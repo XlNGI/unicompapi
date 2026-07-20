@@ -1,0 +1,469 @@
+{
+  "meta": {
+    "name": "UniComp AI Design Tokens",
+    "version": "1.2.0",
+    "status": "final-handoff-no-visual-change",
+    "defaultTheme": "dark",
+    "updatedAt": "2026-07-17",
+    "notes": "最终UI与开发交接包：视觉值不变；统一采用A｜深空专业。设计图来源按“用户重传覆盖版本 > 此前确认默认版本”裁决。导航与页面范围由最终信息架构文档管理。"
+  },
+  "color": {
+    "primitive": {
+      "violet": {
+        "50": "#F1EFFF",
+        "100": "#E4DFFF",
+        "200": "#C9C0FF",
+        "300": "#ADA0FF",
+        "400": "#8F82FF",
+        "500": "#6D5DFB",
+        "600": "#6252ED",
+        "700": "#5848D8",
+        "800": "#493AB8",
+        "900": "#392E8F",
+        "950": "#241D5C"
+      },
+      "status": {
+        "success": "#55D7A7",
+        "info": "#69B0FF",
+        "warning": "#F4C15D",
+        "danger": "#FF7D8E",
+        "attention": "#FFAA6B",
+        "unknown": "#AAB4C3"
+      }
+    },
+    "semantic": {
+      "dark": {
+        "background": {
+          "app": "#0B0F17",
+          "navigation": "#0E131D"
+        },
+        "surface": {
+          "base": "#121821",
+          "panel": "#171F2B",
+          "subtle": "#1D2735",
+          "raised": "#222D3D",
+          "selected": "#272A55",
+          "disabled": "#151B25",
+          "scrim": "rgba(3,7,13,0.72)"
+        },
+        "text": {
+          "primary": "#F1F5F9",
+          "secondary": "#B8C2D1",
+          "tertiary": "#8D99AB",
+          "disabled": "#697587",
+          "inverse": "#10151E",
+          "accent": "#9B91FF"
+        },
+        "icon": {
+          "primary": "#D9E0E9",
+          "secondary": "#9CA8B9"
+        },
+        "border": {
+          "subtle": "#222D3D",
+          "default": "#2D394B",
+          "strong": "#41516A",
+          "focus": "#9B91FF"
+        },
+        "accent": {
+          "fill": "#6D5DFB",
+          "hover": "#6252ED",
+          "pressed": "#5848D8",
+          "text": "#9B91FF",
+          "subtle": "#272A55"
+        },
+        "status": {
+          "success": {
+            "foreground": "#55D7A7",
+            "background": "#102D25",
+            "border": "#276B56"
+          },
+          "info": {
+            "foreground": "#69B0FF",
+            "background": "#12283F",
+            "border": "#285A84"
+          },
+          "warning": {
+            "foreground": "#F4C15D",
+            "background": "#302612",
+            "border": "#7A5A19"
+          },
+          "danger": {
+            "foreground": "#FF7D8E",
+            "background": "#351820",
+            "border": "#873343"
+          },
+          "attention": {
+            "foreground": "#FFAA6B",
+            "background": "#332014",
+            "border": "#81451D"
+          },
+          "unknown": {
+            "foreground": "#AAB4C3",
+            "background": "#202733",
+            "border": "#485465"
+          },
+          "unavailable": {
+            "foreground": "#7C8798",
+            "background": "#181E28",
+            "border": "#313B4A"
+          }
+        },
+        "privacy": {
+          "externalForeground": "#FFB36F",
+          "externalBackground": "#2E1D10"
+        }
+      },
+      "light": {
+        "background": {
+          "app": "#F3F5F8",
+          "navigation": "#F7F9FB"
+        },
+        "surface": {
+          "base": "#FFFFFF",
+          "panel": "#F8FAFC",
+          "subtle": "#EEF2F6",
+          "raised": "#FFFFFF",
+          "selected": "#ECE9FF",
+          "disabled": "#F1F3F6",
+          "scrim": "rgba(17,24,39,0.48)"
+        },
+        "text": {
+          "primary": "#131A24",
+          "secondary": "#4E5968",
+          "tertiary": "#657180",
+          "disabled": "#98A2B1",
+          "inverse": "#F8FAFC",
+          "accent": "#5946CB"
+        },
+        "icon": {
+          "primary": "#293342",
+          "secondary": "#657180"
+        },
+        "border": {
+          "subtle": "#E4E9F0",
+          "default": "#D5DCE6",
+          "strong": "#B7C1CF",
+          "focus": "#5F4BD8"
+        },
+        "accent": {
+          "fill": "#6D5DFB",
+          "hover": "#6252ED",
+          "pressed": "#5848D8",
+          "text": "#5946CB",
+          "subtle": "#ECE9FF"
+        },
+        "status": {
+          "success": {
+            "foreground": "#177A55",
+            "background": "#EAF8F2",
+            "border": "#9FDCC5"
+          },
+          "info": {
+            "foreground": "#1769AA",
+            "background": "#E9F4FF",
+            "border": "#A7CFF1"
+          },
+          "warning": {
+            "foreground": "#8A5B00",
+            "background": "#FFF7E0",
+            "border": "#E9C96A"
+          },
+          "danger": {
+            "foreground": "#B83249",
+            "background": "#FDECEF",
+            "border": "#E7A5B0"
+          },
+          "attention": {
+            "foreground": "#A84D12",
+            "background": "#FFF0E6",
+            "border": "#E7B18D"
+          },
+          "unknown": {
+            "foreground": "#5F6B7A",
+            "background": "#EEF1F5",
+            "border": "#C7CFD9"
+          },
+          "unavailable": {
+            "foreground": "#7B8593",
+            "background": "#F1F3F6",
+            "border": "#D7DDE5"
+          }
+        },
+        "privacy": {
+          "externalForeground": "#9A4A00",
+          "externalBackground": "#FFF3E8"
+        }
+      },
+      "stage": {
+        "dark": "#090C12",
+        "mid": "#252C36",
+        "light": "#F2F4F7",
+        "checkerA": "#DDE2E8",
+        "checkerB": "#F7F8FA",
+        "borderDark": "#2A3545",
+        "borderLight": "#CDD5DF"
+      }
+    }
+  },
+  "typography": {
+    "fontFamily": {
+      "ui": "Inter Variable, Noto Sans SC Variable, PingFang SC, Microsoft YaHei UI, Segoe UI Variable, sans-serif",
+      "mono": "JetBrains Mono, SFMono-Regular, Cascadia Mono, Noto Sans Mono CJK SC, monospace"
+    },
+    "fontWeight": {
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "style": {
+      "display": {
+        "fontSize": 28,
+        "lineHeight": 38,
+        "fontWeight": 600
+      },
+      "title1": {
+        "fontSize": 24,
+        "lineHeight": 34,
+        "fontWeight": 600
+      },
+      "title2": {
+        "fontSize": 20,
+        "lineHeight": 30,
+        "fontWeight": 600
+      },
+      "title3": {
+        "fontSize": 16,
+        "lineHeight": 24,
+        "fontWeight": 600
+      },
+      "bodyLarge": {
+        "fontSize": 15,
+        "lineHeight": 24,
+        "fontWeight": 400
+      },
+      "bodyDefault": {
+        "fontSize": 14,
+        "lineHeight": 22,
+        "fontWeight": 400
+      },
+      "bodySmall": {
+        "fontSize": 13,
+        "lineHeight": 20,
+        "fontWeight": 400
+      },
+      "labelDefault": {
+        "fontSize": 13,
+        "lineHeight": 20,
+        "fontWeight": 500
+      },
+      "labelSmall": {
+        "fontSize": 12,
+        "lineHeight": 18,
+        "fontWeight": 500
+      },
+      "caption": {
+        "fontSize": 12,
+        "lineHeight": 18,
+        "fontWeight": 400
+      },
+      "micro": {
+        "fontSize": 11,
+        "lineHeight": 16,
+        "fontWeight": 500
+      },
+      "code": {
+        "fontSize": 12,
+        "lineHeight": 19,
+        "fontWeight": 400
+      }
+    }
+  },
+  "space": {
+    "0": 0,
+    "0.5": 2,
+    "1": 4,
+    "1.5": 6,
+    "2": 8,
+    "2.5": 10,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48,
+    "16": 64,
+    "20": 80
+  },
+  "size": {
+    "control": {
+      "xs": 24,
+      "sm": 28,
+      "md": 32,
+      "lg": 36,
+      "xl": 40
+    },
+    "icon": {
+      "12": 12,
+      "14": 14,
+      "16": 16,
+      "18": 18,
+      "20": 20,
+      "24": 24
+    },
+    "shell": {
+      "titleBarHeight": 42,
+      "contextBarHeight": 50,
+      "navigationWidth": 72,
+      "navigationCompactWidth": 56,
+      "contextPanelWidth": 264,
+      "contextPanelMin": 220,
+      "contextPanelMax": 360,
+      "inspectorWidth": 344,
+      "inspectorMin": 300,
+      "inspectorMax": 440,
+      "contentStageMinWidth": 560,
+      "taskBarCollapsedHeight": 36,
+      "taskBarExpandedHeight": 260
+    }
+  },
+  "radius": {
+    "none": 0,
+    "2": 2,
+    "4": 4,
+    "6": 6,
+    "8": 8,
+    "10": 10,
+    "12": 12,
+    "16": 16,
+    "full": 999
+  },
+  "borderWidth": {
+    "hairline": 1,
+    "focus": 2,
+    "selected": 2,
+    "drop": 2
+  },
+  "opacity": {
+    "disabled": 0.42,
+    "muted": 0.68,
+    "hoverOverlay": 0.08,
+    "pressedOverlay": 0.14,
+    "scrimDark": 0.72,
+    "scrimLight": 0.48
+  },
+  "shadow": {
+    "dark": {
+      "sm": "0 2px 6px rgba(0,0,0,.28)",
+      "md": "0 10px 28px rgba(0,0,0,.38)",
+      "lg": "0 22px 56px rgba(0,0,0,.48)",
+      "drag": "0 14px 36px rgba(0,0,0,.44)"
+    },
+    "light": {
+      "sm": "0 2px 6px rgba(23,34,52,.10)",
+      "md": "0 10px 28px rgba(23,34,52,.14)",
+      "lg": "0 22px 56px rgba(23,34,52,.20)",
+      "drag": "0 14px 36px rgba(23,34,52,.18)"
+    }
+  },
+  "motion": {
+    "duration": {
+      "instant": 80,
+      "fast": 120,
+      "standard": 180,
+      "panel": 220,
+      "modal": 260,
+      "max": 320
+    },
+    "easing": {
+      "standard": "cubic-bezier(.2,0,0,1)",
+      "enter": "cubic-bezier(.16,1,.3,1)",
+      "exit": "cubic-bezier(.4,0,1,1)",
+      "emphasized": "cubic-bezier(.2,.8,.2,1)"
+    }
+  },
+  "zIndex": {
+    "base": 0,
+    "navigation": 100,
+    "sticky": 200,
+    "dropdown": 400,
+    "tooltip": 500,
+    "drawer": 600,
+    "modal": 700,
+    "toast": 800,
+    "fullscreen": 900
+  },
+  "global": {
+    "theme": {
+      "default": "dark",
+      "supported": [
+        "dark",
+        "light",
+        "system"
+      ],
+      "switchLocation": "globalTopBarRight",
+      "persistence": "local",
+      "requiresReload": false
+    },
+    "navigation": {
+      "primary": [
+        "home",
+        "projects",
+        "imageCreation",
+        "videoCreation",
+        "taskCenter",
+        "library",
+        "providers",
+        "localSettings"
+      ],
+      "imageCreationChildren": [
+        "quickImage",
+        "professionalImage",
+        "imageRecognition",
+        "imageEditing",
+        "imageToPrompt",
+        "multiImageReference",
+        "batchCreation"
+      ],
+      "videoCreationChildren": [
+        "quickVideo",
+        "textToVideo",
+        "imageToVideo",
+        "batchCreation",
+        "basicEditing"
+      ]
+    }
+  },
+  "themes": {
+    "dark": {
+      "appBackground": "#0B0F17",
+      "navBackground": "#0E131D",
+      "surface1": "#111722",
+      "surface2": "#151C29",
+      "border": "#253044",
+      "textPrimary": "#F3F5F8",
+      "textSecondary": "#AAB3C2",
+      "accent": "#6D5DFB",
+      "focus": "#8B7CFF"
+    },
+    "light": {
+      "appBackground": "#F3F5F8",
+      "navBackground": "#FFFFFF",
+      "surface1": "#FFFFFF",
+      "surface2": "#F8F9FB",
+      "border": "#D8DEE8",
+      "textPrimary": "#141923",
+      "textSecondary": "#5F6978",
+      "accent": "#6557E8",
+      "focus": "#6D5DFB"
+    }
+  },
+  "semanticRules": {
+    "lightThemeIsNotInversion": true,
+    "mediaStageBackgroundIndependentOfTheme": true,
+    "capabilityValuesAreDynamic": true,
+    "exampleModelNamesAreNonBinding": true,
+    "fakeProgressForbidden": true
+  }
+}

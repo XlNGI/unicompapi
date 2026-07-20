@@ -1,0 +1,16 @@
+{
+  "original_codex_archive": {
+    "file": "00-交接原件/docs.rar",
+    "sha256": "ed0b8d91932e583e3cdaa2c17317fc279ff486a8d84c346e02d40a3101705e34",
+    "bytes": 264199,
+    "modified": false
+  },
+  "final_ui_handoff": {
+    "file": "00-交接原件/UniComp-AI-最终UI与开发交接包-V1.2.1.zip",
+    "sha256": "0037fcde2b0ad63894776a6b1b3fe299e49f638dcdc4ee8a74970c91c5c58f70",
+    "bytes": 31258072,
+    "modified": false
+  },
+  "expanded_final_handoff": "03-最终UI交接包-已解压/UniComp-AI-最终UI与开发交接包-V1.2.1",
+  "package_purpose": "handoff plus Codex bootstrap; no source code repository included"
+}
