@@ -59,6 +59,7 @@ docs/active/阶段1-任务拆分.md
 - TypeScript 工程校验已通过；
 - Vite 渲染端生产构建已通过；
 - Electron 依赖脚本已批准，但 Electron 二进制下载/重建曾超时，窗口实际启动需在本机网络环境下复测。
+- 阶段 1 桌面壳已接入八个一级页面，`typecheck`、ESLint、生产构建和 Windows Electron 窗口实际启动通过；截图对照仍未完成。
 
 ## 技术栈
 
