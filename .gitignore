@@ -6,8 +6,10 @@ node_modules/
 dist/
 build/
 out/
+dist-electron/
 .next/
 .turbo/
+*.tsbuildinfo
 
 # logs
 *.log
