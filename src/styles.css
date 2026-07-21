@@ -251,7 +251,15 @@ button {
   gap: var(--uc-space-2);
 }
 
+.nav-group {
+  display: grid;
+  gap: 4px;
+}
+
 .nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
   border: 1px solid transparent;
   border-radius: var(--uc-radius-12);
@@ -270,6 +278,44 @@ button {
   border-color: var(--uc-color-border-subtle);
   color: var(--uc-color-text-primary);
   background: var(--uc-color-surface-subtle);
+}
+
+.nav-item-indicator {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.nav-sublist {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 4px 14px;
+  padding-left: 12px;
+  border-left: 1px solid var(--uc-color-border-subtle);
+}
+
+.nav-subitem {
+  width: 100%;
+  border: 0;
+  border-radius: var(--uc-radius-8);
+  padding: 9px 12px;
+  color: var(--uc-color-text-tertiary);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color var(--uc-duration-fast) var(--uc-easing-standard),
+    background-color var(--uc-duration-fast) var(--uc-easing-standard);
+}
+
+.nav-subitem:hover,
+.nav-subitem.active {
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-selected);
+}
+
+.nav-subitem:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: 2px;
 }
 
 .nav-item.active {

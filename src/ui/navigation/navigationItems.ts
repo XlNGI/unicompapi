@@ -44,3 +44,67 @@ export const navigationItems = [
 export type NavigationItemId = (typeof navigationItems)[number]['id'];
 
 export const defaultNavigationItemId: NavigationItemId = navigationItems[0].id;
+
+export const secondaryNavigationItems = [
+  {
+    id: 'quick-image',
+    parentId: 'image-creation',
+    label: '快速生图',
+    description: '快速生图页面骨架，具体创作流程将在后续阶段接入。'
+  },
+  {
+    id: 'professional-image',
+    parentId: 'image-creation',
+    label: '专业生图',
+    description: '专业生图页面骨架，具体创作流程将在后续阶段接入。'
+  },
+  {
+    id: 'image-understanding',
+    parentId: 'image-creation',
+    label: '图片识别',
+    description: '图片识别页面骨架，具体识别能力将在后续阶段接入。'
+  },
+  {
+    id: 'image-editing',
+    parentId: 'image-creation',
+    label: '图片编辑',
+    description: '图片编辑页面骨架，具体编辑能力将在后续阶段接入。'
+  },
+  {
+    id: 'image-to-prompt',
+    parentId: 'image-creation',
+    label: '图片转提示词',
+    description: '图片转提示词页面骨架，具体分析能力将在后续阶段接入。'
+  },
+  {
+    id: 'quick-video',
+    parentId: 'video-creation',
+    label: '快速视频',
+    description: '快速视频页面骨架，具体创作流程将在后续阶段接入。'
+  },
+  {
+    id: 'text-to-video',
+    parentId: 'video-creation',
+    label: '文生视频',
+    description: '文生视频页面骨架，具体创作流程将在后续阶段接入。'
+  },
+  {
+    id: 'image-to-video',
+    parentId: 'video-creation',
+    label: '图生视频',
+    description: '图生视频页面骨架，具体创作流程将在后续阶段接入。'
+  },
+  {
+    id: 'video-editing',
+    parentId: 'video-creation',
+    label: '基础编辑',
+    description: '视频基础编辑页面骨架，具体编辑能力将在后续阶段接入。'
+  }
+] as const;
+
+export type SecondaryNavigationItemId =
+  (typeof secondaryNavigationItems)[number]['id'];
+
+export function getSecondaryNavigationItems(parentId: NavigationItemId) {
+  return secondaryNavigationItems.filter((item) => item.parentId === parentId);
+}

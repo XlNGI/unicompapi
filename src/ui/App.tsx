@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import type { ComponentType } from 'react';
 import { ChatPage } from '../pages/chat/ChatPage';
+import { ImageEditingPage } from '../pages/creation/image/ImageEditingPage';
+import { ImageProfessionalPage } from '../pages/creation/image/ImageProfessionalPage';
+import { ImageQuickPage } from '../pages/creation/image/ImageQuickPage';
+import { ImageToPromptPage } from '../pages/creation/image/ImageToPromptPage';
+import { ImageUnderstandingPage } from '../pages/creation/image/ImageUnderstandingPage';
+import { ImageToVideoPage } from '../pages/creation/video/ImageToVideoPage';
+import { TextToVideoPage } from '../pages/creation/video/TextToVideoPage';
+import { VideoEditingPage } from '../pages/creation/video/VideoEditingPage';
+import { VideoQuickPage } from '../pages/creation/video/VideoQuickPage';
 import { ImageCreationPage } from '../pages/image-creation/ImageCreationPage';
 import { LibraryPage } from '../pages/library/LibraryPage';
 import { ProjectsPage } from '../pages/projects/ProjectsPage';
@@ -11,7 +20,9 @@ import { VideoCreationPage } from '../pages/video-creation/VideoCreationPage';
 import { AppLayout } from './layout/AppLayout';
 import {
   defaultNavigationItemId,
-  type NavigationItemId
+  getSecondaryNavigationItems,
+  type NavigationItemId,
+  type SecondaryNavigationItemId
 } from './navigation/navigationItems';
 
 const pagesByNavigationItem: Record<NavigationItemId, ComponentType> = {
@@ -25,14 +36,51 @@ const pagesByNavigationItem: Record<NavigationItemId, ComponentType> = {
   settings: SettingsPage
 };
 
+const pagesBySecondaryNavigationItem: Record<
+  SecondaryNavigationItemId,
+  ComponentType
+> = {
+  'quick-image': ImageQuickPage,
+  'professional-image': ImageProfessionalPage,
+  'image-understanding': ImageUnderstandingPage,
+  'image-editing': ImageEditingPage,
+  'image-to-prompt': ImageToPromptPage,
+  'quick-video': VideoQuickPage,
+  'text-to-video': TextToVideoPage,
+  'image-to-video': ImageToVideoPage,
+  'video-editing': VideoEditingPage
+};
+
 export function App() {
   const [activeItemId, setActiveItemId] = useState<NavigationItemId>(
     defaultNavigationItemId
   );
-  const ActivePage = pagesByNavigationItem[activeItemId];
+  const [activeSubItemId, setActiveSubItemId] =
+    useState<SecondaryNavigationItemId>();
+  const ActivePage = activeSubItemId
+    ? pagesBySecondaryNavigationItem[activeSubItemId]
+    : pagesByNavigationItem[activeItemId];
+
+  function handleNavigate(itemId: NavigationItemId) {
+    setActiveItemId(itemId);
+    setActiveSubItemId(getSecondaryNavigationItems(itemId)[0]?.id);
+  }
+
+  function handleSecondaryNavigate(
+    itemId: NavigationItemId,
+    subItemId: SecondaryNavigationItemId
+  ) {
+    setActiveItemId(itemId);
+    setActiveSubItemId(subItemId);
+  }
 
   return (
-    <AppLayout activeItemId={activeItemId} onNavigate={setActiveItemId}>
+    <AppLayout
+      activeItemId={activeItemId}
+      activeSubItemId={activeSubItemId}
+      onNavigate={handleNavigate}
+      onSecondaryNavigate={handleSecondaryNavigate}
+    >
       <ActivePage />
     </AppLayout>
   );
