@@ -23,6 +23,8 @@
 - 建立 `Button`、`Card`、`EmptyState`、`StatusPill` 四个基础组件。
 - 建立第一版 CSS Design Tokens，覆盖深色/浅色基础颜色、文本、边框、强调色、状态色、字体、间距、圆角、阴影与动效时长。
 - 已接入 A 的桌面壳和导航代码，并通过 `NavigationItemId` 到页面组件的完整类型映射实现八页切换。
+- 已建立无面包屑全局上边栏，包含品牌、三态主题切换和平台对应的窗口控制。
+- 桌面壳、导航与页面样式已统一迁移到语义 Design Tokens，支持深色和浅色整体切换。
 
 ## 三、边界对照
 
@@ -32,7 +34,7 @@
 - 未加入登录、会员、充值、云同步或账号商业元素。
 - 未写死服务商、模型、价格、费用、时长、分辨率、数量或虚假进度。
 - 任务中心与作品库文案明确区分草稿、任务、远端结果和本地正式作品。
-- 未接入后台接口，未修改 Electron 主进程或预加载脚本。
+- 未接入后台接口；Electron 主进程和预加载脚本仅增加受控的窗口控制 IPC，没有暴露通用 Node 能力。
 
 ## 四、暂未对齐
 
@@ -51,8 +53,9 @@
 
 - `pnpm run typecheck`：通过。
 - `pnpm run lint`：通过，项目已建立 ESLint 9 flat config。
-- `pnpm run build`：通过，Vite 共转换 47 个模块，Electron TypeScript 构建完成。
+- `pnpm run build`：通过，Vite 共转换 60 个模块，Electron TypeScript 构建完成。
 - 八项一级导航均有对应页面组件，映射由 TypeScript `Record<NavigationItemId, ComponentType>` 完整性约束。
 - 自动化测试：项目仍无 `test` 脚本，未执行。
 - Electron 窗口：通过 `pnpm run dev` 实际启动，检测到标题为 `UniComp` 且处于响应状态的窗口进程。
+- 全局上边栏：Windows 实际启动时已枚举到可见 `UniComp` 主窗口；静态类型、lint 和构建通过。
 - 页面截图：未完成，不能作为已通过项。

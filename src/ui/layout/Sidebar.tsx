@@ -11,16 +11,6 @@ interface SidebarProps {
 export function Sidebar({ activeItemId, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <div className="brand-mark" aria-hidden="true">
-          U
-        </div>
-        <div>
-          <div className="brand-title">UniComp</div>
-          <div className="brand-subtitle">AI Creative Desktop</div>
-        </div>
-      </div>
-
       <nav className="nav-list" aria-label="主导航">
         {navigationItems.map((item) => {
           const isActive = item.id === activeItemId;

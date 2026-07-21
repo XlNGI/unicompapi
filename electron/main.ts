@@ -1,7 +1,39 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const isMac = process.platform === 'darwin';
+
+function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
+  return BrowserWindow.fromWebContents(event.sender);
+}
+
+ipcMain.on('window:minimize', (event) => {
+  getWindowFromEvent(event)?.minimize();
+});
+
+ipcMain.on('window:toggle-maximize', (event) => {
+  const window = getWindowFromEvent(event);
+
+  if (!window) {
+    return;
+  }
+
+  if (window.isMaximized()) {
+    window.unmaximize();
+    return;
+  }
+
+  window.maximize();
+});
+
+ipcMain.on('window:close', (event) => {
+  getWindowFromEvent(event)?.close();
+});
+
+ipcMain.handle('window:is-maximized', (event) => {
+  return getWindowFromEvent(event)?.isMaximized() ?? false;
+});
 
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -10,7 +42,9 @@ function createMainWindow(): void {
     minWidth: 1080,
     minHeight: 720,
     title: 'UniComp',
-    backgroundColor: '#080b12',
+    backgroundColor: '#0B0F17',
+    frame: isMac,
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -23,6 +57,13 @@ function createMainWindow(): void {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  const sendMaximizedState = () => {
+    mainWindow.webContents.send('window:maximized-changed', mainWindow.isMaximized());
+  };
+
+  mainWindow.on('maximize', sendMaximizedState);
+  mainWindow.on('unmaximize', sendMaximizedState);
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
