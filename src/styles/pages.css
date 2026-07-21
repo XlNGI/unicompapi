@@ -1,0 +1,38 @@
+@import "./tokens.css";
+
+.uc-page-skeleton {
+  display: grid;
+  gap: var(--uc-space-6);
+  color: var(--uc-color-text-primary);
+  font-family: var(--uc-font-family-ui);
+}
+
+.uc-page-skeleton__header {
+  display: grid;
+  gap: var(--uc-space-2);
+}
+
+.uc-page-skeleton__heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--uc-space-3);
+}
+
+.uc-page-skeleton__title,
+.uc-page-skeleton__description {
+  margin: 0;
+}
+
+.uc-page-skeleton__title {
+  font-size: var(--uc-font-size-title-1);
+  line-height: var(--uc-line-height-title-1);
+  font-weight: 600;
+}
+
+.uc-page-skeleton__description {
+  max-width: 720px;
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-body);
+  line-height: var(--uc-line-height-body);
+}

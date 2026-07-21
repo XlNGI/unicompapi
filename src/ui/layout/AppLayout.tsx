@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { NavigationItemId } from '../navigation/navigationItems';
 import { Sidebar } from './Sidebar';
+import { TitleBar } from './TitleBar';
 
 interface AppLayoutProps {
   activeItemId: NavigationItemId;
@@ -11,8 +12,11 @@ interface AppLayoutProps {
 export function AppLayout({ activeItemId, children, onNavigate }: AppLayoutProps) {
   return (
     <main className="app-shell">
-      <Sidebar activeItemId={activeItemId} onNavigate={onNavigate} />
-      <section className="workspace">{children}</section>
+      <TitleBar />
+      <div className="app-body">
+        <Sidebar activeItemId={activeItemId} onNavigate={onNavigate} />
+        <section className="workspace">{children}</section>
+      </div>
     </main>
   );
 }
