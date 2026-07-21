@@ -9,6 +9,7 @@ export * from './entities/work';
 export * from './errors';
 export * from './ids';
 export * from './services/register-work';
+export * from './repositories/repository-ports';
 export * from './states/execution-state';
 export * from './states/file-state';
 export * from './states/task-status';
