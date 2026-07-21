@@ -1,3 +1,10 @@
+import {
+  imageCreationModes,
+  videoCreationModes,
+  type ImageCreationModeId,
+  type VideoCreationModeId
+} from '../../pages/creation/creationModes';
+
 export const navigationItems = [
   {
     id: 'chat',
@@ -44,3 +51,33 @@ export const navigationItems = [
 export type NavigationItemId = (typeof navigationItems)[number]['id'];
 
 export const defaultNavigationItemId: NavigationItemId = navigationItems[0].id;
+
+export type SecondaryNavigationItemId =
+  | ImageCreationModeId
+  | VideoCreationModeId;
+
+interface SecondaryNavigationItem {
+  id: SecondaryNavigationItemId;
+  parentId: 'image-creation' | 'video-creation';
+  label: string;
+  description: string;
+}
+
+export const secondaryNavigationItems: readonly SecondaryNavigationItem[] = [
+  ...imageCreationModes.map(({ id, label, description }) => ({
+    id,
+    parentId: 'image-creation' as const,
+    label,
+    description
+  })),
+  ...videoCreationModes.map(({ id, label, description }) => ({
+    id,
+    parentId: 'video-creation' as const,
+    label,
+    description
+  }))
+];
+
+export function getSecondaryNavigationItems(parentId: NavigationItemId) {
+  return secondaryNavigationItems.filter((item) => item.parentId === parentId);
+}

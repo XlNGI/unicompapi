@@ -5,6 +5,7 @@ import test from 'node:test';
 const navigationSource = await readFile('src/ui/navigation/navigationItems.ts', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 const creationModesSource = await readFile('src/pages/creation/creationModes.ts', 'utf8');
+const sidebarSource = await readFile('src/ui/layout/Sidebar.tsx', 'utf8');
 const pageFiles = [
   'src/pages/chat/ChatPage.tsx',
   'src/pages/projects/ProjectsPage.tsx',
@@ -44,11 +45,65 @@ test('does not reintroduce prohibited top-level entries', () => {
 
 test('defines only the required image and video creation modes', () => {
   const requiredModes = [
-    '快速生图', '专业生图', '图片识别', '图片编辑', '图片转提示词',
-    '快速视频', '文生视频', '图生视频', '基础编辑'
+    ['quick-image', '快速生图'],
+    ['professional-image', '专业生图'],
+    ['image-understanding', '图片识别'],
+    ['image-editing', '图片编辑'],
+    ['image-to-prompt', '图片转提示词'],
+    ['quick-video', '快速视频'],
+    ['text-to-video', '文生视频'],
+    ['image-to-video', '图生视频'],
+    ['video-editing', '基础编辑']
   ];
-  for (const label of requiredModes) {
-    assert.match(creationModesSource, new RegExp(`label: '${label}'`));
+  let previousIndex = -1;
+  for (const [id, label] of requiredModes) {
+    const idIndex = creationModesSource.indexOf(`id: '${id}'`);
+    const labelIndex = creationModesSource.indexOf(`label: '${label}'`, idIndex);
+    assert.ok(idIndex > previousIndex, `creation mode missing or out of order: ${id}`);
+    assert.ok(labelIndex > idIndex, `creation mode label does not match id: ${id}`);
+    previousIndex = labelIndex;
   }
   assert.doesNotMatch(creationModesSource, /多图参考|图片批量创作|视频批量创作/);
+});
+
+test('uses creation modes as the single source for secondary navigation', () => {
+  assert.match(navigationSource, /imageCreationModes\.map/);
+  assert.match(navigationSource, /videoCreationModes\.map/);
+  assert.doesNotMatch(navigationSource, /id: 'quick-image'|label: '快速生图'/);
+});
+
+test('maps every secondary navigation id to a page component', () => {
+  for (const id of [
+    'quick-image',
+    'professional-image',
+    'image-understanding',
+    'image-editing',
+    'image-to-prompt',
+    'quick-video',
+    'text-to-video',
+    'image-to-video',
+    'video-editing'
+  ]) {
+    assert.match(appSource, new RegExp(`['"]${id}['"]:`));
+  }
+});
+
+test('does not expose prohibited secondary navigation entries', () => {
+  const navigationContract = `${navigationSource}\n${creationModesSource}\n${appSource}`;
+  assert.doesNotMatch(
+    navigationContract,
+    /多图参考|图片批量创作|视频批量创作/
+  );
+});
+
+test('labels each secondary navigation container as a group', () => {
+  assert.match(sidebarSource, /role="group"/);
+  assert.match(sidebarSource, /aria-label=\{`\$\{item\.label\}二级导航`\}/);
+});
+
+test('keeps an expanded creation parent open and returns to its first mode', () => {
+  assert.match(
+    appSource,
+    /setActiveSubItemId\(getSecondaryNavigationItems\(itemId\)\[0\]\?\.id\)/
+  );
 });
