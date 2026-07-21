@@ -7,11 +7,30 @@ export interface EmptyStateProps {
   description: string;
   icon?: ReactNode;
   action?: ReactNode;
+  status?: ReactNode;
+  busy?: boolean;
+  readOnly?: boolean;
+  role?: 'alert' | 'status';
 }
 
-export function EmptyState({ action, description, icon = '·', title }: EmptyStateProps) {
+export function EmptyState({
+  action,
+  busy = false,
+  description,
+  icon = '·',
+  readOnly = false,
+  role,
+  status,
+  title
+}: EmptyStateProps) {
   return (
-    <Card className="uc-empty-state">
+    <Card
+      className="uc-empty-state"
+      aria-busy={busy || undefined}
+      data-read-only={readOnly || undefined}
+      role={role}
+    >
+      {status}
       <span className="uc-empty-state__icon" aria-hidden="true">
         {icon}
       </span>
