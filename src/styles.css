@@ -43,7 +43,7 @@ button {
 .app-shell {
   display: grid;
   grid-template-rows: 32px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
   background: transparent;
 }
 
