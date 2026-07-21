@@ -48,7 +48,12 @@ export function Sidebar({
               </button>
 
               {hasSubItems && isActive && (
-                <div className="nav-sublist" id={`${item.id}-navigation`}>
+                <div
+                  className="nav-sublist"
+                  id={`${item.id}-navigation`}
+                  role="group"
+                  aria-label={`${item.label}二级导航`}
+                >
                   {subItems.map((subItem) => {
                     const isSubItemActive = subItem.id === activeSubItemId;
 
