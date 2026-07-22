@@ -115,3 +115,15 @@ Windows 验收证据：`docs/active/evidence/phase1/windows/`，共 4 张 PNG。
 - `npm test`：UI/契约 22 项、领域与平台 59 项通过；`npm run typecheck`、`npm run lint`、`npm run build` 均通过。
 - 浏览器已验证空状态、搜索、状态筛选和深浅主题，控制台无错误；生产模式 `UniComp` 窗口可正常启动并响应。
 - 开发者 A 自测与项目负责人 Windows 人工验收均已通过，准备提交并上传原功能分支。
+
+## 阶段 3｜A3 作品库待验收记录
+
+日期：2026-07-22
+分支：`feature/work-library-ui`
+
+- 作品库直接使用 `listWorks()` 与 `getWorkDetails(workId)`，提供作品搜索、项目/媒体/文件状态筛选、作品列表和详情层。
+- 预览通过短期 `createWorkMediaHandle(workId)` 获取，不拼接或显示本地路径；系统定位与恢复分别使用 `revealWorkFile(workId)` 和 `relinkFile(fileId)`。
+- 文件丢失、只读、断盘和损坏记录继续展示，并提供真实的重新定位入口；未增加通用文件浏览、导入、删除或覆盖历史版本能力。
+- 详情展示来源项目、来源任务、来源执行、父版本、文件大小与校验时间，均来自开发者 B 的受控 DTO。
+- `npm test`：UI/契约 26 项、领域与平台 59 项通过；`npm run typecheck`、`npm run lint`、`npm run build` 与 `git diff --check` 均通过。
+- 浏览器已验证空状态、搜索、媒体筛选、主题与 1280×720 无横向溢出，控制台无警告或错误；当前不上传、不合并。
