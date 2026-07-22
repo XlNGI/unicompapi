@@ -44,6 +44,21 @@ export class JsonFileIndexRepository {
     await operation;
   }
 
+  async replace(entries: readonly FileIndexEntry[]): Promise<void> {
+    const operation = this.writeQueue.then(async () => {
+      let index = createEmptyProjectFileIndex(this.projectId);
+
+      for (const entry of entries) {
+        index = upsertFileIndexEntry(index, entry);
+      }
+
+      await this.storage.writeJsonAtomically(projectStoragePaths.index, index);
+    });
+
+    this.writeQueue = operation.catch(() => undefined);
+    await operation;
+  }
+
   private async read(): Promise<ProjectFileIndex> {
     const value = await this.storage.readJson<unknown>(projectStoragePaths.index);
 
