@@ -1,7 +1,10 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import path from 'node:path';
 import {
   StorageIpcController,
+  JsonProjectCatalogStore,
   ProjectSessionController,
+  ProjectCatalogService,
   StorageProjectSessionRegistry
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
@@ -24,10 +27,14 @@ export function registerStorageIpcHandlers(): void {
     chooseRelinkFile: () => choosePath(['openFile']),
     chooseBackupFile: () => choosePath(['openFile'])
   });
+  const catalog = new ProjectCatalogService(
+    new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
+  );
   const projectController = new ProjectSessionController({
     registry: sessionRegistry,
     chooseProjectDirectory: () => choosePath(['openDirectory']),
-    beforeSessionChange: () => controller.waitForMutations()
+    beforeSessionChange: () => controller.waitForMutations(),
+    catalog
   });
 
   ipcMain.handle(storageIpcChannels.probeFile, (_event, request: unknown) =>
@@ -47,6 +54,12 @@ export function registerStorageIpcHandlers(): void {
   );
   ipcMain.handle(storageIpcChannels.openProject, () =>
     projectController.openProject()
+  );
+  ipcMain.handle(storageIpcChannels.createProject, (_event, request: unknown) =>
+    projectController.createProject(request)
+  );
+  ipcMain.handle(storageIpcChannels.listProjects, () =>
+    projectController.listProjects()
   );
   ipcMain.handle(storageIpcChannels.closeProject, () =>
     projectController.closeProject()

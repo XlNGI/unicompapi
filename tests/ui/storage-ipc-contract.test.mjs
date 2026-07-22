@@ -13,6 +13,8 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'restoreBackup',
     'rebuildIndex',
     'openProject',
+    'createProject',
+    'listProjects',
     'closeProject',
     'getProjectSession'
   ]) {

@@ -5,6 +5,8 @@ export const storageIpcChannels = {
   restoreBackup: 'storage:restore-backup',
   rebuildIndex: 'storage:rebuild-index',
   openProject: 'storage:open-project',
+  createProject: 'storage:create-project',
+  listProjects: 'storage:list-projects',
   closeProject: 'storage:close-project',
   getProjectSession: 'storage:get-project-session'
 } as const;
@@ -19,6 +21,7 @@ export type StorageIpcErrorCode =
   | 'index_rebuild_failed'
   | 'invalid_project'
   | 'project_open_failed'
+  | 'project_create_failed'
   | 'storage_error';
 
 export type StorageIpcResult<T> =
@@ -66,6 +69,18 @@ export interface StorageOpenProjectDto {
   readonly session?: StorageProjectSessionDto;
 }
 
+export interface StorageProjectSummaryDto {
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly availability: 'available' | 'unavailable';
+  readonly lastOpenedAt: string;
+}
+
+export interface StorageCreateProjectDto {
+  readonly cancelled: boolean;
+  readonly session?: StorageProjectSessionDto;
+}
+
 export interface StorageApi {
   probeFile(fileId: string): Promise<StorageIpcResult<StorageFileStatusDto>>;
   verifyFile(fileId: string): Promise<StorageIpcResult<StorageFileStatusDto>>;
@@ -75,6 +90,10 @@ export interface StorageApi {
   ): Promise<StorageIpcResult<StorageBackupRestoreResultDto>>;
   rebuildIndex(): Promise<StorageIpcResult<StorageIndexRebuildDto>>;
   openProject(): Promise<StorageIpcResult<StorageOpenProjectDto>>;
+  createProject(
+    name: string
+  ): Promise<StorageIpcResult<StorageCreateProjectDto>>;
+  listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>>;
   closeProject(): Promise<StorageIpcResult<{ readonly closed: true }>>;
   getProjectSession(): Promise<
     StorageIpcResult<StorageProjectSessionDto | undefined>
