@@ -39,6 +39,8 @@ export const isFileReferenceEntity: EntityValidator = (value) =>
   (value.checksumSha256 === undefined ||
     (typeof value.checksumSha256 === 'string' &&
       /^[a-f0-9]{64}$/.test(value.checksumSha256))) &&
+  (value.lastVerification === undefined ||
+    isFileVerificationSnapshot(value.lastVerification)) &&
   isCanonicalIsoTimestamp(value.createdAt) &&
   isCanonicalIsoTimestamp(value.updatedAt);
 
@@ -91,6 +93,18 @@ function isFileLocator(value: unknown): boolean {
     isRecord(value) &&
     ((value.kind === 'project' && isNonBlankString(value.relativePath)) ||
       (value.kind === 'external' && isNonBlankString(value.absolutePath)))
+  );
+}
+
+function isFileVerificationSnapshot(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonNegativeInteger(value.sizeBytes) &&
+    typeof value.checksumSha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(value.checksumSha256) &&
+    (value.matchesExpected === undefined ||
+      typeof value.matchesExpected === 'boolean') &&
+    isCanonicalIsoTimestamp(value.verifiedAt)
   );
 }
 

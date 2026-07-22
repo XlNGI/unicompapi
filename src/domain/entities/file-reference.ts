@@ -12,6 +12,13 @@ export type FileLocator =
       readonly absolutePath: string;
     };
 
+export interface FileVerificationSnapshot {
+  readonly sizeBytes: number;
+  readonly checksumSha256: string;
+  readonly matchesExpected: boolean | undefined;
+  readonly verifiedAt: IsoTimestamp;
+}
+
 export interface FileReference {
   readonly schemaVersion: 1;
   readonly id: FileReferenceId;
@@ -21,6 +28,7 @@ export interface FileReference {
   readonly state: FileState;
   readonly sizeBytes?: number;
   readonly checksumSha256?: string;
+  readonly lastVerification?: FileVerificationSnapshot;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }

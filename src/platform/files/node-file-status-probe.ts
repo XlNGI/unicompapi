@@ -10,10 +10,11 @@ import {
 import { NodeSha256FileVerifier } from './node-sha256-verifier';
 import type {
   FileProbeIssue,
+  FileStatusProbe,
   FileStatusProbeResult
 } from './file-status-probe';
 
-export class NodeFileStatusProbe {
+export class NodeFileStatusProbe implements FileStatusProbe {
   private readonly verifier: NodeSha256FileVerifier;
 
   constructor(private readonly projectRoot: string) {
