@@ -4,6 +4,7 @@ export * from './entities/execution';
 export * from './entities/file-reference';
 export * from './entities/project';
 export * from './entities/prompt';
+export * from './entities/provider';
 export * from './entities/task';
 export * from './entities/work';
 export * from './errors';
