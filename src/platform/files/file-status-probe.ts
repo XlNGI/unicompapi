@@ -1,5 +1,8 @@
-import type { FileState } from '../../domain';
-import type { FileVerificationResult } from './file-verifier';
+import type { FileReference, FileState } from '../../domain';
+import type {
+  FileVerificationRequest,
+  FileVerificationResult
+} from './file-verifier';
 
 export type FileProbeIssue =
   | 'not_found'
@@ -14,4 +17,11 @@ export interface FileStatusProbeResult {
   readonly recommendedState: FileState;
   readonly issues: readonly FileProbeIssue[];
   readonly verification?: FileVerificationResult;
+}
+
+export interface FileStatusProbe {
+  inspect(
+    file: FileReference,
+    request?: Omit<FileVerificationRequest, 'file'>
+  ): Promise<FileStatusProbeResult>;
 }
