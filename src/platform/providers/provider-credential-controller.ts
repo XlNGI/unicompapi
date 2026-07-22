@@ -75,6 +75,53 @@ export class ProviderCredentialController {
     }
   }
 
+  async deleteConnection(input: unknown): Promise<CredentialActionResult> {
+    try {
+      const connectionId = parseConnectionInput(input);
+      const snapshot = await this.registry.load();
+      const connection = snapshot.connections.find(
+        (item) => item.id === connectionId
+      );
+      if (!connection) return failure('connection_not_found');
+      if (connection.credentialReference) {
+        await this.vault.remove(connection.credentialReference);
+      }
+      const modelIds = new Set(
+        snapshot.models
+          .filter((model) => model.connectionId === connection.id)
+          .map((model) => model.id)
+      );
+      const now = toIsoTimestamp(new Date().toISOString());
+      await this.registry.save({
+        ...snapshot,
+        connections: replaceConnection(snapshot.connections, connection.id, {
+          ...connection,
+          endpoint: undefined,
+          credentialReference: undefined,
+          credentialState: 'deleted',
+          state: 'deleted',
+          identityState: 'unverified',
+          lastConnectionValidationAt: undefined,
+          updatedAt: now
+        }),
+        models: snapshot.models.map((model) =>
+          modelIds.has(model.id) ? { ...model, enabled: false, updatedAt: now } : model
+        ),
+        routingPreferences: snapshot.routingPreferences.map((preference) =>
+          modelIds.has(preference.modelId)
+            ? { ...preference, enabled: false, updatedAt: now }
+            : preference
+        )
+      });
+      return {
+        ok: true,
+        value: { state: 'deleted', remoteRevocation: 'not_attempted' }
+      };
+    } catch (error) {
+      return failure(mapError(error));
+    }
+  }
+
   async getCredentialStatus(input: unknown): Promise<CredentialStatusResult> {
     try {
       const connectionId = parseConnectionInput(input);

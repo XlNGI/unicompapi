@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
   createModelCapabilityEvidence,
+  createProvider,
+  createProviderConnection,
   createProviderModel,
   createRoutingPreference,
+  providerAccessCategories,
   toCapabilityEvidenceId,
+  toConnectionId,
   toIsoTimestamp,
   toModelId,
+  toProviderId,
   toRoutingPreferenceId,
   type ProviderConnection,
   type ProviderModel
@@ -101,6 +106,186 @@ export class ProviderCapabilityController {
       return {
         ok: true,
         value: { state: observation.state, observedAt }
+      };
+    } catch (error) {
+      return failure(mapError(error));
+    }
+  }
+
+  async createProvider(input: unknown): Promise<ProviderManagementResult> {
+    try {
+      const item = requireRecord(input);
+      const name = requireNonBlank(item.name, 'name');
+      if (
+        typeof item.accessCategory !== 'string' ||
+        !providerAccessCategories.includes(
+          item.accessCategory as (typeof providerAccessCategories)[number]
+        )
+      ) {
+        return failure('invalid_request');
+      }
+      const snapshot = await this.registry.load();
+      const now = toIsoTimestamp(new Date().toISOString());
+      const provider = createProvider({
+        id: toProviderId(`provider-${randomUUID()}`),
+        name,
+        accessCategory: item.accessCategory as (typeof providerAccessCategories)[number],
+        identityState: 'unverified',
+        createdAt: now,
+        updatedAt: now
+      });
+      await this.registry.save({
+        ...snapshot,
+        providers: [...snapshot.providers, provider]
+      });
+      return {
+        ok: true,
+        value: { state: 'provider_created', providerId: provider.id }
+      };
+    } catch (error) {
+      return failure(mapError(error));
+    }
+  }
+
+  async createConnection(input: unknown): Promise<ProviderManagementResult> {
+    try {
+      const item = requireRecord(input);
+      const providerId = requireId(item.providerId, 'providerId');
+      const name = requireNonBlank(item.name, 'name');
+      const endpoint = requireNullableEndpoint(item.endpoint);
+      const snapshot = await this.registry.load();
+      if (!snapshot.providers.some((provider) => provider.id === providerId)) {
+        return failure('provider_not_found');
+      }
+      const now = toIsoTimestamp(new Date().toISOString());
+      const connection = createProviderConnection({
+        id: toConnectionId(`connection-${randomUUID()}`),
+        providerId: toProviderId(providerId),
+        name,
+        endpoint,
+        state: endpoint ? 'saved' : 'unconfigured',
+        identityState: 'unverified',
+        credentialState: 'not_configured',
+        createdAt: now,
+        updatedAt: now
+      });
+      await this.registry.save({
+        ...snapshot,
+        connections: [...snapshot.connections, connection]
+      });
+      return {
+        ok: true,
+        value: { state: connection.state, connectionId: connection.id }
+      };
+    } catch (error) {
+      return failure(mapError(error));
+    }
+  }
+
+  async updateConnection(input: unknown): Promise<ProviderManagementResult> {
+    try {
+      const item = requireRecord(input);
+      const connectionId = requireId(item.connectionId, 'connectionId');
+      const name = requireNonBlank(item.name, 'name');
+      const endpoint = requireNullableEndpoint(item.endpoint);
+      const snapshot = await this.registry.load();
+      const connection = snapshot.connections.find(
+        (candidate) => candidate.id === connectionId
+      );
+      if (!connection) return failure('connection_not_found');
+      if (connection.state === 'deleted') return failure('invalid_request');
+      const now = toIsoTimestamp(new Date().toISOString());
+      const state =
+        connection.state === 'disabled'
+          ? 'disabled'
+          : endpoint
+            ? 'saved'
+            : 'unconfigured';
+      await this.registry.save({
+        ...snapshot,
+        connections: snapshot.connections.map((candidate) =>
+          candidate.id === connection.id
+            ? {
+                ...candidate,
+                name,
+                endpoint,
+                state,
+                identityState: 'unverified',
+                lastConnectionValidationAt: undefined,
+                updatedAt: now
+              }
+            : candidate
+        )
+      });
+      return { ok: true, value: { state, connectionId: connection.id } };
+    } catch (error) {
+      return failure(mapError(error));
+    }
+  }
+
+  async setConnectionEnabled(input: unknown): Promise<ProviderManagementResult> {
+    try {
+      const item = requireRecord(input);
+      const connectionId = requireId(item.connectionId, 'connectionId');
+      if (typeof item.enabled !== 'boolean') return failure('invalid_request');
+      const snapshot = await this.registry.load();
+      const connection = snapshot.connections.find(
+        (candidate) => candidate.id === connectionId
+      );
+      if (!connection) return failure('connection_not_found');
+      if (connection.state === 'deleted') return failure('invalid_request');
+      const state = item.enabled
+        ? connection.endpoint
+          ? 'saved'
+          : 'unconfigured'
+        : 'disabled';
+      await this.registry.save({
+        ...snapshot,
+        connections: snapshot.connections.map((candidate) =>
+          candidate.id === connection.id
+            ? {
+                ...candidate,
+                state,
+                updatedAt: toIsoTimestamp(new Date().toISOString())
+              }
+            : candidate
+        )
+      });
+      return { ok: true, value: { state, connectionId: connection.id } };
+    } catch (error) {
+      return failure(mapError(error));
+    }
+  }
+
+  async setModelEnabled(input: unknown): Promise<ProviderManagementResult> {
+    try {
+      const item = requireRecord(input);
+      const modelId = requireId(item.modelId, 'modelId');
+      if (typeof item.enabled !== 'boolean') return failure('invalid_request');
+      const snapshot = await this.registry.load();
+      const model = snapshot.models.find((candidate) => candidate.id === modelId);
+      if (!model) return failure('model_not_found');
+      const connection = snapshot.connections.find(
+        (candidate) => candidate.id === model.connectionId
+      );
+      if (!connection || connection.state === 'deleted') {
+        return failure('invalid_request');
+      }
+      await this.registry.save({
+        ...snapshot,
+        models: snapshot.models.map((candidate) =>
+          candidate.id === model.id
+            ? {
+                ...candidate,
+                enabled: item.enabled as boolean,
+                updatedAt: toIsoTimestamp(new Date().toISOString())
+              }
+            : candidate
+        )
+      });
+      return {
+        ok: true,
+        value: { state: item.enabled ? 'enabled' : 'disabled', modelId: model.id }
       };
     } catch (error) {
       return failure(mapError(error));
@@ -393,6 +578,11 @@ function requireNonBlank(value: unknown, field: string): string {
   return value;
 }
 
+function requireNullableEndpoint(value: unknown): string | undefined {
+  if (value === null) return undefined;
+  return requireNonBlank(value, 'endpoint');
+}
+
 function requireRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('Provider management request is invalid');
@@ -415,6 +605,7 @@ function failure(
 } {
   const messages = {
     adapter_unavailable: 'The provider adapter is not configured',
+    provider_not_found: 'The provider was not found',
     connection_not_found: 'The provider connection was not found',
     model_not_found: 'The provider model was not found',
     model_already_exists: 'The provider model is already registered',

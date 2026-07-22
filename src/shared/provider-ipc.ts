@@ -10,11 +10,18 @@ export const providerIpcChannels = {
   validateCapability: 'providers:validate-capability',
   recordUserCapability: 'providers:record-user-capability',
   saveRoutingPreference: 'providers:save-routing-preference',
-  planRoute: 'providers:plan-route'
+  planRoute: 'providers:plan-route',
+  createProvider: 'providers:create-provider',
+  createConnection: 'providers:create-connection',
+  updateConnection: 'providers:update-connection',
+  setConnectionEnabled: 'providers:set-connection-enabled',
+  deleteConnection: 'providers:delete-connection',
+  setModelEnabled: 'providers:set-model-enabled'
 } as const;
 
 export type ProviderManagementErrorCode =
   | 'adapter_unavailable'
+  | 'provider_not_found'
   | 'connection_not_found'
   | 'model_not_found'
   | 'model_already_exists'
@@ -27,6 +34,8 @@ export type ProviderManagementResult =
       readonly value: {
         readonly state: string;
         readonly modelId?: string;
+        readonly providerId?: string;
+        readonly connectionId?: string;
         readonly evidenceId?: string;
         readonly preferenceId?: string;
         readonly observedAt?: string;
@@ -192,4 +201,27 @@ export interface ProviderApi {
     enabled: boolean
   ): Promise<ProviderManagementResult>;
   planRoute(purpose: string): Promise<RoutePlanResult>;
+  createProvider(
+    name: string,
+    accessCategory: 'online' | 'local' | 'lan' | 'custom_remote'
+  ): Promise<ProviderManagementResult>;
+  createConnection(
+    providerId: string,
+    name: string,
+    endpoint: string | null
+  ): Promise<ProviderManagementResult>;
+  updateConnection(
+    connectionId: string,
+    name: string,
+    endpoint: string | null
+  ): Promise<ProviderManagementResult>;
+  setConnectionEnabled(
+    connectionId: string,
+    enabled: boolean
+  ): Promise<ProviderManagementResult>;
+  deleteConnection(connectionId: string): Promise<CredentialActionResult>;
+  setModelEnabled(
+    modelId: string,
+    enabled: boolean
+  ): Promise<ProviderManagementResult>;
 }
