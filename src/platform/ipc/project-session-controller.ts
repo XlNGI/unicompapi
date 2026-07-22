@@ -1,13 +1,25 @@
 import path from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { toProjectId } from '../../domain';
 import type {
+  StorageCreateProjectDto,
   StorageIpcResult,
   StorageOpenProjectDto,
   StorageProjectSessionDto
 } from '../../shared/storage-ipc';
 import { JsonProjectRepository } from '../repositories';
-import { NodeProjectStorage, projectStoragePaths } from '../storage';
+import {
+  NodeProjectStorage,
+  projectStoragePaths,
+  toProjectRelativePath
+} from '../storage';
 import type { StorageProjectSession } from './storage-ipc-controller';
+import {
+  createProjectId,
+  createProjectManifest,
+  type ProjectCatalogService
+} from './project-catalog';
+import type { StorageProjectSummaryDto } from '../../shared/storage-ipc';
 
 export class StorageProjectSessionRegistry {
   private session: StorageProjectSession | undefined;
@@ -28,6 +40,7 @@ export class StorageProjectSessionRegistry {
 export interface ProjectSessionControllerDependencies {
   readonly registry: StorageProjectSessionRegistry;
   chooseProjectDirectory(): Promise<string | undefined>;
+  catalog?: ProjectCatalogService;
   beforeSessionChange?(): Promise<void>;
   onError?(error: unknown): void;
 }
@@ -70,6 +83,11 @@ export class ProjectSessionController {
         projectName: project.name,
         rootDirectory: path.resolve(rootDirectory)
       };
+      await this.dependencies.catalog?.remember({
+        projectId: session.projectId,
+        projectName: session.projectName,
+        rootDirectory: session.rootDirectory
+      });
       await this.dependencies.beforeSessionChange?.();
       this.dependencies.registry.set(session);
 
@@ -78,6 +96,82 @@ export class ProjectSessionController {
         session: toSessionDto(session)
       };
     });
+  }
+
+  createProject(
+    request: unknown
+  ): Promise<StorageIpcResult<StorageCreateProjectDto>> {
+    return this.executeCreate(async () => {
+      const name = parseProjectName(request);
+      const rootDirectory = await this.dependencies.chooseProjectDirectory();
+
+      if (!rootDirectory) {
+        return { cancelled: true };
+      }
+
+      if (!path.isAbsolute(rootDirectory)) {
+        throw new ProjectSessionError(
+          'invalid_project',
+          'Selected project directory is invalid'
+        );
+      }
+
+      const normalizedRoot = path.resolve(rootDirectory);
+      const contents = await readdir(normalizedRoot);
+      if (contents.length > 0) {
+        throw new ProjectSessionError(
+          'project_directory_not_empty',
+          'Selected project directory is not empty'
+        );
+      }
+
+      const projectId = createProjectId();
+      const storage = new NodeProjectStorage(normalizedRoot);
+      const manifest = createProjectManifest(
+        projectId,
+        name,
+        new Date().toISOString()
+      );
+      await storage.writeJsonAtomically(projectStoragePaths.manifest, manifest);
+      await Promise.all([
+        storage.ensureDirectory(toProjectRelativePath('entities')),
+        storage.ensureDirectory(toProjectRelativePath('index')),
+        storage.ensureDirectory(projectStoragePaths.filesDirectory),
+        storage.ensureDirectory(projectStoragePaths.temporaryDirectory)
+      ]);
+
+      const session: StorageProjectSession = {
+        projectId,
+        projectName: manifest.name,
+        rootDirectory: normalizedRoot
+      };
+      await this.dependencies.beforeSessionChange?.();
+      this.dependencies.registry.set(session);
+      await this.dependencies.catalog?.remember({
+        projectId: session.projectId,
+        projectName: session.projectName,
+        rootDirectory: session.rootDirectory
+      });
+
+      return {
+        cancelled: false,
+        session: toSessionDto(session)
+      };
+    });
+  }
+
+  async listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>> {
+    try {
+      return { ok: true, value: (await this.dependencies.catalog?.list()) ?? [] };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'project_open_failed',
+          message: 'The project catalog could not be read'
+        }
+      };
+    }
   }
 
   async closeProject(): Promise<StorageIpcResult<{ readonly closed: true }>> {
@@ -105,7 +199,7 @@ export class ProjectSessionController {
       this.dependencies.onError?.(error);
       return {
         ok: false,
-        error: error instanceof ProjectSessionError
+        error: error instanceof ProjectSessionError && error.code === 'invalid_project'
           ? { code: error.code, message: error.message }
           : {
               code: 'project_open_failed',
@@ -114,16 +208,59 @@ export class ProjectSessionController {
       };
     }
   }
+
+  private async executeCreate<T>(
+    operation: () => Promise<T>
+  ): Promise<StorageIpcResult<T>> {
+    try {
+      return { ok: true, value: await operation() };
+    } catch (error) {
+      this.dependencies.onError?.(error);
+      return {
+        ok: false,
+        error: {
+          code: 'project_create_failed',
+          message: error instanceof ProjectSessionError
+            ? error.message
+            : 'The project could not be created'
+        }
+      };
+    }
+  }
 }
 
 class ProjectSessionError extends Error {
   constructor(
-    readonly code: 'invalid_project',
+    readonly code: 'invalid_project' | 'project_directory_not_empty',
     message: string
   ) {
     super(message);
     this.name = 'ProjectSessionError';
   }
+}
+
+function parseProjectName(request: unknown): string {
+  if (
+    typeof request !== 'object' ||
+    request === null ||
+    !('name' in request) ||
+    typeof request.name !== 'string'
+  ) {
+    throw new ProjectSessionError(
+      'invalid_project',
+      'A non-empty project name is required'
+    );
+  }
+
+  const name = request.name.trim();
+  if (name.length === 0) {
+    throw new ProjectSessionError(
+      'invalid_project',
+      'A non-empty project name is required'
+    );
+  }
+
+  return name;
 }
 
 function readProjectId(manifest: unknown) {
