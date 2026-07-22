@@ -1,8 +1,11 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
+import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
+
+registerStorageIpcHandlers();
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);
@@ -71,7 +74,7 @@ function createMainWindow(): void {
     return;
   }
 
-  mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
 }
 
 app.whenReady().then(() => {

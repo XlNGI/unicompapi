@@ -1,7 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import {
+  storageIpcChannels,
+  type StorageApi
+} from '../src/shared/storage-ipc';
+
+const storage: StorageApi = {
+  probeFile: (fileId) =>
+    ipcRenderer.invoke(storageIpcChannels.probeFile, { fileId }),
+  verifyFile: (fileId) =>
+    ipcRenderer.invoke(storageIpcChannels.verifyFile, { fileId }),
+  relinkFile: (fileId) =>
+    ipcRenderer.invoke(storageIpcChannels.relinkFile, { fileId }),
+  rebuildIndex: () => ipcRenderer.invoke(storageIpcChannels.rebuildIndex)
+};
 
 contextBridge.exposeInMainWorld('unicomp', {
   platform: process.platform,
+  storage,
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
