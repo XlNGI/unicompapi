@@ -3,6 +3,10 @@ import {
   storageIpcChannels,
   type StorageApi
 } from '../src/shared/storage-ipc';
+import {
+  providerIpcChannels,
+  type ProviderApi
+} from '../src/shared/provider-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -33,8 +37,13 @@ const storage: StorageApi = {
     ipcRenderer.invoke(storageIpcChannels.getProjectSession)
 };
 
+const providers: ProviderApi = {
+  getRegistry: () => ipcRenderer.invoke(providerIpcChannels.getRegistry)
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
   platform: process.platform,
+  providers,
   storage,
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),

@@ -11,6 +11,11 @@ export type FileReferenceId = DomainId<'FileReferenceId'>;
 export type TaskId = DomainId<'TaskId'>;
 export type ExecutionId = DomainId<'ExecutionId'>;
 export type WorkId = DomainId<'WorkId'>;
+export type ProviderId = DomainId<'ProviderId'>;
+export type ConnectionId = DomainId<'ConnectionId'>;
+export type ModelId = DomainId<'ModelId'>;
+export type CapabilityEvidenceId = DomainId<'CapabilityEvidenceId'>;
+export type RoutingPreferenceId = DomainId<'RoutingPreferenceId'>;
 
 function toDomainId<Name extends string>(value: string, label: Name): DomainId<Name> {
   const normalized = value.trim();
@@ -31,3 +36,11 @@ export const toTaskId = (value: string) => toDomainId(value, 'TaskId');
 export const toExecutionId = (value: string) =>
   toDomainId(value, 'ExecutionId');
 export const toWorkId = (value: string) => toDomainId(value, 'WorkId');
+export const toProviderId = (value: string) => toDomainId(value, 'ProviderId');
+export const toConnectionId = (value: string) =>
+  toDomainId(value, 'ConnectionId');
+export const toModelId = (value: string) => toDomainId(value, 'ModelId');
+export const toCapabilityEvidenceId = (value: string) =>
+  toDomainId(value, 'CapabilityEvidenceId');
+export const toRoutingPreferenceId = (value: string) =>
+  toDomainId(value, 'RoutingPreferenceId');

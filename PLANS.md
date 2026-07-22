@@ -124,6 +124,8 @@ docs/active/阶段4-任务拆分.md
 
 阶段 4 首轮由开发者 B 实现服务商/连接/模型领域契约。后台 Base URL、鉴权和接口示例仍为真实阻断项，不影响本地契约与安全凭证边界先行。
 
+阶段 4 B1 已完成：服务商、连接、模型、能力证据和路由偏好领域契约、版本化本地注册表及只读 `providers:get-registry` IPC 已建立；DTO 不返回 endpoint 或凭证引用，未预置任何厂商和模型。
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript
