@@ -50,7 +50,7 @@ export const navigationItems = [
 
 export type NavigationItemId = (typeof navigationItems)[number]['id'];
 
-export const defaultNavigationItemId: NavigationItemId = navigationItems[0].id;
+export const defaultNavigationItemId: NavigationItemId = 'projects';
 
 export type SecondaryNavigationItemId =
   | ImageCreationModeId
