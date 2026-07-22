@@ -1,6 +1,43 @@
 export const providerIpcChannels = {
-  getRegistry: 'providers:get-registry'
+  getRegistry: 'providers:get-registry',
+  saveCredential: 'providers:save-credential',
+  deleteLocalCredential: 'providers:delete-local-credential',
+  getCredentialStatus: 'providers:get-credential-status',
+  checkCredentialStorage: 'providers:check-credential-storage'
 } as const;
+
+export type CredentialErrorCode =
+  | 'connection_not_found'
+  | 'encryption_unavailable'
+  | 'invalid_request'
+  | 'credential_operation_failed';
+
+export type CredentialActionResult =
+  | {
+      readonly ok: true;
+      readonly value: {
+        readonly state: string;
+        readonly remoteRevocation?: 'not_attempted';
+        readonly remoteValidation?: 'not_attempted';
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: CredentialErrorCode;
+        readonly message: string;
+      };
+    };
+
+export type CredentialStatusResult =
+  | { readonly ok: true; readonly value: { readonly state: string } }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: CredentialErrorCode;
+        readonly message: string;
+      };
+    };
 
 export type ProviderIpcResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -67,4 +104,11 @@ export interface ProviderRegistryDto {
 
 export interface ProviderApi {
   getRegistry(): Promise<ProviderIpcResult<ProviderRegistryDto>>;
+  saveCredential(
+    connectionId: string,
+    value: string
+  ): Promise<CredentialActionResult>;
+  deleteLocalCredential(connectionId: string): Promise<CredentialActionResult>;
+  getCredentialStatus(connectionId: string): Promise<CredentialStatusResult>;
+  checkCredentialStorage(connectionId: string): Promise<CredentialActionResult>;
 }

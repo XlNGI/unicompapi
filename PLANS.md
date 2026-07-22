@@ -126,6 +126,8 @@ docs/active/阶段4-任务拆分.md
 
 阶段 4 B1 已完成：服务商、连接、模型、能力证据和路由偏好领域契约、版本化本地注册表及只读 `providers:get-registry` IPC 已建立；DTO 不返回 endpoint 或凭证引用，未预置任何厂商和模型。
 
+阶段 4 B2 已完成：本机安全凭证库、Electron `safeStorage` 适配及保存/替换、本地删除、状态查询和本地安全存储检查 IPC 已建立；renderer 不提供明文读取，密文仅保存在应用用户目录。删除本地凭证明确不等于撤销服务商侧凭证；真实远端验证继续等待 B3 与后台契约。
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript
