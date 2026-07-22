@@ -37,6 +37,8 @@ export interface CreateFileReferenceInput {
   readonly sourceExecutionId?: ExecutionId;
   readonly locator: FileLocator;
   readonly createdAt: IsoTimestamp;
+  readonly sizeBytes?: number;
+  readonly checksumSha256?: string;
 }
 
 export interface FileTransitionContext {
@@ -74,6 +76,14 @@ export function createFileReference(
     sourceExecutionId: input.sourceExecutionId,
     locator: validateLocator(input.locator),
     state: 'pending',
+    sizeBytes:
+      input.sizeBytes === undefined
+        ? undefined
+        : requireNonNegativeInteger(input.sizeBytes, 'file.sizeBytes'),
+    checksumSha256:
+      input.checksumSha256 === undefined
+        ? undefined
+        : requireSha256(input.checksumSha256),
     createdAt: input.createdAt,
     updatedAt: input.createdAt
   };
