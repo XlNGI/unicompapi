@@ -1,32 +1,32 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import {
   StorageIpcController,
-  type StorageProjectSession
+  ProjectSessionController,
+  StorageProjectSessionRegistry
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
 
-let activeProjectSession: StorageProjectSession | undefined;
-
-export function setActiveStorageProjectSession(
-  session: StorageProjectSession | undefined
-): void {
-  activeProjectSession = session;
-}
-
 export function registerStorageIpcHandlers(): void {
-  const controller = new StorageIpcController({
-    getSession: () => activeProjectSession,
-    chooseRelinkFile: async () => {
-      const window = BrowserWindow.getFocusedWindow();
-      const options: Electron.OpenDialogOptions = {
-        properties: ['openFile']
-      };
-      const result = window
-        ? await dialog.showOpenDialog(window, options)
-        : await dialog.showOpenDialog(options);
+  const sessionRegistry = new StorageProjectSessionRegistry();
+  const choosePath = async (
+    properties: Electron.OpenDialogOptions['properties']
+  ) => {
+    const window = BrowserWindow.getFocusedWindow();
+    const options: Electron.OpenDialogOptions = { properties };
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options);
 
-      return result.canceled ? undefined : result.filePaths[0];
-    }
+    return result.canceled ? undefined : result.filePaths[0];
+  };
+  const controller = new StorageIpcController({
+    getSession: () => sessionRegistry.get(),
+    chooseRelinkFile: () => choosePath(['openFile'])
+  });
+  const projectController = new ProjectSessionController({
+    registry: sessionRegistry,
+    chooseProjectDirectory: () => choosePath(['openDirectory']),
+    beforeSessionChange: () => controller.waitForMutations()
   });
 
   ipcMain.handle(storageIpcChannels.probeFile, (_event, request: unknown) =>
@@ -40,5 +40,14 @@ export function registerStorageIpcHandlers(): void {
   );
   ipcMain.handle(storageIpcChannels.rebuildIndex, () =>
     controller.rebuildIndex()
+  );
+  ipcMain.handle(storageIpcChannels.openProject, () =>
+    projectController.openProject()
+  );
+  ipcMain.handle(storageIpcChannels.closeProject, () =>
+    projectController.closeProject()
+  );
+  ipcMain.handle(storageIpcChannels.getProjectSession, () =>
+    projectController.getProjectSession()
   );
 }

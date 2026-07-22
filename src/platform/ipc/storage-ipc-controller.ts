@@ -27,6 +27,7 @@ import { NodeProjectStorage } from '../storage';
 
 export interface StorageProjectSession {
   readonly projectId: ProjectId;
+  readonly projectName: string;
   readonly rootDirectory: string;
 }
 
@@ -40,6 +41,10 @@ export class StorageIpcController {
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly dependencies: StorageIpcControllerDependencies) {}
+
+  waitForMutations(): Promise<void> {
+    return this.mutationQueue;
+  }
 
   probeFile(request: unknown): Promise<StorageIpcResult<StorageFileStatusDto>> {
     return this.execute(async () => {
