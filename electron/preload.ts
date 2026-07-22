@@ -1,7 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import {
+  storageRecoveryChannels,
+  type StorageRecoveryApi
+} from '../src/platform/ipc';
+
+const storageRecovery = {
+  probeFile: (request) => ipcRenderer.invoke(storageRecoveryChannels.probe, request),
+  verifyFile: (request) => ipcRenderer.invoke(storageRecoveryChannels.verify, request),
+  relinkFile: (request) => ipcRenderer.invoke(storageRecoveryChannels.relink, request),
+  rebuildFileIndex: (request) =>
+    ipcRenderer.invoke(storageRecoveryChannels.rebuildIndex, request)
+} satisfies StorageRecoveryApi;
 
 contextBridge.exposeInMainWorld('unicomp', {
   platform: process.platform,
+  storageRecovery,
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
