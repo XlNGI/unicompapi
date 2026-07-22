@@ -85,6 +85,8 @@ export function App() {
         <ProjectsPage onNavigate={handleNavigate} />
       ) : activeItemId === 'tasks' && !activeSubItemId ? (
         <TasksPage onNavigate={handleNavigate} />
+      ) : activeItemId === 'library' && !activeSubItemId ? (
+        <LibraryPage onNavigate={handleNavigate} />
       ) : (
         <ActivePage />
       )}
