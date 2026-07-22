@@ -268,7 +268,11 @@ export class ProviderCapabilityController {
       const connection = snapshot.connections.find(
         (candidate) => candidate.id === model.connectionId
       );
-      if (!connection || connection.state === 'deleted') {
+      if (
+        !connection ||
+        connection.state === 'deleted' ||
+        (item.enabled && connection.state === 'disabled')
+      ) {
         return failure('invalid_request');
       }
       await this.registry.save({
@@ -523,8 +527,21 @@ export class ProviderCapabilityController {
     try {
       const purpose = parseTextInput(input, 'purpose');
       const snapshot = await this.registry.load();
+      const routableConnections = new Set(
+        snapshot.connections
+          .filter(
+            (connection) =>
+              connection.state !== 'disabled' && connection.state !== 'deleted'
+          )
+          .map((connection) => connection.id)
+      );
       const enabledModels = new Set(
-        snapshot.models.filter((model) => model.enabled).map((model) => model.id)
+        snapshot.models
+          .filter(
+            (model) =>
+              model.enabled && routableConnections.has(model.connectionId)
+          )
+          .map((model) => model.id)
       );
       const candidates = snapshot.routingPreferences
         .filter(

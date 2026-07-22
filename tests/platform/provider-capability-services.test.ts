@@ -60,13 +60,6 @@ describe('ProviderCapabilityController', () => {
         endpoint: 'https://fixture.invalid'
       })
     ).toMatchObject({ ok: true, value: { state: 'saved' } });
-    expect(
-      await controller.setConnectionEnabled({
-        connectionId: connectionResult.value.connectionId,
-        enabled: false
-      })
-    ).toMatchObject({ ok: true, value: { state: 'disabled' } });
-
     const modelResult = await controller.registerManualModel({
       connectionId: connectionResult.value.connectionId,
       name: 'fixture-model-toggle',
@@ -82,6 +75,35 @@ describe('ProviderCapabilityController', () => {
       })
     ).toMatchObject({ ok: true, value: { state: 'enabled' } });
     expect((await registry.load()).models[0].enabled).toBe(true);
+
+    expect(
+      await controller.saveRoutingPreference({
+        purpose: 'fixture_purpose',
+        modelId: modelResult.value.modelId,
+        priority: 0,
+        enabled: true
+      })
+    ).toMatchObject({ ok: true, value: { state: 'routing_saved' } });
+    expect(
+      await controller.setConnectionEnabled({
+        connectionId: connectionResult.value.connectionId,
+        enabled: false
+      })
+    ).toMatchObject({ ok: true, value: { state: 'disabled' } });
+    expect(
+      await controller.setModelEnabled({
+        modelId: modelResult.value.modelId,
+        enabled: true
+      })
+    ).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(await controller.planRoute({ purpose: 'fixture_purpose' })).toEqual({
+      ok: true,
+      value: {
+        purpose: 'fixture_purpose',
+        candidates: [],
+        requiresSubmissionConfirmation: true
+      }
+    });
   });
 
   it('keeps connection, catalog, and capability validation unavailable without adapters', async () => {
