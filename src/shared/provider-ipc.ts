@@ -3,8 +3,66 @@ export const providerIpcChannels = {
   saveCredential: 'providers:save-credential',
   deleteLocalCredential: 'providers:delete-local-credential',
   getCredentialStatus: 'providers:get-credential-status',
-  checkCredentialStorage: 'providers:check-credential-storage'
+  checkCredentialStorage: 'providers:check-credential-storage',
+  validateConnection: 'providers:validate-connection',
+  syncModelCatalog: 'providers:sync-model-catalog',
+  registerManualModel: 'providers:register-manual-model',
+  validateCapability: 'providers:validate-capability',
+  recordUserCapability: 'providers:record-user-capability',
+  saveRoutingPreference: 'providers:save-routing-preference',
+  planRoute: 'providers:plan-route'
 } as const;
+
+export type ProviderManagementErrorCode =
+  | 'adapter_unavailable'
+  | 'connection_not_found'
+  | 'model_not_found'
+  | 'model_already_exists'
+  | 'invalid_request'
+  | 'provider_operation_failed';
+
+export type ProviderManagementResult =
+  | {
+      readonly ok: true;
+      readonly value: {
+        readonly state: string;
+        readonly modelId?: string;
+        readonly evidenceId?: string;
+        readonly preferenceId?: string;
+        readonly observedAt?: string;
+        readonly count?: number;
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: ProviderManagementErrorCode;
+        readonly message: string;
+      };
+    };
+
+export type RoutePlanResult =
+  | {
+      readonly ok: true;
+      readonly value: {
+        readonly purpose: string;
+        readonly candidates: readonly {
+          readonly modelId: string;
+          readonly priority: number;
+          readonly costState: 'unknown';
+          readonly privacyState: 'unknown';
+          readonly regionState: 'unknown';
+        }[];
+        readonly requiresSubmissionConfirmation: true;
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: ProviderManagementErrorCode;
+        readonly message: string;
+      };
+    };
 
 export type CredentialErrorCode =
   | 'connection_not_found'
@@ -111,4 +169,27 @@ export interface ProviderApi {
   deleteLocalCredential(connectionId: string): Promise<CredentialActionResult>;
   getCredentialStatus(connectionId: string): Promise<CredentialStatusResult>;
   checkCredentialStorage(connectionId: string): Promise<CredentialActionResult>;
+  validateConnection(connectionId: string): Promise<ProviderManagementResult>;
+  syncModelCatalog(connectionId: string): Promise<ProviderManagementResult>;
+  registerManualModel(
+    connectionId: string,
+    name: string,
+    displayName: string
+  ): Promise<ProviderManagementResult>;
+  validateCapability(
+    modelId: string,
+    capability: string
+  ): Promise<ProviderManagementResult>;
+  recordUserCapability(
+    modelId: string,
+    capability: string,
+    state: 'user_confirmed' | 'unsupported'
+  ): Promise<ProviderManagementResult>;
+  saveRoutingPreference(
+    purpose: string,
+    modelId: string,
+    priority: number,
+    enabled: boolean
+  ): Promise<ProviderManagementResult>;
+  planRoute(purpose: string): Promise<RoutePlanResult>;
 }

@@ -2,6 +2,7 @@ import { app, ipcMain, safeStorage } from 'electron';
 import path from 'node:path';
 import {
   JsonProviderRegistryStore,
+  ProviderCapabilityController,
   ProviderCredentialController,
   ProviderRegistryController,
   SecureCredentialVault
@@ -25,6 +26,7 @@ export function registerProviderIpcHandlers(): void {
       }
     )
   );
+  const capabilityController = new ProviderCapabilityController(registry);
   ipcMain.handle(providerIpcChannels.getRegistry, () =>
     controller.getRegistry()
   );
@@ -39,5 +41,26 @@ export function registerProviderIpcHandlers(): void {
   );
   ipcMain.handle(providerIpcChannels.checkCredentialStorage, (_event, input) =>
     credentialController.checkCredentialStorage(input)
+  );
+  ipcMain.handle(providerIpcChannels.validateConnection, (_event, input) =>
+    capabilityController.validateConnection(input)
+  );
+  ipcMain.handle(providerIpcChannels.syncModelCatalog, (_event, input) =>
+    capabilityController.syncModelCatalog(input)
+  );
+  ipcMain.handle(providerIpcChannels.registerManualModel, (_event, input) =>
+    capabilityController.registerManualModel(input)
+  );
+  ipcMain.handle(providerIpcChannels.validateCapability, (_event, input) =>
+    capabilityController.validateCapability(input)
+  );
+  ipcMain.handle(providerIpcChannels.recordUserCapability, (_event, input) =>
+    capabilityController.recordUserCapability(input)
+  );
+  ipcMain.handle(providerIpcChannels.saveRoutingPreference, (_event, input) =>
+    capabilityController.saveRoutingPreference(input)
+  );
+  ipcMain.handle(providerIpcChannels.planRoute, (_event, input) =>
+    capabilityController.planRoute(input)
   );
 }

@@ -55,7 +55,37 @@ const providers: ProviderApi = {
   checkCredentialStorage: (connectionId) =>
     ipcRenderer.invoke(providerIpcChannels.checkCredentialStorage, {
       connectionId
-    })
+    }),
+  validateConnection: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.validateConnection, { connectionId }),
+  syncModelCatalog: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.syncModelCatalog, { connectionId }),
+  registerManualModel: (connectionId, name, displayName) =>
+    ipcRenderer.invoke(providerIpcChannels.registerManualModel, {
+      connectionId,
+      name,
+      displayName
+    }),
+  validateCapability: (modelId, capability) =>
+    ipcRenderer.invoke(providerIpcChannels.validateCapability, {
+      modelId,
+      capability
+    }),
+  recordUserCapability: (modelId, capability, state) =>
+    ipcRenderer.invoke(providerIpcChannels.recordUserCapability, {
+      modelId,
+      capability,
+      state
+    }),
+  saveRoutingPreference: (purpose, modelId, priority, enabled) =>
+    ipcRenderer.invoke(providerIpcChannels.saveRoutingPreference, {
+      purpose,
+      modelId,
+      priority,
+      enabled
+    }),
+  planRoute: (purpose) =>
+    ipcRenderer.invoke(providerIpcChannels.planRoute, { purpose })
 };
 
 contextBridge.exposeInMainWorld('unicomp', {

@@ -22,3 +22,14 @@ test('credential IPC is write-only and distinguishes local deletion', () => {
   assert.doesNotMatch(contract, /getCredential\(|readCredential\(|decryptCredential/);
   assert.doesNotMatch(preload, /getCredential\(|readCredential\(|decryptCredential/);
 });
+
+test('provider service IPC keeps validation separate and routing confirmable', () => {
+  assert.match(contract, /validateConnection/);
+  assert.match(contract, /validateCapability/);
+  assert.match(contract, /syncModelCatalog/);
+  assert.match(contract, /registerManualModel/);
+  assert.match(contract, /requiresSubmissionConfirmation: true/);
+  assert.match(contract, /costState: 'unknown'/);
+  assert.match(contract, /privacyState: 'unknown'/);
+  assert.match(contract, /regionState: 'unknown'/);
+});
