@@ -1,11 +1,15 @@
+export const promptSupplementSources = [
+  'project_context',
+  'selected_context',
+  'style',
+  'structure',
+  'constraint',
+  'translation',
+  'model_format'
+] as const;
+
 export type PromptSupplementSource =
-  | 'project_context'
-  | 'selected_context'
-  | 'style'
-  | 'structure'
-  | 'constraint'
-  | 'translation'
-  | 'model_format';
+  (typeof promptSupplementSources)[number];
 
 export interface PromptSupplement {
   readonly content: string;

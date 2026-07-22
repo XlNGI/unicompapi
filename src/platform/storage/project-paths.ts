@@ -30,7 +30,9 @@ export const projectStoragePaths = {
   entities: {
     drafts: toProjectRelativePath('entities/drafts.json'),
     assets: toProjectRelativePath('entities/assets.json'),
+    fileReferences: toProjectRelativePath('entities/file-references.json'),
     tasks: toProjectRelativePath('entities/tasks.json'),
+    executions: toProjectRelativePath('entities/executions.json'),
     works: toProjectRelativePath('entities/works.json')
   },
   index: toProjectRelativePath('index/file-index.json'),
