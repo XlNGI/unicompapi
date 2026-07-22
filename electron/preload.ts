@@ -24,6 +24,10 @@ const storage: StorageApi = {
   listWorks: () => ipcRenderer.invoke(storageIpcChannels.listWorks),
   getWorkDetails: (workId) =>
     ipcRenderer.invoke(storageIpcChannels.getWorkDetails, { workId }),
+  createWorkMediaHandle: (workId) =>
+    ipcRenderer.invoke(storageIpcChannels.createWorkMediaHandle, { workId }),
+  revealWorkFile: (workId) =>
+    ipcRenderer.invoke(storageIpcChannels.revealWorkFile, { workId }),
   closeProject: () => ipcRenderer.invoke(storageIpcChannels.closeProject),
   getProjectSession: () =>
     ipcRenderer.invoke(storageIpcChannels.getProjectSession)

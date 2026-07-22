@@ -19,6 +19,8 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'getTaskDetails',
     'listWorks',
     'getWorkDetails',
+    'createWorkMediaHandle',
+    'revealWorkFile',
     'closeProject',
     'getProjectSession'
   ]) {

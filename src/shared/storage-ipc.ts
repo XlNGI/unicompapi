@@ -11,6 +11,8 @@ export const storageIpcChannels = {
   getTaskDetails: 'storage:get-task-details',
   listWorks: 'storage:list-works',
   getWorkDetails: 'storage:get-work-details',
+  createWorkMediaHandle: 'storage:create-work-media-handle',
+  revealWorkFile: 'storage:reveal-work-file',
   closeProject: 'storage:close-project',
   getProjectSession: 'storage:get-project-session'
 } as const;
@@ -27,6 +29,8 @@ export type StorageIpcErrorCode =
   | 'project_open_failed'
   | 'project_create_failed'
   | 'read_model_failed'
+  | 'work_not_found'
+  | 'media_unavailable'
   | 'storage_error';
 
 export type StorageIpcResult<T> =
@@ -124,6 +128,12 @@ export interface StorageWorkDetailsDto extends StorageWorkSummaryDto {
   readonly verifiedAt?: string;
 }
 
+export interface StorageLocalMediaHandleDto {
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mediaKind: string;
+}
+
 export interface StorageReadModelListDto<TItem> {
   readonly items: readonly TItem[];
   readonly issues: readonly StorageReadModelIssueDto[];
@@ -159,6 +169,12 @@ export interface StorageApi {
   getWorkDetails(
     workId: string
   ): Promise<StorageIpcResult<StorageWorkDetailsDto | undefined>>;
+  createWorkMediaHandle(
+    workId: string
+  ): Promise<StorageIpcResult<StorageLocalMediaHandleDto>>;
+  revealWorkFile(
+    workId: string
+  ): Promise<StorageIpcResult<{ readonly revealed: true }>>;
   closeProject(): Promise<StorageIpcResult<{ readonly closed: true }>>;
   getProjectSession(): Promise<
     StorageIpcResult<StorageProjectSessionDto | undefined>

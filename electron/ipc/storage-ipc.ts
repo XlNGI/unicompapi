@@ -1,16 +1,18 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import {
   StorageIpcController,
   JsonProjectCatalogStore,
   GlobalReadModelController,
+  ControlledLocalMediaController,
   ProjectSessionController,
   ProjectCatalogService,
+  LocalMediaHandleRegistry,
   StorageProjectSessionRegistry
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
 
-export function registerStorageIpcHandlers(): void {
+export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
   const choosePath = async (
     properties: Electron.OpenDialogOptions['properties']
@@ -32,6 +34,12 @@ export function registerStorageIpcHandlers(): void {
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
   const readModels = new GlobalReadModelController(catalog);
+  const mediaHandles = new LocalMediaHandleRegistry();
+  const localMedia = new ControlledLocalMediaController({
+    catalog,
+    handles: mediaHandles,
+    revealFile: (target) => shell.showItemInFolder(target)
+  });
   const projectController = new ProjectSessionController({
     registry: sessionRegistry,
     chooseProjectDirectory: () => choosePath(['openDirectory']),
@@ -71,10 +79,18 @@ export function registerStorageIpcHandlers(): void {
   ipcMain.handle(storageIpcChannels.getWorkDetails, (_event, request: unknown) =>
     readModels.getWorkDetails(request)
   );
+  ipcMain.handle(
+    storageIpcChannels.createWorkMediaHandle,
+    (_event, request: unknown) => localMedia.createHandle(request)
+  );
+  ipcMain.handle(storageIpcChannels.revealWorkFile, (_event, request: unknown) =>
+    localMedia.revealWorkFile(request)
+  );
   ipcMain.handle(storageIpcChannels.closeProject, () =>
     projectController.closeProject()
   );
   ipcMain.handle(storageIpcChannels.getProjectSession, () =>
     projectController.getProjectSession()
   );
+  return mediaHandles;
 }

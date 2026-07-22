@@ -1,11 +1,24 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
 
-registerStorageIpcHandlers();
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'unicomp-media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true
+    }
+  }
+]);
+
+const mediaHandles = registerStorageIpcHandlers();
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);
@@ -78,6 +91,17 @@ function createMainWindow(): void {
 }
 
 app.whenReady().then(() => {
+  protocol.handle('unicomp-media', (request) => {
+    const url = new URL(request.url);
+    const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
+    const target = token ? mediaHandles.resolve(token) : undefined;
+    return target
+      ? net.fetch(pathToFileURL(target).toString(), {
+          method: request.method,
+          headers: request.headers
+        })
+      : new Response('Media handle not found', { status: 404 });
+  });
   createMainWindow();
 
   app.on('activate', () => {
