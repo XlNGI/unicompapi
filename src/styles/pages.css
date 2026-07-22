@@ -1042,6 +1042,13 @@
 .uc-provider-page__tabs {
   display: flex;
   gap: var(--uc-space-1);
+}
+
+.uc-provider-page__filters {
+  flex-wrap: wrap;
+}
+
+.uc-provider-page__tabs {
   overflow-x: auto;
 }
 
@@ -1331,7 +1338,7 @@
   margin-top: var(--uc-space-2);
 }
 
-@media (max-width: 1260px) {
+@media (max-width: 1480px) {
   .uc-provider-page__workspace {
     grid-template-columns: minmax(220px, 0.72fr) minmax(480px, 1.8fr);
   }
