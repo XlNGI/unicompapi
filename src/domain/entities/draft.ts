@@ -2,21 +2,27 @@ import type { AssetId, DraftId, ProjectId } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
 import type { PromptSnapshot } from './prompt';
 
-export type CreationKind =
-  | 'image_generation'
-  | 'image_analysis'
-  | 'image_editing'
-  | 'image_to_prompt'
-  | 'video_generation'
-  | 'video_editing';
+export const creationKinds = [
+  'image_generation',
+  'image_analysis',
+  'image_editing',
+  'image_to_prompt',
+  'video_generation',
+  'video_editing'
+] as const;
 
-export type DraftState =
-  | 'editing'
-  | 'saving'
-  | 'saved'
-  | 'save_failed'
-  | 'stale'
-  | 'archived';
+export type CreationKind = (typeof creationKinds)[number];
+
+export const draftStates = [
+  'editing',
+  'saving',
+  'saved',
+  'save_failed',
+  'stale',
+  'archived'
+] as const;
+
+export type DraftState = (typeof draftStates)[number];
 
 export interface Draft {
   readonly schemaVersion: 1;

@@ -2,8 +2,11 @@ import type { AssetId, FileReferenceId, ProjectId } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
 import { requireNonBlank } from '../validation';
 
-export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'other';
-export type AssetOrigin = 'imported' | 'generated' | 'derived';
+export const mediaKinds = ['image', 'video', 'audio', 'document', 'other'] as const;
+export type MediaKind = (typeof mediaKinds)[number];
+
+export const assetOrigins = ['imported', 'generated', 'derived'] as const;
+export type AssetOrigin = (typeof assetOrigins)[number];
 
 export interface Asset {
   readonly schemaVersion: 1;
