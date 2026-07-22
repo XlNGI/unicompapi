@@ -106,6 +106,8 @@ docs/active/阶段3-任务拆分.md
 
 阶段 3 B2 已完成：跨项目任务/作品摘要与详情读模型、项目级断盘/损坏隔离和 `listTasks/getTaskDetails/listWorks/getWorkDetails` 受控 IPC 已通过完整测试。开发者 A 可据此接入项目中心、任务中心和作品库。
 
+阶段 3 B3 已完成：按 `workId` 创建短期 `unicomp-media` 媒体句柄和系统文件定位的受控主进程流程已建立；renderer 不接收绝对路径，句柄过期、文件缺失和不可预览类型均有真实错误状态。
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript
