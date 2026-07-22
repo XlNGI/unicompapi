@@ -116,7 +116,8 @@ describe('ProjectSessionController', () => {
     });
     const storageController = new StorageIpcController({
       getSession: () => registry.get(),
-      chooseRelinkFile: async () => undefined
+      chooseRelinkFile: async () => undefined,
+      chooseBackupFile: async () => undefined
     });
     await projectController.openProject();
 

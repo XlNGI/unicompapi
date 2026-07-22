@@ -123,3 +123,10 @@ docs/active/阶段1-任务拆分.md
 8. 阶段 8｜本地设置；
 9. 阶段 9｜跨平台与完整验收；
 10. 阶段 10｜打包与发布准备。
+
+## 最近增量（2026-07-22）
+
+- 实际修改：`ProjectsPage` 接入 `getProjectSession`、`openProject`、`closeProject`，增加读取中、未打开、已打开和操作反馈状态；同步更新阶段 2 Session 记录。
+- 验证结果：14 项 UI/契约测试、47 项领域与平台测试，以及 `npm.cmd run typecheck`、`npm.cmd run lint`、`npm.cmd run build`、`git diff --check` 全部通过；Windows Electron 生产窗口启动并保持响应。
+- 未完成项：新建项目流程、重新下载、备份来源/生命周期策略、恢复 UI、macOS 实机验证。Windows Electron 可见窗口已完成项目 Session 联调；备份恢复已接入仅接受 `fileId` 的受控 IPC，路径仍由主进程原生选择器持有。
+- 下一步建议：由项目负责人确认阶段 2 是否收口或进入阶段 3；后续按计划处理新建项目和恢复能力。

@@ -21,7 +21,8 @@ export function registerStorageIpcHandlers(): void {
   };
   const controller = new StorageIpcController({
     getSession: () => sessionRegistry.get(),
-    chooseRelinkFile: () => choosePath(['openFile'])
+    chooseRelinkFile: () => choosePath(['openFile']),
+    chooseBackupFile: () => choosePath(['openFile'])
   });
   const projectController = new ProjectSessionController({
     registry: sessionRegistry,
@@ -37,6 +38,9 @@ export function registerStorageIpcHandlers(): void {
   );
   ipcMain.handle(storageIpcChannels.relinkFile, (_event, request: unknown) =>
     controller.relinkFile(request)
+  );
+  ipcMain.handle(storageIpcChannels.restoreBackup, (_event, request: unknown) =>
+    controller.restoreBackup(request)
   );
   ipcMain.handle(storageIpcChannels.rebuildIndex, () =>
     controller.rebuildIndex()

@@ -2,6 +2,7 @@ export const storageIpcChannels = {
   probeFile: 'storage:probe-file',
   verifyFile: 'storage:verify-file',
   relinkFile: 'storage:relink-file',
+  restoreBackup: 'storage:restore-backup',
   rebuildIndex: 'storage:rebuild-index',
   openProject: 'storage:open-project',
   closeProject: 'storage:close-project',
@@ -14,6 +15,7 @@ export type StorageIpcErrorCode =
   | 'file_not_found'
   | 'verification_failed'
   | 'relink_rejected'
+  | 'backup_restore_failed'
   | 'index_rebuild_failed'
   | 'invalid_project'
   | 'project_open_failed'
@@ -49,6 +51,11 @@ export interface StorageIndexRebuildDto {
   readonly skippedExternalFileCount: number;
 }
 
+export interface StorageBackupRestoreResultDto {
+  readonly cancelled: boolean;
+  readonly file?: StorageFileStatusDto;
+}
+
 export interface StorageProjectSessionDto {
   readonly projectId: string;
   readonly projectName: string;
@@ -63,6 +70,9 @@ export interface StorageApi {
   probeFile(fileId: string): Promise<StorageIpcResult<StorageFileStatusDto>>;
   verifyFile(fileId: string): Promise<StorageIpcResult<StorageFileStatusDto>>;
   relinkFile(fileId: string): Promise<StorageIpcResult<StorageRelinkResultDto>>;
+  restoreBackup(
+    fileId: string
+  ): Promise<StorageIpcResult<StorageBackupRestoreResultDto>>;
   rebuildIndex(): Promise<StorageIpcResult<StorageIndexRebuildDto>>;
   openProject(): Promise<StorageIpcResult<StorageOpenProjectDto>>;
   closeProject(): Promise<StorageIpcResult<{ readonly closed: true }>>;
