@@ -3,6 +3,10 @@ import {
   storageIpcChannels,
   type StorageApi
 } from '../src/shared/storage-ipc';
+import {
+  providerIpcChannels,
+  type ProviderApi
+} from '../src/shared/provider-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -33,8 +37,86 @@ const storage: StorageApi = {
     ipcRenderer.invoke(storageIpcChannels.getProjectSession)
 };
 
+const providers: ProviderApi = {
+  getRegistry: () => ipcRenderer.invoke(providerIpcChannels.getRegistry),
+  saveCredential: (connectionId, value) =>
+    ipcRenderer.invoke(providerIpcChannels.saveCredential, {
+      connectionId,
+      value
+    }),
+  deleteLocalCredential: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.deleteLocalCredential, {
+      connectionId
+    }),
+  getCredentialStatus: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.getCredentialStatus, {
+      connectionId
+    }),
+  checkCredentialStorage: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.checkCredentialStorage, {
+      connectionId
+    }),
+  validateConnection: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.validateConnection, { connectionId }),
+  syncModelCatalog: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.syncModelCatalog, { connectionId }),
+  registerManualModel: (connectionId, name, displayName) =>
+    ipcRenderer.invoke(providerIpcChannels.registerManualModel, {
+      connectionId,
+      name,
+      displayName
+    }),
+  validateCapability: (modelId, capability) =>
+    ipcRenderer.invoke(providerIpcChannels.validateCapability, {
+      modelId,
+      capability
+    }),
+  recordUserCapability: (modelId, capability, state) =>
+    ipcRenderer.invoke(providerIpcChannels.recordUserCapability, {
+      modelId,
+      capability,
+      state
+    }),
+  saveRoutingPreference: (purpose, modelId, priority, enabled) =>
+    ipcRenderer.invoke(providerIpcChannels.saveRoutingPreference, {
+      purpose,
+      modelId,
+      priority,
+      enabled
+    }),
+  planRoute: (purpose) =>
+    ipcRenderer.invoke(providerIpcChannels.planRoute, { purpose }),
+  createProvider: (name, accessCategory) =>
+    ipcRenderer.invoke(providerIpcChannels.createProvider, {
+      name,
+      accessCategory
+    }),
+  createConnection: (providerId, name, endpoint) =>
+    ipcRenderer.invoke(providerIpcChannels.createConnection, {
+      providerId,
+      name,
+      endpoint
+    }),
+  updateConnection: (connectionId, name, endpoint) =>
+    ipcRenderer.invoke(providerIpcChannels.updateConnection, {
+      connectionId,
+      name,
+      endpoint
+    }),
+  setConnectionEnabled: (connectionId, enabled) =>
+    ipcRenderer.invoke(providerIpcChannels.setConnectionEnabled, {
+      connectionId,
+      enabled
+    }),
+  deleteConnection: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.deleteConnection, { connectionId }),
+  setModelEnabled: (modelId, enabled) =>
+    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
   platform: process.platform,
+  providers,
   storage,
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
