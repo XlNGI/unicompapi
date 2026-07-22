@@ -12,3 +12,13 @@ test('provider registry IPC is read-only and credential-free', () => {
   assert.doesNotMatch(contract, /credentialReference|apiKey|token|secret|endpoint:/i);
   assert.doesNotMatch(preload, /credentialReference|apiKey|token|secret/i);
 });
+
+test('credential IPC is write-only and distinguishes local deletion', () => {
+  assert.match(contract, /saveCredential/);
+  assert.match(contract, /deleteLocalCredential/);
+  assert.match(contract, /checkCredentialStorage/);
+  assert.match(contract, /remoteRevocation\?: 'not_attempted'/);
+  assert.match(contract, /remoteValidation\?: 'not_attempted'/);
+  assert.doesNotMatch(contract, /getCredential\(|readCredential\(|decryptCredential/);
+  assert.doesNotMatch(preload, /getCredential\(|readCredential\(|decryptCredential/);
+});

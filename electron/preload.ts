@@ -38,7 +38,24 @@ const storage: StorageApi = {
 };
 
 const providers: ProviderApi = {
-  getRegistry: () => ipcRenderer.invoke(providerIpcChannels.getRegistry)
+  getRegistry: () => ipcRenderer.invoke(providerIpcChannels.getRegistry),
+  saveCredential: (connectionId, value) =>
+    ipcRenderer.invoke(providerIpcChannels.saveCredential, {
+      connectionId,
+      value
+    }),
+  deleteLocalCredential: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.deleteLocalCredential, {
+      connectionId
+    }),
+  getCredentialStatus: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.getCredentialStatus, {
+      connectionId
+    }),
+  checkCredentialStorage: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.checkCredentialStorage, {
+      connectionId
+    })
 };
 
 contextBridge.exposeInMainWorld('unicomp', {
