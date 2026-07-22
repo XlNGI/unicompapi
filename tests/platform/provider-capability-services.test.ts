@@ -24,6 +24,66 @@ afterEach(async () => {
 });
 
 describe('ProviderCapabilityController', () => {
+  it('creates custom providers and manages connection and model enabled states', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-provider-service-'));
+    roots.push(root);
+    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const controller = new ProviderCapabilityController(registry);
+
+    const providerResult = await controller.createProvider({
+      name: 'Custom compatible fixture',
+      accessCategory: 'custom_remote'
+    });
+    expect(providerResult).toMatchObject({
+      ok: true,
+      value: { state: 'provider_created' }
+    });
+    if (!providerResult.ok || !providerResult.value.providerId) {
+      throw new Error('provider missing');
+    }
+    const connectionResult = await controller.createConnection({
+      providerId: providerResult.value.providerId,
+      name: 'Fixture connection',
+      endpoint: null
+    });
+    expect(connectionResult).toMatchObject({
+      ok: true,
+      value: { state: 'unconfigured' }
+    });
+    if (!connectionResult.ok || !connectionResult.value.connectionId) {
+      throw new Error('connection missing');
+    }
+    expect(
+      await controller.updateConnection({
+        connectionId: connectionResult.value.connectionId,
+        name: 'Updated fixture connection',
+        endpoint: 'https://fixture.invalid'
+      })
+    ).toMatchObject({ ok: true, value: { state: 'saved' } });
+    expect(
+      await controller.setConnectionEnabled({
+        connectionId: connectionResult.value.connectionId,
+        enabled: false
+      })
+    ).toMatchObject({ ok: true, value: { state: 'disabled' } });
+
+    const modelResult = await controller.registerManualModel({
+      connectionId: connectionResult.value.connectionId,
+      name: 'fixture-model-toggle',
+      displayName: 'Fixture model toggle'
+    });
+    if (!modelResult.ok || !modelResult.value.modelId) {
+      throw new Error('model missing');
+    }
+    expect(
+      await controller.setModelEnabled({
+        modelId: modelResult.value.modelId,
+        enabled: true
+      })
+    ).toMatchObject({ ok: true, value: { state: 'enabled' } });
+    expect((await registry.load()).models[0].enabled).toBe(true);
+  });
+
   it('keeps connection, catalog, and capability validation unavailable without adapters', async () => {
     const { registry, connectionId } = await fixtureRegistry();
     const controller = new ProviderCapabilityController(registry);

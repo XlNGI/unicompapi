@@ -63,4 +63,22 @@ export function registerProviderIpcHandlers(): void {
   ipcMain.handle(providerIpcChannels.planRoute, (_event, input) =>
     capabilityController.planRoute(input)
   );
+  ipcMain.handle(providerIpcChannels.createProvider, (_event, input) =>
+    capabilityController.createProvider(input)
+  );
+  ipcMain.handle(providerIpcChannels.createConnection, (_event, input) =>
+    capabilityController.createConnection(input)
+  );
+  ipcMain.handle(providerIpcChannels.updateConnection, (_event, input) =>
+    capabilityController.updateConnection(input)
+  );
+  ipcMain.handle(providerIpcChannels.setConnectionEnabled, (_event, input) =>
+    capabilityController.setConnectionEnabled(input)
+  );
+  ipcMain.handle(providerIpcChannels.deleteConnection, (_event, input) =>
+    credentialController.deleteConnection(input)
+  );
+  ipcMain.handle(providerIpcChannels.setModelEnabled, (_event, input) =>
+    capabilityController.setModelEnabled(input)
+  );
 }

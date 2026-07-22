@@ -5,9 +5,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createProvider,
   createProviderConnection,
+  createProviderModel,
+  createRoutingPreference,
   toConnectionId,
   toIsoTimestamp,
-  toProviderId
+  toModelId,
+  toProviderId,
+  toRoutingPreferenceId
 } from '../../src/domain';
 import {
   JsonProviderRegistryStore,
@@ -103,6 +107,80 @@ describe('ProviderCredentialController', () => {
         value: 'fixture-value'
       })
     ).toMatchObject({ ok: false, error: { code: 'connection_not_found' } });
+  });
+
+  it('soft-deletes a connection while preserving historical model facts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-provider-credential-'));
+    roots.push(root);
+    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const vault = new SecureCredentialVault(
+      path.join(root, 'secure-credentials.json'),
+      protector()
+    );
+    const controller = new ProviderCredentialController(registry, vault);
+    const provider = createProvider({
+      id: toProviderId('provider-delete-fixture'),
+      name: 'Delete fixture provider',
+      accessCategory: 'custom_remote',
+      identityState: 'unverified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const connection = createProviderConnection({
+      id: toConnectionId('connection-delete-fixture'),
+      providerId: provider.id,
+      name: 'Delete fixture connection',
+      endpoint: 'https://fixture.invalid',
+      state: 'saved',
+      identityState: 'unverified',
+      credentialState: 'saved',
+      credentialReference: 'credential-delete-fixture',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const model = createProviderModel({
+      id: toModelId('model-delete-fixture'),
+      providerId: provider.id,
+      connectionId: connection.id,
+      name: 'delete-fixture-model',
+      displayName: 'Delete fixture model',
+      enabled: true,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const routing = createRoutingPreference({
+      id: toRoutingPreferenceId('routing-delete-fixture'),
+      purpose: 'fixture_purpose',
+      modelId: model.id,
+      priority: 0,
+      enabled: true,
+      updatedAt: timestamp
+    });
+    await vault.save('credential-delete-fixture', 'fixture-value');
+    await registry.save({
+      schemaVersion: 1,
+      providers: [provider],
+      connections: [connection],
+      models: [model],
+      capabilities: [],
+      routingPreferences: [routing]
+    });
+
+    expect(await controller.deleteConnection({ connectionId: connection.id }))
+      .toEqual({
+        ok: true,
+        value: { state: 'deleted', remoteRevocation: 'not_attempted' }
+      });
+    const snapshot = await registry.load();
+    expect(snapshot.connections[0]).toMatchObject({
+      state: 'deleted',
+      credentialState: 'deleted'
+    });
+    expect(snapshot.connections[0].endpoint).toBeUndefined();
+    expect(snapshot.models).toHaveLength(1);
+    expect(snapshot.models[0].enabled).toBe(false);
+    expect(snapshot.routingPreferences[0].enabled).toBe(false);
+    expect(await vault.status('credential-delete-fixture')).toBe('not_configured');
   });
 });
 

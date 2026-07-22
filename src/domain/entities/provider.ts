@@ -29,7 +29,8 @@ export const connectionStates = [
   'validating',
   'available',
   'unavailable',
-  'disabled'
+  'disabled',
+  'deleted'
 ] as const;
 export type ConnectionState = (typeof connectionStates)[number];
 

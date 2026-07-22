@@ -9,7 +9,10 @@ test('provider registry IPC is read-only and credential-free', () => {
   assert.match(preload, /providers/);
   assert.match(preload, /getRegistry/);
   assert.match(contract, /endpointConfigured/);
-  assert.doesNotMatch(contract, /credentialReference|apiKey|token|secret|endpoint:/i);
+  assert.doesNotMatch(
+    contract,
+    /credentialReference|apiKey|token|secret|readonly endpoint\s*:/i
+  );
   assert.doesNotMatch(preload, /credentialReference|apiKey|token|secret/i);
 });
 
@@ -32,4 +35,13 @@ test('provider service IPC keeps validation separate and routing confirmable', (
   assert.match(contract, /costState: 'unknown'/);
   assert.match(contract, /privacyState: 'unknown'/);
   assert.match(contract, /regionState: 'unknown'/);
+});
+
+test('provider management IPC exposes controlled connection and model mutations', () => {
+  assert.match(contract, /createProvider/);
+  assert.match(contract, /createConnection/);
+  assert.match(contract, /updateConnection/);
+  assert.match(contract, /setConnectionEnabled/);
+  assert.match(contract, /deleteConnection/);
+  assert.match(contract, /setModelEnabled/);
 });

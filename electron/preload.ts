@@ -85,7 +85,33 @@ const providers: ProviderApi = {
       enabled
     }),
   planRoute: (purpose) =>
-    ipcRenderer.invoke(providerIpcChannels.planRoute, { purpose })
+    ipcRenderer.invoke(providerIpcChannels.planRoute, { purpose }),
+  createProvider: (name, accessCategory) =>
+    ipcRenderer.invoke(providerIpcChannels.createProvider, {
+      name,
+      accessCategory
+    }),
+  createConnection: (providerId, name, endpoint) =>
+    ipcRenderer.invoke(providerIpcChannels.createConnection, {
+      providerId,
+      name,
+      endpoint
+    }),
+  updateConnection: (connectionId, name, endpoint) =>
+    ipcRenderer.invoke(providerIpcChannels.updateConnection, {
+      connectionId,
+      name,
+      endpoint
+    }),
+  setConnectionEnabled: (connectionId, enabled) =>
+    ipcRenderer.invoke(providerIpcChannels.setConnectionEnabled, {
+      connectionId,
+      enabled
+    }),
+  deleteConnection: (connectionId) =>
+    ipcRenderer.invoke(providerIpcChannels.deleteConnection, { connectionId }),
+  setModelEnabled: (modelId, enabled) =>
+    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled })
 };
 
 contextBridge.exposeInMainWorld('unicomp', {
