@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -40,6 +40,7 @@ async function createFixture() {
       rootDirectory: root
     }),
     chooseRelinkFile: async () => selectedPath,
+    chooseBackupFile: async () => selectedPath,
     onError: (error) => {
       lastError = error;
     }
@@ -61,7 +62,8 @@ describe('StorageIpcController', () => {
   it('rejects calls without an active project or valid file ID', async () => {
     const withoutProject = new StorageIpcController({
       getSession: () => undefined,
-      chooseRelinkFile: async () => undefined
+      chooseRelinkFile: async () => undefined,
+      chooseBackupFile: async () => undefined
     });
 
     await expect(
@@ -138,5 +140,66 @@ describe('StorageIpcController', () => {
     });
     expect(stored?.locator.kind).toBe('external');
     expect(JSON.stringify(relink)).not.toContain(replacement);
+  });
+
+  it('restores a selected verified backup without exposing its path', async () => {
+    const fixture = await createFixture();
+    const backup = path.join(fixture.root, 'backup.bin');
+    await writeFile(backup, 'hello', 'utf8');
+    fixture.setSelectedPath(backup);
+    const file = createFileReference({
+      id: toFileReferenceId('file-ipc-backup'),
+      projectId: fixture.projectId,
+      locator: { kind: 'project', relativePath: 'files/restored.bin' },
+      checksumSha256: helloChecksum,
+      createdAt: timestamp
+    });
+    await fixture.fileRepository.save(file);
+
+    const result = await fixture.controller.restoreBackup({ fileId: file.id });
+    const stored = await fixture.fileRepository.get(file.id);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        cancelled: false,
+        file: { fileId: file.id, state: 'available', matchesExpected: true }
+      }
+    });
+    expect(stored?.state).toBe('available');
+    expect(JSON.stringify(result)).not.toContain(backup);
+    await expect(
+      readFile(path.join(fixture.root, 'files', 'restored.bin'), 'utf8')
+    ).resolves.toBe('hello');
+  });
+
+  it('preserves the target when backup selection is cancelled or mismatched', async () => {
+    const fixture = await createFixture();
+    const file = createFileReference({
+      id: toFileReferenceId('file-ipc-backup-rejected'),
+      projectId: fixture.projectId,
+      locator: { kind: 'project', relativePath: 'files/rejected.bin' },
+      checksumSha256: helloChecksum,
+      createdAt: timestamp
+    });
+    await fixture.fileRepository.save(file);
+
+    await expect(
+      fixture.controller.restoreBackup({ fileId: file.id })
+    ).resolves.toEqual({ ok: true, value: { cancelled: true } });
+
+    const mismatch = path.join(fixture.root, 'mismatch.bin');
+    await writeFile(mismatch, 'not hello', 'utf8');
+    fixture.setSelectedPath(mismatch);
+
+    await expect(
+      fixture.controller.restoreBackup({ fileId: file.id })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'backup_restore_failed' }
+    });
+    await expect(
+      readFile(path.join(fixture.root, 'files', 'rejected.bin'))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

@@ -10,6 +10,7 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'probeFile',
     'verifyFile',
     'relinkFile',
+    'restoreBackup',
     'rebuildIndex',
     'openProject',
     'closeProject',

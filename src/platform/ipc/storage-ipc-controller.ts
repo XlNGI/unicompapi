@@ -6,17 +6,20 @@ import {
 } from '../../domain';
 import type {
   StorageFileStatusDto,
+  StorageBackupRestoreResultDto,
   StorageIndexRebuildDto,
   StorageIpcErrorCode,
   StorageIpcResult,
   StorageRelinkResultDto
 } from '../../shared/storage-ipc';
 import {
+  BackupRestoreError,
   FileIndexRebuildError,
   FileIndexRebuildService,
   FileRecoveryPersistenceError,
   FileVerificationError,
   FileVerificationPersistenceService,
+  NodeBackupRestoreExecutor,
   NodeFileStatusProbe
 } from '../files';
 import {
@@ -34,6 +37,7 @@ export interface StorageProjectSession {
 export interface StorageIpcControllerDependencies {
   getSession(): StorageProjectSession | undefined;
   chooseRelinkFile(): Promise<string | undefined>;
+  chooseBackupFile(): Promise<string | undefined>;
   onError?(error: unknown): void;
 }
 
@@ -97,6 +101,39 @@ export class StorageIpcController {
     );
   }
 
+  restoreBackup(
+    request: unknown
+  ): Promise<StorageIpcResult<StorageBackupRestoreResultDto>> {
+    return this.enqueueMutation(() =>
+      this.execute(async () => {
+        const fileId = parseFileId(request);
+        const context = await this.createContext();
+        const file = await requireFile(context.fileRepository, fileId);
+        const selectedPath = await this.dependencies.chooseBackupFile();
+
+        if (!selectedPath) {
+          return { cancelled: true };
+        }
+
+        await context.backupRestore.restore({
+          target: file,
+          backup: {
+            ...file,
+            locator: { kind: 'external', absolutePath: selectedPath }
+          },
+          confirmed: true
+        });
+        const result = await context.probe.inspect(file);
+        const updated = await context.persistence.persistProbeResult(file, result);
+
+        return {
+          cancelled: false,
+          file: toPersistedStatusDto(updated, result.issues)
+        };
+      })
+    );
+  }
+
   rebuildIndex(): Promise<StorageIpcResult<StorageIndexRebuildDto>> {
     return this.enqueueMutation(() =>
       this.execute(async () => {
@@ -137,8 +174,9 @@ export class StorageIpcController {
       fileRepository,
       indexRepository
     );
+    const backupRestore = new NodeBackupRestoreExecutor(session.rootDirectory);
 
-    return { fileRepository, persistence, probe, rebuild };
+    return { fileRepository, persistence, probe, rebuild, backupRestore };
   }
 
   private async execute<T>(
@@ -253,6 +291,13 @@ function mapStorageError(error: unknown): {
     return {
       code: 'relink_rejected',
       message: 'The selected file could not be linked safely'
+    };
+  }
+
+  if (error instanceof BackupRestoreError) {
+    return {
+      code: 'backup_restore_failed',
+      message: 'The selected backup could not be restored safely'
     };
   }
 
