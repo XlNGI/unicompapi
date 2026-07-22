@@ -104,6 +104,8 @@ docs/active/阶段3-任务拆分.md
 
 阶段 3 B1 已完成：项目目录目录服务、新建项目、最近项目摘要和 `createProject/listProjects` 受控 IPC 已通过平台与完整测试，等待开发者 A 接入项目中心 UI。
 
+阶段 3 B2 已完成：跨项目任务/作品摘要与详情读模型、项目级断盘/损坏隔离和 `listTasks/getTaskDetails/listWorks/getWorkDetails` 受控 IPC 已通过完整测试。开发者 A 可据此接入项目中心、任务中心和作品库。
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript

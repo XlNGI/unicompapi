@@ -18,6 +18,12 @@ const storage: StorageApi = {
   createProject: (name) =>
     ipcRenderer.invoke(storageIpcChannels.createProject, { name }),
   listProjects: () => ipcRenderer.invoke(storageIpcChannels.listProjects),
+  listTasks: () => ipcRenderer.invoke(storageIpcChannels.listTasks),
+  getTaskDetails: (taskId) =>
+    ipcRenderer.invoke(storageIpcChannels.getTaskDetails, { taskId }),
+  listWorks: () => ipcRenderer.invoke(storageIpcChannels.listWorks),
+  getWorkDetails: (workId) =>
+    ipcRenderer.invoke(storageIpcChannels.getWorkDetails, { workId }),
   closeProject: () => ipcRenderer.invoke(storageIpcChannels.closeProject),
   getProjectSession: () =>
     ipcRenderer.invoke(storageIpcChannels.getProjectSession)

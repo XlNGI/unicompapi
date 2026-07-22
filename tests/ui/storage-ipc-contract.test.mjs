@@ -15,6 +15,10 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'openProject',
     'createProject',
     'listProjects',
+    'listTasks',
+    'getTaskDetails',
+    'listWorks',
+    'getWorkDetails',
     'closeProject',
     'getProjectSession'
   ]) {
