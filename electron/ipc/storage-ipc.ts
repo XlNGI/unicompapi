@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   StorageIpcController,
   JsonProjectCatalogStore,
+  GlobalReadModelController,
   ProjectSessionController,
   ProjectCatalogService,
   StorageProjectSessionRegistry
@@ -30,6 +31,7 @@ export function registerStorageIpcHandlers(): void {
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
+  const readModels = new GlobalReadModelController(catalog);
   const projectController = new ProjectSessionController({
     registry: sessionRegistry,
     chooseProjectDirectory: () => choosePath(['openDirectory']),
@@ -60,6 +62,14 @@ export function registerStorageIpcHandlers(): void {
   );
   ipcMain.handle(storageIpcChannels.listProjects, () =>
     projectController.listProjects()
+  );
+  ipcMain.handle(storageIpcChannels.listTasks, () => readModels.listTasks());
+  ipcMain.handle(storageIpcChannels.getTaskDetails, (_event, request: unknown) =>
+    readModels.getTaskDetails(request)
+  );
+  ipcMain.handle(storageIpcChannels.listWorks, () => readModels.listWorks());
+  ipcMain.handle(storageIpcChannels.getWorkDetails, (_event, request: unknown) =>
+    readModels.getWorkDetails(request)
   );
   ipcMain.handle(storageIpcChannels.closeProject, () =>
     projectController.closeProject()

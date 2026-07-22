@@ -7,6 +7,10 @@ export const storageIpcChannels = {
   openProject: 'storage:open-project',
   createProject: 'storage:create-project',
   listProjects: 'storage:list-projects',
+  listTasks: 'storage:list-tasks',
+  getTaskDetails: 'storage:get-task-details',
+  listWorks: 'storage:list-works',
+  getWorkDetails: 'storage:get-work-details',
   closeProject: 'storage:close-project',
   getProjectSession: 'storage:get-project-session'
 } as const;
@@ -22,6 +26,7 @@ export type StorageIpcErrorCode =
   | 'invalid_project'
   | 'project_open_failed'
   | 'project_create_failed'
+  | 'read_model_failed'
   | 'storage_error';
 
 export type StorageIpcResult<T> =
@@ -76,6 +81,54 @@ export interface StorageProjectSummaryDto {
   readonly lastOpenedAt: string;
 }
 
+export interface StorageReadModelIssueDto {
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly reason: 'unavailable' | 'invalid_data';
+}
+
+export interface StorageTaskSummaryDto {
+  readonly taskId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly kind: string;
+  readonly createdAt: string;
+  readonly executionCount: number;
+  readonly latestExecutionState?: string;
+  readonly latestExecutionUpdatedAt?: string;
+  readonly retryability?: 'retryable' | 'not_retryable' | 'unknown';
+}
+
+export interface StorageTaskDetailsDto extends StorageTaskSummaryDto {
+  readonly sourceDraftId: string;
+  readonly originalInput: string;
+  readonly finalPrompt: string;
+}
+
+export interface StorageWorkSummaryDto {
+  readonly workId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly name: string;
+  readonly mediaKind: string;
+  readonly fileId: string;
+  readonly fileState: string;
+  readonly createdAt: string;
+  readonly parentWorkId?: string;
+}
+
+export interface StorageWorkDetailsDto extends StorageWorkSummaryDto {
+  readonly sourceTaskId: string;
+  readonly sourceExecutionId: string;
+  readonly sizeBytes?: number;
+  readonly verifiedAt?: string;
+}
+
+export interface StorageReadModelListDto<TItem> {
+  readonly items: readonly TItem[];
+  readonly issues: readonly StorageReadModelIssueDto[];
+}
+
 export interface StorageCreateProjectDto {
   readonly cancelled: boolean;
   readonly session?: StorageProjectSessionDto;
@@ -94,6 +147,18 @@ export interface StorageApi {
     name: string
   ): Promise<StorageIpcResult<StorageCreateProjectDto>>;
   listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>>;
+  listTasks(): Promise<
+    StorageIpcResult<StorageReadModelListDto<StorageTaskSummaryDto>>
+  >;
+  getTaskDetails(
+    taskId: string
+  ): Promise<StorageIpcResult<StorageTaskDetailsDto | undefined>>;
+  listWorks(): Promise<
+    StorageIpcResult<StorageReadModelListDto<StorageWorkSummaryDto>>
+  >;
+  getWorkDetails(
+    workId: string
+  ): Promise<StorageIpcResult<StorageWorkDetailsDto | undefined>>;
   closeProject(): Promise<StorageIpcResult<{ readonly closed: true }>>;
   getProjectSession(): Promise<
     StorageIpcResult<StorageProjectSessionDto | undefined>

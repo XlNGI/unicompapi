@@ -92,6 +92,10 @@ export class ProjectCatalogService {
     );
   }
 
+  async getEntries(): Promise<readonly ProjectCatalogEntry[]> {
+    return this.store.load();
+  }
+
   async remember(entry: Omit<ProjectCatalogEntry, 'lastOpenedAt'>): Promise<void> {
     const entries = await this.store.load();
     const updated: ProjectCatalogEntry = {
