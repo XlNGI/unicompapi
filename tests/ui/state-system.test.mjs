@@ -8,6 +8,7 @@ test('keeps the phase 2 UI state contract', async () => {
   const settings = await readFile('src/pages/settings/SettingsPage.tsx', 'utf8');
   const styles = await readFile('src/styles/components.css', 'utf8');
   const shellStyles = await readFile('src/styles.css', 'utf8');
+  const tokens = await readFile('src/styles/tokens.css', 'utf8');
 
   let previousIndex = -1;
   for (const id of [
@@ -39,5 +40,6 @@ test('keeps the phase 2 UI state contract', async () => {
   assert.match(styles, /summary:focus-visible/);
   assert.match(shellStyles, /\.app-shell \{[\s\S]*?height: 100vh;/);
   assert.match(shellStyles, /\.workspace \{[\s\S]*?overflow: auto;/);
+  assert.match(tokens, /:root\[data-theme="light"\] \{[\s\S]*?--uc-color-status-warning: #7a4b00;[\s\S]*?--uc-color-status-warning-bg: #fff7e6;[\s\S]*?--uc-color-status-warning-border: #d6a23a;/);
   assert.doesNotMatch(preview, /API Key|Token|价格|分辨率/);
 });
