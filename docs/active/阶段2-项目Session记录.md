@@ -52,13 +52,25 @@ preload 返回内容仅包含：
 
 ## 五、未完成项
 
-1. 项目页面调用 `openProject`、`closeProject` 和 `getProjectSession`；
-2. Windows Electron 可见窗口中的原生目录选择联调；
-3. 新建项目流程；
-4. 备份恢复执行器；
-5. 已验证能力下的重新下载执行器；
-6. macOS 实机验证。
+1. Windows Electron 可见窗口中的原生目录选择联调；
+2. 新建项目流程；
+3. 备份恢复执行器；
+4. 已验证能力下的重新下载执行器；
+5. macOS 实机验证。
 
-## 六、下一步
+## 六、后续增量：项目页面接入 Session
+
+日期：2026-07-22
+
+- `ProjectsPage` 启动时调用 `getProjectSession`，展示读取中、未打开和已打开状态。
+- “打开项目”调用 `openProject`；取消选择、校验失败和成功结果均保留在页面反馈区。
+- “关闭项目”调用 `closeProject`，成功后清除页面会话。
+- 页面仅使用项目 ID 和名称 DTO，不读取或保存项目根目录。
+
+验证：`npm.cmd run typecheck`、`npm.cmd test` 通过（14 项 UI/契约测试，47 项领域与平台测试）；`npm.cmd run lint`、`npm.cmd run build` 和 `git diff --check` 通过。Windows Electron 生产窗口启动并保持响应；原生目录选择仍需可见窗口人工联调。
+
+Windows 可见窗口联调补充：使用临时目录 `C:\Users\MSI\AppData\Local\Temp\unicomp-ui-session-project-39c8dca6156240929613670a74a8a23e` 完成真实目录选择。页面成功显示“项目已打开”和项目名称“Windows 联调项目”，随后触发“关闭项目”完成会话清理。临时目录位于系统 Temp 下，不属于仓库。
+
+## 七、下一步
 
 项目负责人验收阶段 2 基础能力后，可进入阶段 3 全局页面。项目页面必须复用本 session API，不得自行读取目录或在 renderer 保存项目根路径。
