@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前处于：阶段 2 已于 2026-07-22 正式收口；阶段 3｜全局页面待任务拆分后启动。
+当前处于：阶段 3｜全局页面，任务拆分已形成，等待开发者 B 的项目目录与新建项目契约先行。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -94,6 +94,14 @@ docs/active/阶段1-任务拆分.md
 
 阶段 3 启动前必须先形成任务拆分，继续保持开发者 A 负责 UI/页面、开发者 B 负责领域/平台的边界。
 
+阶段 3 任务拆分文档：
+
+```text
+docs/active/阶段3-任务拆分.md
+```
+
+首轮顺序：开发者 B 先实现项目目录与新建项目契约；合并到 `develop` 后，开发者 A 接入项目中心 UI。任务中心、作品库和对话页继续按小 PR 推进。
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript
@@ -146,4 +154,4 @@ docs/active/阶段1-任务拆分.md
 - 实际修改：`ProjectsPage` 接入 `getProjectSession`、`openProject`、`closeProject`，增加读取中、未打开、已打开和操作反馈状态；同步更新阶段 2 Session 记录。
 - 验证结果：14 项 UI/契约测试、47 项领域与平台测试，以及 `npm.cmd run typecheck`、`npm.cmd run lint`、`npm.cmd run build`、`git diff --check` 全部通过；Windows Electron 生产窗口启动并保持响应。
 - 未完成项：新建项目流程、重新下载、备份来源/生命周期策略、恢复 UI、macOS 实机验证。Windows Electron 可见窗口已完成项目 Session 联调；备份恢复已接入仅接受 `fileId` 的受控 IPC，路径仍由主进程原生选择器持有。
-- 负责人决策：阶段 2 已正式收口。下一步先形成阶段 3 双人任务拆分，再从最新 `develop` 创建新的短期功能分支。
+- 负责人决策：阶段 2 已正式收口，阶段 3 双人任务拆分已形成。下一步由开发者 B 从最新 `develop` 创建 `feature/project-catalog-create`。
