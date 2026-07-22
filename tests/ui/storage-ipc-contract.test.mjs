@@ -10,7 +10,10 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'probeFile',
     'verifyFile',
     'relinkFile',
-    'rebuildIndex'
+    'rebuildIndex',
+    'openProject',
+    'closeProject',
+    'getProjectSession'
   ]) {
     assert.match(preloadSource, new RegExp(`${operation}:`));
     assert.match(sharedContractSource, new RegExp(`${operation}`));

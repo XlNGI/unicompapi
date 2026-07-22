@@ -11,7 +11,11 @@ const storage: StorageApi = {
     ipcRenderer.invoke(storageIpcChannels.verifyFile, { fileId }),
   relinkFile: (fileId) =>
     ipcRenderer.invoke(storageIpcChannels.relinkFile, { fileId }),
-  rebuildIndex: () => ipcRenderer.invoke(storageIpcChannels.rebuildIndex)
+  rebuildIndex: () => ipcRenderer.invoke(storageIpcChannels.rebuildIndex),
+  openProject: () => ipcRenderer.invoke(storageIpcChannels.openProject),
+  closeProject: () => ipcRenderer.invoke(storageIpcChannels.closeProject),
+  getProjectSession: () =>
+    ipcRenderer.invoke(storageIpcChannels.getProjectSession)
 };
 
 contextBridge.exposeInMainWorld('unicomp', {

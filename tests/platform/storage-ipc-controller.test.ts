@@ -34,7 +34,11 @@ async function createFixture() {
   let selectedPath: string | undefined;
   let lastError: unknown;
   const controller = new StorageIpcController({
-    getSession: () => ({ projectId, rootDirectory: root }),
+    getSession: () => ({
+      projectId,
+      projectName: 'IPC project',
+      rootDirectory: root
+    }),
     chooseRelinkFile: async () => selectedPath,
     onError: (error) => {
       lastError = error;
