@@ -81,7 +81,11 @@ export function App() {
       onNavigate={handleNavigate}
       onSecondaryNavigate={handleSecondaryNavigate}
     >
-      <ActivePage />
+      {activeItemId === 'projects' && !activeSubItemId ? (
+        <ProjectsPage onNavigate={handleNavigate} />
+      ) : (
+        <ActivePage />
+      )}
     </AppLayout>
   );
 }
