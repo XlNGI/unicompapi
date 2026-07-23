@@ -17,6 +17,7 @@ export interface Execution {
   readonly attempt: number;
   readonly state: ExecutionState;
   readonly failure?: ExecutionFailure;
+  readonly remoteOperationId?: string;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }

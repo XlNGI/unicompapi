@@ -65,6 +65,32 @@ export const capabilityEvidenceSources = [
 export type CapabilityEvidenceSource =
   (typeof capabilityEvidenceSources)[number];
 
+export const dynamicParameterKinds = [
+  'string',
+  'number',
+  'integer',
+  'boolean',
+  'enum'
+] as const;
+
+export type DynamicParameterKind = (typeof dynamicParameterKinds)[number];
+export type DynamicParameterScalar = string | number | boolean;
+
+export interface DynamicParameterFieldSchema {
+  readonly key: string;
+  readonly label: string;
+  readonly kind: DynamicParameterKind;
+  readonly required: boolean;
+  readonly options?: readonly DynamicParameterScalar[];
+  readonly minimum?: number;
+  readonly maximum?: number;
+}
+
+export interface DynamicParameterSchema {
+  readonly schemaVersion: 1;
+  readonly fields: readonly DynamicParameterFieldSchema[];
+}
+
 export interface Provider {
   readonly schemaVersion: 1;
   readonly id: ProviderId;
@@ -110,6 +136,7 @@ export interface ModelCapabilityEvidence {
   readonly state: CapabilityState;
   readonly source: CapabilityEvidenceSource;
   readonly constraint?: string;
+  readonly parameterSchema?: DynamicParameterSchema;
   readonly observedAt?: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -171,7 +198,22 @@ export function createModelCapabilityEvidence(
     capability: requireNonBlank(input.capability, 'capability.name'),
     constraint: input.constraint
       ? requireNonBlank(input.constraint, 'capability.constraint')
+      : undefined,
+    parameterSchema: input.parameterSchema
+      ? cloneDynamicParameterSchema(input.parameterSchema)
       : undefined
+  };
+}
+
+export function cloneDynamicParameterSchema(
+  schema: DynamicParameterSchema
+): DynamicParameterSchema {
+  return {
+    schemaVersion: 1,
+    fields: schema.fields.map((field) => ({
+      ...field,
+      options: field.options ? [...field.options] : undefined
+    }))
   };
 }
 

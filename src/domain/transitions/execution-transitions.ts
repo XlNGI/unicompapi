@@ -60,6 +60,7 @@ export interface CreateExecutionInput {
 
 export interface ExecutionTransitionContext {
   readonly failure?: ExecutionFailure;
+  readonly remoteOperationId?: string;
 }
 
 export function createExecution(input: CreateExecutionInput): Execution {
@@ -113,10 +114,22 @@ export function transitionExecution(
     );
   }
 
+  if (
+    context.remoteOperationId !== undefined &&
+    nextState !== 'queued' &&
+    nextState !== 'processing'
+  ) {
+    throw new InvariantViolationError(
+      'remote operation ID can only be attached after submission'
+    );
+  }
+
   return {
     ...execution,
     state: nextState,
     failure: context.failure,
+    remoteOperationId:
+      context.remoteOperationId ?? execution.remoteOperationId,
     updatedAt
   };
 }

@@ -6,6 +6,8 @@ import {
   fileStates,
   isImageWorkspaceDraft,
   mediaKinds,
+  imageWorkspaceModes,
+  providerAccessCategories,
   promptSupplementSources,
   toIsoTimestamp,
   type PromptSnapshot,
@@ -56,6 +58,8 @@ export const isTaskEntity: EntityValidator = (value) =>
   isPromptSnapshot(value.submission.prompt) &&
   isStringArray(value.submission.assetIds) &&
   isCanonicalIsoTimestamp(value.submission.confirmedAt) &&
+  (value.submission.image === undefined ||
+    isImageSubmissionSnapshot(value.submission.image)) &&
   isStringArray(value.executionIds) &&
   isCanonicalIsoTimestamp(value.createdAt);
 
@@ -64,6 +68,8 @@ export const isExecutionEntity: EntityValidator = (value) =>
   isPositiveInteger(value.attempt) &&
   isOneOf(value.state, executionStates) &&
   (value.failure === undefined || isExecutionFailure(value.failure)) &&
+  (value.remoteOperationId === undefined ||
+    isNonBlankString(value.remoteOperationId)) &&
   isCanonicalIsoTimestamp(value.createdAt) &&
   isCanonicalIsoTimestamp(value.updatedAt);
 
@@ -133,6 +139,56 @@ function isExecutionFailure(value: unknown): boolean {
       'unknown'
     ] as const)
   );
+}
+
+function isImageSubmissionSnapshot(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isOneOf(value.mode, imageWorkspaceModes) &&
+    isOneOf(value.purpose, [
+      'image_generation',
+      'image_understanding',
+      'image_editing',
+      'image_to_prompt'
+    ] as const) &&
+    isNonBlankString(value.modelId) &&
+    isNonBlankString(value.capabilityEvidenceId) &&
+    isNonBlankString(value.providerId) &&
+    isNonBlankString(value.connectionId) &&
+    isNonBlankString(value.recipientName) &&
+    isOneOf(value.accessCategory, providerAccessCategories) &&
+    isOneOf(value.outboundScope, [
+      'local_device',
+      'local_network',
+      'external_service',
+      'unknown'
+    ] as const) &&
+    value.costState === 'unknown' &&
+    value.privacyState === 'unknown' &&
+    value.regionState === 'unknown' &&
+    isRecord(value.parameters) &&
+    Object.values(value.parameters).every(isDynamicValue) &&
+    (value.parentWorkId === undefined || isNonBlankString(value.parentWorkId)) &&
+    isRecord(value.confirmations) &&
+    value.confirmations.recipient === true &&
+    value.confirmations.outboundScope === true &&
+    value.confirmations.cost === true &&
+    value.confirmations.finalPrompt === true &&
+    value.confirmations.model === true
+  );
+}
+
+function isDynamicValue(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return true;
+  }
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isDynamicValue);
+  return isRecord(value) && Object.values(value).every(isDynamicValue);
 }
 
 export function isCanonicalIsoTimestamp(value: unknown): boolean {

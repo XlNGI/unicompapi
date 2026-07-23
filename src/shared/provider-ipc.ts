@@ -151,6 +151,18 @@ export interface ProviderCapabilitySummaryDto {
   readonly source: string;
   readonly constraint?: string;
   readonly observedAt?: string;
+  readonly parameterSchema?: {
+    readonly schemaVersion: 1;
+    readonly fields: readonly {
+      readonly key: string;
+      readonly label: string;
+      readonly kind: 'string' | 'number' | 'integer' | 'boolean' | 'enum';
+      readonly required: boolean;
+      readonly options?: readonly (string | number | boolean)[];
+      readonly minimum?: number;
+      readonly maximum?: number;
+    }[];
+  };
 }
 
 export interface ProviderRoutingSummaryDto {

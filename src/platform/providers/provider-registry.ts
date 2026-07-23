@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   capabilityEvidenceSources,
   capabilityStates,
+  dynamicParameterKinds,
   connectionStates,
   credentialStates,
   providerAccessCategories,
@@ -15,6 +16,7 @@ import {
   toProviderId,
   toRoutingPreferenceId,
   type ModelCapabilityEvidence,
+  type DynamicParameterSchema,
   type Provider,
   type ProviderConnection,
   type ProviderModel,
@@ -118,6 +120,7 @@ export class ProviderRegistryController {
             state: capability.state,
             source: capability.source,
             constraint: capability.constraint,
+            parameterSchema: capability.parameterSchema,
             observedAt: capability.observedAt
           })),
           routingPreferences: snapshot.routingPreferences.map((preference) => ({
@@ -274,9 +277,87 @@ function parseCapability(value: unknown): ModelCapabilityEvidence {
     state: item.state as ModelCapabilityEvidence['state'],
     source: item.source as ModelCapabilityEvidence['source'],
     constraint: optionalString(item.constraint),
+    parameterSchema: parseParameterSchema(item.parameterSchema),
     observedAt: optionalTimestamp(item.observedAt),
     updatedAt: toIsoTimestamp(String(item.updatedAt))
   };
+}
+
+function parseParameterSchema(value: unknown): DynamicParameterSchema | undefined {
+  if (value === undefined) return undefined;
+  const item = requireRecord(value);
+  if (item.schemaVersion !== 1 || !Array.isArray(item.fields)) {
+    throw new TypeError('Capability parameter schema is invalid');
+  }
+  const keys = new Set<string>();
+  const fields = item.fields.map((fieldValue) => {
+    const field = requireRecord(fieldValue);
+    const key = optionalString(field.key);
+    const label = optionalString(field.label);
+    if (
+      !key ||
+      !label ||
+      typeof field.kind !== 'string' ||
+      !dynamicParameterKinds.includes(
+        field.kind as (typeof dynamicParameterKinds)[number]
+      ) ||
+      typeof field.required !== 'boolean' ||
+      keys.has(key)
+    ) {
+      throw new TypeError('Capability parameter field is invalid');
+    }
+    keys.add(key);
+    const options = parseParameterOptions(field.options);
+    const minimum = optionalFiniteNumber(field.minimum);
+    const maximum = optionalFiniteNumber(field.maximum);
+    if (
+      minimum !== undefined &&
+      maximum !== undefined &&
+      minimum > maximum
+    ) {
+      throw new TypeError('Capability parameter range is invalid');
+    }
+    if ((field.kind === 'enum') !== (options !== undefined)) {
+      throw new TypeError('Enum parameter options are invalid');
+    }
+    return {
+      key,
+      label,
+      kind: field.kind as (typeof dynamicParameterKinds)[number],
+      required: field.required,
+      options,
+      minimum,
+      maximum
+    };
+  });
+  return { schemaVersion: 1, fields };
+}
+
+function parseParameterOptions(
+  value: unknown
+): readonly (string | number | boolean)[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    !value.every(
+      (option) =>
+        typeof option === 'string' ||
+        typeof option === 'boolean' ||
+        (typeof option === 'number' && Number.isFinite(option))
+    )
+  ) {
+    throw new TypeError('Capability parameter options are invalid');
+  }
+  return [...value] as readonly (string | number | boolean)[];
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError('Capability parameter bound is invalid');
+  }
+  return value;
 }
 
 function parseRouting(value: unknown): RoutingPreference {
