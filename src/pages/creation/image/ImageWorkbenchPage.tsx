@@ -15,6 +15,7 @@ import type { ImageCreationMode } from '../creationModes';
 import { ImageEditingWorkspace } from './ImageEditingWorkspace';
 import { ImageProfessionalWorkspace } from './ImageProfessionalWorkspace';
 import { ImageQuickWorkspace } from './ImageQuickWorkspace';
+import { ImageToPromptWorkspace } from './ImageToPromptWorkspace';
 import { ImageUnderstandingWorkspace } from './ImageUnderstandingWorkspace';
 
 const workspaceErrorMessages: Record<ImageWorkspaceIpcErrorCode, string> = {
@@ -292,6 +293,15 @@ export function ImageWorkbenchPage({
           onMessage={setMessage}
           onNavigate={onNavigateToImageMode}
           registry={providerRegistry}
+        />
+      ) : currentDraft?.mode === 'image_to_prompt' ? (
+        <ImageToPromptWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
+          onNavigate={onNavigateToImageMode}
         />
       ) : (
         <>
