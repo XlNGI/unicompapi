@@ -93,6 +93,19 @@ export function App() {
             handleSecondaryNavigate('image-creation', 'professional-image')
           }
         />
+      ) : activeSubItemId === 'image-understanding' ? (
+        <ImageUnderstandingPage
+          onNavigateToImageMode={(mode) =>
+            handleSecondaryNavigate(
+              'image-creation',
+              mode === 'professional_image'
+                ? 'professional-image'
+                : mode === 'image_editing'
+                  ? 'image-editing'
+                  : 'image-to-prompt'
+            )
+          }
+        />
       ) : (
         <ActivePage />
       )}
