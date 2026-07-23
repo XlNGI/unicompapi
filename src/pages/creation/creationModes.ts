@@ -1,42 +1,47 @@
 export const imageCreationModes = [
   {
     id: 'quick-image',
+    workspaceMode: 'quick_image',
     label: '快速生图',
     description: '以最少配置开始图片创作。',
-    emptyTitle: '快速生图尚未接入',
-    emptyDescription: '当前只保留页面骨架；可用服务、模型和参数将在验证后动态提供。',
+    emptyTitle: '还没有快速生图草稿',
+    emptyDescription: '可先创建项目内本地草稿；参考图、能力预检和生成将在后续契约接入。',
     icon: '快'
   },
   {
     id: 'professional-image',
+    workspaceMode: 'professional_image',
     label: '专业生图',
     description: '为图片创作保留更完整的控制空间。',
-    emptyTitle: '专业生图尚未接入',
-    emptyDescription: '当前不创建任务；参数、素材范围和费用将在真实能力接入后展示。',
+    emptyTitle: '还没有专业生图草稿',
+    emptyDescription: '可先创建项目内本地草稿；上下文、动态参数和提交将在后续契约接入。',
     icon: '专'
   },
   {
     id: 'image-understanding',
+    workspaceMode: 'image_understanding',
     label: '图片识别',
     description: '分析本地图片并整理可复用的上下文。',
-    emptyTitle: '图片识别尚未接入',
-    emptyDescription: '当前不上传或处理文件；本地文件校验和分析能力将在后续阶段实现。',
+    emptyTitle: '还没有图片识别草稿',
+    emptyDescription: '可先创建项目内本地草稿；选择图片不会自动上传或分析。',
     icon: '识'
   },
   {
     id: 'image-editing',
+    workspaceMode: 'image_editing',
     label: '图片编辑',
     description: '为图片编辑保留独立的工作入口。',
-    emptyTitle: '图片编辑尚未接入',
-    emptyDescription: '当前不修改原始文件；非破坏式编辑和导出将在后续阶段实现。',
+    emptyTitle: '还没有图片编辑草稿',
+    emptyDescription: '可先创建项目内本地草稿；当前不会读取或覆盖原始图片。',
     icon: '编'
   },
   {
     id: 'image-to-prompt',
+    workspaceMode: 'image_to_prompt',
     label: '图片转提示词',
     description: '从图片中整理可检查的提示词草稿。',
-    emptyTitle: '图片转提示词尚未接入',
-    emptyDescription: '当前只保留分析占位；原始输入、系统补充和最终提示词将在后续阶段分别展示。',
+    emptyTitle: '还没有图片转提示词草稿',
+    emptyDescription: '可先创建项目内本地草稿；选择图片和分析能力将在后续契约接入。',
     icon: '词'
   }
 ] as const;
@@ -77,4 +82,5 @@ export const videoCreationModes = [
 ] as const;
 
 export type ImageCreationModeId = (typeof imageCreationModes)[number]['id'];
+export type ImageCreationMode = (typeof imageCreationModes)[number];
 export type VideoCreationModeId = (typeof videoCreationModes)[number]['id'];
