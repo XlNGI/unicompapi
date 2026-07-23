@@ -117,6 +117,10 @@ export function App() {
         <ImageEditingPage
           onNavigateToImageMode={handleImageModeNavigate}
         />
+      ) : activeSubItemId === 'image-to-prompt' ? (
+        <ImageToPromptPage
+          onNavigateToImageMode={handleImageModeNavigate}
+        />
       ) : (
         <ActivePage />
       )}
