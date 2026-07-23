@@ -13,11 +13,14 @@ import {
   ProjectCatalogService,
   JsonProviderRegistryStore,
   LocalMediaHandleRegistry,
-  StorageProjectSessionRegistry
+  StorageProjectSessionRegistry,
+  VideoWorkspaceController,
+  VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
 import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
+import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
 
 export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
@@ -39,6 +42,7 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   });
   const mediaHandles = new LocalMediaHandleRegistry();
   const imageMutations = new ImageWorkspaceMutationCoordinator();
+  const videoMutations = new VideoWorkspaceMutationCoordinator();
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),
     mutations: imageMutations
@@ -56,6 +60,10 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     ),
     mutations: imageMutations
   });
+  const videoWorkspaces = new VideoWorkspaceController({
+    getSession: () => sessionRegistry.get(),
+    mutations: videoMutations
+  });
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
@@ -71,7 +79,8 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     beforeSessionChange: async () => {
       await Promise.all([
         controller.waitForMutations(),
-        imageWorkspaces.waitForMutations()
+        imageWorkspaces.waitForMutations(),
+        videoWorkspaces.waitForMutations()
       ]);
     },
     catalog
@@ -166,6 +175,19 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   ipcMain.handle(
     imageSubmissionIpcChannels.receiveResult,
     (_event, request: unknown) => imageSubmissions.receiveResult(request)
+  );
+  ipcMain.handle(videoWorkspaceIpcChannels.create, (_event, request: unknown) =>
+    videoWorkspaces.create(request)
+  );
+  ipcMain.handle(videoWorkspaceIpcChannels.get, (_event, request: unknown) =>
+    videoWorkspaces.get(request)
+  );
+  ipcMain.handle(videoWorkspaceIpcChannels.update, (_event, request: unknown) =>
+    videoWorkspaces.update(request)
+  );
+  ipcMain.handle(videoWorkspaceIpcChannels.list, () => videoWorkspaces.list());
+  ipcMain.handle(videoWorkspaceIpcChannels.derive, (_event, request: unknown) =>
+    videoWorkspaces.derive(request)
   );
   return mediaHandles;
 }

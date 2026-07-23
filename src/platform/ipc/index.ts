@@ -7,3 +7,5 @@ export * from './image-workspace-controller';
 export * from './image-local-media-controller';
 export * from './image-workspace-mutations';
 export * from './image-submission-controller';
+export * from './video-workspace-controller';
+export * from './video-workspace-mutations';

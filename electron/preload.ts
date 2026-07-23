@@ -15,6 +15,10 @@ import {
   imageSubmissionIpcChannels,
   type ImageSubmissionApi
 } from '../src/shared/image-submission-ipc';
+import {
+  videoWorkspaceIpcChannels,
+  type VideoWorkspaceApi
+} from '../src/shared/video-workspace-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -167,9 +171,25 @@ const imageSubmissions: ImageSubmissionApi = {
     })
 };
 
+const videoWorkspaces: VideoWorkspaceApi = {
+  create: (mode) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.create, { mode }),
+  get: (draftId) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.get, { draftId }),
+  update: (draft) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.update, { draft }),
+  list: () => ipcRenderer.invoke(videoWorkspaceIpcChannels.list),
+  derive: (sourceDraftId, targetMode) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.derive, {
+      sourceDraftId,
+      targetMode
+    })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
   imageSubmissions,
   imageWorkspaces,
+  videoWorkspaces,
   platform: process.platform,
   providers,
   storage,
