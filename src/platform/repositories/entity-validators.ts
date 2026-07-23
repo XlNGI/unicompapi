@@ -4,6 +4,7 @@ import {
   draftStates,
   executionStates,
   fileStates,
+  isImageWorkspaceDraft,
   mediaKinds,
   promptSupplementSources,
   toIsoTimestamp,
@@ -21,6 +22,9 @@ export const isDraftEntity: EntityValidator = (value) =>
   isStringArray(value.selectedAssetIds) &&
   isCanonicalIsoTimestamp(value.createdAt) &&
   isCanonicalIsoTimestamp(value.updatedAt);
+
+export const isImageWorkspaceEntity: EntityValidator = (value) =>
+  isImageWorkspaceDraft(value);
 
 export const isAssetEntity: EntityValidator = (value) =>
   isNonBlankString(value.fileId) &&

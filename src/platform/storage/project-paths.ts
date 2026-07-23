@@ -29,6 +29,9 @@ export const projectStoragePaths = {
   manifest: toProjectRelativePath('project.json'),
   entities: {
     drafts: toProjectRelativePath('entities/drafts.json'),
+    imageWorkspaceDrafts: toProjectRelativePath(
+      'entities/image-workspace-drafts.json'
+    ),
     assets: toProjectRelativePath('entities/assets.json'),
     fileReferences: toProjectRelativePath('entities/file-references.json'),
     tasks: toProjectRelativePath('entities/tasks.json'),

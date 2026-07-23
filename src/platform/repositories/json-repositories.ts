@@ -11,6 +11,8 @@ import type {
   FileReference,
   FileReferenceId,
   FileReferenceRepository,
+  ImageWorkspaceDraft,
+  ImageWorkspaceRepository,
   Project,
   ProjectId,
   ProjectRepository,
@@ -33,6 +35,7 @@ import {
   isDraftEntity,
   isExecutionEntity,
   isFileReferenceEntity,
+  isImageWorkspaceEntity,
   isTaskEntity,
   isWorkEntity,
   type EntityValidator
@@ -247,6 +250,36 @@ export class JsonDraftRepository implements DraftRepository {
   }
 
   save(draft: Draft) {
+    return this.collection.save(draft);
+  }
+}
+
+export class JsonImageWorkspaceRepository
+  implements ImageWorkspaceRepository {
+  private readonly collection: JsonEntityCollection<
+    ImageWorkspaceDraft,
+    ProjectId
+  >;
+
+  constructor(storage: ProjectStorageAdapter, projectId: ProjectId) {
+    this.collection = new JsonEntityCollection(
+      storage,
+      projectStoragePaths.entities.imageWorkspaceDrafts,
+      projectId,
+      (draft) => draft.projectId,
+      isImageWorkspaceEntity
+    );
+  }
+
+  get(id: DraftId) {
+    return this.collection.get(id);
+  }
+
+  list(projectId: ProjectId) {
+    return this.collection.list(projectId);
+  }
+
+  save(draft: ImageWorkspaceDraft) {
     return this.collection.save(draft);
   }
 }

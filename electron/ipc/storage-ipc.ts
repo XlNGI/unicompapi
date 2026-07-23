@@ -5,12 +5,14 @@ import {
   JsonProjectCatalogStore,
   GlobalReadModelController,
   ControlledLocalMediaController,
+  ImageWorkspaceController,
   ProjectSessionController,
   ProjectCatalogService,
   LocalMediaHandleRegistry,
   StorageProjectSessionRegistry
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
+import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
 
 export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
@@ -30,6 +32,9 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     chooseRelinkFile: () => choosePath(['openFile']),
     chooseBackupFile: () => choosePath(['openFile'])
   });
+  const imageWorkspaces = new ImageWorkspaceController({
+    getSession: () => sessionRegistry.get()
+  });
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
@@ -43,7 +48,12 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const projectController = new ProjectSessionController({
     registry: sessionRegistry,
     chooseProjectDirectory: () => choosePath(['openDirectory']),
-    beforeSessionChange: () => controller.waitForMutations(),
+    beforeSessionChange: async () => {
+      await Promise.all([
+        controller.waitForMutations(),
+        imageWorkspaces.waitForMutations()
+      ]);
+    },
     catalog
   });
 
@@ -91,6 +101,19 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   );
   ipcMain.handle(storageIpcChannels.getProjectSession, () =>
     projectController.getProjectSession()
+  );
+  ipcMain.handle(imageWorkspaceIpcChannels.create, (_event, request: unknown) =>
+    imageWorkspaces.create(request)
+  );
+  ipcMain.handle(imageWorkspaceIpcChannels.get, (_event, request: unknown) =>
+    imageWorkspaces.get(request)
+  );
+  ipcMain.handle(imageWorkspaceIpcChannels.update, (_event, request: unknown) =>
+    imageWorkspaces.update(request)
+  );
+  ipcMain.handle(imageWorkspaceIpcChannels.list, () => imageWorkspaces.list());
+  ipcMain.handle(imageWorkspaceIpcChannels.derive, (_event, request: unknown) =>
+    imageWorkspaces.derive(request)
   );
   return mediaHandles;
 }
