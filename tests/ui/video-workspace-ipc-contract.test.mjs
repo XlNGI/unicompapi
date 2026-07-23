@@ -14,13 +14,27 @@ const mainSource = await readFile(
   new URL('../../electron/ipc/storage-ipc.ts', import.meta.url),
   'utf8'
 );
+const protocolSource = await readFile(
+  new URL('../../electron/main.ts', import.meta.url),
+  'utf8'
+);
 const domainSource = await readFile(
   new URL('../../src/domain/entities/video-workspace.ts', import.meta.url),
   'utf8'
 );
 
 test('exposes only controlled local video workspace operations', () => {
-  for (const operation of ['create', 'get', 'update', 'list', 'derive']) {
+  for (const operation of [
+    'create',
+    'get',
+    'update',
+    'list',
+    'derive',
+    'selectMaterial',
+    'getMaterial',
+    'clearMaterial',
+    'createMaterialPreview'
+  ]) {
     assert.match(sharedSource, new RegExp(`\\b${operation}\\b`));
     assert.match(preloadSource, new RegExp(`videoWorkspaceIpcChannels\\.${operation}`));
     assert.match(mainSource, new RegExp(`videoWorkspaceIpcChannels\\.${operation}`));
@@ -32,7 +46,9 @@ test('exposes only controlled local video workspace operations', () => {
 
 test('keeps video workspace DTOs free of protected main-process facts', () => {
   for (const protectedField of [
+    'rootDirectory',
     'absolutePath',
+    'relativePath',
     'checksumSha256',
     'credentialReference',
     'endpoint',
@@ -44,6 +60,10 @@ test('keeps video workspace DTOs free of protected main-process facts', () => {
 
   assert.match(preloadSource, /videoWorkspaces/);
   assert.match(mainSource, /new VideoWorkspaceController/);
+  assert.match(mainSource, /new VideoReferenceMediaController/);
+  assert.match(protocolSource, /headers: request\.headers/);
+  assert.match(protocolSource, /headers\.set\('content-type', entry\.mimeType\)/);
+  assert.doesNotMatch(sharedSource, /rendererPath|upload|analyze|createTask|createExecution/);
 });
 
 test('keeps generation drafts separate from the phase 7 editor', () => {

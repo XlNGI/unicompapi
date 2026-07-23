@@ -9,3 +9,4 @@ export * from './image-workspace-mutations';
 export * from './image-submission-controller';
 export * from './video-workspace-controller';
 export * from './video-workspace-mutations';
+export * from './video-reference-media-controller';

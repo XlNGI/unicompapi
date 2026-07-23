@@ -183,6 +183,27 @@ const videoWorkspaces: VideoWorkspaceApi = {
     ipcRenderer.invoke(videoWorkspaceIpcChannels.derive, {
       sourceDraftId,
       targetMode
+    }),
+  selectMaterial: (draftId, target, mediaKind) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.selectMaterial, {
+      draftId,
+      target,
+      mediaKind
+    }),
+  getMaterial: (draftId, target) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.getMaterial, {
+      draftId,
+      target
+    }),
+  clearMaterial: (draftId, target) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.clearMaterial, {
+      draftId,
+      target
+    }),
+  createMaterialPreview: (draftId, target) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.createMaterialPreview, {
+      draftId,
+      target
     })
 };
 
