@@ -7,6 +7,10 @@ import type {
 } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
 import { requireNonBlank } from '../validation';
+import type {
+  VideoMaterialKind,
+  VideoWorkspaceMode
+} from './video-workspace';
 
 export const providerAccessCategories = [
   'online',
@@ -91,6 +95,46 @@ export interface DynamicParameterSchema {
   readonly fields: readonly DynamicParameterFieldSchema[];
 }
 
+export interface VideoMaterialSlotCapabilitySchema {
+  readonly id: string;
+  readonly role: string;
+  readonly required: boolean;
+  readonly acceptedMediaKinds: readonly VideoMaterialKind[];
+}
+
+export interface QuickVideoCapabilitySchema {
+  readonly mode: 'quick_video';
+  readonly reference?: {
+    readonly acceptedMediaKinds: readonly VideoMaterialKind[];
+  };
+}
+
+export interface TextToVideoCapabilitySchema {
+  readonly mode: 'text_to_video';
+  readonly materialSlots: readonly VideoMaterialSlotCapabilitySchema[];
+  readonly shotPlan: {
+    readonly supported: boolean;
+    readonly required: boolean;
+    readonly minimumShots?: number;
+    readonly maximumShots?: number;
+  };
+}
+
+export interface ImageToVideoCapabilitySchema {
+  readonly mode: 'image_to_video';
+  readonly materialSlots: readonly VideoMaterialSlotCapabilitySchema[];
+}
+
+export type VideoGenerationModeCapabilitySchema =
+  | QuickVideoCapabilitySchema
+  | TextToVideoCapabilitySchema
+  | ImageToVideoCapabilitySchema;
+
+export interface VideoGenerationCapabilitySchema {
+  readonly schemaVersion: 1;
+  readonly modes: readonly VideoGenerationModeCapabilitySchema[];
+}
+
 export interface Provider {
   readonly schemaVersion: 1;
   readonly id: ProviderId;
@@ -137,6 +181,7 @@ export interface ModelCapabilityEvidence {
   readonly source: CapabilityEvidenceSource;
   readonly constraint?: string;
   readonly parameterSchema?: DynamicParameterSchema;
+  readonly videoGenerationSchema?: VideoGenerationCapabilitySchema;
   readonly observedAt?: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -201,6 +246,9 @@ export function createModelCapabilityEvidence(
       : undefined,
     parameterSchema: input.parameterSchema
       ? cloneDynamicParameterSchema(input.parameterSchema)
+      : undefined,
+    videoGenerationSchema: input.videoGenerationSchema
+      ? cloneVideoGenerationCapabilitySchema(input.videoGenerationSchema)
       : undefined
   };
 }
@@ -215,6 +263,129 @@ export function cloneDynamicParameterSchema(
       options: field.options ? [...field.options] : undefined
     }))
   };
+}
+
+export function cloneVideoGenerationCapabilitySchema(
+  schema: VideoGenerationCapabilitySchema
+): VideoGenerationCapabilitySchema {
+  if (schema.schemaVersion !== 1 || !Array.isArray(schema.modes)) {
+    throw new TypeError('video generation capability schema is invalid');
+  }
+  const modes = schema.modes.map(cloneVideoModeCapability);
+  if (new Set(modes.map((mode) => mode.mode)).size !== modes.length) {
+    throw new TypeError('video generation modes must be unique');
+  }
+  return { schemaVersion: 1, modes };
+}
+
+function cloneVideoModeCapability(
+  value: VideoGenerationModeCapabilitySchema
+): VideoGenerationModeCapabilitySchema {
+  if (value.mode === 'quick_video') {
+    return {
+      mode: value.mode,
+      reference: value.reference
+        ? {
+            acceptedMediaKinds: cloneMediaKinds(
+              value.reference.acceptedMediaKinds
+            )
+          }
+        : undefined
+    };
+  }
+  if (value.mode === 'text_to_video') {
+    const shotPlan = value.shotPlan;
+    if (!shotPlan || typeof shotPlan.supported !== 'boolean' ||
+      typeof shotPlan.required !== 'boolean') {
+      throw new TypeError('text-to-video shot plan schema is invalid');
+    }
+    const minimumShots = optionalNonNegativeInteger(
+      shotPlan.minimumShots,
+      'video shot minimum'
+    );
+    const maximumShots = optionalNonNegativeInteger(
+      shotPlan.maximumShots,
+      'video shot maximum'
+    );
+    if (
+      (!shotPlan.supported &&
+        (shotPlan.required || minimumShots !== undefined || maximumShots !== undefined)) ||
+      (minimumShots !== undefined &&
+        maximumShots !== undefined &&
+        maximumShots < minimumShots)
+    ) {
+      throw new TypeError('text-to-video shot plan limits are invalid');
+    }
+    return {
+      mode: value.mode,
+      materialSlots: cloneMaterialSlots(value.materialSlots),
+      shotPlan: {
+        supported: shotPlan.supported,
+        required: shotPlan.required,
+        minimumShots,
+        maximumShots
+      }
+    };
+  }
+  if (value.mode === 'image_to_video') {
+    return {
+      mode: value.mode,
+      materialSlots: cloneMaterialSlots(value.materialSlots)
+    };
+  }
+  throw new TypeError(
+    `unsupported video generation mode: ${String((value as { mode?: VideoWorkspaceMode }).mode)}`
+  );
+}
+
+function cloneMaterialSlots(
+  slots: readonly VideoMaterialSlotCapabilitySchema[]
+): readonly VideoMaterialSlotCapabilitySchema[] {
+  if (!Array.isArray(slots)) {
+    throw new TypeError('video material slots must be an array');
+  }
+  const cloned = slots.map((slot) => ({
+    id: requireNonBlank(slot.id, 'video material slot id'),
+    role: requireNonBlank(slot.role, 'video material slot role'),
+    required: requireBoolean(slot.required, 'video material slot required'),
+    acceptedMediaKinds: cloneMediaKinds(slot.acceptedMediaKinds)
+  }));
+  if (new Set(cloned.map((slot) => slot.id)).size !== cloned.length) {
+    throw new TypeError('video material slot IDs must be unique');
+  }
+  return cloned;
+}
+
+function cloneMediaKinds(
+  kinds: readonly VideoMaterialKind[]
+): readonly VideoMaterialKind[] {
+  if (
+    !Array.isArray(kinds) ||
+    kinds.length === 0 ||
+    kinds.some((kind) => kind !== 'image' && kind !== 'video') ||
+    new Set(kinds).size !== kinds.length
+  ) {
+    throw new TypeError('video material media kinds are invalid');
+  }
+  return [...kinds];
+}
+
+function optionalNonNegativeInteger(
+  value: number | undefined,
+  label: string
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function requireBoolean(value: boolean, label: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`${label} must be a boolean`);
+  }
+  return value;
 }
 
 export function createRoutingPreference(

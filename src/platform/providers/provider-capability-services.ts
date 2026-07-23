@@ -14,7 +14,8 @@ import {
   toRoutingPreferenceId,
   type ProviderConnection,
   type ProviderModel,
-  type DynamicParameterSchema
+  type DynamicParameterSchema,
+  type VideoGenerationCapabilitySchema
 } from '../../domain';
 import type {
   ProviderManagementErrorCode,
@@ -61,6 +62,7 @@ export interface CapabilityValidationPort {
       | 'restricted';
     readonly constraint?: string;
     readonly parameterSchema?: DynamicParameterSchema;
+    readonly videoGenerationSchema?: VideoGenerationCapabilitySchema;
     readonly observedAt: string;
   }>;
 }
@@ -413,6 +415,7 @@ export class ProviderCapabilityController {
         source: 'connection_verified',
         constraint: observation.constraint,
         parameterSchema: observation.parameterSchema,
+        videoGenerationSchema: observation.videoGenerationSchema,
         observedAt,
         updatedAt: observedAt
       });

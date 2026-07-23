@@ -397,7 +397,10 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
                         : `${videoRouteModelCount} 个`
                   }
                 />
-                <CapabilityFact label="视频生成能力" value="未知，等待 B3 预检" />
+                <CapabilityFact
+                  label="视频生成能力"
+                  value="B3 预检端口已具备，页面接线待后续任务"
+                />
                 <CapabilityFact label="动态参数与素材限制" value="尚未提供" />
                 <CapabilityFact
                   label="素材异常状态"
@@ -407,7 +410,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
                 <CapabilityFact label="在线适配器" value="不可用" />
                 <CapabilityFact label="费用与外发范围" value="未知" />
               </dl>
-              <Button disabled>能力预检未接入，无法提交</Button>
+              <Button disabled>B3 预检端口已具备，页面尚未接线</Button>
             </>
           ) : (
             <EmptyState
@@ -424,7 +427,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
         <StatusPill tone="warning">真实离线状态</StatusPill>
         <p>
           {workspaceMode
-            ? '当前支持项目内视频草稿，并已具备 B2 受控素材选择与预览端口；A1 页面尚未接线。预检、提交、进度和结果继续等待 B3/B4 与真实适配器。'
+            ? '当前支持项目内视频草稿，并已具备 B2 素材端口和 B3 预检/提交流水线；A1 页面尚未接线。进度和结果继续等待真实适配器与 B4。'
             : '基础编辑将在阶段 7 独立开发；当前入口不会修改源视频，也不会自动执行编辑。'}
         </p>
       </Card>
