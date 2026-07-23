@@ -1,7 +1,16 @@
 import { imageCreationModes } from '../creationModes';
 import { ImageWorkbenchPage } from './ImageWorkbenchPage';
 
-export function ImageQuickPage() {
+export function ImageQuickPage({
+  onNavigateToProfessional
+}: {
+  readonly onNavigateToProfessional?: () => void;
+}) {
   const mode = imageCreationModes[0];
-  return <ImageWorkbenchPage mode={mode} />;
+  return (
+    <ImageWorkbenchPage
+      mode={mode}
+      onNavigateToProfessional={onNavigateToProfessional}
+    />
+  );
 }

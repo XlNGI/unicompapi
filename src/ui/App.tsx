@@ -87,6 +87,12 @@ export function App() {
         <TasksPage onNavigate={handleNavigate} />
       ) : activeItemId === 'library' && !activeSubItemId ? (
         <LibraryPage onNavigate={handleNavigate} />
+      ) : activeSubItemId === 'quick-image' ? (
+        <ImageQuickPage
+          onNavigateToProfessional={() =>
+            handleSecondaryNavigate('image-creation', 'professional-image')
+          }
+        />
       ) : (
         <ActivePage />
       )}
