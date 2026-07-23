@@ -2,6 +2,7 @@ export * from './entities/asset';
 export * from './entities/draft';
 export * from './entities/execution';
 export * from './entities/file-reference';
+export * from './entities/image-workspace';
 export * from './entities/project';
 export * from './entities/prompt';
 export * from './entities/provider';

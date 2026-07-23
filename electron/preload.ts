@@ -7,6 +7,10 @@ import {
   providerIpcChannels,
   type ProviderApi
 } from '../src/shared/provider-ipc';
+import {
+  imageWorkspaceIpcChannels,
+  type ImageWorkspaceApi
+} from '../src/shared/image-workspace-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -114,7 +118,23 @@ const providers: ProviderApi = {
     ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled })
 };
 
+const imageWorkspaces: ImageWorkspaceApi = {
+  create: (mode) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.create, { mode }),
+  get: (draftId) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.get, { draftId }),
+  update: (draft) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.update, { draft }),
+  list: () => ipcRenderer.invoke(imageWorkspaceIpcChannels.list),
+  derive: (sourceDraftId, targetMode) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.derive, {
+      sourceDraftId,
+      targetMode
+    })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
+  imageWorkspaces,
   platform: process.platform,
   providers,
   storage,

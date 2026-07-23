@@ -2,6 +2,7 @@ import type { Asset } from '../entities/asset';
 import type { Draft } from '../entities/draft';
 import type { Execution } from '../entities/execution';
 import type { FileReference } from '../entities/file-reference';
+import type { ImageWorkspaceDraft } from '../entities/image-workspace';
 import type { Project } from '../entities/project';
 import type { Task } from '../entities/task';
 import type { Work } from '../entities/work';
@@ -36,6 +37,12 @@ export interface DraftRepository {
   get(id: DraftId): Promise<Draft | undefined>;
   list(projectId: ProjectId): Promise<readonly Draft[]>;
   save(draft: Draft): Promise<void>;
+}
+
+export interface ImageWorkspaceRepository {
+  get(id: DraftId): Promise<ImageWorkspaceDraft | undefined>;
+  list(projectId: ProjectId): Promise<readonly ImageWorkspaceDraft[]>;
+  save(draft: ImageWorkspaceDraft): Promise<void>;
 }
 
 export interface AssetRepository {
