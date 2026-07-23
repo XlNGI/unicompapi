@@ -3,6 +3,7 @@ import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
   deriveImageWorkspaceDraft,
+  applyImageWorkspaceChangeStaleness,
   imageWorkspaceModes,
   isImageWorkspaceDraft,
   toDraftId,
@@ -18,23 +19,28 @@ import type {
 import { JsonImageWorkspaceRepository } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import type { StorageProjectSession } from './storage-ipc-controller';
+import { ImageWorkspaceMutationCoordinator } from './image-workspace-mutations';
 
 export interface ImageWorkspaceControllerDependencies {
   getSession(): StorageProjectSession | undefined;
   createDraftId?(): string;
   now?(): string;
+  mutations?: ImageWorkspaceMutationCoordinator;
   onError?(error: unknown): void;
 }
 
 export class ImageWorkspaceController {
-  private mutationQueue: Promise<void> = Promise.resolve();
+  private readonly mutations: ImageWorkspaceMutationCoordinator;
 
   constructor(
     private readonly dependencies: ImageWorkspaceControllerDependencies
-  ) {}
+  ) {
+    this.mutations =
+      dependencies.mutations ?? new ImageWorkspaceMutationCoordinator();
+  }
 
   waitForMutations(): Promise<void> {
-    return this.mutationQueue;
+    return this.mutations.wait();
   }
 
   create(
@@ -64,7 +70,7 @@ export class ImageWorkspaceController {
     ImageWorkspaceIpcResult<ImageWorkspaceDraftDto | undefined>
   > {
     return this.execute(async () => {
-      await this.mutationQueue;
+      await this.mutations.wait();
       const draftId = parseDraftIdRequest(request);
       const context = this.createContext();
       const draft = await context.repository.get(draftId);
@@ -76,7 +82,7 @@ export class ImageWorkspaceController {
     ImageWorkspaceIpcResult<readonly ImageWorkspaceDraftDto[]>
   > {
     return this.execute(async () => {
-      await this.mutationQueue;
+      await this.mutations.wait();
       const context = this.createContext();
       const drafts = await context.repository.list(context.session.projectId);
       return drafts.map(toImageWorkspaceDto);
@@ -118,15 +124,21 @@ export class ImageWorkspaceController {
           );
         }
 
-        const updated = createImageWorkspaceDraft({
+        const updatedAt = this.now();
+        const candidate = createImageWorkspaceDraft({
           ...requested,
           id: stored.id,
           projectId: stored.projectId,
           mode: stored.mode,
           origin: stored.origin,
           createdAt: stored.createdAt,
-          updatedAt: this.now()
+          updatedAt
         } as ImageWorkspaceDraft);
+        const updated = applyImageWorkspaceChangeStaleness(
+          stored,
+          candidate,
+          updatedAt
+        );
 
         await context.repository.save(updated);
         return toImageWorkspaceDto(updated);
@@ -206,12 +218,7 @@ export class ImageWorkspaceController {
   private enqueueMutation<T>(
     operation: () => Promise<ImageWorkspaceIpcResult<T>>
   ): Promise<ImageWorkspaceIpcResult<T>> {
-    const result = this.mutationQueue.then(operation);
-    this.mutationQueue = result.then(
-      () => undefined,
-      () => undefined
-    );
-    return result;
+    return this.mutations.enqueue(operation);
   }
 }
 
@@ -279,7 +286,7 @@ function parseDeriveRequest(request: unknown): {
   return { sourceDraftId, targetMode };
 }
 
-function toImageWorkspaceDto(
+export function toImageWorkspaceDto(
   draft: ImageWorkspaceDraft
 ): ImageWorkspaceDraftDto {
   const { id, ...rest } = structuredClone(draft);

@@ -4,13 +4,23 @@ import test from 'node:test';
 
 const preloadSource = await readFile('electron/preload.ts', 'utf8');
 const handlerSource = await readFile('electron/ipc/storage-ipc.ts', 'utf8');
+const mainSource = await readFile('electron/main.ts', 'utf8');
 const sharedSource = await readFile(
   'src/shared/image-workspace-ipc.ts',
   'utf8'
 );
 
 test('exposes only the controlled local image workspace operations', () => {
-  for (const operation of ['create', 'get', 'update', 'list', 'derive']) {
+  for (const operation of [
+    'create',
+    'get',
+    'update',
+    'list',
+    'derive',
+    'selectInput',
+    'getInput',
+    'createInputPreview'
+  ]) {
     assert.match(preloadSource, new RegExp(`${operation}:`));
     assert.match(handlerSource, new RegExp(`imageWorkspaceIpcChannels\\.${operation}`));
   }
@@ -32,6 +42,8 @@ test('exposes only the controlled local image workspace operations', () => {
   );
   assert.doesNotMatch(
     sharedSource,
-    /upload|generateImage|analyzeImage|submitTask|createTask/
+    /upload|generateImage|analyzeImage|submitTask|createTask|rendererPath/
   );
+  assert.match(mainSource, /resolveEntry\(token\)/);
+  assert.match(mainSource, /headers\.set\('content-type', entry\.mimeType\)/);
 });

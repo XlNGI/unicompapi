@@ -15,6 +15,7 @@ import type { ProjectCatalogService } from './project-catalog';
 
 interface MediaHandleEntry {
   readonly target: string;
+  readonly mimeType?: string;
   readonly expiresAtMs: number;
 }
 
@@ -26,11 +27,14 @@ export class LocalMediaHandleRegistry {
     private readonly ttlMs = 5 * 60 * 1000
   ) {}
 
-  create(target: string): { readonly url: string; readonly expiresAt: string } {
+  create(
+    target: string,
+    mimeType?: string
+  ): { readonly url: string; readonly expiresAt: string } {
     this.removeExpired();
     const token = randomUUID();
     const expiresAtMs = this.now() + this.ttlMs;
-    this.handles.set(token, { target, expiresAtMs });
+    this.handles.set(token, { target, mimeType, expiresAtMs });
     return {
       url: `unicomp-media://local/${token}`,
       expiresAt: new Date(expiresAtMs).toISOString()
@@ -38,13 +42,17 @@ export class LocalMediaHandleRegistry {
   }
 
   resolve(token: string): string | undefined {
+    return this.resolveEntry(token)?.target;
+  }
+
+  resolveEntry(token: string): MediaHandleEntry | undefined {
     const entry = this.handles.get(token);
     if (!entry) return undefined;
     if (entry.expiresAtMs <= this.now()) {
       this.handles.delete(token);
       return undefined;
     }
-    return entry.target;
+    return entry;
   }
 
   private removeExpired(): void {

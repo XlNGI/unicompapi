@@ -130,6 +130,14 @@ const imageWorkspaces: ImageWorkspaceApi = {
     ipcRenderer.invoke(imageWorkspaceIpcChannels.derive, {
       sourceDraftId,
       targetMode
+    }),
+  selectInput: (draftId) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.selectInput, { draftId }),
+  getInput: (draftId) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.getInput, { draftId }),
+  createInputPreview: (draftId) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.createInputPreview, {
+      draftId
     })
 };
 

@@ -8,6 +8,12 @@ export type MediaKind = (typeof mediaKinds)[number];
 export const assetOrigins = ['imported', 'generated', 'derived'] as const;
 export type AssetOrigin = (typeof assetOrigins)[number];
 
+export interface ImageAssetMetadata {
+  readonly mimeType: string;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface Asset {
   readonly schemaVersion: 1;
   readonly id: AssetId;
@@ -17,6 +23,7 @@ export interface Asset {
   readonly mediaKind: MediaKind;
   readonly origin: AssetOrigin;
   readonly role?: string;
+  readonly imageMetadata?: ImageAssetMetadata;
   readonly createdAt: IsoTimestamp;
 }
 

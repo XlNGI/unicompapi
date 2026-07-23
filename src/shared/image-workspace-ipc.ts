@@ -3,7 +3,10 @@ export const imageWorkspaceIpcChannels = {
   get: 'image-workspace:get',
   update: 'image-workspace:update',
   list: 'image-workspace:list',
-  derive: 'image-workspace:derive'
+  derive: 'image-workspace:derive',
+  selectInput: 'image-workspace:select-input',
+  getInput: 'image-workspace:get-input',
+  createInputPreview: 'image-workspace:create-input-preview'
 } as const;
 
 export const imageWorkspaceDtoModes = [
@@ -22,6 +25,10 @@ export type ImageWorkspaceIpcErrorCode =
   | 'invalid_request'
   | 'draft_not_found'
   | 'draft_conflict'
+  | 'input_not_found'
+  | 'image_unreadable'
+  | 'unsupported_image'
+  | 'preview_unavailable'
   | 'workspace_storage_error';
 
 export type ImageWorkspaceIpcResult<T> =
@@ -90,6 +97,28 @@ export interface ImageWorkspaceObservationSetDto {
   readonly modelInferences: readonly ImageWorkspaceObservationDto[];
   readonly uncertainties: readonly ImageWorkspaceObservationDto[];
   readonly unrecognized: readonly ImageWorkspaceObservationDto[];
+}
+
+export interface ImageWorkspaceInputAssetDto {
+  readonly assetId: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly width: number;
+  readonly height: number;
+  readonly sizeBytes: number;
+  readonly fileState: string;
+}
+
+export interface ImageWorkspaceInputSelectionDto {
+  readonly cancelled: boolean;
+  readonly draft?: ImageWorkspaceDraftDto;
+  readonly input?: ImageWorkspaceInputAssetDto;
+}
+
+export interface ImageWorkspaceInputPreviewDto {
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mimeType: string;
 }
 
 interface ImageWorkspaceDraftDtoBase {
@@ -188,4 +217,15 @@ export interface ImageWorkspaceApi {
     sourceDraftId: string,
     targetMode: ImageWorkspaceDtoMode
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
+  selectInput(
+    draftId: string
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;
+  getInput(
+    draftId: string
+  ): Promise<
+    ImageWorkspaceIpcResult<ImageWorkspaceInputAssetDto | undefined>
+  >;
+  createInputPreview(
+    draftId: string
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputPreviewDto>>;
 }

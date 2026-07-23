@@ -93,16 +93,29 @@ function createMainWindow(): void {
 }
 
 app.whenReady().then(() => {
-  protocol.handle('unicomp-media', (request) => {
+  protocol.handle('unicomp-media', async (request) => {
     const url = new URL(request.url);
     const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
-    const target = token ? mediaHandles.resolve(token) : undefined;
-    return target
-      ? net.fetch(pathToFileURL(target).toString(), {
-          method: request.method,
-          headers: request.headers
-        })
-      : new Response('Media handle not found', { status: 404 });
+    const entry = token ? mediaHandles.resolveEntry(token) : undefined;
+    if (!entry) {
+      return new Response('Media handle not found', { status: 404 });
+    }
+
+    const response = await net.fetch(pathToFileURL(entry.target).toString(), {
+      method: request.method,
+      headers: request.headers
+    });
+    if (!entry.mimeType) {
+      return response;
+    }
+
+    const headers = new Headers(response.headers);
+    headers.set('content-type', entry.mimeType);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
   });
   createMainWindow();
 
