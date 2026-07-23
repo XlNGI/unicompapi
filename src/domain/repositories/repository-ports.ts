@@ -5,6 +5,7 @@ import type { FileReference } from '../entities/file-reference';
 import type { ImageWorkspaceDraft } from '../entities/image-workspace';
 import type { Project } from '../entities/project';
 import type { Task } from '../entities/task';
+import type { VideoWorkspaceDraft } from '../entities/video-workspace';
 import type { Work } from '../entities/work';
 import type {
   ModelCapabilityEvidence,
@@ -43,6 +44,12 @@ export interface ImageWorkspaceRepository {
   get(id: DraftId): Promise<ImageWorkspaceDraft | undefined>;
   list(projectId: ProjectId): Promise<readonly ImageWorkspaceDraft[]>;
   save(draft: ImageWorkspaceDraft): Promise<void>;
+}
+
+export interface VideoWorkspaceRepository {
+  get(id: DraftId): Promise<VideoWorkspaceDraft | undefined>;
+  list(projectId: ProjectId): Promise<readonly VideoWorkspaceDraft[]>;
+  save(draft: VideoWorkspaceDraft): Promise<void>;
 }
 
 export interface AssetRepository {

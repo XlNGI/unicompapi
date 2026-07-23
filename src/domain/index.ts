@@ -7,6 +7,7 @@ export * from './entities/project';
 export * from './entities/prompt';
 export * from './entities/provider';
 export * from './entities/task';
+export * from './entities/video-workspace';
 export * from './entities/work';
 export * from './errors';
 export * from './ids';
