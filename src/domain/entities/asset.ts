@@ -14,6 +14,14 @@ export interface ImageAssetMetadata {
   readonly height: number;
 }
 
+export interface VideoAssetMetadata {
+  readonly mimeType: string;
+  readonly container: string;
+  readonly durationMs: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface Asset {
   readonly schemaVersion: 1;
   readonly id: AssetId;
@@ -24,6 +32,7 @@ export interface Asset {
   readonly origin: AssetOrigin;
   readonly role?: string;
   readonly imageMetadata?: ImageAssetMetadata;
+  readonly videoMetadata?: VideoAssetMetadata;
   readonly createdAt: IsoTimestamp;
 }
 

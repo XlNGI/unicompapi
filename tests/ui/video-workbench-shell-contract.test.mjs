@@ -39,9 +39,9 @@ test('video workbench keeps blocked and unknown states honest', () => {
     '旧预检已过期',
     '未发现',
     '未知，等待 B3 预检',
-    '等待 B2 受控媒体端口',
+    'B2 受控素材端口已具备',
+    'A1 页面尚未接线',
     '不可用',
-    '不会显示示例视频或伪造进度',
     '能力预检未接入，无法提交'
   ]) {
     assert.match(workbenchSource, new RegExp(text));

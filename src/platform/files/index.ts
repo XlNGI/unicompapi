@@ -8,4 +8,6 @@ export * from './file-verification-persistence';
 export * from './node-file-status-probe';
 export * from './node-image-inspector';
 export * from './node-sha256-verifier';
+export * from './node-video-inspector';
 export * from './recovery-planner';
+export * from './video-inspector';

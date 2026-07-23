@@ -3,7 +3,11 @@ export const videoWorkspaceIpcChannels = {
   get: 'video-workspace:get',
   update: 'video-workspace:update',
   list: 'video-workspace:list',
-  derive: 'video-workspace:derive'
+  derive: 'video-workspace:derive',
+  selectMaterial: 'video-workspace:select-material',
+  getMaterial: 'video-workspace:get-material',
+  clearMaterial: 'video-workspace:clear-material',
+  createMaterialPreview: 'video-workspace:create-material-preview'
 } as const;
 
 export const videoWorkspaceDtoModes = [
@@ -28,6 +32,15 @@ export type VideoWorkspaceIpcErrorCode =
   | 'invalid_request'
   | 'draft_not_found'
   | 'draft_conflict'
+  | 'material_target_not_found'
+  | 'material_target_mismatch'
+  | 'material_type_mismatch'
+  | 'material_not_found'
+  | 'unsupported_image'
+  | 'unsupported_video'
+  | 'media_unreadable'
+  | 'media_changed_during_selection'
+  | 'preview_unavailable'
   | 'workspace_storage_error';
 
 export type VideoWorkspaceIpcResult<T> =
@@ -93,6 +106,46 @@ export interface VideoWorkspaceMaterialSelectionDto {
   readonly mediaKind: 'image' | 'video';
   readonly role: string;
   readonly selectedAt: string;
+}
+
+export type VideoWorkspaceMaterialTargetDto =
+  | { readonly kind: 'quick_reference' }
+  | { readonly kind: 'slot'; readonly slotId: string };
+
+interface VideoWorkspaceMaterialAssetDtoBase {
+  readonly assetId: string;
+  readonly name: string;
+  readonly role: string;
+  readonly sizeBytes: number;
+  readonly fileState: string;
+  readonly referenceKind: 'project' | 'external';
+  readonly mimeType: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type VideoWorkspaceMaterialAssetDto =
+  VideoWorkspaceMaterialAssetDtoBase &
+  (
+    | { readonly mediaKind: 'image' }
+    | {
+        readonly mediaKind: 'video';
+        readonly container: string;
+        readonly durationMs: number;
+      }
+  );
+
+export interface VideoWorkspaceMaterialSelectionResultDto {
+  readonly cancelled: boolean;
+  readonly draft?: VideoWorkspaceDraftDto;
+  readonly material?: VideoWorkspaceMaterialAssetDto;
+}
+
+export interface VideoWorkspaceMaterialPreviewDto {
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mediaKind: 'image' | 'video';
+  readonly mimeType: string;
 }
 
 export interface VideoWorkspaceMaterialSlotDto {
@@ -195,4 +248,25 @@ export interface VideoWorkspaceApi {
     sourceDraftId: string,
     targetMode: VideoWorkspaceDtoMode
   ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceDraftDto>>;
+  selectMaterial(
+    draftId: string,
+    target: VideoWorkspaceMaterialTargetDto,
+    mediaKind: 'image' | 'video'
+  ): Promise<
+    VideoWorkspaceIpcResult<VideoWorkspaceMaterialSelectionResultDto>
+  >;
+  getMaterial(
+    draftId: string,
+    target: VideoWorkspaceMaterialTargetDto
+  ): Promise<
+    VideoWorkspaceIpcResult<VideoWorkspaceMaterialAssetDto | undefined>
+  >;
+  clearMaterial(
+    draftId: string,
+    target: VideoWorkspaceMaterialTargetDto
+  ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceDraftDto>>;
+  createMaterialPreview(
+    draftId: string,
+    target: VideoWorkspaceMaterialTargetDto
+  ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceMaterialPreviewDto>>;
 }

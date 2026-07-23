@@ -18,6 +18,15 @@ const workspaceErrorMessages: Record<VideoWorkspaceIpcErrorCode, string> = {
   invalid_request: '当前视频草稿数据无效，请刷新页面后重试。',
   draft_not_found: '视频草稿已不存在，请刷新页面后重试。',
   draft_conflict: '视频草稿已在其他位置更新，请刷新页面后重试。',
+  material_target_not_found: '当前素材槽位已不存在，请刷新页面后重试。',
+  material_target_mismatch: '当前素材目标与视频模式不匹配。',
+  material_type_mismatch: '所选素材类型不符合当前槽位要求。',
+  material_not_found: '已选素材记录不可用，请重新选择。',
+  unsupported_image: '所选文件不是当前支持的图片。',
+  unsupported_video: '所选文件不是当前支持的 MP4 或 MOV 视频。',
+  media_unreadable: '所选素材无法读取或无法完成本地校验。',
+  media_changed_during_selection: '所选素材在校验过程中发生变化，请重新选择。',
+  preview_unavailable: '素材已丢失、变化或不可读，暂时无法预览。',
   workspace_storage_error: '本地视频草稿保存失败，请检查项目目录后重试。'
 };
 
@@ -278,7 +287,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
           <PanelHeading
             description={
               workspaceMode
-                ? '素材、上下文和镜头只接受后续受控端口提供的事实。'
+                ? '素材只接受 B2 受控端口提供的事实；上下文和镜头继续等待对应任务接入。'
                 : '阶段 7 技术架构批准前不建立编辑草稿。'
             }
             number="1"
@@ -353,7 +362,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
             description={
               workspaceMode
                 ? currentDraft
-                  ? 'B2 受控素材预览和 B4 正式作品尚未接入；不会显示示例视频或伪造进度。'
+                  ? 'B2 受控素材端口已具备，但当前 A1 页面尚未接入选择与预览；B4 正式作品也未接入。'
                   : '创建项目内本地草稿后，这里将承载素材预览与真实结果状态。'
                 : '阶段 7 未接入；这里不会显示可操作的假时间线或示例剪辑结果。'
             }
@@ -390,7 +399,10 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
                 />
                 <CapabilityFact label="视频生成能力" value="未知，等待 B3 预检" />
                 <CapabilityFact label="动态参数与素材限制" value="尚未提供" />
-                <CapabilityFact label="素材异常状态" value="等待 B2 受控媒体端口" />
+                <CapabilityFact
+                  label="素材异常状态"
+                  value="B2 受控素材端口已具备，页面接线待后续任务"
+                />
                 <CapabilityFact label="预检状态" value={preflightLabel} />
                 <CapabilityFact label="在线适配器" value="不可用" />
                 <CapabilityFact label="费用与外发范围" value="未知" />
@@ -412,7 +424,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
         <StatusPill tone="warning">真实离线状态</StatusPill>
         <p>
           {workspaceMode
-            ? '当前仅支持项目内视频草稿的创建、读取和保存。素材、预检、提交、进度和结果等待 B2/B3/B4 与真实适配器。'
+            ? '当前支持项目内视频草稿，并已具备 B2 受控素材选择与预览端口；A1 页面尚未接线。预检、提交、进度和结果继续等待 B3/B4 与真实适配器。'
             : '基础编辑将在阶段 7 独立开发；当前入口不会修改源视频，也不会自动执行编辑。'}
         </p>
       </Card>

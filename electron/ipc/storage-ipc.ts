@@ -14,6 +14,7 @@ import {
   JsonProviderRegistryStore,
   LocalMediaHandleRegistry,
   StorageProjectSessionRegistry,
+  VideoReferenceMediaController,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
@@ -25,10 +26,11 @@ import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc'
 export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
   const choosePath = async (
-    properties: Electron.OpenDialogOptions['properties']
+    properties: Electron.OpenDialogOptions['properties'],
+    filters?: Electron.FileFilter[]
   ) => {
     const window = BrowserWindow.getFocusedWindow();
-    const options: Electron.OpenDialogOptions = { properties };
+    const options: Electron.OpenDialogOptions = { properties, filters };
     const result = window
       ? await dialog.showOpenDialog(window, options)
       : await dialog.showOpenDialog(options);
@@ -62,6 +64,24 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   });
   const videoWorkspaces = new VideoWorkspaceController({
     getSession: () => sessionRegistry.get(),
+    mutations: videoMutations
+  });
+  const videoReferenceMedia = new VideoReferenceMediaController({
+    getSession: () => sessionRegistry.get(),
+    chooseMediaFile: (mediaKind) =>
+      choosePath(
+        ['openFile'],
+        mediaKind === 'image'
+          ? [
+              { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+              { name: 'All files', extensions: ['*'] }
+            ]
+          : [
+              { name: 'Videos', extensions: ['mp4', 'm4v', 'mov'] },
+              { name: 'All files', extensions: ['*'] }
+            ]
+      ),
+    handles: mediaHandles,
     mutations: videoMutations
   });
   const catalog = new ProjectCatalogService(
@@ -188,6 +208,23 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   ipcMain.handle(videoWorkspaceIpcChannels.list, () => videoWorkspaces.list());
   ipcMain.handle(videoWorkspaceIpcChannels.derive, (_event, request: unknown) =>
     videoWorkspaces.derive(request)
+  );
+  ipcMain.handle(
+    videoWorkspaceIpcChannels.selectMaterial,
+    (_event, request: unknown) => videoReferenceMedia.selectMaterial(request)
+  );
+  ipcMain.handle(
+    videoWorkspaceIpcChannels.getMaterial,
+    (_event, request: unknown) => videoReferenceMedia.getMaterial(request)
+  );
+  ipcMain.handle(
+    videoWorkspaceIpcChannels.clearMaterial,
+    (_event, request: unknown) => videoReferenceMedia.clearMaterial(request)
+  );
+  ipcMain.handle(
+    videoWorkspaceIpcChannels.createMaterialPreview,
+    (_event, request: unknown) =>
+      videoReferenceMedia.createMaterialPreview(request)
   );
   return mediaHandles;
 }

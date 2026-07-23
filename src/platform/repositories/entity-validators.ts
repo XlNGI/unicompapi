@@ -38,7 +38,14 @@ export const isAssetEntity: EntityValidator = (value) =>
   isOneOf(value.mediaKind, mediaKinds) &&
   isOneOf(value.origin, assetOrigins) &&
   (value.role === undefined || typeof value.role === 'string') &&
-  (value.imageMetadata === undefined || isImageAssetMetadata(value.imageMetadata)) &&
+  (value.imageMetadata === undefined ||
+    (value.mediaKind === 'image' &&
+      value.videoMetadata === undefined &&
+      isImageAssetMetadata(value.imageMetadata))) &&
+  (value.videoMetadata === undefined ||
+    (value.mediaKind === 'video' &&
+      value.imageMetadata === undefined &&
+      isVideoAssetMetadata(value.videoMetadata))) &&
   isCanonicalIsoTimestamp(value.createdAt);
 
 export const isFileReferenceEntity: EntityValidator = (value) =>
@@ -115,6 +122,17 @@ function isImageAssetMetadata(value: unknown): boolean {
   return (
     isRecord(value) &&
     isNonBlankString(value.mimeType) &&
+    isPositiveInteger(value.width) &&
+    isPositiveInteger(value.height)
+  );
+}
+
+function isVideoAssetMetadata(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonBlankString(value.mimeType) &&
+    isNonBlankString(value.container) &&
+    isPositiveInteger(value.durationMs) &&
     isPositiveInteger(value.width) &&
     isPositiveInteger(value.height)
   );
