@@ -5,12 +5,14 @@ import type { ProviderApi } from './shared/provider-ipc';
 import type { ImageWorkspaceApi } from './shared/image-workspace-ipc';
 import type { ImageSubmissionApi } from './shared/image-submission-ipc';
 import type { VideoWorkspaceApi } from './shared/video-workspace-ipc';
+import type { VideoSubmissionApi } from './shared/video-submission-ipc';
 
 declare global {
   interface Window {
     unicomp?: {
       imageWorkspaces: ImageWorkspaceApi;
       imageSubmissions: ImageSubmissionApi;
+      videoSubmissions: VideoSubmissionApi;
       videoWorkspaces: VideoWorkspaceApi;
       platform: NodeJS.Platform;
       providers: ProviderApi;

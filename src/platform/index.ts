@@ -4,3 +4,4 @@ export * from './files';
 export * from './ipc';
 export * from './providers';
 export * from './images';
+export * from './videos';

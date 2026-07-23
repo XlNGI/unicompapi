@@ -8,6 +8,7 @@ import {
   isVideoWorkspaceDraft,
   mediaKinds,
   imageWorkspaceModes,
+  videoWorkspaceModes,
   providerAccessCategories,
   promptSupplementSources,
   toIsoTimestamp,
@@ -71,6 +72,14 @@ export const isTaskEntity: EntityValidator = (value) =>
   isCanonicalIsoTimestamp(value.submission.confirmedAt) &&
   (value.submission.image === undefined ||
     isImageSubmissionSnapshot(value.submission.image)) &&
+  (value.submission.video === undefined ||
+    (value.submission.kind === 'video_generation' &&
+      value.submission.image === undefined &&
+      isVideoSubmissionSnapshot(value.submission.video) &&
+      sameStringSet(
+        value.submission.assetIds,
+        value.submission.video.materials.map((material) => material.assetId)
+      ))) &&
   isStringArray(value.executionIds) &&
   isCanonicalIsoTimestamp(value.createdAt);
 
@@ -197,6 +206,109 @@ function isImageSubmissionSnapshot(value: unknown): boolean {
     value.confirmations.cost === true &&
     value.confirmations.finalPrompt === true &&
     value.confirmations.model === true
+  );
+}
+
+function isVideoSubmissionSnapshot(value: unknown): value is {
+  readonly materials: readonly { readonly assetId: string }[];
+} {
+  return (
+    isRecord(value) &&
+    isOneOf(value.mode, videoWorkspaceModes) &&
+    value.purpose === 'video_generation' &&
+    isNonBlankString(value.modelId) &&
+    isNonBlankString(value.capabilityEvidenceId) &&
+    isNonBlankString(value.providerId) &&
+    isNonBlankString(value.connectionId) &&
+    isNonBlankString(value.recipientName) &&
+    isOneOf(value.accessCategory, providerAccessCategories) &&
+    isOneOf(value.outboundScope, [
+      'local_device',
+      'local_network',
+      'external_service',
+      'unknown'
+    ] as const) &&
+    value.costState === 'unknown' &&
+    value.privacyState === 'unknown' &&
+    value.regionState === 'unknown' &&
+    isRecord(value.parameters) &&
+    Object.values(value.parameters).every(isDynamicValue) &&
+    Array.isArray(value.materials) &&
+    value.materials.every(isVideoSubmissionMaterial) &&
+    Array.isArray(value.contextReferences) &&
+    value.contextReferences.every(isVideoContextReference) &&
+    isVideoSubmissionInput(value.input, value.mode) &&
+    isRecord(value.confirmations) &&
+    value.confirmations.recipient === true &&
+    value.confirmations.outboundScope === true &&
+    value.confirmations.materials === true &&
+    value.confirmations.costPrivacyRegion === true &&
+    value.confirmations.finalPrompt === true &&
+    value.confirmations.model === true
+  );
+}
+
+function isVideoSubmissionMaterial(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonBlankString(value.assetId) &&
+    isOneOf(value.mediaKind, ['image', 'video'] as const) &&
+    isNonBlankString(value.role) &&
+    isRecord(value.target) &&
+    (value.target.kind === 'quick_reference' ||
+      (value.target.kind === 'slot' && isNonBlankString(value.target.slotId)))
+  );
+}
+
+function isVideoContextReference(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isOneOf(value.kind, [
+      'project_asset',
+      'project_context',
+      'saved_conversation'
+    ] as const) &&
+    isNonBlankString(value.referenceId)
+  );
+}
+
+function isVideoSubmissionInput(value: unknown, mode: unknown): boolean {
+  if (!isRecord(value) || value.mode !== mode) return false;
+  if (mode === 'quick_video') return true;
+  if (mode === 'text_to_video') {
+    return (
+      isOneOf(value.sourceKind, ['short_idea', 'long_form'] as const) &&
+      Array.isArray(value.shots) &&
+      value.shots.every(
+        (shot) =>
+          isRecord(shot) &&
+          isNonBlankString(shot.id) &&
+          isPositiveInteger(shot.order) &&
+          typeof shot.description === 'string'
+      )
+    );
+  }
+  if (mode === 'image_to_video') {
+    return (
+      isStringArray(value.mustKeep) &&
+      isStringArray(value.allowedChanges) &&
+      isStringArray(value.prohibited) &&
+      typeof value.subjectAction === 'string' &&
+      typeof value.cameraMovement === 'string' &&
+      typeof value.pace === 'string' &&
+      typeof value.depthOfField === 'string'
+    );
+  }
+  return false;
+}
+
+function sameStringSet(left: unknown, right: readonly string[]): boolean {
+  const rightUnique = [...new Set(right)];
+  return (
+    isStringArray(left) &&
+    new Set(left).size === left.length &&
+    left.length === rightUnique.length &&
+    left.every((value) => rightUnique.includes(value))
   );
 }
 

@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   capabilityEvidenceSources,
   capabilityStates,
+  cloneVideoGenerationCapabilitySchema,
   dynamicParameterKinds,
   connectionStates,
   credentialStates,
@@ -20,7 +21,8 @@ import {
   type Provider,
   type ProviderConnection,
   type ProviderModel,
-  type RoutingPreference
+  type RoutingPreference,
+  type VideoGenerationCapabilitySchema
 } from '../../domain';
 import type {
   ProviderIpcResult,
@@ -121,6 +123,7 @@ export class ProviderRegistryController {
             source: capability.source,
             constraint: capability.constraint,
             parameterSchema: capability.parameterSchema,
+            videoGenerationSchema: capability.videoGenerationSchema,
             observedAt: capability.observedAt
           })),
           routingPreferences: snapshot.routingPreferences.map((preference) => ({
@@ -278,9 +281,25 @@ function parseCapability(value: unknown): ModelCapabilityEvidence {
     source: item.source as ModelCapabilityEvidence['source'],
     constraint: optionalString(item.constraint),
     parameterSchema: parseParameterSchema(item.parameterSchema),
+    videoGenerationSchema: parseVideoGenerationSchema(
+      item.videoGenerationSchema
+    ),
     observedAt: optionalTimestamp(item.observedAt),
     updatedAt: toIsoTimestamp(String(item.updatedAt))
   };
+}
+
+function parseVideoGenerationSchema(
+  value: unknown
+): VideoGenerationCapabilitySchema | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return cloneVideoGenerationCapabilitySchema(
+      value as VideoGenerationCapabilitySchema
+    );
+  } catch {
+    throw new TypeError('Video generation capability schema is invalid');
+  }
 }
 
 function parseParameterSchema(value: unknown): DynamicParameterSchema | undefined {

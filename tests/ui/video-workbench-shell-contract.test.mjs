@@ -38,11 +38,11 @@ test('video workbench keeps blocked and unknown states honest', () => {
     '本地视频草稿保存失败',
     '旧预检已过期',
     '未发现',
-    '未知，等待 B3 预检',
+    'B3 预检端口已具备',
     'B2 受控素材端口已具备',
     'A1 页面尚未接线',
     '不可用',
-    '能力预检未接入，无法提交'
+    '页面尚未接线'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }

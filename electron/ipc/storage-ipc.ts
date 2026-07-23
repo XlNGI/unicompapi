@@ -15,6 +15,7 @@ import {
   LocalMediaHandleRegistry,
   StorageProjectSessionRegistry,
   VideoReferenceMediaController,
+  VideoSubmissionController,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
@@ -22,6 +23,7 @@ import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
 import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
 import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
+import { videoSubmissionIpcChannels } from '../../src/shared/video-submission-ipc';
 
 export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
@@ -45,6 +47,9 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const mediaHandles = new LocalMediaHandleRegistry();
   const imageMutations = new ImageWorkspaceMutationCoordinator();
   const videoMutations = new VideoWorkspaceMutationCoordinator();
+  const providerRegistry = new JsonProviderRegistryStore(
+    path.join(app.getPath('userData'), 'provider-registry.json')
+  );
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),
     mutations: imageMutations
@@ -57,9 +62,7 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   });
   const imageSubmissions = new ImageSubmissionController({
     getSession: () => sessionRegistry.get(),
-    providerRegistry: new JsonProviderRegistryStore(
-      path.join(app.getPath('userData'), 'provider-registry.json')
-    ),
+    providerRegistry,
     mutations: imageMutations
   });
   const videoWorkspaces = new VideoWorkspaceController({
@@ -82,6 +85,11 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
             ]
       ),
     handles: mediaHandles,
+    mutations: videoMutations
+  });
+  const videoSubmissions = new VideoSubmissionController({
+    getSession: () => sessionRegistry.get(),
+    providerRegistry,
     mutations: videoMutations
   });
   const catalog = new ProjectCatalogService(
@@ -225,6 +233,22 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     videoWorkspaceIpcChannels.createMaterialPreview,
     (_event, request: unknown) =>
       videoReferenceMedia.createMaterialPreview(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.preflight,
+    (_event, request: unknown) => videoSubmissions.preflight(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.createTask,
+    (_event, request: unknown) => videoSubmissions.createTask(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.createExecution,
+    (_event, request: unknown) => videoSubmissions.createExecution(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.invokeExecution,
+    (_event, request: unknown) => videoSubmissions.invokeExecution(request)
   );
   return mediaHandles;
 }

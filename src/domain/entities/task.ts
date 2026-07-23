@@ -22,6 +22,15 @@ import type {
   ImageWorkspaceMode
 } from './image-workspace';
 import type { ProviderAccessCategory } from './provider';
+import type {
+  VideoContextReference,
+  VideoDynamicParameterValue,
+  VideoMaterialKind,
+  VideoShotDraft,
+  VideoTextSourceKind,
+  VideoWorkspaceDraft,
+  VideoWorkspaceMode
+} from './video-workspace';
 
 export type ImageOperationPurpose =
   | 'image_generation'
@@ -59,12 +68,71 @@ export interface ImageSubmissionConfirmationSnapshot {
   };
 }
 
+export type VideoOutboundScope = ImageOutboundScope;
+
+export interface VideoSubmissionMaterialSnapshot {
+  readonly assetId: AssetId;
+  readonly mediaKind: VideoMaterialKind;
+  readonly role: string;
+  readonly target:
+    | { readonly kind: 'quick_reference' }
+    | { readonly kind: 'slot'; readonly slotId: string };
+}
+
+export type VideoSubmissionModeInput =
+  | {
+      readonly mode: 'quick_video';
+    }
+  | {
+      readonly mode: 'text_to_video';
+      readonly sourceKind: VideoTextSourceKind;
+      readonly shots: readonly VideoShotDraft[];
+    }
+  | {
+      readonly mode: 'image_to_video';
+      readonly mustKeep: readonly string[];
+      readonly allowedChanges: readonly string[];
+      readonly prohibited: readonly string[];
+      readonly subjectAction: string;
+      readonly cameraMovement: string;
+      readonly pace: string;
+      readonly depthOfField: string;
+    };
+
+export interface VideoSubmissionConfirmationSnapshot {
+  readonly mode: VideoWorkspaceMode;
+  readonly purpose: 'video_generation';
+  readonly modelId: ModelId;
+  readonly capabilityEvidenceId: CapabilityEvidenceId;
+  readonly providerId: ProviderId;
+  readonly connectionId: ConnectionId;
+  readonly recipientName: string;
+  readonly accessCategory: ProviderAccessCategory;
+  readonly outboundScope: VideoOutboundScope;
+  readonly costState: 'unknown';
+  readonly privacyState: 'unknown';
+  readonly regionState: 'unknown';
+  readonly parameters: Readonly<Record<string, VideoDynamicParameterValue>>;
+  readonly materials: readonly VideoSubmissionMaterialSnapshot[];
+  readonly contextReferences: readonly VideoContextReference[];
+  readonly input: VideoSubmissionModeInput;
+  readonly confirmations: {
+    readonly recipient: true;
+    readonly outboundScope: true;
+    readonly materials: true;
+    readonly costPrivacyRegion: true;
+    readonly finalPrompt: true;
+    readonly model: true;
+  };
+}
+
 export interface SubmissionSnapshot {
   readonly kind: CreationKind;
   readonly prompt: PromptSnapshot;
   readonly assetIds: readonly AssetId[];
   readonly confirmedAt: IsoTimestamp;
   readonly image?: ImageSubmissionConfirmationSnapshot;
+  readonly video?: VideoSubmissionConfirmationSnapshot;
 }
 
 export interface CreateImageTaskInput {
@@ -117,6 +185,168 @@ export function createImageTask(input: CreateImageTaskInput): Task {
     },
     executionIds: [],
     createdAt: input.confirmedAt
+  };
+}
+
+export interface CreateVideoTaskInput {
+  readonly id: TaskId;
+  readonly draft: VideoWorkspaceDraft;
+  readonly confirmation: VideoSubmissionConfirmationSnapshot;
+  readonly confirmedAt: IsoTimestamp;
+}
+
+export function createVideoTask(input: CreateVideoTaskInput): Task {
+  if (!['editing', 'saved'].includes(input.draft.state)) {
+    throw new InvariantViolationError(
+      `video workspace in ${input.draft.state} state cannot create a task`
+    );
+  }
+  if (
+    input.confirmation.mode !== input.draft.mode ||
+    input.confirmation.input.mode !== input.draft.mode ||
+    input.confirmation.purpose !== 'video_generation'
+  ) {
+    throw new InvariantViolationError(
+      'video confirmation does not match the source draft'
+    );
+  }
+  validateVideoConfirmationAgainstDraft(input.draft, input.confirmation);
+  assertTimestampNotBefore(
+    input.confirmedAt,
+    input.draft.updatedAt,
+    'task.confirmedAt'
+  );
+  const assetIds = [...new Set(
+    input.confirmation.materials.map((material) => material.assetId)
+  )];
+  return {
+    schemaVersion: 1,
+    id: input.id,
+    projectId: input.draft.projectId,
+    sourceDraftId: input.draft.id,
+    submission: {
+      kind: 'video_generation',
+      prompt: {
+        ...input.draft.prompt,
+        systemSupplements: input.draft.prompt.systemSupplements.map((item) => ({
+          ...item
+        }))
+      },
+      assetIds,
+      confirmedAt: input.confirmedAt,
+      video: cloneVideoConfirmation(input.confirmation)
+    },
+    executionIds: [],
+    createdAt: input.confirmedAt
+  };
+}
+
+function validateVideoConfirmationAgainstDraft(
+  draft: VideoWorkspaceDraft,
+  confirmation: VideoSubmissionConfirmationSnapshot
+): void {
+  if (
+    draft.generation.model &&
+    (draft.generation.model.modelId !== confirmation.modelId ||
+      draft.generation.model.capabilityEvidenceId !==
+        confirmation.capabilityEvidenceId)
+  ) {
+    throw new InvariantViolationError(
+      'video confirmation model does not match the draft snapshot'
+    );
+  }
+  if (
+    draft.generation.parameters &&
+    draft.generation.parameters.capabilityEvidenceId !==
+      confirmation.capabilityEvidenceId
+  ) {
+    throw new InvariantViolationError(
+      'video confirmation parameters use another capability snapshot'
+    );
+  }
+  const expectedParameters = draft.generation.parameters?.values ?? {};
+  const expectedMaterials = materialsForVideoDraft(draft);
+  const expectedInput = inputForVideoDraft(draft);
+  if (
+    !sameStructuredValue(expectedParameters, confirmation.parameters) ||
+    !sameStructuredValue(expectedMaterials, confirmation.materials) ||
+    !sameStructuredValue(draft.contextReferences, confirmation.contextReferences) ||
+    !sameStructuredValue(expectedInput, confirmation.input)
+  ) {
+    throw new InvariantViolationError(
+      'video confirmation does not freeze the current draft input'
+    );
+  }
+}
+
+function materialsForVideoDraft(
+  draft: VideoWorkspaceDraft
+): readonly VideoSubmissionMaterialSnapshot[] {
+  if (draft.mode === 'quick_video') {
+    return draft.quick.reference
+      ? [{
+          assetId: draft.quick.reference.assetId,
+          mediaKind: draft.quick.reference.mediaKind,
+          role: draft.quick.reference.role,
+          target: { kind: 'quick_reference' }
+        }]
+      : [];
+  }
+  const materials = draft.mode === 'text_to_video'
+    ? draft.textToVideo.materials
+    : draft.imageToVideo.materials;
+  return materials?.slots.flatMap((slot) =>
+    slot.selection
+      ? [{
+          assetId: slot.selection.assetId,
+          mediaKind: slot.selection.mediaKind,
+          role: slot.selection.role,
+          target: { kind: 'slot' as const, slotId: slot.id }
+        }]
+      : []
+  ) ?? [];
+}
+
+function inputForVideoDraft(draft: VideoWorkspaceDraft): VideoSubmissionModeInput {
+  if (draft.mode === 'quick_video') return { mode: draft.mode };
+  if (draft.mode === 'text_to_video') {
+    return {
+      mode: draft.mode,
+      sourceKind: draft.textToVideo.sourceKind,
+      shots: draft.textToVideo.shots.map((shot) => ({ ...shot }))
+    };
+  }
+  return {
+    mode: draft.mode,
+    mustKeep: [...draft.imageToVideo.mustKeep],
+    allowedChanges: [...draft.imageToVideo.allowedChanges],
+    prohibited: [...draft.imageToVideo.prohibited],
+    subjectAction: draft.imageToVideo.subjectAction,
+    cameraMovement: draft.imageToVideo.cameraMovement,
+    pace: draft.imageToVideo.pace,
+    depthOfField: draft.imageToVideo.depthOfField
+  };
+}
+
+function sameStructuredValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function cloneVideoConfirmation(
+  confirmation: VideoSubmissionConfirmationSnapshot
+): VideoSubmissionConfirmationSnapshot {
+  return {
+    ...confirmation,
+    parameters: structuredClone(confirmation.parameters),
+    materials: confirmation.materials.map((material) => ({
+      ...material,
+      target: { ...material.target }
+    })),
+    contextReferences: confirmation.contextReferences.map((reference) => ({
+      ...reference
+    })),
+    input: structuredClone(confirmation.input),
+    confirmations: { ...confirmation.confirmations }
   };
 }
 

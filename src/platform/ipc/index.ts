@@ -10,3 +10,4 @@ export * from './image-submission-controller';
 export * from './video-workspace-controller';
 export * from './video-workspace-mutations';
 export * from './video-reference-media-controller';
+export * from './video-submission-controller';

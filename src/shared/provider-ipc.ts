@@ -163,6 +163,41 @@ export interface ProviderCapabilitySummaryDto {
       readonly maximum?: number;
     }[];
   };
+  readonly videoGenerationSchema?: {
+    readonly schemaVersion: 1;
+    readonly modes: readonly (
+      | {
+          readonly mode: 'quick_video';
+          readonly reference?: {
+            readonly acceptedMediaKinds: readonly ('image' | 'video')[];
+          };
+        }
+      | {
+          readonly mode: 'text_to_video';
+          readonly materialSlots: readonly {
+            readonly id: string;
+            readonly role: string;
+            readonly required: boolean;
+            readonly acceptedMediaKinds: readonly ('image' | 'video')[];
+          }[];
+          readonly shotPlan: {
+            readonly supported: boolean;
+            readonly required: boolean;
+            readonly minimumShots?: number;
+            readonly maximumShots?: number;
+          };
+        }
+      | {
+          readonly mode: 'image_to_video';
+          readonly materialSlots: readonly {
+            readonly id: string;
+            readonly role: string;
+            readonly required: boolean;
+            readonly acceptedMediaKinds: readonly ('image' | 'video')[];
+          }[];
+        }
+    )[];
+  };
 }
 
 export interface ProviderRoutingSummaryDto {
