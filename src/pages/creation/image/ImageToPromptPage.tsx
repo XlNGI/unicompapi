@@ -1,7 +1,7 @@
-import { CreationModePage } from '../CreationModePage';
 import { imageCreationModes } from '../creationModes';
+import { ImageWorkbenchPage } from './ImageWorkbenchPage';
 
 export function ImageToPromptPage() {
   const mode = imageCreationModes[4];
-  return <CreationModePage {...mode} title={mode.label} />;
+  return <ImageWorkbenchPage mode={mode} />;
 }
