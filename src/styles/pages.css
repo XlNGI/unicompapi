@@ -565,6 +565,28 @@
   gap: var(--uc-space-3);
 }
 
+.uc-image-editing__workspace {
+  display: grid;
+  grid-template-columns:
+    minmax(320px, 0.9fr)
+    minmax(440px, 1.25fr)
+    minmax(300px, 0.85fr);
+  gap: var(--uc-space-4);
+  align-items: start;
+}
+
+.uc-image-editing__lineage {
+  display: grid;
+  gap: var(--uc-space-4);
+}
+
+.uc-image-editing__lineage .uc-empty-state {
+  min-height: 180px;
+  padding: var(--uc-space-4);
+  background: var(--uc-color-surface-base);
+  box-shadow: none;
+}
+
 @media (max-width: 1500px) {
   .uc-image-workbench__project-strip {
     grid-template-columns: repeat(3, minmax(140px, 1fr));
@@ -591,8 +613,13 @@
     grid-template-columns: minmax(320px, 0.8fr) minmax(460px, 1.2fr);
   }
 
-  .uc-image-understanding__workspace > :last-child {
+  .uc-image-understanding__workspace > :last-child,
+  .uc-image-editing__workspace > :last-child {
     grid-column: 1 / -1;
+  }
+
+  .uc-image-editing__workspace {
+    grid-template-columns: minmax(320px, 0.8fr) minmax(460px, 1.2fr);
   }
 
   .uc-image-understanding__result-grid {
@@ -604,12 +631,14 @@
   .uc-image-workbench__workspace,
   .uc-image-workbench__project-strip,
   .uc-image-professional__workspace,
-  .uc-image-understanding__workspace {
+  .uc-image-understanding__workspace,
+  .uc-image-editing__workspace {
     grid-template-columns: 1fr;
   }
 
   .uc-image-workbench__capabilities,
-  .uc-image-understanding__workspace > :last-child {
+  .uc-image-understanding__workspace > :last-child,
+  .uc-image-editing__workspace > :last-child {
     grid-column: auto;
   }
 

@@ -17,6 +17,7 @@ import { ProvidersPage } from '../pages/providers/ProvidersPage';
 import { SettingsPage } from '../pages/settings/SettingsPage';
 import { TasksPage } from '../pages/tasks/TasksPage';
 import { VideoCreationPage } from '../pages/video-creation/VideoCreationPage';
+import type { ImageWorkspaceDtoMode } from '../shared/image-workspace-ipc';
 import { AppLayout } from './layout/AppLayout';
 import {
   defaultNavigationItemId,
@@ -51,6 +52,17 @@ const pagesBySecondaryNavigationItem: Record<
   'video-editing': VideoEditingPage
 };
 
+const imageModeNavigationIds: Record<
+  ImageWorkspaceDtoMode,
+  SecondaryNavigationItemId
+> = {
+  quick_image: 'quick-image',
+  professional_image: 'professional-image',
+  image_understanding: 'image-understanding',
+  image_editing: 'image-editing',
+  image_to_prompt: 'image-to-prompt'
+};
+
 export function App() {
   const [activeItemId, setActiveItemId] = useState<NavigationItemId>(
     defaultNavigationItemId
@@ -74,6 +86,10 @@ export function App() {
     setActiveSubItemId(subItemId);
   }
 
+  function handleImageModeNavigate(mode: ImageWorkspaceDtoMode) {
+    handleSecondaryNavigate('image-creation', imageModeNavigationIds[mode]);
+  }
+
   return (
     <AppLayout
       activeItemId={activeItemId}
@@ -95,16 +111,11 @@ export function App() {
         />
       ) : activeSubItemId === 'image-understanding' ? (
         <ImageUnderstandingPage
-          onNavigateToImageMode={(mode) =>
-            handleSecondaryNavigate(
-              'image-creation',
-              mode === 'professional_image'
-                ? 'professional-image'
-                : mode === 'image_editing'
-                  ? 'image-editing'
-                  : 'image-to-prompt'
-            )
-          }
+          onNavigateToImageMode={handleImageModeNavigate}
+        />
+      ) : activeSubItemId === 'image-editing' ? (
+        <ImageEditingPage
+          onNavigateToImageMode={handleImageModeNavigate}
         />
       ) : (
         <ActivePage />
