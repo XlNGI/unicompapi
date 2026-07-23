@@ -11,6 +11,10 @@ import {
   imageWorkspaceIpcChannels,
   type ImageWorkspaceApi
 } from '../src/shared/image-workspace-ipc';
+import {
+  imageSubmissionIpcChannels,
+  type ImageSubmissionApi
+} from '../src/shared/image-submission-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -141,7 +145,30 @@ const imageWorkspaces: ImageWorkspaceApi = {
     })
 };
 
+const imageSubmissions: ImageSubmissionApi = {
+  preflight: (draftId) =>
+    ipcRenderer.invoke(imageSubmissionIpcChannels.preflight, { draftId }),
+  createTask: (draftId, draftUpdatedAt, modelId, confirmations) =>
+    ipcRenderer.invoke(imageSubmissionIpcChannels.createTask, {
+      draftId,
+      draftUpdatedAt,
+      modelId,
+      confirmations
+    }),
+  createExecution: (taskId) =>
+    ipcRenderer.invoke(imageSubmissionIpcChannels.createExecution, { taskId }),
+  invokeExecution: (executionId) =>
+    ipcRenderer.invoke(imageSubmissionIpcChannels.invokeExecution, {
+      executionId
+    }),
+  receiveResult: (executionId) =>
+    ipcRenderer.invoke(imageSubmissionIpcChannels.receiveResult, {
+      executionId
+    })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
+  imageSubmissions,
   imageWorkspaces,
   platform: process.platform,
   providers,

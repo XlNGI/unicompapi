@@ -6,15 +6,18 @@ import {
   GlobalReadModelController,
   ControlledLocalMediaController,
   ImageLocalMediaController,
+  ImageSubmissionController,
   ImageWorkspaceController,
   ImageWorkspaceMutationCoordinator,
   ProjectSessionController,
   ProjectCatalogService,
+  JsonProviderRegistryStore,
   LocalMediaHandleRegistry,
   StorageProjectSessionRegistry
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
+import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
 
 export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
@@ -44,6 +47,13 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     getSession: () => sessionRegistry.get(),
     chooseImageFile: () => choosePath(['openFile']),
     handles: mediaHandles,
+    mutations: imageMutations
+  });
+  const imageSubmissions = new ImageSubmissionController({
+    getSession: () => sessionRegistry.get(),
+    providerRegistry: new JsonProviderRegistryStore(
+      path.join(app.getPath('userData'), 'provider-registry.json')
+    ),
     mutations: imageMutations
   });
   const catalog = new ProjectCatalogService(
@@ -136,6 +146,26 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   ipcMain.handle(
     imageWorkspaceIpcChannels.createInputPreview,
     (_event, request: unknown) => imageLocalMedia.createInputPreview(request)
+  );
+  ipcMain.handle(
+    imageSubmissionIpcChannels.preflight,
+    (_event, request: unknown) => imageSubmissions.preflight(request)
+  );
+  ipcMain.handle(
+    imageSubmissionIpcChannels.createTask,
+    (_event, request: unknown) => imageSubmissions.createTask(request)
+  );
+  ipcMain.handle(
+    imageSubmissionIpcChannels.createExecution,
+    (_event, request: unknown) => imageSubmissions.createExecution(request)
+  );
+  ipcMain.handle(
+    imageSubmissionIpcChannels.invokeExecution,
+    (_event, request: unknown) => imageSubmissions.invokeExecution(request)
+  );
+  ipcMain.handle(
+    imageSubmissionIpcChannels.receiveResult,
+    (_event, request: unknown) => imageSubmissions.receiveResult(request)
   );
   return mediaHandles;
 }

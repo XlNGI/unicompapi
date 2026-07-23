@@ -13,7 +13,8 @@ import {
   toProviderId,
   toRoutingPreferenceId,
   type ProviderConnection,
-  type ProviderModel
+  type ProviderModel,
+  type DynamicParameterSchema
 } from '../../domain';
 import type {
   ProviderManagementErrorCode,
@@ -59,6 +60,7 @@ export interface CapabilityValidationPort {
       | 'verification_failed'
       | 'restricted';
     readonly constraint?: string;
+    readonly parameterSchema?: DynamicParameterSchema;
     readonly observedAt: string;
   }>;
 }
@@ -410,6 +412,7 @@ export class ProviderCapabilityController {
         state: observation.state,
         source: 'connection_verified',
         constraint: observation.constraint,
+        parameterSchema: observation.parameterSchema,
         observedAt,
         updatedAt: observedAt
       });
