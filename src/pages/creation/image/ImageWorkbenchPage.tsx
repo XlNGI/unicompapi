@@ -13,6 +13,7 @@ import '../../../styles/pages.css';
 import type { ImageCreationMode } from '../creationModes';
 import { ImageProfessionalWorkspace } from './ImageProfessionalWorkspace';
 import { ImageQuickWorkspace } from './ImageQuickWorkspace';
+import { ImageUnderstandingWorkspace } from './ImageUnderstandingWorkspace';
 
 const workspaceErrorMessages: Record<ImageWorkspaceIpcErrorCode, string> = {
   project_not_open: '请先在“项目”页面新建或打开一个项目。',
@@ -36,11 +37,15 @@ const draftStateLabels: Record<ImageWorkspaceDraftDto['state'], string> = {
 interface ImageWorkbenchPageProps {
   mode: ImageCreationMode;
   onNavigateToProfessional?: () => void;
+  onNavigateToImageMode?: (
+    mode: 'professional_image' | 'image_editing' | 'image_to_prompt'
+  ) => void;
 }
 
 export function ImageWorkbenchPage({
   mode,
-  onNavigateToProfessional
+  onNavigateToProfessional,
+  onNavigateToImageMode
 }: ImageWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
@@ -150,7 +155,13 @@ export function ImageWorkbenchPage({
     try {
       const result = await imageWorkspaces.update({
         ...currentDraft,
-        state: 'saved'
+        state:
+          (currentDraft.mode === 'image_understanding' &&
+            currentDraft.understanding.analysisState === 'stale') ||
+          (currentDraft.mode === 'image_to_prompt' &&
+            currentDraft.imageToPrompt.analysisState === 'stale')
+            ? 'stale'
+            : 'saved'
       });
       if (!result.ok) {
         setMessage(workspaceErrorMessages[result.error.code]);
@@ -211,7 +222,9 @@ export function ImageWorkbenchPage({
           <Button
             disabled={
               !currentDraft ||
-              (currentDraft.state === 'saved' && !dirty) ||
+              (!dirty &&
+                (currentDraft.state === 'saved' ||
+                  currentDraft.state === 'stale')) ||
               currentDraft.state === 'archived' ||
               busy
             }
@@ -258,6 +271,15 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           registry={providerRegistry}
+        />
+      ) : currentDraft?.mode === 'image_understanding' ? (
+        <ImageUnderstandingWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
+          onNavigate={onNavigateToImageMode}
         />
       ) : (
         <>

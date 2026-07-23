@@ -158,11 +158,13 @@ export function ImageSubmissionConfirmations({
   candidate,
   confirmations,
   finalPrompt,
+  promptLabel = '最终提示词',
   onChange
 }: {
   readonly candidate: ImagePreflightCandidateDto;
   readonly confirmations: ImageSubmissionConfirmationDto;
   readonly finalPrompt: string;
+  readonly promptLabel?: string;
   readonly onChange: (confirmations: ImageSubmissionConfirmationDto) => void;
 }) {
   return (
@@ -189,7 +191,7 @@ export function ImageSubmissionConfirmations({
       />
       <Confirmation
         checked={confirmations.finalPrompt}
-        label={`最终提示词：${finalPrompt}`}
+        label={`${promptLabel}：${finalPrompt}`}
         onChange={(checked) =>
           onChange({ ...confirmations, finalPrompt: checked })
         }
