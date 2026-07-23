@@ -15,6 +15,7 @@ import {
   imageSubmissionErrorMessages,
   ImageSubmissionConfirmations
 } from './ImageGenerationControls';
+import { ImageRegionFields } from './ImageRegionFields';
 
 type UnderstandingDraftDto = Extract<
   ImageWorkspaceDraftDto,
@@ -182,31 +183,6 @@ export function ImageUnderstandingWorkspace({
     });
   }
 
-  function toggleRegion(enabled: boolean) {
-    if (!draft.input) return;
-    changeDraft({
-      ...draft,
-      input: {
-        ...draft.input,
-        region: enabled ? { x: 0, y: 0, width: 1, height: 1 } : undefined
-      }
-    });
-  }
-
-  function changeRegion(
-    key: 'x' | 'y' | 'width' | 'height',
-    percent: number
-  ) {
-    if (!draft.input?.region || !Number.isFinite(percent)) return;
-    const region = { ...draft.input.region };
-    const minimum = key === 'width' || key === 'height' ? 0.01 : 0;
-    const maximum = key === 'x' || key === 'y' ? 0.99 : 1;
-    region[key] = Math.min(maximum, Math.max(minimum, percent / 100));
-    region.width = Math.min(region.width, 1 - region.x);
-    region.height = Math.min(region.height, 1 - region.y);
-    changeDraft({ ...draft, input: { ...draft.input, region } });
-  }
-
   async function checkRecognition() {
     if (!imageSubmissions || dirty || busy) return;
     setBusy(true);
@@ -317,45 +293,19 @@ export function ImageUnderstandingWorkspace({
             />
             <small>{draft.input?.purpose?.length ?? 0} / 500</small>
           </label>
-          <label className="uc-image-quick__checkbox">
-            <input
-              checked={Boolean(draft.input?.region)}
-              disabled={!draft.input}
-              onChange={(event) => toggleRegion(event.target.checked)}
-              type="checkbox"
-            />
-            <span>启用区域识别（不勾选时识别全图）</span>
-          </label>
-          {draft.input?.region ? (
-            <div
-              aria-label="识别区域百分比"
-              className="uc-image-understanding__region-fields"
-            >
-              {(['x', 'y', 'width', 'height'] as const).map((key) => (
-                <label className="uc-image-quick__field" key={key}>
-                  <span>
-                    {key === 'x'
-                      ? '左侧'
-                      : key === 'y'
-                        ? '顶部'
-                        : key === 'width'
-                          ? '宽度'
-                          : '高度'}
-                    （%）
-                  </span>
-                  <input
-                    max={key === 'x' || key === 'y' ? 99 : 100}
-                    min={key === 'width' || key === 'height' ? 1 : 0}
-                    onChange={(event) =>
-                      changeRegion(key, Number(event.target.value))
-                    }
-                    type="number"
-                    value={Math.round(draft.input!.region![key] * 100)}
-                  />
-                </label>
-              ))}
-            </div>
-          ) : null}
+          <ImageRegionFields
+            disabled={!draft.input}
+            label="启用区域识别（不勾选时识别全图）"
+            onChange={(region) => {
+              if (draft.input) {
+                changeDraft({
+                  ...draft,
+                  input: { ...draft.input, region }
+                });
+              }
+            }}
+            region={draft.input?.region}
+          />
           <label className="uc-image-quick__field">
             <span>结果保存范围</span>
             <select

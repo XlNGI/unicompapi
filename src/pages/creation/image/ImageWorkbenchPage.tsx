@@ -5,12 +5,14 @@ import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   ImageWorkspaceDraftDto,
-  ImageWorkspaceIpcErrorCode
+  ImageWorkspaceIpcErrorCode,
+  ImageWorkspaceDtoMode
 } from '../../../shared/image-workspace-ipc';
 import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
 import type { StorageProjectSessionDto } from '../../../shared/storage-ipc';
 import '../../../styles/pages.css';
 import type { ImageCreationMode } from '../creationModes';
+import { ImageEditingWorkspace } from './ImageEditingWorkspace';
 import { ImageProfessionalWorkspace } from './ImageProfessionalWorkspace';
 import { ImageQuickWorkspace } from './ImageQuickWorkspace';
 import { ImageUnderstandingWorkspace } from './ImageUnderstandingWorkspace';
@@ -38,7 +40,7 @@ interface ImageWorkbenchPageProps {
   mode: ImageCreationMode;
   onNavigateToProfessional?: () => void;
   onNavigateToImageMode?: (
-    mode: 'professional_image' | 'image_editing' | 'image_to_prompt'
+    mode: ImageWorkspaceDtoMode
   ) => void;
 }
 
@@ -280,6 +282,16 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigate={onNavigateToImageMode}
+        />
+      ) : currentDraft?.mode === 'image_editing' ? (
+        <ImageEditingWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
+          onNavigate={onNavigateToImageMode}
+          registry={providerRegistry}
         />
       ) : (
         <>

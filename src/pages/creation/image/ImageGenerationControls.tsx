@@ -5,7 +5,9 @@ import type {
 } from '../../../shared/image-submission-ipc';
 import type {
   ImageWorkspaceDraftDto,
-  ImageWorkspaceParameterValueDto
+  ImageWorkspaceModelDto,
+  ImageWorkspaceParameterValueDto,
+  ImageWorkspaceParametersDto
 } from '../../../shared/image-workspace-ipc';
 import type {
   ProviderCapabilitySummaryDto,
@@ -15,6 +17,11 @@ import type {
 export type GenerationImageDraftDto = Extract<
   ImageWorkspaceDraftDto,
   { readonly generation: object }
+>;
+
+export type EditingImageDraftDto = Extract<
+  ImageWorkspaceDraftDto,
+  { readonly mode: 'image_editing' }
 >;
 
 export const imageSubmissionErrorMessages: Record<
@@ -57,9 +64,65 @@ export function ImageGenerationModelFields({
   readonly registry?: ProviderRegistryDto;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
 }) {
-  const modelOptions = getGenerationModelOptions(registry);
+  return (
+    <ImageModelFields
+      label="图片生成模型"
+      model={draft.generation.model}
+      onChange={(generation) => onDraftChange({ ...draft, generation })}
+      parameters={draft.generation.parameters}
+      purpose="image_generation"
+      registry={registry}
+    />
+  );
+}
+
+export function ImageEditingModelFields({
+  draft,
+  registry,
+  onDraftChange
+}: {
+  readonly draft: EditingImageDraftDto;
+  readonly registry?: ProviderRegistryDto;
+  readonly onDraftChange: (draft: EditingImageDraftDto) => void;
+}) {
+  return (
+    <ImageModelFields
+      label="图片编辑模型"
+      model={draft.editing.model}
+      onChange={(selection) =>
+        onDraftChange({
+          ...draft,
+          editing: { ...draft.editing, ...selection }
+        })
+      }
+      parameters={draft.editing.parameters}
+      purpose="image_editing"
+      registry={registry}
+    />
+  );
+}
+
+function ImageModelFields({
+  label,
+  model,
+  parameters,
+  purpose,
+  registry,
+  onChange
+}: {
+  readonly label: string;
+  readonly model?: ImageWorkspaceModelDto;
+  readonly parameters?: ImageWorkspaceParametersDto;
+  readonly purpose: 'image_generation' | 'image_editing';
+  readonly registry?: ProviderRegistryDto;
+  readonly onChange: (selection: {
+    readonly model?: ImageWorkspaceModelDto;
+    readonly parameters?: ImageWorkspaceParametersDto;
+  }) => void;
+}) {
+  const modelOptions = getModelOptions(registry, purpose);
   const selectedOption = modelOptions.find(
-    (option) => option.modelId === draft.generation.model?.modelId
+    (option) => option.modelId === model?.modelId
   );
 
   function changeModel(modelId: string) {
@@ -69,9 +132,8 @@ export function ImageGenerationModelFields({
         !candidate.reason &&
         candidate.evidence
     );
-    onDraftChange({
-      ...draft,
-      generation: option?.evidence
+    onChange(
+      option?.evidence
         ? {
             model: {
               modelId: option.modelId,
@@ -83,7 +145,7 @@ export function ImageGenerationModelFields({
             }
           }
         : {}
-    });
+    );
   }
 
   function changeParameter(
@@ -92,13 +154,11 @@ export function ImageGenerationModelFields({
   ) {
     if (!selectedOption?.evidence || selectedOption.reason) return;
     const values = {
-      ...(draft.generation.parameters?.values ?? {})
+      ...(parameters?.values ?? {})
     } as Record<string, ImageWorkspaceParameterValueDto>;
     if (value === undefined) delete values[key];
     else values[key] = value;
-    onDraftChange({
-      ...draft,
-      generation: {
+    onChange({
         model: {
           modelId: selectedOption.modelId,
           capabilityEvidenceId: selectedOption.evidence.evidenceId
@@ -107,18 +167,17 @@ export function ImageGenerationModelFields({
           capabilityEvidenceId: selectedOption.evidence.evidenceId,
           values
         }
-      }
     });
   }
 
   return (
     <>
       <label className="uc-image-quick__field">
-        <span>图片生成模型</span>
+        <span>{label}</span>
         <select
           disabled={modelOptions.length === 0}
           onChange={(event) => changeModel(event.target.value)}
-          value={draft.generation.model?.modelId ?? ''}
+          value={model?.modelId ?? ''}
         >
           <option value="">请选择模型</option>
           {modelOptions.map((option) => (
@@ -135,7 +194,7 @@ export function ImageGenerationModelFields({
       </label>
       {modelOptions.length === 0 ? (
         <p className="uc-image-quick__hint">
-          没有图片生成模型或路由；请先在“模型与服务商”页面完成配置。
+          没有符合当前用途的模型或路由；请先在“模型与服务商”页面完成配置。
         </p>
       ) : null}
       {selectedOption?.evidence && !selectedOption.reason ? (
@@ -145,7 +204,7 @@ export function ImageGenerationModelFields({
               field={field}
               key={field.key}
               onChange={(value) => changeParameter(field.key, value)}
-              value={draft.generation.parameters?.values[field.key]}
+              value={parameters?.values[field.key]}
             />
           ))}
         </div>
@@ -212,15 +271,14 @@ interface GenerationModelOption {
   readonly reason?: string;
 }
 
-function getGenerationModelOptions(
-  registry?: ProviderRegistryDto
+function getModelOptions(
+  registry: ProviderRegistryDto | undefined,
+  purpose: 'image_generation' | 'image_editing'
 ): readonly GenerationModelOption[] {
   if (!registry) return [];
   const routeModelIds = new Set(
     registry.routingPreferences
-      .filter(
-        (route) => route.enabled && route.purpose === 'image_generation'
-      )
+      .filter((route) => route.enabled && route.purpose === purpose)
       .map((route) => route.modelId)
   );
 
@@ -231,14 +289,14 @@ function getGenerationModelOptions(
         registry.capabilities.some(
           (capability) =>
             capability.modelId === model.modelId &&
-            capability.capability === 'image_generation'
+            capability.capability === purpose
         )
     )
     .map<GenerationModelOption>((model) => {
       const evidenceItems = registry.capabilities.filter(
         (capability) =>
           capability.modelId === model.modelId &&
-          capability.capability === 'image_generation'
+          capability.capability === purpose
       );
       const evidence =
         evidenceItems.find((capability) =>
@@ -250,7 +308,7 @@ function getGenerationModelOptions(
       const reason = !model.enabled
         ? '模型已停用'
         : !routeModelIds.has(model.modelId)
-          ? '未启用图片生成路由'
+          ? '未启用当前用途路由'
           : connection?.state !== 'available'
             ? '连接不可用'
             : !evidence
