@@ -4,3 +4,5 @@ export * from './project-catalog';
 export * from './global-read-model-controller';
 export * from './controlled-local-media';
 export * from './image-workspace-controller';
+export * from './image-local-media-controller';
+export * from './image-workspace-mutations';

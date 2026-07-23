@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 5｜图片创作进行中。阶段 4 已正式收口；阶段 5 B1 图片工作区领域契约已完成，等待提交并合并到 `develop`，随后按顺序推进 A1 公共工作区和 B2 本地单图输入。
+当前状态：阶段 5｜图片创作进行中。阶段 4 已正式收口；阶段 5 B1 已合并到 `develop`，B2 本地单图输入与受控预览已在 `feature/image-local-media` 完成，按合并顺序等待 A1 公共工作区先合并。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -166,7 +166,17 @@ B1 完整门禁为 40 项 UI/IPC/安全契约测试、86 项领域与平台测�
 docs/active/阶段5-B1-图片工作区领域契约记录.md
 ```
 
-下一步按合并顺序先将 B1 合并到 `develop`，开发者 A 再从最新 `develop` 接入公共工作区；开发者 B 后续从最新 `develop` 创建 `feature/image-local-media` 实现 B2。真实上传、生成、识别、编辑、提示词分析和 HTTP 适配器仍未开始，继续等待后台契约。
+B1 已通过 `dda88a7 Merge image workspace contracts` 合并到 `develop`。开发者 A 可基于该提交接入公共工作区；真实上传、生成、识别、编辑、提示词分析和 HTTP 适配器仍未开始，继续等待后台契约。
+
+阶段 5 B2 已完成：图片只通过主进程原生文件选择器获得明确授权，不接收 renderer 路径；本地检查按文件内容识别 PNG、JPEG、GIF、WebP 和 BMP，读取真实像素尺寸、字节数并流式计算 SHA-256。通过校验后登记外部 FileReference 与 imported Asset，图片工作区只保存 Asset ID；预览前重新校验文件并生成短期 `unicomp-media` 句柄，协议响应使用已识别 MIME，不向 renderer 返回绝对路径或原始 Hash。图片、区域、用途和要求变化会保留旧分析并标记过期；整个流程不上传、不分析、不创建任务、执行或作品。
+
+B2 完整门禁为 40 项 UI/IPC/安全契约测试、95 项领域与平台测试，共 135 项且 0 失败；TypeScript、ESLint、生产构建和差异检查通过。工程记录见：
+
+```text
+docs/active/阶段5-B2-本地图片输入与预览记录.md
+```
+
+下一步：先等待开发者 A 的 `feature/image-workbench-shell` 按顺序合并；随后 B2 同步最新 `develop`、复验并合并，之后开发者 B 创建 `feature/image-submission-pipeline` 推进 B3。
 
 真实生成、识别、编辑和提示词分析 HTTP 适配器继续等待后台 Base URL、鉴权、接口、错误码和媒体限制契约；该阻断不影响本地工作区与离线页面先行。
 

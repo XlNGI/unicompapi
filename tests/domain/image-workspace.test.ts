@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyImageWorkspaceChangeStaleness,
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
   deriveImageWorkspaceDraft,
@@ -201,6 +202,52 @@ describe('image workspace contracts', () => {
     expect(stale.imageToPrompt.observations.visibleFacts).toEqual(
       analyzed.imageToPrompt.observations.visibleFacts
     );
+  });
+
+  it('marks region, purpose and requirement changes with separate stale reasons', () => {
+    const base = createEmpty('image_to_prompt') as ImageToPromptWorkspaceDraft;
+    const analyzed = createImageWorkspaceDraft({
+      ...base,
+      state: 'saved',
+      input: {
+        assetId: toAssetId('asset-analysis-source'),
+        role: 'source',
+        purpose: 'source purpose',
+        region: { x: 0, y: 0, width: 1, height: 1 },
+        selectedAt: t0
+      },
+      imageToPrompt: {
+        ...base.imageToPrompt,
+        analysisState: 'current',
+        purpose: 'listing',
+        requirements: ['Keep facts'],
+        analyzedAt: t0
+      }
+    });
+    const changed = createImageWorkspaceDraft({
+      ...analyzed,
+      input: {
+        ...analyzed.input,
+        region: { x: 0, y: 0, width: 0.5, height: 1 }
+      },
+      imageToPrompt: {
+        ...analyzed.imageToPrompt,
+        purpose: 'advertisement',
+        requirements: ['Keep facts', 'Mention lighting']
+      },
+      updatedAt: t1
+    });
+
+    const stale = applyImageWorkspaceChangeStaleness(analyzed, changed, t1);
+    if (stale.mode !== 'image_to_prompt') {
+      throw new Error('unexpected mode');
+    }
+
+    expect(stale.imageToPrompt.staleReasons).toEqual([
+      'region_changed',
+      'purpose_changed',
+      'requirements_changed'
+    ]);
   });
 
   it('rejects unsupported modes, wrong input roles and unbounded regions', () => {

@@ -32,6 +32,7 @@ export const isAssetEntity: EntityValidator = (value) =>
   isOneOf(value.mediaKind, mediaKinds) &&
   isOneOf(value.origin, assetOrigins) &&
   (value.role === undefined || typeof value.role === 'string') &&
+  (value.imageMetadata === undefined || isImageAssetMetadata(value.imageMetadata)) &&
   isCanonicalIsoTimestamp(value.createdAt);
 
 export const isFileReferenceEntity: EntityValidator = (value) =>
@@ -97,6 +98,15 @@ function isFileLocator(value: unknown): boolean {
     isRecord(value) &&
     ((value.kind === 'project' && isNonBlankString(value.relativePath)) ||
       (value.kind === 'external' && isNonBlankString(value.absolutePath)))
+  );
+}
+
+function isImageAssetMetadata(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonBlankString(value.mimeType) &&
+    isPositiveInteger(value.width) &&
+    isPositiveInteger(value.height)
   );
 }
 

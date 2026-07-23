@@ -5,7 +5,9 @@ import {
   JsonProjectCatalogStore,
   GlobalReadModelController,
   ControlledLocalMediaController,
+  ImageLocalMediaController,
   ImageWorkspaceController,
+  ImageWorkspaceMutationCoordinator,
   ProjectSessionController,
   ProjectCatalogService,
   LocalMediaHandleRegistry,
@@ -32,14 +34,22 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     chooseRelinkFile: () => choosePath(['openFile']),
     chooseBackupFile: () => choosePath(['openFile'])
   });
+  const mediaHandles = new LocalMediaHandleRegistry();
+  const imageMutations = new ImageWorkspaceMutationCoordinator();
   const imageWorkspaces = new ImageWorkspaceController({
-    getSession: () => sessionRegistry.get()
+    getSession: () => sessionRegistry.get(),
+    mutations: imageMutations
+  });
+  const imageLocalMedia = new ImageLocalMediaController({
+    getSession: () => sessionRegistry.get(),
+    chooseImageFile: () => choosePath(['openFile']),
+    handles: mediaHandles,
+    mutations: imageMutations
   });
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
   const readModels = new GlobalReadModelController(catalog);
-  const mediaHandles = new LocalMediaHandleRegistry();
   const localMedia = new ControlledLocalMediaController({
     catalog,
     handles: mediaHandles,
@@ -114,6 +124,18 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   ipcMain.handle(imageWorkspaceIpcChannels.list, () => imageWorkspaces.list());
   ipcMain.handle(imageWorkspaceIpcChannels.derive, (_event, request: unknown) =>
     imageWorkspaces.derive(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.selectInput,
+    (_event, request: unknown) => imageLocalMedia.selectInput(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.getInput,
+    (_event, request: unknown) => imageLocalMedia.getInput(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.createInputPreview,
+    (_event, request: unknown) => imageLocalMedia.createInputPreview(request)
   );
   return mediaHandles;
 }

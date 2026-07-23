@@ -420,6 +420,67 @@ export function markImageAnalysisStale(
   };
 }
 
+export function applyImageWorkspaceChangeStaleness(
+  previous: ImageWorkspaceDraft,
+  next: ImageWorkspaceDraft,
+  updatedAt: IsoTimestamp
+): ImageWorkspaceDraft {
+  if (previous.mode !== next.mode || previous.id !== next.id) {
+    throw new TypeError('image workspace staleness requires the same draft');
+  }
+
+  if (
+    previous.mode === 'image_understanding' &&
+    next.mode === 'image_understanding'
+  ) {
+    if (previous.understanding.analysisState === 'not_analyzed') {
+      return next;
+    }
+
+    let updated = next;
+    if (previous.input?.assetId !== next.input?.assetId) {
+      updated = markImageAnalysisStale(updated, 'input_changed', updatedAt);
+    }
+    if (!sameValue(previous.input?.region, next.input?.region)) {
+      updated = markImageAnalysisStale(updated, 'region_changed', updatedAt);
+    }
+    if (previous.input?.purpose !== next.input?.purpose) {
+      updated = markImageAnalysisStale(updated, 'purpose_changed', updatedAt);
+    }
+    return updated;
+  }
+
+  if (previous.mode === 'image_to_prompt' && next.mode === 'image_to_prompt') {
+    if (previous.imageToPrompt.analysisState === 'not_analyzed') {
+      return next;
+    }
+
+    let updated = next;
+    if (previous.input?.assetId !== next.input?.assetId) {
+      updated = markImageAnalysisStale(updated, 'input_changed', updatedAt);
+    }
+    if (!sameValue(previous.input?.region, next.input?.region)) {
+      updated = markImageAnalysisStale(updated, 'region_changed', updatedAt);
+    }
+    if (previous.imageToPrompt.purpose !== next.imageToPrompt.purpose) {
+      updated = markImageAnalysisStale(updated, 'purpose_changed', updatedAt);
+    }
+    if (!sameValue(
+      previous.imageToPrompt.requirements,
+      next.imageToPrompt.requirements
+    )) {
+      updated = markImageAnalysisStale(
+        updated,
+        'requirements_changed',
+        updatedAt
+      );
+    }
+    return updated;
+  }
+
+  return next;
+}
+
 export function isImageWorkspaceDraft(
   value: unknown
 ): value is ImageWorkspaceDraft {
@@ -499,6 +560,10 @@ function clonePrompt(prompt: PromptSnapshot): PromptSnapshot {
       ...supplement
     }))
   };
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function addUnique<TValue>(
