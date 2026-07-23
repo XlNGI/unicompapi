@@ -11,6 +11,7 @@ import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
 import type { StorageProjectSessionDto } from '../../../shared/storage-ipc';
 import '../../../styles/pages.css';
 import type { ImageCreationMode } from '../creationModes';
+import { ImageProfessionalWorkspace } from './ImageProfessionalWorkspace';
 import { ImageQuickWorkspace } from './ImageQuickWorkspace';
 
 const workspaceErrorMessages: Record<ImageWorkspaceIpcErrorCode, string> = {
@@ -54,7 +55,9 @@ export function ImageWorkbenchPage({
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const currentDraft = drafts[drafts.length - 1];
-  const isQuickImage = mode.workspaceMode === 'quick_image';
+  const isGenerationImage =
+    mode.workspaceMode === 'quick_image' ||
+    mode.workspaceMode === 'professional_image';
 
   useEffect(() => {
     let active = true;
@@ -167,6 +170,16 @@ export function ImageWorkbenchPage({
     }
   }
 
+  function replaceCurrentDraft(
+    draft: ImageWorkspaceDraftDto,
+    hasUnsavedChanges: boolean
+  ) {
+    setDrafts((items) =>
+      items.map((item) => (item.draftId === draft.draftId ? draft : item))
+    );
+    setDirty(hasUnsavedChanges);
+  }
+
   const projectStatus = loading
     ? '正在读取'
     : session
@@ -231,24 +244,19 @@ export function ImageWorkbenchPage({
         <ImageQuickWorkspace
           dirty={dirty}
           draft={currentDraft}
-          onDraftChange={(draft) => {
-            setDrafts((items) =>
-              items.map((item) =>
-                item.draftId === draft.draftId ? draft : item
-              )
-            );
-            setDirty(true);
-          }}
-          onDraftPersisted={(draft) => {
-            setDrafts((items) =>
-              items.map((item) =>
-                item.draftId === draft.draftId ? draft : item
-              )
-            );
-            setDirty(false);
-          }}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToProfessional={onNavigateToProfessional}
+          registry={providerRegistry}
+        />
+      ) : currentDraft?.mode === 'professional_image' ? (
+        <ImageProfessionalWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
           registry={providerRegistry}
         />
       ) : (
@@ -361,18 +369,22 @@ export function ImageWorkbenchPage({
             <div>
               <dt>图片能力</dt>
               <dd>
-                {isQuickImage ? '待创建草稿后预检' : '未知，等待 B3 预检'}
+                {isGenerationImage
+                  ? '待创建草稿后预检'
+                  : '未知，等待 B3 预检'}
               </dd>
             </div>
             <div>
               <dt>动态参数</dt>
               <dd>
-                {isQuickImage ? '由模型能力 Schema 动态提供' : '尚未提供 Schema'}
+                {isGenerationImage
+                  ? '由模型能力 Schema 动态提供'
+                  : '尚未提供 Schema'}
               </dd>
             </div>
             <div>
               <dt>在线适配器</dt>
-              <dd>{isQuickImage ? '待预检' : '不可用'}</dd>
+              <dd>{isGenerationImage ? '待预检' : '不可用'}</dd>
             </div>
             <div>
               <dt>费用与外发范围</dt>
@@ -380,7 +392,7 @@ export function ImageWorkbenchPage({
             </div>
           </dl>
           <Button disabled>
-            {isQuickImage
+            {isGenerationImage
               ? '创建并保存草稿后检查'
               : '能力预检未接入，无法提交'}
           </Button>
@@ -390,7 +402,7 @@ export function ImageWorkbenchPage({
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="warning">真实离线状态</StatusPill>
         <p>
-          {isQuickImage
+          {isGenerationImage
             ? '创建项目内草稿后，可填写需求、选择单张参考图并检查真实提交条件。'
             : '当前仅支持项目内图片草稿的创建、读取和保存。选图、预览、模型预检与任务提交等待 B2/B3。'}
         </p>
