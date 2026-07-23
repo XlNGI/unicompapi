@@ -1,7 +1,6 @@
-import { CreationModePage } from '../CreationModePage';
 import { videoCreationModes } from '../creationModes';
+import { VideoWorkbenchPage } from './VideoWorkbenchPage';
 
 export function VideoQuickPage() {
-  const mode = videoCreationModes[0];
-  return <CreationModePage {...mode} title={mode.label} />;
+  return <VideoWorkbenchPage mode={videoCreationModes[0]} />;
 }

@@ -49,26 +49,29 @@ export const imageCreationModes = [
 export const videoCreationModes = [
   {
     id: 'quick-video',
+    workspaceMode: 'quick_video',
     label: '快速视频',
     description: '以最少配置开始视频创作。',
-    emptyTitle: '快速视频尚未接入',
-    emptyDescription: '当前不创建任务；可用能力、时长和费用将在验证后动态提供。',
+    emptyTitle: '还没有快速视频草稿',
+    emptyDescription: '可先创建项目内本地草稿；选择素材不会自动上传或生成。',
     icon: '快'
   },
   {
     id: 'text-to-video',
+    workspaceMode: 'text_to_video',
     label: '文生视频',
     description: '从文本上下文整理视频创作草稿。',
-    emptyTitle: '文生视频尚未接入',
-    emptyDescription: '当前只保留草稿入口；提交任务前的外发范围和费用确认将在后续阶段实现。',
+    emptyTitle: '还没有文生视频草稿',
+    emptyDescription: '可先创建项目内本地草稿；上下文、镜头方案和提交仍等待受控端口。',
     icon: '文'
   },
   {
     id: 'image-to-video',
+    workspaceMode: 'image_to_video',
     label: '图生视频',
     description: '从已选择的图片素材整理视频创作草稿。',
-    emptyTitle: '图生视频尚未接入',
-    emptyDescription: '当前不读取未明确选择的素材，也不创建远端任务。',
+    emptyTitle: '还没有图生视频草稿',
+    emptyDescription: '可先创建项目内本地草稿；图片槽位与数量必须等待动态能力事实。',
     icon: '图'
   },
   {
@@ -84,3 +87,4 @@ export const videoCreationModes = [
 export type ImageCreationModeId = (typeof imageCreationModes)[number]['id'];
 export type ImageCreationMode = (typeof imageCreationModes)[number];
 export type VideoCreationModeId = (typeof videoCreationModes)[number]['id'];
+export type VideoCreationMode = (typeof videoCreationModes)[number];
