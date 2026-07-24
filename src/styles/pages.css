@@ -382,6 +382,74 @@
   grid-area: prompt;
 }
 
+.uc-video-image__workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.36fr);
+}
+
+.uc-video-image__main,
+.uc-video-image__work-grid {
+  display: grid;
+  gap: var(--uc-space-4);
+  align-items: start;
+}
+
+.uc-video-image__work-grid {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "materials"
+    "requirements"
+    "motion"
+    "prompt";
+}
+
+.uc-video-image__materials {
+  grid-area: materials;
+}
+
+.uc-video-image__materials .uc-empty-state {
+  min-height: 0;
+  align-content: start;
+  padding: var(--uc-space-4);
+}
+
+.uc-video-image__requirements {
+  grid-area: requirements;
+}
+
+.uc-video-image__motion {
+  grid-area: motion;
+}
+
+.uc-video-image__prompt {
+  grid-area: prompt;
+}
+
+.uc-video-image__requirements-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--uc-space-3);
+}
+
+.uc-video-image__motion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--uc-space-3);
+}
+
+.uc-video-image__handoff {
+  display: grid;
+  gap: var(--uc-space-3);
+  border-top: 1px solid var(--uc-color-border-subtle);
+  padding-top: var(--uc-space-4);
+}
+
+.uc-video-image__handoff p {
+  margin: 0;
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-body);
+}
+
 .uc-image-professional__contexts {
   display: grid;
   gap: var(--uc-space-2);
@@ -714,7 +782,12 @@
     grid-template-columns: 1fr;
   }
 
-  .uc-video-text__workspace .uc-video-text__submit {
+  .uc-video-image__workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .uc-video-text__workspace .uc-video-text__submit,
+  .uc-video-image__workspace .uc-video-image__submit {
     grid-column: auto;
   }
 
@@ -767,6 +840,7 @@
   }
 
   .uc-video-text__work-grid,
+  .uc-video-image__work-grid,
   .uc-video-text__source .uc-image-professional__contexts {
     grid-template-columns: 1fr;
   }
@@ -775,6 +849,14 @@
     grid-template-areas:
       "materials"
       "shots"
+      "prompt";
+  }
+
+  .uc-video-image__work-grid {
+    grid-template-areas:
+      "materials"
+      "requirements"
+      "motion"
       "prompt";
   }
 
@@ -791,7 +873,9 @@
   .uc-image-understanding__region-fields,
   .uc-image-understanding__result-grid,
   .uc-image-understanding__revision,
-  .uc-image-to-prompt__result-grid {
+  .uc-image-to-prompt__result-grid,
+  .uc-video-image__requirements-grid,
+  .uc-video-image__motion-grid {
     grid-template-columns: 1fr;
   }
 }

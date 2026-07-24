@@ -13,6 +13,7 @@ import type {
 import '../../../styles/pages.css';
 import type { VideoCreationMode } from '../creationModes';
 import { VideoQuickWorkspace } from './VideoQuickWorkspace';
+import { VideoImageWorkspace } from './VideoImageWorkspace';
 import { VideoTextWorkspace } from './VideoTextWorkspace';
 
 const workspaceErrorMessages: Record<VideoWorkspaceIpcErrorCode, string> = {
@@ -323,6 +324,15 @@ export function VideoWorkbenchPage({
           onMessage={setMessage}
           registry={registry}
         />
+      ) : currentDraft?.mode === 'image_to_video' ? (
+        <VideoImageWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
+          registry={registry}
+        />
       ) : (
         <>
       <div className="uc-image-workbench__workspace">
@@ -352,7 +362,7 @@ export function VideoWorkbenchPage({
                 readOnly
                 title="需要先打开项目"
               />
-            ) : !currentDraft ? (
+            ) : (
               <EmptyState
                 action={
                   <Button disabled={busy} onClick={() => void createDraft()}>
@@ -363,27 +373,6 @@ export function VideoWorkbenchPage({
                 icon={mode.icon}
                 title={mode.emptyTitle}
               />
-            ) : (
-              <div className="uc-image-workbench__draft">
-                <div className="uc-image-workbench__draft-status">
-                  <StatusPill
-                    tone={currentDraft.state === 'saved' ? 'success' : 'info'}
-                  >
-                    {draftStateLabels[currentDraft.state]}
-                  </StatusPill>
-                  <span>
-                    {currentDraft.origin.kind === 'derived'
-                      ? '派生草稿'
-                      : '新建草稿'}
-                  </span>
-                </div>
-                <EmptyState
-                  description="模式输入将在对应页面任务中接入；当前草稿不读取未选择的素材或上下文。"
-                  icon={mode.icon}
-                  readOnly
-                  title="本地视频草稿已就绪"
-                />
-              </div>
             )
           ) : (
             <EmptyState
@@ -404,18 +393,14 @@ export function VideoWorkbenchPage({
           <EmptyState
             description={
               workspaceMode
-                ? currentDraft
-                  ? 'B2 受控素材端口已具备，但当前 A1 页面尚未接入选择与预览；B4 正式作品也未接入。'
-                  : '创建项目内本地草稿后，这里将承载素材预览与真实结果状态。'
+                ? '创建项目内本地草稿后，这里将承载素材预览与真实结果状态。'
                 : '阶段 7 未接入；这里不会显示可操作的假时间线或示例剪辑结果。'
             }
             icon={workspaceMode ? '视' : '线'}
             readOnly
             title={
               workspaceMode
-                ? currentDraft
-                  ? '受控预览与结果尚未接入'
-                  : '预览区暂无内容'
+                ? '预览区暂无内容'
                 : '编辑器不可用'
             }
           />
