@@ -40,6 +40,10 @@ export const videoSubmissionErrorMessages: Record<
   execution_not_found: '视频执行记录已不存在。',
   invalid_execution_state: '当前执行状态不允许此操作。',
   adapter_unavailable: '没有配置真实视频生成适配器，当前不会外发或生成。',
+  result_discovery_failed: '无法读取远端完成事实或视频结果清单。',
+  download_failed: '视频结果下载失败，未登记为作品。',
+  result_verification_failed: '视频结果未通过本地媒体与完整性校验。',
+  result_registration_failed: '视频文件已保留，但作品登记失败。',
   submission_storage_error: '任务或执行记录写入本地项目失败。'
 };
 

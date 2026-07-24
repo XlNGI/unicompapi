@@ -75,6 +75,29 @@ describe('execution state machine', () => {
     expect(retry.failure).toBeUndefined();
   });
 
+  it('can preserve a failure discovered after remote completion', () => {
+    const { execution } = createLinkedExecutionFixture();
+    const submitting = transitionExecution(execution, 'submitting', t3);
+    const processing = transitionExecution(submitting, 'processing', t4);
+    const remoteCompleted = transitionExecution(
+      processing,
+      'remote_completed',
+      t5
+    );
+    const failed = transitionExecution(remoteCompleted, 'failed', t6, {
+      failure: {
+        stage: 'remote_completed',
+        message: 'Result discovery failed',
+        retryability: 'retryable'
+      }
+    });
+
+    expect(failed).toMatchObject({
+      state: 'failed',
+      failure: { stage: 'remote_completed', retryability: 'retryable' }
+    });
+  });
+
   it('does not allow blind retry while cancellation status is unknown', () => {
     const { execution } = createLinkedExecutionFixture();
     const submitting = transitionExecution(execution, 'submitting', t3);

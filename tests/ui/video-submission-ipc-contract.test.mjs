@@ -7,18 +7,21 @@ const preloadSource = await readFile('electron/preload.ts', 'utf8');
 const handlerSource = await readFile('electron/ipc/storage-ipc.ts', 'utf8');
 const taskSource = await readFile('src/domain/entities/task.ts', 'utf8');
 
-test('keeps video preflight, task, execution and invocation operations separate', () => {
+test('keeps video preflight, task, execution, invocation and result operations separate', () => {
   for (const operation of [
     'preflight',
     'createTask',
     'createExecution',
-    'invokeExecution'
+    'invokeExecution',
+    'receiveResult'
   ]) {
     assert.match(sharedSource, new RegExp(`\\b${operation}\\b`));
     assert.match(preloadSource, new RegExp(`videoSubmissionIpcChannels\\.${operation}`));
     assert.match(handlerSource, new RegExp(`videoSubmissionIpcChannels\\.${operation}`));
   }
-  assert.doesNotMatch(sharedSource, /receiveResult|download|upload|poll|progress|cancel/);
+  assert.doesNotMatch(sharedSource, /upload|poll|progress|cancel/);
+  assert.match(sharedSource, /result_verification_failed/);
+  assert.match(sharedSource, /works: readonly/);
 });
 
 test('keeps video submission DTOs free of protected main-process facts', () => {

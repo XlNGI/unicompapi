@@ -226,6 +226,10 @@ const videoSubmissions: VideoSubmissionApi = {
   invokeExecution: (executionId) =>
     ipcRenderer.invoke(videoSubmissionIpcChannels.invokeExecution, {
       executionId
+    }),
+  receiveResult: (executionId) =>
+    ipcRenderer.invoke(videoSubmissionIpcChannels.receiveResult, {
+      executionId
     })
 };
 

@@ -20,7 +20,8 @@ import type {
   VideoPreflightDto,
   VideoSubmissionErrorCode,
   VideoSubmissionResult,
-  VideoTaskCreatedDto
+  VideoTaskCreatedDto,
+  VideoWorkRegisteredDto
 } from '../../shared/video-submission-ipc';
 import {
   buildVideoPreflight,
@@ -47,6 +48,11 @@ export interface VideoSubmissionControllerDependencies {
   providerRegistry: JsonProviderRegistryStore;
   mutations: VideoWorkspaceMutationCoordinator;
   operationPort?: VideoGenerationSubmitPort;
+  resultReceiver?: {
+    receive(
+      executionId: string
+    ): Promise<VideoSubmissionResult<VideoWorkRegisteredDto>>;
+  };
   createTaskId?(): string;
   createExecutionId?(): string;
   now?(): string;
@@ -265,6 +271,26 @@ export class VideoSubmissionController {
         }
       })
     );
+  }
+
+  async receiveResult(
+    request: unknown
+  ): Promise<VideoSubmissionResult<VideoWorkRegisteredDto>> {
+    try {
+      const executionId = parseId(request, 'executionId', toExecutionId);
+      if (!this.dependencies.resultReceiver) {
+        return {
+          ok: false,
+          error: {
+            code: 'adapter_unavailable',
+            message: 'No result adapter is configured for video generation'
+          }
+        };
+      }
+      return await this.dependencies.resultReceiver.receive(executionId);
+    } catch (error) {
+      return { ok: false, error: mapSubmissionError(error) };
+    }
   }
 
   private createContext() {

@@ -350,6 +350,16 @@ A4 同时接入用户原始输入、系统补充与最终提交提示词三层�
 docs/active/阶段6-A4-图生视频页面记录.md
 ```
 
+阶段 6 B4 已完成：新增视频结果端口，严格分离远端完成事实、结果发现和分块下载流。每个结果必须由服务完整声明 MIME、容器、字节数、SHA-256、时长和宽高；主进程使用 pipeline 流式写项目临时文件，超过声明字节数立即终止，并依次执行 fsync、常规文件检查、B2 可信视频探测和流式 Hash 校验，不把完整视频送入 renderer 或缓冲进主进程内存。
+
+通过临时校验的结果使用同卷排他硬链接原子发布到独立项目结果文件，不覆盖历史版本；正式路径再次完成媒体与 Hash 校验。全部结果的 available FileReference 和索引持久化成功后 Execution 才能 completed，随后每个结果分别登记独立 Work 和来源 Task/Execution 关系。任一下载、探测、声明、Hash、fsync、发布或本地记录失败均不创建 Work；Work 登记失败不返回成功，并保留 completed Execution 与可恢复的正式文件事实。
+
+B4 新增 `receiveResult(executionId)` 安全 IPC，renderer 只接收 Execution ID、Work ID 和显示名称。当前 Electron 未注入真实视频结果适配器，调用保持 `adapter_unavailable`，不伪造完成、进度、下载或视频作品。完整门禁为 84 项 UI/IPC/安全契约测试、147 项领域与平台测试，共 231 项且 0 失败；TypeScript、ESLint、生产构建和差异检查通过。工程记录见：
+
+```text
+docs/active/阶段6-B4-视频结果接收与作品登记记录.md
+```
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript
