@@ -19,7 +19,8 @@ import {
   VideoEditorController,
   VideoEditorMediaController,
   VideoWorkspaceController,
-  VideoWorkspaceMutationCoordinator
+  VideoWorkspaceMutationCoordinator,
+  createDevelopmentVideoEditorPreviewAdapter
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
@@ -101,9 +102,10 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
           { name: 'Videos', extensions: ['mp4', 'm4v', 'mov'] },
           { name: 'All files', extensions: ['*'] }
         ]
-      ),
+    ),
     handles: mediaHandles,
-    editor: videoEditors
+    editor: videoEditors,
+    previewAdapter: createDevelopmentVideoEditorPreviewAdapter()
   });
   const videoReferenceMedia = new VideoReferenceMediaController({
     getSession: () => sessionRegistry.get(),

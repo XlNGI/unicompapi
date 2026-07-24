@@ -59,6 +59,11 @@ export interface VideoEditorPreviewArtifactAdapter {
     readonly plan: VideoEditorPreviewPlan;
     readonly kind: VideoEditorPreviewArtifactKind;
     readonly cache: NodeVideoEditorPreviewCache;
+    /**
+     * A verified source path held by the main process. This is intentionally
+     * not part of PreviewPlan or any renderer DTO.
+     */
+    readonly sourcePath: string;
   }): Promise<VideoEditorPreviewArtifactResult>;
 }
 

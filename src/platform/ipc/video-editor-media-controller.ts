@@ -501,7 +501,11 @@ export class VideoEditorMediaController {
       const parsed = parsePreviewArtifactRequest(request);
       const context = this.createContext();
       const resolved = await this.resolveClip(context, parsed.draftId, parsed.clipId);
-      await this.requireVerifiedSource(context, resolved.clip);
+      const source = await this.requireVerifiedSource(context, resolved.clip);
+      const sourcePath = resolveFileReferencePath(
+        context.session.rootDirectory,
+        source
+      );
       const plan: VideoEditorPreviewPlan = {
         schemaVersion: 1,
         draftId: resolved.draft.id,
@@ -517,7 +521,8 @@ export class VideoEditorMediaController {
       const result = await this.previewAdapter.requestArtifact({
         plan,
         kind: parsed.kind,
-        cache
+        cache,
+        sourcePath
       });
       if (result.status === 'adapter_unavailable') {
         throw mediaError(

@@ -4,7 +4,7 @@
 
 后台服务已由已有后台提供，本仓库负责桌面端体验、本地状态、模型/服务商连接配置、任务流程、作品管理和与后台/API 的调用集成。
 
-当前状态：阶段 7｜视频基础编辑。B1、B2、A1、A2 与 A3 已完成并合并 develop；项目许可证采用 Apache-2.0，媒体引擎选型方向为 FFmpeg 8.1.2 LGPL-only。真实媒体引擎二进制、编码器白名单和正式导出仍等待独立许可与分发审查。
+当前状态：阶段 7｜视频基础编辑。B1、B2、A1、A2 与 A3 已完成并合并 develop；项目许可证采用 Apache-2.0，媒体引擎选型方向为 FFmpeg 8.1.2 LGPL-only。仅限本地开发/测试的外部 FFmpeg 路径例外已启用，真实媒体引擎二进制、编码器白名单和正式导出仍等待独立许可与分发审查。
 
 ## 许可证
 
@@ -67,6 +67,16 @@ pnpm dev
 npm install
 npm run dev
 ```
+
+如需临时启用仓库外的本地 FFmpeg 预览适配器，仅可在开发模式设置：
+
+```powershell
+$env:UNICOMP_ENABLE_LOCAL_FFMPEG = '1'
+$env:UNICOMP_FFMPEG_PATH = 'D:\tools\ffmpeg\8.1.2\bin\ffmpeg.exe'
+npm.cmd run dev
+```
+
+生产启动不会读取这条开发例外，也不会将外部 FFmpeg 自动打进安装包。
 
 ## 下一步
 
