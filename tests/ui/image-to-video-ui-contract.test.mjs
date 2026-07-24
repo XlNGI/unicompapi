@@ -95,6 +95,7 @@ test('image to video preserves prompt, stale and submission boundaries', () => {
   ]) {
     assert.match(imageVideoSource, new RegExp(`\\.${operation}\\(`));
   }
+  assert.match(imageVideoSource, /B4 结果登记端口已具备/);
 });
 
 test('video shell renders the image to video workspace', () => {

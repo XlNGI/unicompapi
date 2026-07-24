@@ -414,7 +414,7 @@ export function VideoQuickWorkspace({
             </figure>
           ) : (
             <EmptyState
-              description="参考素材不是必填项；当前没有 B4 正式登记的视频结果。"
+              description="参考素材不是必填项；B4 正式登记端口已具备，当前没有真实适配器返回的视频结果。"
               icon="视"
               readOnly
               title="尚无真实视频结果"
@@ -428,7 +428,7 @@ export function VideoQuickWorkspace({
               重新生成（等待真实结果）
             </Button>
             <Button disabled variant="secondary">
-              保存结果（等待 B4）
+              保存结果（等待真实结果）
             </Button>
             <Button
               disabled={dirty || busy}
