@@ -4,7 +4,7 @@
 
 后台服务已由已有后台提供，本仓库负责桌面端体验、本地状态、模型/服务商连接配置、任务流程、作品管理和与后台/API 的调用集成。
 
-当前状态：阶段 7｜视频基础编辑。B1、B2、A1、A2 与 A3 已完成并合并 develop；项目许可证采用 Apache-2.0，媒体引擎选型方向为 FFmpeg 8.1.2 LGPL-only。仅限本地开发/测试的外部 FFmpeg 路径例外已启用，真实媒体引擎二进制、编码器白名单和正式导出仍等待独立许可与分发审查。
+当前状态：阶段 7｜视频基础编辑。B1、B2、A1、A2 与 A3 已完成并合并 develop；项目许可证采用 Apache-2.0，媒体引擎选型方向为 FFmpeg 8.1.2 LGPL-only。仅限本地开发/测试的项目内 `.tools/` 工具链已启用；二进制仍不进入 Git、生产构建或发布物，编码器白名单和正式导出继续等待独立许可与分发审查。
 
 ## 许可证
 
@@ -68,15 +68,15 @@ npm install
 npm run dev
 ```
 
-如需临时启用仓库外的本地 FFmpeg 预览适配器，仅可在开发模式设置：
+首次启用本地 FFmpeg 开发预览时，将负责人批准的 Windows 压缩包安装到被 Git 忽略的 `.tools/`：
 
 ```powershell
-$env:UNICOMP_ENABLE_LOCAL_FFMPEG = '1'
-$env:UNICOMP_FFMPEG_PATH = 'D:\tools\ffmpeg\8.1.2\ffmpeg-n8.1-latest-win64-lgpl-8.1\bin\ffmpeg.exe'
+npm.cmd run setup:media-engine -- --archive "C:\path\to\ffmpeg-n8.1-latest-win64-lgpl-8.1.zip"
+npm.cmd run verify:media-engine
 npm.cmd run dev
 ```
 
-生产启动不会读取这条开发例外，也不会将外部 FFmpeg 自动打进安装包。
+不传 `--archive` 时安装脚本可从 manifest 中的受控 HTTPS 地址下载，但仍必须匹配固定 SHA-256；上游滚动包发生变化时会失败关闭，必须重新审批后才能更新 manifest。`npm run dev` 会先验证版本、LGPL-only 构建参数、必需编码器和许可证文件，再自动注入项目内绝对路径。生产启动和生产构建不会读取这条开发例外，也不会将 `.tools/` 自动打进安装包。
 
 ## 下一步
 
