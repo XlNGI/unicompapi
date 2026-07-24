@@ -105,6 +105,30 @@ describe('file verification persistence', () => {
     });
   });
 
+  it('continues from changed content to a later missing state', async () => {
+    const fixture = await createFixture();
+    const target = path.join(fixture.root, 'changed-then-missing.txt');
+    await writeFile(target, 'changed', 'utf8');
+    const file = createFile(
+      fixture.projectId,
+      'changed-then-missing.txt',
+      helloChecksum
+    );
+    const changed = await fixture.service.persistProbeResult(
+      file,
+      await fixture.probe.inspect(file)
+    );
+    expect(changed.state).toBe('corrupted');
+
+    await rm(target);
+    const missing = await fixture.service.persistProbeResult(
+      changed,
+      await fixture.probe.inspect(changed)
+    );
+    expect(missing.state).toBe('missing');
+    expect(missing.checksumSha256).toBe(helloChecksum);
+  });
+
   it('relinks only after confirmation and matching local verification', async () => {
     const fixture = await createFixture();
     await writeFile(path.join(fixture.root, 'replacement.txt'), 'hello', 'utf8');

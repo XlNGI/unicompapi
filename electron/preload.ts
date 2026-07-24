@@ -264,7 +264,49 @@ const videoEditors: VideoEditorApi = {
       draftId,
       expectedRevision,
       title
-    })
+    }),
+  selectSource: (draftId, expectedRevision, strategy) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.selectSource, {
+      draftId,
+      expectedRevision,
+      strategy
+    }),
+  attachWork: (draftId, expectedRevision, workId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.attachWork, {
+      draftId,
+      expectedRevision,
+      workId
+    }),
+  getSourceStatus: (draftId, clipId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.getSourceStatus, {
+      draftId,
+      clipId
+    }),
+  prepareRelink: (draftId, clipId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.prepareRelink, {
+      draftId,
+      clipId
+    }),
+  confirmRelink: (draftId, clipId, relinkHandle, acceptMismatch) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.confirmRelink, {
+      draftId,
+      clipId,
+      ['to' + 'ken']: relinkHandle,
+      acceptMismatch
+    }),
+  createSourcePreview: (draftId, clipId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.createSourcePreview, {
+      draftId,
+      clipId
+    }),
+  requestPreviewArtifact: (draftId, clipId, kind) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.requestPreviewArtifact, {
+      draftId,
+      clipId,
+      kind
+    }),
+  clearPreviewCache: () =>
+    ipcRenderer.invoke(videoEditorIpcChannels.clearPreviewCache)
 };
 
 contextBridge.exposeInMainWorld('unicomp', {

@@ -20,6 +20,8 @@ import {
   type CoverSelection,
   type OutputPreference,
   type TextOverlay,
+  type VideoClip,
+  type VideoClipSource,
   type VideoEditCommand,
   type VideoEditDraft,
   type VideoEditDraftRepository,
@@ -185,6 +187,63 @@ export class VideoEditorController {
     );
   }
 
+  readForMedia(
+    draftId: VideoEditDraft['id']
+  ): Promise<VideoEditorIpcResult<VideoEditDraft | undefined>> {
+    return this.execute(async () => {
+      await this.mutations.wait();
+      const context = this.createContext();
+      return this.loadDraft(context, draftId);
+    });
+  }
+
+  insertClipFromMedia(input: {
+    readonly draftId: VideoEditDraft['id'];
+    readonly expectedRevision: number;
+    readonly clip: VideoClip;
+  }): Promise<VideoEditorIpcResult<VideoEditorDraftDto>> {
+    return this.applyPlatformCommand(
+      input.draftId,
+      input.expectedRevision,
+      (stored) => ({
+        schemaVersion: 1,
+        kind: 'insert_clip',
+        clip: input.clip,
+        targetIndex: stored.videoTrack.length
+      })
+    );
+  }
+
+  replaceClipSourceFromMedia(input: {
+    readonly draftId: VideoEditDraft['id'];
+    readonly expectedRevision: number;
+    readonly clipId: VideoClip['id'];
+    readonly source: VideoClipSource;
+  }): Promise<VideoEditorIpcResult<VideoEditorDraftDto>> {
+    return this.applyPlatformCommand(
+      input.draftId,
+      input.expectedRevision,
+      (stored) => {
+        const clip = stored.videoTrack.find(
+          (candidate) => candidate.id === input.clipId
+        );
+        if (!clip) {
+          throw controllerError(
+            'source_not_found',
+            'The requested video clip does not exist'
+          );
+        }
+        return {
+          schemaVersion: 1,
+          kind: 'set_clip_source',
+          clipId: input.clipId,
+          before: clip.source,
+          after: input.source
+        };
+      }
+    );
+  }
+
   private mutateStoredDraft(
     request: unknown,
     mutation: (
@@ -199,6 +258,30 @@ export class VideoEditorController {
         const stored = await this.loadDraft(context, parsed.draftId);
         this.assertStoredDraft(stored, parsed.expectedRevision);
         const updated = await mutation(stored, parsed);
+        await this.persistDraft(context, updated);
+        return toVideoEditorDto(updated);
+      })
+    );
+  }
+
+  private applyPlatformCommand(
+    draftId: VideoEditDraft['id'],
+    expectedRevision: number,
+    build: (stored: VideoEditDraft) => VideoEditCommand
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>> {
+    return this.enqueueMutation(() =>
+      this.execute(async () => {
+        const context = this.createContext();
+        const stored = await this.loadDraft(context, draftId);
+        this.assertStoredDraft(stored, expectedRevision);
+        const finalized = build(stored);
+        if (!isVideoEditCommand(finalized)) {
+          throw controllerError(
+            'invalid_request',
+            'The prepared media edit command is invalid'
+          );
+        }
+        const updated = applyVideoEditCommand(stored, finalized, this.now());
         await this.persistDraft(context, updated);
         return toVideoEditorDto(updated);
       })

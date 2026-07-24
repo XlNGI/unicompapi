@@ -10,5 +10,6 @@ export * from './image-submission-controller';
 export * from './video-workspace-controller';
 export * from './video-workspace-mutations';
 export * from './video-editor-controller';
+export * from './video-editor-media-controller';
 export * from './video-reference-media-controller';
 export * from './video-submission-controller';

@@ -140,7 +140,8 @@ export class FileVerificationPersistenceService {
     file: FileReference,
     result: FileStatusProbeResult
   ): FileReference {
-    const updatedAt = result.verification?.verifiedAt ?? this.now();
+    const observedAt = result.verification?.verifiedAt ?? this.now();
+    const updatedAt = observedAt < file.updatedAt ? file.updatedAt : observedAt;
     let updated = this.transitionToState(
       file,
       result.recommendedState,
@@ -202,6 +203,15 @@ export class FileVerificationPersistenceService {
         sizeBytes: result.verification.sizeBytes,
         checksumSha256: result.verification.checksumSha256
       });
+    }
+
+    if (
+      file.state === 'corrupted' &&
+      canTransitionFile('corrupted', 'writing') &&
+      canTransitionFile('writing', state)
+    ) {
+      const writing = transitionFile(file, 'writing', updatedAt);
+      return transitionFile(writing, state, updatedAt);
     }
 
     if (!canTransitionFile(file.state, state)) {
