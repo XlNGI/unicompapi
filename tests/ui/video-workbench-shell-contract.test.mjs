@@ -14,8 +14,7 @@ const videoPages = await Promise.all(
   [
     'VideoQuickPage.tsx',
     'TextToVideoPage.tsx',
-    'ImageToVideoPage.tsx',
-    'VideoEditingPage.tsx'
+    'ImageToVideoPage.tsx'
   ].map((name) => readFile(`src/pages/creation/video/${name}`, 'utf8'))
 );
 
@@ -52,7 +51,7 @@ test('video workbench keeps blocked and unknown states honest', () => {
   );
 });
 
-test('all four video pages reuse the shared shell and single mode source', () => {
+test('all three generation pages reuse the shared shell and mode source', () => {
   for (const pageSource of videoPages) {
     assert.match(pageSource, /VideoWorkbenchPage/);
     assert.match(pageSource, /videoCreationModes/);
@@ -65,14 +64,11 @@ test('all four video pages reuse the shared shell and single mode source', () =>
   assert.doesNotMatch(modesSource, /workspaceMode:\s*'video_editing'/);
 });
 
-test('saving stays separate from submission and phase 7 editing', () => {
+test('saving a generation draft stays separate from submission', () => {
   for (const text of [
     '新建本地草稿',
     '保存本地草稿',
-    '没有创建或提交任务',
-    '基础编辑将在阶段 7 实现',
-    '不会显示可操作的假时间线',
-    '阶段 6 不创建编辑草稿'
+    '没有创建或提交任务'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }
