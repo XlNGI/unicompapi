@@ -11,14 +11,18 @@ import path from 'node:path';
 import {
   createAsset,
   createFileReference,
+  getVideoTimelineDurationUs,
   toAssetId,
   toFileReferenceId,
   toIsoTimestamp,
+  toProjectId,
   toVideoClipId,
   toVideoEditDraftId,
   toWorkId,
   transitionFile,
   type Asset,
+  type BackgroundMusic,
+  type CoverSelection,
   type FileLocator,
   type FileReference,
   type IsoTimestamp,
@@ -30,6 +34,8 @@ import {
 import type {
   VideoEditorIpcErrorCode,
   VideoEditorIpcResult,
+  VideoEditorAssetSelectionResultDto,
+  VideoEditorDraftDto,
   VideoEditorMediaIdentityDto,
   VideoEditorPreviewArtifactDto,
   VideoEditorPreviewArtifactKindDto,
@@ -42,7 +48,9 @@ import type {
 } from '../../shared/video-editor-ipc';
 import {
   FileVerificationPersistenceService,
+  ImageInspectionError,
   NodeFileStatusProbe,
+  NodeImageInspector,
   NodeSha256FileVerifier,
   NodeVideoInspector,
   VideoInspectionError,
@@ -77,6 +85,8 @@ const relinkTokenTtlMs = 5 * 60 * 1000;
 export interface VideoEditorMediaControllerDependencies {
   getSession(): StorageProjectSession | undefined;
   chooseVideoFile(): Promise<string | undefined>;
+  chooseAudioFile?(): Promise<string | undefined>;
+  chooseImageFile?(): Promise<string | undefined>;
   handles: LocalMediaHandleRegistry;
   editor: VideoEditorController;
   videoInspector?: VideoInspector;
@@ -199,6 +209,151 @@ export class VideoEditorMediaController {
         draft: unwrapEditorResult(updated),
         source: toSourceDto(clip, asset, 'managed_work', verified.file.state)
       };
+    });
+  }
+
+  selectBackgroundMusic(
+    request: unknown
+  ): Promise<VideoEditorIpcResult<VideoEditorAssetSelectionResultDto>> {
+    return this.execute(async () => {
+      const parsed = parseRevisionRequest(request);
+      const context = this.createContext();
+      const draft = await this.requireDraft(parsed.draftId);
+      assertRevision(draft, parsed.expectedRevision);
+      const timelineDurationUs = getVideoTimelineDurationUs(draft);
+      if (timelineDurationUs <= 0) {
+        throw mediaError('invalid_request', 'Background music requires a non-empty timeline');
+      }
+      const selectedPath = await this.dependencies.chooseAudioFile?.();
+      if (!selectedPath) return { cancelled: true };
+
+      const inspected = await inspectStableWave(
+        context.session.rootDirectory,
+        selectedPath,
+        this.now()
+      );
+      const registered = await this.registerAuxiliaryFile(context, {
+        selectedPath,
+        mediaKind: 'audio',
+        role: 'video_editor_background_music',
+        verification: inspected.verification
+      });
+      const identity = {
+        sizeBytes: inspected.verification.sizeBytes,
+        modifiedAtMs: inspected.modifiedAtMs,
+        durationUs: inspected.durationUs,
+        container: 'wav',
+        width: 0,
+        height: 0,
+        checksumSha256: inspected.verification.checksumSha256
+      };
+      const music: BackgroundMusic = {
+        kind: 'background_music',
+        fileId: registered.file.id,
+        assetId: registered.asset.id,
+        identity,
+        sourceRange: { inUs: 0, outUs: identity.durationUs },
+        timelineRange: {
+          startUs: 0,
+          endUs: Math.min(identity.durationUs, timelineDurationUs)
+        },
+        volumePermille: 1000,
+        fadeInUs: 0,
+        fadeOutUs: 0
+      };
+      const updated = await this.dependencies.editor.setBackgroundMusicFromMedia({
+        draftId: draft.id,
+        expectedRevision: parsed.expectedRevision,
+        music
+      });
+      return { cancelled: false, draft: unwrapEditorResult(updated) };
+    });
+  }
+
+  selectCoverImage(
+    request: unknown
+  ): Promise<VideoEditorIpcResult<VideoEditorAssetSelectionResultDto>> {
+    return this.execute(async () => {
+      const parsed = parseCoverSelectionRequest(request);
+      const context = this.createContext();
+      const draft = await this.requireDraft(parsed.draftId);
+      assertRevision(draft, parsed.expectedRevision);
+      const selectedPath = await this.dependencies.chooseImageFile?.();
+      if (!selectedPath) return { cancelled: true };
+
+      const inspected = await inspectStableImage(
+        context.session.rootDirectory,
+        selectedPath,
+        this.now()
+      );
+      const registered = await this.registerAuxiliaryFile(context, {
+        selectedPath,
+        mediaKind: 'image',
+        role: 'video_editor_cover',
+        verification: inspected.verification,
+        imageMetadata: inspected.image
+      });
+      const updated = await this.dependencies.editor.setCoverFromMedia({
+        draftId: draft.id,
+        expectedRevision: parsed.expectedRevision,
+        cover: {
+          kind: 'local_image',
+          fileId: registered.file.id,
+          assetId: registered.asset.id,
+          prependToVideo: parsed.prependToVideo
+        }
+      });
+      return { cancelled: false, draft: unwrapEditorResult(updated) };
+    });
+  }
+
+  attachCoverWork(
+    request: unknown
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>> {
+    return this.execute(async () => {
+      const parsed = parseCoverWorkRequest(request);
+      const context = this.createContext();
+      const draft = await this.requireDraft(parsed.draftId);
+      assertRevision(draft, parsed.expectedRevision);
+      const work = await context.workRepository.get(parsed.workId);
+      if (
+        !work ||
+        work.projectId !== context.session.projectId ||
+        work.mediaKind !== 'image'
+      ) {
+        throw mediaError('work_not_found', 'The requested project image work does not exist');
+      }
+      const file = await context.fileRepository.get(work.fileId);
+      if (!file) {
+        throw mediaError('source_unavailable', 'The project image file is unavailable');
+      }
+      const verified = await this.verifyFile(context, file, file.checksumSha256);
+      if (
+        verified.file.state !== 'available' ||
+        verified.matchesIdentity === false
+      ) {
+        throw mediaError('source_unavailable', 'The project image is not locally verified');
+      }
+      try {
+        await new NodeImageInspector().inspect(
+          resolveFileReferencePath(context.session.rootDirectory, verified.file)
+        );
+      } catch {
+        throw mediaError('unsupported_image', 'The project work is not a supported image');
+      }
+      const cover: CoverSelection = {
+        kind: 'project_image',
+        workId: work.id,
+        fileId: verified.file.id,
+        prependToVideo: parsed.prependToVideo
+      };
+      return unwrapEditorResult(
+        await this.dependencies.editor.setCoverFromMedia({
+          draftId: draft.id,
+          expectedRevision: parsed.expectedRevision,
+          cover
+        })
+      );
     });
   }
 
@@ -552,6 +707,55 @@ export class VideoEditorMediaController {
     return { file, asset, referenceKind: input.referenceKind };
   }
 
+  private async registerAuxiliaryFile(
+    context: MediaContext,
+    input: {
+      readonly selectedPath: string;
+      readonly mediaKind: 'audio' | 'image';
+      readonly role: string;
+      readonly verification: {
+        readonly sizeBytes: number;
+        readonly checksumSha256: string;
+        readonly verifiedAt: IsoTimestamp;
+      };
+      readonly imageMetadata?: {
+        readonly mimeType: string;
+        readonly width: number;
+        readonly height: number;
+      };
+    }
+  ): Promise<{ readonly file: FileReference; readonly asset: Asset }> {
+    const provisional = createFileReference({
+      id: this.createFileId(),
+      projectId: context.session.projectId,
+      locator: {
+        kind: 'external',
+        absolutePath: path.resolve(input.selectedPath)
+      },
+      createdAt: input.verification.verifiedAt
+    });
+    const file = createAvailableFile(
+      provisional,
+      input.verification.sizeBytes,
+      input.verification.checksumSha256,
+      input.verification.verifiedAt
+    );
+    const asset = createAsset({
+      id: this.createAssetId(),
+      projectId: context.session.projectId,
+      fileId: file.id,
+      name: path.basename(input.selectedPath),
+      mediaKind: input.mediaKind,
+      origin: 'imported',
+      role: input.role,
+      imageMetadata: input.imageMetadata,
+      createdAt: input.verification.verifiedAt
+    });
+    await context.fileRepository.save(file);
+    await context.assetRepository.save(asset);
+    return { file, asset };
+  }
+
   private createClip(
     file: FileReference,
     asset: Asset,
@@ -739,6 +943,139 @@ export class VideoEditorMediaController {
   }
 }
 
+async function inspectStableImage(
+  projectRoot: string,
+  selectedPath: string,
+  createdAt: IsoTimestamp
+) {
+  try {
+    const inspector = new NodeImageInspector();
+    const beforeMetadata = await stat(selectedPath);
+    const before = await inspector.inspect(selectedPath);
+    const verification = await verifySelectedFile(
+      projectRoot,
+      selectedPath,
+      createdAt
+    );
+    const after = await inspector.inspect(selectedPath);
+    const afterMetadata = await stat(selectedPath);
+    if (
+      Math.trunc(beforeMetadata.mtimeMs) !== Math.trunc(afterMetadata.mtimeMs) ||
+      before.mimeType !== after.mimeType ||
+      before.width !== after.width ||
+      before.height !== after.height ||
+      before.sizeBytes !== after.sizeBytes ||
+      after.sizeBytes !== verification.sizeBytes
+    ) {
+      throw mediaError('source_changed', 'The selected image changed while it was verified');
+    }
+    return { image: after, verification };
+  } catch (error) {
+    if (error instanceof VideoEditorMediaError) throw error;
+    if (error instanceof ImageInspectionError) {
+      throw mediaError(
+        error.code === 'unsupported_image' ? 'unsupported_image' : 'media_unreadable',
+        'The selected image is not locally supported'
+      );
+    }
+    throw mediaError('media_unreadable', 'The selected image could not be verified');
+  }
+}
+
+async function inspectStableWave(
+  projectRoot: string,
+  selectedPath: string,
+  createdAt: IsoTimestamp
+) {
+  const beforeMetadata = await stat(selectedPath);
+  const before = await inspectWave(selectedPath);
+  const verification = await verifySelectedFile(
+    projectRoot,
+    selectedPath,
+    createdAt
+  );
+  const after = await inspectWave(selectedPath);
+  const afterMetadata = await stat(selectedPath);
+  if (
+    Math.trunc(beforeMetadata.mtimeMs) !== Math.trunc(afterMetadata.mtimeMs) ||
+    before.durationUs !== after.durationUs ||
+    before.sizeBytes !== after.sizeBytes ||
+    after.sizeBytes !== verification.sizeBytes
+  ) {
+    throw mediaError('source_changed', 'The selected audio changed while it was verified');
+  }
+  return {
+    ...after,
+    modifiedAtMs: Math.max(0, Math.trunc(afterMetadata.mtimeMs)),
+    verification
+  };
+}
+
+async function verifySelectedFile(
+  projectRoot: string,
+  selectedPath: string,
+  createdAt: IsoTimestamp
+) {
+  const provisional = createFileReference({
+    id: toFileReferenceId('file-editor-selection'),
+    projectId: toProjectId('project-editor-selection'),
+    locator: { kind: 'external', absolutePath: path.resolve(selectedPath) },
+    createdAt
+  });
+  return new NodeSha256FileVerifier(projectRoot).verify({ file: provisional });
+}
+
+async function inspectWave(
+  selectedPath: string
+): Promise<{ readonly durationUs: number; readonly sizeBytes: number }> {
+  const metadata = await stat(selectedPath);
+  if (!metadata.isFile() || metadata.size < 44) {
+    throw mediaError('unsupported_audio', 'The selected file is not a readable WAV audio file');
+  }
+  const handle = await open(selectedPath, 'r');
+  try {
+    const header = Buffer.alloc(Math.min(metadata.size, 1024 * 1024));
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    const data = header.subarray(0, bytesRead);
+    if (
+      data.toString('ascii', 0, 4) !== 'RIFF' ||
+      data.toString('ascii', 8, 12) !== 'WAVE'
+    ) {
+      throw mediaError('unsupported_audio', 'Only verified PCM or float WAV audio is supported');
+    }
+    let offset = 12;
+    let byteRate = 0;
+    let dataSize = 0;
+    while (offset + 8 <= data.length) {
+      const type = data.toString('ascii', offset, offset + 4);
+      const size = data.readUInt32LE(offset + 4);
+      const payload = offset + 8;
+      if (type === 'fmt ' && size >= 16 && payload + 16 <= data.length) {
+        const format = data.readUInt16LE(payload);
+        byteRate = data.readUInt32LE(payload + 8);
+        if ((format !== 1 && format !== 3) || byteRate <= 0) {
+          throw mediaError('unsupported_audio', 'The WAV encoding is not locally supported');
+        }
+      }
+      if (type === 'data') {
+        dataSize = size;
+        if (payload + dataSize > metadata.size) {
+          throw mediaError('media_unreadable', 'The selected WAV file is truncated');
+        }
+        break;
+      }
+      offset = payload + size + (size % 2);
+    }
+    const durationUs = Math.floor((dataSize * 1_000_000) / byteRate);
+    if (!byteRate || !dataSize || !Number.isSafeInteger(durationUs) || durationUs <= 0) {
+      throw mediaError('media_unreadable', 'The WAV duration could not be read safely');
+    }
+    return { durationUs, sizeBytes: metadata.size };
+  } finally {
+    await handle.close();
+  }
+}
+
 interface MediaContext {
   readonly session: StorageProjectSession;
   readonly assetRepository: JsonAssetRepository;
@@ -802,6 +1139,79 @@ function parseSelectSourceRequest(request: unknown): {
     expectedRevision: request.expectedRevision,
     strategy: request.strategy
   };
+}
+
+function parseRevisionRequest(request: unknown): {
+  readonly draftId: VideoEditDraft['id'];
+  readonly expectedRevision: number;
+} {
+  if (
+    !isRecord(request) ||
+    !exact(request, ['draftId', 'expectedRevision']) ||
+    typeof request.draftId !== 'string' ||
+    !isNonNegativeInteger(request.expectedRevision)
+  ) {
+    throw mediaError('invalid_request', 'A valid media selection request is required');
+  }
+  return {
+    draftId: parseDraftId(request.draftId),
+    expectedRevision: request.expectedRevision
+  };
+}
+
+function parseCoverSelectionRequest(request: unknown): {
+  readonly draftId: VideoEditDraft['id'];
+  readonly expectedRevision: number;
+  readonly prependToVideo: boolean;
+} {
+  if (
+    !isRecord(request) ||
+    !exact(request, ['draftId', 'expectedRevision', 'prependToVideo']) ||
+    typeof request.prependToVideo !== 'boolean'
+  ) {
+    throw mediaError('invalid_request', 'A valid cover image request is required');
+  }
+  return {
+    ...parseRevisionRequest({
+      draftId: request.draftId,
+      expectedRevision: request.expectedRevision
+    }),
+    prependToVideo: request.prependToVideo
+  };
+}
+
+function parseCoverWorkRequest(request: unknown): {
+  readonly draftId: VideoEditDraft['id'];
+  readonly expectedRevision: number;
+  readonly workId: ReturnType<typeof toWorkId>;
+  readonly prependToVideo: boolean;
+} {
+  if (
+    !isRecord(request) ||
+    !exact(request, [
+      'draftId',
+      'expectedRevision',
+      'workId',
+      'prependToVideo'
+    ]) ||
+    typeof request.workId !== 'string' ||
+    typeof request.prependToVideo !== 'boolean'
+  ) {
+    throw mediaError('invalid_request', 'A valid project cover request is required');
+  }
+  try {
+    return {
+      ...parseRevisionRequest({
+        draftId: request.draftId,
+        expectedRevision: request.expectedRevision
+      }),
+      workId: toWorkId(request.workId),
+      prependToVideo: request.prependToVideo
+    };
+  } catch (error) {
+    if (error instanceof VideoEditorMediaError) throw error;
+    throw mediaError('invalid_request', 'The project cover identifier is invalid');
+  }
 }
 
 function parseAttachWorkRequest(request: unknown): {

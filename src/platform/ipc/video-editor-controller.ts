@@ -244,6 +244,40 @@ export class VideoEditorController {
     );
   }
 
+  setBackgroundMusicFromMedia(input: {
+    readonly draftId: VideoEditDraft['id'];
+    readonly expectedRevision: number;
+    readonly music: BackgroundMusic;
+  }): Promise<VideoEditorIpcResult<VideoEditorDraftDto>> {
+    return this.applyPlatformCommand(
+      input.draftId,
+      input.expectedRevision,
+      (stored) => ({
+        schemaVersion: 1,
+        kind: 'set_background_music',
+        before: stored.backgroundMusic,
+        after: input.music
+      })
+    );
+  }
+
+  setCoverFromMedia(input: {
+    readonly draftId: VideoEditDraft['id'];
+    readonly expectedRevision: number;
+    readonly cover: CoverSelection;
+  }): Promise<VideoEditorIpcResult<VideoEditorDraftDto>> {
+    return this.applyPlatformCommand(
+      input.draftId,
+      input.expectedRevision,
+      (stored) => ({
+        schemaVersion: 1,
+        kind: 'set_cover',
+        before: stored.cover,
+        after: input.cover
+      })
+    );
+  }
+
   private mutateStoredDraft(
     request: unknown,
     mutation: (

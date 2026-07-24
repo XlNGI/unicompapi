@@ -11,6 +11,9 @@ export const videoEditorIpcChannels = {
   getSourceStatus: 'video-editor:get-source-status',
   prepareRelink: 'video-editor:prepare-relink',
   confirmRelink: 'video-editor:confirm-relink',
+  selectBackgroundMusic: 'video-editor:select-background-music',
+  selectCoverImage: 'video-editor:select-cover-image',
+  attachCoverWork: 'video-editor:attach-cover-work',
   createSourcePreview: 'video-editor:create-source-preview',
   requestPreviewArtifact: 'video-editor:request-preview-artifact',
   clearPreviewCache: 'video-editor:clear-preview-cache'
@@ -30,6 +33,8 @@ export type VideoEditorIpcErrorCode =
   | 'source_unavailable'
   | 'source_changed'
   | 'unsupported_video'
+  | 'unsupported_audio'
+  | 'unsupported_image'
   | 'media_unreadable'
   | 'managed_copy_failed'
   | 'relink_token_invalid'
@@ -256,6 +261,11 @@ export interface VideoEditorSourceSelectionResultDto {
   readonly source?: VideoEditorSourceDto;
 }
 
+export interface VideoEditorAssetSelectionResultDto {
+  readonly cancelled: boolean;
+  readonly draft?: VideoEditorDraftDto;
+}
+
 export interface VideoEditorSourceStatusDto {
   readonly clipId: string;
   readonly state: string;
@@ -434,6 +444,21 @@ export interface VideoEditorApi {
     token: string,
     acceptMismatch: boolean
   ): Promise<VideoEditorIpcResult<VideoEditorSourceSelectionResultDto>>;
+  selectBackgroundMusic(
+    draftId: string,
+    expectedRevision: number
+  ): Promise<VideoEditorIpcResult<VideoEditorAssetSelectionResultDto>>;
+  selectCoverImage(
+    draftId: string,
+    expectedRevision: number,
+    prependToVideo: boolean
+  ): Promise<VideoEditorIpcResult<VideoEditorAssetSelectionResultDto>>;
+  attachCoverWork(
+    draftId: string,
+    expectedRevision: number,
+    workId: string,
+    prependToVideo: boolean
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
   createSourcePreview(
     draftId: string,
     clipId: string

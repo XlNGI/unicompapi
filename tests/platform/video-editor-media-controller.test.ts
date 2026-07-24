@@ -35,6 +35,8 @@ async function createFixture() {
   const original = path.join(root, 'original-video.bin');
   const exactReplacement = path.join(root, 'exact-replacement.bin');
   const mismatchReplacement = path.join(root, 'mismatch-replacement.bin');
+  const backgroundMusic = path.join(root, 'background.wav');
+  const coverImage = path.join(root, 'cover.png');
   const content = isoBmffVideo();
   await writeFile(original, content);
   await writeFile(exactReplacement, content);
@@ -42,6 +44,8 @@ async function createFixture() {
     mismatchReplacement,
     isoBmffVideo({ suffix: 'different-video-payload' })
   );
+  await writeFile(backgroundMusic, waveAudio());
+  await writeFile(coverImage, pngImage());
 
   const projectId = toProjectId('project-video-editor-media');
   const session = {
@@ -67,6 +71,8 @@ async function createFixture() {
   const handles = new LocalMediaHandleRegistry();
   const controller = new VideoEditorMediaController({
     getSession: () => session,
+    chooseAudioFile: async () => backgroundMusic,
+    chooseImageFile: async () => coverImage,
     chooseVideoFile: async () => selectedPath,
     handles,
     editor,
@@ -81,6 +87,8 @@ async function createFixture() {
 
   return {
     controller,
+    backgroundMusic,
+    coverImage,
     created: created.value,
     editor,
     exactReplacement,
@@ -151,6 +159,108 @@ describe('VideoEditorMediaController', () => {
     ).resolves.toMatchObject({
       ok: false,
       error: { code: 'adapter_unavailable' }
+    });
+  });
+
+  it('keeps one verified background track and registers a path-free local cover', async () => {
+    const fixture = await createFixture();
+    const source = await fixture.controller.selectSource({
+      draftId: fixture.created.draftId,
+      expectedRevision: 0,
+      strategy: 'external_reference'
+    });
+    if (!source.ok || source.value.cancelled || !source.value.draft) {
+      throw fixture.getLastError();
+    }
+
+    const music = await fixture.controller.selectBackgroundMusic({
+      draftId: fixture.created.draftId,
+      expectedRevision: 1
+    });
+    if (!music.ok || music.value.cancelled || !music.value.draft) {
+      throw new Error(JSON.stringify(music));
+    }
+    expect(music.value.draft).toMatchObject({
+      revision: 2,
+      backgroundMusic: {
+        identity: { container: 'wav', durationUs: 1_000_000, width: 0, height: 0 },
+        timelineRange: { startUs: 0, endUs: 1_000_000 }
+      }
+    });
+
+    const replacement = await fixture.controller.selectBackgroundMusic({
+      draftId: fixture.created.draftId,
+      expectedRevision: 2
+    });
+    expect(replacement).toMatchObject({
+      ok: true,
+      value: { draft: { revision: 3, backgroundMusic: { identity: { container: 'wav' } } } }
+    });
+
+    const cover = await fixture.controller.selectCoverImage({
+      draftId: fixture.created.draftId,
+      expectedRevision: 3,
+      prependToVideo: false
+    });
+    expect(cover).toMatchObject({
+      ok: true,
+      value: {
+        draft: {
+          revision: 4,
+          cover: { kind: 'local_image', prependToVideo: false }
+        }
+      }
+    });
+    const serialized = JSON.stringify({ music, cover });
+    expect(serialized).not.toContain(fixture.backgroundMusic);
+    expect(serialized).not.toContain(fixture.coverImage);
+    expect(serialized).not.toContain('checksumSha256');
+    if (
+      !cover.ok ||
+      cover.value.cancelled ||
+      cover.value.draft?.cover?.kind !== 'local_image'
+    ) {
+      throw new Error(JSON.stringify(cover));
+    }
+    await new JsonWorkRepository(fixture.storage, fixture.projectId).save({
+      schemaVersion: 1,
+      id: toWorkId('editor-cover-work'),
+      projectId: fixture.projectId,
+      sourceTaskId: toTaskId('editor-cover-task'),
+      sourceExecutionId: toExecutionId('editor-cover-execution'),
+      fileId: cover.value.draft.cover.fileId as never,
+      mediaKind: 'image',
+      name: '项目封面作品',
+      createdAt: new Date().toISOString() as never
+    });
+    await expect(
+      fixture.controller.attachCoverWork({
+        draftId: fixture.created.draftId,
+        expectedRevision: 4,
+        workId: 'editor-cover-work',
+        prependToVideo: false
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        revision: 5,
+        cover: {
+          kind: 'project_image',
+          workId: 'editor-cover-work',
+          prependToVideo: false
+        }
+      }
+    });
+    await expect(
+      fixture.controller.selectCoverImage({
+        draftId: fixture.created.draftId,
+        expectedRevision: 5,
+        prependToVideo: false,
+        absolutePath: fixture.coverImage
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' }
     });
   });
 
@@ -396,4 +506,32 @@ function box(type: string, payload: Buffer): Buffer {
   header.writeUInt32BE(header.length + payload.length, 0);
   header.write(type, 4, 4, 'ascii');
   return Buffer.concat([header, payload]);
+}
+
+function waveAudio(): Buffer {
+  const dataSize = 16_000;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write('RIFF', 0, 4, 'ascii');
+  buffer.writeUInt32LE(buffer.length - 8, 4);
+  buffer.write('WAVEfmt ', 8, 8, 'ascii');
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(8_000, 24);
+  buffer.writeUInt32LE(16_000, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36, 4, 'ascii');
+  buffer.writeUInt32LE(dataSize, 40);
+  return buffer;
+}
+
+function pngImage(): Buffer {
+  const buffer = Buffer.alloc(24);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(buffer);
+  buffer.writeUInt32BE(13, 8);
+  buffer.write('IHDR', 12, 4, 'ascii');
+  buffer.writeUInt32BE(640, 16);
+  buffer.writeUInt32BE(360, 20);
+  return buffer;
 }

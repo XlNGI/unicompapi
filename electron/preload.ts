@@ -294,6 +294,24 @@ const videoEditors: VideoEditorApi = {
       ['to' + 'ken']: relinkHandle,
       acceptMismatch
     }),
+  selectBackgroundMusic: (draftId, expectedRevision) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.selectBackgroundMusic, {
+      draftId,
+      expectedRevision
+    }),
+  selectCoverImage: (draftId, expectedRevision, prependToVideo) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.selectCoverImage, {
+      draftId,
+      expectedRevision,
+      prependToVideo
+    }),
+  attachCoverWork: (draftId, expectedRevision, workId, prependToVideo) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.attachCoverWork, {
+      draftId,
+      expectedRevision,
+      workId,
+      prependToVideo
+    }),
   createSourcePreview: (draftId, clipId) =>
     ipcRenderer.invoke(videoEditorIpcChannels.createSourcePreview, {
       draftId,

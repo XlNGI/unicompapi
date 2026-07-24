@@ -1106,7 +1106,9 @@ function isVideoClipSource(value: unknown): boolean {
     isNonBlankString(value.fileId) &&
     (value.assetId === undefined || isNonBlankString(value.assetId)) &&
     (value.workId === undefined || isNonBlankString(value.workId)) &&
-    isMediaIdentity(value.identity);
+    isMediaIdentity(value.identity) &&
+    (value.identity as MediaIdentitySnapshot).width > 0 &&
+    (value.identity as MediaIdentitySnapshot).height > 0;
 }
 
 function isMediaIdentity(value: unknown): boolean {
@@ -1124,8 +1126,8 @@ function isMediaIdentity(value: unknown): boolean {
     isNonNegativeInteger(value.modifiedAtMs) &&
     isPositiveInteger(value.durationUs) &&
     isNonBlankString(value.container) &&
-    isPositiveInteger(value.width) &&
-    isPositiveInteger(value.height) &&
+    isNonNegativeInteger(value.width) &&
+    isNonNegativeInteger(value.height) &&
     (value.checksumSha256 === undefined ||
       (typeof value.checksumSha256 === 'string' &&
         /^[a-f0-9]{64}$/.test(value.checksumSha256)));
