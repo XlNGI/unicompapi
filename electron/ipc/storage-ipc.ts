@@ -16,6 +16,7 @@ import {
   StorageProjectSessionRegistry,
   VideoReferenceMediaController,
   VideoSubmissionController,
+  VideoEditorController,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
@@ -24,6 +25,7 @@ import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc'
 import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
 import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
 import { videoSubmissionIpcChannels } from '../../src/shared/video-submission-ipc';
+import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
 
 export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const sessionRegistry = new StorageProjectSessionRegistry();
@@ -69,6 +71,10 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
   });
+  const videoEditors = new VideoEditorController({
+    getSession: () => sessionRegistry.get(),
+    mutations: videoMutations
+  });
   const videoReferenceMedia = new VideoReferenceMediaController({
     getSession: () => sessionRegistry.get(),
     chooseMediaFile: (mediaKind) =>
@@ -108,7 +114,8 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
       await Promise.all([
         controller.waitForMutations(),
         imageWorkspaces.waitForMutations(),
-        videoWorkspaces.waitForMutations()
+        videoWorkspaces.waitForMutations(),
+        videoEditors.waitForMutations()
       ]);
     },
     catalog
@@ -216,6 +223,25 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   ipcMain.handle(videoWorkspaceIpcChannels.list, () => videoWorkspaces.list());
   ipcMain.handle(videoWorkspaceIpcChannels.derive, (_event, request: unknown) =>
     videoWorkspaces.derive(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.create, (_event, request: unknown) =>
+    videoEditors.create(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.get, (_event, request: unknown) =>
+    videoEditors.get(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.list, () => videoEditors.list());
+  ipcMain.handle(videoEditorIpcChannels.update, (_event, request: unknown) =>
+    videoEditors.update(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.undo, (_event, request: unknown) =>
+    videoEditors.undo(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.redo, (_event, request: unknown) =>
+    videoEditors.redo(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.copy, (_event, request: unknown) =>
+    videoEditors.copy(request)
   );
   ipcMain.handle(
     videoWorkspaceIpcChannels.selectMaterial,

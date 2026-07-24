@@ -1,0 +1,325 @@
+export const videoEditorIpcChannels = {
+  create: 'video-editor:create',
+  get: 'video-editor:get',
+  list: 'video-editor:list',
+  update: 'video-editor:update',
+  undo: 'video-editor:undo',
+  redo: 'video-editor:redo',
+  copy: 'video-editor:copy'
+} as const;
+
+export type VideoEditorIpcErrorCode =
+  | 'project_not_open'
+  | 'invalid_request'
+  | 'draft_not_found'
+  | 'draft_conflict'
+  | 'source_not_found'
+  | 'source_invalid'
+  | 'nothing_to_undo'
+  | 'nothing_to_redo'
+  | 'workspace_storage_error';
+
+export type VideoEditorIpcResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: VideoEditorIpcErrorCode;
+        readonly message: string;
+        readonly recoverableDraft?: VideoEditorDraftDto;
+      };
+    };
+
+export type VideoEditorSourceIntentDto =
+  | { readonly kind: 'blank' }
+  | { readonly kind: 'from_work'; readonly sourceWorkId: string }
+  | { readonly kind: 'from_video_draft'; readonly sourceDraftId: string };
+
+export interface VideoEditorMediaIdentityDto {
+  readonly sizeBytes: number;
+  readonly durationUs: number;
+  readonly container: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface VideoEditorSourceRangeDto {
+  readonly inUs: number;
+  readonly outUs: number;
+}
+
+export interface VideoEditorRationalDto {
+  readonly numerator: number;
+  readonly denominator: number;
+}
+
+export interface VideoEditorTransformDto {
+  readonly scalePermille: number;
+  readonly positionXPermille: number;
+  readonly positionYPermille: number;
+  readonly rotationMilliDegrees: number;
+  readonly flipX: boolean;
+  readonly flipY: boolean;
+  readonly crop: {
+    readonly xPermille: number;
+    readonly yPermille: number;
+    readonly widthPermille: number;
+    readonly heightPermille: number;
+  } | null;
+}
+
+export type VideoEditorTransitionDto =
+  | { readonly kind: 'none' }
+  | {
+      readonly kind: 'fade' | 'dissolve';
+      readonly durationUs: number;
+    };
+
+export interface VideoEditorClipDto {
+  readonly clipId: string;
+  readonly source: {
+    readonly fileId: string;
+    readonly assetId?: string;
+    readonly workId?: string;
+    readonly identity: VideoEditorMediaIdentityDto;
+  };
+  readonly sourceRange: VideoEditorSourceRangeDto;
+  readonly speed: VideoEditorRationalDto;
+  readonly transform: VideoEditorTransformDto;
+  readonly sourceAudio: {
+    readonly muted: boolean;
+    readonly volumePermille: number;
+  };
+  readonly transitionToNext: VideoEditorTransitionDto;
+}
+
+export interface VideoEditorTextOverlayDto {
+  readonly textId: string;
+  readonly content: string;
+  readonly range: {
+    readonly startUs: number;
+    readonly endUs: number;
+  };
+  readonly style: {
+    readonly requestedFontFamily: string;
+    readonly resolvedFontId?: string;
+    readonly fontSizeMilliPx: number;
+    readonly alignment: 'left' | 'center' | 'right';
+    readonly opacityPermille: number;
+    readonly color: string;
+  };
+  readonly position: {
+    readonly xPermille: number;
+    readonly yPermille: number;
+  };
+  readonly entrance: 'none' | 'fade_in';
+  readonly exit: 'none' | 'fade_out';
+}
+
+export interface VideoEditorBackgroundMusicDto {
+  readonly fileId: string;
+  readonly assetId?: string;
+  readonly identity: VideoEditorMediaIdentityDto;
+  readonly sourceRange: VideoEditorSourceRangeDto;
+  readonly timelineRange: {
+    readonly startUs: number;
+    readonly endUs: number;
+  };
+  readonly volumePermille: number;
+  readonly fadeInUs: number;
+  readonly fadeOutUs: number;
+}
+
+export type VideoEditorCoverDto =
+  | {
+      readonly kind: 'video_frame';
+      readonly clipId: string;
+      readonly sourceTimeUs: number;
+      readonly prependToVideo: boolean;
+    }
+  | {
+      readonly kind: 'local_image';
+      readonly fileId: string;
+      readonly assetId?: string;
+      readonly prependToVideo: boolean;
+    }
+  | {
+      readonly kind: 'project_image';
+      readonly workId: string;
+      readonly fileId: string;
+      readonly prependToVideo: boolean;
+    };
+
+export interface VideoEditorCanvasDto {
+  readonly aspectRatio:
+    | { readonly kind: 'source' }
+    | {
+        readonly kind: 'ratio';
+        readonly numerator: number;
+        readonly denominator: number;
+      };
+  readonly transformPolicy: 'fit' | 'fill';
+  readonly background:
+    | { readonly kind: 'solid'; readonly color: string }
+    | { readonly kind: 'blur_source'; readonly strengthPermille: number };
+}
+
+export type VideoEditorCapabilityPreferenceDto =
+  | { readonly kind: 'auto' }
+  | { readonly kind: 'capability'; readonly valueId: string };
+
+export type VideoEditorResolutionPreferenceDto =
+  | { readonly kind: 'source' }
+  | { readonly kind: 'capability'; readonly valueId: string };
+
+export interface VideoEditorOutputPreferenceDto {
+  readonly destinationId?: string;
+  readonly fileName?: string;
+  readonly container: VideoEditorCapabilityPreferenceDto;
+  readonly videoCodec: VideoEditorCapabilityPreferenceDto;
+  readonly audioCodec: VideoEditorCapabilityPreferenceDto;
+  readonly resolution: VideoEditorResolutionPreferenceDto;
+  readonly frameRate: VideoEditorResolutionPreferenceDto;
+  readonly quality: VideoEditorCapabilityPreferenceDto;
+  readonly hardwareAcceleration:
+    | 'auto'
+    | 'prefer_hardware'
+    | 'software_only';
+  readonly conflictPolicy: 'fail' | 'create_unique_name';
+}
+
+export interface VideoEditorDraftDto {
+  readonly schemaVersion: 1;
+  readonly kind: 'video_basic_edit';
+  readonly draftId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly revision: number;
+  readonly sourceIntent: VideoEditorSourceIntentDto;
+  readonly canvas: VideoEditorCanvasDto;
+  readonly videoTrack: readonly VideoEditorClipDto[];
+  readonly removedClips: readonly {
+    readonly clip: VideoEditorClipDto;
+    readonly previousIndex: number;
+  }[];
+  readonly textTrack: readonly VideoEditorTextOverlayDto[];
+  readonly backgroundMusic: VideoEditorBackgroundMusicDto | null;
+  readonly cover: VideoEditorCoverDto | null;
+  readonly outputPreference: VideoEditorOutputPreferenceDto;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export type VideoEditorUpdateDto =
+  | { readonly kind: 'set_title'; readonly title: string }
+  | {
+      readonly kind: 'trim_clip';
+      readonly clipId: string;
+      readonly sourceRange: VideoEditorSourceRangeDto;
+    }
+  | {
+      readonly kind: 'split_clip';
+      readonly clipId: string;
+      readonly atSourceUs: number;
+    }
+  | { readonly kind: 'remove_clip'; readonly clipId: string }
+  | {
+      readonly kind: 'restore_clip';
+      readonly clipId: string;
+      readonly targetIndex?: number;
+    }
+  | {
+      readonly kind: 'duplicate_clip';
+      readonly clipId: string;
+      readonly targetIndex?: number;
+    }
+  | {
+      readonly kind: 'move_clip';
+      readonly clipId: string;
+      readonly toIndex: number;
+    }
+  | {
+      readonly kind: 'set_clip_speed';
+      readonly clipId: string;
+      readonly speed: VideoEditorRationalDto;
+    }
+  | {
+      readonly kind: 'set_clip_transform';
+      readonly clipId: string;
+      readonly transform: VideoEditorTransformDto;
+    }
+  | {
+      readonly kind: 'set_clip_transition';
+      readonly clipId: string;
+      readonly transition: VideoEditorTransitionDto;
+    }
+  | {
+      readonly kind: 'set_source_audio';
+      readonly clipId: string;
+      readonly sourceAudio: {
+        readonly muted: boolean;
+        readonly volumePermille: number;
+      };
+    }
+  | {
+      readonly kind: 'upsert_text';
+      readonly text: Omit<VideoEditorTextOverlayDto, 'textId'> & {
+        readonly textId?: string;
+      };
+    }
+  | { readonly kind: 'remove_text'; readonly textId: string }
+  | {
+      readonly kind: 'update_background_music';
+      readonly sourceRange: VideoEditorSourceRangeDto;
+      readonly timelineRange: {
+        readonly startUs: number;
+        readonly endUs: number;
+      };
+      readonly volumePermille: number;
+      readonly fadeInUs: number;
+      readonly fadeOutUs: number;
+    }
+  | { readonly kind: 'clear_background_music' }
+  | {
+      readonly kind: 'set_cover';
+      readonly cover: VideoEditorCoverDto | null;
+    }
+  | {
+      readonly kind: 'set_canvas';
+      readonly canvas: VideoEditorCanvasDto;
+    }
+  | {
+      readonly kind: 'set_output_preference';
+      readonly outputPreference: VideoEditorOutputPreferenceDto;
+    };
+
+export interface VideoEditorApi {
+  create(
+    sourceIntent?: VideoEditorSourceIntentDto,
+    title?: string
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
+  get(
+    draftId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto | undefined>>;
+  list(): Promise<VideoEditorIpcResult<readonly VideoEditorDraftDto[]>>;
+  update(
+    draftId: string,
+    expectedRevision: number,
+    command: VideoEditorUpdateDto
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
+  undo(
+    draftId: string,
+    expectedRevision: number
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
+  redo(
+    draftId: string,
+    expectedRevision: number
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
+  copy(
+    draftId: string,
+    expectedRevision: number,
+    title?: string
+  ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
+}

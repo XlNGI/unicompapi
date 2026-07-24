@@ -19,6 +19,9 @@ import type {
   Task,
   TaskId,
   TaskRepository,
+  VideoEditDraft,
+  VideoEditDraftId,
+  VideoEditDraftRepository,
   VideoWorkspaceDraft,
   VideoWorkspaceRepository,
   Work,
@@ -39,6 +42,7 @@ import {
   isFileReferenceEntity,
   isImageWorkspaceEntity,
   isTaskEntity,
+  isVideoEditDraftEntity,
   isVideoWorkspaceEntity,
   isWorkEntity,
   type EntityValidator
@@ -313,6 +317,36 @@ export class JsonVideoWorkspaceRepository
   }
 
   save(draft: VideoWorkspaceDraft) {
+    return this.collection.save(draft);
+  }
+}
+
+export class JsonVideoEditDraftRepository
+  implements VideoEditDraftRepository {
+  private readonly collection: JsonEntityCollection<
+    VideoEditDraft,
+    ProjectId
+  >;
+
+  constructor(storage: ProjectStorageAdapter, projectId: ProjectId) {
+    this.collection = new JsonEntityCollection(
+      storage,
+      projectStoragePaths.entities.videoEditDrafts,
+      projectId,
+      (draft) => draft.projectId,
+      isVideoEditDraftEntity
+    );
+  }
+
+  get(id: VideoEditDraftId) {
+    return this.collection.get(id);
+  }
+
+  list(projectId: ProjectId) {
+    return this.collection.list(projectId);
+  }
+
+  save(draft: VideoEditDraft) {
     return this.collection.save(draft);
   }
 }
