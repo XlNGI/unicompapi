@@ -77,9 +77,9 @@ export const videoCreationModes = [
   {
     id: 'video-editing',
     label: '基础编辑',
-    description: '为单轨、非破坏式视频编辑保留独立入口。',
-    emptyTitle: '基础编辑尚未接入',
-    emptyDescription: '当前不修改源文件；编辑草稿、代理预览和本地导出将在完成技术架构后实现。',
+    description: '本地优先、非破坏式的轻量单轨视频编辑。',
+    emptyTitle: '还没有基础编辑草稿',
+    emptyDescription: '可先建立项目内编辑草稿；素材、预览和导出按真实端口逐步接入。',
     icon: '编'
   }
 ] as const;
