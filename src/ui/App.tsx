@@ -121,6 +121,12 @@ export function App() {
         <ImageToPromptPage
           onNavigateToImageMode={handleImageModeNavigate}
         />
+      ) : activeSubItemId === 'quick-video' ? (
+        <VideoQuickPage
+          onNavigateToTextToVideo={() =>
+            handleSecondaryNavigate('video-creation', 'text-to-video')
+          }
+        />
       ) : (
         <ActivePage />
       )}
