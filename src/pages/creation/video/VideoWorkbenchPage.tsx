@@ -13,6 +13,7 @@ import type {
 import '../../../styles/pages.css';
 import type { VideoCreationMode } from '../creationModes';
 import { VideoQuickWorkspace } from './VideoQuickWorkspace';
+import { VideoTextWorkspace } from './VideoTextWorkspace';
 
 const workspaceErrorMessages: Record<VideoWorkspaceIpcErrorCode, string> = {
   project_not_open: '请先在“项目”页面新建或打开一个项目。',
@@ -311,6 +312,15 @@ export function VideoWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToTextToVideo={onNavigateToTextToVideo}
+          registry={registry}
+        />
+      ) : currentDraft?.mode === 'text_to_video' ? (
+        <VideoTextWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
           registry={registry}
         />
       ) : (
