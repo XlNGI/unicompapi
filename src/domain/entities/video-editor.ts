@@ -217,6 +217,12 @@ export type VideoEditCommand = VideoEditCommandBase &
         readonly after: SourceTimeRange;
       }
     | {
+        readonly kind: 'set_clip_source';
+        readonly clipId: VideoClipId;
+        readonly before: VideoClipSource;
+        readonly after: VideoClipSource;
+      }
+    | {
         readonly kind: 'split_clip';
         readonly sourceIndex: number;
         readonly before: VideoClip;
@@ -612,6 +618,11 @@ export function isVideoEditCommand(value: unknown): value is VideoEditCommand {
         isNonBlankString(value.clipId) &&
         isSourceTimeRange(value.before) &&
         isSourceTimeRange(value.after);
+    case 'set_clip_source':
+      return exact(value, ['schemaVersion', 'kind', 'clipId', 'before', 'after']) &&
+        isNonBlankString(value.clipId) &&
+        isVideoClipSource(value.before) &&
+        isVideoClipSource(value.after);
     case 'split_clip':
       return exact(value, [
         'schemaVersion',
@@ -722,6 +733,14 @@ function executeCommand(
         draft,
         command.clipId,
         'sourceRange',
+        apply ? command.before : command.after,
+        apply ? command.after : command.before
+      );
+    case 'set_clip_source':
+      return replaceClipField(
+        draft,
+        command.clipId,
+        'source',
         apply ? command.before : command.after,
         apply ? command.after : command.before
       );

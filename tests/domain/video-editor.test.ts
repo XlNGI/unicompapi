@@ -146,6 +146,37 @@ describe('video editor draft contracts', () => {
     expect(redone.revision).toBe(4);
   });
 
+  it('relinks a clip source through reversible domain history', () => {
+    const inserted = insert(emptyDraft());
+    const original = inserted.videoTrack[0]!;
+    const replacement = {
+      fileId: toFileReferenceId('file-relinked'),
+      assetId: toAssetId('asset-relinked'),
+      identity: {
+        ...original.source.identity,
+        modifiedAtMs: original.source.identity.modifiedAtMs + 1,
+        checksumSha256: 'b'.repeat(64)
+      }
+    };
+    const relinked = applyVideoEditCommand(
+      inserted,
+      {
+        schemaVersion: 1,
+        kind: 'set_clip_source',
+        clipId: original.id,
+        before: original.source,
+        after: replacement
+      },
+      t2
+    );
+
+    expect(relinked.videoTrack[0]?.source).toEqual(replacement);
+    expect(undoVideoEditCommand(relinked, t2).videoTrack[0]?.source).toEqual(
+      original.source
+    );
+    expect(isVideoEditCommand(relinked.history.undoStack.at(-1))).toBe(true);
+  });
+
   it('supports split, remove and restore as reversible single-track commands', () => {
     const inserted = insert(emptyDraft());
     const original = inserted.videoTrack[0]!;

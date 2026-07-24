@@ -17,6 +17,7 @@ import {
   VideoReferenceMediaController,
   VideoSubmissionController,
   VideoEditorController,
+  VideoEditorMediaController,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
@@ -74,6 +75,19 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   const videoEditors = new VideoEditorController({
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
+  });
+  const videoEditorMedia = new VideoEditorMediaController({
+    getSession: () => sessionRegistry.get(),
+    chooseVideoFile: () =>
+      choosePath(
+        ['openFile'],
+        [
+          { name: 'Videos', extensions: ['mp4', 'm4v', 'mov'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      ),
+    handles: mediaHandles,
+    editor: videoEditors
   });
   const videoReferenceMedia = new VideoReferenceMediaController({
     getSession: () => sessionRegistry.get(),
@@ -242,6 +256,37 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   );
   ipcMain.handle(videoEditorIpcChannels.copy, (_event, request: unknown) =>
     videoEditors.copy(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.selectSource,
+    (_event, request: unknown) => videoEditorMedia.selectSource(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.attachWork,
+    (_event, request: unknown) => videoEditorMedia.attachWork(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.getSourceStatus,
+    (_event, request: unknown) => videoEditorMedia.getSourceStatus(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.prepareRelink,
+    (_event, request: unknown) => videoEditorMedia.prepareRelink(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.confirmRelink,
+    (_event, request: unknown) => videoEditorMedia.confirmRelink(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.createSourcePreview,
+    (_event, request: unknown) => videoEditorMedia.createSourcePreview(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.requestPreviewArtifact,
+    (_event, request: unknown) => videoEditorMedia.requestPreviewArtifact(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.clearPreviewCache, () =>
+    videoEditorMedia.clearPreviewCache()
   );
   ipcMain.handle(
     videoWorkspaceIpcChannels.selectMaterial,

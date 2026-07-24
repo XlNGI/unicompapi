@@ -45,6 +45,36 @@ test('exposes revisioned local editor draft operations only', () => {
   assert.doesNotMatch(sharedSource, /mediaEngine|exportPlan|invokeExecution|createTask/);
 });
 
+test('exposes controlled B2 source, relink and preview-cache operations', () => {
+  for (const operation of [
+    'selectSource',
+    'attachWork',
+    'getSourceStatus',
+    'prepareRelink',
+    'confirmRelink',
+    'createSourcePreview',
+    'requestPreviewArtifact',
+    'clearPreviewCache'
+  ]) {
+    assert.match(sharedSource, new RegExp('\\b' + operation + '\\b'));
+    assert.match(
+      preloadSource,
+      new RegExp('videoEditorIpcChannels\\.' + operation)
+    );
+    assert.match(
+      mainSource,
+      new RegExp('videoEditorIpcChannels\\.' + operation)
+    );
+  }
+
+  assert.match(sharedSource, /external_reference/);
+  assert.match(sharedSource, /managed_project_copy/);
+  assert.match(sharedSource, /managed_work/);
+  assert.match(sharedSource, /adapter_unavailable/);
+  assert.match(sharedSource, /acceptMismatch/);
+  assert.match(domainSource, /set_clip_source/);
+});
+
 test('keeps editor DTOs path-free, hash-free and history-free', () => {
   for (const protectedField of [
     'rootDirectory',

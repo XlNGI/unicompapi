@@ -5,7 +5,15 @@ export const videoEditorIpcChannels = {
   update: 'video-editor:update',
   undo: 'video-editor:undo',
   redo: 'video-editor:redo',
-  copy: 'video-editor:copy'
+  copy: 'video-editor:copy',
+  selectSource: 'video-editor:select-source',
+  attachWork: 'video-editor:attach-work',
+  getSourceStatus: 'video-editor:get-source-status',
+  prepareRelink: 'video-editor:prepare-relink',
+  confirmRelink: 'video-editor:confirm-relink',
+  createSourcePreview: 'video-editor:create-source-preview',
+  requestPreviewArtifact: 'video-editor:request-preview-artifact',
+  clearPreviewCache: 'video-editor:clear-preview-cache'
 } as const;
 
 export type VideoEditorIpcErrorCode =
@@ -17,6 +25,18 @@ export type VideoEditorIpcErrorCode =
   | 'source_invalid'
   | 'nothing_to_undo'
   | 'nothing_to_redo'
+  | 'clip_not_found'
+  | 'work_not_found'
+  | 'source_unavailable'
+  | 'source_changed'
+  | 'unsupported_video'
+  | 'media_unreadable'
+  | 'managed_copy_failed'
+  | 'relink_token_invalid'
+  | 'relink_mismatch_confirmation_required'
+  | 'relink_candidate_too_short'
+  | 'preview_unavailable'
+  | 'adapter_unavailable'
   | 'workspace_storage_error';
 
 export type VideoEditorIpcResult<T> =
@@ -212,6 +232,74 @@ export interface VideoEditorDraftDto {
   readonly updatedAt: string;
 }
 
+export type VideoEditorSourceRegistrationStrategyDto =
+  | 'external_reference'
+  | 'managed_project_copy';
+
+export type VideoEditorSourceReferenceKindDto =
+  | VideoEditorSourceRegistrationStrategyDto
+  | 'managed_work';
+
+export interface VideoEditorSourceDto {
+  readonly clipId: string;
+  readonly assetId?: string;
+  readonly workId?: string;
+  readonly name: string;
+  readonly referenceKind: VideoEditorSourceReferenceKindDto;
+  readonly fileState: string;
+  readonly identity: VideoEditorMediaIdentityDto;
+}
+
+export interface VideoEditorSourceSelectionResultDto {
+  readonly cancelled: boolean;
+  readonly draft?: VideoEditorDraftDto;
+  readonly source?: VideoEditorSourceDto;
+}
+
+export interface VideoEditorSourceStatusDto {
+  readonly clipId: string;
+  readonly state: string;
+  readonly issues: readonly string[];
+  readonly matchesIdentity?: boolean;
+  readonly relinkRequired: boolean;
+  readonly referenceKind: VideoEditorSourceReferenceKindDto;
+  readonly checkedAt?: string;
+}
+
+export interface VideoEditorRelinkPreparationDto {
+  readonly cancelled: boolean;
+  readonly token?: string;
+  readonly expiresAt?: string;
+  readonly matchesIdentity?: boolean;
+  readonly candidate?: VideoEditorMediaIdentityDto;
+  readonly differences?: {
+    readonly content: boolean;
+    readonly size: boolean;
+    readonly duration: boolean;
+    readonly container: boolean;
+    readonly dimensions: boolean;
+  };
+}
+
+export interface VideoEditorSourcePreviewDto {
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mimeType: 'video/mp4' | 'video/quicktime';
+  readonly kind: 'original';
+}
+
+export type VideoEditorPreviewArtifactKindDto =
+  | 'proxy_video'
+  | 'thumbnail_strip'
+  | 'audio_waveform';
+
+export interface VideoEditorPreviewArtifactDto {
+  readonly kind: VideoEditorPreviewArtifactKindDto;
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mimeType: string;
+}
+
 export type VideoEditorUpdateDto =
   | { readonly kind: 'set_title'; readonly title: string }
   | {
@@ -322,4 +410,40 @@ export interface VideoEditorApi {
     expectedRevision: number,
     title?: string
   ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
+  selectSource(
+    draftId: string,
+    expectedRevision: number,
+    strategy: VideoEditorSourceRegistrationStrategyDto
+  ): Promise<VideoEditorIpcResult<VideoEditorSourceSelectionResultDto>>;
+  attachWork(
+    draftId: string,
+    expectedRevision: number,
+    workId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorSourceSelectionResultDto>>;
+  getSourceStatus(
+    draftId: string,
+    clipId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorSourceStatusDto>>;
+  prepareRelink(
+    draftId: string,
+    clipId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorRelinkPreparationDto>>;
+  confirmRelink(
+    draftId: string,
+    clipId: string,
+    token: string,
+    acceptMismatch: boolean
+  ): Promise<VideoEditorIpcResult<VideoEditorSourceSelectionResultDto>>;
+  createSourcePreview(
+    draftId: string,
+    clipId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorSourcePreviewDto>>;
+  requestPreviewArtifact(
+    draftId: string,
+    clipId: string,
+    kind: VideoEditorPreviewArtifactKindDto
+  ): Promise<VideoEditorIpcResult<VideoEditorPreviewArtifactDto>>;
+  clearPreviewCache(): Promise<
+    VideoEditorIpcResult<{ readonly cleared: true }>
+  >;
 }
