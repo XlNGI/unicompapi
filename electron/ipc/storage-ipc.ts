@@ -18,6 +18,7 @@ import {
   VideoSubmissionController,
   VideoEditorController,
   VideoEditorMediaController,
+  createFfmpegMediaEngineAdapterFromEnvironment,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
   createDevelopmentVideoEditorPreviewAdapter
@@ -105,7 +106,9 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     ),
     handles: mediaHandles,
     editor: videoEditors,
-    previewAdapter: createDevelopmentVideoEditorPreviewAdapter()
+    previewAdapter:
+      createFfmpegMediaEngineAdapterFromEnvironment() ??
+      createDevelopmentVideoEditorPreviewAdapter()
   });
   const videoReferenceMedia = new VideoReferenceMediaController({
     getSession: () => sessionRegistry.get(),

@@ -444,6 +444,8 @@ A3 分支门禁为 100 项 UI/IPC/安全契约测试与 174 项领域/平台测�
 
 项目负责人随后批准仅限开发/测试的项目本地媒体工具链。`config/media-engine-development.json` 固定 Windows x64 FFmpeg 8.1.2 LGPL 包来源、SHA-256、目录、版本、构建参数和编码器要求；`setup:media-engine` 在哈希和归档路径校验后解压到被 Git 忽略的 `.tools/`，验证通过才替换安装；`verify:media-engine` 可独立复核；`npm run dev` 通过后自动注入 `ffmpeg`/`ffprobe` 绝对路径。真实安装、重复替换与验证通过；新增 8 项工具链安全测试后，全量门禁为 108 项 UI/IPC/工具链契约测试与 177 项领域/平台测试，共 285 项且 0 失败，类型检查、lint、生产构建和差异检查通过。二进制、压缩包、生产构建和发布物边界没有改变，macOS 安装清单与正式分发审查仍未完成。
 
+阶段 7 B3 已在 `feature/video-media-engine-adapter` 实现真实 `MediaEngineAdapter`：动态能力、ffprobe 探测、参数数组预览/导出、真实 progress、取消确认和独立输出校验；主进程现有预览 IPC 已优先使用该适配器。Windows `.tools` 实样本已生成并验证 WebM VP9/Opus，真实取消和临时文件清理通过。B3 仍未完整收口，B4 ExportPlan/Task/Execution/Work、A4 导出 UI、生产媒体引擎构建签名和在线后台契约继续阻断最终上线。
+
 ## 技术栈
 
 ### 已选方案：Electron + React + TypeScript
