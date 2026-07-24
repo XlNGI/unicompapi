@@ -35,6 +35,9 @@ export const projectStoragePaths = {
     videoWorkspaceDrafts: toProjectRelativePath(
       'entities/video-workspace-drafts.json'
     ),
+    videoEditDrafts: toProjectRelativePath(
+      'entities/video-edit-drafts.json'
+    ),
     assets: toProjectRelativePath('entities/assets.json'),
     fileReferences: toProjectRelativePath('entities/file-references.json'),
     tasks: toProjectRelativePath('entities/tasks.json'),

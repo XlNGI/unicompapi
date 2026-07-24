@@ -16,6 +16,9 @@ export type ConnectionId = DomainId<'ConnectionId'>;
 export type ModelId = DomainId<'ModelId'>;
 export type CapabilityEvidenceId = DomainId<'CapabilityEvidenceId'>;
 export type RoutingPreferenceId = DomainId<'RoutingPreferenceId'>;
+export type VideoEditDraftId = DomainId<'VideoEditDraftId'>;
+export type VideoClipId = DomainId<'VideoClipId'>;
+export type TextOverlayId = DomainId<'TextOverlayId'>;
 
 function toDomainId<Name extends string>(value: string, label: Name): DomainId<Name> {
   const normalized = value.trim();
@@ -44,3 +47,9 @@ export const toCapabilityEvidenceId = (value: string) =>
   toDomainId(value, 'CapabilityEvidenceId');
 export const toRoutingPreferenceId = (value: string) =>
   toDomainId(value, 'RoutingPreferenceId');
+export const toVideoEditDraftId = (value: string) =>
+  toDomainId(value, 'VideoEditDraftId');
+export const toVideoClipId = (value: string) =>
+  toDomainId(value, 'VideoClipId');
+export const toTextOverlayId = (value: string) =>
+  toDomainId(value, 'TextOverlayId');

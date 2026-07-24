@@ -5,6 +5,7 @@ import {
   executionStates,
   fileStates,
   isImageWorkspaceDraft,
+  isVideoEditDraft,
   isVideoWorkspaceDraft,
   mediaKinds,
   imageWorkspaceModes,
@@ -32,6 +33,9 @@ export const isImageWorkspaceEntity: EntityValidator = (value) =>
 
 export const isVideoWorkspaceEntity: EntityValidator = (value) =>
   isVideoWorkspaceDraft(value);
+
+export const isVideoEditDraftEntity: EntityValidator = (value) =>
+  isVideoEditDraft(value);
 
 export const isAssetEntity: EntityValidator = (value) =>
   isNonBlankString(value.fileId) &&
