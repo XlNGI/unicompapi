@@ -78,6 +78,22 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   });
   const videoEditorMedia = new VideoEditorMediaController({
     getSession: () => sessionRegistry.get(),
+    chooseAudioFile: () =>
+      choosePath(
+        ['openFile'],
+        [
+          { name: 'WAV audio', extensions: ['wav'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      ),
+    chooseImageFile: () =>
+      choosePath(
+        ['openFile'],
+        [
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      ),
     chooseVideoFile: () =>
       choosePath(
         ['openFile'],
@@ -276,6 +292,18 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   ipcMain.handle(
     videoEditorIpcChannels.confirmRelink,
     (_event, request: unknown) => videoEditorMedia.confirmRelink(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.selectBackgroundMusic,
+    (_event, request: unknown) => videoEditorMedia.selectBackgroundMusic(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.selectCoverImage,
+    (_event, request: unknown) => videoEditorMedia.selectCoverImage(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.attachCoverWork,
+    (_event, request: unknown) => videoEditorMedia.attachCoverWork(request)
   );
   ipcMain.handle(
     videoEditorIpcChannels.createSourcePreview,

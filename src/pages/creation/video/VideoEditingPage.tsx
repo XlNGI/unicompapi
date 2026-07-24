@@ -9,13 +9,16 @@ import type {
 } from '../../../shared/storage-ipc';
 import type {
   VideoEditorCanvasDto,
+  VideoEditorBackgroundMusicDto,
   VideoEditorClipDto,
+  VideoEditorCoverDto,
   VideoEditorDraftDto,
   VideoEditorIpcErrorCode,
   VideoEditorIpcResult,
   VideoEditorSourcePreviewDto,
   VideoEditorSourceRegistrationStrategyDto,
   VideoEditorSourceStatusDto,
+  VideoEditorTextOverlayDto,
   VideoEditorUpdateDto
 } from '../../../shared/video-editor-ipc';
 import '../../../styles/pages.css';
@@ -31,11 +34,13 @@ const errorMessages: Partial<Record<VideoEditorIpcErrorCode, string>> = {
   source_not_found: '来源作品或视频草稿已不可用，源文件也可能不存在。',
   source_invalid: '来源不属于当前项目或不是可用视频。',
   clip_not_found: '所选片段已不存在，请重新选择。',
-  work_not_found: '所选视频作品已不存在或不属于当前项目。',
+  work_not_found: '所选项目作品已不存在、类型不符或不属于当前项目。',
   source_unavailable: '源文件当前不可用，请检查文件状态。',
   source_changed: '源文件内容已经变化，请重新定位并确认。',
   unsupported_video: '当前只支持经过内容校验的 MP4 或 MOV 视频。',
-  media_unreadable: '无法读取所选视频，请检查文件后重试。',
+  unsupported_audio: '当前背景音乐只支持经过内容校验的 PCM 或浮点 WAV 文件。',
+  unsupported_image: '当前封面只支持经过内容校验的 PNG、JPEG、GIF、WebP 或 BMP 图片。',
+  media_unreadable: '无法读取所选媒体，请检查文件后重试。',
   managed_copy_failed: '视频未能安全复制到项目，请检查存储空间。',
   relink_token_invalid: '重新定位确认已经失效，请重新选择文件。',
   relink_mismatch_confirmation_required: '候选文件与原文件不同，需要明确确认。',
@@ -53,7 +58,7 @@ type EditorError = Extract<
 >['error'];
 type SaveState = 'saved' | 'editing' | 'saving' | 'failed' | 'conflict';
 type MediaTab = 'timeline' | 'project';
-type InspectorTab = 'clip' | 'canvas';
+type InspectorTab = 'clip' | 'canvas' | 'audio' | 'text' | 'cover';
 
 interface TimelineSegment {
   readonly clipId: string;
@@ -90,8 +95,10 @@ export function VideoEditingPage() {
   const [drafts, setDrafts] = useState<readonly VideoEditorDraftDto[]>([]);
   const [currentDraft, setCurrentDraft] = useState<VideoEditorDraftDto>();
   const [videoWorks, setVideoWorks] = useState<readonly StorageWorkSummaryDto[]>([]);
+  const [imageWorks, setImageWorks] = useState<readonly StorageWorkSummaryDto[]>([]);
   const [selectedWorkId, setSelectedWorkId] = useState('');
   const [selectedClipId, setSelectedClipId] = useState('');
+  const [selectedTextId, setSelectedTextId] = useState('');
   const [sourceStatuses, setSourceStatuses] = useState<
     Readonly<Record<string, VideoEditorSourceStatusDto>>
   >({});
@@ -141,12 +148,12 @@ export function VideoEditingPage() {
         return;
       }
       if (worksResult.ok) {
-        const works = worksResult.value.items.filter(
-          (work) =>
-            work.projectId === sessionResult.value?.projectId &&
-            work.mediaKind === 'video'
+        const projectWorks = worksResult.value.items.filter(
+          (work) => work.projectId === sessionResult.value?.projectId
         );
+        const works = projectWorks.filter((work) => work.mediaKind === 'video');
         setVideoWorks(works);
+        setImageWorks(projectWorks.filter((work) => work.mediaKind === 'image'));
         setSelectedWorkId(works[0]?.workId ?? '');
       }
       const sorted = sortDrafts(listResult.value);
@@ -207,6 +214,9 @@ export function VideoEditingPage() {
         ? preferredClipId
         : draft?.videoTrack[0]?.clipId ?? '';
     setSelectedClipId(nextClipId);
+    setSelectedTextId((textId) =>
+      draft?.textTrack.some((text) => text.textId === textId) ? textId : ''
+    );
     setPlayheadUs(
       buildTimelineSegments(draft?.videoTrack ?? []).find(
         (segment) => segment.clipId === nextClipId
@@ -375,6 +385,82 @@ export function VideoEditingPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function selectBackgroundMusic() {
+    if (!videoEditors || !currentDraft || busy) return;
+    setBusy(true);
+    setSaveState('saving');
+    setMessage('');
+    try {
+      const result = await videoEditors.selectBackgroundMusic(
+        currentDraft.draftId,
+        currentDraft.revision
+      );
+      if (!result.ok) {
+        handleError(result.error);
+        return;
+      }
+      if (result.value.cancelled) {
+        setSaveState('saved');
+        setMessage('已取消选择音乐，草稿保持不变。');
+        return;
+      }
+      acceptDraft(result.value.draft, selectedClipId);
+      setInspectorTab('audio');
+      setMessage('背景音乐已校验并保存；草稿仍只包含一条背景音乐。');
+    } catch {
+      setSaveState('failed');
+      setMessage('选择背景音乐失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectCoverImage(prependToVideo: boolean) {
+    if (!videoEditors || !currentDraft || busy) return;
+    setBusy(true);
+    setSaveState('saving');
+    setMessage('');
+    try {
+      const result = await videoEditors.selectCoverImage(
+        currentDraft.draftId,
+        currentDraft.revision,
+        prependToVideo
+      );
+      if (!result.ok) {
+        handleError(result.error);
+        return;
+      }
+      if (result.value.cancelled) {
+        setSaveState('saved');
+        setMessage('已取消选择封面，草稿保持不变。');
+        return;
+      }
+      acceptDraft(result.value.draft, selectedClipId);
+      setInspectorTab('cover');
+      setMessage('本机图片已经过内容校验并设为封面。');
+    } catch {
+      setSaveState('failed');
+      setMessage('选择本机封面失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function attachCoverWork(workId: string, prependToVideo: boolean) {
+    if (!videoEditors || !currentDraft || !workId || busy) return;
+    await mutate(
+      () =>
+        videoEditors.attachCoverWork(
+          currentDraft.draftId,
+          currentDraft.revision,
+          workId,
+          prependToVideo
+        ),
+      '项目图片作品已设为封面，没有复制或修改原作品。'
+    );
+    setInspectorTab('cover');
   }
 
   async function relinkSource(clipId: string) {
@@ -905,11 +991,26 @@ export function VideoEditingPage() {
                 >
                   恢复删除
                 </Button>
-                <Button disabled title="等待 A3" variant="ghost">
+                <Button
+                  disabled={!currentDraft || totalDurationUs <= 0}
+                  onClick={() => setInspectorTab('text')}
+                  variant="ghost"
+                >
                   文字
                 </Button>
-                <Button disabled title="等待 A3" variant="ghost">
+                <Button
+                  disabled={!currentDraft || totalDurationUs <= 0}
+                  onClick={() => setInspectorTab('audio')}
+                  variant="ghost"
+                >
                   音乐
+                </Button>
+                <Button
+                  disabled={!currentDraft || totalDurationUs <= 0}
+                  onClick={() => setInspectorTab('cover')}
+                  variant="ghost"
+                >
+                  封面
                 </Button>
               </div>
             </div>
@@ -942,6 +1043,11 @@ export function VideoEditingPage() {
                 })) ?? []
               }
               label="文字轨"
+              onSelect={(textId) => {
+                setSelectedTextId(textId);
+                setInspectorTab('text');
+              }}
+              selectedId={selectedTextId}
             />
             <TimelineTrack
               items={
@@ -977,11 +1083,32 @@ export function VideoEditingPage() {
             >
               画面
             </button>
-            <button disabled role="tab" title="等待 A3" type="button">
+            <button
+              aria-selected={inspectorTab === 'audio'}
+              disabled={!currentDraft}
+              onClick={() => setInspectorTab('audio')}
+              role="tab"
+              type="button"
+            >
               声音
             </button>
-            <button disabled role="tab" title="等待 A3" type="button">
+            <button
+              aria-selected={inspectorTab === 'text'}
+              disabled={!currentDraft}
+              onClick={() => setInspectorTab('text')}
+              role="tab"
+              type="button"
+            >
               文字
+            </button>
+            <button
+              aria-selected={inspectorTab === 'cover'}
+              disabled={!currentDraft}
+              onClick={() => setInspectorTab('cover')}
+              role="tab"
+              type="button"
+            >
+              封面
             </button>
           </div>
           <label className="uc-video-editor__title-field">
@@ -1019,7 +1146,7 @@ export function VideoEditingPage() {
                 title="尚未选择片段"
               />
             )
-          ) : currentDraft ? (
+          ) : inspectorTab === 'canvas' && currentDraft ? (
             <CanvasInspector
               busy={operationBlocked}
               canvas={currentDraft.canvas}
@@ -1031,6 +1158,49 @@ export function VideoEditingPage() {
               }
               onInvalid={setMessage}
               sourceClip={currentDraft.videoTrack[0]}
+            />
+          ) : inspectorTab === 'audio' && currentDraft ? (
+            <AudioInspector
+              backgroundMusic={currentDraft.backgroundMusic}
+              busy={operationBlocked}
+              clip={selectedClip}
+              onCommand={(command, successMessage) =>
+                void runCommand(command, successMessage)
+              }
+              onInvalid={setMessage}
+              onSelectMusic={() => void selectBackgroundMusic()}
+              totalDurationUs={totalDurationUs}
+            />
+          ) : inspectorTab === 'text' && currentDraft ? (
+            <TextInspector
+              busy={operationBlocked}
+              onCommand={(command, successMessage) =>
+                void runCommand(command, successMessage)
+              }
+              onInvalid={setMessage}
+              onSelect={setSelectedTextId}
+              selectedTextId={selectedTextId}
+              texts={currentDraft.textTrack}
+              totalDurationUs={totalDurationUs}
+            />
+          ) : inspectorTab === 'cover' && currentDraft ? (
+            <CoverInspector
+              busy={operationBlocked}
+              clips={currentDraft.videoTrack}
+              cover={currentDraft.cover}
+              imageWorks={imageWorks}
+              key={`${currentDraft.draftId}-${JSON.stringify(currentDraft.cover)}`}
+              onAttachWork={(workId, prependToVideo) =>
+                void attachCoverWork(workId, prependToVideo)
+              }
+              onCommand={(command, successMessage) =>
+                void runCommand(command, successMessage)
+              }
+              onInvalid={setMessage}
+              onSelectLocal={(prependToVideo) =>
+                void selectCoverImage(prependToVideo)
+              }
+              selectedClipId={selectedClipId}
             />
           ) : (
             <EmptyState
@@ -1255,17 +1425,34 @@ function VideoTimelineTrack({
 
 function TimelineTrack({
   items,
-  label
+  label,
+  onSelect,
+  selectedId
 }: {
   readonly items: readonly { readonly id: string; readonly label: string }[];
   readonly label: string;
+  readonly onSelect?: (id: string) => void;
+  readonly selectedId?: string;
 }) {
   return (
     <div className="uc-video-editor__track">
       <strong>{label}</strong>
       <div>
         {items.length ? (
-          items.map((item) => <span key={item.id}>{item.label}</span>)
+          items.map((item) =>
+            onSelect ? (
+              <button
+                aria-pressed={selectedId === item.id}
+                key={item.id}
+                onClick={() => onSelect(item.id)}
+                type="button"
+              >
+                {item.label}
+              </button>
+            ) : (
+              <span key={item.id}>{item.label}</span>
+            )
+          )
         ) : (
           <small>暂无内容</small>
         )}
@@ -1579,6 +1766,390 @@ function CanvasInspector({
   );
 }
 
+function TextInspector({
+  busy,
+  onCommand,
+  onInvalid,
+  onSelect,
+  selectedTextId,
+  texts,
+  totalDurationUs
+}: {
+  readonly busy: boolean;
+  readonly onCommand: (command: VideoEditorUpdateDto, message: string) => void;
+  readonly onInvalid: (message: string) => void;
+  readonly onSelect: (textId: string) => void;
+  readonly selectedTextId: string;
+  readonly texts: readonly VideoEditorTextOverlayDto[];
+  readonly totalDurationUs: number;
+}) {
+  const selected = texts.find((text) => text.textId === selectedTextId);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const content = String(data.get('content')).trim();
+    const fontFamily = String(data.get('fontFamily')).trim();
+    const startUs = millisecondsToUs(formNumber(form, 'startMs'));
+    const endUs = millisecondsToUs(formNumber(form, 'endMs'));
+    const fontSizeMilliPx = Math.round(formNumber(form, 'fontSizePx') * 1000);
+    const opacityPermille = percentToPermille(formNumber(form, 'opacityPercent'));
+    const xPermille = percentToPermille(formNumber(form, 'xPercent'));
+    const yPermille = percentToPermille(formNumber(form, 'yPercent'));
+    if (!content) {
+      onInvalid('文字内容不能为空。');
+      return;
+    }
+    if (!fontFamily || !document.fonts.check(`16px ${JSON.stringify(fontFamily)}`)) {
+      onInvalid(`系统未检测到字体“${fontFamily || '未填写'}”，请更换字体后保存。`);
+      return;
+    }
+    if (
+      ![startUs, endUs, fontSizeMilliPx, opacityPermille, xPermille, yPermille]
+        .every(Number.isSafeInteger) ||
+      startUs < 0 ||
+      endUs <= startUs ||
+      endUs > totalDurationUs ||
+      fontSizeMilliPx <= 0 ||
+      opacityPermille < 0 ||
+      opacityPermille > 1000 ||
+      xPermille < 0 ||
+      xPermille > 1000 ||
+      yPermille < 0 ||
+      yPermille > 1000
+    ) {
+      onInvalid('文字时间、字号、位置或透明度无效，且结束时间不能越过项目时长。');
+      return;
+    }
+    onCommand(
+      {
+        kind: 'upsert_text',
+        text: {
+          ...(selected ? { textId: selected.textId } : {}),
+          content,
+          range: { startUs, endUs },
+          style: {
+            requestedFontFamily: fontFamily,
+            ...(selected?.style.requestedFontFamily === fontFamily &&
+            selected.style.resolvedFontId
+              ? { resolvedFontId: selected.style.resolvedFontId }
+              : {}),
+            fontSizeMilliPx,
+            alignment:
+              data.get('alignment') === 'left' || data.get('alignment') === 'right'
+                ? data.get('alignment') as 'left' | 'right'
+                : 'center',
+            opacityPermille,
+            color: String(data.get('color'))
+          },
+          position: { xPermille, yPermille },
+          entrance: data.get('entrance') === 'fade_in' ? 'fade_in' : 'none',
+          exit: data.get('exit') === 'fade_out' ? 'fade_out' : 'none'
+        }
+      },
+      selected ? '文字层修改已保存。' : '新文字层已添加。'
+    );
+  }
+
+  return (
+    <div className="uc-video-editor__inspector-content">
+      <div className="uc-video-editor__layer-list">
+        <Button
+          disabled={busy}
+          onClick={() => onSelect('')}
+          variant={selected ? 'ghost' : 'secondary'}
+        >
+          新建文字
+        </Button>
+        {texts.map((text, index) => (
+          <button
+            aria-pressed={selectedTextId === text.textId}
+            key={text.textId}
+            onClick={() => onSelect(text.textId)}
+            type="button"
+          >
+            {index + 1}. {text.content || '空文字层'}
+          </button>
+        ))}
+      </div>
+      <form
+        className="uc-video-editor__form"
+        key={selected?.textId ?? 'new-text'}
+        onSubmit={submit}
+      >
+        <h3>{selected ? '编辑文字层' : '新建文字层'}</h3>
+        <label>文字内容<textarea defaultValue={selected?.content ?? ''} name="content" rows={3} /></label>
+        <label>开始（毫秒）<input defaultValue={(selected?.range.startUs ?? 0) / 1000} min="0" name="startMs" step="1" type="number" /></label>
+        <label>结束（毫秒）<input defaultValue={(selected?.range.endUs ?? totalDurationUs) / 1000} min="1" name="endMs" step="1" type="number" /></label>
+        <label>字体<input defaultValue={selected?.style.requestedFontFamily ?? 'Segoe UI'} name="fontFamily" /></label>
+        <label>字号（px）<input defaultValue={(selected?.style.fontSizeMilliPx ?? 32_000) / 1000} min="1" name="fontSizePx" step="0.1" type="number" /></label>
+        <label>对齐<select defaultValue={selected?.style.alignment ?? 'center'} name="alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+        <label>水平位置（%）<input defaultValue={(selected?.position.xPermille ?? 500) / 10} max="100" min="0" name="xPercent" step="0.1" type="number" /></label>
+        <label>垂直位置（%）<input defaultValue={(selected?.position.yPermille ?? 850) / 10} max="100" min="0" name="yPercent" step="0.1" type="number" /></label>
+        <label>透明度（%）<input defaultValue={(selected?.style.opacityPermille ?? 1000) / 10} max="100" min="0" name="opacityPercent" step="0.1" type="number" /></label>
+        <label>颜色<input defaultValue={selected?.style.color ?? '#ffffff'} name="color" type="color" /></label>
+        <label>出现<select defaultValue={selected?.entrance ?? 'none'} name="entrance"><option value="none">直接出现</option><option value="fade_in">淡入</option></select></label>
+        <label>消失<select defaultValue={selected?.exit ?? 'none'} name="exit"><option value="none">直接消失</option><option value="fade_out">淡出</option></select></label>
+        <Button disabled={busy || totalDurationUs <= 0} type="submit">
+          {selected ? '保存文字层' : '添加文字层'}
+        </Button>
+        {selected ? (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              onCommand(
+                { kind: 'remove_text', textId: selected.textId },
+                '文字层已删除。'
+              );
+              onSelect('');
+            }}
+            variant="ghost"
+          >
+            删除文字层
+          </Button>
+        ) : null}
+      </form>
+    </div>
+  );
+}
+
+function AudioInspector({
+  backgroundMusic,
+  busy,
+  clip,
+  onCommand,
+  onInvalid,
+  onSelectMusic,
+  totalDurationUs
+}: {
+  readonly backgroundMusic: VideoEditorBackgroundMusicDto | null;
+  readonly busy: boolean;
+  readonly clip?: VideoEditorClipDto;
+  readonly onCommand: (command: VideoEditorUpdateDto, message: string) => void;
+  readonly onInvalid: (message: string) => void;
+  readonly onSelectMusic: () => void;
+  readonly totalDurationUs: number;
+}) {
+  function submitSourceAudio(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!clip) return;
+    const form = event.currentTarget;
+    const volumePermille = percentToPermille(formNumber(form, 'volumePercent'));
+    if (!Number.isSafeInteger(volumePermille) || volumePermille < 0 || volumePermille > 1000) {
+      onInvalid('原声音量必须在 0% 到 100% 之间。');
+      return;
+    }
+    onCommand(
+      {
+        kind: 'set_source_audio',
+        clipId: clip.clipId,
+        sourceAudio: {
+          muted: new FormData(form).has('muted'),
+          volumePermille
+        }
+      },
+      '当前片段原声设置已保存。'
+    );
+  }
+
+  function submitMusic(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!backgroundMusic) return;
+    const form = event.currentTarget;
+    const sourceRange = {
+      inUs: millisecondsToUs(formNumber(form, 'sourceStartMs')),
+      outUs: millisecondsToUs(formNumber(form, 'sourceEndMs'))
+    };
+    const timelineRange = {
+      startUs: millisecondsToUs(formNumber(form, 'trackStartMs')),
+      endUs: millisecondsToUs(formNumber(form, 'trackEndMs'))
+    };
+    const volumePermille = percentToPermille(formNumber(form, 'musicVolumePercent'));
+    const fadeInUs = millisecondsToUs(formNumber(form, 'fadeInMs'));
+    const fadeOutUs = millisecondsToUs(formNumber(form, 'fadeOutMs'));
+    const values = [
+      sourceRange.inUs,
+      sourceRange.outUs,
+      timelineRange.startUs,
+      timelineRange.endUs,
+      volumePermille,
+      fadeInUs,
+      fadeOutUs
+    ];
+    if (
+      !values.every(Number.isSafeInteger) ||
+      sourceRange.inUs < 0 ||
+      sourceRange.outUs <= sourceRange.inUs ||
+      sourceRange.outUs > backgroundMusic.identity.durationUs ||
+      timelineRange.startUs < 0 ||
+      timelineRange.endUs <= timelineRange.startUs ||
+      timelineRange.endUs > totalDurationUs ||
+      volumePermille < 0 ||
+      volumePermille > 1000 ||
+      fadeInUs < 0 ||
+      fadeOutUs < 0 ||
+      fadeInUs + fadeOutUs > timelineRange.endUs - timelineRange.startUs
+    ) {
+      onInvalid('音乐裁剪、时间、音量或淡入淡出无效，且不能越过音频或项目时长。');
+      return;
+    }
+    onCommand(
+      {
+        kind: 'update_background_music',
+        sourceRange,
+        timelineRange,
+        volumePermille,
+        fadeInUs,
+        fadeOutUs
+      },
+      '背景音乐设置已保存。'
+    );
+  }
+
+  return (
+    <div className="uc-video-editor__inspector-content">
+      {clip ? (
+        <form className="uc-video-editor__form" key={`audio-${clip.clipId}`} onSubmit={submitSourceAudio}>
+          <h3>片段原声</h3>
+          <label className="uc-video-editor__check"><input defaultChecked={clip.sourceAudio.muted} name="muted" type="checkbox" />静音当前片段</label>
+          <label>原声音量（%）<input defaultValue={clip.sourceAudio.volumePermille / 10} max="100" min="0" name="volumePercent" step="0.1" type="number" /></label>
+          <Button disabled={busy} type="submit">保存原声</Button>
+        </form>
+      ) : (
+        <p className="uc-video-editor__hint">选择一个视频片段后可调整原声。</p>
+      )}
+      <div className="uc-video-editor__form">
+        <h3>单条背景音乐</h3>
+        <Button disabled={busy || totalDurationUs <= 0} onClick={onSelectMusic} variant="secondary">
+          {backgroundMusic ? '替换背景音乐' : '选择背景音乐'}
+        </Button>
+        <p className="uc-video-editor__hint">当前使用本机安全解析的 PCM/浮点 WAV；选择新文件会替换现有音乐，不会叠加第二条。</p>
+      </div>
+      {backgroundMusic ? (
+        <form className="uc-video-editor__form" key={backgroundMusic.fileId} onSubmit={submitMusic}>
+          <h3>音乐范围与混音</h3>
+          <label>源开始（毫秒）<input defaultValue={backgroundMusic.sourceRange.inUs / 1000} min="0" name="sourceStartMs" step="1" type="number" /></label>
+          <label>源结束（毫秒）<input defaultValue={backgroundMusic.sourceRange.outUs / 1000} min="1" name="sourceEndMs" step="1" type="number" /></label>
+          <label>时间线开始（毫秒）<input defaultValue={backgroundMusic.timelineRange.startUs / 1000} min="0" name="trackStartMs" step="1" type="number" /></label>
+          <label>时间线结束（毫秒）<input defaultValue={backgroundMusic.timelineRange.endUs / 1000} min="1" name="trackEndMs" step="1" type="number" /></label>
+          <label>音乐音量（%）<input defaultValue={backgroundMusic.volumePermille / 10} max="100" min="0" name="musicVolumePercent" step="0.1" type="number" /></label>
+          <label>淡入（毫秒）<input defaultValue={backgroundMusic.fadeInUs / 1000} min="0" name="fadeInMs" step="1" type="number" /></label>
+          <label>淡出（毫秒）<input defaultValue={backgroundMusic.fadeOutUs / 1000} min="0" name="fadeOutMs" step="1" type="number" /></label>
+          <Button disabled={busy} type="submit">保存背景音乐</Button>
+          <Button
+            disabled={busy}
+            onClick={() =>
+              onCommand({ kind: 'clear_background_music' }, '背景音乐已移除。')
+            }
+            variant="ghost"
+          >
+            移除背景音乐
+          </Button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+function CoverInspector({
+  busy,
+  clips,
+  cover,
+  imageWorks,
+  onAttachWork,
+  onCommand,
+  onInvalid,
+  onSelectLocal,
+  selectedClipId
+}: {
+  readonly busy: boolean;
+  readonly clips: readonly VideoEditorClipDto[];
+  readonly cover: VideoEditorCoverDto | null;
+  readonly imageWorks: readonly StorageWorkSummaryDto[];
+  readonly onAttachWork: (workId: string, prependToVideo: boolean) => void;
+  readonly onCommand: (command: VideoEditorUpdateDto, message: string) => void;
+  readonly onInvalid: (message: string) => void;
+  readonly onSelectLocal: (prependToVideo: boolean) => void;
+  readonly selectedClipId: string;
+}) {
+  const [prependToVideo, setPrependToVideo] = useState(
+    cover?.prependToVideo ?? false
+  );
+  const [projectWorkId, setProjectWorkId] = useState(imageWorks[0]?.workId ?? '');
+
+  function submitVideoFrame(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const clipId = String(data.get('clipId'));
+    const clip = clips.find((candidate) => candidate.clipId === clipId);
+    const sourceTimeUs = millisecondsToUs(formNumber(form, 'sourceTimeMs'));
+    if (
+      !clip ||
+      !Number.isSafeInteger(sourceTimeUs) ||
+      sourceTimeUs < clip.sourceRange.inUs ||
+      sourceTimeUs >= clip.sourceRange.outUs
+    ) {
+      onInvalid('封面选帧必须位于所选片段的有效源时间范围内。');
+      return;
+    }
+    onCommand(
+      {
+        kind: 'set_cover',
+        cover: {
+          kind: 'video_frame',
+          clipId,
+          sourceTimeUs,
+          prependToVideo
+        }
+      },
+      '视频帧已设为封面。'
+    );
+  }
+
+  return (
+    <div className="uc-video-editor__inspector-content">
+      <dl className="uc-video-editor__facts">
+        <Fact label="当前封面" value={coverLabel(cover)} />
+        <Fact
+          label="视频内容"
+          value={cover?.prependToVideo ? '封面将拼接到视频开头' : '封面不改变视频内容'}
+        />
+      </dl>
+      <fieldset className="uc-video-editor__choice">
+        <legend>封面是否加入视频</legend>
+        <label><input checked={!prependToVideo} name="prependChoice" onChange={() => setPrependToVideo(false)} type="radio" />仅作为封面（默认）</label>
+        <label><input checked={prependToVideo} name="prependChoice" onChange={() => setPrependToVideo(true)} type="radio" />拼接到视频开头</label>
+      </fieldset>
+      <form className="uc-video-editor__form" onSubmit={submitVideoFrame}>
+        <h3>从视频选帧</h3>
+        <label>片段<select defaultValue={selectedClipId || clips[0]?.clipId} name="clipId">{clips.map((clip, index) => <option key={clip.clipId} value={clip.clipId}>片段 {index + 1}</option>)}</select></label>
+        <label>源时间（毫秒）<input defaultValue={(clips.find((clip) => clip.clipId === selectedClipId)?.sourceRange.inUs ?? clips[0]?.sourceRange.inUs ?? 0) / 1000} min="0" name="sourceTimeMs" step="1" type="number" /></label>
+        <Button disabled={busy || clips.length === 0} type="submit">使用视频帧</Button>
+      </form>
+      <div className="uc-video-editor__form">
+        <h3>本机图片</h3>
+        <Button disabled={busy} onClick={() => onSelectLocal(prependToVideo)} variant="secondary">选择并校验图片</Button>
+      </div>
+      <div className="uc-video-editor__form">
+        <h3>项目图片作品</h3>
+        <label>图片作品<select disabled={imageWorks.length === 0} onChange={(event) => setProjectWorkId(event.target.value)} value={projectWorkId}>{imageWorks.length === 0 ? <option value="">暂无项目图片</option> : null}{imageWorks.map((work) => <option key={work.workId} value={work.workId}>{work.name}</option>)}</select></label>
+        <Button disabled={busy || !projectWorkId} onClick={() => onAttachWork(projectWorkId, prependToVideo)} variant="secondary">使用项目图片</Button>
+      </div>
+      {cover ? (
+        <Button
+          disabled={busy}
+          onClick={() => onCommand({ kind: 'set_cover', cover: null }, '封面已清除。')}
+          variant="ghost"
+        >
+          清除封面
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function PanelHeading({
   description,
   title
@@ -1655,6 +2226,13 @@ function canvasLabel(draft: VideoEditorDraftDto): string {
       ? '跟随源比例'
       : `${draft.canvas.aspectRatio.numerator}:${draft.canvas.aspectRatio.denominator}`;
   return `${aspectRatio} · ${draft.canvas.transformPolicy === 'fit' ? '适应画布' : '填满画布'}`;
+}
+
+function coverLabel(cover: VideoEditorCoverDto | null): string {
+  if (!cover) return '未设置';
+  if (cover.kind === 'video_frame') return '视频选帧';
+  if (cover.kind === 'local_image') return '本机图片';
+  return '项目图片作品';
 }
 
 function sortDrafts(
