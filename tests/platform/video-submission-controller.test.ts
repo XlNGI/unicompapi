@@ -337,4 +337,31 @@ describe('VideoSubmissionController', () => {
     );
     expect(stored?.state).toBe('created');
   });
+
+  it('returns adapter unavailable for result receipt without inventing works', async () => {
+    const fixture = await createFixture();
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-video-submission' });
+    await fixture.controller.invokeExecution({
+      executionId: 'execution-video-submission-1'
+    });
+
+    await expect(
+      fixture.controller.receiveResult({
+        executionId: 'execution-video-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'adapter_unavailable' }
+    });
+    const stored = await new JsonExecutionRepository(fixture.storage).get(
+      toExecutionId('execution-video-submission-1')
+    );
+    expect(stored?.state).toBe('queued');
+  });
 });

@@ -2,7 +2,8 @@ export const videoSubmissionIpcChannels = {
   preflight: 'video-submission:preflight',
   createTask: 'video-submission:create-task',
   createExecution: 'video-submission:create-execution',
-  invokeExecution: 'video-submission:invoke-execution'
+  invokeExecution: 'video-submission:invoke-execution',
+  receiveResult: 'video-submission:receive-result'
 } as const;
 
 export type VideoSubmissionErrorCode =
@@ -28,6 +29,10 @@ export type VideoSubmissionErrorCode =
   | 'execution_not_found'
   | 'invalid_execution_state'
   | 'adapter_unavailable'
+  | 'result_discovery_failed'
+  | 'download_failed'
+  | 'result_verification_failed'
+  | 'result_registration_failed'
   | 'submission_storage_error';
 
 export type VideoSubmissionResult<T> =
@@ -136,6 +141,14 @@ export interface VideoExecutionDto {
   readonly retryability?: 'retryable' | 'not_retryable' | 'unknown';
 }
 
+export interface VideoWorkRegisteredDto {
+  readonly executionId: string;
+  readonly works: readonly {
+    readonly workId: string;
+    readonly name: string;
+  }[];
+}
+
 export interface VideoSubmissionApi {
   preflight(
     draftId: string
@@ -152,4 +165,7 @@ export interface VideoSubmissionApi {
   invokeExecution(
     executionId: string
   ): Promise<VideoSubmissionResult<VideoExecutionDto>>;
+  receiveResult(
+    executionId: string
+  ): Promise<VideoSubmissionResult<VideoWorkRegisteredDto>>;
 }

@@ -250,5 +250,9 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     videoSubmissionIpcChannels.invokeExecution,
     (_event, request: unknown) => videoSubmissions.invokeExecution(request)
   );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.receiveResult,
+    (_event, request: unknown) => videoSubmissions.receiveResult(request)
+  );
   return mediaHandles;
 }

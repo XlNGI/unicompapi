@@ -27,7 +27,7 @@ const allowedTransitions: Record<ExecutionState, readonly ExecutionState[]> = {
     'failed',
     'expired'
   ],
-  remote_completed: ['downloading', 'expired'],
+  remote_completed: ['downloading', 'failed', 'expired'],
   downloading: ['writing', 'failed', 'expired'],
   writing: ['verifying', 'failed'],
   verifying: ['completed', 'failed'],
