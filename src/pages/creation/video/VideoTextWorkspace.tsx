@@ -493,8 +493,9 @@ export function VideoTextWorkspace({
 
   return (
     <>
-      <div className="uc-image-professional__workspace">
-        <Card className="uc-image-workbench__panel">
+      <div className="uc-image-professional__workspace uc-video-text__workspace">
+        <div className="uc-video-text__main">
+        <Card className="uc-image-workbench__panel uc-video-text__source">
           <PanelHeading
             description="短创意和长文本分别保存，不自动读取任何上下文。"
             number="1"
@@ -586,7 +587,8 @@ export function VideoTextWorkspace({
           </p>
         </Card>
 
-        <Card className="uc-image-workbench__panel">
+        <div className="uc-video-text__work-grid">
+        <Card className="uc-image-workbench__panel uc-video-text__materials">
           <PanelHeading
             description="槽位、角色、必填状态和媒体类型只来自能力 Schema。"
             number="2"
@@ -624,7 +626,7 @@ export function VideoTextWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel">
+        <Card className="uc-image-workbench__panel uc-video-text__shots">
           <PanelHeading
             description="镜头草稿只保存在当前项目，不会创建远端任务。"
             number="3"
@@ -712,7 +714,7 @@ export function VideoTextWorkspace({
           </div>
         </Card>
 
-        <Card className="uc-image-workbench__panel">
+        <Card className="uc-image-workbench__panel uc-video-text__prompt">
           <PanelHeading
             description="三层内容分别展示和保存，系统补充不会覆盖用户原文。"
             number="4"
@@ -760,8 +762,10 @@ export function VideoTextWorkspace({
             增强提示词（缺少真实端口）
           </Button>
         </Card>
+        </div>
+        </div>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit">
           <PanelHeading
             description="模型、参数、费用和外发范围只来自本机真实 DTO。"
             number="5"

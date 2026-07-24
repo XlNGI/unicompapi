@@ -16,6 +16,19 @@ const shellSource = await readFile(
 );
 const bundle = `${textSource}\n${controlsSource}\n${shellSource}`;
 
+test('text to video keeps the main workflow compact and ordered', () => {
+  for (const className of [
+    'uc-video-text__main',
+    'uc-video-text__work-grid',
+    'uc-video-text__materials',
+    'uc-video-text__shots',
+    'uc-video-text__prompt',
+    'uc-video-text__submit'
+  ]) {
+    assert.match(textSource, new RegExp(className));
+  }
+});
+
 test('text to video keeps text sources and contexts explicit', () => {
   for (const text of [
     '短创意',
