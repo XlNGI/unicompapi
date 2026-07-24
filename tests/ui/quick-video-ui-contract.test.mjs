@@ -46,7 +46,7 @@ test('quick video keeps every side effect explicit and separate', () => {
     '创建执行记录',
     '提交视频生成',
     '重新生成（等待真实结果）',
-    '保存结果（等待 B4）',
+    '保存结果（等待真实结果）',
     '进入文生视频'
   ]) {
     assert.match(bundle, new RegExp(text.replace(/[（）]/g, '\\$&')));
@@ -70,6 +70,7 @@ test('quick video has one optional dynamic reference and no fixed result facts',
 test('quick video stays honest without an adapter or registered result', () => {
   assert.match(controlsSource, /adapter_unavailable/);
   assert.match(quickSource, /尚无真实视频结果/);
-  assert.match(quickSource, /等待 B4/);
+  assert.match(quickSource, /B4 正式登记端口已具备/);
+  assert.match(quickSource, /等待真实结果/);
   assert.match(quickSource, /不会伪造进度、费用、结果或成功状态/);
 });

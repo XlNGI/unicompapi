@@ -735,7 +735,7 @@ export function VideoImageWorkspace({
           <section className="uc-video-image__handoff">
             <strong>结果与基础编辑边界</strong>
             <p>
-              只有视频结果正式下载、校验并登记为 Work 后才能进入基础编辑；当前尚未接入 B4，阶段 7 编辑器也未实现。
+              只有视频结果正式下载、校验并登记为 Work 后才能进入基础编辑；B4 结果登记端口已具备，但当前没有可接收的真实结果，阶段 7 编辑器也未实现。
             </p>
             <Button disabled variant="secondary">
               进入基础编辑（等待正式 Work 与阶段 7）
@@ -749,7 +749,7 @@ export function VideoImageWorkspace({
           {blockers.length === 0 && preflight ? '等待明确确认' : '真实能力状态'}
         </StatusPill>
         <p>
-          当前没有图片识别、提示词增强、真实视频适配器或 B4 结果登记；页面只保存可追溯本地草稿、受控素材和真实阻断。
+          当前没有图片识别、提示词增强或真实视频适配器；B4 结果登记端口保持真实不可用状态，页面只保存可追溯本地草稿、受控素材和真实阻断。
         </p>
       </Card>
     </>
