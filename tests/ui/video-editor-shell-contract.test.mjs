@@ -53,13 +53,12 @@ test('video editor shell exposes the frozen A1 regions and honest states', () =>
   assert.match(modesSource, /本地优先、非破坏式的轻量单轨视频编辑/);
 });
 
-test('video editor shell keeps post-B1 capabilities explicitly disabled', () => {
+test('video editor shell keeps unapproved engine and export capabilities disabled', () => {
   for (const text of [
-    '等待 B2 项目素材端口',
-    '等待 B2 受控源文件端口',
     '等待 B4 导出契约',
-    '不会显示示例视频或伪造画面',
-    '不创建代理、缩略图或导出任务'
+    '媒体引擎尚未审批',
+    '预览代理引擎尚未审批',
+    '不上传、不调用在线 AI、不创建任务'
   ]) {
     assert.match(editorSource, new RegExp(text));
   }
