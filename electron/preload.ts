@@ -23,6 +23,10 @@ import {
   videoSubmissionIpcChannels,
   type VideoSubmissionApi
 } from '../src/shared/video-submission-ipc';
+import {
+  videoEditorIpcChannels,
+  type VideoEditorApi
+} from '../src/shared/video-editor-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -233,10 +237,41 @@ const videoSubmissions: VideoSubmissionApi = {
     })
 };
 
+const videoEditors: VideoEditorApi = {
+  create: (sourceIntent, title) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.create, { sourceIntent, title }),
+  get: (draftId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.get, { draftId }),
+  list: () => ipcRenderer.invoke(videoEditorIpcChannels.list),
+  update: (draftId, expectedRevision, command) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.update, {
+      draftId,
+      expectedRevision,
+      command
+    }),
+  undo: (draftId, expectedRevision) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.undo, {
+      draftId,
+      expectedRevision
+    }),
+  redo: (draftId, expectedRevision) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.redo, {
+      draftId,
+      expectedRevision
+    }),
+  copy: (draftId, expectedRevision, title) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.copy, {
+      draftId,
+      expectedRevision,
+      title
+    })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
   imageSubmissions,
   imageWorkspaces,
   videoSubmissions,
+  videoEditors,
   videoWorkspaces,
   platform: process.platform,
   providers,

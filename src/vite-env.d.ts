@@ -6,6 +6,7 @@ import type { ImageWorkspaceApi } from './shared/image-workspace-ipc';
 import type { ImageSubmissionApi } from './shared/image-submission-ipc';
 import type { VideoWorkspaceApi } from './shared/video-workspace-ipc';
 import type { VideoSubmissionApi } from './shared/video-submission-ipc';
+import type { VideoEditorApi } from './shared/video-editor-ipc';
 
 declare global {
   interface Window {
@@ -13,6 +14,7 @@ declare global {
       imageWorkspaces: ImageWorkspaceApi;
       imageSubmissions: ImageSubmissionApi;
       videoSubmissions: VideoSubmissionApi;
+      videoEditors: VideoEditorApi;
       videoWorkspaces: VideoWorkspaceApi;
       platform: NodeJS.Platform;
       providers: ProviderApi;
