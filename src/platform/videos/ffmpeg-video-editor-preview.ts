@@ -205,13 +205,13 @@ function buildFfmpegArguments(input: {
   if (input.kind === 'audio_waveform') {
     return [
       ...common,
+      '-filter_complex',
+      '[0:a:0]showwavespic=s=1200x240:colors=white[waveform]',
       '-map',
-      '0:a:0',
-      '-vn',
+      '[waveform]',
       '-frames:v',
       '1',
-      '-filter_complex',
-      'showwavespic=s=1200x240:colors=white',
+      '-an',
       '-f',
       'image2',
       input.target

@@ -72,7 +72,7 @@ npm run dev
 
 ```powershell
 $env:UNICOMP_ENABLE_LOCAL_FFMPEG = '1'
-$env:UNICOMP_FFMPEG_PATH = 'D:\tools\ffmpeg\8.1.2\bin\ffmpeg.exe'
+$env:UNICOMP_FFMPEG_PATH = 'D:\tools\ffmpeg\8.1.2\ffmpeg-n8.1-latest-win64-lgpl-8.1\bin\ffmpeg.exe'
 npm.cmd run dev
 ```
 

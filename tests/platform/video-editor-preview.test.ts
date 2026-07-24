@@ -172,8 +172,12 @@ describe('video editor preview cache boundary', () => {
       sourcePath: path.join(root, 'source.mp4')
     });
 
-    expect(args).toContain('0:a:0');
-    expect(args).toContain('showwavespic=s=1200x240:colors=white');
+    expect(args).toContain(
+      '[0:a:0]showwavespic=s=1200x240:colors=white[waveform]'
+    );
+    expect(args).toContain('[waveform]');
+    expect(args).toContain('-an');
+    expect(args).not.toContain('-vn');
     expect(args).not.toContain('--shell');
   });
 });
