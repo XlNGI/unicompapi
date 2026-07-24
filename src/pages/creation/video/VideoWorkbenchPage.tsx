@@ -12,6 +12,7 @@ import type {
 } from '../../../shared/video-workspace-ipc';
 import '../../../styles/pages.css';
 import type { VideoCreationMode } from '../creationModes';
+import { VideoQuickWorkspace } from './VideoQuickWorkspace';
 
 const workspaceErrorMessages: Record<VideoWorkspaceIpcErrorCode, string> = {
   project_not_open: '请先在“项目”页面新建或打开一个项目。',
@@ -58,9 +59,13 @@ const staleReasonLabels: Record<VideoWorkspaceStaleReasonDto, string> = {
 
 interface VideoWorkbenchPageProps {
   readonly mode: VideoCreationMode;
+  readonly onNavigateToTextToVideo?: () => void;
 }
 
-export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
+export function VideoWorkbenchPage({
+  mode,
+  onNavigateToTextToVideo
+}: VideoWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const providers = window.unicomp?.providers;
@@ -71,6 +76,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
   const [registry, setRegistry] = useState<ProviderRegistryDto>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const currentDraft = drafts[drafts.length - 1];
 
@@ -83,6 +89,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
       setSession(undefined);
       setDrafts([]);
       setRegistry(undefined);
+      setDirty(false);
 
       if (!storage) {
         setMessage('当前运行环境未连接桌面项目工作区。');
@@ -149,6 +156,7 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
         return;
       }
       setDrafts((items) => [...items, result.value]);
+      setDirty(false);
       setMessage('本地视频草稿已创建；没有上传素材，也没有创建任务。');
     } catch {
       setMessage('创建本地视频草稿失败，请重试。');
@@ -175,12 +183,23 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
           draft.draftId === result.value.draftId ? result.value : draft
         )
       );
+      setDirty(false);
       setMessage('视频草稿已保存到当前项目；没有创建或提交任务。');
     } catch {
       setMessage('保存本地视频草稿失败，请重试。');
     } finally {
       setBusy(false);
     }
+  }
+
+  function replaceCurrentDraft(
+    draft: VideoWorkspaceDraftDto,
+    hasUnsavedChanges: boolean
+  ) {
+    setDrafts((items) =>
+      items.map((item) => (item.draftId === draft.draftId ? draft : item))
+    );
+    setDirty(hasUnsavedChanges);
   }
 
   const videoRouteModelIds = new Set(
@@ -238,7 +257,9 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
             <Button
               disabled={
                 !currentDraft ||
-                currentDraft.state === 'saved' ||
+                (!dirty &&
+                  (currentDraft.state === 'saved' ||
+                    currentDraft.state === 'stale')) ||
                 currentDraft.state === 'archived' ||
                 busy
               }
@@ -282,6 +303,18 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
         </p>
       </Card>
 
+      {currentDraft?.mode === 'quick_video' ? (
+        <VideoQuickWorkspace
+          dirty={dirty}
+          draft={currentDraft}
+          onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onMessage={setMessage}
+          onNavigateToTextToVideo={onNavigateToTextToVideo}
+          registry={registry}
+        />
+      ) : (
+        <>
       <div className="uc-image-workbench__workspace">
         <Card className="uc-image-workbench__panel">
           <PanelHeading
@@ -431,6 +464,8 @@ export function VideoWorkbenchPage({ mode }: VideoWorkbenchPageProps) {
             : '基础编辑将在阶段 7 独立开发；当前入口不会修改源视频，也不会自动执行编辑。'}
         </p>
       </Card>
+        </>
+      )}
       <p className="uc-image-workbench__message" aria-live="polite">
         {message}
       </p>
