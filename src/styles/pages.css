@@ -3147,6 +3147,32 @@
   padding: var(--uc-space-3) var(--uc-space-4);
 }
 
+.uc-settings__proxy-form {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 120px;
+  gap: var(--uc-space-2);
+  padding: var(--uc-space-3) var(--uc-space-4) 0;
+}
+
+.uc-settings__proxy-form + .uc-settings__proxy-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.uc-settings__proxy-form select,
+.uc-settings__proxy-form input {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--uc-color-border-default);
+  border-radius: var(--uc-radius-8);
+  padding: 0 var(--uc-space-3);
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-panel);
+}
+
+.uc-settings__shortcut-list {
+  display: grid;
+}
+
 .uc-settings__notice {
   margin: 0 var(--uc-space-4) var(--uc-space-3) !important;
   border-left: 3px solid var(--uc-color-border-focus);
@@ -3386,10 +3412,16 @@
     justify-content: stretch;
   }
 
+  .uc-settings__proxy-form,
+  .uc-settings__proxy-form + .uc-settings__proxy-form {
+    grid-template-columns: 1fr;
+  }
+
   .uc-settings__search,
   .uc-settings__control select,
   .uc-settings__control input[type="text"],
-  .uc-settings__inline-actions .uc-button {
+  .uc-settings__inline-actions .uc-button,
+  .uc-settings__proxy-form .uc-button {
     width: 100%;
   }
 

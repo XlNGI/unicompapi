@@ -19,15 +19,24 @@ import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import type {
   GeneralSettings,
   MediaSettings,
+  NetworkSettings,
+  NotificationSettings,
   PerformanceSettings,
+  PrivacySettings,
+  ProxyMode,
   SettingsCategory,
   SettingsValues,
+  ShortcutBinding,
+  ShortcutSettings,
   StorageSettings
 } from '../../domain';
 import type {
   CleanupScope,
   ControlledDirectoryDto,
   DirectoryPurpose,
+  NativeSystemSettingsTarget,
+  NotificationTestResultDto,
+  ShortcutPlatform,
   SettingsCapabilityDto,
   SettingsIpcErrorCode,
   SettingsOperationPlanDto,
@@ -84,25 +93,25 @@ const categories: readonly SettingsCategoryItem[] = [
   {
     id: 'privacy', label: '隐私与权限', icon: LuShield,
     description: '文件访问、外发确认与系统权限',
-    capabilityId: 'permission_controls', delivery: '等待 B3 与 A3',
+    capabilityId: 'permission_controls', delivery: 'A3 当前已接入',
     keywords: '隐私 权限 文件 外发 剪贴板'
   },
   {
     id: 'network', label: '网络与代理', icon: LuWifi,
     description: '系统代理、连接与超时',
-    capabilityId: 'proxy_controls', delivery: '等待 B3 与 A3',
+    capabilityId: 'proxy_controls', delivery: 'A3 当前已接入',
     keywords: '网络 代理 连接 DNS 证书 超时'
   },
   {
     id: 'notifications', label: '通知', icon: LuBell,
     description: '应用内、系统与声音提醒',
-    capabilityId: 'notification_controls', delivery: '等待 B3 与 A3',
+    capabilityId: 'notification_controls', delivery: 'A3 当前已接入',
     keywords: '通知 提醒 声音 系统'
   },
   {
     id: 'shortcuts', label: '快捷键', icon: LuKeyboard,
     description: 'Windows 与 macOS 按键映射',
-    capabilityId: 'shortcut_controls', delivery: '等待 B3 与 A3',
+    capabilityId: 'shortcut_controls', delivery: 'A3 当前已接入',
     keywords: '快捷键 按键 Windows macOS 冲突'
   },
   {
@@ -133,6 +142,7 @@ export function SettingsPage() {
   const [operationPlan, setOperationPlan] = useState<SettingsOperationPlanDto>();
   const [operationCopy, setOperationCopy] = useState<OperationCopy>();
   const [operationBusy, setOperationBusy] = useState(false);
+  const [notificationResult, setNotificationResult] = useState<NotificationTestResultDto>();
 
   useEffect(() => {
     let active = true;
@@ -225,6 +235,14 @@ export function SettingsPage() {
     void saveValues({
       ...values,
       media: { ...values.media, ...patch }
+    });
+  }
+
+  function updateNotifications(patch: Partial<NotificationSettings>) {
+    if (!values) return;
+    void saveValues({
+      ...values,
+      notifications: { ...values.notifications, ...patch }
     });
   }
 
@@ -358,6 +376,75 @@ export function SettingsPage() {
     );
   }
 
+  async function openSystemSettings(target: NativeSystemSettingsTarget) {
+    if (!settings) return;
+    const result = await settings.openSystemSettings(target);
+    setMessage(result.ok ? '已打开系统设置入口；授权结果以系统实际状态为准。' : settingsErrorMessage(result.error.code));
+    await refreshSystemStatus();
+  }
+
+  async function sendTestNotification(system: boolean, sound: boolean) {
+    if (!settings) return;
+    const result = await settings.sendTestNotification(system, sound);
+    if (!result.ok) {
+      setMessage(settingsErrorMessage(result.error.code));
+      return;
+    }
+    setNotificationResult(result.value);
+    setMessage('测试通知已执行；应用内提醒保持可用，系统与声音结果按平台事实显示。');
+    await refreshSystemStatus();
+  }
+
+  async function planProxy(next: ProxyMode, credential?: { readonly username: string; readonly secret: string }) {
+    if (!settings) return;
+    let credentialHandle: string | undefined;
+    if (credential) {
+      const staged = await settings.stageProxyCredential(credential.username, credential.secret);
+      if (!staged.ok) {
+        setMessage(settingsErrorMessage(staged.error.code));
+        return;
+      }
+      credentialHandle = staged.value.credentialHandle;
+    }
+    void planOperation(
+      { kind: 'update_proxy', value: next, credentialHandle },
+      {
+        title: '确认切换网络代理',
+        description: '代理测试只发送最小探测请求，不携带项目内容、提示词或服务商凭证；变更只影响后续请求。',
+        success: '网络代理已通过探测并保存；活动请求没有被重试或改写。'
+      }
+    );
+  }
+
+  function planPrivacy(next: PrivacySettings) {
+    void planOperation(
+      { kind: 'update_privacy_permissions', values: next },
+      {
+        title: '确认隐私与权限策略',
+        description: '外发、费用、任务失败和存储不足等强制确认不会被关闭。',
+        success: '隐私与权限策略已保存，强制确认边界仍保留。'
+      }
+    );
+  }
+
+  function planShortcuts(platform: ShortcutPlatform, bindings: readonly ShortcutBinding[]) {
+    void planOperation(
+      {
+        kind: 'update_shortcuts',
+        platform,
+        bindings: bindings.map((binding) => ({
+          actionId: binding.actionId,
+          accelerator: platform === 'windows' ? binding.windows : binding.macos
+        }))
+      },
+      {
+        title: '确认快捷键变更',
+        description: '保存前会检查未知动作、不可修改动作、重复键、系统保留键和真实注册结果。',
+        success: '快捷键已保存；另一个平台的按键没有被覆盖。'
+      }
+    );
+  }
+
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
   const visibleCategories = categories.filter((category) =>
     `${category.label} ${category.description} ${category.keywords}`
@@ -367,6 +454,7 @@ export function SettingsPage() {
   const category = categories.find((item) => item.id === activeCategory) ?? categories[0];
   const capability = capabilityFor(snapshot, category.capabilityId);
   const isB2Category = ['storage', 'performance', 'media'].includes(activeCategory);
+  const isB3Category = ['privacy', 'network', 'notifications', 'shortcuts'].includes(activeCategory);
   const disabled =
     saveState === 'loading' ||
     saveState === 'saving' ||
@@ -395,7 +483,7 @@ export function SettingsPage() {
             <Button disabled={!snapshot || disabled} onClick={planGeneralRestore} variant="secondary">
               恢复常规默认
             </Button>
-          ) : isB2Category ? (
+          ) : isB2Category || isB3Category ? (
             <Button disabled={operationBusy} onClick={() => void refreshSystemStatus()} variant="secondary">
               重新检查本机状态
             </Button>
@@ -451,7 +539,7 @@ export function SettingsPage() {
               readOnly
               title={saveState === 'loading' ? '正在读取本地设置' : '常规设置暂不可用'}
             />
-          ) : isB2Category && values && systemStatus ? (
+          ) : (isB2Category || isB3Category) && values && systemStatus ? (
             activeCategory === 'storage' ? (
               <StorageSettingsPanel
                 directories={systemStatus.storage.directories}
@@ -484,7 +572,7 @@ export function SettingsPage() {
                 status={systemStatus.performance}
                 values={values.performance}
               />
-            ) : (
+            ) : activeCategory === 'media' ? (
               <MediaSettingsPanel
                 directories={systemStatus.storage.directories}
                 disabled={disabled}
@@ -503,10 +591,50 @@ export function SettingsPage() {
                 unit={values.general.fileSizeUnit}
                 values={values.media}
               />
+            ) : activeCategory === 'privacy' ? (
+              <PrivacySettingsPanel
+                disabled={disabled}
+                onOpenSystemSettings={(target) => void openSystemSettings(target)}
+                onPlan={planPrivacy}
+                status={systemStatus.privacy}
+                values={values.privacy}
+              />
+            ) : activeCategory === 'network' ? (
+              <NetworkSettingsPanel
+                disabled={disabled}
+                onPlan={(next, credential) => void planProxy(next, credential)}
+                status={systemStatus.network}
+                values={values.network}
+              />
+            ) : activeCategory === 'notifications' ? (
+              <NotificationsSettingsPanel
+                disabled={disabled}
+                onChange={updateNotifications}
+                onOpenSystemSettings={(target) => void openSystemSettings(target)}
+                onTest={(system, sound) => void sendTestNotification(system, sound)}
+                result={notificationResult}
+                status={systemStatus.notifications}
+                values={values.notifications}
+              />
+            ) : (
+              <ShortcutsSettingsPanel
+                disabled={disabled}
+                onPlan={planShortcuts}
+                onRestore={(platform) => void planOperation(
+                  { kind: 'restore_shortcut_defaults', platform },
+                  {
+                    title: '确认恢复快捷键默认',
+                    description: '只恢复所选平台的版本化默认快捷键，不覆盖另一个平台。',
+                    success: '快捷键已恢复为所选平台默认值。'
+                  }
+                )}
+                status={systemStatus.shortcuts}
+                values={values.shortcuts}
+              />
             )
-          ) : isB2Category ? (
+          ) : isB2Category || isB3Category ? (
             <SystemStatusUnavailable
-              message={systemStatusError || '正在读取真实目录、设备负载和媒体组件状态…'}
+              message={systemStatusError || '正在读取真实目录、设备负载、媒体组件、权限、代理、通知和快捷键状态…'}
               onRetry={() => void refreshSystemStatus()}
             />
           ) : (
@@ -548,7 +676,7 @@ export function SettingsPage() {
           <section className="uc-settings__status-card">
             <h3>安全边界</h3>
             <p>当前页面不会显示设置文件路径、凭证、日志原文或设备句柄。</p>
-            <p>{isB2Category ? '高风险操作必须先展示真实影响计划，再由你确认执行。' : '未接平台适配器的分类只显示不可用，不提供假控件。'}</p>
+            <p>{isB2Category || isB3Category ? '高风险操作必须先展示真实影响计划，再由你确认执行。' : '未接平台适配器的分类只显示不可用，不提供假控件。'}</p>
           </section>
         </aside>
       </div>
@@ -1026,6 +1154,294 @@ function MediaSettingsPanel({ directories, disabled, onChange, onHardware, onMig
   );
 }
 
+function PrivacySettingsPanel({ disabled, onOpenSystemSettings, onPlan, status, values }: {
+  readonly disabled: boolean;
+  readonly onOpenSystemSettings: (target: NativeSystemSettingsTarget) => void;
+  readonly onPlan: (values: PrivacySettings) => void;
+  readonly status: SettingsSystemStatusDto['privacy'];
+  readonly values: PrivacySettings;
+}) {
+  return (
+    <div className="uc-settings__groups">
+      <SettingsGroup title="1. 最小授权边界">
+        <div className="uc-settings__metric-grid">
+          <Metric label="文件访问" value={status.minimumAuthorization.selectedFilesOnly ? '仅用户选择文件' : '状态异常'} />
+          <Metric label="项目目录" value={status.minimumAuthorization.authorizedDirectoriesOnly ? '仅授权目录' : '状态异常'} />
+          <Metric label="主目录扫描" value={status.minimumAuthorization.homeDirectoryScan ? '异常开启' : '禁止'} />
+          <Metric label="后台剪贴板" value={status.minimumAuthorization.backgroundClipboardRead ? '异常开启' : '禁止'} />
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="2. 系统权限状态">
+        {status.permissions.map((permission) => (
+          <SettingRow
+            description={capabilityReason(permission)}
+            key={permission.id}
+            label={permission.id === 'files_and_folders' ? '文件与文件夹权限' : '通知权限'}
+          >
+            <div className="uc-settings__inline-actions">
+              <StatusPill tone={capabilityTone(permission)}>{capabilityLabel(permission)}</StatusPill>
+              <Button disabled={disabled} onClick={() => onOpenSystemSettings(permission.systemSettingsTarget)} variant="secondary">
+                打开系统设置
+              </Button>
+            </div>
+          </SettingRow>
+        ))}
+      </SettingsGroup>
+
+      <SettingsGroup title="3. 外发与费用确认">
+        <SettingRow description="文本任务是否每次都需要确认外发范围。" label="文本外发确认">
+          <select aria-label="文本外发确认" disabled={disabled} onChange={(event) => onPlan({ ...values, textOutboundConfirmation: event.target.value as PrivacySettings['textOutboundConfirmation'] })} value={values.textOutboundConfirmation}>
+            <option value="each_task">每个任务确认</option>
+            <option value="always">始终确认</option>
+          </select>
+        </SettingRow>
+        <SettingRow description="图片和视频提交前必须确认接收方、外发范围和未知费用。" label="多媒体外发确认">
+          <div className="uc-settings__inline-actions">
+            <StatusPill tone="warning">图片：{outboundLabel(values.imageOutboundConfirmation)}</StatusPill>
+            <StatusPill tone="warning">视频：{outboundLabel(values.videoOutboundConfirmation)}</StatusPill>
+          </div>
+        </SettingRow>
+        <SettingRow description="项目上下文和未知费用确认是强制边界，不能被页面关闭。" label="强制确认">
+          <div className="uc-settings__inline-actions">
+            <StatusPill tone="success">项目上下文：始终确认</StatusPill>
+            <StatusPill tone="success">未知费用：始终确认</StatusPill>
+          </div>
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="4. 数据保护">
+        <SettingRow description="只读取用户授权项目上下文，不自动读取未保存聊天。" label="项目上下文读取">
+          <Toggle checked={values.readProjectContext} disabled={disabled} label="读取项目上下文" onChange={(checked) => onPlan({ ...values, readProjectContext: checked })} />
+        </SettingRow>
+        <SettingRow description="已保存项目对话可作为上下文；未保存聊天保持禁止。" label="已保存对话上下文">
+          <Toggle checked={values.readSavedProjectChats} disabled={disabled} label="读取已保存项目对话" onChange={(checked) => onPlan({ ...values, readSavedProjectChats: checked })} />
+        </SettingRow>
+        <SettingRow description="正式作品和原始素材不进入自动清理。" label="清理边界">
+          <div className="uc-settings__inline-actions">
+            <StatusPill tone="success">{retentionLabel(values.worksRetention)}</StatusPill>
+            <StatusPill tone="success">{retentionLabel(values.sourceMediaRetention)}</StatusPill>
+          </div>
+        </SettingRow>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+function NetworkSettingsPanel({ disabled, onPlan, status, values }: {
+  readonly disabled: boolean;
+  readonly onPlan: (next: ProxyMode, credential?: { readonly username: string; readonly secret: string }) => void;
+  readonly status: SettingsSystemStatusDto['network'];
+  readonly values: NetworkSettings;
+}) {
+  const [protocol, setProtocol] = useState<Extract<ProxyMode, { kind: 'custom' }>['protocol']>(
+    values.proxy.kind === 'custom' ? values.proxy.protocol : 'http'
+  );
+  const [host, setHost] = useState(values.proxy.kind === 'custom' ? values.proxy.host : '');
+  const [port, setPort] = useState(values.proxy.kind === 'custom' ? String(values.proxy.port) : '8080');
+  const [username, setUsername] = useState('');
+  const [secret, setSecret] = useState('');
+  const customPort = Number(port);
+  const canUseCustom = host.trim().length > 0 && Number.isSafeInteger(customPort) && customPort > 0 && customPort <= 65535;
+
+  function submitCustom(authenticated: boolean) {
+    const proxy: ProxyMode = {
+      kind: 'custom',
+      protocol,
+      host: host.trim(),
+      port: customPort,
+      authenticationConfigured: authenticated
+    };
+    onPlan(proxy, authenticated ? { username, secret } : undefined);
+    setSecret('');
+  }
+
+  return (
+    <div className="uc-settings__groups">
+      <SettingsGroup title="1. 当前代理事实">
+        <div className="uc-settings__metric-grid">
+          <Metric label="保存意图" value={proxyModeLabel(values.proxy.kind)} />
+          <Metric label="当前运行态" value={status.activeMode ? proxyModeLabel(status.activeMode) : '尚未应用'} />
+          <Metric label="作用范围" value="仅后续请求" />
+          <Metric label="活动请求" value={status.activeRequestsRetried ? '异常重试' : '不重试'} />
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="2. 代理模式">
+        <div className="uc-settings__mode-grid" role="radiogroup" aria-label="网络代理模式">
+          {(['system_default', 'system_proxy', 'direct'] as const).map((kind) => (
+            <button
+              aria-checked={values.proxy.kind === kind}
+              className={values.proxy.kind === kind ? 'is-active' : ''}
+              disabled={disabled}
+              key={kind}
+              onClick={() => onPlan({ kind })}
+              role="radio"
+              type="button"
+            >
+              <strong>{proxyModeLabel(kind)}</strong>
+              <span>{proxyModeDescription(kind)}</span>
+            </button>
+          ))}
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="3. 自定义代理">
+        <div className="uc-settings__proxy-form">
+          <select aria-label="自定义代理协议" disabled={disabled} onChange={(event) => setProtocol(event.target.value as typeof protocol)} value={protocol}>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+            <option value="socks5">SOCKS5</option>
+          </select>
+          <input aria-label="自定义代理主机" disabled={disabled} onChange={(event) => setHost(event.target.value)} placeholder="主机名" type="text" value={host} />
+          <input aria-label="自定义代理端口" disabled={disabled} max={65535} min={1} onChange={(event) => setPort(event.target.value)} type="number" value={port} />
+        </div>
+        <div className="uc-settings__proxy-form">
+          <input aria-label="代理用户名" autoComplete="off" disabled={disabled} onChange={(event) => setUsername(event.target.value)} placeholder="用户名（可选）" type="text" value={username} />
+          <input aria-label="代理认证值" autoComplete="new-password" disabled={disabled} onChange={(event) => setSecret(event.target.value)} placeholder="认证值（不会回显）" type="password" value={secret} />
+          <Button disabled={disabled || !canUseCustom} onClick={() => submitCustom(username.length > 0 || secret.length > 0)} variant="secondary">测试并确认</Button>
+        </div>
+        <p className="uc-settings__notice">代理测试使用隔离请求，不发送项目内容、提示词、请求正文或服务商凭证。</p>
+      </SettingsGroup>
+
+      <SettingsGroup title="4. 连接结果与超时">
+        <div className="uc-settings__metric-grid">
+          <Metric label="凭证仓储" value={capabilityLabel(status.credentialStorage)} />
+          <Metric label="最近测试" value={proxyTestLabel(status.lastTest)} />
+          <Metric label="连接超时" value={`${Math.round(values.connectionTimeoutMs / 1000)} 秒`} />
+          <Metric label="下载超时" value={`${Math.round(values.downloadTimeoutMs / 1000)} 秒`} />
+        </div>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+function NotificationsSettingsPanel({ disabled, onChange, onOpenSystemSettings, onTest, result, status, values }: {
+  readonly disabled: boolean;
+  readonly onChange: (patch: Partial<NotificationSettings>) => void;
+  readonly onOpenSystemSettings: (target: NativeSystemSettingsTarget) => void;
+  readonly onTest: (system: boolean, sound: boolean) => void;
+  readonly result?: NotificationTestResultDto;
+  readonly status: SettingsSystemStatusDto['notifications'];
+  readonly values: NotificationSettings;
+}) {
+  function patchRule(event: NotificationSettings['rules'][number]['event'], patch: Partial<NotificationSettings['rules'][number]>) {
+    onChange({
+      rules: values.rules.map((rule) => rule.event === event ? { ...rule, ...patch } : rule)
+    });
+  }
+
+  return (
+    <div className="uc-settings__groups">
+      <SettingsGroup title="1. 通知渠道">
+        <div className="uc-settings__metric-grid">
+          <Metric label="应用内" value={capabilityLabel(status.inApp)} />
+          <Metric label="系统通知" value={capabilityLabel(status.system)} />
+          <Metric label="声音" value={capabilityLabel(status.sound)} />
+          <Metric label="业务状态" value="不被通知结果改变" />
+        </div>
+        <div className="uc-settings__group-actions">
+          <Button disabled={disabled} onClick={() => onTest(true, true)} variant="secondary">发送测试通知</Button>
+          <Button disabled={disabled} onClick={() => onOpenSystemSettings('notifications')} variant="secondary">打开通知设置</Button>
+          <span>{result ? `应用内：${result.inApp}，系统：${deliveryLabel(result.system)}，声音：${deliveryLabel(result.sound)}` : '尚未发送本次测试。'}</span>
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="2. 通知规则">
+        {values.rules.map((rule) => (
+          <SettingRow description="应用内提醒始终保留；系统与声音按平台能力执行。" key={rule.event} label={notificationEventLabel(rule.event)}>
+            <div className="uc-settings__inline-actions">
+              <StatusPill tone="success">应用内</StatusPill>
+              <Toggle checked={rule.system} disabled={disabled} label={`${notificationEventLabel(rule.event)}系统通知`} onChange={(checked) => patchRule(rule.event, { system: checked })} />
+              <Toggle checked={rule.sound} disabled={disabled} label={`${notificationEventLabel(rule.event)}声音提醒`} onChange={(checked) => patchRule(rule.event, { sound: checked })} />
+            </div>
+          </SettingRow>
+        ))}
+      </SettingsGroup>
+
+      <SettingsGroup title="3. 合并与关键提醒">
+        <SettingRow description="密集完成事件会合并显示，减少打扰。" label="合并任务完成通知">
+          <Toggle checked={values.mergeTaskCompletions} disabled={disabled} label="合并任务完成通知" onChange={(checked) => onChange({ mergeTaskCompletions: checked })} />
+        </SettingRow>
+        <SettingRow description="失败和需要确认必须留在应用内提醒中。" label="关键提醒可见">
+          <StatusPill tone="success">{values.keepUserActionVisible ? '保持可见' : '状态异常'}</StatusPill>
+        </SettingRow>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+function ShortcutsSettingsPanel({ disabled, onPlan, onRestore, status, values }: {
+  readonly disabled: boolean;
+  readonly onPlan: (platform: ShortcutPlatform, bindings: readonly ShortcutBinding[]) => void;
+  readonly onRestore: (platform: ShortcutPlatform) => void;
+  readonly status: SettingsSystemStatusDto['shortcuts'];
+  readonly values: ShortcutSettings;
+}) {
+  const [platform, setPlatform] = useState<ShortcutPlatform>(status.platform);
+  const [edits, setEdits] = useState<Readonly<Record<string, string>>>({});
+  const stored = new Map(values.bindings.map((binding) => [binding.actionId, binding]));
+
+  function currentValue(actionId: string) {
+    const action = status.actions.find((item) => item.actionId === actionId);
+    const binding = stored.get(actionId);
+    return edits[actionId] ?? (binding ? binding[platform] : action?.defaults[platform]) ?? '';
+  }
+
+  function submit() {
+    onPlan(platform, status.actions.map((action) => ({
+      actionId: action.actionId,
+      windows: platform === 'windows' ? currentValue(action.actionId) || null : stored.get(action.actionId)?.windows ?? action.defaults.windows,
+      macos: platform === 'macos' ? currentValue(action.actionId) || null : stored.get(action.actionId)?.macos ?? action.defaults.macos
+    })));
+  }
+
+  return (
+    <div className="uc-settings__groups">
+      <SettingsGroup title="1. 平台与注册状态">
+        <div className="uc-settings__metric-grid">
+          <Metric label="注册表版本" value={`V${status.registryVersion}`} />
+          <Metric label="当前平台" value={platformLabel(status.platform)} />
+          <Metric label="全局快捷键" value={`${status.activeGlobalActionIds.length} 个已注册`} />
+          <Metric label="保存范围" value="平台隔离" />
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="2. 编辑快捷键">
+        <div className="uc-settings__group-actions">
+          <select aria-label="快捷键平台" disabled={disabled} onChange={(event) => setPlatform(event.target.value as ShortcutPlatform)} value={platform}>
+            <option value="windows">Windows</option>
+            <option value="macos">macOS</option>
+          </select>
+          <Button disabled={disabled} onClick={submit} variant="secondary">检查并确认保存</Button>
+          <Button disabled={disabled} onClick={() => onRestore(platform)} variant="ghost">恢复本平台默认</Button>
+        </div>
+        <div className="uc-settings__shortcut-list">
+          {status.actions.map((action) => (
+            <SettingRow
+              description={`${action.scope === 'global' ? '全局' : '应用内'} · 默认 ${action.defaults[platform] ?? '未设置'}${action.mutable ? '' : ' · 不可修改'}`}
+              key={action.actionId}
+              label={shortcutActionLabel(action.actionId)}
+            >
+              <input
+                aria-label={`${shortcutActionLabel(action.actionId)}快捷键`}
+                disabled={disabled || !action.mutable}
+                onChange={(event) => setEdits({ ...edits, [action.actionId]: event.target.value })}
+                type="text"
+                value={currentValue(action.actionId)}
+              />
+            </SettingRow>
+          ))}
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="3. 冲突规则">
+        <p className="uc-settings__notice">保存前会拒绝未知动作、不可修改动作、非法按键、重复键和系统保留键；注册失败会恢复旧绑定。</p>
+      </SettingsGroup>
+    </div>
+  );
+}
+
 function SystemStatusUnavailable({ message, onRetry }: { readonly message: string; readonly onRetry: () => void }) {
   return (
     <EmptyState
@@ -1078,6 +1494,58 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
           <Fact label="组件范围" value={status.media.engine.distributionScope === 'development_test_only' ? '仅开发/测试' : '未配置'} />
           <Fact label="硬件加速" value={capabilityLabel(status.media.hardwareAcceleration)} />
           <Fact label="软件回退" value={status.media.automaticSoftwareFallback ? '已启用' : '未启用'} />
+        </dl>
+      </section>
+    );
+  }
+  if (activeCategory === 'privacy') {
+    return (
+      <section className="uc-settings__status-card">
+        <h3>隐私与权限</h3>
+        <dl className="uc-settings__facts">
+          <Fact label="文件访问" value={status.privacy.minimumAuthorization.selectedFilesOnly ? '仅用户选择' : '状态异常'} />
+          <Fact label="目录访问" value={status.privacy.minimumAuthorization.authorizedDirectoriesOnly ? '仅授权目录' : '状态异常'} />
+          <Fact label="后台剪贴板" value={status.privacy.minimumAuthorization.backgroundClipboardRead ? '状态异常' : '禁止'} />
+          <Fact label="未知费用" value={status.privacy.minimumAuthorization.unknownCostConfirmationMandatory ? '必须确认' : '状态异常'} />
+        </dl>
+      </section>
+    );
+  }
+  if (activeCategory === 'network') {
+    return (
+      <section className="uc-settings__status-card">
+        <h3>网络与代理</h3>
+        <dl className="uc-settings__facts">
+          <Fact label="运行态" value={status.network.activeMode ? proxyModeLabel(status.network.activeMode) : '尚未应用'} />
+          <Fact label="作用范围" value="仅后续请求" />
+          <Fact label="活动请求" value={status.network.activeRequestsRetried ? '异常重试' : '不重试'} />
+          <Fact label="最近测试" value={proxyTestLabel(status.network.lastTest)} />
+        </dl>
+      </section>
+    );
+  }
+  if (activeCategory === 'notifications') {
+    return (
+      <section className="uc-settings__status-card">
+        <h3>通知渠道</h3>
+        <dl className="uc-settings__facts">
+          <Fact label="应用内" value={capabilityLabel(status.notifications.inApp)} />
+          <Fact label="系统通知" value={capabilityLabel(status.notifications.system)} />
+          <Fact label="声音" value={capabilityLabel(status.notifications.sound)} />
+          <Fact label="业务状态" value="不受通知影响" />
+        </dl>
+      </section>
+    );
+  }
+  if (activeCategory === 'shortcuts') {
+    return (
+      <section className="uc-settings__status-card">
+        <h3>快捷键</h3>
+        <dl className="uc-settings__facts">
+          <Fact label="平台" value={platformLabel(status.shortcuts.platform)} />
+          <Fact label="动作注册表" value={`V${status.shortcuts.registryVersion}`} />
+          <Fact label="动作数量" value={`${status.shortcuts.actions.length} 个`} />
+          <Fact label="已注册全局键" value={`${status.shortcuts.activeGlobalActionIds.length} 个`} />
         </dl>
       </section>
     );
@@ -1198,6 +1666,90 @@ function yesNo(value: boolean): string {
   return value ? '支持' : '不支持';
 }
 
+function outboundLabel(value: PrivacySettings['textOutboundConfirmation'] | PrivacySettings['imageOutboundConfirmation'] | PrivacySettings['videoOutboundConfirmation']): string {
+  return value === 'always' ? '始终确认' : '每次提交确认';
+}
+
+function retentionLabel(value: PrivacySettings['worksRetention'] | PrivacySettings['sourceMediaRetention']): string {
+  return value === 'never_auto_cleanup' ? '不自动清理' : '状态异常';
+}
+
+function proxyModeLabel(kind: ProxyMode['kind']): string {
+  const labels: Record<ProxyMode['kind'], string> = {
+    system_default: '系统默认',
+    system_proxy: '系统代理',
+    custom: '自定义代理',
+    direct: '直连'
+  };
+  return labels[kind];
+}
+
+function proxyModeDescription(kind: Exclude<ProxyMode['kind'], 'custom'>): string {
+  const labels: Record<Exclude<ProxyMode['kind'], 'custom'>, string> = {
+    system_default: '遵循应用默认网络策略。',
+    system_proxy: '读取系统代理事实。',
+    direct: '后续请求不使用代理。'
+  };
+  return labels[kind];
+}
+
+function proxyTestLabel(result: SettingsSystemStatusDto['network']['lastTest']): string {
+  if (!result) return '尚未测试';
+  return result.ok ? `已到达 ${new Date(result.reachedAt).toLocaleTimeString()}` : `失败：${proxyFailureLabel(result.failure)}`;
+}
+
+function proxyFailureLabel(failure: Exclude<SettingsSystemStatusDto['network']['lastTest'], null | { readonly ok: true }>['failure']): string {
+  const labels: Record<typeof failure, string> = {
+    dns: 'DNS',
+    certificate: '证书',
+    authentication: '认证',
+    timeout: '超时',
+    unknown: '未知'
+  };
+  return labels[failure];
+}
+
+function deliveryLabel(value: NotificationTestResultDto['system']): string {
+  const labels: Record<NotificationTestResultDto['system'], string> = {
+    accepted: '已提交',
+    denied: '被拒绝',
+    unsupported: '不支持',
+    failed: '失败',
+    not_requested: '未请求'
+  };
+  return labels[value];
+}
+
+function notificationEventLabel(event: NotificationSettings['rules'][number]['event']): string {
+  const labels: Record<NotificationSettings['rules'][number]['event'], string> = {
+    task_completed: '任务完成',
+    task_failed: '任务失败',
+    user_action_required: '需要确认',
+    download_completed: '下载完成',
+    export_completed: '导出完成',
+    storage_insufficient: '空间不足',
+    service_connection_failed: '服务连接失效',
+    update_available: '更新可用',
+    local_component_failed: '本地组件异常'
+  };
+  return labels[event];
+}
+
+function platformLabel(platform: ShortcutPlatform): string {
+  return platform === 'windows' ? 'Windows' : 'macOS';
+}
+
+function shortcutActionLabel(actionId: string): string {
+  const labels: Record<string, string> = {
+    show_app: '显示应用',
+    new_project: '新建项目',
+    open_settings: '打开设置',
+    focus_search: '聚焦搜索',
+    cancel_current_action: '取消当前操作'
+  };
+  return labels[actionId] ?? actionId;
+}
+
 function formatBytes(bytes: number | null, unit: GeneralSettings['fileSizeUnit']): string {
   if (bytes === null || !Number.isFinite(bytes)) return '未知';
   if (bytes === 0) return '0 B';
@@ -1211,6 +1763,19 @@ function formatBytes(bytes: number | null, unit: GeneralSettings['fileSizeUnit']
 function operationCodeLabel(code: string): string {
   const labels: Record<string, string> = {
     changes_apply_only_to_new_tasks_and_attempts: '只影响后续任务和新的 attempt，活动任务保持不变。',
+    outbound_confirmation_mandatory: '外发确认是强制边界，不能被关闭。',
+    unknown_cost_confirmation_mandatory: '未知费用确认是强制边界，不能被关闭。',
+    minimum_authorization_mandatory: '最小授权策略必须保留。',
+    proxy_probe_failed_dns: '代理测试失败：DNS 解析失败。',
+    proxy_probe_failed_certificate: '代理测试失败：证书校验失败。',
+    proxy_probe_failed_authentication: '代理测试失败：认证失败。',
+    proxy_probe_failed_timeout: '代理测试失败：连接超时。',
+    proxy_probe_failed_unknown: '代理测试失败：原因未知。',
+    shortcut_unknown_action: '快捷键包含未知动作。',
+    shortcut_immutable_action: '不可修改快捷键不能改变。',
+    shortcut_invalid: '快捷键格式无效。',
+    shortcut_duplicate: '快捷键存在重复冲突。',
+    shortcut_system_reserved: '快捷键被系统保留。',
     software_export_remains_available: '软件导出继续可用，不会因硬件状态失败而阻断。',
     hardware_acceleration_not_approved: '硬件加速尚未获批准，当前不能启用。',
     target_conflict: '目标目录不是空目录，不能覆盖现有文件。',
