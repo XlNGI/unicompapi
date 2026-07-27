@@ -373,6 +373,12 @@ const settings: SettingsApi = {
   getSystemStatus: () => ipcRenderer.invoke(settingsIpcChannels.getSystemStatus),
   selectDirectory: (purpose) =>
     ipcRenderer.invoke(settingsIpcChannels.selectDirectory, { purpose }),
+  openSystemSettings: (target) =>
+    ipcRenderer.invoke(settingsIpcChannels.openSystemSettings, { target }),
+  sendTestNotification: (system, sound) =>
+    ipcRenderer.invoke(settingsIpcChannels.sendTestNotification, { system, sound }),
+  stageProxyCredential: (username, value) =>
+    ipcRenderer.invoke(settingsIpcChannels.stageProxyCredential, { username, value }),
   planOperation: (expectedRevision, operation) =>
     ipcRenderer.invoke(settingsIpcChannels.planOperation, {
       expectedRevision,

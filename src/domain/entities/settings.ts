@@ -518,6 +518,7 @@ function highRiskProjection(values: SettingsValues): unknown {
       cleanupExpiredProxies: values.media.cleanupExpiredProxies,
       proxyDirectoryId: values.media.proxyDirectoryId
     },
+    privacy: values.privacy,
     proxy: values.network.proxy,
     shortcuts: values.shortcuts,
     diagnosticsCleanup: values.diagnostics.autoCleanup

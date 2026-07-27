@@ -22,7 +22,7 @@ protocol.registerSchemesAsPrivileged([
 
 const mediaHandles = registerStorageIpcHandlers();
 registerProviderIpcHandlers();
-registerSettingsIpcHandlers();
+const settingsLifecycle = registerSettingsIpcHandlers();
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);
@@ -94,7 +94,8 @@ function createMainWindow(): void {
   mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await settingsLifecycle.activate();
   protocol.handle('unicomp-media', async (request) => {
     const url = new URL(request.url);
     const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
@@ -126,6 +127,10 @@ app.whenReady().then(() => {
       createMainWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  settingsLifecycle.dispose();
 });
 
 app.on('window-all-closed', () => {

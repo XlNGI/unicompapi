@@ -101,12 +101,23 @@ export class SecureCredentialVault {
     if (!this.protector.isAvailable()) {
       throw new CredentialVaultUnavailableError();
     }
+    return this.useValue(reference, verifier);
+  }
+
+  /** Keeps decrypted values inside a main-process callback boundary. */
+  async useValue<T>(
+    reference: string,
+    operation: (value: string) => Promise<T>
+  ): Promise<T> {
+    if (!this.protector.isAvailable()) {
+      throw new CredentialVaultUnavailableError();
+    }
     const entry = await this.findEntry(requireReference(reference));
     if (!entry) throw new CredentialNotFoundError();
     const value = this.protector.unprotect(
       Buffer.from(entry.encryptedValue, 'base64')
     );
-    return verifier(value);
+    return operation(value);
   }
 
   private async findEntry(
