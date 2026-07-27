@@ -14,3 +14,4 @@ export * from './video-editor-media-controller';
 export * from './video-export-controller';
 export * from './video-reference-media-controller';
 export * from './video-submission-controller';
+export * from './settings-controller';
