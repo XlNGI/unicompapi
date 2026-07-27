@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
+import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -21,6 +22,7 @@ protocol.registerSchemesAsPrivileged([
 
 const mediaHandles = registerStorageIpcHandlers();
 registerProviderIpcHandlers();
+registerSettingsIpcHandlers();
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);

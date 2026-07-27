@@ -5,3 +5,4 @@ export * from './ipc';
 export * from './providers';
 export * from './images';
 export * from './videos';
+export * from './settings';

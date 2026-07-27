@@ -27,6 +27,10 @@ import {
   videoEditorIpcChannels,
   type VideoEditorApi
 } from '../src/shared/video-editor-ipc';
+import {
+  settingsIpcChannels,
+  type SettingsApi
+} from '../src/shared/settings-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -353,6 +357,30 @@ const videoEditors: VideoEditorApi = {
     ipcRenderer.invoke(videoEditorIpcChannels.recoverExports)
 };
 
+const settings: SettingsApi = {
+  getSnapshot: () => ipcRenderer.invoke(settingsIpcChannels.getSnapshot),
+  updateValues: (expectedRevision, values) =>
+    ipcRenderer.invoke(settingsIpcChannels.updateValues, {
+      expectedRevision,
+      values
+    }),
+  exportPortable: () => ipcRenderer.invoke(settingsIpcChannels.exportPortable),
+  prepareImport: (expectedRevision, document) =>
+    ipcRenderer.invoke(settingsIpcChannels.prepareImport, {
+      expectedRevision,
+      document
+    }),
+  planOperation: (expectedRevision, operation) =>
+    ipcRenderer.invoke(settingsIpcChannels.planOperation, {
+      expectedRevision,
+      operation
+    }),
+  executeOperation: (confirmationHandle) =>
+    ipcRenderer.invoke(settingsIpcChannels.executeOperation, {
+      confirmationHandle
+    })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
   imageSubmissions,
   imageWorkspaces,
@@ -361,6 +389,7 @@ contextBridge.exposeInMainWorld('unicomp', {
   videoWorkspaces,
   platform: process.platform,
   providers,
+  settings,
   storage,
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),

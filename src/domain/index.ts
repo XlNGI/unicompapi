@@ -6,6 +6,7 @@ export * from './entities/image-workspace';
 export * from './entities/project';
 export * from './entities/prompt';
 export * from './entities/provider';
+export * from './entities/settings';
 export * from './entities/task';
 export * from './entities/video-workspace';
 export * from './entities/video-editor';
