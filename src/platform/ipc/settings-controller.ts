@@ -10,6 +10,7 @@ import {
   toSettingsValues,
   hasHighRiskSettingsChanges,
   type PerformanceSettings,
+  type PrivacySettings,
   type SettingsCategory,
   type SettingsValues
 } from '../../domain';
@@ -21,7 +22,11 @@ import type {
   SettingsIpcResult,
   SettingsOperationPlanDto,
   SettingsOperationRequestDto,
-  SettingsSnapshotDto
+  SettingsSnapshotDto,
+  NativeSystemSettingsTarget,
+  NotificationTestResultDto,
+  SettingsSystemStatusDto,
+  ShortcutPlatform
 } from '../../shared/settings-ipc';
 import { directoryPurposes } from '../../shared/settings-ipc';
 import {
@@ -40,6 +45,16 @@ import {
   type SettingsLoadResult,
   type SettingsRepository
 } from '../settings';
+import {
+  type NotificationService,
+  type PrivacyPermissionService,
+  type ProxyChangePlan,
+  ProxyOperationError,
+  type ProxyService,
+  type ShortcutChangePlan,
+  ShortcutOperationError,
+  type ShortcutService
+} from '../settings';
 
 interface PendingSettingsOperation {
   readonly kind: SettingsOperationPlanDto['kind'];
@@ -49,6 +64,8 @@ interface PendingSettingsOperation {
   readonly migration?: DirectoryMigrationPlan;
   readonly cleanup?: CleanupPlan;
   readonly blocker?: string;
+  readonly proxyPlan?: ProxyChangePlan;
+  readonly shortcutPlan?: ShortcutChangePlan;
 }
 
 export interface SettingsB2Services {
@@ -60,15 +77,25 @@ export interface SettingsB2Services {
   readonly media: MediaSettingsStatusService;
 }
 
+export interface SettingsB3Services {
+  readonly privacy: PrivacyPermissionService;
+  readonly proxy: ProxyService;
+  readonly notifications: NotificationService;
+  readonly shortcuts: ShortcutService;
+}
+
 class UnsupportedSettingsOperationError extends Error {}
 
 const unavailableCapabilities = [
+  'diagnostics',
+  'updates'
+] as const;
+
+const b3Capabilities = [
   'permission_controls',
   'proxy_controls',
   'notification_controls',
-  'shortcut_controls',
-  'diagnostics',
-  'updates'
+  'shortcut_controls'
 ] as const;
 
 export class SettingsController {
@@ -79,12 +106,16 @@ export class SettingsController {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createHandle: () => string = () => randomUUID(),
     private readonly planLifetimeMs = 5 * 60 * 1000,
-    private readonly b2?: SettingsB2Services
+    private readonly b2?: SettingsB2Services,
+    private readonly b3?: SettingsB3Services
   ) {}
 
   async getSnapshot(): Promise<SettingsIpcResult<SettingsSnapshotDto>> {
     try {
-      return { ok: true, value: toSnapshot(await this.repository.load(), Boolean(this.b2)) };
+      return {
+        ok: true,
+        value: toSnapshot(await this.repository.load(), Boolean(this.b2), Boolean(this.b3))
+      };
     } catch {
       return failure('settings_read_failed', 'Local settings could not be read');
     }
@@ -95,13 +126,20 @@ export class SettingsController {
       return failure('operation_unsupported', 'System settings adapters are unavailable');
     }
     try {
-      const [entries, appUsage, performance, media] = await Promise.all([
+      const current = await this.repository.load();
+      const [entries, appUsage, performance, media, privacy, network, notifications] = await Promise.all([
         this.b2.directoryRegistry.list(),
         scanDirectoryUsage(this.b2.userDataPath),
         this.b2.performance.getStatus(),
-        this.b2.media.getStatus()
+        this.b2.media.getStatus(),
+        this.b3?.privacy.getStatus() ?? Promise.resolve(unavailablePrivacyStatus()),
+        this.b3?.proxy.getStatus(current.document.network.proxy) ??
+          Promise.resolve(unavailableNetworkStatus()),
+        this.b3?.notifications.getStatus() ?? Promise.resolve(unavailableNotificationStatus())
       ]);
       const directories = await Promise.all(entries.map(describeControlledDirectory));
+      const shortcuts = this.b3?.shortcuts.getStatus(current.document.shortcuts) ??
+        unavailableShortcutStatus();
       return {
         ok: true as const,
         value: {
@@ -116,11 +154,74 @@ export class SettingsController {
             ] as const
           },
           performance,
-          media
+          media,
+          privacy,
+          network,
+          notifications,
+          shortcuts
         }
       };
     } catch {
       return failure('settings_read_failed', 'System settings status could not be read');
+    }
+  }
+
+  async openSystemSettings(
+    target: unknown
+  ): Promise<SettingsIpcResult<{ readonly opened: true }>> {
+    if (!this.b3) {
+      return failure('operation_unsupported', 'System settings adapters are unavailable');
+    }
+    if (!isNativeSystemSettingsTarget(target)) {
+      return failure('invalid_request', 'Native system settings target is invalid');
+    }
+    try {
+      await this.b3.privacy.openSystemSettings(target);
+      return { ok: true, value: { opened: true } };
+    } catch {
+      return failure('operation_failed', 'System settings could not be opened');
+    }
+  }
+
+  async sendTestNotification(
+    system: unknown,
+    sound: unknown
+  ): Promise<SettingsIpcResult<NotificationTestResultDto>> {
+    if (!this.b3) {
+      return failure('operation_unsupported', 'Notification adapters are unavailable');
+    }
+    if (typeof system !== 'boolean' || typeof sound !== 'boolean') {
+      return failure('invalid_request', 'Notification test request is invalid');
+    }
+    try {
+      return { ok: true, value: await this.b3.notifications.sendTest(system, sound) };
+    } catch {
+      return failure('operation_failed', 'Notification test failed');
+    }
+  }
+
+  async stageProxyCredential(
+    input: unknown
+  ): Promise<SettingsIpcResult<{ readonly credentialHandle: string }>> {
+    if (!this.b3) {
+      return failure('operation_unsupported', 'Proxy credential storage is unavailable');
+    }
+    try {
+      const item = exactRequest(input, ['username', 'value']);
+      if (
+        typeof item.username !== 'string' || item.username.length > 512 ||
+        typeof item.value !== 'string' || item.value.length < 1 || item.value.length > 65_536
+      ) {
+        throw new TypeError('Proxy credential is invalid');
+      }
+      return {
+        ok: true,
+        value: {
+          credentialHandle: await this.b3.proxy.stageCredential(item.username, item.value)
+        }
+      };
+    } catch {
+      return failure('invalid_request', 'Proxy credential is invalid');
     }
   }
 
@@ -165,7 +266,8 @@ export class SettingsController {
         ok: true,
         value: toSnapshot(
           await this.repository.replace(request.expectedRevision, request.values),
-          Boolean(this.b2)
+          Boolean(this.b2),
+          Boolean(this.b3)
         )
       };
     } catch (error) {
@@ -224,23 +326,91 @@ export class SettingsController {
       }
       const currentValues = toSettingsValues(current.document);
       if (request.operation.kind === 'restore_all_defaults') {
+        const defaults = createDefaultSettingsValues();
+        if (this.b3) {
+          const proxyPlan = JSON.stringify(currentValues.network.proxy) ===
+            JSON.stringify(defaults.network.proxy)
+            ? undefined
+            : await this.b3.proxy.plan(
+                currentValues.network.proxy,
+                defaults.network.proxy,
+                undefined,
+                currentValues.network.connectionTimeoutMs
+              );
+          const shortcutPlan = this.b3.shortcuts.restoreAllDefaults(
+            currentValues.shortcuts
+          );
+          return {
+            ok: true,
+            value: this.rememberPlan(request.operation.kind, current, defaults, {
+              blocker: proxyPlan && !proxyPlan.test.ok
+                ? `proxy_test_${proxyPlan.test.failure}`
+                : undefined,
+              warnings: ['changes_apply_to_new_requests_only', 'active_requests_are_not_retried'],
+              proxyPlan: proxyPlan?.test.ok ? proxyPlan : undefined,
+              shortcutPlan
+            })
+          };
+        }
         return {
           ok: true,
           value: this.rememberPlan(
             request.operation.kind,
             current,
-            createDefaultSettingsValues()
+            defaults
           )
         };
       }
       if (request.operation.kind === 'restore_category_defaults') {
+        const next = restoreSettingsCategory(currentValues, request.operation.category);
+        if (this.b3 && request.operation.category === 'network') {
+          const proxyPlan = JSON.stringify(currentValues.network.proxy) ===
+            JSON.stringify(next.network.proxy)
+            ? undefined
+            : await this.b3.proxy.plan(
+                currentValues.network.proxy,
+                next.network.proxy,
+                undefined,
+                currentValues.network.connectionTimeoutMs
+              );
+          return {
+            ok: true,
+            value: this.rememberPlan(request.operation.kind, current, next, {
+              blocker: proxyPlan && !proxyPlan.test.ok
+                ? `proxy_test_${proxyPlan.test.failure}`
+                : undefined,
+              warnings: ['changes_apply_to_new_requests_only', 'active_requests_are_not_retried'],
+              proxyPlan: proxyPlan?.test.ok ? proxyPlan : undefined
+            })
+          };
+        }
+        if (this.b3 && request.operation.category === 'shortcuts') {
+          return {
+            ok: true,
+            value: this.rememberPlan(request.operation.kind, current, next, {
+              shortcutPlan: this.b3.shortcuts.restoreAllDefaults(currentValues.shortcuts)
+            })
+          };
+        }
         return {
           ok: true,
           value: this.rememberPlan(
             request.operation.kind,
             current,
-            restoreSettingsCategory(currentValues, request.operation.category)
+            next
           )
+        };
+      }
+      if (
+        request.operation.kind === 'update_privacy_permissions' ||
+        request.operation.kind === 'update_proxy' ||
+        request.operation.kind === 'update_shortcuts' ||
+        request.operation.kind === 'restore_shortcut_defaults'
+      ) {
+        if (!this.b3) throw new UnsupportedSettingsOperationError();
+        return {
+          ok: true,
+          value: await this.planB3Operation(current, currentValues, request.operation)
         };
       }
       if (!this.b2) throw new UnsupportedSettingsOperationError();
@@ -283,21 +453,41 @@ export class SettingsController {
       if (pending.blocker) {
         return failure('operation_blocked', 'The operation still has blockers');
       }
-      if (pending.migration) {
-        if (!this.b2) throw new UnsupportedSettingsOperationError();
-        await this.b2.directoryMigration.execute(pending.migration);
+      const rollbacks: Array<() => Promise<void>> = [];
+      try {
+        if (pending.proxyPlan) {
+          if (!this.b3) throw new UnsupportedSettingsOperationError();
+          rollbacks.push(await this.b3.proxy.apply(pending.proxyPlan));
+        }
+        if (pending.shortcutPlan) {
+          if (!this.b3) throw new UnsupportedSettingsOperationError();
+          rollbacks.push(await this.b3.shortcuts.apply(pending.shortcutPlan));
+        }
+        if (pending.migration) {
+          if (!this.b2) throw new UnsupportedSettingsOperationError();
+          await this.b2.directoryMigration.execute(pending.migration);
+        }
+        if (pending.cleanup) {
+          if (!this.b2) throw new UnsupportedSettingsOperationError();
+          await this.b2.cleanup.execute(pending.cleanup);
+        }
+        const result = pending.values
+          ? await this.repository.replace(pending.expectedRevision, pending.values)
+          : current;
+        return {
+          ok: true,
+          value: toSnapshot(result, Boolean(this.b2), Boolean(this.b3))
+        };
+      } catch (error) {
+        for (const rollback of rollbacks.reverse()) {
+          try {
+            await rollback();
+          } catch {
+            // Preserve the original operation failure for the renderer.
+          }
+        }
+        throw error;
       }
-      if (pending.cleanup) {
-        if (!this.b2) throw new UnsupportedSettingsOperationError();
-        await this.b2.cleanup.execute(pending.cleanup);
-      }
-      const result = pending.values
-        ? await this.repository.replace(pending.expectedRevision, pending.values)
-        : current;
-      return {
-        ok: true,
-        value: toSnapshot(result, Boolean(this.b2))
-      };
     } catch (error) {
       return mapOperationError(error);
     }
@@ -312,6 +502,8 @@ export class SettingsController {
       readonly blocker?: string;
       readonly warnings?: readonly string[];
       readonly impact?: SettingsOperationPlanDto['impact'];
+      readonly proxyPlan?: ProxyChangePlan;
+      readonly shortcutPlan?: ShortcutChangePlan;
     } = {}
   ): SettingsOperationPlanDto {
     const confirmationHandle = this.createHandle();
@@ -340,16 +532,66 @@ export class SettingsController {
       expectedRevision: current.document.revision,
       expiresAtMs,
       values,
-      blocker: options.blocker
+      blocker: options.blocker,
+      proxyPlan: options.proxyPlan,
+      shortcutPlan: options.shortcutPlan
     });
     return plan;
+  }
+
+  private async planB3Operation(
+    current: SettingsLoadResult,
+    values: SettingsValues,
+    operation: Extract<SettingsOperationRequestDto, {
+      readonly kind:
+        | 'update_privacy_permissions'
+        | 'update_proxy'
+        | 'update_shortcuts'
+        | 'restore_shortcut_defaults';
+    }>
+  ): Promise<SettingsOperationPlanDto> {
+    if (!this.b3) throw new UnsupportedSettingsOperationError();
+    if (operation.kind === 'update_privacy_permissions') {
+      const next = parseSettingsValues({ ...values, privacy: operation.values });
+      return this.rememberPlan(operation.kind, current, next, {
+        warnings: ['mandatory_outbound_and_cost_confirmations_remain_enabled']
+      });
+    }
+    if (operation.kind === 'update_proxy') {
+      const next = parseSettingsValues({
+        ...values,
+        network: { ...values.network, proxy: operation.value }
+      });
+      const proxyPlan = await this.b3.proxy.plan(
+        values.network.proxy,
+        next.network.proxy,
+        operation.credentialHandle,
+        values.network.connectionTimeoutMs
+      );
+      return this.rememberPlan(operation.kind, current, next, {
+        blocker: proxyPlan.test.ok ? undefined : `proxy_test_${proxyPlan.test.failure}`,
+        warnings: ['changes_apply_to_new_requests_only', 'active_requests_are_not_retried'],
+        proxyPlan: proxyPlan.test.ok ? proxyPlan : undefined
+      });
+    }
+    const shortcutPlan = operation.kind === 'restore_shortcut_defaults'
+      ? this.b3.shortcuts.restoreDefaults(values.shortcuts, operation.platform)
+      : this.b3.shortcuts.plan(values.shortcuts, operation.platform, operation.bindings);
+    const next = parseSettingsValues({ ...values, shortcuts: shortcutPlan.next });
+    return this.rememberPlan(operation.kind, current, next, {
+      blocker: shortcutPlan.issues.length > 0 ? 'shortcut_conflict' : undefined,
+      shortcutPlan
+    });
   }
 
   private async planB2Operation(
     current: SettingsLoadResult,
     values: SettingsValues,
-    operation: Exclude<SettingsOperationRequestDto,
-      { readonly kind: 'restore_all_defaults' | 'restore_category_defaults' }>
+    operation: Extract<SettingsOperationRequestDto, { readonly kind:
+      | 'migrate_directory'
+      | 'cleanup_storage'
+      | 'update_performance'
+      | 'update_hardware_acceleration'; }>
   ): Promise<SettingsOperationPlanDto> {
     if (!this.b2) throw new UnsupportedSettingsOperationError();
     if (operation.kind === 'update_performance') {
@@ -466,7 +708,11 @@ export class SettingsController {
   }
 }
 
-function toSnapshot(result: SettingsLoadResult, b2Available: boolean): SettingsSnapshotDto {
+function toSnapshot(
+  result: SettingsLoadResult,
+  b2Available: boolean,
+  b3Available: boolean
+): SettingsSnapshotDto {
   const b2Capabilities = [
     'platform_capability_detection',
     'directory_operations',
@@ -479,16 +725,21 @@ function toSnapshot(result: SettingsLoadResult, b2Available: boolean): SettingsS
     resolved: {
       appliedKeys: [
         'settings_persistence',
-        ...(b2Available ? b2Capabilities : [])
+        ...(b2Available ? b2Capabilities : []),
+        ...(b3Available ? b3Capabilities : [])
       ],
       unavailableKeys: [
         ...(!b2Available ? b2Capabilities : []),
+        ...(!b3Available ? b3Capabilities : []),
         ...unavailableCapabilities
       ]
     },
     capabilities: [
       { id: 'settings_persistence', state: 'available' },
       ...b2Capabilities.map<SettingsCapabilityDto>((id) => b2Available
+        ? { id, state: 'available' }
+        : { id, state: 'unavailable', reason: 'phase8_platform_adapter_pending' }),
+      ...b3Capabilities.map<SettingsCapabilityDto>((id) => b3Available
         ? { id, state: 'available' }
         : { id, state: 'unavailable', reason: 'phase8_platform_adapter_pending' }),
       ...unavailableCapabilities.map<SettingsCapabilityDto>((id) => ({
@@ -604,6 +855,78 @@ function parseOperationRequest(value: unknown): {
       }
     };
   }
+  if (operation.kind === 'update_privacy_permissions') {
+    exactKeys(operation, ['kind', 'values']);
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: {
+        kind: 'update_privacy_permissions',
+        values: record(operation.values) as unknown as PrivacySettings
+      }
+    };
+  }
+  if (operation.kind === 'update_proxy') {
+    const keys = operation.credentialHandle === undefined
+      ? ['kind', 'value']
+      : ['kind', 'value', 'credentialHandle'];
+    exactKeys(operation, keys);
+    const defaults = createDefaultSettingsValues();
+    const value = parseSettingsValues({
+      ...defaults,
+      network: { ...defaults.network, proxy: operation.value }
+    }).network.proxy;
+    let credentialHandle: string | undefined;
+    if (operation.credentialHandle !== undefined) {
+      if (
+        typeof operation.credentialHandle !== 'string' ||
+        !/^[A-Za-z0-9-]{8,128}$/.test(operation.credentialHandle)
+      ) {
+        throw new TypeError('Proxy credential handle is invalid');
+      }
+      credentialHandle = operation.credentialHandle;
+    }
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: {
+        kind: 'update_proxy',
+        value,
+        ...(credentialHandle ? { credentialHandle } : {})
+      }
+    };
+  }
+  if (operation.kind === 'update_shortcuts') {
+    exactKeys(operation, ['kind', 'platform', 'bindings']);
+    const platform = shortcutPlatform(operation.platform);
+    if (!Array.isArray(operation.bindings)) throw new TypeError('Shortcut bindings are invalid');
+    const bindings = operation.bindings.map((value) => {
+      const binding = exactRequest(value, ['actionId', 'accelerator']);
+      if (
+        typeof binding.actionId !== 'string' || binding.actionId.length < 1 ||
+        binding.actionId.length > 100 ||
+        (binding.accelerator !== null && typeof binding.accelerator !== 'string')
+      ) {
+        throw new TypeError('Shortcut binding is invalid');
+      }
+      return {
+        actionId: binding.actionId,
+        accelerator: binding.accelerator as string | null
+      };
+    });
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: { kind: 'update_shortcuts', platform, bindings }
+    };
+  }
+  if (operation.kind === 'restore_shortcut_defaults') {
+    exactKeys(operation, ['kind', 'platform']);
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: {
+        kind: 'restore_shortcut_defaults',
+        platform: shortcutPlatform(operation.platform)
+      }
+    };
+  }
   throw new UnsupportedSettingsOperationError('Settings operation is unsupported');
 }
 
@@ -649,6 +972,9 @@ function mapWriteError(error: unknown): SettingsIpcResult<never> {
 
 function mapOperationError(error: unknown): SettingsIpcResult<never> {
   if (error instanceof StorageOperationError) {
+    return failure('operation_failed', error.message);
+  }
+  if (error instanceof ProxyOperationError || error instanceof ShortcutOperationError) {
     return failure('operation_failed', error.message);
   }
   if (error instanceof UnsupportedSettingsOperationError) {
@@ -762,4 +1088,75 @@ function assignDirectory(
         directories: { ...values.storage.directories, [purpose]: directoryId }
       }
     });
+}
+
+function isNativeSystemSettingsTarget(
+  value: unknown
+): value is NativeSystemSettingsTarget {
+  return value === 'files_and_folders' || value === 'notifications';
+}
+
+function shortcutPlatform(value: unknown): ShortcutPlatform {
+  if (value !== 'windows' && value !== 'macos') {
+    throw new TypeError('Shortcut platform is invalid');
+  }
+  return value;
+}
+
+function unavailablePrivacyStatus(): SettingsSystemStatusDto['privacy'] {
+  return {
+    minimumAuthorization: {
+      selectedFilesOnly: true,
+      authorizedDirectoriesOnly: true,
+      homeDirectoryScan: false,
+      backgroundClipboardRead: false,
+      outboundConfirmationMandatory: true,
+      unknownCostConfirmationMandatory: true
+    },
+    permissions: ['files_and_folders', 'notifications'].map((id) => ({
+      id: id as 'files_and_folders' | 'notifications',
+      state: 'unavailable',
+      reason: 'phase8_platform_adapter_pending',
+      systemSettingsTarget: id as NativeSystemSettingsTarget
+    }))
+  };
+}
+
+function unavailableNetworkStatus(): SettingsSystemStatusDto['network'] {
+  return {
+    activeMode: null,
+    appliesTo: 'new_requests_only',
+    activeRequestsRetried: false,
+    credentialStorage: {
+      id: 'proxy_credential_storage',
+      state: 'unavailable',
+      reason: 'phase8_platform_adapter_pending'
+    },
+    lastTest: null
+  };
+}
+
+function unavailableNotificationStatus(): SettingsSystemStatusDto['notifications'] {
+  return {
+    inApp: { id: 'in_app_notifications', state: 'available' },
+    system: {
+      id: 'system_notifications',
+      state: 'unavailable',
+      reason: 'phase8_platform_adapter_pending'
+    },
+    sound: {
+      id: 'notification_sound',
+      state: 'unavailable',
+      reason: 'phase8_platform_adapter_pending'
+    }
+  };
+}
+
+function unavailableShortcutStatus(): SettingsSystemStatusDto['shortcuts'] {
+  return {
+    registryVersion: 1,
+    platform: process.platform === 'darwin' ? 'macos' : 'windows',
+    actions: [],
+    activeGlobalActionIds: []
+  };
 }

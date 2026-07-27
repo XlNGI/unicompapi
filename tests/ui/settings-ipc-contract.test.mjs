@@ -6,7 +6,7 @@ const preload = await readFile('electron/preload.ts', 'utf8');
 const contract = await readFile('src/shared/settings-ipc.ts', 'utf8');
 const controller = await readFile('src/platform/ipc/settings-controller.ts', 'utf8');
 
-test('exposes only the controlled phase 8 B1/B2 settings operations', () => {
+test('exposes only the controlled phase 8 settings operations', () => {
   for (const operation of [
     'getSnapshot',
     'updateValues',
@@ -14,6 +14,9 @@ test('exposes only the controlled phase 8 B1/B2 settings operations', () => {
     'prepareImport',
     'getSystemStatus',
     'selectDirectory',
+    'openSystemSettings',
+    'sendTestNotification',
+    'stageProxyCredential',
     'planOperation',
     'executeOperation'
   ]) {

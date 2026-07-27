@@ -4,3 +4,7 @@ export * from './directory-migration';
 export * from './cleanup-service';
 export * from './performance-policy';
 export * from './media-settings-status';
+export * from './privacy-permission-service';
+export * from './notification-service';
+export * from './proxy-service';
+export * from './shortcut-service';
