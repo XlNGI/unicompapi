@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 7 已完成联调并正式收口；阶段 8 规划已批准，B1、A1、B2、A2、B3、A3、B4、A4 已合并 `develop`。A2 已完成存储、任务性能和本地媒体三个真实面板并通过项目负责人 Windows Electron 手工验收。B3 已完成最小授权、代理隔离测试与事务回滚、独立 `safeStorage` 凭证、通知降级、版本化快捷键、跨平台绑定隔离和恢复默认事务；独立门禁为 365 项测试通过，A2+B3 集成门禁为 369 项测试通过，类型检查、lint、生产构建和差异检查通过，功能分支本地与远程保留。A3 已在 `feature/local-settings-user-controls` 完成隐私、网络代理、通知和快捷键四个 B3-backed 面板，129 项 Node 测试与 244 项 Vitest 测试通过，并通过项目负责人 Windows Electron 手工验收后合并。B4 已在 `feature/local-settings-diagnostics-update` 完成本地日志滚动/分级清理、脱敏诊断包、导入/重置/本机数据清除事务和真实不可用更新状态；125 项 Node 与 253 项 Vitest，共 378 项通过，类型检查、lint、生产构建、差异检查和 Windows Electron 烟测通过，并合并 `develop`。A4 已在 `feature/local-settings-diagnostics-update-ui` 完成日志诊断、应用更新、便携导入导出、全部恢复默认、清除本机数据确认流程和 10 分类收口自测，通过项目负责人 Windows Electron 手工验收，并通过 `3b06a1c Merge phase 8 A4 local settings diagnostics update UI` 合并 `develop`；功能分支本地与远程保留。A4 自测门禁为 Node/UI 134 项 + Vitest 253 项，共 387 项通过，类型检查、lint、生产构建、差异检查和 Windows Electron 烟测通过。生产更新源、生产媒体组件分发、硬件能力与 macOS 实机证据仍未具备，不得伪造为可用。规划见 `docs/active/阶段8-技术架构.md` 与 `docs/active/阶段8-任务拆分.md`，B1/A1/B2/A2/B3/A3/B4/A4 工程记录均保留在 `docs/active/`。
+当前状态：阶段 8 已完成最终联调并正式收口。B1、A1、B2、A2、B3、A3、B4、A4 已全部合并到 `develop@db9e94d`，本地与远程功能分支保留。最终门禁为 Node/UI 134 项与 Vitest 253 项，共 387 项通过、0 失败、0 跳过；类型检查、lint、生产构建、差异检查、Windows Electron 4/4 进程响应烟测和三档响应式界面检查全部通过。收口记录见 `docs/active/阶段8-联调验收记录.md`。生产更新源、签名安装/修复/回退、生产媒体组件分发、硬件能力完整证据与 macOS 实机证据仍未具备，不得宣称发布就绪。阶段 9 尚未启动，必须先形成并批准技术架构、任务拆分与验收边界。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -629,4 +629,16 @@ B2 合并时 A2 尚未接入；当前 A2 已完成并合并。B3/B4 的隐私、
 
 更新端口按应用、媒体组件、内置适配器、服务商预设和帮助资源建模，返回当前版本、渠道、检查、完整性、签名和活动任务/未保存草稿阻断事实。当前没有获批生产更新源时稳定返回 `unavailable`；检查异常或完整性/签名失败返回 `failed`，无可用版本、安装、修复或回退命令，不显示“已是最新”。
 
-验证结果：125 项 Node UI/IPC/工具链测试与 253 项 Vitest 领域/平台测试，共 378 项通过、0 失败、0 跳过；`npm.cmd run typecheck`、`npm.cmd run lint`、`npm.cmd run build` 和 `git diff --check` 通过；Windows Electron 生产构建隐藏启动 4 个进程全部响应，清理后残留 0。B4 尚未合并 `develop`；A4 必须等待 B4 合并，生产更新源、签名安装/回退、macOS 实机证据继续不属于本分支。
+验证结果：125 项 Node UI/IPC/工具链测试与 253 项 Vitest 领域/平台测试，共 378 项通过、0 失败、0 跳过；`npm.cmd run typecheck`、`npm.cmd run lint`、`npm.cmd run build` 和 `git diff --check` 通过；Windows Electron 生产构建隐藏启动 4 个进程全部响应，清理后残留 0。B4 已合并 `develop`，A4 随后完成并合并；生产更新源、签名安装/回退、macOS 实机证据继续不属于本分支。
+
+## 阶段 8｜最终联调与正式收口（2026-07-27）
+
+阶段 8 的 B1、A1、B2、A2、B3、A3、B4、A4 已全部合并到 `develop@db9e94d`。最终统一门禁为 Node/UI 134 项与 Vitest 253 项，共 387 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建、差异检查和 Windows Electron 4/4 进程响应烟测通过，结束后本次残留进程为 0。
+
+本地设置 10 个分类已完成统一联调；`1920x1080`、`1280x900`、`1080x800` 三个视口无横向溢出或文字裁切，焦点轮廓可见，浏览器控制台 0 警告、0 错误。生产预览未连接 Electron 设置端口时诚实显示不可用，没有假控件或假成功状态。
+
+阶段 8 正式收口，详细证据见：
+
+    docs/active/阶段8-联调验收记录.md
+
+本结论不批准生产更新、签名安装/修复/回退、生产媒体组件分发、硬件矩阵、macOS 实机或正式安装包发布。下一阶段不自动启动，必须先完成技术架构、任务拆分和验收边界审批。
