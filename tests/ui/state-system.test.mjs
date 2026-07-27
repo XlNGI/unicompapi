@@ -36,7 +36,7 @@ test('keeps the phase 2 UI state contract', async () => {
   assert.match(preview, /actionDisabled: true/);
   assert.match(preview, /role: 'alert'/);
   assert.match(preview, /readOnly: true/);
-  assert.match(settings, /<StateSystemPreview \/>/);
+  assert.doesNotMatch(settings, /<StateSystemPreview \/>/);
   assert.match(styles, /summary:focus-visible/);
   assert.match(shellStyles, /\.app-shell \{[\s\S]*?height: 100vh;/);
   assert.match(shellStyles, /\.workspace \{[\s\S]*?overflow: auto;/);
