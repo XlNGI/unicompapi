@@ -20,6 +20,12 @@ const taskStates: Record<string, { label: string; tone: StatusTone }> = {
   submitting: { label: '正在提交', tone: 'info' },
   queued: { label: '排队中', tone: 'info' },
   processing: { label: '处理中', tone: 'info' },
+  validating_sources: { label: '正在校验素材', tone: 'info' },
+  preparing_media: { label: '正在准备媒体', tone: 'info' },
+  encoding: { label: '正在编码', tone: 'info' },
+  writing_file: { label: '正在写入文件', tone: 'info' },
+  verifying_file: { label: '正在校验文件', tone: 'info' },
+  registering_work: { label: '正在登记作品', tone: 'info' },
   remote_completed: { label: '远端完成', tone: 'info' },
   downloading: { label: '下载中', tone: 'info' },
   writing: { label: '本地保存中', tone: 'info' },
@@ -28,6 +34,9 @@ const taskStates: Record<string, { label: string; tone: StatusTone }> = {
   cancel_requested: { label: '正在请求取消', tone: 'warning' },
   cancelled: { label: '已取消', tone: 'neutral' },
   cancellation_unknown: { label: '取消状态未知', tone: 'warning' },
+  needs_user_action: { label: '需要处理', tone: 'warning' },
+  interrupted: { label: '执行已中断', tone: 'warning' },
+  recovery_required: { label: '需要恢复', tone: 'warning' },
   failed: { label: '失败', tone: 'danger' },
   expired: { label: '已过期', tone: 'danger' }
 };

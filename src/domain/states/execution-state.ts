@@ -3,6 +3,12 @@ export const executionStates = [
   'submitting',
   'queued',
   'processing',
+  'validating_sources',
+  'preparing_media',
+  'encoding',
+  'writing_file',
+  'verifying_file',
+  'registering_work',
   'remote_completed',
   'downloading',
   'writing',
@@ -11,6 +17,9 @@ export const executionStates = [
   'cancel_requested',
   'cancelled',
   'cancellation_unknown',
+  'needs_user_action',
+  'interrupted',
+  'recovery_required',
   'failed',
   'expired'
 ] as const;

@@ -9,6 +9,8 @@ import type {
   ProviderId,
   ProjectId,
   TaskId,
+  VideoEditDraftId,
+  VideoExportPlanId,
   WorkId
 } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
@@ -126,14 +128,33 @@ export interface VideoSubmissionConfirmationSnapshot {
   };
 }
 
-export interface SubmissionSnapshot {
-  readonly kind: CreationKind;
+export interface GenerationSubmissionSnapshot {
+  readonly kind: Exclude<CreationKind, 'video_editing'>;
   readonly prompt: PromptSnapshot;
   readonly assetIds: readonly AssetId[];
   readonly confirmedAt: IsoTimestamp;
   readonly image?: ImageSubmissionConfirmationSnapshot;
   readonly video?: VideoSubmissionConfirmationSnapshot;
+  readonly videoEditing?: never;
 }
+
+export interface VideoEditingSubmissionSnapshot {
+  readonly kind: 'video_editing';
+  readonly confirmedAt: IsoTimestamp;
+  readonly videoEditing: {
+    readonly exportPlanId: VideoExportPlanId;
+    readonly draftRevision: number;
+    readonly title: string;
+  };
+  readonly prompt?: never;
+  readonly assetIds?: never;
+  readonly image?: never;
+  readonly video?: never;
+}
+
+export type SubmissionSnapshot =
+  | GenerationSubmissionSnapshot
+  | VideoEditingSubmissionSnapshot;
 
 export interface CreateImageTaskInput {
   readonly id: TaskId;
@@ -366,7 +387,9 @@ export function imagePurposeForMode(
   }
 }
 
-function creationKindForImageMode(mode: ImageWorkspaceMode): CreationKind {
+function creationKindForImageMode(
+  mode: ImageWorkspaceMode
+): Exclude<CreationKind, 'video_editing'> {
   switch (mode) {
     case 'quick_image':
     case 'professional_image':
@@ -384,10 +407,45 @@ export interface Task {
   readonly schemaVersion: 1;
   readonly id: TaskId;
   readonly projectId: ProjectId;
-  readonly sourceDraftId: DraftId;
+  readonly sourceDraftId: DraftId | VideoEditDraftId;
   readonly submission: SubmissionSnapshot;
   readonly executionIds: readonly ExecutionId[];
   readonly createdAt: IsoTimestamp;
+}
+
+export interface CreateVideoEditingTaskInput {
+  readonly id: TaskId;
+  readonly projectId: ProjectId;
+  readonly draftId: VideoEditDraftId;
+  readonly draftRevision: number;
+  readonly exportPlanId: VideoExportPlanId;
+  readonly title: string;
+  readonly confirmedAt: IsoTimestamp;
+}
+
+export function createVideoEditingTask(input: CreateVideoEditingTaskInput): Task {
+  if (!Number.isSafeInteger(input.draftRevision) || input.draftRevision < 0) {
+    throw new InvariantViolationError('video editing task revision is invalid');
+  }
+  const title = input.title.trim();
+  if (!title) throw new InvariantViolationError('video editing task title is required');
+  return {
+    schemaVersion: 1,
+    id: input.id,
+    projectId: input.projectId,
+    sourceDraftId: input.draftId,
+    submission: {
+      kind: 'video_editing',
+      confirmedAt: input.confirmedAt,
+      videoEditing: {
+        exportPlanId: input.exportPlanId,
+        draftRevision: input.draftRevision,
+        title
+      }
+    },
+    executionIds: [],
+    createdAt: input.confirmedAt
+  };
 }
 
 export interface CreateTaskFromDraftInput {
@@ -400,6 +458,11 @@ export function createTaskFromDraft(input: CreateTaskFromDraftInput): Task {
   if (!['editing', 'saved'].includes(input.draft.state)) {
     throw new InvariantViolationError(
       `draft in ${input.draft.state} state cannot create a task`
+    );
+  }
+  if (input.draft.kind === 'video_editing') {
+    throw new InvariantViolationError(
+      'video editing tasks require a frozen export plan'
     );
   }
 

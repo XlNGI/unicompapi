@@ -269,4 +269,102 @@ describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () =>
     await expect(stat(outputPath)).rejects.toBeDefined();
     expect((await readdir(root)).some((name) => name.includes('.part-'))).toBe(false);
   }, 120_000);
+
+  it('renders a real multi-clip composition with speed and a transition', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-media-composition-'));
+    roots.push(root);
+    const sources = [path.join(root, 'red.webm'), path.join(root, 'blue.webm')];
+    for (const [index, source] of sources.entries()) {
+      await execFileAsync(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', `color=c=${index === 0 ? 'red' : 'blue'}:s=96x64:r=12`,
+        '-f', 'lavfi', '-i', `sine=frequency=${index === 0 ? 440 : 880}:sample_rate=48000`,
+        '-t', '1.2', '-c:v', 'libvpx-vp9', '-c:a', 'libopus', source
+      ]);
+    }
+    const outputPath = path.join(root, 'composition.webm');
+    const adapter = new FfmpegMediaEngineAdapter({ ffmpegPath, ffprobePath });
+    const transform = {
+      scalePermille: 1000,
+      positionXPermille: 0,
+      positionYPermille: 0,
+      rotationMilliDegrees: 0,
+      flipX: false,
+      flipY: false,
+      crop: null
+    };
+    const result = await adapter.export({
+      jobId: 'composition-export',
+      outputPath,
+      composition: {
+        clips: [
+          {
+            source: { sourcePath: sources[0] },
+            sourceRange: { inUs: 0, outUs: 1_000_000 },
+            speed: { numerator: 1, denominator: 1 },
+            transform,
+            sourceAudio: { muted: false, volumePermille: 1000 },
+            transitionToNext: { kind: 'fade', durationUs: 200_000 },
+            hasAudio: true
+          },
+          {
+            source: { sourcePath: sources[1] },
+            sourceRange: { inUs: 0, outUs: 1_000_000 },
+            speed: { numerator: 2, denominator: 1 },
+            transform: { ...transform, flipX: true },
+            sourceAudio: { muted: false, volumePermille: 500 },
+            transitionToNext: { kind: 'none' },
+            hasAudio: true
+          }
+        ],
+        canvas: {
+          width: 96,
+          height: 64,
+          transformPolicy: 'fit',
+          background: { kind: 'blur_source', strengthPermille: 500 }
+        },
+        textTrack: [{
+          kind: 'text_overlay',
+          id: 'integration-text' as never,
+          content: 'UniComp',
+          range: { startUs: 100_000, endUs: 900_000 },
+          style: {
+            requestedFontFamily: 'Segoe UI',
+            fontSizeMilliPx: 12_000,
+            alignment: 'center',
+            opacityPermille: 900,
+            color: '#FFFFFF'
+          },
+          position: { xPermille: 500, yPermille: 500 },
+          entrance: 'fade_in',
+          exit: 'fade_out'
+        }],
+        backgroundMusic: {
+          source: { sourcePath: sources[0] },
+          sourceRange: { inUs: 0, outUs: 1_000_000 },
+          timelineRange: { startUs: 0, endUs: 1_000_000 },
+          volumePermille: 200,
+          fadeInUs: 100_000,
+          fadeOutUs: 100_000
+        },
+        cover: {
+          source: { sourcePath: sources[1] },
+          kind: 'video_frame',
+          sourceTimeUs: 100_000,
+          durationUs: 1_000_000
+        }
+      },
+      videoCodec: 'libvpx-vp9',
+      audioCodec: 'libopus'
+    });
+
+    if (result.status === 'failed') throw new Error(result.message);
+    expect(result).toMatchObject({ status: 'completed' });
+    const verified = await adapter.verifyOutput(outputPath);
+    expect(verified).toMatchObject({ status: 'verified', hasVideo: true, hasAudio: true });
+    if (verified.status === 'verified') {
+      expect(verified.durationUs).toBeGreaterThan(2_000_000);
+      expect(verified.durationUs).toBeLessThan(2_600_000);
+    }
+  }, 120_000);
 });

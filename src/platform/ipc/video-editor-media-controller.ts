@@ -300,7 +300,8 @@ export class VideoEditorMediaController {
           kind: 'local_image',
           fileId: registered.file.id,
           assetId: registered.asset.id,
-          prependToVideo: parsed.prependToVideo
+          prependToVideo: parsed.prependToVideo,
+          prependDurationUs: parsed.prependDurationUs
         }
       });
       return { cancelled: false, draft: unwrapEditorResult(updated) };
@@ -345,7 +346,8 @@ export class VideoEditorMediaController {
         kind: 'project_image',
         workId: work.id,
         fileId: verified.file.id,
-        prependToVideo: parsed.prependToVideo
+        prependToVideo: parsed.prependToVideo,
+        prependDurationUs: parsed.prependDurationUs
       };
       return unwrapEditorResult(
         await this.dependencies.editor.setCoverFromMedia({
@@ -1168,11 +1170,15 @@ function parseCoverSelectionRequest(request: unknown): {
   readonly draftId: VideoEditDraft['id'];
   readonly expectedRevision: number;
   readonly prependToVideo: boolean;
+  readonly prependDurationUs?: number;
 } {
   if (
     !isRecord(request) ||
-    !exact(request, ['draftId', 'expectedRevision', 'prependToVideo']) ||
-    typeof request.prependToVideo !== 'boolean'
+    !exact(request, request.prependDurationUs === undefined
+      ? ['draftId', 'expectedRevision', 'prependToVideo']
+      : ['draftId', 'expectedRevision', 'prependToVideo', 'prependDurationUs']) ||
+    typeof request.prependToVideo !== 'boolean' ||
+    !isValidPrependDuration(request.prependToVideo, request.prependDurationUs)
   ) {
     throw mediaError('invalid_request', 'A valid cover image request is required');
   }
@@ -1181,7 +1187,8 @@ function parseCoverSelectionRequest(request: unknown): {
       draftId: request.draftId,
       expectedRevision: request.expectedRevision
     }),
-    prependToVideo: request.prependToVideo
+    prependToVideo: request.prependToVideo,
+    prependDurationUs: request.prependDurationUs as number | undefined
   };
 }
 
@@ -1190,17 +1197,22 @@ function parseCoverWorkRequest(request: unknown): {
   readonly expectedRevision: number;
   readonly workId: ReturnType<typeof toWorkId>;
   readonly prependToVideo: boolean;
+  readonly prependDurationUs?: number;
 } {
   if (
     !isRecord(request) ||
-    !exact(request, [
-      'draftId',
-      'expectedRevision',
-      'workId',
-      'prependToVideo'
-    ]) ||
+    !exact(request, request.prependDurationUs === undefined
+      ? ['draftId', 'expectedRevision', 'workId', 'prependToVideo']
+      : [
+          'draftId',
+          'expectedRevision',
+          'workId',
+          'prependToVideo',
+          'prependDurationUs'
+        ]) ||
     typeof request.workId !== 'string' ||
-    typeof request.prependToVideo !== 'boolean'
+    typeof request.prependToVideo !== 'boolean' ||
+    !isValidPrependDuration(request.prependToVideo, request.prependDurationUs)
   ) {
     throw mediaError('invalid_request', 'A valid project cover request is required');
   }
@@ -1211,12 +1223,19 @@ function parseCoverWorkRequest(request: unknown): {
         expectedRevision: request.expectedRevision
       }),
       workId: toWorkId(request.workId),
-      prependToVideo: request.prependToVideo
+      prependToVideo: request.prependToVideo,
+      prependDurationUs: request.prependDurationUs as number | undefined
     };
   } catch (error) {
     if (error instanceof VideoEditorMediaError) throw error;
     throw mediaError('invalid_request', 'The project cover identifier is invalid');
   }
+}
+
+function isValidPrependDuration(prepend: boolean, duration: unknown): boolean {
+  return prepend
+    ? isNonNegativeInteger(duration) && duration > 0
+    : duration === undefined;
 }
 
 function parseAttachWorkRequest(request: unknown): {

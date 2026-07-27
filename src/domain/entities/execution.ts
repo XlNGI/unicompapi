@@ -1,4 +1,10 @@
-import type { ExecutionId, TaskId } from '../ids';
+import type {
+  ExecutionId,
+  FileReferenceId,
+  TaskId,
+  VideoExportPlanId,
+  WorkId
+} from '../ids';
 import type { IsoTimestamp } from '../timestamps';
 import type { ExecutionState } from '../states/execution-state';
 
@@ -10,6 +16,11 @@ export interface ExecutionFailure {
   readonly retryability: Retryability;
 }
 
+export interface ExecutionUserAction {
+  readonly code: 'source_unavailable' | 'destination_unavailable';
+  readonly message: string;
+}
+
 export interface Execution {
   readonly schemaVersion: 1;
   readonly id: ExecutionId;
@@ -17,7 +28,17 @@ export interface Execution {
   readonly attempt: number;
   readonly state: ExecutionState;
   readonly failure?: ExecutionFailure;
+  readonly userAction?: ExecutionUserAction;
   readonly remoteOperationId?: string;
+  readonly exportPlanId?: VideoExportPlanId;
+  readonly progress?: {
+    readonly processedUs?: number;
+    readonly totalUs?: number;
+    readonly percent?: number;
+  };
+  readonly outputFileId?: FileReferenceId;
+  readonly workId?: WorkId;
+  readonly cancelRequestedAt?: IsoTimestamp;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }

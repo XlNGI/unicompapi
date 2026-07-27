@@ -499,3 +499,30 @@ A3 分支门禁为 100 项 UI/IPC/安全契约测试与 174 项领域/平台测�
 - 验证结果：14 项 UI/契约测试、47 项领域与平台测试，以及 `npm.cmd run typecheck`、`npm.cmd run lint`、`npm.cmd run build`、`git diff --check` 全部通过；Windows Electron 生产窗口启动并保持响应。
 - 未完成项：新建项目流程、重新下载、备份来源/生命周期策略、恢复 UI、macOS 实机验证。Windows Electron 可见窗口已完成项目 Session 联调；备份恢复已接入仅接受 `fileId` 的受控 IPC，路径仍由主进程原生选择器持有。
 - 负责人决策：阶段 2 已正式收口，阶段 3 双人任务拆分已形成。下一步由开发者 B 从最新 `develop` 创建 `feature/project-catalog-create`。
+
+## 阶段 7 B4 增量（2026-07-27）
+
+实际修改：
+
+- 新增不可变 `VideoExportPlan`、计划完整性 Hash 和项目范围仓储；
+- 新增本地视频导出 Task/Execution 编排、状态投影、取消、重试和启动恢复；
+- 接入真实 FFmpeg/ffprobe 多片段合成、进度、取消、临时文件同步、独立输出校验、SHA-256 和不覆盖发布；
+- 仅在源、输出和 Work 事实均通过校验后登记 FileReference/Work 并完成 Execution；
+- 持久化 `needs_user_action` 的来源/目标处理原因，修正 `conflictPolicy` 与文件扩展名语义；
+- 新增 B4 领域、控制器、故障和真实 FFmpeg 集成测试，并扩展 UI/IPC 契约测试。
+
+验证结果：
+
+- 109 项 Node UI/IPC/工具链契约测试通过；
+- 194 项 Vitest 领域与平台测试通过；
+- 共 303 项，0 失败；
+- `npm.cmd run typecheck`、`npm.cmd run lint`、`npm.cmd run build` 和 `git diff --check` 通过；
+- Windows Electron 生产构建启动冒烟保持响应 8 秒，通过且无残留项目进程。
+
+未完成项或阻断项：
+
+- A4 导出/任务中心 UI 尚未接入；
+- 当前批准 FFmpeg 工具链没有已验证硬件编码器，硬件失败回退测试保留到能力获批后；
+- `.tools/` 仅限本地开发/测试，生产媒体引擎分发、签名、编解码器白名单、专利/商业审查和 macOS 实机验证未完成。
+
+下一步：提交并合并 B4 后，由 A 从最新 `develop` 开始 A4 UI。

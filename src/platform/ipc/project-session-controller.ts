@@ -42,6 +42,7 @@ export interface ProjectSessionControllerDependencies {
   chooseProjectDirectory(): Promise<string | undefined>;
   catalog?: ProjectCatalogService;
   beforeSessionChange?(): Promise<void>;
+  afterSessionChange?(): Promise<void>;
   onError?(error: unknown): void;
 }
 
@@ -90,6 +91,7 @@ export class ProjectSessionController {
       });
       await this.dependencies.beforeSessionChange?.();
       this.dependencies.registry.set(session);
+      await this.dependencies.afterSessionChange?.();
 
       return {
         cancelled: false,
@@ -147,6 +149,7 @@ export class ProjectSessionController {
       };
       await this.dependencies.beforeSessionChange?.();
       this.dependencies.registry.set(session);
+      await this.dependencies.afterSessionChange?.();
       await this.dependencies.catalog?.remember({
         projectId: session.projectId,
         projectName: session.projectName,

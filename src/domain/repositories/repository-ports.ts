@@ -6,6 +6,7 @@ import type { ImageWorkspaceDraft } from '../entities/image-workspace';
 import type { Project } from '../entities/project';
 import type { Task } from '../entities/task';
 import type { VideoEditDraft } from '../entities/video-editor';
+import type { VideoExportPlan } from '../entities/video-export-plan';
 import type { VideoWorkspaceDraft } from '../entities/video-workspace';
 import type { Work } from '../entities/work';
 import type {
@@ -28,6 +29,7 @@ import type {
   RoutingPreferenceId,
   TaskId,
   VideoEditDraftId,
+  VideoExportPlanId,
   WorkId
 } from '../ids';
 
@@ -58,6 +60,12 @@ export interface VideoEditDraftRepository {
   get(id: VideoEditDraftId): Promise<VideoEditDraft | undefined>;
   list(projectId: ProjectId): Promise<readonly VideoEditDraft[]>;
   save(draft: VideoEditDraft): Promise<void>;
+}
+
+export interface VideoExportPlanRepository {
+  get(id: VideoExportPlanId): Promise<VideoExportPlan | undefined>;
+  list(projectId: ProjectId): Promise<readonly VideoExportPlan[]>;
+  save(plan: VideoExportPlan): Promise<void>;
 }
 
 export interface AssetRepository {
