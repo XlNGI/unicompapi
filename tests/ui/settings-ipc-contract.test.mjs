@@ -6,12 +6,14 @@ const preload = await readFile('electron/preload.ts', 'utf8');
 const contract = await readFile('src/shared/settings-ipc.ts', 'utf8');
 const controller = await readFile('src/platform/ipc/settings-controller.ts', 'utf8');
 
-test('exposes only the controlled phase 8 B1 settings operations', () => {
+test('exposes only the controlled phase 8 B1/B2 settings operations', () => {
   for (const operation of [
     'getSnapshot',
     'updateValues',
     'exportPortable',
     'prepareImport',
+    'getSystemStatus',
+    'selectDirectory',
     'planOperation',
     'executeOperation'
   ]) {
@@ -33,7 +35,7 @@ test('keeps dangerous settings behind impact planning and confirmation', () => {
   assert.doesNotMatch(contract, /migrateDirectory\(|clearLocalData\(|setProxy\(/);
 });
 
-test('keeps unsupported platform capabilities honest in B1', () => {
+test('keeps unsupported platform capabilities honest while B2 adapters are explicit', () => {
   for (const capability of [
     'directory_operations',
     'task_policy',

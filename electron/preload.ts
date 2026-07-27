@@ -370,6 +370,9 @@ const settings: SettingsApi = {
       expectedRevision,
       document
     }),
+  getSystemStatus: () => ipcRenderer.invoke(settingsIpcChannels.getSystemStatus),
+  selectDirectory: (purpose) =>
+    ipcRenderer.invoke(settingsIpcChannels.selectDirectory, { purpose }),
   planOperation: (expectedRevision, operation) =>
     ipcRenderer.invoke(settingsIpcChannels.planOperation, {
       expectedRevision,
