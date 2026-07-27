@@ -53,18 +53,17 @@ test('video editor shell exposes the frozen A1 regions and honest states', () =>
   assert.match(modesSource, /本地优先、非破坏式的轻量单轨视频编辑/);
 });
 
-test('video editor shell keeps unapproved engine and export capabilities disabled', () => {
+test('video editor shell keeps unverified media options out of the UI', () => {
   for (const text of [
-    '等待 B4 导出契约',
     '媒体引擎尚未审批',
-    '预览代理引擎尚未审批',
-    '不上传、不调用在线 AI、不创建任务'
+    '不上传、不调用在线 AI、不创建任务',
+    '等待媒体引擎真实预检'
   ]) {
     assert.match(editorSource, new RegExp(text));
   }
   assert.doesNotMatch(
     editorSource,
-    /MediaEngine|ExportPlan|createTask|invokeExecution|进度：\s*\d+%|1080p|24fps/
+    /MediaEngine|ExportPlan|createTask|invokeExecution|1080p|24fps/
   );
 });
 

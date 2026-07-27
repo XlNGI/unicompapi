@@ -127,6 +127,8 @@ export function App() {
             handleSecondaryNavigate('video-creation', 'text-to-video')
           }
         />
+      ) : activeSubItemId === 'video-editing' ? (
+        <VideoEditingPage onNavigate={handleNavigate} />
       ) : (
         <ActivePage />
       )}
