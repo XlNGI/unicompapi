@@ -16,24 +16,32 @@ import {
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill, type StatusTone } from '../../components/StatusPill';
+import { localApplicationDataScopes } from '../../shared/settings-ipc';
 import type {
+  DiagnosticSettings,
   GeneralSettings,
   MediaSettings,
   NetworkSettings,
   NotificationSettings,
   PerformanceSettings,
+  PortableSettingsV1,
   PrivacySettings,
   ProxyMode,
   SettingsCategory,
   SettingsValues,
   ShortcutBinding,
   ShortcutSettings,
-  StorageSettings
+  StorageSettings,
+  UpdateSettings
 } from '../../domain';
 import type {
   CleanupScope,
   ControlledDirectoryDto,
+  DiagnosticBundlePreviewDto,
+  DiagnosticBundleResultDto,
+  DiagnosticLocationTarget,
   DirectoryPurpose,
+  LocalApplicationDataScope,
   NativeSystemSettingsTarget,
   NotificationTestResultDto,
   ShortcutPlatform,
@@ -42,7 +50,9 @@ import type {
   SettingsOperationPlanDto,
   SettingsOperationRequestDto,
   SettingsSnapshotDto,
-  SettingsSystemStatusDto
+  SettingsSystemStatusDto,
+  SettingsMaintenanceStatusDto,
+  UpdateItemStatusDto
 } from '../../shared/settings-ipc';
 import { useTheme } from '../../theme/useTheme';
 import '../../styles/pages.css';
@@ -117,13 +127,13 @@ const categories: readonly SettingsCategoryItem[] = [
   {
     id: 'diagnostics', label: '日志与诊断', icon: LuFileText,
     description: '本地日志、脱敏与诊断包',
-    capabilityId: 'diagnostics', delivery: '等待 B4 与 A4',
+    capabilityId: 'diagnostics', delivery: 'A4 当前已接入',
     keywords: '日志 诊断 脱敏 导出'
   },
   {
     id: 'updates', label: '应用更新', icon: LuRefreshCw,
     description: '应用和获批组件更新状态',
-    capabilityId: 'updates', delivery: '等待 B4 与 A4',
+    capabilityId: 'updates', delivery: 'A4 当前已接入',
     keywords: '更新 版本 签名 安装 回退'
   }
 ];
@@ -139,6 +149,11 @@ export function SettingsPage() {
   const [message, setMessage] = useState('正在读取此设备的本地设置…');
   const [systemStatus, setSystemStatus] = useState<SettingsSystemStatusDto>();
   const [systemStatusError, setSystemStatusError] = useState('');
+  const [maintenanceStatus, setMaintenanceStatus] = useState<SettingsMaintenanceStatusDto>();
+  const [maintenanceError, setMaintenanceError] = useState('');
+  const [diagnosticPreview, setDiagnosticPreview] = useState<DiagnosticBundlePreviewDto>();
+  const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticBundleResultDto>();
+  const [portableExport, setPortableExport] = useState('');
   const [operationPlan, setOperationPlan] = useState<SettingsOperationPlanDto>();
   const [operationCopy, setOperationCopy] = useState<OperationCopy>();
   const [operationBusy, setOperationBusy] = useState(false);
@@ -180,6 +195,21 @@ export function SettingsPage() {
       if (active) {
         setSystemStatus(undefined);
         setSystemStatusError('本机动态状态读取失败，可以重新检查。');
+      }
+    });
+    void settings.getMaintenanceStatus().then((result) => {
+      if (!active) return;
+      if (result.ok) {
+        setMaintenanceStatus(result.value);
+        setMaintenanceError('');
+      } else {
+        setMaintenanceStatus(undefined);
+        setMaintenanceError(settingsErrorMessage(result.error.code));
+      }
+    }).catch(() => {
+      if (active) {
+        setMaintenanceStatus(undefined);
+        setMaintenanceError('日志、诊断与更新状态读取失败，可以重新检查。');
       }
     });
     return () => {
@@ -246,6 +276,22 @@ export function SettingsPage() {
     });
   }
 
+  function updateDiagnostics(patch: Partial<DiagnosticSettings>) {
+    if (!values) return;
+    void saveValues({
+      ...values,
+      diagnostics: { ...values.diagnostics, ...patch }
+    });
+  }
+
+  function updateUpdates(patch: Partial<UpdateSettings>) {
+    if (!values) return;
+    void saveValues({
+      ...values,
+      updates: { ...values.updates, ...patch }
+    });
+  }
+
   async function refreshSystemStatus() {
     if (!settings) return;
     setSystemStatusError('');
@@ -259,6 +305,27 @@ export function SettingsPage() {
     } catch {
       setSystemStatus(undefined);
       setSystemStatusError('本机动态状态读取失败，可以重新检查。');
+    }
+  }
+
+  async function refreshMaintenanceStatus(checkUpdates = false) {
+    if (!settings) return;
+    setMaintenanceError('');
+    try {
+      const result = checkUpdates
+        ? await settings.checkForUpdates()
+        : await settings.getMaintenanceStatus();
+      if (result.ok) {
+        setMaintenanceStatus(result.value);
+        setMaintenanceError('');
+        if (checkUpdates) setMessage('更新状态已按真实端口刷新；当前页面不会提供未接入的安装、修复或回退操作。');
+      } else {
+        setMaintenanceStatus(undefined);
+        setMaintenanceError(settingsErrorMessage(result.error.code));
+      }
+    } catch {
+      setMaintenanceStatus(undefined);
+      setMaintenanceError('日志、诊断与更新状态读取失败，可以重新检查。');
     }
   }
 
@@ -355,6 +422,7 @@ export function SettingsPage() {
       }
       acceptSnapshot(result.value);
       await refreshSystemStatus();
+      await refreshMaintenanceStatus();
       setMessage(operationCopy.success);
     } catch {
       setMessage('操作失败；尚未完成的部分不会被标记为成功，请重新生成影响计划。');
@@ -393,6 +461,96 @@ export function SettingsPage() {
     setNotificationResult(result.value);
     setMessage('测试通知已执行；应用内提醒保持可用，系统与声音结果按平台事实显示。');
     await refreshSystemStatus();
+  }
+
+  async function previewDiagnosticBundle() {
+    if (!settings) return;
+    const result = await settings.previewDiagnosticBundle();
+    if (!result.ok) {
+      setMessage(settingsErrorMessage(result.error.code));
+      return;
+    }
+    setDiagnosticPreview(result.value);
+    setMessage('诊断包预览已生成；页面只展示脱敏统计，不展示日志原文或本机路径。');
+  }
+
+  async function generateDiagnosticBundle() {
+    if (!settings) return;
+    const result = await settings.generateDiagnosticBundle();
+    if (!result.ok) {
+      setMessage(settingsErrorMessage(result.error.code));
+      return;
+    }
+    if (!result.value) {
+      setMessage('已取消诊断包生成；没有写入文件。');
+      return;
+    }
+    setDiagnosticResult(result.value);
+    setMessage('诊断包已写入你选择的本地目录；不会自动上传。');
+    await refreshMaintenanceStatus();
+  }
+
+  async function openDiagnosticLocation(target: DiagnosticLocationTarget) {
+    if (!settings) return;
+    const result = await settings.openDiagnosticLocation(target);
+    if (!result.ok) {
+      setMessage(settingsErrorMessage(result.error.code));
+      return;
+    }
+    setMessage(target === 'logs' ? '已请求打开本地日志目录。' : '已请求打开最近一次诊断包位置。');
+  }
+
+  async function exportPortableSettings() {
+    if (!settings) return;
+    const result = await settings.exportPortable();
+    if (!result.ok) {
+      setMessage(settingsErrorMessage(result.error.code));
+      return;
+    }
+    setPortableExport(JSON.stringify(result.value, null, 2));
+    setMessage('便携设置已导出到页面文本框；不包含本机目录授权、凭证、项目、日志或媒体文件。');
+  }
+
+  async function preparePortableImport(document: PortableSettingsV1) {
+    if (!settings || !snapshot) return;
+    const result = await settings.prepareImport(snapshot.revision, document);
+    if (!result.ok) {
+      if (result.error.code === 'revision_conflict') setSaveState('conflict');
+      setMessage(settingsErrorMessage(result.error.code));
+      return;
+    }
+    setOperationPlan(result.value);
+    setOperationCopy({
+      title: '确认导入便携设置',
+      description: '导入只写可迁移的设置，不携带目录授权、凭证、项目、日志或媒体文件；执行前请确认影响分类。',
+      success: '便携设置已导入并保存到此设备。'
+    });
+  }
+
+  function planRestoreAllDefaults() {
+    void planOperation(
+      { kind: 'restore_all_defaults' },
+      {
+        title: '确认恢复全部默认设置',
+        description: '只恢复 10 个设置分类的默认值，不删除项目、作品、任务、本机日志、缓存或凭证。',
+        success: '全部设置已恢复默认；本机应用数据没有被清除。'
+      }
+    );
+  }
+
+  function planClearLocalApplicationData(scopes: readonly LocalApplicationDataScope[]) {
+    if (scopes.length === 0) {
+      setMessage('请至少选择一个本机应用数据范围，再生成清除计划。');
+      return;
+    }
+    void planOperation(
+      { kind: 'clear_local_application_data', scopes },
+      {
+        title: '确认清除本机应用数据',
+        description: '这不是恢复默认设置。执行前会列出预计文件和容量；项目、作品、任务、外部文件和原始素材始终排除。',
+        success: '选中的本机应用数据已按计划清除；项目、作品、任务和外部文件未被删除。'
+      }
+    );
   }
 
   async function planProxy(next: ProxyMode, credential?: { readonly username: string; readonly secret: string }) {
@@ -455,6 +613,7 @@ export function SettingsPage() {
   const capability = capabilityFor(snapshot, category.capabilityId);
   const isB2Category = ['storage', 'performance', 'media'].includes(activeCategory);
   const isB3Category = ['privacy', 'network', 'notifications', 'shortcuts'].includes(activeCategory);
+  const isB4Category = ['diagnostics', 'updates'].includes(activeCategory);
   const disabled =
     saveState === 'loading' ||
     saveState === 'saving' ||
@@ -486,6 +645,10 @@ export function SettingsPage() {
           ) : isB2Category || isB3Category ? (
             <Button disabled={operationBusy} onClick={() => void refreshSystemStatus()} variant="secondary">
               重新检查本机状态
+            </Button>
+          ) : isB4Category ? (
+            <Button disabled={operationBusy} onClick={() => void refreshMaintenanceStatus(activeCategory === 'updates')} variant="secondary">
+              重新检查维护状态
             </Button>
           ) : null}
         </div>
@@ -632,10 +795,42 @@ export function SettingsPage() {
                 values={values.shortcuts}
               />
             )
-          ) : isB2Category || isB3Category ? (
+          ) : isB4Category && values && maintenanceStatus ? (
+            activeCategory === 'diagnostics' ? (
+              <DiagnosticsSettingsPanel
+                disabled={disabled}
+                exportedJson={portableExport}
+                lastResult={diagnosticResult}
+                onChange={updateDiagnostics}
+                onClearData={planClearLocalApplicationData}
+                onExport={() => void exportPortableSettings()}
+                onGenerate={() => void generateDiagnosticBundle()}
+                onOpenLocation={(target) => void openDiagnosticLocation(target)}
+                onPrepareImport={(document) => void preparePortableImport(document)}
+                onPreview={() => void previewDiagnosticBundle()}
+                onRestoreAll={planRestoreAllDefaults}
+                preview={diagnosticPreview}
+                status={maintenanceStatus.diagnostics}
+                unit={values.general.fileSizeUnit}
+                values={values.diagnostics}
+              />
+            ) : (
+              <UpdatesSettingsPanel
+                disabled={disabled}
+                onChange={updateUpdates}
+                onCheck={() => void refreshMaintenanceStatus(true)}
+                status={maintenanceStatus.updates}
+                values={values.updates}
+              />
+            )
+          ) : isB2Category || isB3Category || isB4Category ? (
             <SystemStatusUnavailable
-              message={systemStatusError || '正在读取真实目录、设备负载、媒体组件、权限、代理、通知和快捷键状态…'}
-              onRetry={() => void refreshSystemStatus()}
+              message={
+                isB4Category
+                  ? maintenanceError || '正在读取本地日志、诊断包与更新状态…'
+                  : systemStatusError || '正在读取真实目录、设备负载、媒体组件、权限、代理、通知和快捷键状态…'
+              }
+              onRetry={() => void (isB4Category ? refreshMaintenanceStatus(activeCategory === 'updates') : refreshSystemStatus())}
             />
           ) : (
             <EmptyState
@@ -666,9 +861,10 @@ export function SettingsPage() {
               label={activeCategory === 'general' ? '常规平台能力' : category.label}
             />
           </section>
-          {systemStatus ? (
+          {systemStatus || maintenanceStatus ? (
             <CategorySystemStatus
               activeCategory={activeCategory}
+              maintenance={maintenanceStatus}
               status={systemStatus}
               unit={values?.general.fileSizeUnit ?? 'auto'}
             />
@@ -676,7 +872,7 @@ export function SettingsPage() {
           <section className="uc-settings__status-card">
             <h3>安全边界</h3>
             <p>当前页面不会显示设置文件路径、凭证、日志原文或设备句柄。</p>
-            <p>{isB2Category || isB3Category ? '高风险操作必须先展示真实影响计划，再由你确认执行。' : '未接平台适配器的分类只显示不可用，不提供假控件。'}</p>
+            <p>{isB2Category || isB3Category || isB4Category ? '高风险操作必须先展示真实影响计划，再由你确认执行。' : '未接平台适配器的分类只显示不可用，不提供假控件。'}</p>
           </section>
         </aside>
       </div>
@@ -1442,6 +1638,342 @@ function ShortcutsSettingsPanel({ disabled, onPlan, onRestore, status, values }:
   );
 }
 
+function DiagnosticsSettingsPanel({
+  disabled,
+  exportedJson,
+  lastResult,
+  onChange,
+  onClearData,
+  onExport,
+  onGenerate,
+  onOpenLocation,
+  onPrepareImport,
+  onPreview,
+  onRestoreAll,
+  preview,
+  status,
+  unit,
+  values
+}: {
+  readonly disabled: boolean;
+  readonly exportedJson: string;
+  readonly lastResult?: DiagnosticBundleResultDto;
+  readonly onChange: (patch: Partial<DiagnosticSettings>) => void;
+  readonly onClearData: (scopes: readonly LocalApplicationDataScope[]) => void;
+  readonly onExport: () => void;
+  readonly onGenerate: () => void;
+  readonly onOpenLocation: (target: DiagnosticLocationTarget) => void;
+  readonly onPrepareImport: (document: PortableSettingsV1) => void;
+  readonly onPreview: () => void;
+  readonly onRestoreAll: () => void;
+  readonly preview?: DiagnosticBundlePreviewDto;
+  readonly status: SettingsMaintenanceStatusDto['diagnostics'];
+  readonly unit: GeneralSettings['fileSizeUnit'];
+  readonly values: DiagnosticSettings;
+}) {
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
+  const [selectedScopes, setSelectedScopes] = useState<readonly LocalApplicationDataScope[]>(['logs', 'caches']);
+  const categories = Object.entries(values.categories) as Array<[keyof DiagnosticSettings['categories'], boolean]>;
+
+  function toggleCategory(category: keyof DiagnosticSettings['categories'], checked: boolean) {
+    onChange({ categories: { ...values.categories, [category]: checked } });
+  }
+
+  function toggleScope(scope: LocalApplicationDataScope, checked: boolean) {
+    setSelectedScopes((current) =>
+      checked
+        ? [...new Set([...current, scope])]
+        : current.filter((item) => item !== scope)
+    );
+  }
+
+  function submitImport() {
+    try {
+      const document = JSON.parse(importText) as PortableSettingsV1;
+      setImportError('');
+      onPrepareImport(document);
+    } catch {
+      setImportError('JSON 格式不正确；没有生成导入计划，也没有写入设置。');
+    }
+  }
+
+  return (
+    <div className="uc-settings__groups">
+      <SettingsGroup title="1. 本地日志设置">
+        <div className="uc-settings__metric-grid">
+          <Metric label="日志能力" value={capabilityLabel(status.capability)} />
+          <Metric label="本机保留" value={status.logging.localOnly ? '仅当前设备' : '状态异常'} />
+          <Metric label="自动上传" value={status.logging.automaticUpload ? '状态异常' : '不会上传'} />
+          <Metric label="最近诊断包" value={status.lastBundleAvailable ? '有本地包' : '尚未生成'} />
+        </div>
+        {categories.map(([category, checked]) => (
+          <SettingRow
+            description="只控制本地日志类别，诊断包仍会按 B4 规则脱敏。"
+            key={category}
+            label={diagnosticCategoryLabel(category)}
+          >
+            <Toggle
+              checked={checked}
+              disabled={disabled}
+              label={`${diagnosticCategoryLabel(category)}日志`}
+              onChange={(next) => toggleCategory(category, next)}
+            />
+          </SettingRow>
+        ))}
+        <SettingRow description="普通运行建议保持 info；debug 只用于本机排查。" label="日志级别">
+          <select
+            disabled={disabled}
+            onChange={(event) => onChange({ level: event.target.value as DiagnosticSettings['level'] })}
+            value={values.level}
+          >
+            {(['error', 'warn', 'info', 'debug'] as const).map((level) => (
+              <option key={level} value={level}>{diagnosticLevelLabel(level)}</option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow description="到期日志只在本机清理，不会扫描项目或外部文件。" label="保留天数">
+          <select
+            disabled={disabled}
+            onChange={(event) => onChange({ retentionDays: Number(event.target.value) })}
+            value={values.retentionDays}
+          >
+            {[7, 14, 30, 60, 90].map((days) => (
+              <option key={days} value={days}>{days} 天</option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow description="单文件达到上限后由本地日志服务滚动，不上传。" label="单文件上限">
+          <select
+            disabled={disabled}
+            onChange={(event) => onChange({ maxFileBytes: Number(event.target.value) })}
+            value={values.maxFileBytes}
+          >
+            {[5, 10, 25, 50].map((size) => (
+              <option key={size} value={size * 1024 * 1024}>{size} MiB</option>
+            ))}
+          </select>
+        </SettingRow>
+        <SettingRow description="只清理符合保留期的本机日志，不删除项目、作品或原始素材。" label="自动清理到期日志">
+          <Toggle
+            checked={values.autoCleanup}
+            disabled={disabled}
+            label="自动清理到期日志"
+            onChange={(checked) => onChange({ autoCleanup: checked })}
+          />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="2. 脱敏诊断包">
+        <p className="uc-settings__notice">诊断包预览先展示将包含/排除的类别和脱敏规则；生成时只写入你选择的本地目录，平台不会自动上传。</p>
+        <div className="uc-settings__group-actions">
+          <Button disabled={disabled} onClick={onPreview} variant="secondary">预览诊断包</Button>
+          <Button disabled={disabled} onClick={onGenerate}>生成本地诊断包</Button>
+          <Button disabled={disabled} onClick={() => onOpenLocation('logs')} variant="ghost">打开日志目录</Button>
+          <Button disabled={disabled || !status.lastBundleAvailable} onClick={() => onOpenLocation('last_bundle')} variant="ghost">打开最近诊断包</Button>
+        </div>
+        {preview ? (
+          <div className="uc-settings__list-grid">
+            <section>
+              <h4>将包含</h4>
+              <ul>
+                {preview.included.length ? preview.included.map((item) => (
+                  <li key={item.category}>{item.displayName} · {formatBytes(item.bytes, unit)}</li>
+                )) : <li>没有可包含的本地日志。</li>}
+              </ul>
+            </section>
+            <section>
+              <h4>将排除</h4>
+              <ul>
+                {preview.excluded.length ? preview.excluded.map((item) => (
+                  <li key={`${item.category}-${item.reason}`}>{item.category} · {diagnosticExcludeReasonLabel(item.reason)}</li>
+                )) : <li>没有额外排除项。</li>}
+              </ul>
+            </section>
+            <section>
+              <h4>脱敏规则</h4>
+              <ul>{preview.redactions.map((item) => <li key={item}>{diagnosticRedactionLabel(item)}</li>)}</ul>
+            </section>
+            <section>
+              <h4>安全事实</h4>
+              <dl className="uc-settings__facts">
+                <Fact label="输入容量" value={formatBytes(preview.totalInputBytes, unit)} />
+                <Fact label="路径脱敏" value={preview.pathsRedacted ? '是' : '状态异常'} />
+                <Fact label="凭证" value={preview.containsCredentials ? '状态异常' : '不包含'} />
+                <Fact label="用户媒体" value={preview.containsUserMedia ? '状态异常' : '不包含'} />
+                <Fact label="完整提示词" value={preview.containsFullPrompts ? '状态异常' : '不包含'} />
+              </dl>
+            </section>
+          </div>
+        ) : null}
+        {lastResult ? (
+          <dl className="uc-settings__facts uc-settings__inline-facts">
+            <Fact label="文件名" value={lastResult.fileName} />
+            <Fact label="大小" value={formatBytes(lastResult.bytes, unit)} />
+            <Fact label="格式" value={lastResult.format} />
+            <Fact label="本地校验" value={lastResult.locallyVerified ? '已通过' : '状态异常'} />
+          </dl>
+        ) : null}
+      </SettingsGroup>
+
+      <SettingsGroup title="3. 设置导入导出与恢复默认">
+        <p className="uc-settings__notice">便携设置不携带本机目录授权、凭证、项目、日志或媒体文件；导入也必须先生成确认计划。</p>
+        <div className="uc-settings__text-block">
+          <label>
+            <span>便携导出内容</span>
+            <textarea readOnly value={exportedJson || '点击“导出便携设置”后，这里显示可复制的 JSON。'} />
+          </label>
+          <div className="uc-settings__group-actions">
+            <Button disabled={disabled} onClick={onExport} variant="secondary">导出便携设置</Button>
+            <Button disabled={disabled} onClick={onRestoreAll} variant="ghost">恢复全部默认设置</Button>
+          </div>
+          <label>
+            <span>粘贴便携设置 JSON</span>
+            <textarea
+              onChange={(event) => setImportText(event.target.value)}
+              placeholder="把另一台设备导出的便携设置 JSON 粘贴到这里"
+              value={importText}
+            />
+          </label>
+          {importError ? <p className="uc-settings__notice uc-settings__notice--warning">{importError}</p> : null}
+          <div className="uc-settings__group-actions">
+            <Button disabled={disabled || importText.trim().length === 0} onClick={submitImport}>
+              生成导入影响计划
+            </Button>
+          </div>
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="4. 清除本机应用数据">
+        <p className="uc-settings__notice uc-settings__notice--warning">这是删除本机应用数据，不是恢复默认设置；项目、作品、任务、外部文件和原始素材始终排除。</p>
+        <div className="uc-settings__scope-grid">
+          {localApplicationDataScopes.map((scope) => (
+            <label className="uc-settings__cleanup-option" key={scope}>
+              <input
+                checked={selectedScopes.includes(scope)}
+                disabled={disabled}
+                onChange={(event) => toggleScope(scope, event.target.checked)}
+                type="checkbox"
+              />
+              <strong>{localDataScopeLabel(scope)}</strong>
+              <span>{localDataScopeDescription(scope)}</span>
+            </label>
+          ))}
+        </div>
+        <div className="uc-settings__group-actions">
+          <Button disabled={disabled || selectedScopes.length === 0} onClick={() => onClearData(selectedScopes)}>
+            生成清除影响计划
+          </Button>
+          <span>执行前会显示预计文件数、容量、是否删除凭证、是否重置设置。</span>
+        </div>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+function UpdatesSettingsPanel({ disabled, onChange, onCheck, status, values }: {
+  readonly disabled: boolean;
+  readonly onChange: (patch: Partial<UpdateSettings>) => void;
+  readonly onCheck: () => void;
+  readonly status: SettingsMaintenanceStatusDto['updates'];
+  readonly values: UpdateSettings;
+}) {
+  return (
+    <div className="uc-settings__groups">
+      <SettingsGroup title="1. 更新策略">
+        <div className="uc-settings__metric-grid">
+          <Metric label="更新能力" value={capabilityLabel(status.capability)} />
+          <Metric label="检查时间" value={status.checkedAt ? new Date(status.checkedAt).toLocaleString() : '尚未检查'} />
+          <Metric label="安装确认" value={status.installRequiresExplicitConfirmation ? '必须确认' : '状态异常'} />
+          <Metric label="重启确认" value={status.restartRequiresExplicitConfirmation ? '必须确认' : '状态异常'} />
+        </div>
+        <SettingRow description="只决定是否自动查询状态；没有生产更新源时仍诚实显示不可用。" label="自动检查">
+          <Toggle
+            checked={values.automaticChecks}
+            disabled={disabled}
+            label="自动检查更新状态"
+            onChange={(checked) => onChange({ automaticChecks: checked })}
+          />
+        </SettingRow>
+        <SettingRow description="当前阶段只支持稳定通道，不提供实验通道切换。" label="更新通道">
+          <select disabled value={values.channel}>
+            <option value="stable">stable</option>
+          </select>
+        </SettingRow>
+        <SettingRow description="更新下载策略固定为只提醒，不自动下载安装包。" label="下载策略">
+          <select disabled value={values.downloadMode}>
+            <option value="notify_only">只提醒</option>
+          </select>
+        </SettingRow>
+        <SettingRow description="安装必须由用户明确确认；当前 UI 不提供执行安装入口。" label="安装策略">
+          <select disabled value={values.installMode}>
+            <option value="user_confirmed">用户确认</option>
+          </select>
+        </SettingRow>
+        <SettingRow description="有活动任务时不会插入更新安装或重启流程。" label="活动任务期间">
+          <select disabled value={values.duringActiveTasks}>
+            <option value="never">不执行更新动作</option>
+          </select>
+        </SettingRow>
+        <div className="uc-settings__group-actions">
+          <Button disabled={disabled} onClick={onCheck} variant="secondary">检查更新状态</Button>
+          <span>只刷新真实状态，不会启动下载、安装、修复或回退。</span>
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="2. 更新阻断与边界">
+        <div className="uc-settings__list-grid">
+          <section>
+            <h4>阻断项</h4>
+            <ul>
+              {status.blockers.length ? status.blockers.map((blocker) => (
+                <li key={blocker}>{updateBlockerLabel(blocker)}</li>
+              )) : <li>当前没有来自 B4 的更新执行阻断项。</li>}
+            </ul>
+          </section>
+          <section>
+            <h4>不可执行边界</h4>
+            <ul>
+              <li>没有生产更新源时只显示不可用原因。</li>
+              <li>签名或完整性失败时只显示失败状态。</li>
+              <li>本阶段不提供下载、安装、修复、回退执行按钮。</li>
+            </ul>
+          </section>
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="3. 更新项状态">
+        <div className="uc-settings__update-list">
+          {status.items.map((item) => (
+            <UpdateStatusCard item={item} key={item.kind} />
+          ))}
+        </div>
+      </SettingsGroup>
+    </div>
+  );
+}
+
+function UpdateStatusCard({ item }: { readonly item: UpdateItemStatusDto }) {
+  return (
+    <article className="uc-settings__update-card">
+      <div>
+        <h4>{updateItemKindLabel(item.kind)}</h4>
+        <StatusPill tone={updateStateTone(item)}>{updateStateLabel(item.state)}</StatusPill>
+      </div>
+      <dl className="uc-settings__facts">
+        <Fact label="当前版本" value={item.currentVersion ?? '未提供'} />
+        <Fact label="可用版本" value={item.availableVersion ?? '未提供'} />
+        <Fact label="通道" value={item.channel} />
+        <Fact label="原因" value={updateReasonLabel(item.reason)} />
+        <Fact label="完整性" value={integrityLabel(item.integrity)} />
+        <Fact label="签名" value={integrityLabel(item.signature)} />
+        <Fact label="安装" value={item.canInstall ? '状态异常' : '不可执行'} />
+        <Fact label="修复/回退" value={item.canRepair || item.canRollback ? '状态异常' : '不可执行'} />
+      </dl>
+    </article>
+  );
+}
+
 function SystemStatusUnavailable({ message, onRetry }: { readonly message: string; readonly onRetry: () => void }) {
   return (
     <EmptyState
@@ -1454,12 +1986,13 @@ function SystemStatusUnavailable({ message, onRetry }: { readonly message: strin
   );
 }
 
-function CategorySystemStatus({ activeCategory, status, unit }: {
+function CategorySystemStatus({ activeCategory, maintenance, status, unit }: {
   readonly activeCategory: SettingsCategory;
-  readonly status: SettingsSystemStatusDto;
+  readonly maintenance?: SettingsMaintenanceStatusDto;
+  readonly status?: SettingsSystemStatusDto;
   readonly unit: GeneralSettings['fileSizeUnit'];
 }) {
-  if (activeCategory === 'storage') {
+  if (activeCategory === 'storage' && status) {
     const abnormal = status.storage.directories.filter((directory) => directory.state !== 'available').length;
     return (
       <section className="uc-settings__status-card">
@@ -1472,7 +2005,7 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
       </section>
     );
   }
-  if (activeCategory === 'performance') {
+  if (activeCategory === 'performance' && status) {
     return (
       <section className="uc-settings__status-card">
         <h3>本机资源与负载</h3>
@@ -1485,7 +2018,7 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
       </section>
     );
   }
-  if (activeCategory === 'media') {
+  if (activeCategory === 'media' && status) {
     return (
       <section className="uc-settings__status-card">
         <h3>媒体与回退</h3>
@@ -1498,7 +2031,7 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
       </section>
     );
   }
-  if (activeCategory === 'privacy') {
+  if (activeCategory === 'privacy' && status) {
     return (
       <section className="uc-settings__status-card">
         <h3>隐私与权限</h3>
@@ -1511,7 +2044,7 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
       </section>
     );
   }
-  if (activeCategory === 'network') {
+  if (activeCategory === 'network' && status) {
     return (
       <section className="uc-settings__status-card">
         <h3>网络与代理</h3>
@@ -1524,7 +2057,7 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
       </section>
     );
   }
-  if (activeCategory === 'notifications') {
+  if (activeCategory === 'notifications' && status) {
     return (
       <section className="uc-settings__status-card">
         <h3>通知渠道</h3>
@@ -1537,7 +2070,7 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
       </section>
     );
   }
-  if (activeCategory === 'shortcuts') {
+  if (activeCategory === 'shortcuts' && status) {
     return (
       <section className="uc-settings__status-card">
         <h3>快捷键</h3>
@@ -1546,6 +2079,32 @@ function CategorySystemStatus({ activeCategory, status, unit }: {
           <Fact label="动作注册表" value={`V${status.shortcuts.registryVersion}`} />
           <Fact label="动作数量" value={`${status.shortcuts.actions.length} 个`} />
           <Fact label="已注册全局键" value={`${status.shortcuts.activeGlobalActionIds.length} 个`} />
+        </dl>
+      </section>
+    );
+  }
+  if (activeCategory === 'diagnostics' && maintenance) {
+    return (
+      <section className="uc-settings__status-card">
+        <h3>日志与诊断</h3>
+        <dl className="uc-settings__facts">
+          <Fact label="日志级别" value={diagnosticLevelLabel(maintenance.diagnostics.logging.level)} />
+          <Fact label="保留期" value={`${maintenance.diagnostics.logging.retentionDays} 天`} />
+          <Fact label="文件上限" value={formatBytes(maintenance.diagnostics.logging.maxFileBytes, unit)} />
+          <Fact label="自动上传" value={maintenance.diagnostics.logging.automaticUpload ? '状态异常' : '不会上传'} />
+        </dl>
+      </section>
+    );
+  }
+  if (activeCategory === 'updates' && maintenance) {
+    return (
+      <section className="uc-settings__status-card">
+        <h3>应用更新</h3>
+        <dl className="uc-settings__facts">
+          <Fact label="更新能力" value={capabilityLabel(maintenance.updates.capability)} />
+          <Fact label="检查时间" value={maintenance.updates.checkedAt ? new Date(maintenance.updates.checkedAt).toLocaleString() : '尚未检查'} />
+          <Fact label="更新项" value={`${maintenance.updates.items.length} 项`} />
+          <Fact label="阻断项" value={maintenance.updates.blockers.length ? `${maintenance.updates.blockers.length} 项` : '无'} />
         </dl>
       </section>
     );
@@ -1624,6 +2183,10 @@ function ConfirmOperationDialog({ busy, copy, onCancel, onConfirm, plan }: {
         <Fact label="可回退" value={plan.reversible ? '是' : '否'} />
         <Fact label="活动任务" value={plan.impact?.activeTasksUnaffected ? '不受影响' : '不涉及或按计划复检'} />
         <Fact label="旧位置" value={plan.impact?.oldLocationRetained ? '保留' : '不涉及'} />
+        <Fact label="设置重置" value={plan.impact?.settingsReset ? '是' : '不涉及'} />
+        <Fact label="凭证删除" value={plan.impact?.credentialsDeleted ? '是' : '不涉及'} />
+        <Fact label="项目文件" value={plan.impact?.projectsExcluded ? '明确排除' : '不涉及'} />
+        <Fact label="外部文件" value={plan.impact?.externalFilesExcluded ? '明确排除' : '不涉及'} />
         <Fact label="待重启" value={plan.pendingRestart.length ? `${plan.pendingRestart.length} 项` : '无'} />
         <Fact label="确认有效期" value={new Date(plan.expiresAt).toLocaleTimeString()} />
       </dl>
@@ -1750,6 +2313,130 @@ function shortcutActionLabel(actionId: string): string {
   return labels[actionId] ?? actionId;
 }
 
+function diagnosticCategoryLabel(category: keyof DiagnosticSettings['categories']): string {
+  const labels: Record<keyof DiagnosticSettings['categories'], string> = {
+    application: '应用运行',
+    tasks: '任务执行',
+    media: '媒体处理',
+    networkErrors: '网络错误',
+    connectionValidation: '连接验证',
+    crashDiagnostics: '崩溃诊断'
+  };
+  return labels[category];
+}
+
+function diagnosticLevelLabel(level: DiagnosticSettings['level']): string {
+  const labels: Record<DiagnosticSettings['level'], string> = {
+    error: '仅错误',
+    warn: '警告及错误',
+    info: '常规信息',
+    debug: '调试信息'
+  };
+  return labels[level];
+}
+
+function diagnosticExcludeReasonLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    disabled_by_settings: '已在设置中关闭',
+    file_missing: '本机文件不存在',
+    file_empty: '本机文件为空',
+    read_failed: '读取失败'
+  };
+  return labels[reason] ?? reason;
+}
+
+function diagnosticRedactionLabel(rule: string): string {
+  const labels: Record<string, string> = {
+    absolute_paths: '隐藏绝对路径',
+    credentials: '移除凭证和密钥',
+    full_prompts: '不包含完整提示词',
+    user_media: '不包含用户媒体文件'
+  };
+  return labels[rule] ?? rule;
+}
+
+function localDataScopeLabel(scope: LocalApplicationDataScope): string {
+  const labels: Record<LocalApplicationDataScope, string> = {
+    settings: '设置备份',
+    directory_authorizations: '目录授权记录',
+    provider_registry: '服务商注册表',
+    local_credentials: '本机凭证',
+    project_catalog: '项目目录索引',
+    logs: '本机日志',
+    caches: '缓存与临时文件'
+  };
+  return labels[scope];
+}
+
+function localDataScopeDescription(scope: LocalApplicationDataScope): string {
+  const labels: Record<LocalApplicationDataScope, string> = {
+    settings: '清除设置备份；如同时重置设置，会在计划里明确标出。',
+    directory_authorizations: '清除本机目录授权记录，不删除目录内容。',
+    provider_registry: '清除本机服务商注册缓存，不删除项目。',
+    local_credentials: '清除本机加密凭证；计划会标出 credentialsDeleted。',
+    project_catalog: '清除项目目录索引，不删除项目文件夹。',
+    logs: '清除本机日志文件。',
+    caches: '清除缓存和临时文件。'
+  };
+  return labels[scope];
+}
+
+function updateItemKindLabel(kind: UpdateItemStatusDto['kind']): string {
+  const labels: Record<UpdateItemStatusDto['kind'], string> = {
+    application: '应用程序',
+    media_component: '媒体组件',
+    built_in_adapters: '内置适配器',
+    provider_presets: '服务商预设',
+    help_resources: '帮助资源'
+  };
+  return labels[kind];
+}
+
+function updateStateLabel(state: UpdateItemStatusDto['state']): string {
+  const labels: Record<UpdateItemStatusDto['state'], string> = {
+    unavailable: '不可用',
+    failed: '检查失败',
+    update_available: '候选更新可见'
+  };
+  return labels[state];
+}
+
+function updateStateTone(item: UpdateItemStatusDto): StatusTone {
+  if (item.state === 'failed' || item.integrity === 'failed' || item.signature === 'failed') return 'danger';
+  if (item.state === 'update_available') return 'warning';
+  return 'neutral';
+}
+
+function updateReasonLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    production_update_source_not_configured: '生产更新源未配置',
+    update_check_failed: '更新检查失败',
+    no_verified_update_available: '没有已验证候选更新',
+    verified_update_available: '发现已验证候选更新',
+    integrity_or_signature_failed: '完整性或签名校验失败'
+  };
+  return labels[reason] ?? reason;
+}
+
+function integrityLabel(state: UpdateItemStatusDto['integrity'] | UpdateItemStatusDto['signature']): string {
+  const labels: Record<typeof state, string> = {
+    not_checked: '未检查',
+    verified: '已验证',
+    failed: '失败'
+  };
+  return labels[state];
+}
+
+function updateBlockerLabel(blocker: string): string {
+  const labels: Record<string, string> = {
+    active_tasks: '当前有活动任务',
+    unsaved_drafts: '存在未保存草稿',
+    active_exports: '当前有导出任务',
+    component_repair_in_progress: '组件修复任务进行中'
+  };
+  return labels[blocker] ?? blocker;
+}
+
 function formatBytes(bytes: number | null, unit: GeneralSettings['fileSizeUnit']): string {
   if (bytes === null || !Number.isFinite(bytes)) return '未知';
   if (bytes === 0) return '0 B';
@@ -1763,9 +2450,21 @@ function formatBytes(bytes: number | null, unit: GeneralSettings['fileSizeUnit']
 function operationCodeLabel(code: string): string {
   const labels: Record<string, string> = {
     changes_apply_only_to_new_tasks_and_attempts: '只影响后续任务和新的 attempt，活动任务保持不变。',
+    changes_apply_to_new_requests_only: '只影响后续网络请求，活动请求保持不变。',
+    active_requests_are_not_retried: '活动请求不会被重试、抢占或改写。',
+    mandatory_outbound_and_cost_confirmations_remain_enabled: '外发和未知费用确认仍保持强制开启。',
     outbound_confirmation_mandatory: '外发确认是强制边界，不能被关闭。',
     unknown_cost_confirmation_mandatory: '未知费用确认是强制边界，不能被关闭。',
     minimum_authorization_mandatory: '最小授权策略必须保留。',
+    projects_works_tasks_and_source_media_are_excluded: '项目、作品、任务和原始素材明确排除，不会被本次清除。',
+    external_files_are_excluded: '外部文件明确排除，不会被本次清除。',
+    deleted_application_data_cannot_be_recovered: '被清除的本机应用数据不可恢复，请确认选择范围。',
+    shortcut_conflict: '快捷键存在冲突，当前不能执行。',
+    proxy_test_dns: '代理测试失败：DNS 解析失败。',
+    proxy_test_certificate: '代理测试失败：证书校验失败。',
+    proxy_test_authentication: '代理测试失败：认证失败。',
+    proxy_test_timeout: '代理测试失败：连接超时。',
+    proxy_test_unknown: '代理测试失败：原因未知。',
     proxy_probe_failed_dns: '代理测试失败：DNS 解析失败。',
     proxy_probe_failed_certificate: '代理测试失败：证书校验失败。',
     proxy_probe_failed_authentication: '代理测试失败：认证失败。',
