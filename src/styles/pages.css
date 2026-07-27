@@ -3050,7 +3050,8 @@
   min-width: 0;
 }
 
-.uc-settings__control select {
+.uc-settings__control select,
+.uc-settings__control input[type="text"] {
   width: min(100%, 260px);
   min-height: 34px;
   border: 1px solid var(--uc-color-border-default);
@@ -3060,9 +3061,103 @@
   background: var(--uc-color-surface-panel);
 }
 
-.uc-settings__control select:disabled {
+.uc-settings__control select:disabled,
+.uc-settings__control input[type="text"]:disabled {
   color: var(--uc-color-text-disabled);
   cursor: not-allowed;
+}
+
+.uc-settings__inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--uc-space-2);
+  min-width: 0;
+}
+
+.uc-settings__metric-grid,
+.uc-settings__cleanup-grid,
+.uc-settings__mode-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--uc-space-2);
+  padding: var(--uc-space-3) var(--uc-space-4);
+}
+
+.uc-settings__metric,
+.uc-settings__cleanup-option,
+.uc-settings__mode-grid button {
+  display: grid;
+  gap: var(--uc-space-1);
+  min-width: 0;
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: var(--uc-radius-8);
+  padding: var(--uc-space-3);
+  background: var(--uc-color-surface-panel);
+}
+
+.uc-settings__metric span,
+.uc-settings__cleanup-option span,
+.uc-settings__mode-grid button span,
+.uc-settings__group-actions span {
+  color: var(--uc-color-text-tertiary);
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-caption);
+}
+
+.uc-settings__cleanup-option {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  cursor: pointer;
+}
+
+.uc-settings__cleanup-option input {
+  grid-row: 1 / 3;
+  margin-top: 2px;
+}
+
+.uc-settings__mode-grid button {
+  color: var(--uc-color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.uc-settings__mode-grid button:hover,
+.uc-settings__mode-grid button.is-active {
+  border-color: var(--uc-color-border-focus);
+  background: var(--uc-color-surface-selected);
+}
+
+.uc-settings__mode-grid button:focus-visible,
+.uc-settings__cleanup-option input:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: 2px;
+}
+
+.uc-settings__mode-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.uc-settings__group-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--uc-space-3);
+  border-top: 1px solid var(--uc-color-border-subtle);
+  padding: var(--uc-space-3) var(--uc-space-4);
+}
+
+.uc-settings__notice {
+  margin: 0 var(--uc-space-4) var(--uc-space-3) !important;
+  border-left: 3px solid var(--uc-color-border-focus);
+  padding: var(--uc-space-2) var(--uc-space-3);
+  color: var(--uc-color-text-secondary);
+  background: var(--uc-color-surface-panel);
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-settings__notice--warning {
+  border-left-color: var(--uc-color-status-warning-border);
 }
 
 .uc-settings__range {
@@ -3207,6 +3302,25 @@
   color: var(--uc-color-text-secondary);
 }
 
+.uc-settings__dialog-note {
+  margin-top: var(--uc-space-3);
+  border: 1px solid var(--uc-color-status-warning-border);
+  border-radius: var(--uc-radius-8);
+  padding: var(--uc-space-3);
+  background: var(--uc-color-status-warning-bg);
+}
+
+.uc-settings__dialog-note--danger {
+  border-color: var(--uc-color-status-danger-border);
+  background: var(--uc-color-status-danger-bg);
+}
+
+.uc-settings__dialog-note ul {
+  margin: var(--uc-space-2) 0 0;
+  padding-left: var(--uc-space-4);
+  color: var(--uc-color-text-secondary);
+}
+
 .uc-settings__dialog-actions {
   justify-content: flex-end;
   margin-top: var(--uc-space-4);
@@ -3247,5 +3361,41 @@
   .uc-settings__status-heading,
   .uc-settings__facts {
     grid-column: 1 / -1;
+  }
+
+  .uc-settings__metric-grid,
+  .uc-settings__cleanup-grid,
+  .uc-settings__mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .uc-settings__header,
+  .uc-settings__section-heading,
+  .uc-settings__row,
+  .uc-settings__group-actions {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .uc-settings__header-actions,
+  .uc-settings__inline-actions,
+  .uc-settings__control {
+    justify-content: stretch;
+  }
+
+  .uc-settings__search,
+  .uc-settings__control select,
+  .uc-settings__control input[type="text"],
+  .uc-settings__inline-actions .uc-button {
+    width: 100%;
+  }
+
+  .uc-settings__metric-grid,
+  .uc-settings__cleanup-grid,
+  .uc-settings__mode-grid {
+    grid-template-columns: 1fr;
   }
 }
