@@ -9,36 +9,60 @@ import {
   settingsCategories,
   toSettingsValues,
   hasHighRiskSettingsChanges,
+  type PerformanceSettings,
   type SettingsCategory,
   type SettingsValues
 } from '../../domain';
 import type {
+  CleanupScope,
+  ControlledDirectoryDto,
+  DirectoryPurpose,
   SettingsCapabilityDto,
   SettingsIpcResult,
   SettingsOperationPlanDto,
   SettingsOperationRequestDto,
   SettingsSnapshotDto
 } from '../../shared/settings-ipc';
+import { directoryPurposes } from '../../shared/settings-ipc';
 import {
+  type CleanupPlan,
+  type CleanupService,
+  describeControlledDirectory,
+  type DirectoryMigrationPlan,
+  type DirectoryMigrationService,
+  type DirectoryRegistry,
+  type MediaSettingsStatusService,
+  type PerformancePolicyService,
+  scanDirectoryUsage,
   SettingsDataError,
   SettingsRevisionConflictError,
+  StorageOperationError,
   type SettingsLoadResult,
   type SettingsRepository
 } from '../settings';
 
 interface PendingSettingsOperation {
+  readonly kind: SettingsOperationPlanDto['kind'];
   readonly expectedRevision: number;
   readonly expiresAtMs: number;
-  readonly values: SettingsValues;
+  readonly values?: SettingsValues;
+  readonly migration?: DirectoryMigrationPlan;
+  readonly cleanup?: CleanupPlan;
+  readonly blocker?: string;
+}
+
+export interface SettingsB2Services {
+  readonly userDataPath: string;
+  readonly directoryRegistry: DirectoryRegistry;
+  readonly directoryMigration: DirectoryMigrationService;
+  readonly cleanup: CleanupService;
+  readonly performance: PerformancePolicyService;
+  readonly media: MediaSettingsStatusService;
 }
 
 class UnsupportedSettingsOperationError extends Error {}
 
 const unavailableCapabilities = [
-  'platform_capability_detection',
-  'directory_operations',
-  'task_policy',
-  'media_components',
   'permission_controls',
   'proxy_controls',
   'notification_controls',
@@ -54,14 +78,72 @@ export class SettingsController {
     private readonly repository: SettingsRepository,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createHandle: () => string = () => randomUUID(),
-    private readonly planLifetimeMs = 5 * 60 * 1000
+    private readonly planLifetimeMs = 5 * 60 * 1000,
+    private readonly b2?: SettingsB2Services
   ) {}
 
   async getSnapshot(): Promise<SettingsIpcResult<SettingsSnapshotDto>> {
     try {
-      return { ok: true, value: toSnapshot(await this.repository.load()) };
+      return { ok: true, value: toSnapshot(await this.repository.load(), Boolean(this.b2)) };
     } catch {
       return failure('settings_read_failed', 'Local settings could not be read');
+    }
+  }
+
+  async getSystemStatus() {
+    if (!this.b2) {
+      return failure('operation_unsupported', 'System settings adapters are unavailable');
+    }
+    try {
+      const [entries, appUsage, performance, media] = await Promise.all([
+        this.b2.directoryRegistry.list(),
+        scanDirectoryUsage(this.b2.userDataPath),
+        this.b2.performance.getStatus(),
+        this.b2.media.getStatus()
+      ]);
+      const directories = await Promise.all(entries.map(describeControlledDirectory));
+      return {
+        ok: true as const,
+        value: {
+          storage: {
+            directories,
+            appUsage,
+            cleanupScopes: [
+              'caches',
+              'preview_proxies',
+              'temporary_exports',
+              'eligible_logs'
+            ] as const
+          },
+          performance,
+          media
+        }
+      };
+    } catch {
+      return failure('settings_read_failed', 'System settings status could not be read');
+    }
+  }
+
+  /** Called only by Electron main after a native directory picker succeeds. */
+  async registerSelectedDirectory(
+    purpose: unknown,
+    selectedPath: string
+  ): Promise<SettingsIpcResult<ControlledDirectoryDto>> {
+    if (!this.b2) {
+      return failure('operation_unsupported', 'Directory registration is unavailable');
+    }
+    if (!isDirectoryPurpose(purpose)) {
+      return failure('invalid_request', 'Directory purpose is invalid');
+    }
+    try {
+      return {
+        ok: true,
+        value: await describeControlledDirectory(
+          await this.b2.directoryRegistry.register(purpose, selectedPath)
+        )
+      };
+    } catch {
+      return failure('operation_failed', 'Selected directory could not be registered');
     }
   }
 
@@ -82,7 +164,8 @@ export class SettingsController {
       return {
         ok: true,
         value: toSnapshot(
-          await this.repository.replace(request.expectedRevision, request.values)
+          await this.repository.replace(request.expectedRevision, request.values),
+          Boolean(this.b2)
         )
       };
     } catch (error) {
@@ -140,16 +223,30 @@ export class SettingsController {
         return revisionConflict(current.document.revision);
       }
       const currentValues = toSettingsValues(current.document);
-      const values = request.operation.kind === 'restore_all_defaults'
-        ? createDefaultSettingsValues()
-        : restoreSettingsCategory(currentValues, request.operation.category);
+      if (request.operation.kind === 'restore_all_defaults') {
+        return {
+          ok: true,
+          value: this.rememberPlan(
+            request.operation.kind,
+            current,
+            createDefaultSettingsValues()
+          )
+        };
+      }
+      if (request.operation.kind === 'restore_category_defaults') {
+        return {
+          ok: true,
+          value: this.rememberPlan(
+            request.operation.kind,
+            current,
+            restoreSettingsCategory(currentValues, request.operation.category)
+          )
+        };
+      }
+      if (!this.b2) throw new UnsupportedSettingsOperationError();
       return {
         ok: true,
-        value: this.rememberPlan(
-          request.operation.kind,
-          current,
-          values
-        )
+        value: await this.planB2Operation(current, currentValues, request.operation)
       };
     } catch (error) {
       if (error instanceof UnsupportedSettingsOperationError) {
@@ -157,6 +254,9 @@ export class SettingsController {
       }
       if (error instanceof SettingsDataError) {
         return failure('settings_read_failed', 'Local settings could not be read');
+      }
+      if (error instanceof StorageOperationError) {
+        return failure('operation_blocked', error.message);
       }
       return failure('invalid_request', 'Settings operation request is invalid');
     }
@@ -180,21 +280,39 @@ export class SettingsController {
       if (current.document.revision !== pending.expectedRevision) {
         return revisionConflict(current.document.revision);
       }
+      if (pending.blocker) {
+        return failure('operation_blocked', 'The operation still has blockers');
+      }
+      if (pending.migration) {
+        if (!this.b2) throw new UnsupportedSettingsOperationError();
+        await this.b2.directoryMigration.execute(pending.migration);
+      }
+      if (pending.cleanup) {
+        if (!this.b2) throw new UnsupportedSettingsOperationError();
+        await this.b2.cleanup.execute(pending.cleanup);
+      }
+      const result = pending.values
+        ? await this.repository.replace(pending.expectedRevision, pending.values)
+        : current;
       return {
         ok: true,
-        value: toSnapshot(
-          await this.repository.replace(pending.expectedRevision, pending.values)
-        )
+        value: toSnapshot(result, Boolean(this.b2))
       };
     } catch (error) {
-      return mapWriteError(error);
+      return mapOperationError(error);
     }
   }
 
   private rememberPlan(
     kind: SettingsOperationPlanDto['kind'],
     current: SettingsLoadResult,
-    values: SettingsValues
+    values: SettingsValues,
+    options: {
+      readonly reversible?: boolean;
+      readonly blocker?: string;
+      readonly warnings?: readonly string[];
+      readonly impact?: SettingsOperationPlanDto['impact'];
+    } = {}
   ): SettingsOperationPlanDto {
     const confirmationHandle = this.createHandle();
     const nowMs = Date.parse(this.now());
@@ -211,16 +329,134 @@ export class SettingsController {
       expiresAt: new Date(expiresAtMs).toISOString(),
       affectedCategories,
       changedValueCount: countChangedLeaves(before, values),
-      reversible: true,
-      blockers: [],
+      reversible: options.reversible ?? true,
+      blockers: options.blocker ? [options.blocker] : [],
+      warnings: options.warnings,
+      impact: options.impact,
       pendingRestart: []
     };
     this.pending.set(confirmationHandle, {
+      kind,
       expectedRevision: current.document.revision,
       expiresAtMs,
-      values
+      values,
+      blocker: options.blocker
     });
     return plan;
+  }
+
+  private async planB2Operation(
+    current: SettingsLoadResult,
+    values: SettingsValues,
+    operation: Exclude<SettingsOperationRequestDto,
+      { readonly kind: 'restore_all_defaults' | 'restore_category_defaults' }>
+  ): Promise<SettingsOperationPlanDto> {
+    if (!this.b2) throw new UnsupportedSettingsOperationError();
+    if (operation.kind === 'update_performance') {
+      const next = parseSettingsValues({ ...values, performance: operation.values });
+      return this.rememberPlan(operation.kind, current, next, {
+        reversible: true,
+        warnings: ['changes_apply_only_to_new_tasks_and_attempts'],
+        impact: { activeTasksUnaffected: true }
+      });
+    }
+    if (operation.kind === 'update_hardware_acceleration') {
+      const next = parseSettingsValues({
+        ...values,
+        media: { ...values.media, hardwareAcceleration: operation.value }
+      });
+      return this.rememberPlan(operation.kind, current, next, {
+        reversible: true,
+        blocker: operation.value === 'prefer_hardware'
+          ? 'hardware_acceleration_not_approved'
+          : undefined,
+        warnings: ['software_export_remains_available']
+      });
+    }
+    if (operation.kind === 'cleanup_storage') {
+      const cleanup = await this.b2.cleanup.plan(operation.scopes, {
+        logRetentionDays: values.diagnostics.retentionDays,
+        nowMs: Date.parse(this.now())
+      });
+      return this.rememberEffectPlan(operation.kind, current, {
+        cleanup,
+        reversible: false,
+        affectedCategories: [],
+        impact: { fileCount: cleanup.fileCount, bytes: cleanup.bytes }
+      });
+    }
+    const next = assignDirectory(values, operation.purpose, operation.targetDirectoryId);
+    try {
+      const migration = await this.b2.directoryMigration.plan({
+        purpose: operation.purpose,
+        sourceDirectoryId: assignedDirectoryId(values, operation.purpose),
+        targetDirectoryId: operation.targetDirectoryId
+      });
+      return this.rememberEffectPlan(operation.kind, current, {
+        values: next,
+        migration,
+        reversible: true,
+        affectedCategories: [operation.purpose === 'proxy' ? 'media' : 'storage'],
+        changedValueCount: 1,
+        impact: {
+          fileCount: migration.fileCount,
+          bytes: migration.bytes,
+          oldLocationRetained: true
+        }
+      });
+    } catch (error) {
+      if (!(error instanceof StorageOperationError)) throw error;
+      return this.rememberEffectPlan(operation.kind, current, {
+        values: next,
+        blocker: error.code,
+        reversible: true,
+        affectedCategories: [operation.purpose === 'proxy' ? 'media' : 'storage'],
+        changedValueCount: 1
+      });
+    }
+  }
+
+  private rememberEffectPlan(
+    kind: SettingsOperationPlanDto['kind'],
+    current: SettingsLoadResult,
+    options: {
+      readonly values?: SettingsValues;
+      readonly migration?: DirectoryMigrationPlan;
+      readonly cleanup?: CleanupPlan;
+      readonly blocker?: string;
+      readonly reversible: boolean;
+      readonly affectedCategories: readonly SettingsCategory[];
+      readonly changedValueCount?: number;
+      readonly warnings?: readonly string[];
+      readonly impact?: SettingsOperationPlanDto['impact'];
+    }
+  ): SettingsOperationPlanDto {
+    const confirmationHandle = this.createHandle();
+    const nowMs = Date.parse(this.now());
+    this.purgeExpiredPlans(nowMs);
+    const expiresAtMs = nowMs + this.planLifetimeMs;
+    this.pending.set(confirmationHandle, {
+      kind,
+      expectedRevision: current.document.revision,
+      expiresAtMs,
+      values: options.values,
+      migration: options.migration,
+      cleanup: options.cleanup,
+      blocker: options.blocker
+    });
+    return {
+      kind,
+      confirmationHandle,
+      expectedRevision: current.document.revision,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      affectedCategories: options.affectedCategories,
+      changedValueCount: options.changedValueCount ?? 0,
+      reversible: options.reversible,
+      blockers: options.blocker ? [options.blocker] : [],
+      warnings: options.warnings,
+      impact: options.impact,
+      pendingRestart: []
+    };
   }
 
   private purgeExpiredPlans(nowMs: number): void {
@@ -230,16 +466,31 @@ export class SettingsController {
   }
 }
 
-function toSnapshot(result: SettingsLoadResult): SettingsSnapshotDto {
+function toSnapshot(result: SettingsLoadResult, b2Available: boolean): SettingsSnapshotDto {
+  const b2Capabilities = [
+    'platform_capability_detection',
+    'directory_operations',
+    'task_policy',
+    'media_components'
+  ];
   return {
     revision: result.document.revision,
     values: toSettingsValues(result.document),
     resolved: {
-      appliedKeys: ['settings_persistence'],
-      unavailableKeys: [...unavailableCapabilities]
+      appliedKeys: [
+        'settings_persistence',
+        ...(b2Available ? b2Capabilities : [])
+      ],
+      unavailableKeys: [
+        ...(!b2Available ? b2Capabilities : []),
+        ...unavailableCapabilities
+      ]
     },
     capabilities: [
       { id: 'settings_persistence', state: 'available' },
+      ...b2Capabilities.map<SettingsCapabilityDto>((id) => b2Available
+        ? { id, state: 'available' }
+        : { id, state: 'unavailable', reason: 'phase8_platform_adapter_pending' }),
       ...unavailableCapabilities.map<SettingsCapabilityDto>((id) => ({
         id,
         state: 'unavailable',
@@ -302,6 +553,57 @@ function parseOperationRequest(value: unknown): {
       }
     };
   }
+  if (operation.kind === 'migrate_directory') {
+    exactKeys(operation, ['kind', 'purpose', 'targetDirectoryId']);
+    if (!isDirectoryPurpose(operation.purpose) || !isControlledId(operation.targetDirectoryId)) {
+      throw new TypeError('Directory migration request is invalid');
+    }
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: {
+        kind: 'migrate_directory',
+        purpose: operation.purpose,
+        targetDirectoryId: operation.targetDirectoryId
+      }
+    };
+  }
+  if (operation.kind === 'cleanup_storage') {
+    exactKeys(operation, ['kind', 'scopes']);
+    if (!Array.isArray(operation.scopes) || operation.scopes.length === 0) {
+      throw new TypeError('Cleanup scopes are invalid');
+    }
+    const scopes = operation.scopes.map((scope) => {
+      if (!isCleanupScope(scope)) throw new TypeError('Cleanup scope is invalid');
+      return scope;
+    });
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: { kind: 'cleanup_storage', scopes }
+    };
+  }
+  if (operation.kind === 'update_performance') {
+    exactKeys(operation, ['kind', 'values']);
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: {
+        kind: 'update_performance',
+        values: record(operation.values) as unknown as PerformanceSettings
+      }
+    };
+  }
+  if (operation.kind === 'update_hardware_acceleration') {
+    exactKeys(operation, ['kind', 'value']);
+    if (!['auto', 'prefer_hardware', 'software_only'].includes(String(operation.value))) {
+      throw new TypeError('Hardware acceleration preference is invalid');
+    }
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: {
+        kind: 'update_hardware_acceleration',
+        value: operation.value as 'auto' | 'prefer_hardware' | 'software_only'
+      }
+    };
+  }
   throw new UnsupportedSettingsOperationError('Settings operation is unsupported');
 }
 
@@ -345,6 +647,16 @@ function mapWriteError(error: unknown): SettingsIpcResult<never> {
   return failure('settings_write_failed', 'Local settings could not be saved');
 }
 
+function mapOperationError(error: unknown): SettingsIpcResult<never> {
+  if (error instanceof StorageOperationError) {
+    return failure('operation_failed', error.message);
+  }
+  if (error instanceof UnsupportedSettingsOperationError) {
+    return failure('operation_unsupported', 'Settings operation is not supported');
+  }
+  return mapWriteError(error);
+}
+
 function revisionConflict(actualRevision: number): SettingsIpcResult<never> {
   return {
     ok: false,
@@ -366,7 +678,8 @@ function failure(
 function buildFailure(
   code: 'invalid_request' | 'settings_read_failed' | 'settings_write_failed' |
     'revision_conflict' | 'confirmation_required' | 'operation_not_found' |
-    'operation_expired' | 'operation_unsupported',
+    'operation_expired' | 'operation_unsupported' | 'operation_blocked' |
+    'operation_failed',
   message: string
 ): SettingsIpcResult<never> {
   return { ok: false, error: { code, message } };
@@ -402,4 +715,51 @@ function record(value: unknown): Record<string, unknown> {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isDirectoryPurpose(value: unknown): value is DirectoryPurpose {
+  return directoryPurposes.includes(value as DirectoryPurpose);
+}
+
+function isCleanupScope(value: unknown): value is CleanupScope {
+  return [
+    'caches',
+    'preview_proxies',
+    'temporary_exports',
+    'eligible_logs'
+  ].includes(String(value));
+}
+
+function isControlledId(value: unknown): value is string {
+  return typeof value === 'string' &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
+}
+
+function assignedDirectoryId(
+  values: SettingsValues,
+  purpose: DirectoryPurpose
+): string | null {
+  return purpose === 'proxy'
+    ? values.media.proxyDirectoryId
+    : values.storage.directories[purpose];
+}
+
+function assignDirectory(
+  values: SettingsValues,
+  purpose: DirectoryPurpose,
+  directoryId: string
+): SettingsValues {
+  return purpose === 'proxy'
+    ? parseSettingsValues({
+      ...values,
+      media: { ...values.media, proxyDirectoryId: directoryId }
+    })
+    : parseSettingsValues({
+      ...values,
+      storage: {
+        ...values.storage,
+        directories: { ...values.storage.directories, [purpose]: directoryId }
+      }
+    });
 }
