@@ -299,18 +299,26 @@ const videoEditors: VideoEditorApi = {
       draftId,
       expectedRevision
     }),
-  selectCoverImage: (draftId, expectedRevision, prependToVideo) =>
+  selectCoverImage: (draftId, expectedRevision, prependToVideo, prependDurationUs) =>
     ipcRenderer.invoke(videoEditorIpcChannels.selectCoverImage, {
       draftId,
       expectedRevision,
-      prependToVideo
+      prependToVideo,
+      ...(prependDurationUs === undefined ? {} : { prependDurationUs })
     }),
-  attachCoverWork: (draftId, expectedRevision, workId, prependToVideo) =>
+  attachCoverWork: (
+    draftId,
+    expectedRevision,
+    workId,
+    prependToVideo,
+    prependDurationUs
+  ) =>
     ipcRenderer.invoke(videoEditorIpcChannels.attachCoverWork, {
       draftId,
       expectedRevision,
       workId,
-      prependToVideo
+      prependToVideo,
+      ...(prependDurationUs === undefined ? {} : { prependDurationUs })
     }),
   createSourcePreview: (draftId, clipId) =>
     ipcRenderer.invoke(videoEditorIpcChannels.createSourcePreview, {
@@ -324,7 +332,25 @@ const videoEditors: VideoEditorApi = {
       kind
     }),
   clearPreviewCache: () =>
-    ipcRenderer.invoke(videoEditorIpcChannels.clearPreviewCache)
+    ipcRenderer.invoke(videoEditorIpcChannels.clearPreviewCache),
+  preflightExport: (draftId, expectedRevision) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.preflightExport, {
+      draftId,
+      expectedRevision
+    }),
+  startExport: (draftId, expectedRevision) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.startExport, {
+      draftId,
+      expectedRevision
+    }),
+  getExport: (taskId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.getExport, { taskId }),
+  cancelExport: (taskId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.cancelExport, { taskId }),
+  retryExport: (taskId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.retryExport, { taskId }),
+  recoverExports: () =>
+    ipcRenderer.invoke(videoEditorIpcChannels.recoverExports)
 };
 
 contextBridge.exposeInMainWorld('unicomp', {

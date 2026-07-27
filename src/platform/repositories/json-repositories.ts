@@ -22,6 +22,9 @@ import type {
   VideoEditDraft,
   VideoEditDraftId,
   VideoEditDraftRepository,
+  VideoExportPlan,
+  VideoExportPlanId,
+  VideoExportPlanRepository,
   VideoWorkspaceDraft,
   VideoWorkspaceRepository,
   Work,
@@ -34,6 +37,7 @@ import {
   type ProjectStorageAdapter
 } from '../storage';
 import { RepositoryDataError } from './repository-data-error';
+import { hasValidVideoExportPlanHash } from './video-export-plan-integrity';
 import {
   isAssetEntity,
   isCanonicalIsoTimestamp,
@@ -43,6 +47,7 @@ import {
   isImageWorkspaceEntity,
   isTaskEntity,
   isVideoEditDraftEntity,
+  isVideoExportPlanEntity,
   isVideoWorkspaceEntity,
   isWorkEntity,
   type EntityValidator
@@ -348,6 +353,47 @@ export class JsonVideoEditDraftRepository
 
   save(draft: VideoEditDraft) {
     return this.collection.save(draft);
+  }
+}
+
+export class JsonVideoExportPlanRepository
+  implements VideoExportPlanRepository {
+  private readonly collection: JsonEntityCollection<VideoExportPlan, ProjectId>;
+
+  constructor(storage: ProjectStorageAdapter, projectId: ProjectId) {
+    this.collection = new JsonEntityCollection(
+      storage,
+      projectStoragePaths.entities.videoExportPlans,
+      projectId,
+      (plan) => plan.projectId,
+      isVideoExportPlanEntity
+    );
+  }
+
+  async get(id: VideoExportPlanId) {
+    const plan = await this.collection.get(id);
+    if (plan) this.assertIntegrity(plan);
+    return plan;
+  }
+
+  async list(projectId: ProjectId) {
+    const plans = await this.collection.list(projectId);
+    plans.forEach((plan) => this.assertIntegrity(plan));
+    return plans;
+  }
+
+  save(plan: VideoExportPlan) {
+    this.assertIntegrity(plan);
+    return this.collection.save(plan);
+  }
+
+  private assertIntegrity(plan: VideoExportPlan): void {
+    if (!hasValidVideoExportPlanHash(plan)) {
+      throw new RepositoryDataError(
+        projectStoragePaths.entities.videoExportPlans,
+        `export plan ${plan.id} failed SHA-256 integrity verification`
+      );
+    }
   }
 }
 

@@ -21,6 +21,12 @@ const taskStatusByExecutionState: Record<ExecutionState, TaskStatus> = {
   submitting: 'submitting',
   queued: 'active',
   processing: 'active',
+  validating_sources: 'active',
+  preparing_media: 'active',
+  encoding: 'active',
+  writing_file: 'localizing',
+  verifying_file: 'localizing',
+  registering_work: 'localizing',
   remote_completed: 'remote_completed',
   downloading: 'localizing',
   writing: 'localizing',
@@ -29,6 +35,9 @@ const taskStatusByExecutionState: Record<ExecutionState, TaskStatus> = {
   cancel_requested: 'cancel_requested',
   cancelled: 'cancelled',
   cancellation_unknown: 'cancellation_unknown',
+  needs_user_action: 'failed',
+  interrupted: 'failed',
+  recovery_required: 'failed',
   failed: 'failed',
   expired: 'expired'
 };

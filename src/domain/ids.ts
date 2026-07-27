@@ -17,6 +17,7 @@ export type ModelId = DomainId<'ModelId'>;
 export type CapabilityEvidenceId = DomainId<'CapabilityEvidenceId'>;
 export type RoutingPreferenceId = DomainId<'RoutingPreferenceId'>;
 export type VideoEditDraftId = DomainId<'VideoEditDraftId'>;
+export type VideoExportPlanId = DomainId<'VideoExportPlanId'>;
 export type VideoClipId = DomainId<'VideoClipId'>;
 export type TextOverlayId = DomainId<'TextOverlayId'>;
 
@@ -49,6 +50,8 @@ export const toRoutingPreferenceId = (value: string) =>
   toDomainId(value, 'RoutingPreferenceId');
 export const toVideoEditDraftId = (value: string) =>
   toDomainId(value, 'VideoEditDraftId');
+export const toVideoExportPlanId = (value: string) =>
+  toDomainId(value, 'VideoExportPlanId');
 export const toVideoClipId = (value: string) =>
   toDomainId(value, 'VideoClipId');
 export const toTextOverlayId = (value: string) =>

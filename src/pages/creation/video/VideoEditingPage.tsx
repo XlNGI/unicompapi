@@ -417,7 +417,10 @@ export function VideoEditingPage() {
     }
   }
 
-  async function selectCoverImage(prependToVideo: boolean) {
+  async function selectCoverImage(
+    prependToVideo: boolean,
+    prependDurationUs?: number
+  ) {
     if (!videoEditors || !currentDraft || busy) return;
     setBusy(true);
     setSaveState('saving');
@@ -426,7 +429,8 @@ export function VideoEditingPage() {
       const result = await videoEditors.selectCoverImage(
         currentDraft.draftId,
         currentDraft.revision,
-        prependToVideo
+        prependToVideo,
+        prependDurationUs
       );
       if (!result.ok) {
         handleError(result.error);
@@ -448,7 +452,11 @@ export function VideoEditingPage() {
     }
   }
 
-  async function attachCoverWork(workId: string, prependToVideo: boolean) {
+  async function attachCoverWork(
+    workId: string,
+    prependToVideo: boolean,
+    prependDurationUs?: number
+  ) {
     if (!videoEditors || !currentDraft || !workId || busy) return;
     await mutate(
       () =>
@@ -456,7 +464,8 @@ export function VideoEditingPage() {
           currentDraft.draftId,
           currentDraft.revision,
           workId,
-          prependToVideo
+          prependToVideo,
+          prependDurationUs
         ),
       '项目图片作品已设为封面，没有复制或修改原作品。'
     );
@@ -1190,15 +1199,15 @@ export function VideoEditingPage() {
               cover={currentDraft.cover}
               imageWorks={imageWorks}
               key={`${currentDraft.draftId}-${JSON.stringify(currentDraft.cover)}`}
-              onAttachWork={(workId, prependToVideo) =>
-                void attachCoverWork(workId, prependToVideo)
+              onAttachWork={(workId, prependToVideo, prependDurationUs) =>
+                void attachCoverWork(workId, prependToVideo, prependDurationUs)
               }
               onCommand={(command, successMessage) =>
                 void runCommand(command, successMessage)
               }
               onInvalid={setMessage}
-              onSelectLocal={(prependToVideo) =>
-                void selectCoverImage(prependToVideo)
+              onSelectLocal={(prependToVideo, prependDurationUs) =>
+                void selectCoverImage(prependToVideo, prependDurationUs)
               }
               selectedClipId={selectedClipId}
             />
@@ -2067,14 +2076,24 @@ function CoverInspector({
   readonly clips: readonly VideoEditorClipDto[];
   readonly cover: VideoEditorCoverDto | null;
   readonly imageWorks: readonly StorageWorkSummaryDto[];
-  readonly onAttachWork: (workId: string, prependToVideo: boolean) => void;
+  readonly onAttachWork: (
+    workId: string,
+    prependToVideo: boolean,
+    prependDurationUs?: number
+  ) => void;
   readonly onCommand: (command: VideoEditorUpdateDto, message: string) => void;
   readonly onInvalid: (message: string) => void;
-  readonly onSelectLocal: (prependToVideo: boolean) => void;
+  readonly onSelectLocal: (
+    prependToVideo: boolean,
+    prependDurationUs?: number
+  ) => void;
   readonly selectedClipId: string;
 }) {
   const [prependToVideo, setPrependToVideo] = useState(
     cover?.prependToVideo ?? false
+  );
+  const [prependDurationMs, setPrependDurationMs] = useState(
+    cover?.prependDurationUs ? String(cover.prependDurationUs / 1000) : ''
   );
   const [projectWorkId, setProjectWorkId] = useState(imageWorks[0]?.workId ?? '');
 
@@ -2085,11 +2104,13 @@ function CoverInspector({
     const clipId = String(data.get('clipId'));
     const clip = clips.find((candidate) => candidate.clipId === clipId);
     const sourceTimeUs = millisecondsToUs(formNumber(form, 'sourceTimeMs'));
+    const prependDurationUs = readPrependDuration();
     if (
       !clip ||
       !Number.isSafeInteger(sourceTimeUs) ||
       sourceTimeUs < clip.sourceRange.inUs ||
-      sourceTimeUs >= clip.sourceRange.outUs
+      sourceTimeUs >= clip.sourceRange.outUs ||
+      prependDurationUs === null
     ) {
       onInvalid('封面选帧必须位于所选片段的有效源时间范围内。');
       return;
@@ -2101,11 +2122,33 @@ function CoverInspector({
           kind: 'video_frame',
           clipId,
           sourceTimeUs,
-          prependToVideo
+          prependToVideo,
+          prependDurationUs: prependDurationUs ?? undefined
         }
       },
       '视频帧已设为封面。'
     );
+  }
+
+  function readPrependDuration(): number | undefined | null {
+    if (!prependToVideo) return undefined;
+    const milliseconds = Number(prependDurationMs);
+    const durationUs = millisecondsToUs(milliseconds);
+    if (!Number.isFinite(milliseconds) || !Number.isSafeInteger(durationUs) || durationUs <= 0) {
+      onInvalid('拼接封面时必须填写大于 0 的显示时长。');
+      return null;
+    }
+    return durationUs;
+  }
+
+  function selectLocalCover(): void {
+    const duration = readPrependDuration();
+    if (duration !== null) onSelectLocal(prependToVideo, duration);
+  }
+
+  function attachProjectCover(): void {
+    const duration = readPrependDuration();
+    if (duration !== null) onAttachWork(projectWorkId, prependToVideo, duration);
   }
 
   return (
@@ -2122,6 +2165,9 @@ function CoverInspector({
         <label><input checked={!prependToVideo} name="prependChoice" onChange={() => setPrependToVideo(false)} type="radio" />仅作为封面（默认）</label>
         <label><input checked={prependToVideo} name="prependChoice" onChange={() => setPrependToVideo(true)} type="radio" />拼接到视频开头</label>
       </fieldset>
+      {prependToVideo ? (
+        <label>封面显示时长（毫秒）<input min="1" onChange={(event) => setPrependDurationMs(event.target.value)} step="1" type="number" value={prependDurationMs} /></label>
+      ) : null}
       <form className="uc-video-editor__form" onSubmit={submitVideoFrame}>
         <h3>从视频选帧</h3>
         <label>片段<select defaultValue={selectedClipId || clips[0]?.clipId} name="clipId">{clips.map((clip, index) => <option key={clip.clipId} value={clip.clipId}>片段 {index + 1}</option>)}</select></label>
@@ -2130,12 +2176,12 @@ function CoverInspector({
       </form>
       <div className="uc-video-editor__form">
         <h3>本机图片</h3>
-        <Button disabled={busy} onClick={() => onSelectLocal(prependToVideo)} variant="secondary">选择并校验图片</Button>
+        <Button disabled={busy} onClick={selectLocalCover} variant="secondary">选择并校验图片</Button>
       </div>
       <div className="uc-video-editor__form">
         <h3>项目图片作品</h3>
         <label>图片作品<select disabled={imageWorks.length === 0} onChange={(event) => setProjectWorkId(event.target.value)} value={projectWorkId}>{imageWorks.length === 0 ? <option value="">暂无项目图片</option> : null}{imageWorks.map((work) => <option key={work.workId} value={work.workId}>{work.name}</option>)}</select></label>
-        <Button disabled={busy || !projectWorkId} onClick={() => onAttachWork(projectWorkId, prependToVideo)} variant="secondary">使用项目图片</Button>
+        <Button disabled={busy || !projectWorkId} onClick={attachProjectCover} variant="secondary">使用项目图片</Button>
       </div>
       {cover ? (
         <Button

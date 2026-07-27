@@ -156,18 +156,21 @@ export type CoverSelection =
       readonly clipId: VideoClipId;
       readonly sourceTimeUs: number;
       readonly prependToVideo: boolean;
+      readonly prependDurationUs?: number;
     }
   | {
       readonly kind: 'local_image';
       readonly fileId: FileReferenceId;
       readonly assetId?: AssetId;
       readonly prependToVideo: boolean;
+      readonly prependDurationUs?: number;
     }
   | {
       readonly kind: 'project_image';
       readonly workId: WorkId;
       readonly fileId: FileReferenceId;
       readonly prependToVideo: boolean;
+      readonly prependDurationUs?: number;
     };
 
 export type CapabilityPreference =
@@ -1311,21 +1314,28 @@ function isBackgroundMusic(value: unknown): value is BackgroundMusic {
 
 function isCoverSelection(value: unknown): value is CoverSelection {
   return isRecord(value) &&
-    ((exact(value, ['kind', 'clipId', 'sourceTimeUs', 'prependToVideo']) &&
+    ((exact(value, ['kind', 'clipId', 'sourceTimeUs', 'prependToVideo', 'prependDurationUs']) &&
       value.kind === 'video_frame' &&
       isNonBlankString(value.clipId) &&
       isNonNegativeInteger(value.sourceTimeUs) &&
-      typeof value.prependToVideo === 'boolean') ||
-      (exact(value, ['kind', 'fileId', 'assetId', 'prependToVideo']) &&
+      isCoverPrepend(value)) ||
+      (exact(value, ['kind', 'fileId', 'assetId', 'prependToVideo', 'prependDurationUs']) &&
         value.kind === 'local_image' &&
         isNonBlankString(value.fileId) &&
         (value.assetId === undefined || isNonBlankString(value.assetId)) &&
-        typeof value.prependToVideo === 'boolean') ||
-      (exact(value, ['kind', 'workId', 'fileId', 'prependToVideo']) &&
+        isCoverPrepend(value)) ||
+      (exact(value, ['kind', 'workId', 'fileId', 'prependToVideo', 'prependDurationUs']) &&
         value.kind === 'project_image' &&
         isNonBlankString(value.workId) &&
         isNonBlankString(value.fileId) &&
-        typeof value.prependToVideo === 'boolean'));
+        isCoverPrepend(value)));
+}
+
+function isCoverPrepend(value: Record<string, unknown>): boolean {
+  return typeof value.prependToVideo === 'boolean' &&
+    (value.prependToVideo
+      ? isPositiveInteger(value.prependDurationUs)
+      : value.prependDurationUs === undefined);
 }
 
 function isOutputPreference(value: unknown): value is OutputPreference {

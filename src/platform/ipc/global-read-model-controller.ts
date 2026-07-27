@@ -108,6 +108,8 @@ export class GlobalReadModelController {
           const context = createContext(entry);
           const works = await context.works.list(entry.projectId);
           for (const work of works) {
+            const execution = await context.executions.get(work.sourceExecutionId);
+            if (!execution || execution.state !== 'completed') continue;
             const file = await context.files.get(work.fileId);
             if (!file) throw new TypeError('Work references a missing file record');
             items.push({
@@ -150,6 +152,10 @@ export class GlobalReadModelController {
           const context = createContext(entry);
           const work = await context.works.get(toWorkId(workId));
           if (!work) continue;
+          const execution = await context.executions.get(work.sourceExecutionId);
+          if (!execution || execution.state !== 'completed') {
+            return { ok: true, value: undefined };
+          }
           const file = await context.files.get(work.fileId);
           if (!file) return { ok: true, value: undefined };
           return {
@@ -221,8 +227,12 @@ function toTaskDetails(
   return {
     ...summary,
     sourceDraftId: task.sourceDraftId,
-    originalInput: task.submission.prompt.originalInput,
-    finalPrompt: task.submission.prompt.finalPrompt
+    originalInput: task.submission.kind === 'video_editing'
+      ? task.submission.videoEditing.title
+      : task.submission.prompt.originalInput,
+    finalPrompt: task.submission.kind === 'video_editing'
+      ? `本地视频导出，草稿版本 ${task.submission.videoEditing.draftRevision}`
+      : task.submission.prompt.finalPrompt
   };
 }
 

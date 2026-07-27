@@ -75,6 +75,25 @@ test('exposes controlled B2 source, relink and preview-cache operations', () => 
   assert.match(domainSource, /set_clip_source/);
 });
 
+test('exposes controlled B4 export lifecycle without renderer paths or hashes', () => {
+  for (const operation of [
+    'preflightExport',
+    'startExport',
+    'getExport',
+    'cancelExport',
+    'retryExport',
+    'recoverExports'
+  ]) {
+    assert.match(sharedSource, new RegExp('\\b' + operation + '\\b'));
+    assert.match(preloadSource, new RegExp('videoEditorIpcChannels\\.' + operation));
+    assert.match(mainSource, new RegExp('videoEditorIpcChannels\\.' + operation));
+  }
+
+  assert.match(sharedSource, /recoveryRequired/);
+  assert.match(sharedSource, /software_only/);
+  assert.doesNotMatch(sharedSource, /outputPath|sourcePath|planHash|checksumSha256/);
+});
+
 test('keeps editor DTOs path-free, hash-free and history-free', () => {
   for (const protectedField of [
     'rootDirectory',

@@ -281,6 +281,18 @@ describe('video editor draft contracts', () => {
     expect(isVideoEditDraft(withCover)).toBe(true);
     expect(withCover.textTrack).toHaveLength(1);
     expect(withCover.cover).toMatchObject({ prependToVideo: false });
+    expect(isVideoEditDraft({
+      ...withCover,
+      cover: { ...withCover.cover!, prependToVideo: true }
+    })).toBe(false);
+    expect(isVideoEditDraft({
+      ...withCover,
+      cover: {
+        ...withCover.cover!,
+        prependToVideo: true,
+        prependDurationUs: 750_000
+      }
+    })).toBe(true);
     expect(
       isVideoEditDraft({
         ...withCover,

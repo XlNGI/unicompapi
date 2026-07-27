@@ -16,7 +16,13 @@ export const videoEditorIpcChannels = {
   attachCoverWork: 'video-editor:attach-cover-work',
   createSourcePreview: 'video-editor:create-source-preview',
   requestPreviewArtifact: 'video-editor:request-preview-artifact',
-  clearPreviewCache: 'video-editor:clear-preview-cache'
+  clearPreviewCache: 'video-editor:clear-preview-cache',
+  preflightExport: 'video-editor:preflight-export',
+  startExport: 'video-editor:start-export',
+  getExport: 'video-editor:get-export',
+  cancelExport: 'video-editor:cancel-export',
+  retryExport: 'video-editor:retry-export',
+  recoverExports: 'video-editor:recover-exports'
 } as const;
 
 export type VideoEditorIpcErrorCode =
@@ -42,7 +48,48 @@ export type VideoEditorIpcErrorCode =
   | 'relink_candidate_too_short'
   | 'preview_unavailable'
   | 'adapter_unavailable'
+  | 'export_preflight_failed'
+  | 'export_not_found'
+  | 'export_not_cancellable'
+  | 'export_not_retryable'
+  | 'export_failed'
   | 'workspace_storage_error';
+
+export interface VideoEditorExportPreflightDto {
+  readonly ready: boolean;
+  readonly reasons: readonly string[];
+  readonly output: {
+    readonly container: 'webm';
+    readonly videoCodec: 'libvpx-vp9';
+    readonly audioCodec: 'libopus';
+    readonly hardwareAcceleration: 'software_only';
+  };
+  readonly estimatedOutputBytes: number;
+}
+
+export interface VideoEditorExportTaskDto {
+  readonly taskId: string;
+  readonly executionId: string;
+  readonly attempt: number;
+  readonly state: string;
+  readonly progress?: {
+    readonly processedUs?: number;
+    readonly totalUs?: number;
+    readonly percent?: number;
+  };
+  readonly canCancel: boolean;
+  readonly canRetry: boolean;
+  readonly workId?: string;
+  readonly requiredAction?: {
+    readonly code: 'source_unavailable' | 'destination_unavailable';
+    readonly message: string;
+  };
+  readonly failure?: {
+    readonly message: string;
+    readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
+  };
+  readonly updatedAt: string;
+}
 
 export type VideoEditorIpcResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -161,18 +208,21 @@ export type VideoEditorCoverDto =
       readonly clipId: string;
       readonly sourceTimeUs: number;
       readonly prependToVideo: boolean;
+      readonly prependDurationUs?: number;
     }
   | {
       readonly kind: 'local_image';
       readonly fileId: string;
       readonly assetId?: string;
       readonly prependToVideo: boolean;
+      readonly prependDurationUs?: number;
     }
   | {
       readonly kind: 'project_image';
       readonly workId: string;
       readonly fileId: string;
       readonly prependToVideo: boolean;
+      readonly prependDurationUs?: number;
     };
 
 export interface VideoEditorCanvasDto {
@@ -451,13 +501,15 @@ export interface VideoEditorApi {
   selectCoverImage(
     draftId: string,
     expectedRevision: number,
-    prependToVideo: boolean
+    prependToVideo: boolean,
+    prependDurationUs?: number
   ): Promise<VideoEditorIpcResult<VideoEditorAssetSelectionResultDto>>;
   attachCoverWork(
     draftId: string,
     expectedRevision: number,
     workId: string,
-    prependToVideo: boolean
+    prependToVideo: boolean,
+    prependDurationUs?: number
   ): Promise<VideoEditorIpcResult<VideoEditorDraftDto>>;
   createSourcePreview(
     draftId: string,
@@ -470,5 +522,25 @@ export interface VideoEditorApi {
   ): Promise<VideoEditorIpcResult<VideoEditorPreviewArtifactDto>>;
   clearPreviewCache(): Promise<
     VideoEditorIpcResult<{ readonly cleared: true }>
+  >;
+  preflightExport(
+    draftId: string,
+    expectedRevision: number
+  ): Promise<VideoEditorIpcResult<VideoEditorExportPreflightDto>>;
+  startExport(
+    draftId: string,
+    expectedRevision: number
+  ): Promise<VideoEditorIpcResult<VideoEditorExportTaskDto>>;
+  getExport(
+    taskId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorExportTaskDto>>;
+  cancelExport(
+    taskId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorExportTaskDto>>;
+  retryExport(
+    taskId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorExportTaskDto>>;
+  recoverExports(): Promise<
+    VideoEditorIpcResult<{ readonly recoveryRequired: number }>
   >;
 }

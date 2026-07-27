@@ -18,6 +18,7 @@ import {
   VideoSubmissionController,
   VideoEditorController,
   VideoEditorMediaController,
+  VideoExportController,
   createFfmpegMediaEngineAdapterFromEnvironment,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
@@ -78,6 +79,7 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
   });
+  const mediaEngine = createFfmpegMediaEngineAdapterFromEnvironment();
   const videoEditorMedia = new VideoEditorMediaController({
     getSession: () => sessionRegistry.get(),
     chooseAudioFile: () =>
@@ -106,9 +108,11 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     ),
     handles: mediaHandles,
     editor: videoEditors,
-    previewAdapter:
-      createFfmpegMediaEngineAdapterFromEnvironment() ??
-      createDevelopmentVideoEditorPreviewAdapter()
+    previewAdapter: mediaEngine ?? createDevelopmentVideoEditorPreviewAdapter()
+  });
+  const videoExports = new VideoExportController({
+    getSession: () => sessionRegistry.get(),
+    getAdapter: () => mediaEngine
   });
   const videoReferenceMedia = new VideoReferenceMediaController({
     getSession: () => sessionRegistry.get(),
@@ -152,6 +156,9 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
         videoWorkspaces.waitForMutations(),
         videoEditors.waitForMutations()
       ]);
+    },
+    afterSessionChange: async () => {
+      await videoExports.recoverExports();
     },
     catalog
   });
@@ -320,6 +327,24 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
   );
   ipcMain.handle(videoEditorIpcChannels.clearPreviewCache, () =>
     videoEditorMedia.clearPreviewCache()
+  );
+  ipcMain.handle(videoEditorIpcChannels.preflightExport, (_event, request: unknown) =>
+    videoExports.preflightExport(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.startExport, (_event, request: unknown) =>
+    videoExports.startExport(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.getExport, (_event, request: unknown) =>
+    videoExports.getExport(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.cancelExport, (_event, request: unknown) =>
+    videoExports.cancelExport(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.retryExport, (_event, request: unknown) =>
+    videoExports.retryExport(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.recoverExports, () =>
+    videoExports.recoverExports()
   );
   ipcMain.handle(
     videoWorkspaceIpcChannels.selectMaterial,

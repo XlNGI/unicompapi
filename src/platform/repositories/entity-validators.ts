@@ -6,6 +6,7 @@ import {
   fileStates,
   isImageWorkspaceDraft,
   isVideoEditDraft,
+  isVideoExportPlan,
   isVideoWorkspaceDraft,
   mediaKinds,
   imageWorkspaceModes,
@@ -71,19 +72,10 @@ export const isTaskEntity: EntityValidator = (value) =>
   isNonBlankString(value.sourceDraftId) &&
   isRecord(value.submission) &&
   isOneOf(value.submission.kind, creationKinds) &&
-  isPromptSnapshot(value.submission.prompt) &&
-  isStringArray(value.submission.assetIds) &&
   isCanonicalIsoTimestamp(value.submission.confirmedAt) &&
-  (value.submission.image === undefined ||
-    isImageSubmissionSnapshot(value.submission.image)) &&
-  (value.submission.video === undefined ||
-    (value.submission.kind === 'video_generation' &&
-      value.submission.image === undefined &&
-      isVideoSubmissionSnapshot(value.submission.video) &&
-      sameStringSet(
-        value.submission.assetIds,
-        value.submission.video.materials.map((material) => material.assetId)
-      ))) &&
+  (value.submission.kind === 'video_editing'
+    ? isVideoEditingSubmission(value.submission)
+    : isGenerationSubmission(value.submission)) &&
   isStringArray(value.executionIds) &&
   isCanonicalIsoTimestamp(value.createdAt);
 
@@ -92,8 +84,17 @@ export const isExecutionEntity: EntityValidator = (value) =>
   isPositiveInteger(value.attempt) &&
   isOneOf(value.state, executionStates) &&
   (value.failure === undefined || isExecutionFailure(value.failure)) &&
+  (value.state === 'needs_user_action'
+    ? isExecutionUserAction(value.userAction)
+    : value.userAction === undefined) &&
   (value.remoteOperationId === undefined ||
     isNonBlankString(value.remoteOperationId)) &&
+  (value.exportPlanId === undefined || isNonBlankString(value.exportPlanId)) &&
+  (value.outputFileId === undefined || isNonBlankString(value.outputFileId)) &&
+  (value.workId === undefined || isNonBlankString(value.workId)) &&
+  (value.cancelRequestedAt === undefined ||
+    isCanonicalIsoTimestamp(value.cancelRequestedAt)) &&
+  (value.progress === undefined || isExecutionProgress(value.progress)) &&
   isCanonicalIsoTimestamp(value.createdAt) &&
   isCanonicalIsoTimestamp(value.updatedAt);
 
@@ -105,6 +106,42 @@ export const isWorkEntity: EntityValidator = (value) =>
   isNonBlankString(value.name) &&
   (value.parentWorkId === undefined || isNonBlankString(value.parentWorkId)) &&
   isCanonicalIsoTimestamp(value.createdAt);
+
+export const isVideoExportPlanEntity: EntityValidator = (value) =>
+  isVideoExportPlan(value);
+
+function isGenerationSubmission(value: Record<string, unknown>): boolean {
+  return isPromptSnapshot(value.prompt) &&
+    isStringArray(value.assetIds) &&
+    (value.image === undefined || isImageSubmissionSnapshot(value.image)) &&
+    (value.video === undefined ||
+      (value.kind === 'video_generation' &&
+        value.image === undefined &&
+        isVideoSubmissionSnapshot(value.video) &&
+        sameStringSet(
+          value.assetIds,
+          value.video.materials.map((material) => material.assetId)
+        )));
+}
+
+function isVideoEditingSubmission(value: Record<string, unknown>): boolean {
+  return value.prompt === undefined &&
+    value.assetIds === undefined &&
+    value.image === undefined &&
+    value.video === undefined &&
+    isRecord(value.videoEditing) &&
+    isNonBlankString(value.videoEditing.exportPlanId) &&
+    isNonNegativeInteger(value.videoEditing.draftRevision) &&
+    isNonBlankString(value.videoEditing.title);
+}
+
+function isExecutionProgress(value: unknown): boolean {
+  return isRecord(value) &&
+    (value.processedUs === undefined || isNonNegativeInteger(value.processedUs)) &&
+    (value.totalUs === undefined || isNonNegativeInteger(value.totalUs)) &&
+    (value.percent === undefined ||
+      (isNonNegativeInteger(value.percent) && value.percent <= 100));
+}
 
 function isPromptSnapshot(value: unknown): value is PromptSnapshot {
   return (
@@ -173,6 +210,17 @@ function isExecutionFailure(value: unknown): boolean {
       'not_retryable',
       'unknown'
     ] as const)
+  );
+}
+
+function isExecutionUserAction(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isOneOf(value.code, [
+      'source_unavailable',
+      'destination_unavailable'
+    ] as const) &&
+    isNonBlankString(value.message)
   );
 }
 

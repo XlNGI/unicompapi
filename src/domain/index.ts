@@ -9,6 +9,7 @@ export * from './entities/provider';
 export * from './entities/task';
 export * from './entities/video-workspace';
 export * from './entities/video-editor';
+export * from './entities/video-export-plan';
 export * from './entities/work';
 export * from './errors';
 export * from './ids';

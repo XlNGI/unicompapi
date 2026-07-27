@@ -32,9 +32,21 @@ export function registerWork(input: RegisterWorkInput): Work {
     );
   }
 
-  if (input.execution.state !== 'completed') {
+  if (
+    input.execution.state !== 'completed' &&
+    input.execution.state !== 'registering_work'
+  ) {
     throw new WorkRegistrationRejectedError(
-      'execution is not locally completed'
+      'execution is not ready for local work registration'
+    );
+  }
+
+  if (
+    input.execution.state === 'registering_work' &&
+    (!input.execution.exportPlanId || input.execution.outputFileId !== input.file.id)
+  ) {
+    throw new WorkRegistrationRejectedError(
+      'local export execution has not linked its verified output'
     );
   }
 
