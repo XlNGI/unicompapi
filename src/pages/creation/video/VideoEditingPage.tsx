@@ -4,17 +4,23 @@ import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill, type StatusTone } from '../../../components/StatusPill';
 import type {
+  StorageApi,
+  StorageLocalMediaHandleDto,
   StorageProjectSessionDto,
   StorageWorkSummaryDto
 } from '../../../shared/storage-ipc';
 import type {
+  VideoEditorApi,
   VideoEditorCanvasDto,
   VideoEditorBackgroundMusicDto,
   VideoEditorClipDto,
   VideoEditorCoverDto,
   VideoEditorDraftDto,
+  VideoEditorExportPreflightDto,
+  VideoEditorExportTaskDto,
   VideoEditorIpcErrorCode,
   VideoEditorIpcResult,
+  VideoEditorOutputPreferenceDto,
   VideoEditorSourcePreviewDto,
   VideoEditorSourceRegistrationStrategyDto,
   VideoEditorSourceStatusDto,
@@ -46,7 +52,12 @@ const errorMessages: Partial<Record<VideoEditorIpcErrorCode, string>> = {
   relink_mismatch_confirmation_required: '候选文件与原文件不同，需要明确确认。',
   relink_candidate_too_short: '候选视频太短，无法覆盖当前片段的裁剪范围。',
   preview_unavailable: '原片预览不可用，请先恢复源文件。',
-  adapter_unavailable: '预览代理引擎尚未审批，当前只能使用受控原片预览。',
+  adapter_unavailable: '当前未检测到经批准的本地媒体引擎，请检查本机工具链。',
+  export_preflight_failed: '导出预检未通过，请按原因修复后重新检查。',
+  export_not_found: '导出任务已不存在，请前往任务中心核对。',
+  export_not_cancellable: '当前导出阶段不能取消。',
+  export_not_retryable: '当前导出失败不能直接重试，请重新预检并创建新版本。',
+  export_failed: '本地导出失败，原草稿和旧作品没有被覆盖。',
   nothing_to_undo: '当前没有可撤销的操作。',
   nothing_to_redo: '当前没有可重做的操作。',
   workspace_storage_error: '草稿未能写入项目，请检查存储后继续。'
@@ -58,7 +69,11 @@ type EditorError = Extract<
 >['error'];
 type SaveState = 'saved' | 'editing' | 'saving' | 'failed' | 'conflict';
 type MediaTab = 'timeline' | 'project';
-type InspectorTab = 'clip' | 'canvas' | 'audio' | 'text' | 'cover';
+type InspectorTab = 'clip' | 'canvas' | 'audio' | 'text' | 'cover' | 'export';
+
+interface VideoEditingPageProps {
+  readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
+}
 
 interface TimelineSegment {
   readonly clipId: string;
@@ -87,7 +102,7 @@ const saveStateTones: Record<SaveState, StatusTone> = {
   conflict: 'danger'
 };
 
-export function VideoEditingPage() {
+export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
   const storage = window.unicomp?.storage;
   const videoEditors = window.unicomp?.videoEditors;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -111,6 +126,12 @@ export function VideoEditingPage() {
   const [busy, setBusy] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [message, setMessage] = useState('');
+  const [exportPreflight, setExportPreflight] =
+    useState<VideoEditorExportPreflightDto>();
+  const [exportTask, setExportTask] = useState<VideoEditorExportTaskDto>();
+  const [exportMedia, setExportMedia] = useState<StorageLocalMediaHandleDto>();
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportConfirmed, setExportConfirmed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -203,11 +224,81 @@ export function VideoEditingPage() {
     };
   }, [currentDraft, videoEditors]);
 
+  useEffect(() => {
+    let active = true;
+    setExportPreflight(undefined);
+    setExportConfirmed(false);
+    setExportMedia(undefined);
+    setExportTask(undefined);
+    if (!storage || !videoEditors || !session || !currentDraft) {
+      return () => {
+        active = false;
+      };
+    }
+    void findLatestExportForDraft(
+      storage,
+      videoEditors,
+      session.projectId,
+      currentDraft.draftId
+    ).then((task) => {
+      if (active) setExportTask(task);
+    }).catch(() => {
+      if (active) setMessage('读取当前草稿的导出任务失败，请前往任务中心核对。');
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentDraft?.draftId, session, storage, videoEditors]);
+
+  useEffect(() => {
+    if (!videoEditors || !exportTask || !isExportPollingState(exportTask.state)) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void videoEditors.getExport(exportTask.taskId).then((result) => {
+        if (!active) return;
+        if (result.ok) setExportTask(result.value);
+        else setMessage(errorMessage(result.error.code, '刷新导出任务失败，请重试。'));
+      }).catch(() => {
+        if (active) setMessage('刷新导出任务失败，请前往任务中心核对。');
+      });
+    }, 800);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [exportTask, videoEditors]);
+
+  useEffect(() => {
+    let active = true;
+    setExportMedia(undefined);
+    if (
+      !storage ||
+      exportTask?.state !== 'completed' ||
+      !exportTask.workId
+    ) {
+      return () => {
+        active = false;
+      };
+    }
+    void storage.createWorkMediaHandle(exportTask.workId).then((result) => {
+      if (!active) return;
+      if (result.ok) setExportMedia(result.value);
+      else setMessage('导出已完成，但作品预览暂不可用；可前往作品库核对。');
+    }).catch(() => {
+      if (active) setMessage('导出已完成，但作品预览暂不可用；可前往作品库核对。');
+    });
+    return () => {
+      active = false;
+    };
+  }, [exportTask?.state, exportTask?.workId, storage]);
+
   function acceptDraft(draft?: VideoEditorDraftDto, preferredClipId?: string) {
     setCurrentDraft(draft);
     setTitle(draft?.title ?? '');
     setSaveState('saved');
     setPreview(undefined);
+    setExportPreflight(undefined);
+    setExportConfirmed(false);
     const nextClipId =
       preferredClipId &&
       draft?.videoTrack.some((clip) => clip.clipId === preferredClipId)
@@ -583,6 +674,122 @@ export function VideoEditingPage() {
     }
   }
 
+  async function prepareExport() {
+    if (!videoEditors || !currentDraft || exportBusy) return;
+    setInspectorTab('export');
+    setExportBusy(true);
+    setExportConfirmed(false);
+    setMessage('正在校验素材、字体、输出能力和目标要求…');
+    try {
+      const result = await videoEditors.preflightExport(
+        currentDraft.draftId,
+        currentDraft.revision
+      );
+      if (!result.ok) {
+        if (result.error.code === 'draft_conflict') setSaveState('conflict');
+        setMessage(errorMessage(result.error.code, '导出预检失败，请重试。'));
+        return;
+      }
+      setExportPreflight(result.value);
+      setMessage(
+        result.value.ready
+          ? '导出预检通过；请核对确认信息后再创建后台任务。'
+          : '导出预检未通过，请按面板中的真实原因处理。'
+      );
+    } catch {
+      setMessage('导出预检失败，请检查本机媒体工具链后重试。');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function startExport() {
+    if (
+      !videoEditors ||
+      !currentDraft ||
+      !exportPreflight?.ready ||
+      !exportConfirmed ||
+      exportBusy
+    ) return;
+    setExportBusy(true);
+    setMessage('正在创建冻结导出计划和后台任务…');
+    try {
+      const result = await videoEditors.startExport(
+        currentDraft.draftId,
+        currentDraft.revision
+      );
+      if (!result.ok) {
+        if (result.error.code === 'draft_conflict') setSaveState('conflict');
+        setMessage(errorMessage(result.error.code, '导出任务未能创建，请重试。'));
+        return;
+      }
+      setExportTask(result.value);
+      setExportConfirmed(false);
+      setMessage('后台导出任务已创建；继续编辑不会改变本次冻结计划。');
+    } catch {
+      setMessage('创建导出任务失败，草稿和已有作品保持不变。');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function cancelExport() {
+    if (!videoEditors || !exportTask?.canCancel || exportBusy) return;
+    setExportBusy(true);
+    setMessage('正在请求媒体进程安全停止…');
+    try {
+      const result = await videoEditors.cancelExport(exportTask.taskId);
+      if (!result.ok) {
+        setMessage(errorMessage(result.error.code, '取消请求未完成，请重试。'));
+        return;
+      }
+      setExportTask(result.value);
+      setMessage('取消请求已记录；只有进程确认停止后才会显示已取消。');
+    } catch {
+      setMessage('取消请求失败，请前往任务中心核对真实状态。');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function retryExport() {
+    if (!videoEditors || !exportTask?.canRetry || exportBusy) return;
+    setExportBusy(true);
+    setMessage('正在基于原冻结计划创建新的导出尝试…');
+    try {
+      const result = await videoEditors.retryExport(exportTask.taskId);
+      if (!result.ok) {
+        setMessage(errorMessage(result.error.code, '导出重试未能创建。'));
+        return;
+      }
+      setExportTask(result.value);
+      setMessage(`第 ${result.value.attempt} 次导出尝试已创建；旧尝试记录仍然保留。`);
+    } catch {
+      setMessage('创建重试失败，原尝试记录保持不变。');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function revealExport() {
+    if (!storage || exportTask?.state !== 'completed' || !exportTask.workId || exportBusy) {
+      return;
+    }
+    setExportBusy(true);
+    try {
+      const result = await storage.revealWorkFile(exportTask.workId);
+      setMessage(
+        result.ok
+          ? '已在系统文件管理器中定位已登记作品。'
+          : '无法定位作品，请前往作品库检查文件状态。'
+      );
+    } catch {
+      setMessage('无法定位作品，请前往作品库检查文件状态。');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   const segments = buildTimelineSegments(currentDraft?.videoTrack ?? []);
   const totalDurationUs = segments.at(-1)?.endUs ?? 0;
   const selectedClip = currentDraft?.videoTrack.find(
@@ -739,10 +946,17 @@ export function VideoEditingPage() {
           >
             保存草稿
           </Button>
-          <Button disabled title="等待 B4 导出契约" variant="secondary">
+          <Button
+            disabled={!currentDraft || operationBlocked || exportBusy}
+            onClick={() => setInspectorTab('export')}
+            variant="secondary"
+          >
             导出设置
           </Button>
-          <Button disabled title="等待 B4 导出契约">
+          <Button
+            disabled={!currentDraft || operationBlocked || exportBusy}
+            onClick={() => void prepareExport()}
+          >
             导出视频
           </Button>
         </div>
@@ -1119,6 +1333,15 @@ export function VideoEditingPage() {
             >
               封面
             </button>
+            <button
+              aria-selected={inspectorTab === 'export'}
+              disabled={!currentDraft}
+              onClick={() => setInspectorTab('export')}
+              role="tab"
+              type="button"
+            >
+              导出
+            </button>
           </div>
           <label className="uc-video-editor__title-field">
             <span>草稿名称</span>
@@ -1210,6 +1433,30 @@ export function VideoEditingPage() {
                 void selectCoverImage(prependToVideo, prependDurationUs)
               }
               selectedClipId={selectedClipId}
+            />
+          ) : inspectorTab === 'export' && currentDraft ? (
+            <ExportInspector
+              busy={operationBlocked || exportBusy}
+              confirmed={exportConfirmed}
+              draft={currentDraft}
+              key={`${currentDraft.draftId}-${currentDraft.outputPreference.fileName ?? ''}-${currentDraft.outputPreference.conflictPolicy}`}
+              media={exportMedia}
+              onCancel={() => void cancelExport()}
+              onConfirm={setExportConfirmed}
+              onNavigate={onNavigate}
+              onPreflight={() => void prepareExport()}
+              onReveal={() => void revealExport()}
+              onRetry={() => void retryExport()}
+              onSave={(outputPreference) =>
+                void runCommand(
+                  { kind: 'set_output_preference', outputPreference },
+                  '导出文件名和冲突策略已保存；请重新预检。'
+                )
+              }
+              onStart={() => void startExport()}
+              preflight={exportPreflight}
+              task={exportTask}
+              totalDurationUs={totalDurationUs}
             />
           ) : (
             <EmptyState
@@ -2196,6 +2443,244 @@ function CoverInspector({
   );
 }
 
+function ExportInspector({
+  busy,
+  confirmed,
+  draft,
+  media,
+  onCancel,
+  onConfirm,
+  onNavigate,
+  onPreflight,
+  onReveal,
+  onRetry,
+  onSave,
+  onStart,
+  preflight,
+  task,
+  totalDurationUs
+}: {
+  readonly busy: boolean;
+  readonly confirmed: boolean;
+  readonly draft: VideoEditorDraftDto;
+  readonly media?: StorageLocalMediaHandleDto;
+  readonly onCancel: () => void;
+  readonly onConfirm: (confirmed: boolean) => void;
+  readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
+  readonly onPreflight: () => void;
+  readonly onReveal: () => void;
+  readonly onRetry: () => void;
+  readonly onSave: (preference: VideoEditorOutputPreferenceDto) => void;
+  readonly onStart: () => void;
+  readonly preflight?: VideoEditorExportPreflightDto;
+  readonly task?: VideoEditorExportTaskDto;
+  readonly totalDurationUs: number;
+}) {
+  const [fileName, setFileName] = useState(
+    draft.outputPreference.fileName ?? draft.title
+  );
+  const [conflictPolicy, setConflictPolicy] = useState(
+    draft.outputPreference.conflictPolicy
+  );
+  const state = exportStateDisplay(task?.state);
+  const completed = task?.state === 'completed' && Boolean(task.workId);
+  const active = Boolean(task && isExportPollingState(task.state));
+  const preferencesDirty =
+    fileName.trim() !== (draft.outputPreference.fileName ?? draft.title) ||
+    conflictPolicy !== draft.outputPreference.conflictPolicy;
+  const currentPreflight = preferencesDirty ? undefined : preflight;
+
+  function savePreferences(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave({
+      ...draft.outputPreference,
+      fileName: fileName.trim() || undefined,
+      conflictPolicy
+    });
+  }
+
+  return (
+    <div className="uc-video-editor__inspector-content uc-video-editor__export">
+      <form className="uc-video-editor__form" onSubmit={savePreferences}>
+        <h3>输出文件</h3>
+        <label>
+          文件名
+          <input
+            maxLength={80}
+            onChange={(event) => setFileName(event.target.value)}
+            placeholder="视频作品名称"
+            value={fileName}
+          />
+        </label>
+        <label>
+          同名冲突
+          <select
+            onChange={(event) =>
+              setConflictPolicy(
+                event.target.value === 'fail' ? 'fail' : 'create_unique_name'
+              )
+            }
+            value={conflictPolicy}
+          >
+            <option value="create_unique_name">创建独立版本（推荐）</option>
+            <option value="fail">同名时停止</option>
+          </select>
+        </label>
+        <Button
+          disabled={busy || !fileName.trim() || !preferencesDirty}
+          type="submit"
+          variant="secondary"
+        >
+          保存导出设置
+        </Button>
+        {preferencesDirty ? <p>设置尚未保存；保存后才能执行预检或开始导出。</p> : null}
+      </form>
+
+      <section className="uc-video-editor__export-confirmation">
+        <div className="uc-video-editor__export-heading">
+          <h3>导出确认</h3>
+          <StatusPill
+            tone={currentPreflight?.ready ? 'success' : currentPreflight ? 'warning' : 'neutral'}
+          >
+            {preferencesDirty
+              ? '设置未保存'
+              : currentPreflight?.ready
+                ? '预检通过'
+                : currentPreflight
+                  ? '预检未通过'
+                  : '尚未预检'}
+          </StatusPill>
+        </div>
+        <dl className="uc-video-editor__facts">
+          <Fact
+            label="来源"
+            value={`${draft.videoTrack.length} 个视频片段 · ${formatTime(totalDurationUs)}`}
+          />
+          <Fact
+            label="目标"
+            value={`当前项目独立结果 · ${fileName.trim() || draft.title}.webm`}
+          />
+          <Fact
+            label="格式"
+            value={currentPreflight
+              ? `${currentPreflight.output.container.toUpperCase()} · ${currentPreflight.output.videoCodec} · ${currentPreflight.output.audioCodec}`
+              : '等待媒体引擎真实预检'}
+          />
+          <Fact label="质量" value="源分辨率 · 源帧率 · 当前引擎质量策略" />
+          <Fact
+            label="硬件策略"
+            value={currentPreflight
+              ? hardwarePolicyLabel(currentPreflight.output.hardwareAcceleration)
+              : '等待媒体引擎真实预检'}
+          />
+          <Fact
+            label="空间状态"
+            value={exportSpaceLabel(currentPreflight, task)}
+          />
+        </dl>
+        {currentPreflight && !currentPreflight.ready ? (
+          <ul className="uc-video-editor__export-reasons" role="alert">
+            {currentPreflight.reasons.map((reason) => (
+              <li key={reason}>{exportReasonLabel(reason)}</li>
+            ))}
+          </ul>
+        ) : null}
+        <Button disabled={busy || preferencesDirty} onClick={onPreflight} variant="secondary">
+          {currentPreflight ? '重新执行预检' : '执行导出预检'}
+        </Button>
+        {currentPreflight?.ready ? (
+          <label className="uc-video-editor__export-check">
+            <input
+              checked={confirmed}
+              onChange={(event) => onConfirm(event.target.checked)}
+              type="checkbox"
+            />
+            我已核对来源、目标、格式、质量、硬件策略和空间校验时机
+          </label>
+        ) : null}
+        <Button
+          disabled={busy || active || !currentPreflight?.ready || !confirmed}
+          onClick={onStart}
+        >
+          {active ? '已有导出正在执行' : '创建独立导出版本'}
+        </Button>
+      </section>
+
+      {task ? (
+        <section className="uc-video-editor__export-task" aria-live="polite">
+          <div className="uc-video-editor__export-heading">
+            <h3>后台任务 · 第 {task.attempt} 次尝试</h3>
+            <StatusPill tone={state.tone}>{state.label}</StatusPill>
+          </div>
+          <progress
+            aria-label="导出进度"
+            max="100"
+            value={Math.max(0, Math.min(100, task.progress?.percent ?? 0))}
+          />
+          <p>
+            {task.progress?.percent === undefined
+              ? '当前阶段尚未报告百分比。'
+              : `已处理 ${task.progress.percent.toFixed(1)}%`}
+          </p>
+          {task.attempt > 1 ? (
+            <p>旧尝试没有被覆盖；全部真实尝试可在任务中心查看。</p>
+          ) : null}
+          {task.requiredAction ? (
+            <p className="uc-video-editor__source-issue">
+              {requiredActionLabel(task.requiredAction.code)}：
+              {exportReasonLabel(task.requiredAction.message)}
+            </p>
+          ) : null}
+          {task.failure ? (
+            <p className="uc-video-editor__source-issue">
+              失败：{exportReasonLabel(task.failure.message)}（
+              {retryabilityLabel(task.failure.retryability)}）
+            </p>
+          ) : null}
+          <div className="uc-video-editor__export-actions">
+            {task.canCancel ? (
+              <Button disabled={busy} onClick={onCancel} variant="secondary">
+                请求取消
+              </Button>
+            ) : null}
+            {task.canRetry ? (
+              <Button disabled={busy} onClick={onRetry} variant="secondary">
+                创建新尝试
+              </Button>
+            ) : null}
+            {onNavigate ? (
+              <Button onClick={() => onNavigate('tasks')} variant="ghost">
+                打开任务中心
+              </Button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {completed ? (
+        <section className="uc-video-editor__export-result">
+          <div className="uc-video-editor__export-heading">
+            <h3>导出成功</h3>
+            <StatusPill tone="success">作品已登记</StatusPill>
+          </div>
+          <p>文件已经过独立探测、校验、发布并登记为新作品。</p>
+          {media?.mediaKind === 'video' ? (
+            <video aria-label="已登记导出作品预览" controls src={media.url} />
+          ) : null}
+          <div className="uc-video-editor__export-actions">
+            <Button disabled={busy} onClick={onReveal} variant="secondary">
+              在文件管理器中定位
+            </Button>
+            {onNavigate ? (
+              <Button onClick={() => onNavigate('library')}>打开作品库</Button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 function PanelHeading({
   description,
   title
@@ -2326,6 +2811,113 @@ function sourceSummary(
   if (abnormal) return `${abnormal} 个需恢复`;
   if (pending) return '检查中';
   return '全部可用';
+}
+
+async function findLatestExportForDraft(
+  storage: StorageApi,
+  videoEditors: VideoEditorApi,
+  projectId: string,
+  draftId: string
+): Promise<VideoEditorExportTaskDto | undefined> {
+  const listed = await storage.listTasks();
+  if (!listed.ok) throw new Error('Unable to list export tasks');
+  const candidates = listed.value.items
+    .filter((task) => task.projectId === projectId && task.kind === 'video_editing')
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  for (const candidate of candidates) {
+    const details = await storage.getTaskDetails(candidate.taskId);
+    if (!details.ok || details.value?.sourceDraftId !== draftId) continue;
+    const task = await videoEditors.getExport(candidate.taskId);
+    return task.ok ? task.value : undefined;
+  }
+  return undefined;
+}
+
+const pollingExportStates = new Set([
+  'queued',
+  'validating_sources',
+  'preparing_media',
+  'encoding',
+  'writing_file',
+  'verifying_file',
+  'registering_work',
+  'cancel_requested'
+]);
+
+function isExportPollingState(state: string): boolean {
+  return pollingExportStates.has(state);
+}
+
+function exportStateDisplay(state?: string): { readonly label: string; readonly tone: StatusTone } {
+  const states: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
+    queued: { label: '排队中', tone: 'info' },
+    validating_sources: { label: '正在校验素材', tone: 'info' },
+    preparing_media: { label: '正在准备媒体', tone: 'info' },
+    encoding: { label: '正在编码', tone: 'info' },
+    writing_file: { label: '正在写入文件', tone: 'info' },
+    verifying_file: { label: '正在校验文件', tone: 'info' },
+    registering_work: { label: '正在登记作品', tone: 'info' },
+    completed: { label: '已完成', tone: 'success' },
+    cancel_requested: { label: '正在请求取消', tone: 'warning' },
+    cancelled: { label: '已取消', tone: 'neutral' },
+    needs_user_action: { label: '需要处理', tone: 'warning' },
+    interrupted: { label: '执行已中断', tone: 'warning' },
+    recovery_required: { label: '需要恢复', tone: 'warning' },
+    failed: { label: '失败', tone: 'danger' },
+    expired: { label: '已过期', tone: 'danger' }
+  };
+  return state
+    ? states[state] ?? { label: state, tone: 'neutral' }
+    : { label: '尚未创建任务', tone: 'neutral' };
+}
+
+function exportSpaceLabel(
+  preflight?: VideoEditorExportPreflightDto,
+  task?: VideoEditorExportTaskDto
+): string {
+  if (task?.requiredAction?.code === 'destination_unavailable') {
+    return `目标不可用：${exportReasonLabel(task.requiredAction.message)}`;
+  }
+  if (!preflight) return '尚未估算；执行开始时检查真实可写空间';
+  return `预计 ${formatFileSize(preflight.estimatedOutputBytes)}；执行开始时检查真实可写空间`;
+}
+
+function exportReasonLabel(reason: string): string {
+  if (reason.includes('timeline has no video clips')) return '时间线没有视频片段';
+  if (reason.includes('approved local media engine is unavailable')) {
+    return '未检测到经批准的本地媒体引擎';
+  }
+  if (reason.includes('capability probe failed')) return '媒体引擎能力探测失败';
+  if (reason.includes('source file') || reason.includes('source identity')) {
+    return '源文件不可用、已变化或无法验证';
+  }
+  if (reason.includes('requested font is unavailable')) return '草稿使用的字体当前不可用';
+  if (reason.includes('destination is not writable')) return '目标目录不可写';
+  if (reason.includes('destination space is unavailable')) return '无法读取目标磁盘空间';
+  if (reason.includes('does not have enough free space')) return '目标磁盘空间不足';
+  if (reason.includes('requested export destination')) return '所选目标目录不受当前管线支持';
+  if (reason.includes('requested') && reason.includes('unavailable')) return '所选输出能力不可用';
+  return reason;
+}
+
+function hardwarePolicyLabel(value: 'software_only'): string {
+  return value === 'software_only' ? '仅软件编码（当前真实能力）' : value;
+}
+
+function requiredActionLabel(code: 'source_unavailable' | 'destination_unavailable'): string {
+  return code === 'source_unavailable' ? '需要恢复源文件' : '需要恢复导出目标';
+}
+
+function retryabilityLabel(value: 'retryable' | 'not_retryable' | 'unknown'): string {
+  if (value === 'retryable') return '可以创建新尝试';
+  if (value === 'not_retryable') return '不能直接重试';
+  return '重试状态未知';
+}
+
+function formatFileSize(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function referenceKindLabel(
