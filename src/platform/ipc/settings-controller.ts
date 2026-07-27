@@ -26,9 +26,13 @@ import type {
   NativeSystemSettingsTarget,
   NotificationTestResultDto,
   SettingsSystemStatusDto,
-  ShortcutPlatform
+  ShortcutPlatform,
+  DiagnosticBundlePreviewDto,
+  DiagnosticBundleResultDto,
+  SettingsMaintenanceStatusDto,
+  LocalApplicationDataScope
 } from '../../shared/settings-ipc';
-import { directoryPurposes } from '../../shared/settings-ipc';
+import { directoryPurposes, localApplicationDataScopes } from '../../shared/settings-ipc';
 import {
   type CleanupPlan,
   type CleanupService,
@@ -53,7 +57,12 @@ import {
   type ProxyService,
   type ShortcutChangePlan,
   ShortcutOperationError,
-  type ShortcutService
+  type ShortcutService,
+  ApplicationDataOperationError,
+  type ApplicationDataPlan,
+  type ApplicationDataService,
+  type DiagnosticsService,
+  type UpdatesService
 } from '../settings';
 
 interface PendingSettingsOperation {
@@ -66,6 +75,7 @@ interface PendingSettingsOperation {
   readonly blocker?: string;
   readonly proxyPlan?: ProxyChangePlan;
   readonly shortcutPlan?: ShortcutChangePlan;
+  readonly applicationData?: ApplicationDataPlan;
 }
 
 export interface SettingsB2Services {
@@ -84,12 +94,15 @@ export interface SettingsB3Services {
   readonly shortcuts: ShortcutService;
 }
 
+export interface SettingsB4Services {
+  readonly diagnostics: DiagnosticsService;
+  readonly updates: UpdatesService;
+  readonly applicationData: ApplicationDataService;
+}
+
 class UnsupportedSettingsOperationError extends Error {}
 
-const unavailableCapabilities = [
-  'diagnostics',
-  'updates'
-] as const;
+const unavailableCapabilities = ['diagnostics', 'updates'] as const;
 
 const b3Capabilities = [
   'permission_controls',
@@ -107,14 +120,20 @@ export class SettingsController {
     private readonly createHandle: () => string = () => randomUUID(),
     private readonly planLifetimeMs = 5 * 60 * 1000,
     private readonly b2?: SettingsB2Services,
-    private readonly b3?: SettingsB3Services
+    private readonly b3?: SettingsB3Services,
+    private readonly b4?: SettingsB4Services
   ) {}
 
   async getSnapshot(): Promise<SettingsIpcResult<SettingsSnapshotDto>> {
     try {
       return {
         ok: true,
-        value: toSnapshot(await this.repository.load(), Boolean(this.b2), Boolean(this.b3))
+        value: toSnapshot(
+          await this.repository.load(),
+          Boolean(this.b2),
+          Boolean(this.b3),
+          Boolean(this.b4)
+        )
       };
     } catch {
       return failure('settings_read_failed', 'Local settings could not be read');
@@ -225,6 +244,91 @@ export class SettingsController {
     }
   }
 
+  async getMaintenanceStatus(
+    checkUpdates = false
+  ): Promise<SettingsIpcResult<SettingsMaintenanceStatusDto>> {
+    if (!this.b4) {
+      return failure('operation_unsupported', 'Diagnostics and update adapters are unavailable');
+    }
+    try {
+      const current = await this.repository.load();
+      return {
+        ok: true,
+        value: {
+          diagnostics: {
+            capability: this.b4.diagnostics.getCapability(),
+            logging: {
+              level: current.document.diagnostics.level,
+              retentionDays: current.document.diagnostics.retentionDays,
+              maxFileBytes: current.document.diagnostics.maxFileBytes,
+              automaticCleanup: current.document.diagnostics.autoCleanup,
+              localOnly: true,
+              automaticUpload: false
+            },
+            lastBundleAvailable: this.b4.diagnostics.getLastBundleAvailable()
+          },
+          updates: await this.b4.updates.getStatus(current.document.updates, checkUpdates)
+        }
+      };
+    } catch {
+      return failure('settings_read_failed', 'Maintenance status could not be read');
+    }
+  }
+
+  async previewDiagnosticBundle(): Promise<SettingsIpcResult<DiagnosticBundlePreviewDto>> {
+    if (!this.b4) {
+      return failure('operation_unsupported', 'Diagnostics are unavailable');
+    }
+    try {
+      const current = await this.repository.load();
+      return { ok: true, value: await this.b4.diagnostics.preview(current.document.diagnostics) };
+    } catch {
+      return failure('operation_failed', 'Diagnostic preview could not be prepared');
+    }
+  }
+
+  /** Called only by Electron main after a native directory picker succeeds. */
+  async generateDiagnosticBundle(
+    outputDirectory: unknown
+  ): Promise<SettingsIpcResult<DiagnosticBundleResultDto>> {
+    if (!this.b4) {
+      return failure('operation_unsupported', 'Diagnostics are unavailable');
+    }
+    if (typeof outputDirectory !== 'string' || outputDirectory.length < 1) {
+      return failure('invalid_request', 'Diagnostic output directory is invalid');
+    }
+    try {
+      const current = await this.repository.load();
+      return {
+        ok: true,
+        value: await this.b4.diagnostics.generate(current.document.diagnostics, outputDirectory)
+      };
+    } catch {
+      return failure('operation_failed', 'Diagnostic bundle generation failed and temporary files were removed');
+    }
+  }
+
+  async openDiagnosticLocation(
+    target: unknown
+  ): Promise<SettingsIpcResult<{ readonly opened: true }>> {
+    if (!this.b4) {
+      return failure('operation_unsupported', 'Diagnostics are unavailable');
+    }
+    if (target !== 'logs' && target !== 'last_bundle') {
+      return failure('invalid_request', 'Diagnostic location target is invalid');
+    }
+    try {
+      await this.b4.diagnostics.openLocation(target);
+      return { ok: true, value: { opened: true } };
+    } catch {
+      return failure('operation_failed', 'Diagnostic location could not be opened');
+    }
+  }
+
+  async checkForUpdates(): Promise<SettingsIpcResult<SettingsMaintenanceStatusDto>> {
+    return this.getMaintenanceStatus(true);
+  }
+
   /** Called only by Electron main after a native directory picker succeeds. */
   async registerSelectedDirectory(
     purpose: unknown,
@@ -267,7 +371,8 @@ export class SettingsController {
         value: toSnapshot(
           await this.repository.replace(request.expectedRevision, request.values),
           Boolean(this.b2),
-          Boolean(this.b3)
+          Boolean(this.b3),
+          Boolean(this.b4)
         )
       };
     } catch (error) {
@@ -413,6 +518,55 @@ export class SettingsController {
           value: await this.planB3Operation(current, currentValues, request.operation)
         };
       }
+      if (request.operation.kind === 'clear_local_application_data') {
+        if (!this.b4) throw new UnsupportedSettingsOperationError();
+        const dataPlan = await this.b4.applicationData.plan(request.operation.scopes);
+        const resetSettings = request.operation.scopes.includes('settings');
+        const next = resetSettings ? createDefaultSettingsValues() : undefined;
+        let proxyPlan: ProxyChangePlan | undefined;
+        let shortcutPlan: ShortcutChangePlan | undefined;
+        let blocker: string | undefined;
+        if (resetSettings && this.b3) {
+          if (JSON.stringify(currentValues.network.proxy) !==
+            JSON.stringify(createDefaultSettingsValues().network.proxy)) {
+            proxyPlan = await this.b3.proxy.plan(
+              currentValues.network.proxy,
+              { kind: 'system_default' },
+              undefined,
+              currentValues.network.connectionTimeoutMs
+            );
+            if (!proxyPlan.test.ok) blocker = `proxy_test_${proxyPlan.test.failure}`;
+          }
+          shortcutPlan = this.b3.shortcuts.restoreAllDefaults(currentValues.shortcuts);
+          if (shortcutPlan.issues.length > 0) blocker = 'shortcut_conflict';
+        }
+        return {
+          ok: true,
+          value: this.rememberEffectPlan(request.operation.kind, current, {
+            values: next,
+            applicationData: dataPlan,
+            proxyPlan: proxyPlan?.test.ok ? proxyPlan : undefined,
+            shortcutPlan,
+            blocker,
+            reversible: false,
+            affectedCategories: resetSettings ? settingsCategories : [],
+            changedValueCount: resetSettings ? countChangedLeaves(currentValues, next) : 0,
+            warnings: [
+              'projects_works_tasks_and_source_media_are_excluded',
+              'external_files_are_excluded',
+              'deleted_application_data_cannot_be_recovered'
+            ],
+            impact: {
+              fileCount: dataPlan.fileCount,
+              bytes: dataPlan.bytes,
+              settingsReset: resetSettings,
+              credentialsDeleted: request.operation.scopes.includes('local_credentials'),
+              projectsExcluded: true,
+              externalFilesExcluded: true
+            }
+          })
+        };
+      }
       if (!this.b2) throw new UnsupportedSettingsOperationError();
       return {
         ok: true,
@@ -471,12 +625,21 @@ export class SettingsController {
           if (!this.b2) throw new UnsupportedSettingsOperationError();
           await this.b2.cleanup.execute(pending.cleanup);
         }
+        if (pending.applicationData) {
+          if (!this.b4) throw new UnsupportedSettingsOperationError();
+          await this.b4.applicationData.execute(pending.applicationData);
+        }
         const result = pending.values
           ? await this.repository.replace(pending.expectedRevision, pending.values)
           : current;
         return {
           ok: true,
-          value: toSnapshot(result, Boolean(this.b2), Boolean(this.b3))
+          value: toSnapshot(
+            result,
+            Boolean(this.b2),
+            Boolean(this.b3),
+            Boolean(this.b4)
+          )
         };
       } catch (error) {
         for (const rollback of rollbacks.reverse()) {
@@ -504,6 +667,7 @@ export class SettingsController {
       readonly impact?: SettingsOperationPlanDto['impact'];
       readonly proxyPlan?: ProxyChangePlan;
       readonly shortcutPlan?: ShortcutChangePlan;
+      readonly applicationData?: ApplicationDataPlan;
     } = {}
   ): SettingsOperationPlanDto {
     const confirmationHandle = this.createHandle();
@@ -534,7 +698,8 @@ export class SettingsController {
       values,
       blocker: options.blocker,
       proxyPlan: options.proxyPlan,
-      shortcutPlan: options.shortcutPlan
+      shortcutPlan: options.shortcutPlan,
+      applicationData: options.applicationData
     });
     return plan;
   }
@@ -671,6 +836,9 @@ export class SettingsController {
       readonly changedValueCount?: number;
       readonly warnings?: readonly string[];
       readonly impact?: SettingsOperationPlanDto['impact'];
+      readonly proxyPlan?: ProxyChangePlan;
+      readonly shortcutPlan?: ShortcutChangePlan;
+      readonly applicationData?: ApplicationDataPlan;
     }
   ): SettingsOperationPlanDto {
     const confirmationHandle = this.createHandle();
@@ -684,7 +852,10 @@ export class SettingsController {
       values: options.values,
       migration: options.migration,
       cleanup: options.cleanup,
-      blocker: options.blocker
+      blocker: options.blocker,
+      proxyPlan: options.proxyPlan,
+      shortcutPlan: options.shortcutPlan,
+      applicationData: options.applicationData
     });
     return {
       kind,
@@ -711,7 +882,8 @@ export class SettingsController {
 function toSnapshot(
   result: SettingsLoadResult,
   b2Available: boolean,
-  b3Available: boolean
+  b3Available: boolean,
+  b4Available = false
 ): SettingsSnapshotDto {
   const b2Capabilities = [
     'platform_capability_detection',
@@ -726,12 +898,13 @@ function toSnapshot(
       appliedKeys: [
         'settings_persistence',
         ...(b2Available ? b2Capabilities : []),
-        ...(b3Available ? b3Capabilities : [])
+        ...(b3Available ? b3Capabilities : []),
+        ...(b4Available ? ['diagnostics'] : [])
       ],
       unavailableKeys: [
         ...(!b2Available ? b2Capabilities : []),
         ...(!b3Available ? b3Capabilities : []),
-        ...unavailableCapabilities
+        ...(b4Available ? ['updates'] : unavailableCapabilities)
       ]
     },
     capabilities: [
@@ -742,11 +915,20 @@ function toSnapshot(
       ...b3Capabilities.map<SettingsCapabilityDto>((id) => b3Available
         ? { id, state: 'available' }
         : { id, state: 'unavailable', reason: 'phase8_platform_adapter_pending' }),
-      ...unavailableCapabilities.map<SettingsCapabilityDto>((id) => ({
-        id,
-        state: 'unavailable',
-        reason: 'phase8_platform_adapter_pending'
-      }))
+      ...(b4Available
+        ? [
+            { id: 'diagnostics', state: 'available' as const, reason: 'local_only_no_upload' },
+            {
+              id: 'updates',
+              state: 'unavailable' as const,
+              reason: 'production_update_source_not_configured'
+            }
+          ]
+        : unavailableCapabilities.map<SettingsCapabilityDto>((id) => ({
+            id,
+            state: 'unavailable',
+            reason: 'phase8_platform_adapter_pending'
+          })))
     ],
     statuses: {
       repository: result.source,
@@ -927,6 +1109,25 @@ function parseOperationRequest(value: unknown): {
       }
     };
   }
+  if (operation.kind === 'clear_local_application_data') {
+    exactKeys(operation, ['kind', 'scopes']);
+    if (!Array.isArray(operation.scopes) || operation.scopes.length === 0) {
+      throw new TypeError('Application data scopes are invalid');
+    }
+    const scopes = operation.scopes.map((scope) => {
+      if (!localApplicationDataScopes.includes(scope as LocalApplicationDataScope)) {
+        throw new TypeError('Application data scope is invalid');
+      }
+      return scope as LocalApplicationDataScope;
+    });
+    if (new Set(scopes).size !== scopes.length) {
+      throw new TypeError('Application data scopes must be unique');
+    }
+    return {
+      expectedRevision: revision(item.expectedRevision),
+      operation: { kind: 'clear_local_application_data', scopes }
+    };
+  }
   throw new UnsupportedSettingsOperationError('Settings operation is unsupported');
 }
 
@@ -975,6 +1176,9 @@ function mapOperationError(error: unknown): SettingsIpcResult<never> {
     return failure('operation_failed', error.message);
   }
   if (error instanceof ProxyOperationError || error instanceof ShortcutOperationError) {
+    return failure('operation_failed', error.message);
+  }
+  if (error instanceof ApplicationDataOperationError) {
     return failure('operation_failed', error.message);
   }
   if (error instanceof UnsupportedSettingsOperationError) {

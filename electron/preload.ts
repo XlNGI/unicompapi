@@ -379,6 +379,16 @@ const settings: SettingsApi = {
     ipcRenderer.invoke(settingsIpcChannels.sendTestNotification, { system, sound }),
   stageProxyCredential: (username, value) =>
     ipcRenderer.invoke(settingsIpcChannels.stageProxyCredential, { username, value }),
+  getMaintenanceStatus: () =>
+    ipcRenderer.invoke(settingsIpcChannels.getMaintenanceStatus),
+  previewDiagnosticBundle: () =>
+    ipcRenderer.invoke(settingsIpcChannels.previewDiagnosticBundle),
+  generateDiagnosticBundle: () =>
+    ipcRenderer.invoke(settingsIpcChannels.generateDiagnosticBundle),
+  openDiagnosticLocation: (target) =>
+    ipcRenderer.invoke(settingsIpcChannels.openDiagnosticLocation, { target }),
+  checkForUpdates: () =>
+    ipcRenderer.invoke(settingsIpcChannels.checkForUpdates),
   planOperation: (expectedRevision, operation) =>
     ipcRenderer.invoke(settingsIpcChannels.planOperation, {
       expectedRevision,

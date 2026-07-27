@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import {
   app,
   BrowserWindow,
@@ -22,7 +23,8 @@ import type {
   NativePermissionAdapter,
   NotificationPlatformAdapter,
   ProxyPlatformAdapter,
-  ShortcutPlatformAdapter
+  ShortcutPlatformAdapter,
+  DiagnosticLocationAdapter
 } from '../../src/platform';
 
 const proxyProbeUrl = 'https://example.com/';
@@ -197,6 +199,20 @@ export class ElectronShortcutAdapter implements ShortcutPlatformAdapter {
 
   unregister(accelerator: string): void {
     globalShortcut.unregister(accelerator);
+  }
+}
+
+export class ElectronDiagnosticLocationAdapter implements DiagnosticLocationAdapter {
+  constructor(private readonly userDataPath: string) {}
+
+  async open(target: 'logs' | 'last_bundle', lastBundlePath: string | undefined): Promise<void> {
+    if (target === 'last_bundle') {
+      if (!lastBundlePath) throw new Error('No diagnostic bundle has been generated');
+      shell.showItemInFolder(lastBundlePath);
+      return;
+    }
+    const error = await shell.openPath(path.join(this.userDataPath, 'logs'));
+    if (error) throw new Error(error);
   }
 }
 

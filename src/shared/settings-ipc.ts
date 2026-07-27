@@ -17,6 +17,11 @@ export const settingsIpcChannels = {
   openSystemSettings: 'settings:open-system-settings',
   sendTestNotification: 'settings:send-test-notification',
   stageProxyCredential: 'settings:stage-proxy-credential',
+  getMaintenanceStatus: 'settings:get-maintenance-status',
+  previewDiagnosticBundle: 'settings:preview-diagnostic-bundle',
+  generateDiagnosticBundle: 'settings:generate-diagnostic-bundle',
+  openDiagnosticLocation: 'settings:open-diagnostic-location',
+  checkForUpdates: 'settings:check-for-updates',
   planOperation: 'settings:plan-operation',
   executeOperation: 'settings:execute-operation'
 } as const;
@@ -229,6 +234,95 @@ export interface SettingsSystemStatusDto {
   };
 }
 
+export type DiagnosticLocationTarget = 'logs' | 'last_bundle';
+
+export interface DiagnosticBundlePreviewDto {
+  readonly generatedAt: string;
+  readonly included: readonly {
+    readonly category: string;
+    readonly displayName: string;
+    readonly bytes: number;
+  }[];
+  readonly excluded: readonly {
+    readonly category: string;
+    readonly reason: string;
+  }[];
+  readonly redactions: readonly string[];
+  readonly totalInputBytes: number;
+  readonly automaticUpload: false;
+  readonly pathsRedacted: true;
+  readonly containsCredentials: false;
+  readonly containsUserMedia: false;
+  readonly containsFullPrompts: false;
+}
+
+export interface DiagnosticBundleResultDto {
+  readonly bundleId: string;
+  readonly fileName: string;
+  readonly bytes: number;
+  readonly format: 'json_gzip_v1';
+  readonly locallyVerified: true;
+  readonly automaticUpload: false;
+  readonly location: 'user_selected';
+}
+
+export type UpdateItemKind =
+  | 'application'
+  | 'media_component'
+  | 'built_in_adapters'
+  | 'provider_presets'
+  | 'help_resources';
+
+export interface UpdateItemStatusDto {
+  readonly kind: UpdateItemKind;
+  readonly currentVersion: string | null;
+  readonly availableVersion: string | null;
+  readonly channel: 'stable';
+  readonly state: 'unavailable' | 'failed' | 'update_available';
+  readonly reason: string;
+  readonly integrity: 'not_checked' | 'verified' | 'failed';
+  readonly signature: 'not_checked' | 'verified' | 'failed';
+  readonly canInstall: false;
+  readonly canRepair: false;
+  readonly canRollback: false;
+}
+
+export interface SettingsMaintenanceStatusDto {
+  readonly diagnostics: {
+    readonly capability: SettingsCapabilityDto;
+    readonly logging: {
+      readonly level: 'error' | 'warn' | 'info' | 'debug';
+      readonly retentionDays: number;
+      readonly maxFileBytes: number;
+      readonly automaticCleanup: boolean;
+      readonly localOnly: true;
+      readonly automaticUpload: false;
+    };
+    readonly lastBundleAvailable: boolean;
+  };
+  readonly updates: {
+    readonly capability: SettingsCapabilityDto;
+    readonly items: readonly UpdateItemStatusDto[];
+    readonly checkedAt: string | null;
+    readonly blockers: readonly string[];
+    readonly installRequiresExplicitConfirmation: true;
+    readonly restartRequiresExplicitConfirmation: true;
+  };
+}
+
+export const localApplicationDataScopes = [
+  'settings',
+  'directory_authorizations',
+  'provider_registry',
+  'local_credentials',
+  'project_catalog',
+  'logs',
+  'caches'
+] as const;
+
+export type LocalApplicationDataScope =
+  (typeof localApplicationDataScopes)[number];
+
 export type SettingsOperationRequestDto =
   | {
       readonly kind: 'restore_category_defaults';
@@ -269,6 +363,10 @@ export type SettingsOperationRequestDto =
   | {
       readonly kind: 'restore_shortcut_defaults';
       readonly platform: ShortcutPlatform;
+    }
+  | {
+      readonly kind: 'clear_local_application_data';
+      readonly scopes: readonly LocalApplicationDataScope[];
     };
 
 export interface SettingsOperationPlanDto {
@@ -288,6 +386,10 @@ export interface SettingsOperationPlanDto {
     readonly bytes?: number;
     readonly activeTasksUnaffected?: boolean;
     readonly oldLocationRetained?: boolean;
+    readonly settingsReset?: boolean;
+    readonly credentialsDeleted?: boolean;
+    readonly projectsExcluded?: boolean;
+    readonly externalFilesExcluded?: boolean;
   };
   readonly pendingRestart: readonly string[];
 }
@@ -318,6 +420,13 @@ export interface SettingsApi {
     username: string,
     value: string
   ): Promise<SettingsIpcResult<{ readonly credentialHandle: string }>>;
+  getMaintenanceStatus(): Promise<SettingsIpcResult<SettingsMaintenanceStatusDto>>;
+  previewDiagnosticBundle(): Promise<SettingsIpcResult<DiagnosticBundlePreviewDto>>;
+  generateDiagnosticBundle(): Promise<SettingsIpcResult<DiagnosticBundleResultDto | null>>;
+  openDiagnosticLocation(
+    target: DiagnosticLocationTarget
+  ): Promise<SettingsIpcResult<{ readonly opened: true }>>;
+  checkForUpdates(): Promise<SettingsIpcResult<SettingsMaintenanceStatusDto>>;
   planOperation(
     expectedRevision: number,
     operation: SettingsOperationRequestDto
