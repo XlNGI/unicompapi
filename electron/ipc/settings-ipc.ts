@@ -2,7 +2,9 @@ import { app, dialog, ipcMain, safeStorage } from 'electron';
 import path from 'node:path';
 import {
   CleanupService,
+  ApplicationDataService,
   DirectoryMigrationService,
+  DiagnosticsService,
   JsonDirectoryRegistry,
   JsonSettingsRepository,
   MediaSettingsStatusService,
@@ -12,7 +14,8 @@ import {
   ProxyService,
   SecureCredentialVault,
   ShortcutService,
-  SettingsController
+  SettingsController,
+  UpdatesService
 } from '../../src/platform';
 import {
   directoryPurposes,
@@ -20,6 +23,7 @@ import {
 } from '../../src/shared/settings-ipc';
 import {
   ElectronNotificationAdapter,
+  ElectronDiagnosticLocationAdapter,
   ElectronPermissionAdapter,
   ElectronProxyAdapter,
   ElectronShortcutAdapter,
@@ -73,6 +77,15 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
       proxy,
       notifications: new NotificationService(new ElectronNotificationAdapter()),
       shortcuts
+    },
+    {
+      diagnostics: new DiagnosticsService(
+        userDataPath,
+        undefined,
+        new ElectronDiagnosticLocationAdapter(userDataPath)
+      ),
+      updates: new UpdatesService(app.getVersion()),
+      applicationData: new ApplicationDataService(userDataPath)
     }
   );
 
@@ -126,6 +139,31 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
   });
   ipcMain.handle(settingsIpcChannels.stageProxyCredential, (_event, input) =>
     controller.stageProxyCredential(input)
+  );
+  ipcMain.handle(settingsIpcChannels.getMaintenanceStatus, () =>
+    controller.getMaintenanceStatus()
+  );
+  ipcMain.handle(settingsIpcChannels.previewDiagnosticBundle, () =>
+    controller.previewDiagnosticBundle()
+  );
+  ipcMain.handle(settingsIpcChannels.generateDiagnosticBundle, async () => {
+    const selected = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择诊断包保存位置'
+    });
+    if (selected.canceled || selected.filePaths.length !== 1) {
+      return { ok: true as const, value: null };
+    }
+    return controller.generateDiagnosticBundle(selected.filePaths[0]);
+  });
+  ipcMain.handle(settingsIpcChannels.openDiagnosticLocation, (_event, input) => {
+    const target = input && typeof input === 'object' && 'target' in input
+      ? input.target
+      : undefined;
+    return controller.openDiagnosticLocation(target);
+  });
+  ipcMain.handle(settingsIpcChannels.checkForUpdates, () =>
+    controller.checkForUpdates()
   );
   ipcMain.handle(settingsIpcChannels.planOperation, (_event, input) =>
     controller.planOperation(input)

@@ -17,6 +17,11 @@ test('exposes only the controlled phase 8 settings operations', () => {
     'openSystemSettings',
     'sendTestNotification',
     'stageProxyCredential',
+    'getMaintenanceStatus',
+    'previewDiagnosticBundle',
+    'generateDiagnosticBundle',
+    'openDiagnosticLocation',
+    'checkForUpdates',
     'planOperation',
     'executeOperation'
   ]) {
