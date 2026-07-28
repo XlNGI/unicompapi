@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "id": "windows-x64-primary",
+      "os": "win32",
+      "allowedArchitectures": ["x64"],
+      "architecturePolicy": "record_observed_only",
+      "executionMode": "real_device",
+      "required": true,
+      "requiredSuites": [
+        "engineering_integrity",
+        "electron_lifecycle",
+        "filesystem_permissions",
+        "secure_storage",
+        "system_integrations",
+        "power_recovery",
+        "media_software",
+        "full_product_ui",
+        "security_audit"
+      ]
+    },
+    {
+      "id": "macos-primary",
+      "os": "darwin",
+      "allowedArchitectures": ["arm64", "x64"],
+      "architecturePolicy": "record_observed_only",
+      "executionMode": "real_device",
+      "required": true,
+      "requiredSuites": [
+        "engineering_integrity",
+        "electron_lifecycle",
+        "filesystem_permissions",
+        "secure_storage",
+        "system_integrations",
+        "power_recovery",
+        "media_software",
+        "full_product_ui",
+        "security_audit"
+      ]
+    }
+  ]
+}
