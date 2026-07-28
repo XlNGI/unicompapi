@@ -10,6 +10,10 @@ import type { VideoExportPlan } from '../entities/video-export-plan';
 import type { VideoWorkspaceDraft } from '../entities/video-workspace';
 import type { Work } from '../entities/work';
 import type {
+  Conversation,
+  ConversationStatus
+} from '../entities/conversation';
+import type {
   ModelCapabilityEvidence,
   Provider,
   ProviderConnection,
@@ -32,6 +36,19 @@ import type {
   VideoExportPlanId,
   WorkId
 } from '../ids';
+import type { ConversationId } from '../ids';
+
+export interface ConversationListOptions {
+  readonly statuses?: readonly ConversationStatus[];
+  readonly projectId?: ProjectId | null;
+}
+
+export interface ConversationRepository {
+  get(id: ConversationId): Promise<Conversation | undefined>;
+  list(options?: ConversationListOptions): Promise<readonly Conversation[]>;
+  create(conversation: Conversation): Promise<void>;
+  save(conversation: Conversation, expectedRevision: number): Promise<void>;
+}
 
 export interface ProjectRepository {
   load(): Promise<Project | undefined>;
