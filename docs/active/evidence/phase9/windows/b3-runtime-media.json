@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "targetId": "windows-x64-primary",
+  "sourceCommit": "7aac020",
+  "collectedAt": "2026-07-28T03:13:40.773Z",
+  "runtime": {
+    "schemaVersion": 1,
+    "os": "win32",
+    "osVersion": "10.0.19045",
+    "architecture": "x64",
+    "nodeVersion": "20.18.3",
+    "electronVersion": "33.4.11",
+    "pathSeparator": "\\",
+    "caseSensitivity": "unknown",
+    "unicodeNormalization": "preserved",
+    "locale": "zh-CN",
+    "timeZone": "Asia/Shanghai"
+  },
+  "results": [
+    {
+      "caseId": "b3.windows.engineering_gate",
+      "suite": "engineering_integrity",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.production_startup_graceful_shutdown",
+      "suite": "electron_lifecycle",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.native_directory_picker_authorization",
+      "suite": "filesystem_permissions",
+      "status": "not_run",
+      "evidenceRefs": [],
+      "note": "B2 visible native picker authorization and revocation remain pending"
+    },
+    {
+      "caseId": "b3.windows.electron_safe_storage_recheck",
+      "suite": "secure_storage",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.proxy_and_shortcut_runtime",
+      "suite": "system_integrations",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.notification_delivery_sound_and_settings",
+      "suite": "system_integrations",
+      "status": "not_run",
+      "evidenceRefs": [],
+      "note": "Capability detection passed; visible notification, sound and system settings opening were not executed"
+    },
+    {
+      "caseId": "b3.windows.process_tree_and_recovery_mapping",
+      "suite": "power_recovery",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.real_suspend_lock_resume",
+      "suite": "power_recovery",
+      "status": "not_run",
+      "evidenceRefs": [],
+      "note": "The real device was not suspended, resumed, locked or unlocked during this run"
+    },
+    {
+      "caseId": "b3.windows.approved_media_toolchain",
+      "suite": "media_software",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.real_media_probe_preview_export_cancel",
+      "suite": "media_software",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    },
+    {
+      "caseId": "b3.windows.full_product_ui",
+      "suite": "full_product_ui",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b3.windows.runtime_security_audit",
+      "suite": "security_audit",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b3-runtime-media-summary.md"]
+    }
+  ]
+}

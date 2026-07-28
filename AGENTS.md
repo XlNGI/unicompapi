@@ -61,7 +61,7 @@ Codex 每次完成任务后应更新：
 当前阶段为：
 
 ```text
-阶段 9｜跨平台与完整验收（B1、B2 已合并；B2 跨平台实机验收待补）
+阶段 9｜跨平台与完整验收（B1、B2 已合并；B3 Windows 实现基线完成，跨平台实机验收待补）
 ```
 
-阶段 8 已完成联调并正式收口，记录见 `docs/active/阶段8-联调验收记录.md`。阶段 9 B1 已通过 `bb862a3 Merge phase 9 cross-platform contracts` 合并并推送 `develop`；B2 已通过 `f47be6b Merge phase 9 cross-platform storage security` 合并并推送 `develop`，本地与远程功能分支均保留。B2 已完成可移植路径、符号链接防护、目录授权记录、安全存储回滚、敏感产物脱敏和 Windows 自动化/真实 `safeStorage` 基线；Windows 原生目录选择器人工操作和全部 macOS 实机用例仍为 `not_run`，不得标记 B2 跨平台验收完成。本次负责人决策只授权先合并 B2，不等于授权启动 B3；B3 仍须单独确认，并遵守 macOS 媒体工具链单独批准边界。阶段 9 不新增业务一级页面；安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入继续属于阶段 10。`.tools/` 与 FFmpeg 二进制不得进入 Git、生产构建或发布物。
+阶段 8 已完成联调并正式收口，记录见 `docs/active/阶段8-联调验收记录.md`。阶段 9 B1 已通过 `bb862a3 Merge phase 9 cross-platform contracts` 合并并推送 `develop`；B2 已通过 `f47be6b Merge phase 9 cross-platform storage security` 合并并推送 `develop`，本地与远程功能分支均保留。项目负责人已明确启动 B3；`feature/cross-platform-runtime-media` 从 `develop@a76890d` 建立，实现提交 `7aac020` 已完成受控进程树、媒体超时/取消、导出恢复、休眠/锁屏/退出、代理/快捷键运行时验证和 HTTPS 外链边界。Windows 工程与运行时基线通过，但真实睡眠/锁屏、通知/声音/系统设置人工项和全部 macOS 实机项仍为 `not_run`，不得标记 B3 跨平台验收完成或自动启动 B4。macOS 本地开发/测试媒体工具链仍须单独批准。阶段 9 不新增业务一级页面；安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入继续属于阶段 10。`.tools/` 与 FFmpeg 二进制不得进入 Git、生产构建或发布物。
