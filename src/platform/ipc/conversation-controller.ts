@@ -12,6 +12,7 @@ import {
 import {
   chatContextRequestParsers,
   type ChatContextIpcResult,
+  type ConversationCandidateDto,
   type ConversationDto,
   type MessageDto
 } from '../../shared/chat-context-ipc';
@@ -69,6 +70,42 @@ export class ConversationController {
       if (input.includeDeleted) statuses.push('deleted');
       const conversations = await this.dependencies.service.list({ statuses });
       return { ok: true, value: conversations.map(toConversationDto) };
+    });
+  }
+
+  listCandidates(): Promise<
+    ChatContextIpcResult<readonly ConversationCandidateDto[]>
+  > {
+    return this.execute(async () => {
+      const session = this.dependencies.getSession();
+      if (!session) {
+        return failure(
+          'project_not_open',
+          'A project must be open to list conversation candidates'
+        );
+      }
+      const conversations = await this.dependencies.service.list({
+        statuses: ['active', 'archived'],
+        projectId: session.projectId
+      });
+      return {
+        ok: true,
+        value: conversations.flatMap((conversation) =>
+          conversation.status === 'deleted'
+            ? []
+            : [{
+                conversationId: conversation.id,
+                projectId: session.projectId,
+                title: conversation.title,
+                status: conversation.status,
+                messageCount: conversation.messages.length,
+                completedMessageCount: conversation.messages.filter(
+                  (message) => message.state === 'completed'
+                ).length,
+                updatedAt: conversation.updatedAt
+              }]
+        )
+      };
     });
   }
 

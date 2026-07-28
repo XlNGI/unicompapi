@@ -28,6 +28,9 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.listConversations, (_event, request: unknown) =>
     conversations.list(request)
   );
+  ipcMain.handle(chatContextIpcChannels.listConversationCandidates, () =>
+    conversations.listCandidates()
+  );
   ipcMain.handle(chatContextIpcChannels.renameConversation, (_event, request: unknown) =>
     conversations.rename(request)
   );

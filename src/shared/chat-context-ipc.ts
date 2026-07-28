@@ -2,6 +2,7 @@ export const chatContextIpcChannels = {
   createConversation: 'chat-context:create-conversation',
   getConversation: 'chat-context:get-conversation',
   listConversations: 'chat-context:list-conversations',
+  listConversationCandidates: 'chat-context:list-conversation-candidates',
   renameConversation: 'chat-context:rename-conversation',
   archiveConversation: 'chat-context:archive-conversation',
   restoreConversation: 'chat-context:restore-conversation',
@@ -95,6 +96,16 @@ export interface ConversationDto {
   readonly updatedAt: string;
   readonly archivedAt?: string;
   readonly deletedAt?: string;
+}
+
+export interface ConversationCandidateDto {
+  readonly conversationId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly status: 'active' | 'archived';
+  readonly messageCount: number;
+  readonly completedMessageCount: number;
+  readonly updatedAt: string;
 }
 
 export interface ProjectContextFragmentDto {
@@ -412,6 +423,9 @@ export interface ChatContextApi {
     includeArchived: boolean,
     includeDeleted: boolean
   ): Promise<ChatContextIpcResult<readonly ConversationDto[]>>;
+  listConversationCandidates(): Promise<
+    ChatContextIpcResult<readonly ConversationCandidateDto[]>
+  >;
   renameConversation(
     conversationId: string,
     expectedRevision: number,

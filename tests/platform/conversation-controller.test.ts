@@ -117,6 +117,48 @@ describe('ConversationController', () => {
     expect(JSON.stringify(invalid)).not.toContain('C:\\private');
   });
 
+  it('lists only current-project safe conversation candidates without message content', async () => {
+    const value = await fixture();
+    const unbound = await value.controller.create({
+      title: 'Unbound chat',
+      bindToCurrentProject: false
+    });
+    expect(unbound.ok).toBe(true);
+    expect(await value.controller.listCandidates()).toMatchObject({
+      ok: false,
+      error: { code: 'project_not_open' }
+    });
+
+    value.openProject();
+    const bound = await value.controller.create({
+      title: 'Bound chat',
+      bindToCurrentProject: true
+    });
+    if (!bound.ok) throw new Error('fixture creation failed');
+    const withMessage = await value.controller.addUserMessage({
+      conversationId: bound.value.conversationId,
+      expectedRevision: bound.value.revision,
+      content: 'private message body'
+    });
+    if (!withMessage.ok) throw new Error('fixture message failed');
+
+    const candidates = await value.controller.listCandidates();
+    expect(candidates).toEqual({
+      ok: true,
+      value: [{
+        conversationId: bound.value.conversationId,
+        projectId: 'project-chat',
+        title: 'Bound chat',
+        status: 'active',
+        messageCount: 1,
+        completedMessageCount: 1,
+        updatedAt: withMessage.value.updatedAt
+      }]
+    });
+    expect(JSON.stringify(candidates)).not.toContain('private message body');
+    expect(JSON.stringify(candidates)).not.toContain('messages');
+  });
+
   it('returns adapter_unavailable without creating or completing an assistant message', async () => {
     const value = await fixture();
     const created = await value.controller.create({
