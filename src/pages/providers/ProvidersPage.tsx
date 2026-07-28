@@ -43,6 +43,17 @@ const capabilityLabels: Record<string, string> = {
   restricted: '受限'
 };
 
+const credentialLabels: Record<string, string> = {
+  not_configured: '未配置凭证',
+  saved: '已安全保存（不回显）',
+  validating: '正在验证（不回显）',
+  valid: '凭证有效（不回显）',
+  invalid: '凭证无效',
+  deleted: '本地凭证已删除',
+  verification_unavailable: '安全存储暂不可验证',
+  status_unavailable: '凭证状态读取失败'
+};
+
 const tabLabels: Record<DetailTab, string> = {
   models: '模型目录',
   connection: '连接信息',
@@ -53,9 +64,9 @@ const tabLabels: Record<DetailTab, string> = {
 
 function toneForState(state: string): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
   if (state === 'available' || state === 'valid' || state === 'verified_supported') return 'success';
-  if (state === 'unavailable' || state === 'invalid' || state === 'verification_failed') return 'danger';
+  if (state === 'unavailable' || state === 'invalid' || state === 'verification_failed' || state === 'status_unavailable') return 'danger';
   if (state === 'saved' || state === 'validating' || state === 'declared_supported') return 'info';
-  if (state === 'unconfigured' || state === 'user_confirmed' || state === 'restricted') return 'warning';
+  if (state === 'unconfigured' || state === 'not_configured' || state === 'verification_unavailable' || state === 'user_confirmed' || state === 'restricted') return 'warning';
   return 'neutral';
 }
 
@@ -96,6 +107,7 @@ export function ProvidersPage() {
   const [routingPriority, setRoutingPriority] = useState('0');
   const [editConnectionName, setEditConnectionName] = useState('');
   const [editEndpoint, setEditEndpoint] = useState('');
+  const [credentialStatus, setCredentialStatus] = useState<string>();
 
   async function refreshRegistry(preferredConnectionId?: string) {
     if (!providersApi) {
@@ -160,6 +172,35 @@ export function ProvidersPage() {
   const modelCapabilities = registry.capabilities.filter(
     (item) => item.modelId === selectedModel?.modelId
   );
+
+  useEffect(() => {
+    let active = true;
+    setCredentialStatus(selectedConnection?.credentialState);
+    if (!providersApi || !selectedConnection) {
+      return () => {
+        active = false;
+      };
+    }
+
+    void providersApi.getCredentialStatus(selectedConnection.connectionId)
+      .then((result) => {
+        if (!active) return;
+        setCredentialStatus(
+          result.ok
+            ? result.value.state
+            : result.error.code === 'encryption_unavailable'
+              ? 'verification_unavailable'
+              : 'status_unavailable'
+        );
+      })
+      .catch(() => {
+        if (active) setCredentialStatus('status_unavailable');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [providersApi, selectedConnection?.connectionId, selectedConnection?.credentialState]);
 
   useEffect(() => {
     setSelectedModelId(connectionModels[0]?.modelId ?? '');
@@ -463,7 +504,7 @@ export function ProvidersPage() {
             </div>
           </aside>
 
-          <main className="uc-provider-page__details">
+          <section className="uc-provider-page__details" aria-label="服务商连接详情">
             {!selectedConnection ? (
               <EmptyState description="请从左侧选择一个连接。" icon="连" title="未选择连接" />
             ) : (
@@ -609,13 +650,13 @@ export function ProvidersPage() {
                   <section className="uc-provider-page__tab-panel" aria-labelledby="credential-heading">
                     <div className="uc-provider-page__section-heading">
                       <div><h3 id="credential-heading">凭证与安全</h3><p>凭证只写入本机安全存储；页面没有读取、复制或显示明文的能力。</p></div>
-                      <StatusPill tone={toneForState(selectedConnection.credentialState)}>
-                        {selectedConnection.credentialState === 'not_configured' ? '未配置凭证' : selectedConnection.credentialState === 'verification_unavailable' ? '不可验证' : selectedConnection.credentialState === 'invalid' ? '凭证无效' : '••••••••'}
+                      <StatusPill tone={toneForState(credentialStatus ?? selectedConnection.credentialState)}>
+                        {credentialLabels[credentialStatus ?? selectedConnection.credentialState] ?? '凭证状态未知'}
                       </StatusPill>
                     </div>
                     <form className="uc-provider-page__stack-form" onSubmit={handleSaveCredential}>
                       <label>
-                        {selectedConnection.credentialState === 'not_configured' ? '输入新凭证' : '替换凭证'}
+                        {(credentialStatus ?? selectedConnection.credentialState) === 'not_configured' ? '输入新凭证' : '替换凭证'}
                         <input autoComplete="new-password" maxLength={65536} onChange={(event) => setCredential(event.target.value)} placeholder="保存后不会再次显示" type="password" value={credential} />
                       </label>
                       <div className="uc-provider-page__header-actions">
@@ -689,7 +730,7 @@ export function ProvidersPage() {
                 )}
               </>
             )}
-          </main>
+          </section>
 
           <aside className="uc-provider-page__capabilities" aria-label="模型能力与路由">
             <div className="uc-provider-page__panel-heading">

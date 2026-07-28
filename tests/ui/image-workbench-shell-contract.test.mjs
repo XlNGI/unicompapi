@@ -34,21 +34,22 @@ test('image workbench uses only the real B1 local draft operations', () => {
   );
 });
 
-test('image workbench keeps blocked and unknown states honest', () => {
+test('image workbench keeps controlled and blocked states honest', () => {
   for (const text of [
     '需要先打开项目',
     '正在读取图片工作区',
     '当前没有图片输入',
     '本地草稿保存失败',
     '未发现',
-    '未知，等待 B3 预检',
+    '按当前模式能力事实检查',
     '不可用',
-    '尚未提供 Schema',
-    '不会显示示例图或伪造结果',
-    '能力预检未接入，无法提交'
+    '由当前模式能力事实提供',
+    '没有真实适配器时会明确阻断',
+    '保存草稿后检查真实提交条件'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }
+  assert.doesNotMatch(workbenchSource, /等待 B2|等待 B3|B2\/B3|尚未接入/);
   assert.doesNotMatch(
     workbenchSource,
     /OpenAI|Anthropic|Midjourney|Stable Diffusion|1024x1024|45%|¥\d|\$\d/
