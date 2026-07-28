@@ -13,7 +13,11 @@ import { pathToFileURL } from 'node:url';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
-import { normalizeTrustedExternalUrl } from '../src/platform';
+import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
+import {
+  normalizeTrustedExternalUrl,
+  StorageProjectSessionRegistry
+} from '../src/platform';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -33,7 +37,13 @@ protocol.registerSchemesAsPrivileged([
 let sleepBlockerId: number | undefined;
 let powerPolicyRead = Promise.resolve();
 const settingsLifecycle = registerSettingsIpcHandlers();
+const projectSessionRegistry = new StorageProjectSessionRegistry();
+const chatContextLifecycle = registerChatContextIpcHandlers({
+  getSession: () => projectSessionRegistry.get()
+});
 const storageLifecycle = registerStorageIpcHandlers({
+  sessionRegistry: projectSessionRegistry,
+  additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
   onActiveExportCountChanged: (count) => {
     powerPolicyRead = powerPolicyRead
       .then(async () => {
@@ -191,7 +201,10 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   if (cleanupStarted) return;
   cleanupStarted = true;
-  void storageLifecycle.dispose().finally(() => {
+  void Promise.all([
+    storageLifecycle.dispose(),
+    chatContextLifecycle.waitForMutations()
+  ]).finally(() => {
     settingsLifecycle.dispose();
     updateSleepBlocker(false);
     cleanupCompleted = true;

@@ -41,8 +41,10 @@ export interface StorageIpcLifecycle {
 
 export function registerStorageIpcHandlers(options: {
   readonly onActiveExportCountChanged?: (count: number) => void;
+  readonly sessionRegistry?: StorageProjectSessionRegistry;
+  readonly additionalSessionChangeGuards?: readonly (() => Promise<void>)[];
 } = {}): StorageIpcLifecycle {
-  const sessionRegistry = new StorageProjectSessionRegistry();
+  const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
     properties: Electron.OpenDialogOptions['properties'],
     filters?: Electron.FileFilter[]
@@ -166,7 +168,8 @@ export function registerStorageIpcHandlers(options: {
         controller.waitForMutations(),
         imageWorkspaces.waitForMutations(),
         videoWorkspaces.waitForMutations(),
-        videoEditors.waitForMutations()
+        videoEditors.waitForMutations(),
+        ...(options.additionalSessionChangeGuards ?? []).map((guard) => guard())
       ]);
     },
     afterSessionChange: async () => {
