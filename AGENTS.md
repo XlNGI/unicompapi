@@ -61,7 +61,7 @@ Codex 每次完成任务后应更新：
 当前阶段为：
 
 ```text
-阶段 9｜跨平台与完整验收（B1 已完成，等待合并 develop）
+阶段 9｜跨平台与完整验收（B1 已合并；B2 Windows 实现基线完成，跨平台实机验收待补）
 ```
 
-阶段 8 已完成联调并正式收口，记录见 `docs/active/阶段8-联调验收记录.md`。阶段 9 规划已通过 `398aa3d Merge phase 9 planning` 合并 `develop`。B1 已在 `feature/cross-platform-contracts` 完成平台目标矩阵、运行时事实与证据契约、平台假设审计、权威交接包校验及 Windows 工程完整性基线，等待合并 `develop`；A1 与 B2 仍等待 B1 合并。Windows 其余 8 个验收套件与 macOS 全部实机套件尚未执行，不得标记阶段 9 通过。阶段 9 不新增业务一级页面；安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入继续属于阶段 10。macOS 实机执行资源与本地开发/测试媒体工具链仍待落实和单独批准。`.tools/` 与 FFmpeg 二进制不得进入 Git、生产构建或发布物。
+阶段 8 已完成联调并正式收口，记录见 `docs/active/阶段8-联调验收记录.md`。阶段 9 B1 已通过 `bb862a3 Merge phase 9 cross-platform contracts` 合并并推送 `develop`，A1 已具备启动条件。B2 已在 `feature/cross-platform-storage-security` 完成可移植路径、符号链接防护、目录授权记录、安全存储回滚、敏感产物脱敏和 Windows 自动化/真实 `safeStorage` 基线；Windows 原生目录选择器人工操作和全部 macOS 实机用例仍为 `not_run`，B2 不得标记跨平台验收完成，B3 仍等待 B2 合并及媒体工具链单独批准。阶段 9 不新增业务一级页面；安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入继续属于阶段 10。`.tools/` 与 FFmpeg 二进制不得进入 Git、生产构建或发布物。
