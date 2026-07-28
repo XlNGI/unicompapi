@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "roots": ["electron", "scripts", "src"],
+  "extensions": [".ts", ".tsx", ".mjs"],
+  "rules": [
+    {
+      "id": "direct-runtime-platform-access",
+      "owner": "B1-B3 platform composition and adapters",
+      "pattern": "process\\.(?:platform|arch)",
+      "allowedFiles": [
+        "electron/ipc/settings-ipc.ts",
+        "electron/ipc/settings-platform-adapters.ts",
+        "electron/main.ts",
+        "electron/preload.ts",
+        "scripts/media-engine-common.mjs",
+        "scripts/phase9-platform-common.mjs",
+        "src/platform/ipc/settings-controller.ts",
+        "src/platform/settings/cleanup-service.ts",
+        "src/platform/settings/directory-migration.ts",
+        "src/platform/settings/directory-registry.ts",
+        "src/platform/settings/performance-policy.ts"
+      ]
+    },
+    {
+      "id": "platform-literal-in-production-code",
+      "owner": "B1 inventory; later tasks keep literals inside contracts and adapters",
+      "pattern": "['\"](?:win32|darwin|windows|macos)['\"]",
+      "allowedFiles": [
+        "electron/ipc/settings-ipc.ts",
+        "electron/ipc/settings-platform-adapters.ts",
+        "electron/main.ts",
+        "scripts/collect-platform-evidence.mjs",
+        "scripts/phase9-platform-common.mjs",
+        "src/domain/entities/settings.ts",
+        "src/pages/settings/SettingsPage.tsx",
+        "src/platform/acceptance/platform-acceptance.ts",
+        "src/platform/ipc/settings-controller.ts",
+        "src/platform/settings/cleanup-service.ts",
+        "src/platform/settings/directory-migration.ts",
+        "src/platform/settings/directory-registry.ts",
+        "src/platform/settings/performance-policy.ts",
+        "src/platform/settings/shortcut-service.ts",
+        "src/shared/settings-ipc.ts",
+        "src/ui/layout/TitleBar.tsx"
+      ]
+    }
+  ]
+}
