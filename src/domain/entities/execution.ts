@@ -1,6 +1,7 @@
 import type {
   ExecutionId,
   FileReferenceId,
+  ProviderOperationRecordId,
   TaskId,
   VideoExportPlanId,
   WorkId
@@ -30,6 +31,12 @@ export interface Execution {
   readonly failure?: ExecutionFailure;
   readonly userAction?: ExecutionUserAction;
   readonly remoteOperationId?: string;
+  readonly providerOperationRecordId?: ProviderOperationRecordId;
+  readonly submissionOutcome?:
+    | 'accepted_async'
+    | 'completed_sync'
+    | 'submission_outcome_unknown'
+    | 'failed_before_submission';
   readonly exportPlanId?: VideoExportPlanId;
   readonly progress?: {
     readonly processedUs?: number;

@@ -43,7 +43,10 @@ afterEach(async () => {
   );
 });
 
-async function createFixture(options: { readonly failingPort?: boolean } = {}) {
+async function createFixture(options: {
+  readonly failingPort?: boolean;
+  readonly unknownOutcome?: boolean;
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-video-submit-'));
   roots.push(root);
   const projectId = toProjectId('project-video-submission');
@@ -195,6 +198,13 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
         if (options.failingPort) {
           throw new VideoOperationPortError('retryable', 'temporary failure');
         }
+        if (options.unknownOutcome) {
+          throw new VideoOperationPortError(
+            'not_retryable',
+            'response lost after write',
+            'submission_outcome_unknown'
+          );
+        }
         return {
           remoteOperationId: 'remote-video-operation-internal',
           state: 'queued'
@@ -204,6 +214,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     createTaskId: () => 'task-video-submission',
     createExecutionId: () =>
       executionIds.shift() ?? 'execution-video-fallback',
+    createProviderOperationRecordId: () => 'provider-operation-record-video',
     now: () => times.shift() ?? '2026-07-23T11:59:00.000Z'
   });
   return {
@@ -320,6 +331,40 @@ describe('VideoSubmissionController', () => {
     ).resolves.toMatchObject({
       ok: true,
       value: { executionId: 'execution-video-submission-2', attempt: 2 }
+    });
+  });
+
+  it('does not allow ordinary retry after an unknown paid submission outcome', async () => {
+    const fixture = await createFixture({ unknownOutcome: true });
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({
+      taskId: 'task-video-submission'
+    });
+    await expect(
+      fixture.controller.invokeExecution({
+        executionId: 'execution-video-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'submission_outcome_unknown' }
+    });
+    await expect(
+      fixture.controller.createExecution({ taskId: 'task-video-submission' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'submission_outcome_unknown' }
+    });
+    const stored = await new JsonExecutionRepository(fixture.storage).get(
+      toExecutionId('execution-video-submission-1')
+    );
+    expect(stored).toMatchObject({
+      state: 'submission_outcome_unknown',
+      submissionOutcome: 'submission_outcome_unknown'
     });
   });
 

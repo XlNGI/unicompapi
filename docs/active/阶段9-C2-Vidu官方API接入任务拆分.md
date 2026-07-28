@@ -2,9 +2,9 @@
 
 日期：2026-07-28
 
-状态：项目负责人已批准写入工程计划；流程 1 已实现并通过分支门禁，等待验收；流程 2—8 未启动
+状态：流程 1 已合并 `develop`；流程 2 已完成实现和分支门禁，等待连续授权下提交、推送与合并；流程 3—8 未启动
 
-当前执行基线：`develop@a6a04a5`
+当前执行基线：`develop@c03693f`
 
 技术架构：
 
@@ -18,15 +18,15 @@
 - 每个流程结束时更新实际修改、验证结果、未完成项和下一步，不得用计划代替真实测试；
 - 流程 1—7 禁止真实 Token、真实 Vidu 联网和收费请求；
 - 流程 8 必须在流程 1—7 全部完成后，由项目负责人再次明确批准联网范围和收费次数；
-- 不直接在 `main` 或 `develop` 开发，不自动合并，不自动启动下一流程；
+- 不直接在 `main` 或 `develop` 开发；项目负责人已明确授权流程 1—7 在各自门禁通过后连续非快进合并并顺序启动下一流程；
 - 不恢复多图参考、图片批量创作、视频批量创作或对话页直接生成。
 
 ## 二、状态总表
 
 | 流程 | 分支 | 状态 | 前置 |
 | --- | --- | --- | --- |
-| 1. 协议、模型记录与强类型路由 | `feature/vidu-protocol-contracts` | `implemented_pending_acceptance` | C1 UI 已合并的 `develop@a6a04a5` |
-| 2. 同步与异步执行生命周期 | `feature/vidu-execution-lifecycle` | `not_started` | 流程 1 合并 |
+| 1. 协议、模型记录与强类型路由 | `feature/vidu-protocol-contracts` | `merged_develop_c03693f` | C1 UI 已合并的 `develop@a6a04a5` |
+| 2. 同步与异步执行生命周期 | `feature/vidu-execution-lifecycle` | `implemented_gates_passed` | 流程 1 合并 |
 | 3. Vidu 共享安全运行时 | `feature/vidu-runtime` | `not_started` | 流程 2 合并 |
 | 4. 两个同步图片适配器 | `feature/vidu-image-adapters` | `not_started` | 流程 3 合并 |
 | 5. Q3 异步视频适配器 | `feature/vidu-video-adapter` | `not_started` | 流程 4 合并 |
@@ -34,7 +34,7 @@
 | 7. 合成服务全链路验收 | `feature/vidu-e2e-validation` | `not_started` | 流程 6 合并 |
 | 8. 真实 Vidu 最小闭环 | `feature/vidu-live-validation` | `not_started` | 流程 1—7 合并且负责人再次批准 |
 
-`feature/vidu-protocol-contracts` 当前已在本地和远程建立。流程 1 已完成实现和完整门禁，等待项目负责人验收；尚未合并 `develop`。实现与验证事实见 `docs/active/阶段9-C2-流程1-Vidu协议契约工程记录.md`。
+`feature/vidu-protocol-contracts` 已通过 `c03693f` 非快进合并 `develop`，本地和远程功能分支均保留。流程 2 实现与验证事实见 `docs/active/阶段9-C2-流程2-执行生命周期工程记录.md`。
 
 ## 三、流程 1｜协议、模型记录与强类型路由
 
@@ -208,4 +208,4 @@
 
 ## 十三、当前执行入口
 
-流程 1 已完成实现、测试、工程记录与分支门禁，当前只应提交并推送 `feature/vidu-protocol-contracts` 后等待项目负责人验收。禁止自行合并 `develop`，禁止实现 HTTP、使用 Token、修改生成页面或提前启动流程 2。
+流程 2 已完成实现、测试、工程记录与分支门禁。按项目负责人连续授权，提交并推送 `feature/vidu-execution-lifecycle`，非快进合并并复验最新 `develop` 后，才能从该基线创建 `feature/vidu-runtime`。仍禁止真实 HTTP、Token、收费请求及提前实现图片/视频协议适配器。

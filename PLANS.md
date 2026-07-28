@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已在 `feature/vidu-protocol-contracts` 完成实现与分支门禁：Node 157 项、Vitest 331 项，合计 488 项通过，等待项目负责人验收且尚未合并 `develop`。流程 2—7 未启动且禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f` 合并 `develop`；流程 2 已在 `feature/vidu-execution-lifecycle` 完成实现和分支门禁，Node 157 项、Vitest 339 项，合计 496 项通过，等待在连续授权下提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -798,4 +798,10 @@ ViduProviderPackage
 
 验证结果：`npm test` 为 Node 157 项与 Vitest 331 项，合计 488 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 200 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。本流程未修改 Electron/preload，未执行 Electron 烟测；未实现 HTTP、未读取 Token、未发起真实或收费请求，也未修改任何生成页面。
 
-未完成：Vidu 真实连接验证、同步/异步执行生命周期持久化、安全 HTTP 运行时、三个协议适配器、结果接收与 Work 流转均不属于流程 1。`reference_to_image` 与 `reference_to_video` 的 Task/提交端口兼容迁移仍须在后续获批小 PR 中完成，当前冻结模型保持不可提交状态。流程 1 等待项目负责人验收和合并指令；不得自动启动流程 2、A3、B4、A4 或真实联网验证。
+流程 1 已提交并推送 `feature/vidu-protocol-contracts`，随后通过 `c03693f Merge phase 9 C2 Vidu protocol contracts` 非快进合并并推送 `develop`；合并后完整门禁再次通过，功能分支本地和远程均保留。
+
+流程 2 实际结果：新增不可变 `ProviderOperationRecord` 与 Schema v1→v2 迁移，统一记录 `accepted_async`、`completed_sync`、`submission_outcome_unknown` 和 `failed_before_submission`。同步图片结果 URL/base64/file URI 先保存到主进程私有项目仓储，再把 Execution 推进到 `remote_completed`；异步提交持久化 provider operation ID，并提供查询、取消和重启恢复端口。收据先于 Execution 更新落盘，重启时可以幂等补齐状态；未知收费提交结果的自动重试次数固定为 0，图片和视频控制器均拒绝在同一 Task 上普通重试。
+
+流程 2 验证结果：`npm test` 为 Node 157 项与 Vitest 339 项，合计 496 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 203 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。本流程未修改 Electron 主进程或 preload，不需要 Electron 烟测；没有 HTTP、Token、真实联网或收费请求。
+
+流程 2 未完成：Vidu 安全 HTTP 运行时、两个同步图片适配器、Q3 视频适配器、结果下载/探测/Work 完整接线与合成服务端到端验证属于后续流程。冻结 Vidu 模型仍保持禁用和 `declared_supported`；A3、B4、A4 与流程 8 均未启动。

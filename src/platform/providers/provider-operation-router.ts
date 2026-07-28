@@ -266,10 +266,18 @@ function outcomeMatchesLifecycle(
   binding: ProviderProtocolBinding
 ): boolean {
   if (binding.executionLifecycle === 'asynchronous_polling') {
-    return outcome.kind === 'asynchronous';
+    return (
+      outcome.kind === 'accepted_async' ||
+      outcome.kind === 'submission_outcome_unknown' ||
+      outcome.kind === 'failed_before_submission'
+    );
   }
   if (binding.executionLifecycle === 'synchronous_completed') {
-    return outcome.kind === 'synchronous_completed';
+    return (
+      outcome.kind === 'completed_sync' ||
+      outcome.kind === 'submission_outcome_unknown' ||
+      outcome.kind === 'failed_before_submission'
+    );
   }
   return false;
 }

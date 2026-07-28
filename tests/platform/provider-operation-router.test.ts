@@ -45,7 +45,7 @@ describe('strongly typed provider operation routers', () => {
         submit: async () => {
           adapterCalls += 1;
           return {
-            kind: 'asynchronous',
+            kind: 'accepted_async',
             providerOperationId: 'should-not-exist',
             state: 'queued'
           };
@@ -71,8 +71,9 @@ describe('strongly typed provider operation routers', () => {
         submit: async () => {
           adapterCalls += 1;
           return {
-            kind: 'synchronous_completed',
+            kind: 'completed_sync',
             providerOperationId: 'should-not-exist'
+            ,results: [{ kind: 'remote_url', value: 'https://invalid.test/result' }]
           };
         }
       }
@@ -99,8 +100,9 @@ describe('strongly typed provider operation routers', () => {
           expect(model.capabilityEvidenceId).toBe(fixture.newImageEvidenceId);
           expect(binding.executionLifecycle).toBe('synchronous_completed');
           return {
-            kind: 'synchronous_completed',
-            providerOperationId: 'local-provider-operation-1'
+            kind: 'completed_sync',
+            providerOperationId: 'local-provider-operation-1',
+            results: [{ kind: 'remote_url', value: 'https://fixture.test/result' }]
           };
         }
       }
@@ -112,8 +114,9 @@ describe('strongly typed provider operation routers', () => {
     ).resolves.toEqual({
       ok: true,
       value: {
-        kind: 'synchronous_completed',
-        providerOperationId: 'local-provider-operation-1'
+        kind: 'completed_sync',
+        providerOperationId: 'local-provider-operation-1',
+        results: [{ kind: 'remote_url', value: 'https://fixture.test/result' }]
       }
     });
     expect(adapterCalls).toBe(1);
@@ -127,8 +130,9 @@ describe('strongly typed provider operation routers', () => {
         submit: async () => {
           adapterCalls += 1;
           return {
-            kind: 'synchronous_completed',
-            providerOperationId: 'should-not-exist'
+            kind: 'completed_sync',
+            providerOperationId: 'should-not-exist',
+            results: [{ kind: 'remote_url', value: 'https://invalid.test/result' }]
           };
         }
       }
@@ -167,8 +171,9 @@ describe('strongly typed provider operation routers', () => {
         submit: async () => {
           adapterCalls += 1;
           return {
-            kind: 'synchronous_completed',
-            providerOperationId: 'should-not-exist'
+            kind: 'completed_sync',
+            providerOperationId: 'should-not-exist',
+            results: [{ kind: 'remote_url', value: 'https://invalid.test/result' }]
           };
         }
       }
@@ -202,7 +207,7 @@ describe('strongly typed provider operation routers', () => {
         submit: async () => {
           adapterCalls += 1;
           return {
-            kind: 'asynchronous',
+            kind: 'accepted_async',
             providerOperationId: 'provider-operation-invalid-lifecycle',
             state: 'queued'
           };
