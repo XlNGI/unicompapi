@@ -6,10 +6,12 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   toConnectionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProviderId,
   toRoutingPreferenceId
 } from '../../src/domain';
@@ -58,9 +60,10 @@ describe('ProviderCredentialController', () => {
       updatedAt: timestamp
     });
     await registry.save({
-      schemaVersion: 1,
+      schemaVersion: 2,
       providers: [provider],
       connections: [connection],
+      protocolBindings: [],
       models: [],
       capabilities: [],
       routingPreferences: []
@@ -142,7 +145,10 @@ describe('ProviderCredentialController', () => {
       id: toModelId('model-delete-fixture'),
       providerId: provider.id,
       connectionId: connection.id,
-      name: 'delete-fixture-model',
+      protocolBindingId: toProtocolBindingId('protocol-delete-fixture'),
+      providerModelKey: 'delete-fixture-model',
+      mediaKind: 'unknown',
+      revision: 1,
       displayName: 'Delete fixture model',
       enabled: true,
       createdAt: timestamp,
@@ -156,11 +162,26 @@ describe('ProviderCredentialController', () => {
       enabled: true,
       updatedAt: timestamp
     });
+    const binding = createProviderProtocolBinding({
+      id: model.protocolBindingId,
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolId: 'fixture.unclassified',
+      protocolVersion: '1',
+      mediaKind: 'unknown',
+      adapterKind: 'unavailable',
+      authScheme: 'unknown',
+      executionLifecycle: 'unknown',
+      supportedPurposes: [],
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
     await vault.save('credential-delete-fixture', 'fixture-value');
     await registry.save({
-      schemaVersion: 1,
+      schemaVersion: 2,
       providers: [provider],
       connections: [connection],
+      protocolBindings: [binding],
       models: [model],
       capabilities: [],
       routingPreferences: [routing]

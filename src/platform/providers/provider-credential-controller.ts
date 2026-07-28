@@ -105,7 +105,14 @@ export class ProviderCredentialController {
           updatedAt: now
         }),
         models: snapshot.models.map((model) =>
-          modelIds.has(model.id) ? { ...model, enabled: false, updatedAt: now } : model
+          modelIds.has(model.id)
+            ? {
+                ...model,
+                enabled: false,
+                revision: model.revision + 1,
+                updatedAt: now
+              }
+            : model
         ),
         routingPreferences: snapshot.routingPreferences.map((preference) =>
           modelIds.has(preference.modelId)

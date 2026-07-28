@@ -138,19 +138,41 @@ export interface ProviderModelSummaryDto {
   readonly modelId: string;
   readonly providerId: string;
   readonly connectionId: string;
+  readonly protocolBindingId: string;
   readonly name: string;
+  readonly providerModelKey: string;
+  readonly mediaKind: 'image' | 'video' | 'unknown';
+  readonly revision: number;
+  readonly capabilityEvidenceId?: string;
   readonly displayName: string;
   readonly enabled: boolean;
+}
+
+export interface ProviderProtocolBindingSummaryDto {
+  readonly protocolBindingId: string;
+  readonly providerId: string;
+  readonly connectionId: string;
+  readonly protocolId: string;
+  readonly protocolVersion: string;
+  readonly mediaKind: 'image' | 'video' | 'unknown';
+  readonly executionLifecycle:
+    | 'synchronous_completed'
+    | 'asynchronous_polling'
+    | 'unknown';
+  readonly supportedPurposes: readonly string[];
 }
 
 export interface ProviderCapabilitySummaryDto {
   readonly evidenceId: string;
   readonly modelId: string;
+  readonly revision: number;
   readonly capability: string;
   readonly state: string;
   readonly source: string;
+  readonly supersedesEvidenceId?: string;
   readonly constraint?: string;
   readonly observedAt?: string;
+  readonly recordedAt: string;
   readonly parameterSchema?: {
     readonly schemaVersion: 1;
     readonly fields: readonly {
@@ -211,6 +233,7 @@ export interface ProviderRoutingSummaryDto {
 export interface ProviderRegistryDto {
   readonly providers: readonly ProviderSummaryDto[];
   readonly connections: readonly ProviderConnectionSummaryDto[];
+  readonly protocolBindings: readonly ProviderProtocolBindingSummaryDto[];
   readonly models: readonly ProviderModelSummaryDto[];
   readonly capabilities: readonly ProviderCapabilitySummaryDto[];
   readonly routingPreferences: readonly ProviderRoutingSummaryDto[];

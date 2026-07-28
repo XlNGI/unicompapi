@@ -5,11 +5,13 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   toCapabilityEvidenceId,
   toConnectionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProviderId,
   toRoutingPreferenceId
 } from '../../src/domain';
@@ -53,7 +55,10 @@ describe('provider domain contracts', () => {
       id: toModelId('model-local'),
       providerId: provider.id,
       connectionId: connection.id,
-      name: 'local-model-id',
+      protocolBindingId: toProtocolBindingId('protocol-local-image'),
+      providerModelKey: 'local-model-id',
+      mediaKind: 'image',
+      revision: 1,
       displayName: 'Local model',
       enabled: false,
       createdAt: timestamp,
@@ -62,9 +67,24 @@ describe('provider domain contracts', () => {
     const evidence = createModelCapabilityEvidence({
       id: toCapabilityEvidenceId('capability-local'),
       modelId: model.id,
+      revision: 1,
       capability: 'image_generation',
       state: 'unknown',
       source: 'provider_declared',
+      recordedAt: timestamp
+    });
+    const binding = createProviderProtocolBinding({
+      id: model.protocolBindingId,
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolId: 'local.image',
+      protocolVersion: '1',
+      mediaKind: 'image',
+      adapterKind: 'local_image',
+      authScheme: 'unknown',
+      executionLifecycle: 'synchronous_completed',
+      supportedPurposes: ['image_generation'],
+      createdAt: timestamp,
       updatedAt: timestamp
     });
     const routing = createRoutingPreference({
@@ -78,6 +98,7 @@ describe('provider domain contracts', () => {
 
     expect(connection.state).toBe('saved');
     expect(evidence.state).toBe('unknown');
+    expect(binding.mediaKind).toBe('image');
     expect(routing.enabled).toBe(false);
   });
 });

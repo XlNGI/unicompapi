@@ -14,6 +14,7 @@ export type WorkId = DomainId<'WorkId'>;
 export type ProviderId = DomainId<'ProviderId'>;
 export type ConnectionId = DomainId<'ConnectionId'>;
 export type ModelId = DomainId<'ModelId'>;
+export type ProtocolBindingId = DomainId<'ProtocolBindingId'>;
 export type CapabilityEvidenceId = DomainId<'CapabilityEvidenceId'>;
 export type RoutingPreferenceId = DomainId<'RoutingPreferenceId'>;
 export type VideoEditDraftId = DomainId<'VideoEditDraftId'>;
@@ -49,6 +50,8 @@ export const toProviderId = (value: string) => toDomainId(value, 'ProviderId');
 export const toConnectionId = (value: string) =>
   toDomainId(value, 'ConnectionId');
 export const toModelId = (value: string) => toDomainId(value, 'ModelId');
+export const toProtocolBindingId = (value: string) =>
+  toDomainId(value, 'ProtocolBindingId');
 export const toCapabilityEvidenceId = (value: string) =>
   toDomainId(value, 'CapabilityEvidenceId');
 export const toRoutingPreferenceId = (value: string) =>

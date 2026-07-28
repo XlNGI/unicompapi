@@ -74,7 +74,11 @@ describe('ProviderCapabilityController', () => {
         enabled: true
       })
     ).toMatchObject({ ok: true, value: { state: 'enabled' } });
-    expect((await registry.load()).models[0].enabled).toBe(true);
+    expect(
+      (await registry.load()).models.find(
+        (model) => model.id === modelResult.value.modelId
+      )?.enabled
+    ).toBe(true);
 
     expect(
       await controller.saveRoutingPreference({
@@ -159,7 +163,11 @@ describe('ProviderCapabilityController', () => {
     const snapshot = await registry.load();
     await registry.save({
       ...snapshot,
-      models: snapshot.models.map((model) => ({ ...model, enabled: true }))
+      models: snapshot.models.map((model) => ({
+        ...model,
+        enabled: true,
+        revision: model.revision + 1
+      }))
     });
     expect(await controller.planRoute({ purpose: 'fixture_purpose' })).toEqual({
       ok: true,
@@ -223,9 +231,25 @@ describe('ProviderCapabilityController', () => {
       ok: true,
       value: { state: 'verified_supported' }
     });
-    expect((await registry.load()).capabilities[0]).toMatchObject({
+    const firstSnapshot = await registry.load();
+    const firstEvidenceId = firstSnapshot.capabilities[0].id;
+    expect(firstSnapshot.capabilities[0]).toMatchObject({
       source: 'connection_verified',
-      state: 'verified_supported'
+      state: 'verified_supported',
+      revision: 1
+    });
+    expect(
+      await controller.validateCapability({
+        modelId: model.id,
+        capability: 'observed_capability'
+      })
+    ).toMatchObject({ ok: true, value: { state: 'verified_supported' } });
+    const secondSnapshot = await registry.load();
+    expect(secondSnapshot.capabilities).toHaveLength(2);
+    expect(secondSnapshot.capabilities[0].id).toBe(firstEvidenceId);
+    expect(secondSnapshot.capabilities[1]).toMatchObject({
+      revision: 2,
+      supersedesEvidenceId: firstEvidenceId
     });
   });
 });
@@ -256,9 +280,10 @@ async function fixtureRegistry(): Promise<{
     updatedAt: timestamp
   });
   await registry.save({
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [],
     models: [],
     capabilities: [],
     routingPreferences: []

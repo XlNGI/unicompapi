@@ -9,6 +9,7 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   toCapabilityEvidenceId,
   toConnectionId,
@@ -16,6 +17,7 @@ import {
   toExecutionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProjectId,
   toProviderId,
   toRoutingPreferenceId,
@@ -95,7 +97,10 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     id: modelId,
     providerId: provider.id,
     connectionId: connection.id,
-    name: 'submission-model',
+    protocolBindingId: toProtocolBindingId('protocol-image-submission'),
+    providerModelKey: 'submission-model',
+    mediaKind: 'image',
+    revision: 1,
     displayName: 'Submission model',
     enabled: true,
     createdAt: t0,
@@ -104,6 +109,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
   const evidence = createModelCapabilityEvidence({
     id: evidenceId,
     modelId,
+    revision: 1,
     capability: 'image_generation',
     state: 'verified_supported',
     source: 'connection_verified',
@@ -120,12 +126,27 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
       ]
     },
     observedAt: t0,
+    recordedAt: t0
+  });
+  const binding = createProviderProtocolBinding({
+    id: model.protocolBindingId,
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'fixture.image.submit',
+    protocolVersion: '1',
+    mediaKind: 'image',
+    adapterKind: 'fixture_image_submit',
+    authScheme: 'unknown',
+    executionLifecycle: 'asynchronous_polling',
+    supportedPurposes: ['image_generation'],
+    createdAt: t0,
     updatedAt: t0
   });
   await registry.save({
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [binding],
     models: [model],
     capabilities: [evidence],
     routingPreferences: [
