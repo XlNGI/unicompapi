@@ -60,6 +60,11 @@ ipcMain.on('window:toggle-maximize', (event) => {
     return;
   }
 
+  if (window.isFullScreen()) {
+    window.setFullScreen(false);
+    return;
+  }
+
   if (window.isMaximized()) {
     window.unmaximize();
     return;
@@ -73,15 +78,17 @@ ipcMain.on('window:close', (event) => {
 });
 
 ipcMain.handle('window:is-maximized', (event) => {
-  return getWindowFromEvent(event)?.isMaximized() ?? false;
+  const window = getWindowFromEvent(event);
+  return window ? window.isMaximized() || window.isFullScreen() : false;
 });
 
-function createMainWindow(): void {
+function createMainWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 1080,
     minHeight: 720,
+    show: false,
     title: 'UniComp',
     backgroundColor: '#0B0F17',
     frame: isMac,
@@ -105,6 +112,8 @@ function createMainWindow(): void {
 
   mainWindow.on('maximize', sendMaximizedState);
   mainWindow.on('unmaximize', sendMaximizedState);
+  mainWindow.on('enter-full-screen', sendMaximizedState);
+  mainWindow.on('leave-full-screen', sendMaximizedState);
   mainWindow.on('closed', () => {
     if (!isMac) return;
     void settingsLifecycle.getRuntimePolicy()
@@ -113,14 +122,19 @@ function createMainWindow(): void {
         : storageLifecycle.interruptActiveExports('background_processing_disabled'))
       .catch(() => undefined);
   });
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
-    return;
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 
-  mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
+  return mainWindow;
 }
 
 app.whenReady().then(async () => {
@@ -159,9 +173,14 @@ app.whenReady().then(async () => {
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    const [mainWindow] = BrowserWindow.getAllWindows();
+    if (!mainWindow) {
       createMainWindow();
+      return;
     }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
 });
 

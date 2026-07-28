@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { LuCheck, LuChevronDown, LuMonitor, LuMoon, LuSun } from 'react-icons/lu';
 import type { IconType } from 'react-icons';
 import { themePreferences } from '../theme/theme';
@@ -21,11 +22,17 @@ export function ThemeSwitch() {
   const { preference, resolvedTheme, setPreference } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!isOpen) {
       return undefined;
     }
+
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
+      ?.focus();
 
     const closeOnOutsideClick = (event: MouseEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) {
@@ -35,6 +42,7 @@ export function ThemeSwitch() {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsOpen(false);
+        triggerRef.current?.focus();
       }
     };
 
@@ -49,6 +57,24 @@ export function ThemeSwitch() {
   const selectTheme = (nextPreference: ThemePreference) => {
     setPreference(nextPreference);
     setIsOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const options = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []
+    );
+    if (options.length === 0) return;
+    event.preventDefault();
+    const current = Math.max(0, options.indexOf(document.activeElement as HTMLButtonElement));
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? options.length - 1
+        : (current + (event.key === 'ArrowDown' ? 1 : -1) + options.length)
+          % options.length;
+    options[next]?.focus();
   };
 
   const ActiveThemeIcon = themeIcons[preference];
@@ -58,9 +84,11 @@ export function ThemeSwitch() {
       <button
         type="button"
         className="theme-switch__trigger"
+        aria-controls="theme-switch-menu"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={`切换主题，当前为${themeLabels[preference]}`}
+        ref={triggerRef}
         title={`当前视觉：${themeLabels[resolvedTheme]}`}
         onClick={() => setIsOpen((open) => !open)}
       >
@@ -70,7 +98,14 @@ export function ThemeSwitch() {
       </button>
 
       {isOpen ? (
-        <div className="theme-switch__menu" role="menu" aria-label="主题模式">
+        <div
+          aria-label="主题模式"
+          className="theme-switch__menu"
+          id="theme-switch-menu"
+          onKeyDown={handleMenuKeyDown}
+          ref={menuRef}
+          role="menu"
+        >
           {themePreferences.map((option) => {
             const OptionIcon = themeIcons[option];
             const isSelected = preference === option;
