@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 已合并 `develop`，A3、B4 未启动。A2 已通过项目负责人 Windows 手工验收；对话与项目上下文 UI 接线正在 `feature/chat-context-ui-wiring` 等待验收，完整门禁 477 项通过。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已在 `feature/vidu-protocol-contracts` 完成实现与分支门禁：Node 157 项、Vitest 331 项，合计 488 项通过，等待项目负责人验收且尚未合并 `develop`。流程 2—7 未启动且禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -759,3 +759,43 @@ ProjectContext 控制器只从当前主进程 Project Session 派生项目范围
     docs/active/阶段9-C1-对话与项目上下文UI接线记录.md
 
 未完成：真实 LLM/图片/视频适配器、HTTP、收费调用、原生附件选择、项目素材候选、对话消息级创作引用、供应商提交前外发确认均未实现；不得把保存的对话 candidate ID 解释为读取全部消息或外发授权。macOS 实机按项目负责人最新决策保持 `not_run/deferred`。项目负责人验收后已通过非快进提交 `e278b63` 合并并推送 `develop`；合并后完整门禁与 Windows Electron 4/4 响应、受控关闭残留 0 再次通过，未自动启动 Vidu 或 B4。
+
+## 阶段 9 C2｜Vidu 官方 API 开发态适配规划（2026-07-28）
+
+项目负责人最新决策批准将 Vidu 官方 API 接入拆为八个小 PR 写入工程计划。该决策自本记录起形成阶段 9 的显式业务范围例外，不倒改阶段 4—6 与 C1 在当时“真实适配器缺失或尚未授权”的历史事实，也不修改原阶段 9 A/B 验收任务的完成定义。
+
+正式技术架构与任务拆分见：
+
+    docs/active/阶段9-C2-Vidu官方API接入技术架构.md
+    docs/active/阶段9-C2-Vidu官方API接入任务拆分.md
+
+冻结架构为一个 `ViduProviderPackage`、一个共享安全运行时、三个协议适配器与多个模型记录：
+
+```text
+ViduProviderPackage
+├─ ViduSharedRuntime
+├─ ViduImageV1Adapter
+├─ ViduGeminiImageV2Adapter
+└─ ViduReferenceVideoV2Adapter
+```
+
+模型必须通过 `mediaKind + protocolId + protocolVersion + executionLifecycle` 绑定协议；图片/视频强类型 Router 在类型不匹配时返回 `operation_model_mismatch`，HTTP 调用数为 0。`POST /ent/v2/reference2image` 标准异步图片接口属于未批准的第四协议，不得塞入现有三个适配器。
+
+八个流程依次为：
+
+1. `feature/vidu-protocol-contracts`：协议、模型记录、注册表迁移、不可变能力证据与强类型 Router；
+2. `feature/vidu-execution-lifecycle`：同步图片、异步视频、结果 receipt、`submission_outcome_unknown`、轮询/取消/恢复契约；
+3. `feature/vidu-runtime`：共享凭证、受控 HTTP、代理、超时、端点限制、错误映射与日志脱敏；
+4. `feature/vidu-image-adapters`：Image V1 与 Gemini Image V2 两个同步图片适配器；
+5. `feature/vidu-video-adapter`：Q3 异步视频提交、轮询、取消、恢复和受控结果暂存桥；
+6. `feature/vidu-app-wiring`：唯一 Electron 组合根、图片/视频页面真实状态和图片 Work 显式进入图生视频草稿；
+7. `feature/vidu-e2e-validation`：本地合成服务的全协议、故障、安全与完整业务闭环；
+8. `feature/vidu-live-validation`：再次获批后执行一次最小图片和一次最小视频的真实开发态验证。
+
+流程 1—7 只能使用本地合成服务，不得访问真实 Vidu。流程 8 必须在前七个流程全部验收并合并后，由项目负责人再次批准联网范围和收费次数；Token 只能由用户在应用凭证界面录入。真实验证成功只能记录为“Vidu 官方 API Windows 开发态最小闭环通过”，不能记录为阶段 9 跨平台完成、阶段 10 完成或发布就绪。
+
+流程 1 实际结果：已新增协议绑定、ProviderModel Schema v2 迁移、不可变 CapabilityEvidence 历史、冻结的 3 个 Vidu 协议绑定与 10 个模型记录，以及图片/视频强类型 Router。类型、Task 业务种类、provider/connection、协议媒体类型或目的不一致时，统一在适配器调用前返回 `operation_model_mismatch`；测试明确确认适配器调用数为 0。冻结记录默认禁用，能力仅为 `declared_supported`，未登记价格、参数、时长、分辨率或已验证支持事实。
+
+验证结果：`npm test` 为 Node 157 项与 Vitest 331 项，合计 488 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 200 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。本流程未修改 Electron/preload，未执行 Electron 烟测；未实现 HTTP、未读取 Token、未发起真实或收费请求，也未修改任何生成页面。
+
+未完成：Vidu 真实连接验证、同步/异步执行生命周期持久化、安全 HTTP 运行时、三个协议适配器、结果接收与 Work 流转均不属于流程 1。`reference_to_image` 与 `reference_to_video` 的 Task/提交端口兼容迁移仍须在后续获批小 PR 中完成，当前冻结模型保持不可提交状态。流程 1 等待项目负责人验收和合并指令；不得自动启动流程 2、A3、B4、A4 或真实联网验证。

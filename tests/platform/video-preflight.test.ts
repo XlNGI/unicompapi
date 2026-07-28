@@ -5,6 +5,7 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   createVideoWorkspaceDraft,
   toAssetId,
@@ -13,6 +14,7 @@ import {
   toDraftId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProjectId,
   toProviderId,
   toRoutingPreferenceId,
@@ -55,7 +57,10 @@ function createRegistry(options: {
     id: modelId,
     providerId: provider.id,
     connectionId: connection.id,
-    name: 'configured-video-model',
+    protocolBindingId: toProtocolBindingId('protocol-video-preflight'),
+    providerModelKey: 'configured-video-model',
+    mediaKind: 'video',
+    revision: 1,
     displayName: 'Configured video model',
     enabled: true,
     createdAt: now,
@@ -64,6 +69,7 @@ function createRegistry(options: {
   const evidence = createModelCapabilityEvidence({
     id: evidenceId,
     modelId,
+    revision: 1,
     capability: 'video_generation',
     state: options.verified === false ? 'unknown' : 'verified_supported',
     source: 'connection_verified',
@@ -121,12 +127,27 @@ function createRegistry(options: {
           ]
         },
     observedAt: now,
+    recordedAt: now
+  });
+  const binding = createProviderProtocolBinding({
+    id: model.protocolBindingId,
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'fixture.video',
+    protocolVersion: '1',
+    mediaKind: 'video',
+    adapterKind: 'fixture_video',
+    authScheme: 'unknown',
+    executionLifecycle: 'asynchronous_polling',
+    supportedPurposes: ['video_generation'],
+    createdAt: now,
     updatedAt: now
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [binding],
     models: [model],
     capabilities: [evidence],
     routingPreferences: [

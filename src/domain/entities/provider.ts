@@ -2,6 +2,7 @@ import type {
   CapabilityEvidenceId,
   ConnectionId,
   ModelId,
+  ProtocolBindingId,
   ProviderId,
   RoutingPreferenceId
 } from '../ids';
@@ -79,6 +80,60 @@ export const dynamicParameterKinds = [
 
 export type DynamicParameterKind = (typeof dynamicParameterKinds)[number];
 export type DynamicParameterScalar = string | number | boolean;
+
+export const providerMediaKinds = ['image', 'video', 'unknown'] as const;
+export type ProviderMediaKind = (typeof providerMediaKinds)[number];
+
+export const providerExecutionLifecycles = [
+  'synchronous_completed',
+  'asynchronous_polling',
+  'unknown'
+] as const;
+export type ProviderExecutionLifecycle =
+  (typeof providerExecutionLifecycles)[number];
+
+export const providerAuthSchemes = ['token', 'unknown'] as const;
+export type ProviderAuthScheme = (typeof providerAuthSchemes)[number];
+
+export const providerOperationPurposes = [
+  'image_generation',
+  'image_understanding',
+  'image_editing',
+  'image_to_prompt',
+  'reference_to_image',
+  'video_generation',
+  'reference_to_video'
+] as const;
+export type ProviderOperationPurpose =
+  (typeof providerOperationPurposes)[number];
+
+export interface ProviderProtocolBinding {
+  readonly schemaVersion: 1;
+  readonly id: ProtocolBindingId;
+  readonly providerId: ProviderId;
+  readonly connectionId: ConnectionId;
+  readonly protocolId: string;
+  readonly protocolVersion: string;
+  readonly mediaKind: ProviderMediaKind;
+  readonly adapterKind: string;
+  readonly endpointTemplate?: string;
+  readonly authScheme: ProviderAuthScheme;
+  readonly executionLifecycle: ProviderExecutionLifecycle;
+  readonly supportedPurposes: readonly ProviderOperationPurpose[];
+  readonly createdAt: IsoTimestamp;
+  readonly updatedAt: IsoTimestamp;
+}
+
+export type ProviderSubmitOutcome =
+  | {
+      readonly kind: 'asynchronous';
+      readonly providerOperationId: string;
+      readonly state: 'queued' | 'processing';
+    }
+  | {
+      readonly kind: 'synchronous_completed';
+      readonly providerOperationId: string;
+    };
 
 export interface DynamicParameterFieldSchema {
   readonly key: string;
@@ -161,29 +216,35 @@ export interface ProviderConnection {
 }
 
 export interface ProviderModel {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly id: ModelId;
   readonly providerId: ProviderId;
   readonly connectionId: ConnectionId;
-  readonly name: string;
+  readonly protocolBindingId: ProtocolBindingId;
+  readonly providerModelKey: string;
+  readonly mediaKind: ProviderMediaKind;
+  readonly revision: number;
   readonly displayName: string;
+  readonly capabilityEvidenceId?: CapabilityEvidenceId;
   readonly enabled: boolean;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
 
 export interface ModelCapabilityEvidence {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly id: CapabilityEvidenceId;
   readonly modelId: ModelId;
+  readonly revision: number;
   readonly capability: string;
   readonly state: CapabilityState;
   readonly source: CapabilityEvidenceSource;
+  readonly supersedesEvidenceId?: CapabilityEvidenceId;
   readonly constraint?: string;
   readonly parameterSchema?: DynamicParameterSchema;
   readonly videoGenerationSchema?: VideoGenerationCapabilitySchema;
   readonly observedAt?: IsoTimestamp;
-  readonly updatedAt: IsoTimestamp;
+  readonly recordedAt: IsoTimestamp;
 }
 
 export interface RoutingPreference {
@@ -226,10 +287,16 @@ export function createProviderConnection(
 export function createProviderModel(
   input: Omit<ProviderModel, 'schemaVersion'>
 ): ProviderModel {
+  if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
+    throw new TypeError('model.revision must be a positive integer');
+  }
   return {
     ...input,
-    schemaVersion: 1,
-    name: requireNonBlank(input.name, 'model.name'),
+    schemaVersion: 2,
+    providerModelKey: requireNonBlank(
+      input.providerModelKey,
+      'model.providerModelKey'
+    ),
     displayName: requireNonBlank(input.displayName, 'model.displayName')
   };
 }
@@ -237,9 +304,12 @@ export function createProviderModel(
 export function createModelCapabilityEvidence(
   input: Omit<ModelCapabilityEvidence, 'schemaVersion'>
 ): ModelCapabilityEvidence {
+  if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
+    throw new TypeError('capability.revision must be a positive integer');
+  }
   return {
     ...input,
-    schemaVersion: 1,
+    schemaVersion: 2,
     capability: requireNonBlank(input.capability, 'capability.name'),
     constraint: input.constraint
       ? requireNonBlank(input.constraint, 'capability.constraint')
@@ -250,6 +320,34 @@ export function createModelCapabilityEvidence(
     videoGenerationSchema: input.videoGenerationSchema
       ? cloneVideoGenerationCapabilitySchema(input.videoGenerationSchema)
       : undefined
+  };
+}
+
+export function createProviderProtocolBinding(
+  input: Omit<ProviderProtocolBinding, 'schemaVersion'>
+): ProviderProtocolBinding {
+  const supportedPurposes = [...input.supportedPurposes];
+  if (
+    new Set(supportedPurposes).size !== supportedPurposes.length ||
+    supportedPurposes.some(
+      (purpose) => !providerOperationPurposes.includes(purpose)
+    )
+  ) {
+    throw new TypeError('protocol binding purposes are invalid');
+  }
+  return {
+    ...input,
+    schemaVersion: 1,
+    protocolId: requireNonBlank(input.protocolId, 'protocol.protocolId'),
+    protocolVersion: requireNonBlank(
+      input.protocolVersion,
+      'protocol.protocolVersion'
+    ),
+    adapterKind: requireNonBlank(input.adapterKind, 'protocol.adapterKind'),
+    endpointTemplate: input.endpointTemplate
+      ? requireNonBlank(input.endpointTemplate, 'protocol.endpointTemplate')
+      : undefined,
+    supportedPurposes
   };
 }
 

@@ -53,6 +53,9 @@ export function buildVideoPreflight(
   const providers = new Map(
     registry.providers.map((provider) => [provider.id, provider])
   );
+  const bindings = new Map(
+    registry.protocolBindings.map((binding) => [binding.id, binding])
+  );
   const selectedModelId = draft.generation.model?.modelId;
   const preferences = registry.routingPreferences
     .filter(
@@ -71,6 +74,15 @@ export function buildVideoPreflight(
     const connection = model ? connections.get(model.connectionId) : undefined;
     const provider = connection ? providers.get(connection.providerId) : undefined;
     if (!model?.enabled || connection?.state !== 'available' || !provider) {
+      continue;
+    }
+    const binding = bindings.get(model.protocolBindingId);
+    if (
+      model.mediaKind !== 'video' ||
+      binding?.mediaKind !== 'video' ||
+      !binding.supportedPurposes.includes('video_generation')
+    ) {
+      candidateDiscoveryBlockers.add('no_route_candidate');
       continue;
     }
 
@@ -406,7 +418,7 @@ function selectEvidence(
           item.state as (typeof acceptedCapabilityStates)[number]
         )
     )
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
 }
 
 function outboundScopeForAccess(

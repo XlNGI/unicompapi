@@ -8,6 +8,7 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   createVideoWorkspaceDraft,
   toCapabilityEvidenceId,
@@ -16,6 +17,7 @@ import {
   toExecutionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProjectId,
   toProviderId,
   toRoutingPreferenceId,
@@ -100,7 +102,10 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     id: modelId,
     providerId: provider.id,
     connectionId: connection.id,
-    name: 'video-submission-model',
+    protocolBindingId: toProtocolBindingId('protocol-video-submission'),
+    providerModelKey: 'video-submission-model',
+    mediaKind: 'video',
+    revision: 1,
     displayName: 'Video submission model',
     enabled: true,
     createdAt: t0,
@@ -109,6 +114,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
   const evidence = createModelCapabilityEvidence({
     id: evidenceId,
     modelId,
+    revision: 1,
     capability: 'video_generation',
     state: 'verified_supported',
     source: 'connection_verified',
@@ -129,12 +135,27 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
       modes: [{ mode: 'quick_video' }]
     },
     observedAt: t0,
+    recordedAt: t0
+  });
+  const binding = createProviderProtocolBinding({
+    id: model.protocolBindingId,
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'fixture.video.submit',
+    protocolVersion: '1',
+    mediaKind: 'video',
+    adapterKind: 'fixture_video_submit',
+    authScheme: 'unknown',
+    executionLifecycle: 'asynchronous_polling',
+    supportedPurposes: ['video_generation'],
+    createdAt: t0,
     updatedAt: t0
   });
   await registry.save({
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [binding],
     models: [model],
     capabilities: [evidence],
     routingPreferences: [

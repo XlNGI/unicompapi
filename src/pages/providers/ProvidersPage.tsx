@@ -18,6 +18,7 @@ type ActionResult = ProviderManagementResult | CredentialActionResult;
 const emptyRegistry: ProviderRegistryDto = {
   providers: [],
   connections: [],
+  protocolBindings: [],
   models: [],
   capabilities: [],
   routingPreferences: []

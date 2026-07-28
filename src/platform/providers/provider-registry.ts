@@ -5,22 +5,30 @@ import {
   capabilityEvidenceSources,
   capabilityStates,
   cloneVideoGenerationCapabilitySchema,
-  dynamicParameterKinds,
   connectionStates,
   credentialStates,
+  dynamicParameterKinds,
   providerAccessCategories,
+  providerAuthSchemes,
+  providerExecutionLifecycles,
   providerIdentityStates,
+  providerMediaKinds,
+  providerOperationPurposes,
   toCapabilityEvidenceId,
   toConnectionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProviderId,
   toRoutingPreferenceId,
-  type ModelCapabilityEvidence,
   type DynamicParameterSchema,
+  type ModelCapabilityEvidence,
   type Provider,
   type ProviderConnection,
+  type ProviderMediaKind,
   type ProviderModel,
+  type ProviderOperationPurpose,
+  type ProviderProtocolBinding,
   type RoutingPreference,
   type VideoGenerationCapabilitySchema
 } from '../../domain';
@@ -28,14 +36,42 @@ import type {
   ProviderIpcResult,
   ProviderRegistryDto
 } from '../../shared/provider-ipc';
+import { createFrozenViduRegistryRecords } from './vidu-protocol-catalog';
 
 export interface ProviderRegistrySnapshot {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly providers: readonly Provider[];
   readonly connections: readonly ProviderConnection[];
+  readonly protocolBindings: readonly ProviderProtocolBinding[];
   readonly models: readonly ProviderModel[];
   readonly capabilities: readonly ModelCapabilityEvidence[];
   readonly routingPreferences: readonly RoutingPreference[];
+}
+
+interface LegacyProviderModel {
+  readonly schemaVersion: 1;
+  readonly id: ProviderModel['id'];
+  readonly providerId: ProviderModel['providerId'];
+  readonly connectionId: ProviderModel['connectionId'];
+  readonly name: string;
+  readonly displayName: string;
+  readonly enabled: boolean;
+  readonly createdAt: ProviderModel['createdAt'];
+  readonly updatedAt: ProviderModel['updatedAt'];
+}
+
+interface LegacyCapabilityEvidence {
+  readonly schemaVersion: 1;
+  readonly id: ModelCapabilityEvidence['id'];
+  readonly modelId: ModelCapabilityEvidence['modelId'];
+  readonly capability: string;
+  readonly state: ModelCapabilityEvidence['state'];
+  readonly source: ModelCapabilityEvidence['source'];
+  readonly constraint?: string;
+  readonly parameterSchema?: DynamicParameterSchema;
+  readonly videoGenerationSchema?: VideoGenerationCapabilitySchema;
+  readonly observedAt?: ModelCapabilityEvidence['observedAt'];
+  readonly updatedAt: ModelCapabilityEvidence['recordedAt'];
 }
 
 export class JsonProviderRegistryStore {
@@ -61,6 +97,15 @@ export class JsonProviderRegistryStore {
   }
 
   private async write(snapshot: ProviderRegistrySnapshot): Promise<void> {
+    try {
+      const current = parseSnapshot(
+        JSON.parse(await readFile(this.registryPath, 'utf8'))
+      );
+      assertCapabilityHistoryPreserved(current, snapshot);
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== 'ENOENT') throw error;
+    }
+
     const parent = path.dirname(this.registryPath);
     const temporary = path.join(
       parent,
@@ -107,24 +152,42 @@ export class ProviderRegistryController {
             endpointConfigured: connection.endpoint !== undefined,
             lastConnectionValidationAt: connection.lastConnectionValidationAt
           })),
+          protocolBindings: snapshot.protocolBindings.map((binding) => ({
+            protocolBindingId: binding.id,
+            providerId: binding.providerId,
+            connectionId: binding.connectionId,
+            protocolId: binding.protocolId,
+            protocolVersion: binding.protocolVersion,
+            mediaKind: binding.mediaKind,
+            executionLifecycle: binding.executionLifecycle,
+            supportedPurposes: binding.supportedPurposes
+          })),
           models: snapshot.models.map((model) => ({
             modelId: model.id,
             providerId: model.providerId,
             connectionId: model.connectionId,
-            name: model.name,
+            protocolBindingId: model.protocolBindingId,
+            name: model.providerModelKey,
+            providerModelKey: model.providerModelKey,
+            mediaKind: model.mediaKind,
+            revision: model.revision,
+            capabilityEvidenceId: model.capabilityEvidenceId,
             displayName: model.displayName,
             enabled: model.enabled
           })),
           capabilities: snapshot.capabilities.map((capability) => ({
             evidenceId: capability.id,
             modelId: capability.modelId,
+            revision: capability.revision,
             capability: capability.capability,
             state: capability.state,
             source: capability.source,
+            supersedesEvidenceId: capability.supersedesEvidenceId,
             constraint: capability.constraint,
             parameterSchema: capability.parameterSchema,
             videoGenerationSchema: capability.videoGenerationSchema,
-            observedAt: capability.observedAt
+            observedAt: capability.observedAt,
+            recordedAt: capability.recordedAt
           })),
           routingPreferences: snapshot.routingPreferences.map((preference) => ({
             preferenceId: preference.id,
@@ -148,20 +211,21 @@ export class ProviderRegistryController {
 }
 
 function emptySnapshot(): ProviderRegistrySnapshot {
+  const vidu = createFrozenViduRegistryRecords();
   return {
-    schemaVersion: 1,
-    providers: [],
-    connections: [],
-    models: [],
-    capabilities: [],
+    schemaVersion: 2,
+    providers: vidu.providers,
+    connections: vidu.connections,
+    protocolBindings: vidu.protocolBindings,
+    models: vidu.models,
+    capabilities: vidu.capabilities,
     routingPreferences: []
   };
 }
 
-function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
+export function migrateProviderRegistrySnapshot(value: unknown): unknown {
+  if (!isRecord(value) || value.schemaVersion !== 1) return value;
   if (
-    !isRecord(value) ||
-    value.schemaVersion !== 1 ||
     !Array.isArray(value.providers) ||
     !Array.isArray(value.connections) ||
     !Array.isArray(value.models) ||
@@ -173,29 +237,145 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
 
   const providers = value.providers.map(parseProvider);
   const connections = value.connections.map(parseConnection);
-  const models = value.models.map(parseModel);
-  const capabilities = value.capabilities.map(parseCapability);
+  const legacyModels = value.models.map(parseLegacyModel);
+  const legacyCapabilities = value.capabilities.map(parseLegacyCapability);
   const routingPreferences = value.routingPreferences.map(parseRouting);
-  const providerIds = new Set(providers.map((item) => item.id));
-  const connectionIds = new Set(connections.map((item) => item.id));
-  const modelIds = new Set(models.map((item) => item.id));
+  const migratedCapabilities = migrateLegacyCapabilities(legacyCapabilities);
+  const protocolBindings = legacyModels.map((model) => {
+    const purposes = purposesForLegacyModel(
+      model.id,
+      legacyCapabilities,
+      routingPreferences
+    );
+    return {
+      schemaVersion: 1 as const,
+      id: toProtocolBindingId(`protocol-binding-legacy-${model.id}`),
+      providerId: model.providerId,
+      connectionId: model.connectionId,
+      protocolId: 'legacy.unclassified',
+      protocolVersion: '1',
+      mediaKind: mediaKindForPurposes(purposes),
+      adapterKind: 'legacy_unavailable',
+      authScheme: 'unknown' as const,
+      executionLifecycle: 'unknown' as const,
+      supportedPurposes: purposes,
+      createdAt: model.createdAt,
+      updatedAt: model.updatedAt
+    };
+  });
+  const bindingsByModel = new Map(
+    legacyModels.map((model, index) => [model.id, protocolBindings[index]])
+  );
+  const models = legacyModels.map((model) => {
+    const binding = bindingsByModel.get(model.id);
+    if (!binding) throw new TypeError('Legacy model binding is missing');
+    const latestEvidence = migratedCapabilities
+      .filter((evidence) => evidence.modelId === model.id)
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
+    return {
+      schemaVersion: 2 as const,
+      id: model.id,
+      providerId: model.providerId,
+      connectionId: model.connectionId,
+      protocolBindingId: binding.id,
+      providerModelKey: model.name,
+      mediaKind: binding.mediaKind,
+      revision: 1,
+      displayName: model.displayName,
+      capabilityEvidenceId: latestEvidence?.id,
+      enabled: model.enabled,
+      createdAt: model.createdAt,
+      updatedAt: model.updatedAt
+    };
+  });
+
+  return {
+    schemaVersion: 2,
+    providers,
+    connections,
+    protocolBindings,
+    models,
+    capabilities: migratedCapabilities,
+    routingPreferences
+  };
+}
+
+function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
+  const migrated = migrateProviderRegistrySnapshot(value);
+  if (
+    !isRecord(migrated) ||
+    migrated.schemaVersion !== 2 ||
+    !Array.isArray(migrated.providers) ||
+    !Array.isArray(migrated.connections) ||
+    !Array.isArray(migrated.protocolBindings) ||
+    !Array.isArray(migrated.models) ||
+    !Array.isArray(migrated.capabilities) ||
+    !Array.isArray(migrated.routingPreferences)
+  ) {
+    throw new TypeError('Provider registry has an unsupported schema');
+  }
+
+  const providers = migrated.providers.map(parseProvider);
+  const connections = migrated.connections.map(parseConnection);
+  const protocolBindings = migrated.protocolBindings.map(parseProtocolBinding);
+  const models = migrated.models.map(parseModel);
+  const capabilities = migrated.capabilities.map(parseCapability);
+  const routingPreferences = migrated.routingPreferences.map(parseRouting);
+
+  assertUnique(providers.map((item) => item.id), 'provider');
+  assertUnique(connections.map((item) => item.id), 'connection');
+  assertUnique(protocolBindings.map((item) => item.id), 'protocol binding');
+  assertUnique(models.map((item) => item.id), 'model');
+  assertUnique(capabilities.map((item) => item.id), 'capability evidence');
+  assertUnique(routingPreferences.map((item) => item.id), 'routing preference');
+
+  const providersById = new Map(providers.map((item) => [item.id, item]));
+  const connectionsById = new Map(connections.map((item) => [item.id, item]));
+  const bindingsById = new Map(protocolBindings.map((item) => [item.id, item]));
+  const modelsById = new Map(models.map((item) => [item.id, item]));
+  const capabilitiesById = new Map(capabilities.map((item) => [item.id, item]));
 
   if (
-    connections.some((item) => !providerIds.has(item.providerId)) ||
-    models.some(
-      (item) =>
-        !providerIds.has(item.providerId) || !connectionIds.has(item.connectionId)
-    ) ||
-    capabilities.some((item) => !modelIds.has(item.modelId)) ||
-    routingPreferences.some((item) => !modelIds.has(item.modelId))
+    connections.some((item) => !providersById.has(item.providerId)) ||
+    protocolBindings.some((item) => {
+      const connection = connectionsById.get(item.connectionId);
+      return (
+        !providersById.has(item.providerId) ||
+        !connection ||
+        connection.providerId !== item.providerId
+      );
+    }) ||
+    models.some((item) => {
+      const binding = bindingsById.get(item.protocolBindingId);
+      return (
+        !providersById.has(item.providerId) ||
+        !connectionsById.has(item.connectionId) ||
+        !binding ||
+        binding.providerId !== item.providerId ||
+        binding.connectionId !== item.connectionId ||
+        binding.mediaKind !== item.mediaKind
+      );
+    }) ||
+    capabilities.some((item) => !modelsById.has(item.modelId)) ||
+    routingPreferences.some((item) => !modelsById.has(item.modelId))
   ) {
     throw new TypeError('Provider registry contains invalid references');
   }
 
+  for (const model of models) {
+    if (!model.capabilityEvidenceId) continue;
+    const evidence = capabilitiesById.get(model.capabilityEvidenceId);
+    if (!evidence || evidence.modelId !== model.id) {
+      throw new TypeError('Provider model capability pointer is invalid');
+    }
+  }
+  validateCapabilityHistory(capabilities, capabilitiesById);
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers,
     connections,
+    protocolBindings,
     models,
     capabilities,
     routingPreferences
@@ -242,7 +422,77 @@ function parseConnection(value: unknown): ProviderConnection {
   };
 }
 
+function parseProtocolBinding(value: unknown): ProviderProtocolBinding {
+  const item = requireRecord(value);
+  if (
+    item.schemaVersion !== 1 ||
+    !Array.isArray(item.supportedPurposes)
+  ) {
+    throw new TypeError('Provider protocol binding is invalid');
+  }
+  requireOneOf(item.mediaKind, providerMediaKinds);
+  requireOneOf(item.authScheme, providerAuthSchemes);
+  requireOneOf(item.executionLifecycle, providerExecutionLifecycles);
+  const supportedPurposes = item.supportedPurposes.map((purpose) => {
+    requireOneOf(purpose, providerOperationPurposes);
+    return purpose as ProviderOperationPurpose;
+  });
+  if (new Set(supportedPurposes).size !== supportedPurposes.length) {
+    throw new TypeError('Provider protocol purposes are duplicated');
+  }
+  return {
+    schemaVersion: 1,
+    id: toProtocolBindingId(String(item.id)),
+    providerId: toProviderId(String(item.providerId)),
+    connectionId: toConnectionId(String(item.connectionId)),
+    protocolId: requireNonBlankString(item.protocolId),
+    protocolVersion: requireNonBlankString(item.protocolVersion),
+    mediaKind: item.mediaKind as ProviderProtocolBinding['mediaKind'],
+    adapterKind: requireNonBlankString(item.adapterKind),
+    endpointTemplate: optionalString(item.endpointTemplate),
+    authScheme: item.authScheme as ProviderProtocolBinding['authScheme'],
+    executionLifecycle:
+      item.executionLifecycle as ProviderProtocolBinding['executionLifecycle'],
+    supportedPurposes,
+    createdAt: toIsoTimestamp(String(item.createdAt)),
+    updatedAt: toIsoTimestamp(String(item.updatedAt))
+  };
+}
+
 function parseModel(value: unknown): ProviderModel {
+  const item = requireRecord(value);
+  if (
+    item.schemaVersion !== 2 ||
+    typeof item.displayName !== 'string' ||
+    item.displayName.trim().length === 0 ||
+    typeof item.enabled !== 'boolean' ||
+    !Number.isSafeInteger(item.revision) ||
+    Number(item.revision) < 1
+  ) {
+    throw new TypeError('Provider model is invalid');
+  }
+  requireOneOf(item.mediaKind, providerMediaKinds);
+  return {
+    schemaVersion: 2,
+    id: toModelId(String(item.id)),
+    providerId: toProviderId(String(item.providerId)),
+    connectionId: toConnectionId(String(item.connectionId)),
+    protocolBindingId: toProtocolBindingId(String(item.protocolBindingId)),
+    providerModelKey: requireNonBlankString(item.providerModelKey),
+    mediaKind: item.mediaKind as ProviderModel['mediaKind'],
+    revision: Number(item.revision),
+    displayName: item.displayName,
+    capabilityEvidenceId:
+      item.capabilityEvidenceId === undefined
+        ? undefined
+        : toCapabilityEvidenceId(String(item.capabilityEvidenceId)),
+    enabled: item.enabled,
+    createdAt: toIsoTimestamp(String(item.createdAt)),
+    updatedAt: toIsoTimestamp(String(item.updatedAt))
+  };
+}
+
+function parseLegacyModel(value: unknown): LegacyProviderModel {
   const item = requireRecord(value);
   requireVersionAndName(item);
   if (typeof item.displayName !== 'string' || typeof item.enabled !== 'boolean') {
@@ -264,6 +514,41 @@ function parseModel(value: unknown): ProviderModel {
 function parseCapability(value: unknown): ModelCapabilityEvidence {
   const item = requireRecord(value);
   if (
+    item.schemaVersion !== 2 ||
+    typeof item.capability !== 'string' ||
+    item.capability.trim().length === 0 ||
+    !Number.isSafeInteger(item.revision) ||
+    Number(item.revision) < 1
+  ) {
+    throw new TypeError('Capability evidence is invalid');
+  }
+  requireOneOf(item.state, capabilityStates);
+  requireOneOf(item.source, capabilityEvidenceSources);
+  return {
+    schemaVersion: 2,
+    id: toCapabilityEvidenceId(String(item.id)),
+    modelId: toModelId(String(item.modelId)),
+    revision: Number(item.revision),
+    capability: item.capability,
+    state: item.state as ModelCapabilityEvidence['state'],
+    source: item.source as ModelCapabilityEvidence['source'],
+    supersedesEvidenceId:
+      item.supersedesEvidenceId === undefined
+        ? undefined
+        : toCapabilityEvidenceId(String(item.supersedesEvidenceId)),
+    constraint: optionalString(item.constraint),
+    parameterSchema: parseParameterSchema(item.parameterSchema),
+    videoGenerationSchema: parseVideoGenerationSchema(
+      item.videoGenerationSchema
+    ),
+    observedAt: optionalTimestamp(item.observedAt),
+    recordedAt: toIsoTimestamp(String(item.recordedAt))
+  };
+}
+
+function parseLegacyCapability(value: unknown): LegacyCapabilityEvidence {
+  const item = requireRecord(value);
+  if (
     item.schemaVersion !== 1 ||
     typeof item.capability !== 'string' ||
     item.capability.trim().length === 0
@@ -277,8 +562,8 @@ function parseCapability(value: unknown): ModelCapabilityEvidence {
     id: toCapabilityEvidenceId(String(item.id)),
     modelId: toModelId(String(item.modelId)),
     capability: item.capability,
-    state: item.state as ModelCapabilityEvidence['state'],
-    source: item.source as ModelCapabilityEvidence['source'],
+    state: item.state as LegacyCapabilityEvidence['state'],
+    source: item.source as LegacyCapabilityEvidence['source'],
     constraint: optionalString(item.constraint),
     parameterSchema: parseParameterSchema(item.parameterSchema),
     videoGenerationSchema: parseVideoGenerationSchema(
@@ -287,6 +572,44 @@ function parseCapability(value: unknown): ModelCapabilityEvidence {
     observedAt: optionalTimestamp(item.observedAt),
     updatedAt: toIsoTimestamp(String(item.updatedAt))
   };
+}
+
+function migrateLegacyCapabilities(
+  legacy: readonly LegacyCapabilityEvidence[]
+): readonly ModelCapabilityEvidence[] {
+  const groups = new Map<string, LegacyCapabilityEvidence[]>();
+  for (const evidence of legacy) {
+    const key = evidenceHistoryKey(evidence);
+    const group = groups.get(key) ?? [];
+    group.push(evidence);
+    groups.set(key, group);
+  }
+  const migrated: ModelCapabilityEvidence[] = [];
+  for (const group of groups.values()) {
+    const ordered = [...group].sort(
+      (left, right) =>
+        left.updatedAt.localeCompare(right.updatedAt) ||
+        left.id.localeCompare(right.id)
+    );
+    ordered.forEach((evidence, index) => {
+      migrated.push({
+        schemaVersion: 2,
+        id: evidence.id,
+        modelId: evidence.modelId,
+        revision: index + 1,
+        capability: evidence.capability,
+        state: evidence.state,
+        source: evidence.source,
+        supersedesEvidenceId: index > 0 ? ordered[index - 1].id : undefined,
+        constraint: evidence.constraint,
+        parameterSchema: evidence.parameterSchema,
+        videoGenerationSchema: evidence.videoGenerationSchema,
+        observedAt: evidence.observedAt,
+        recordedAt: evidence.updatedAt
+      });
+    });
+  }
+  return migrated;
 }
 
 function parseVideoGenerationSchema(
@@ -402,6 +725,94 @@ function parseRouting(value: unknown): RoutingPreference {
   };
 }
 
+function purposesForLegacyModel(
+  modelId: ProviderModel['id'],
+  capabilities: readonly LegacyCapabilityEvidence[],
+  routingPreferences: readonly RoutingPreference[]
+): readonly ProviderOperationPurpose[] {
+  const purposes = new Set<ProviderOperationPurpose>();
+  for (const value of [
+    ...capabilities
+      .filter((item) => item.modelId === modelId)
+      .map((item) => item.capability),
+    ...routingPreferences
+      .filter((item) => item.modelId === modelId)
+      .map((item) => item.purpose)
+  ]) {
+    if (
+      providerOperationPurposes.includes(value as ProviderOperationPurpose)
+    ) {
+      purposes.add(value as ProviderOperationPurpose);
+    }
+  }
+  return [...purposes];
+}
+
+function mediaKindForPurposes(
+  purposes: readonly ProviderOperationPurpose[]
+): ProviderMediaKind {
+  const hasImage = purposes.some(
+    (purpose) => purpose.includes('image') || purpose === 'reference_to_image'
+  );
+  const hasVideo = purposes.some(
+    (purpose) => purpose.includes('video') || purpose === 'reference_to_video'
+  );
+  if (hasImage === hasVideo) return 'unknown';
+  return hasImage ? 'image' : 'video';
+}
+
+function validateCapabilityHistory(
+  capabilities: readonly ModelCapabilityEvidence[],
+  byId: ReadonlyMap<ModelCapabilityEvidence['id'], ModelCapabilityEvidence>
+): void {
+  const revisionsByKey = new Map<string, Set<number>>();
+  for (const evidence of capabilities) {
+    const key = evidenceHistoryKey(evidence);
+    const revisions = revisionsByKey.get(key) ?? new Set<number>();
+    if (revisions.has(evidence.revision)) {
+      throw new TypeError('Capability evidence revision is duplicated');
+    }
+    revisions.add(evidence.revision);
+    revisionsByKey.set(key, revisions);
+    if (!evidence.supersedesEvidenceId) continue;
+    const previous = byId.get(evidence.supersedesEvidenceId);
+    if (
+      !previous ||
+      evidenceHistoryKey(previous) !== key ||
+      previous.revision >= evidence.revision
+    ) {
+      throw new TypeError('Capability evidence history link is invalid');
+    }
+  }
+}
+
+function assertCapabilityHistoryPreserved(
+  current: ProviderRegistrySnapshot,
+  next: ProviderRegistrySnapshot
+): void {
+  const nextById = new Map(next.capabilities.map((item) => [item.id, item]));
+  for (const evidence of current.capabilities) {
+    const retained = nextById.get(evidence.id);
+    if (!retained || JSON.stringify(retained) !== JSON.stringify(evidence)) {
+      throw new TypeError('Capability evidence history is immutable');
+    }
+  }
+}
+
+function evidenceHistoryKey(value: {
+  readonly modelId: ProviderModel['id'];
+  readonly capability: string;
+  readonly source: ModelCapabilityEvidence['source'];
+}): string {
+  return `${value.modelId}\u0000${value.capability}\u0000${value.source}`;
+}
+
+function assertUnique(values: readonly string[], label: string): void {
+  if (new Set(values).size !== values.length) {
+    throw new TypeError(`Provider registry contains duplicate ${label} IDs`);
+  }
+}
+
 function requireVersionAndName(item: Record<string, unknown>): void {
   if (
     item.schemaVersion !== 1 ||
@@ -418,12 +829,15 @@ function requireOneOf(value: unknown, allowed: readonly string[]): void {
   }
 }
 
-function optionalString(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
+function requireNonBlankString(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new TypeError('Provider registry string is invalid');
   }
   return value;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return value === undefined ? undefined : requireNonBlankString(value);
 }
 
 function optionalTimestamp(value: unknown) {
