@@ -6,11 +6,14 @@ export function TitleBar() {
   const isMac = platform === 'darwin';
 
   return (
-    <header className={isMac ? 'title-bar title-bar--mac' : 'title-bar'}>
+    <header
+      aria-label="应用标题栏"
+      className={isMac ? 'title-bar title-bar--mac' : 'title-bar'}
+    >
       <div className="title-bar__brand">
         <div
+          aria-hidden="true"
           className="title-bar__brand-mark"
-          aria-label="UniComp 品牌标识占位"
           title="正式品牌 Logo 待接入"
         >
           U

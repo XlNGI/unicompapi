@@ -18,7 +18,7 @@ export function WindowControls() {
   }
 
   return (
-    <div className="window-controls" aria-label="窗口控制">
+    <div className="window-controls" aria-label="窗口控制" role="group">
       <button
         type="button"
         className="window-control"
@@ -31,8 +31,8 @@ export function WindowControls() {
       <button
         type="button"
         className="window-control"
-        aria-label="最大化或还原窗口"
-        title="最大化或还原"
+        aria-label={isMaximized ? '还原窗口' : '最大化窗口'}
+        title={isMaximized ? '还原' : '最大化'}
         onClick={controls.toggleMaximize}
       >
         <span className="windows-caption-icon" aria-hidden="true">
