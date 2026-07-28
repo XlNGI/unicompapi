@@ -758,4 +758,4 @@ ProjectContext 控制器只从当前主进程 Project Session 派生项目范围
 
     docs/active/阶段9-C1-对话与项目上下文UI接线记录.md
 
-未完成：真实 LLM/图片/视频适配器、HTTP、收费调用、原生附件选择、项目素材候选、对话消息级创作引用、供应商提交前外发确认均未实现；不得把保存的对话 candidate ID 解释为读取全部消息或外发授权。macOS 实机按项目负责人最新决策保持 `not_run/deferred`；本分支等待验收，未经批准不得合并 `develop`，也不自动启动 Vidu 或 B4。
+未完成：真实 LLM/图片/视频适配器、HTTP、收费调用、原生附件选择、项目素材候选、对话消息级创作引用、供应商提交前外发确认均未实现；不得把保存的对话 candidate ID 解释为读取全部消息或外发授权。macOS 实机按项目负责人最新决策保持 `not_run/deferred`。项目负责人验收后已通过非快进提交 `e278b63` 合并并推送 `develop`；合并后完整门禁与 Windows Electron 4/4 响应、受控关闭残留 0 再次通过，未自动启动 Vidu 或 B4。
