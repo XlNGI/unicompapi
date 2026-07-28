@@ -5,7 +5,7 @@ import type {
   StorageIpcResult,
   StorageLocalMediaHandleDto
 } from '../../shared/storage-ipc';
-import { resolveFileReferencePath } from '../files';
+import { resolveFileReferencePathSafely } from '../files';
 import {
   JsonFileReferenceRepository,
   JsonWorkRepository
@@ -125,7 +125,7 @@ export class ControlledLocalMediaController {
         if (!file || file.state !== 'available') {
           throw new LocalMediaError('media_unavailable');
         }
-        const target = resolveFileReferencePath(entry.rootDirectory, file);
+        const target = await resolveFileReferencePathSafely(entry.rootDirectory, file);
         const metadata = await stat(target);
         if (!metadata.isFile()) {
           throw new LocalMediaError('media_unavailable');

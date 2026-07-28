@@ -29,7 +29,7 @@ import {
   NodeFileStatusProbe,
   NodeImageInspector,
   NodeSha256FileVerifier,
-  resolveFileReferencePath
+  resolveFileReferencePathSafely
 } from '../files';
 import {
   JsonAssetRepository,
@@ -181,7 +181,7 @@ export class ImageLocalMediaController {
         );
       }
 
-      const target = resolveFileReferencePath(
+      const target = await resolveFileReferencePathSafely(
         context.session.rootDirectory,
         verified
       );

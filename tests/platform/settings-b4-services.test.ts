@@ -26,6 +26,9 @@ describe('phase 8 B4 diagnostics and maintenance services', () => {
       'Authorization: Bearer top-secret-token',
       'Cookie: session=never-collect',
       'path=C:\\Users\\Developer\\private\\source.mp4',
+      `sha256=${'a'.repeat(64)}`,
+      'hostname=private-workstation',
+      'deviceId=private-device-id',
       'prompt: complete private prompt text'
     ].join('\n'));
     const service = new DiagnosticsService(root, () => '2026-07-27T08:00:00.000Z');
@@ -52,10 +55,15 @@ describe('phase 8 B4 diagnostics and maintenance services', () => {
     expect(payload).not.toContain('top-secret-token');
     expect(payload).not.toContain('never-collect');
     expect(payload).not.toContain('Developer');
+    expect(payload).not.toContain('a'.repeat(64));
+    expect(payload).not.toContain('private-workstation');
+    expect(payload).not.toContain('private-device-id');
     expect(payload).not.toContain('complete private prompt text');
     expect(payload).not.toContain(root);
     expect(payload).toContain('[REDACTED]');
     expect(payload).toContain('[PATH_REDACTED]');
+    expect(payload).toContain('[HASH_REDACTED]');
+    expect(payload).toContain('[DEVICE_REDACTED]');
     expect(payload).toContain('[CONTENT_REDACTED]');
   });
 
@@ -113,19 +121,43 @@ describe('phase 8 B4 diagnostics and maintenance services', () => {
     const projectFile = path.join(root, 'projects', 'project-a', 'entities', 'works.json');
     const externalFile = path.join(external, 'source.mp4');
     const credential = path.join(root, 'secure-credentials.json');
+    const credentialBackup = path.join(root, 'secure-credentials.json.bak');
+    const directoryAuthorization = path.join(root, 'settings', 'directories.json');
+    const directoryAuthorizationBackup = `${directoryAuthorization}.bak`;
     const log = path.join(root, 'logs', 'application.log');
     const cache = path.join(root, 'cache', 'preview.bin');
-    for (const file of [projectFile, externalFile, credential, log, cache]) {
+    for (const file of [
+      projectFile,
+      externalFile,
+      credential,
+      credentialBackup,
+      directoryAuthorization,
+      directoryAuthorizationBackup,
+      log,
+      cache
+    ]) {
       await mkdir(path.dirname(file), { recursive: true });
       await writeFile(file, 'fixture');
     }
     const service = new ApplicationDataService(root);
-    const plan = await service.plan(['local_credentials', 'logs', 'caches']);
+    const plan = await service.plan([
+      'local_credentials',
+      'directory_authorizations',
+      'logs',
+      'caches'
+    ]);
     expect(plan).toMatchObject({ projectsExcluded: true, externalFilesExcluded: true });
     expect(JSON.stringify(plan)).not.toContain(projectFile);
     expect(JSON.stringify(plan)).not.toContain(externalFile);
     await service.execute(plan);
-    await expect(stat(credential)).rejects.toMatchObject({ code: 'ENOENT' });
+    for (const file of [
+      credential,
+      credentialBackup,
+      directoryAuthorization,
+      directoryAuthorizationBackup
+    ]) {
+      await expect(stat(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
     await expect(stat(log)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(stat(cache)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(projectFile, 'utf8')).resolves.toBe('fixture');

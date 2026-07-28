@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
   access,
+  lstat,
   mkdir,
   open,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -15,9 +17,15 @@ import type {
   ControlledDirectoryDto,
   DirectoryPurpose
 } from '../../shared/settings-ipc';
+import { assertNotSymbolicLink } from '../storage';
+import {
+  parseDirectoryAuthorization,
+  type DirectoryAuthorizationPort,
+  type DirectoryAuthorizationRecord
+} from './directory-authorization';
 
 interface DirectoryRegistryDocument {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly entries: readonly DirectoryRegistryEntry[];
 }
 
@@ -28,10 +36,16 @@ export interface DirectoryRegistryEntry {
   readonly directoryPath: string;
   readonly displayName: string;
   readonly registeredAt: string;
+  /** Main-process-only native authorization evidence. */
+  readonly authorization: DirectoryAuthorizationRecord;
 }
 
 export interface DirectoryRegistry {
-  register(purpose: DirectoryPurpose, directoryPath: string): Promise<DirectoryRegistryEntry>;
+  register(
+    purpose: DirectoryPurpose,
+    directoryPath: string,
+    authorization?: DirectoryAuthorizationRecord
+  ): Promise<DirectoryRegistryEntry>;
   resolve(id: string, purpose?: DirectoryPurpose): Promise<DirectoryRegistryEntry | undefined>;
   list(): Promise<readonly DirectoryRegistryEntry[]>;
 }
@@ -47,18 +61,36 @@ export class JsonDirectoryRegistry implements DirectoryRegistry {
 
   async register(
     purpose: DirectoryPurpose,
-    directoryPath: string
+    directoryPath: string,
+    authorization: DirectoryAuthorizationRecord = { kind: 'native_picker' }
   ): Promise<DirectoryRegistryEntry> {
-    const normalized = requireAbsoluteDirectory(directoryPath);
+    const normalized = await canonicalDirectory(directoryPath);
+    const parsedAuthorization = parseDirectoryAuthorization(authorization);
     let result: DirectoryRegistryEntry | undefined;
     const operation = this.queue.then(async () => {
       await assertDirectory(normalized);
       const document = await this.readDocument();
-      const existing = document.entries.find(
+      const existingIndex = document.entries.findIndex(
         (entry) => entry.purpose === purpose && samePath(entry.directoryPath, normalized)
       );
+      const existing = document.entries[existingIndex];
       if (existing) {
-        result = existing;
+        if (!sameAuthorization(existing.authorization, parsedAuthorization)) {
+          const updated: DirectoryRegistryEntry = {
+            ...existing,
+            registeredAt: this.now(),
+            authorization: parsedAuthorization
+          };
+          await writeRegistry(this.registryPath, {
+            schemaVersion: 2,
+            entries: document.entries.map((entry, index) =>
+              index === existingIndex ? updated : entry
+            )
+          });
+          result = updated;
+        } else {
+          result = existing;
+        }
         return;
       }
       if (document.entries.some((entry) => samePath(entry.directoryPath, normalized))) {
@@ -69,10 +101,11 @@ export class JsonDirectoryRegistry implements DirectoryRegistry {
         purpose,
         directoryPath: normalized,
         displayName: path.basename(normalized) || path.parse(normalized).root,
-        registeredAt: this.now()
+        registeredAt: this.now(),
+        authorization: parsedAuthorization
       };
       await writeRegistry(this.registryPath, {
-        schemaVersion: 1,
+        schemaVersion: 2,
         entries: [...document.entries, entry]
       });
       result = entry;
@@ -103,20 +136,39 @@ export class JsonDirectoryRegistry implements DirectoryRegistry {
       return parseRegistry(JSON.parse(await readFile(this.registryPath, 'utf8')));
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') {
-        return { schemaVersion: 1, entries: [] };
+        return readRegistryBackupOrEmpty(this.registryPath);
       }
-      const failure = new Error('Controlled directory registry is invalid');
-      Object.assign(failure, { cause: error });
-      throw failure;
+      try {
+        return await readRegistryBackup(this.registryPath);
+      } catch (backupError) {
+        const failure = new Error('Controlled directory registry is invalid');
+        Object.assign(failure, { cause: { primaryError: error, backupError } });
+        throw failure;
+      }
     }
   }
 }
 
 export async function describeControlledDirectory(
-  entry: DirectoryRegistryEntry
+  entry: DirectoryRegistryEntry,
+  authorizationPort?: DirectoryAuthorizationPort
 ): Promise<ControlledDirectoryDto> {
   try {
-    const metadata = await stat(entry.directoryPath);
+    if (authorizationPort) {
+      const authorization = await authorizationPort.ensureAccess({
+        directoryId: entry.id,
+        directoryPath: entry.directoryPath,
+        authorization: entry.authorization
+      });
+      if (authorization.state === 'revoked') {
+        return permissionRequiredDirectory(
+          entry,
+          authorization.reason ?? 'directory_authorization_revoked'
+        );
+      }
+    }
+    await assertNotSymbolicLink(entry.directoryPath);
+    const metadata = await lstat(entry.directoryPath);
     if (!metadata.isDirectory()) {
       return unavailableDirectory(entry, 'not_a_directory');
     }
@@ -150,6 +202,7 @@ async function writeRegistry(
   document: DirectoryRegistryDocument
 ): Promise<void> {
   const parent = path.dirname(target);
+  const backup = `${target}.bak`;
   const temporary = path.join(parent, `.${path.basename(target)}.${randomUUID()}.tmp`);
   await mkdir(parent, { recursive: true });
   try {
@@ -160,6 +213,13 @@ async function writeRegistry(
     } finally {
       await handle.close();
     }
+    try {
+      const currentText = await readFile(target, 'utf8');
+      parseRegistry(JSON.parse(currentText));
+      await writeTextAtomically(backup, currentText);
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== 'ENOENT') throw error;
+    }
     await rename(temporary, target);
   } finally {
     await rm(temporary, { force: true });
@@ -168,11 +228,11 @@ async function writeRegistry(
 
 function parseRegistry(value: unknown): DirectoryRegistryDocument {
   const item = record(value);
-  if (item.schemaVersion !== 1 || !Array.isArray(item.entries)) {
+  if ((item.schemaVersion !== 1 && item.schemaVersion !== 2) || !Array.isArray(item.entries)) {
     throw new TypeError('Directory registry version is invalid');
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     entries: item.entries.map((entry) => {
       const candidate = record(entry);
       if (
@@ -193,10 +253,46 @@ function parseRegistry(value: unknown): DirectoryRegistryDocument {
         purpose: candidate.purpose,
         directoryPath: path.resolve(candidate.directoryPath),
         displayName: candidate.displayName,
-        registeredAt: candidate.registeredAt
+        registeredAt: candidate.registeredAt,
+        authorization: item.schemaVersion === 1
+          ? { kind: 'native_picker' }
+          : parseDirectoryAuthorization(candidate.authorization)
       };
     })
   };
+}
+
+async function writeTextAtomically(target: string, content: string): Promise<void> {
+  const parent = path.dirname(target);
+  const temporary = path.join(parent, `.${path.basename(target)}.${randomUUID()}.tmp`);
+  await mkdir(parent, { recursive: true });
+  try {
+    const handle = await open(temporary, 'wx');
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function readRegistryBackupOrEmpty(target: string): Promise<DirectoryRegistryDocument> {
+  try {
+    return await readRegistryBackup(target);
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return { schemaVersion: 2, entries: [] };
+    }
+    throw error;
+  }
+}
+
+async function readRegistryBackup(target: string): Promise<DirectoryRegistryDocument> {
+  return parseRegistry(JSON.parse(await readFile(`${target}.bak`, 'utf8')));
 }
 
 function unavailableDirectory(
@@ -208,6 +304,22 @@ function unavailableDirectory(
     purpose: entry.purpose,
     displayName: entry.displayName,
     state: 'unavailable',
+    readable: false,
+    writable: false,
+    freeBytes: null,
+    reason
+  };
+}
+
+function permissionRequiredDirectory(
+  entry: DirectoryRegistryEntry,
+  reason: string
+): ControlledDirectoryDto {
+  return {
+    id: entry.id,
+    purpose: entry.purpose,
+    displayName: entry.displayName,
+    state: 'permission_required',
     readable: false,
     writable: false,
     freeBytes: null,
@@ -240,17 +352,30 @@ async function getFreeBytes(target: string): Promise<number | null> {
   }
 }
 
-function requireAbsoluteDirectory(value: string): string {
+async function canonicalDirectory(value: string): Promise<string> {
   if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) {
     throw new TypeError('Controlled directory path must be absolute');
   }
-  return path.resolve(value);
+  const resolved = path.resolve(value);
+  await assertNotSymbolicLink(resolved);
+  if (!(await stat(resolved)).isDirectory()) {
+    throw new TypeError('Selected path is not a directory');
+  }
+  return realpath(resolved);
 }
 
 function samePath(left: string, right: string): boolean {
-  return process.platform === 'win32'
-    ? left.toLocaleLowerCase('en-US') === right.toLocaleLowerCase('en-US')
-    : left === right;
+  return path.relative(left, right) === '';
+}
+
+function sameAuthorization(
+  left: DirectoryAuthorizationRecord,
+  right: DirectoryAuthorizationRecord
+): boolean {
+  return left.kind === right.kind && (
+    left.kind === 'native_picker' ||
+    (right.kind === 'macos_security_scoped_bookmark' && left.bookmark === right.bookmark)
+  );
 }
 
 function isDirectoryPurpose(value: unknown): value is DirectoryPurpose {

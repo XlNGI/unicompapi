@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, open, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { FileReference } from '../../domain';
-import { resolveFileReferencePath } from './file-paths';
+import { resolveFileReferencePathSafely } from './file-paths';
 import { NodeSha256FileVerifier } from './node-sha256-verifier';
 import type { FileVerificationResult } from './file-verifier';
 
@@ -59,8 +59,14 @@ export class NodeBackupRestoreExecutor {
       );
     }
 
-    const source = resolveFileReferencePath(this.projectRoot, request.backup);
-    const target = resolveFileReferencePath(this.projectRoot, request.target);
+    let source: string;
+    let target: string;
+    try {
+      source = await resolveFileReferencePathSafely(this.projectRoot, request.backup);
+      target = await resolveFileReferencePathSafely(this.projectRoot, request.target);
+    } catch {
+      throw new BackupRestoreError('restore_failed', 'Backup or target path is not safe');
+    }
     const parent = path.dirname(target);
     const temporary = path.join(
       parent,

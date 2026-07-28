@@ -80,9 +80,18 @@ function rootsFor(userDataPath: string, scopes: readonly LocalApplicationDataSco
   const roots: string[] = [];
   const add = (...relative: string[]) => roots.push(...relative.map((item) => path.join(userDataPath, item)));
   if (scopes.includes('settings')) add('settings/settings.json.bak');
-  if (scopes.includes('directory_authorizations')) add('settings/directories.json');
+  if (scopes.includes('directory_authorizations')) {
+    add('settings/directories.json', 'settings/directories.json.bak');
+  }
   if (scopes.includes('provider_registry')) add('provider-registry.json');
-  if (scopes.includes('local_credentials')) add('secure-credentials.json', 'settings/proxy-credentials.json');
+  if (scopes.includes('local_credentials')) {
+    add(
+      'secure-credentials.json',
+      'secure-credentials.json.bak',
+      'settings/proxy-credentials.json',
+      'settings/proxy-credentials.json.bak'
+    );
+  }
   if (scopes.includes('project_catalog')) add('project-catalog.json');
   if (scopes.includes('logs')) add('logs');
   if (scopes.includes('caches')) add('cache', 'tmp');

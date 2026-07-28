@@ -2,7 +2,7 @@ import path from 'node:path';
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import type { FileReference } from '../../domain';
-import { resolveFileReferencePath } from './file-paths';
+import { resolveFileReferencePathSafely } from './file-paths';
 import {
   FileVerificationError,
   type FileVerificationRequest
@@ -28,7 +28,7 @@ export class NodeFileStatusProbe implements FileStatusProbe {
     let target: string;
 
     try {
-      target = resolveFileReferencePath(this.projectRoot, file);
+      target = await resolveFileReferencePathSafely(this.projectRoot, file);
     } catch {
       return {
         recommendedState: 'missing',

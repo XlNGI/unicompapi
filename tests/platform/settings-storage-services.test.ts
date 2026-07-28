@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   utimes,
   writeFile
 } from 'node:fs/promises';
@@ -62,6 +63,76 @@ describe('controlled directory registry and migration', () => {
     );
   });
 
+  it('rejects symbolic-link directory registrations and reports revoked authorization', async () => {
+    const { root, registry } = await fixture();
+    const selected = path.join(root, 'selected');
+    const linked = path.join(root, 'linked');
+    await mkdir(selected);
+    await symlink(selected, linked, 'junction');
+    await expect(registry.register('projects', linked)).rejects.toMatchObject({
+      code: 'symbolic_link_rejected'
+    });
+
+    const entry = await registry.register('projects', selected, {
+      kind: 'macos_security_scoped_bookmark',
+      bookmark: 'opaque-bookmark'
+    });
+    const renewed = await registry.register('projects', selected, {
+      kind: 'macos_security_scoped_bookmark',
+      bookmark: 'renewed-bookmark'
+    });
+    expect(renewed.id).toBe(entry.id);
+    expect(renewed.authorization).toEqual({
+      kind: 'macos_security_scoped_bookmark',
+      bookmark: 'renewed-bookmark'
+    });
+    const dto = await describeControlledDirectory(entry, {
+      ensureAccess: async () => ({
+        state: 'revoked',
+        reason: 'directory_authorization_revoked'
+      })
+    });
+    expect(dto).toMatchObject({
+      state: 'permission_required',
+      readable: false,
+      writable: false,
+      reason: 'directory_authorization_revoked'
+    });
+    expect(JSON.stringify(dto)).not.toContain('opaque-bookmark');
+  });
+
+  it('migrates the v1 registry and recovers the last valid backup', async () => {
+    const { root } = await fixture();
+    const registryPath = path.join(root, 'legacy', 'directories.json');
+    const first = path.join(root, 'first');
+    const second = path.join(root, 'second');
+    const third = path.join(root, 'third');
+    await Promise.all([mkdir(first), mkdir(second), mkdir(third), mkdir(path.dirname(registryPath))]);
+    await writeFile(registryPath, JSON.stringify({
+      schemaVersion: 1,
+      entries: [{
+        id: 'dir-00000001',
+        purpose: 'projects',
+        directoryPath: first,
+        displayName: 'first',
+        registeredAt: '2026-07-27T00:00:00.000Z'
+      }]
+    }));
+    const registry = new JsonDirectoryRegistry(
+      registryPath,
+      () => '2026-07-28T00:00:00.000Z',
+      () => '00000002'
+    );
+    expect((await registry.list())[0].authorization).toEqual({ kind: 'native_picker' });
+    await registry.register('works', second);
+    await registry.register('downloads', third);
+    await writeFile(registryPath, '{corrupted');
+
+    const recovered = await new JsonDirectoryRegistry(registryPath).list();
+    expect(recovered.map((entry) => entry.displayName)).toEqual(['first', 'second']);
+    await expect(readFile(registryPath, 'utf8')).resolves.toBe('{corrupted');
+  });
+
   it('copies, verifies and publishes a migration without deleting the source', async () => {
     const { root, registry } = await fixture();
     const source = path.join(root, 'source');
@@ -85,6 +156,30 @@ describe('controlled directory registry and migration', () => {
       .resolves.toBe('verified-data');
     await expect(readFile(path.join(source, 'nested', 'data.bin'), 'utf8'))
       .resolves.toBe('verified-data');
+  });
+
+  it('preserves Unicode, spaces and deep paths during verified migration', async () => {
+    const { root, registry } = await fixture();
+    const source = path.join(root, 'source folder');
+    const target = path.join(root, 'target folder');
+    const relative = path.join(
+      '素材 空间',
+      ...Array.from({ length: 12 }, (_, index) => `nested-${index}`),
+      'Cafe\u0301 result.bin'
+    );
+    await mkdir(path.join(source, path.dirname(relative)), { recursive: true });
+    await mkdir(target);
+    await writeFile(path.join(source, relative), 'portable-data');
+    const sourceEntry = await registry.register('works', source);
+    const targetEntry = await registry.register('works', target);
+    const service = new DirectoryMigrationService(registry);
+    const plan = await service.plan({
+      purpose: 'works',
+      sourceDirectoryId: sourceEntry.id,
+      targetDirectoryId: targetEntry.id
+    });
+    await service.execute(plan);
+    await expect(readFile(path.join(target, relative), 'utf8')).resolves.toBe('portable-data');
   });
 
   it('blocks conflicts and insufficient space before copying', async () => {

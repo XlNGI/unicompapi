@@ -24,6 +24,7 @@ import {
 import {
   ElectronNotificationAdapter,
   ElectronDiagnosticLocationAdapter,
+  ElectronDirectoryAuthorizationAdapter,
   ElectronPermissionAdapter,
   ElectronProxyAdapter,
   ElectronShortcutAdapter,
@@ -43,6 +44,7 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
   const directoryRegistry = new JsonDirectoryRegistry(
     path.join(userDataPath, 'settings', 'directories.json')
   );
+  const directoryAuthorization = new ElectronDirectoryAuthorizationAdapter();
   const proxyAdapter = new ElectronProxyAdapter();
   const proxy = new ProxyService(
     proxyAdapter,
@@ -67,6 +69,7 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
     {
       userDataPath,
       directoryRegistry,
+      directoryAuthorization,
       directoryMigration: new DirectoryMigrationService(directoryRegistry),
       cleanup: new CleanupService(userDataPath, directoryRegistry),
       performance: new PerformancePolicyService(),
@@ -115,12 +118,20 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
       };
     }
     const selected = await dialog.showOpenDialog({
-      properties: ['openDirectory', 'createDirectory']
+      properties: ['openDirectory', 'createDirectory'],
+      securityScopedBookmarks: process.platform === 'darwin'
     });
     if (selected.canceled || selected.filePaths.length !== 1) {
       return { ok: true as const, value: null };
     }
-    return controller.registerSelectedDirectory(purpose, selected.filePaths[0]);
+    const bookmark = selected.bookmarks?.[0];
+    return controller.registerSelectedDirectory(
+      purpose,
+      selected.filePaths[0],
+      bookmark
+        ? { kind: 'macos_security_scoped_bookmark', bookmark }
+        : { kind: 'native_picker' }
+    );
   });
   ipcMain.handle(settingsIpcChannels.openSystemSettings, (_event, input) => {
     const target = input && typeof input === 'object' && 'target' in input
@@ -188,6 +199,7 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
     },
     dispose() {
       shortcuts.release();
+      directoryAuthorization.dispose();
       proxy.dispose();
       proxyAdapter.dispose();
     }

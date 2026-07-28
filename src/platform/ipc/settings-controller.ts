@@ -39,6 +39,7 @@ import {
   describeControlledDirectory,
   type DirectoryMigrationPlan,
   type DirectoryMigrationService,
+  type DirectoryAuthorizationPort,
   type DirectoryRegistry,
   type MediaSettingsStatusService,
   type PerformancePolicyService,
@@ -81,6 +82,7 @@ interface PendingSettingsOperation {
 export interface SettingsB2Services {
   readonly userDataPath: string;
   readonly directoryRegistry: DirectoryRegistry;
+  readonly directoryAuthorization?: DirectoryAuthorizationPort;
   readonly directoryMigration: DirectoryMigrationService;
   readonly cleanup: CleanupService;
   readonly performance: PerformancePolicyService;
@@ -156,7 +158,9 @@ export class SettingsController {
           Promise.resolve(unavailableNetworkStatus()),
         this.b3?.notifications.getStatus() ?? Promise.resolve(unavailableNotificationStatus())
       ]);
-      const directories = await Promise.all(entries.map(describeControlledDirectory));
+      const directories = await Promise.all(entries.map((entry) =>
+        describeControlledDirectory(entry, this.b2?.directoryAuthorization)
+      ));
       const shortcuts = this.b3?.shortcuts.getStatus(current.document.shortcuts) ??
         unavailableShortcutStatus();
       return {
@@ -332,7 +336,8 @@ export class SettingsController {
   /** Called only by Electron main after a native directory picker succeeds. */
   async registerSelectedDirectory(
     purpose: unknown,
-    selectedPath: string
+    selectedPath: string,
+    authorization?: Parameters<DirectoryRegistry['register']>[2]
   ): Promise<SettingsIpcResult<ControlledDirectoryDto>> {
     if (!this.b2) {
       return failure('operation_unsupported', 'Directory registration is unavailable');
@@ -344,7 +349,8 @@ export class SettingsController {
       return {
         ok: true,
         value: await describeControlledDirectory(
-          await this.b2.directoryRegistry.register(purpose, selectedPath)
+          await this.b2.directoryRegistry.register(purpose, selectedPath, authorization),
+          this.b2.directoryAuthorization
         )
       };
     } catch {

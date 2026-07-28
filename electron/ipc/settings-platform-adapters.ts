@@ -20,12 +20,49 @@ import type {
   SettingsCapabilityDto
 } from '../../src/shared/settings-ipc';
 import type {
+  DirectoryAuthorizationPort,
   NativePermissionAdapter,
   NotificationPlatformAdapter,
   ProxyPlatformAdapter,
   ShortcutPlatformAdapter,
   DiagnosticLocationAdapter
 } from '../../src/platform';
+
+export class ElectronDirectoryAuthorizationAdapter implements DirectoryAuthorizationPort {
+  private readonly releases = new Map<string, () => void>();
+
+  async ensureAccess(input: Parameters<DirectoryAuthorizationPort['ensureAccess']>[0]) {
+    if (input.authorization.kind === 'native_picker') {
+      return { state: 'granted' as const };
+    }
+    if (process.platform !== 'darwin') {
+      return {
+        state: 'revoked' as const,
+        reason: 'security_scoped_bookmark_platform_mismatch'
+      };
+    }
+    if (this.releases.has(input.directoryId)) {
+      return { state: 'granted' as const };
+    }
+    try {
+      const release = app.startAccessingSecurityScopedResource(
+        input.authorization.bookmark
+      );
+      this.releases.set(input.directoryId, () => release());
+      return { state: 'granted' as const };
+    } catch {
+      return {
+        state: 'revoked' as const,
+        reason: 'directory_authorization_revoked'
+      };
+    }
+  }
+
+  dispose(): void {
+    for (const release of this.releases.values()) release();
+    this.releases.clear();
+  }
+}
 
 const proxyProbeUrl = 'https://example.com/';
 

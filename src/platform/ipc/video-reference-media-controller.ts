@@ -36,7 +36,7 @@ import {
   NodeSha256FileVerifier,
   NodeVideoInspector,
   VideoInspectionError,
-  resolveFileReferencePath,
+  resolveFileReferencePathSafely,
   type VideoInspection,
   type VideoInspector
 } from '../files';
@@ -233,7 +233,7 @@ export class VideoReferenceMediaController {
         );
       }
 
-      const target = resolveFileReferencePath(
+      const target = await resolveFileReferencePathSafely(
         context.session.rootDirectory,
         verified
       );

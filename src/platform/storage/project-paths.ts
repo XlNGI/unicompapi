@@ -1,3 +1,5 @@
+import { normalizePortableRelativePath } from './path-security';
+
 declare const projectRelativePathBrand: unique symbol;
 
 export type ProjectRelativePath = string & {
@@ -5,24 +7,7 @@ export type ProjectRelativePath = string & {
 };
 
 export function toProjectRelativePath(value: string): ProjectRelativePath {
-  const normalized = value.trim().replace(/\\/g, '/');
-  const segments = normalized.split('/');
-
-  if (
-    normalized.length === 0 ||
-    normalized.startsWith('/') ||
-    normalized.startsWith('\\') ||
-    /^[A-Za-z]:/.test(normalized) ||
-    normalized.includes('\0') ||
-    segments.some(
-      (segment: string) =>
-        segment === '' || segment === '.' || segment === '..'
-    )
-  ) {
-    throw new TypeError('Storage path must be a safe project-relative path');
-  }
-
-  return normalized as ProjectRelativePath;
+  return normalizePortableRelativePath(value) as ProjectRelativePath;
 }
 
 export const projectStoragePaths = {
