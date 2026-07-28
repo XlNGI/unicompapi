@@ -4,6 +4,11 @@ import type { Execution } from '../entities/execution';
 import type { FileReference } from '../entities/file-reference';
 import type { ImageWorkspaceDraft } from '../entities/image-workspace';
 import type { Project } from '../entities/project';
+import type {
+  ProjectContextDraftV1,
+  ProjectContextV1,
+  ProjectContextVersionV1
+} from '../entities/project-context';
 import type { Task } from '../entities/task';
 import type { VideoEditDraft } from '../entities/video-editor';
 import type { VideoExportPlan } from '../entities/video-export-plan';
@@ -29,6 +34,8 @@ import type {
   FileReferenceId,
   ModelId,
   ProjectId,
+  ProjectContextDraftId,
+  ProjectContextId,
   ProviderId,
   RoutingPreferenceId,
   TaskId,
@@ -48,6 +55,28 @@ export interface ConversationRepository {
   list(options?: ConversationListOptions): Promise<readonly Conversation[]>;
   create(conversation: Conversation): Promise<void>;
   save(conversation: Conversation, expectedRevision: number): Promise<void>;
+}
+
+export interface ProjectContextRepository {
+  readonly projectId: ProjectId;
+  getDraft(id: ProjectContextDraftId): Promise<ProjectContextDraftV1 | undefined>;
+  createDraft(draft: ProjectContextDraftV1): Promise<void>;
+  saveDraft(
+    draft: ProjectContextDraftV1,
+    expectedRevision: number
+  ): Promise<void>;
+  registerDraft(
+    draftId: ProjectContextDraftId,
+    expectedDraftRevision: number,
+    context: ProjectContextV1
+  ): Promise<void>;
+  get(id: ProjectContextId): Promise<ProjectContextV1 | undefined>;
+  getRevision(
+    id: ProjectContextId,
+    revision: number
+  ): Promise<ProjectContextVersionV1 | undefined>;
+  list(includeDeleted?: boolean): Promise<readonly ProjectContextV1[]>;
+  save(context: ProjectContextV1, expectedRevision: number): Promise<void>;
 }
 
 export interface ProjectRepository {

@@ -22,6 +22,9 @@ export type VideoClipId = DomainId<'VideoClipId'>;
 export type TextOverlayId = DomainId<'TextOverlayId'>;
 export type ConversationId = DomainId<'ConversationId'>;
 export type MessageId = DomainId<'MessageId'>;
+export type ProjectContextId = DomainId<'ProjectContextId'>;
+export type ProjectContextDraftId = DomainId<'ProjectContextDraftId'>;
+export type ProjectContextFragmentId = DomainId<'ProjectContextFragmentId'>;
 
 function toDomainId<Name extends string>(value: string, label: Name): DomainId<Name> {
   const normalized = value.trim();
@@ -62,3 +65,9 @@ export const toConversationId = (value: string) =>
   toDomainId(value, 'ConversationId');
 export const toMessageId = (value: string) =>
   toDomainId(value, 'MessageId');
+export const toProjectContextId = (value: string) =>
+  toDomainId(value, 'ProjectContextId');
+export const toProjectContextDraftId = (value: string) =>
+  toDomainId(value, 'ProjectContextDraftId');
+export const toProjectContextFragmentId = (value: string) =>
+  toDomainId(value, 'ProjectContextFragmentId');
