@@ -137,7 +137,10 @@ class ControlledExportAdapter implements MediaEngineAdapter {
   }
 }
 
-async function fixture(adapter: ControlledExportAdapter) {
+async function fixture(
+  adapter: ControlledExportAdapter,
+  onActiveCountChanged?: (count: number) => void
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-export-fault-'));
   roots.push(root);
   const projectRoot = path.join(root, 'project');
@@ -207,7 +210,8 @@ async function fixture(adapter: ControlledExportAdapter) {
     getSession: () => ({ projectId, projectName: 'Fault project', rootDirectory: projectRoot }),
     getAdapter: () => adapter,
     now: () => '2026-07-27T02:01:00.000Z',
-    createId: () => `fault-${++sequence}`
+    createId: () => `fault-${++sequence}`,
+    onActiveCountChanged
   });
   return {
     controller,
@@ -267,6 +271,31 @@ describe('VideoExportController fault handling', () => {
     await test.controller.waitForExports();
     await expect(test.controller.getExport({ taskId: started.value.taskId }))
       .resolves.toMatchObject({ ok: true, value: { state: 'cancelled' } });
+    await expect(new JsonWorkRepository(test.storage, test.projectId).list(test.projectId))
+      .resolves.toEqual([]);
+  });
+
+  it('maps suspend interruption to recovery required without duplicate completion', async () => {
+    const adapter = new ControlledExportAdapter();
+    const activeCounts: number[] = [];
+    const test = await fixture(adapter, (count) => activeCounts.push(count));
+    const started = await test.controller.startExport({
+      draftId: test.draft.id,
+      expectedRevision: test.draft.revision
+    });
+    if (!started.ok) throw new Error(started.error.message);
+    await waitUntil(() => adapter.started);
+
+    expect(test.controller.activeExportCount).toBe(1);
+    await expect(test.controller.interruptActiveExports('system_suspend'))
+      .resolves.toBe(1);
+    await expect(test.controller.getExport({ taskId: started.value.taskId }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: { state: 'recovery_required', canRetry: true }
+      });
+    expect(test.controller.activeExportCount).toBe(0);
+    expect(activeCounts).toEqual([1, 0]);
     await expect(new JsonWorkRepository(test.storage, test.projectId).list(test.projectId))
       .resolves.toEqual([]);
   });

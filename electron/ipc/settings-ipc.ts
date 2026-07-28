@@ -33,6 +33,11 @@ import {
 
 export interface SettingsIpcLifecycle {
   activate(): Promise<void>;
+  getRuntimePolicy(): Promise<{
+    readonly continueInBackground: boolean;
+    readonly preventSleepWhileActive: boolean;
+    readonly pauseOnLowBattery: boolean;
+  }>;
   dispose(): void;
 }
 
@@ -196,6 +201,14 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
         proxy.activate(current.document.network.proxy),
         shortcuts.activate(current.document.shortcuts)
       ]);
+    },
+    async getRuntimePolicy() {
+      const current = await repository.load();
+      return {
+        continueInBackground: current.document.performance.continueInBackground,
+        preventSleepWhileActive: current.document.performance.preventSleepWhileActive,
+        pauseOnLowBattery: current.document.performance.pauseOnLowBattery
+      };
     },
     dispose() {
       shortcuts.release();

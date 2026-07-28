@@ -1,9 +1,19 @@
-import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  net,
+  powerMonitor,
+  powerSaveBlocker,
+  protocol,
+  shell
+} from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
+import { normalizeTrustedExternalUrl } from '../src/platform';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -20,9 +30,20 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-const mediaHandles = registerStorageIpcHandlers();
-registerProviderIpcHandlers();
+let sleepBlockerId: number | undefined;
+let powerPolicyRead = Promise.resolve();
 const settingsLifecycle = registerSettingsIpcHandlers();
+const storageLifecycle = registerStorageIpcHandlers({
+  onActiveExportCountChanged: (count) => {
+    powerPolicyRead = powerPolicyRead
+      .then(async () => {
+        const policy = await settingsLifecycle.getRuntimePolicy();
+        updateSleepBlocker(count > 0 && policy.preventSleepWhileActive);
+      })
+      .catch(() => updateSleepBlocker(false));
+  }
+});
+registerProviderIpcHandlers();
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);
@@ -74,7 +95,7 @@ function createMainWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    void openTrustedExternalUrl(url);
     return { action: 'deny' };
   });
 
@@ -84,6 +105,14 @@ function createMainWindow(): void {
 
   mainWindow.on('maximize', sendMaximizedState);
   mainWindow.on('unmaximize', sendMaximizedState);
+  mainWindow.on('closed', () => {
+    if (!isMac) return;
+    void settingsLifecycle.getRuntimePolicy()
+      .then((policy) => policy.continueInBackground
+        ? undefined
+        : storageLifecycle.interruptActiveExports('background_processing_disabled'))
+      .catch(() => undefined);
+  });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -99,7 +128,7 @@ app.whenReady().then(async () => {
   protocol.handle('unicomp-media', async (request) => {
     const url = new URL(request.url);
     const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
-    const entry = token ? mediaHandles.resolveEntry(token) : undefined;
+    const entry = token ? storageLifecycle.resolveEntry(token) : undefined;
     if (!entry) {
       return new Response('Media handle not found', { status: 404 });
     }
@@ -122,6 +151,13 @@ app.whenReady().then(async () => {
   });
   createMainWindow();
 
+  powerMonitor.on('suspend', () => {
+    void storageLifecycle.interruptActiveExports('system_suspend').catch(() => undefined);
+  });
+  powerMonitor.on('lock-screen', () => {
+    void storageLifecycle.interruptActiveExports('screen_locked').catch(() => undefined);
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
@@ -129,8 +165,19 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', () => {
-  settingsLifecycle.dispose();
+let cleanupStarted = false;
+let cleanupCompleted = false;
+app.on('before-quit', (event) => {
+  if (cleanupCompleted) return;
+  event.preventDefault();
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  void storageLifecycle.dispose().finally(() => {
+    settingsLifecycle.dispose();
+    updateSleepBlocker(false);
+    cleanupCompleted = true;
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -138,3 +185,22 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+function updateSleepBlocker(required: boolean): void {
+  if (required) {
+    if (sleepBlockerId === undefined || !powerSaveBlocker.isStarted(sleepBlockerId)) {
+      sleepBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    }
+    return;
+  }
+  if (sleepBlockerId !== undefined && powerSaveBlocker.isStarted(sleepBlockerId)) {
+    powerSaveBlocker.stop(sleepBlockerId);
+  }
+  sleepBlockerId = undefined;
+}
+
+async function openTrustedExternalUrl(rawUrl: string): Promise<void> {
+  const trustedUrl = normalizeTrustedExternalUrl(rawUrl);
+  if (!trustedUrl) return;
+  await shell.openExternal(trustedUrl).catch(() => undefined);
+}

@@ -14,7 +14,9 @@
         "electron/preload.ts",
         "scripts/media-engine-common.mjs",
         "scripts/phase9-platform-common.mjs",
+        "scripts/verify-runtime-integrations.cjs",
         "src/platform/ipc/settings-controller.ts",
+        "src/platform/runtime/managed-process.ts",
         "src/platform/settings/cleanup-service.ts",
         "src/platform/settings/directory-migration.ts",
         "src/platform/settings/performance-policy.ts"
@@ -34,6 +36,7 @@
         "src/pages/settings/SettingsPage.tsx",
         "src/platform/acceptance/platform-acceptance.ts",
         "src/platform/ipc/settings-controller.ts",
+        "src/platform/runtime/managed-process.ts",
         "src/platform/settings/cleanup-service.ts",
         "src/platform/settings/directory-migration.ts",
         "src/platform/settings/performance-policy.ts",

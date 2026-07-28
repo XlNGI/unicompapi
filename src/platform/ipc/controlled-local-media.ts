@@ -55,6 +55,10 @@ export class LocalMediaHandleRegistry {
     return entry;
   }
 
+  clear(): void {
+    this.handles.clear();
+  }
+
   private removeExpired(): void {
     const now = this.now();
     for (const [token, entry] of this.handles) {
