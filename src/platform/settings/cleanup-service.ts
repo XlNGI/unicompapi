@@ -1,4 +1,4 @@
-import { lstat, readdir, rm, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { CleanupScope } from '../../shared/settings-ipc';
@@ -108,6 +108,7 @@ export class CleanupService {
   ): Promise<readonly { readonly scope: CleanupScope; readonly path: string }[]> {
     const result: { scope: CleanupScope; path: string }[] = [];
     const registrations = await this.registry.list();
+    const userDataPath = await canonicalPath(this.userDataPath);
     const protectedRoots = registrations
       .filter((entry) => !['cache', 'projects'].includes(entry.purpose))
       .map((entry) => entry.directoryPath);
@@ -122,13 +123,13 @@ export class CleanupService {
       .filter((root) => isSafeManagedRoot(root));
 
     if (scopes.includes('caches')) {
-      result.push({ scope: 'caches', path: path.join(this.userDataPath, 'cache') });
+      result.push({ scope: 'caches', path: path.join(userDataPath, 'cache') });
       result.push(...cacheRoots.map((root) => ({ scope: 'caches' as const, path: root })));
     }
     if (scopes.includes('preview_proxies')) {
       result.push({
         scope: 'preview_proxies',
-        path: path.join(this.userDataPath, 'cache', 'video-editor-preview')
+        path: path.join(userDataPath, 'cache', 'video-editor-preview')
       });
       result.push(...cacheRoots.map((root) => ({
         scope: 'preview_proxies' as const,
@@ -139,17 +140,26 @@ export class CleanupService {
     if (scopes.includes('temporary_exports')) {
       result.push({
         scope: 'temporary_exports',
-        path: path.join(this.userDataPath, 'tmp', 'exports')
+        path: path.join(userDataPath, 'tmp', 'exports')
       });
       result.push(...await projectManagedRoots(projectRoots, 'tmp/editor', 'temporary_exports'));
     }
     if (scopes.includes('eligible_logs')) {
-      result.push({ scope: 'eligible_logs', path: path.join(this.userDataPath, 'logs') });
+      result.push({ scope: 'eligible_logs', path: path.join(userDataPath, 'logs') });
     }
     return result.filter((root) =>
       isSafeManagedRoot(root.path) &&
       !protectedRoots.some((protectedRoot) => overlaps(root.path, protectedRoot))
     );
+  }
+}
+
+async function canonicalPath(target: string): Promise<string> {
+  try {
+    return await realpath(target);
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return path.resolve(target);
+    throw error;
   }
 }
 
