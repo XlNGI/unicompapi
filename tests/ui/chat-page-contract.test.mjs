@@ -4,26 +4,45 @@ import test from 'node:test';
 
 const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 
-test('chat page reports the real offline and unconfigured state', () => {
-  assert.match(source, /服务未配置/);
-  assert.match(source, />离线</);
-  assert.match(source, /不会生成或伪造 AI 回复/);
-  assert.match(source, /disabled>服务未配置，无法发送/);
+test('chat page uses persisted conversation operations and honest adapter failure', () => {
+  for (const operation of [
+    'listConversations',
+    'createConversation',
+    'renameConversation',
+    'archiveConversation',
+    'restoreConversation',
+    'deleteConversation',
+    'addUserMessage',
+    'requestAssistantResponse'
+  ]) {
+    assert.match(source, new RegExp(`chat\\.${operation}\\(`));
+  }
+  assert.match(source, /adapter_unavailable/);
+  assert.match(source, /不会生成或伪造 AI 回复、进度或费用/);
+  assert.match(source, /消息已保存；尚未配置真实适配器，因此没有创建 AI 回复/);
 });
 
-test('chat attachments stay in the current page and are not uploaded', () => {
-  assert.match(source, /type="file"/);
-  assert.match(source, /multiple/);
-  assert.match(source, /file\.name/);
-  assert.match(source, /当前输入、附件和未保存草稿不会出现在项目页或创作页/);
-  assert.doesNotMatch(source, /upload|fetch\(|localStorage|sessionStorage/);
+test('chat attachments remain unavailable until a controlled native port exists', () => {
+  assert.match(source, /disabled title="原生附件登记将在独立小 PR 实现"/);
+  assert.doesNotMatch(source, /type="file"|FileReader|fetch\(|upload|localStorage|sessionStorage/);
 });
 
-test('project context requires explicit selection, review and save capability', () => {
-  assert.match(source, /storage\.getProjectSession\(\)/);
-  assert.match(source, /只有用户明确选择的内容才能进入草稿/);
-  assert.match(source, /检查后才可保存到项目/);
-  assert.match(source, /disabled>没有可保存的上下文/);
+test('project context requires completed-message selection, preview and confirmation', () => {
+  for (const operation of [
+    'createContextDraft',
+    'addContextMessageFragment',
+    'removeContextMessageFragment',
+    'updateContextDraftLabels',
+    'registerContextDraft'
+  ]) {
+    assert.match(source, new RegExp(`chat\\.${operation}\\(`));
+  }
+  assert.match(source, /message\.state === 'completed'/);
+  assert.match(source, /message\.content\.length/);
+  assert.match(source, /草稿预览/);
+  assert.match(source, /我已检查目标项目、消息内容和标签/);
+  assert.match(source, /确认登记到项目/);
+  assert.match(source, /保存对话和登记项目上下文是两个独立操作/);
 });
 
 test('chat page does not expose creation or task submission controls', () => {

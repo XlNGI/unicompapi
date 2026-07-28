@@ -23,6 +23,7 @@ import {
   videoSubmissionErrorMessages,
   VideoSubmissionConfirmations
 } from './VideoGenerationControls';
+import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 
 type TextVideoDraftDto = Extract<
   VideoWorkspaceDraftDto,
@@ -37,24 +38,6 @@ interface VideoTextWorkspaceProps {
   readonly onDraftPersisted: (draft: TextVideoDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
-
-const contextSections = [
-  {
-    kind: 'project_asset',
-    title: '项目素材',
-    description: '只使用用户明确选择的当前项目素材。'
-  },
-  {
-    kind: 'project_context',
-    title: '项目上下文',
-    description: '不会自动读取整个项目历史。'
-  },
-  {
-    kind: 'saved_conversation',
-    title: '已保存的对话上下文',
-    description: '不会读取未保存或未选择的对话。'
-  }
-] as const;
 
 const artifactStateLabels = {
   not_created: '尚未生成',
@@ -558,33 +541,15 @@ export function VideoTextWorkspace({
             <small>{draft.prompt.originalInput.length} 个字符</small>
           </label>
 
-          <div className="uc-image-professional__contexts">
-            {contextSections.map((section) => {
-              const count = draft.contextReferences.filter(
-                (reference) => reference.kind === section.kind
-              ).length;
-              return (
-                <section
-                  className="uc-image-professional__context"
-                  key={section.kind}
-                >
-                  <div>
-                    <strong>{section.title}</strong>
-                    <span>{section.description}</span>
-                  </div>
-                  <div className="uc-image-professional__context-action">
-                    <Button disabled variant="secondary">
-                      选择{section.title}
-                    </Button>
-                    <span>已明确选择 {count} 项</span>
-                  </div>
-                </section>
-              );
+          <WorkspaceContextSelector
+            disabled={busy}
+            onChange={(contextReferences) => changeDraft({
+              ...draft,
+              contextReferences
             })}
-          </div>
-          <p className="uc-image-quick__hint">
-            当前 DTO 没有上下文候选列表接口，因此不能新增选择，也不会自动读取。
-          </p>
+            onMessage={onMessage}
+            references={draft.contextReferences}
+          />
         </Card>
 
         <div className="uc-video-text__work-grid">

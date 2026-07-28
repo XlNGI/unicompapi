@@ -5,7 +5,6 @@ import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
 import type { ImagePreflightDto } from '../../../shared/image-submission-ipc';
 import type {
-  ImageWorkspaceContextDto,
   ImageWorkspaceInputAssetDto
 } from '../../../shared/image-workspace-ipc';
 import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
@@ -16,6 +15,7 @@ import {
   ImageSubmissionConfirmations,
   type GenerationImageDraftDto
 } from './ImageGenerationControls';
+import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 
 interface ImageProfessionalWorkspaceProps {
   readonly dirty: boolean;
@@ -25,32 +25,6 @@ interface ImageProfessionalWorkspaceProps {
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
-
-const contextSections: readonly {
-  readonly kind: ImageWorkspaceContextDto['kind'];
-  readonly title: string;
-  readonly description: string;
-  readonly action: string;
-}[] = [
-  {
-    kind: 'project_asset',
-    title: '项目素材',
-    description: '只使用用户明确选择的当前项目素材。',
-    action: '选择项目素材'
-  },
-  {
-    kind: 'project_context',
-    title: '项目上下文',
-    description: '不默认读取整个项目历史。',
-    action: '选择项目上下文'
-  },
-  {
-    kind: 'saved_conversation',
-    title: '已保存的对话上下文',
-    description: '不使用未保存或其他项目的对话。',
-    action: '选择已保存对话'
-  }
-];
 
 const supplementSourceLabels: Readonly<Record<string, string>> = {
   project_context: '项目上下文',
@@ -211,33 +185,15 @@ export function ImageProfessionalWorkspace({
             <small>{draft.prompt.originalInput.length} / 1000</small>
           </label>
 
-          <div className="uc-image-professional__contexts">
-            {contextSections.map((section) => {
-              const count = draft.contextReferences.filter(
-                (reference) => reference.kind === section.kind
-              ).length;
-              return (
-                <section
-                  className="uc-image-professional__context"
-                  key={section.kind}
-                >
-                  <div>
-                    <strong>{section.title}</strong>
-                    <span>{section.description}</span>
-                  </div>
-                  <div className="uc-image-professional__context-action">
-                    <Button disabled variant="secondary">
-                      {section.action}
-                    </Button>
-                    <span>已选 {count} 项</span>
-                  </div>
-                </section>
-              );
+          <WorkspaceContextSelector
+            disabled={busy}
+            onChange={(contextReferences) => changeDraft({
+              ...draft,
+              contextReferences
             })}
-          </div>
-          <p className="uc-image-quick__hint">
-            当前 DTO 尚未提供三类上下文的候选列表接口，因此不能新增选择。
-          </p>
+            onMessage={onMessage}
+            references={draft.contextReferences}
+          />
 
           <section className="uc-image-professional__reference">
             <div className="uc-image-quick__reference">

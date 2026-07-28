@@ -14,18 +14,23 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
-const source = `${professionalSource}\n${controlsSource}`;
+const selectorSource = await readFile(
+  'src/pages/creation/WorkspaceContextSelector.tsx',
+  'utf8'
+);
+const source = `${professionalSource}\n${controlsSource}\n${selectorSource}`;
 
 test('professional image keeps each context source distinct and honest', () => {
   for (const text of [
     '项目素材',
     '项目上下文',
-    '已保存的对话上下文',
+    '已保存的对话',
     '单张参考图',
     '参考图用途',
-    '尚未提供三类上下文的候选列表接口'
+    '候选只在点击后读取',
+    '保存草稿不构成向服务商外发授权'
   ]) {
-    assert.match(professionalSource, new RegExp(text));
+    assert.match(source, new RegExp(text));
   }
 
   for (const kind of [
@@ -33,8 +38,9 @@ test('professional image keeps each context source distinct and honest', () => {
     'project_context',
     'saved_conversation'
   ]) {
-    assert.match(professionalSource, new RegExp(`kind: '${kind}'`));
+    assert.match(selectorSource, new RegExp(`kind: '${kind}'`));
   }
+  assert.match(professionalSource, /WorkspaceContextSelector/);
 });
 
 test('professional image preserves the three prompt layers and dynamic facts', () => {

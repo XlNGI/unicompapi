@@ -417,6 +417,8 @@ const chatContexts: ChatContextApi = {
       includeArchived,
       includeDeleted
     }),
+  listConversationCandidates: () =>
+    ipcRenderer.invoke(chatContextIpcChannels.listConversationCandidates),
   renameConversation: (conversationId, expectedRevision, title) =>
     ipcRenderer.invoke(chatContextIpcChannels.renameConversation, {
       conversationId,
