@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "targetId": "windows-x64-primary",
-  "sourceCommit": "7aac020",
-  "collectedAt": "2026-07-28T03:13:40.773Z",
+  "sourceCommit": "596e2ab",
+  "collectedAt": "2026-07-28T03:19:40.750Z",
   "runtime": {
     "schemaVersion": 1,
     "os": "win32",

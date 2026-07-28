@@ -688,11 +688,11 @@ B2 当前门禁为 140 项 Node UI/IPC/工具链测试与 267 项 Vitest 领域/
 
 ## 阶段 9 B3｜进程、媒体、网络与系统生命周期（2026-07-28）
 
-项目负责人通过“b3启动”明确批准启动 B3。`feature/cross-platform-runtime-media` 从 `develop@a76890d` 建立，实现提交 `7aac020` 新增统一受控进程监督器，媒体命令固定结构化参数与 `shell: false`，能力探测、ffprobe、预览、缩略图、波形和软件导出均具有超时、有界输出、进程树终止和退出清理。Windows 使用 `taskkill /T /F`，macOS/POSIX 使用独立进程组、`SIGTERM` 与 `SIGKILL` 回退。
+项目负责人通过“b3启动”明确批准启动 B3。`feature/cross-platform-runtime-media` 从 `develop@a76890d` 建立，实现提交 `7aac020` 新增统一受控进程监督器，媒体命令固定结构化参数与 `shell: false`，能力探测、ffprobe、预览、缩略图、波形和软件导出均具有超时、有界输出、进程树终止和退出清理。Windows 使用 `taskkill /T /F`，macOS/POSIX 使用独立进程组、`SIGTERM` 与 `SIGKILL` 回退。开发者 A 在 B3 实施期间完成 A1，B3 已通过 `596e2ab` 同步 `origin/develop@b7169b6` 并保留双方窗口与生命周期实现。
 
 视频导出追踪真实活动 Execution；休眠、锁屏、禁止后台处理和应用退出会中断活动导出并落到 `recovery_required`，用户取消仍保持 `cancelled`，不创建假 Work 或重复完成。Electron 退出先停止媒体与导出，再释放快捷键、目录授权、代理运行时、短期媒体句柄和休眠阻止器。renderer 外链只允许无凭证 HTTPS URL。
 
-B3 当前门禁为 143 项 Node UI/IPC/工具链测试与 279 项 Vitest 领域/平台测试，共 422 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接包完整性和差异检查通过。平台审计扫描 184 个生产侧文件，登记 23 处直接运行时平台访问和 49 处平台字面量，0 违规。Windows `safeStorage`、快捷键、direct/system 代理解析、电源状态、FFmpeg `8.1.2` 开发工具链、真实媒体闭环和 4/4 Electron 进程响应/优雅退出残留 0 通过。工程记录见：
+B3 同步 A1 后的当前门禁为 147 项 Node UI/IPC/工具链测试与 279 项 Vitest 领域/平台测试，共 426 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接包完整性和差异检查通过。平台审计扫描 184 个生产侧文件，登记 23 处直接运行时平台访问和 49 处平台字面量，0 违规。Windows `safeStorage`、快捷键、direct/system 代理解析、电源状态、FFmpeg `8.1.2` 开发工具链、真实媒体闭环和 4/4 Electron 进程响应/优雅退出残留 0 通过。工程记录见：
 
     docs/active/阶段9-B3-进程媒体与系统生命周期记录.md
 
