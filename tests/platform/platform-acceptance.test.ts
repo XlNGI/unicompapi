@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   findTargetRequirement,
@@ -120,5 +122,19 @@ describe('Phase 9 platform acceptance contracts', () => {
       ...evidence,
       hostname: 'private-device'
     })).toThrow('missing or unknown fields');
+  });
+
+  it('validates committed B2 Windows evidence without treating its not-run picker as complete', async () => {
+    const evidence = JSON.parse(await readFile(path.resolve(
+      'docs/active/evidence/phase9/windows/b2-storage-security.json'
+    ), 'utf8'));
+    const parsedEvidence = parsePlatformEvidenceManifest(evidence);
+    const target = parsePlatformTargetMatrix(matrix).targets[0];
+    expect(parsedEvidence.sourceCommit).toBe('5db899f');
+    expect(parsedEvidence.results).toContainEqual(expect.objectContaining({
+      caseId: 'b2.windows.native_directory_picker_authorization',
+      status: 'not_run'
+    }));
+    expect(isTargetAcceptanceComplete(target, parsedEvidence.results)).toBe(false);
   });
 });

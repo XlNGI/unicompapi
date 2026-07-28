@@ -358,6 +358,10 @@ function redact(value: string): string {
     .replace(/[A-Za-z]:\\[^\r\n\"']+/g, '[PATH_REDACTED]')
     .replace(/(?:[A-Za-z]:)?\\Users\\[^\r\n\"']+/gi, '[PATH_REDACTED]')
     .replace(/\/Users\/[^\r\n\"']+/g, '[PATH_REDACTED]')
+    .replace(/\/home\/[^\r\n\"']+/g, '[PATH_REDACTED]')
+    .replace(/file:\/\/\/[^\r\n\"']+/gi, '[PATH_REDACTED]')
+    .replace(/\b[a-f0-9]{64}\b/gi, '[HASH_REDACTED]')
+    .replace(/(hostname|computer[_ -]?name|device[_ -]?id|machine[_ -]?id|serial)\s*[:=]\s*[^\r\n]*/gi, '$1: [DEVICE_REDACTED]')
     .replace(/(?:prompt|user[_ -]?content|media[_ -]?path)\s*[:=]\s*[^\r\n]*/gi, '$1: [CONTENT_REDACTED]');
 }
 

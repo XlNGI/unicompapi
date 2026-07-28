@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "targetId": "windows-x64-primary",
+  "sourceCommit": "5db899f",
+  "collectedAt": "2026-07-28T02:34:54.933Z",
+  "runtime": {
+    "schemaVersion": 1,
+    "os": "win32",
+    "osVersion": "10.0.19045",
+    "architecture": "x64",
+    "nodeVersion": "20.18.3",
+    "electronVersion": "33.4.11",
+    "pathSeparator": "\\",
+    "caseSensitivity": "unknown",
+    "unicodeNormalization": "preserved",
+    "locale": "zh-CN",
+    "timeZone": "Asia/Shanghai"
+  },
+  "results": [
+    {
+      "caseId": "b2.windows.engineering_gate",
+      "suite": "engineering_integrity",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b2-storage-security-summary.md"]
+    },
+    {
+      "caseId": "b2.windows.portable_paths_and_symlink_escape",
+      "suite": "filesystem_permissions",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b2-storage-security-summary.md"]
+    },
+    {
+      "caseId": "b2.windows.directory_registry_migration_and_recovery",
+      "suite": "filesystem_permissions",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b2-storage-security-summary.md"]
+    },
+    {
+      "caseId": "b2.windows.native_directory_picker_authorization",
+      "suite": "filesystem_permissions",
+      "status": "not_run",
+      "evidenceRefs": [],
+      "note": "Visible native picker authorization and revocation require a separate manual run"
+    },
+    {
+      "caseId": "b2.windows.electron_safe_storage_round_trip",
+      "suite": "secure_storage",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b2-storage-security-summary.md"]
+    },
+    {
+      "caseId": "b2.windows.vault_restart_backup_and_rollback",
+      "suite": "secure_storage",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b2-storage-security-summary.md"]
+    },
+    {
+      "caseId": "b2.windows.sensitive_artifact_redaction",
+      "suite": "security_audit",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/b2-storage-security-summary.md"]
+    },
+    {
+      "caseId": "b2.windows.electron_lifecycle",
+      "suite": "electron_lifecycle",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b2.windows.system_integrations",
+      "suite": "system_integrations",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b2.windows.power_recovery",
+      "suite": "power_recovery",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b2.windows.media_software",
+      "suite": "media_software",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b2.windows.full_product_ui",
+      "suite": "full_product_ui",
+      "status": "not_run",
+      "evidenceRefs": []
+    }
+  ]
+}

@@ -35,7 +35,7 @@ import type {
 import {
   FileVerificationPersistenceService,
   NodeFileStatusProbe,
-  resolveFileReferencePath
+  resolveFileReferencePathSafely
 } from '../files';
 import {
   JsonExecutionRepository,
@@ -691,7 +691,10 @@ async function collectAndVerifyDraftInputs(
       reasons.push(`A source file is unavailable or changed (${fileId})`);
       continue;
     }
-    const sourcePath = resolveFileReferencePath(context.session.rootDirectory, file);
+    const sourcePath = await resolveFileReferencePathSafely(
+      context.session.rootDirectory,
+      file
+    );
     const metadata = await stat(sourcePath);
     result.set(fileId, {
       file,
@@ -749,7 +752,10 @@ async function verifyFrozenInputs(
         'A frozen source identity no longer matches'
       );
     }
-    const sourcePath = resolveFileReferencePath(context.session.rootDirectory, file);
+    const sourcePath = await resolveFileReferencePathSafely(
+      context.session.rootDirectory,
+      file
+    );
     let mediaProbe;
     try {
       mediaProbe = input.role.kind === 'clip'

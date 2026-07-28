@@ -3,6 +3,10 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectStorageAdapter } from './storage-adapter';
 import {
+  assertNoSymbolicLinkTraversal,
+  resolveInsideRoot
+} from './path-security';
+import {
   toProjectRelativePath,
   type ProjectRelativePath
 } from './project-paths';
@@ -22,7 +26,9 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
 
   async readJson<T>(relativePath: ProjectRelativePath): Promise<T | undefined> {
     try {
-      const content = await readFile(this.resolve(relativePath), 'utf8');
+      const target = this.resolve(relativePath);
+      await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
+      const content = await readFile(target, 'utf8');
       return JSON.parse(content) as T;
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') {
@@ -44,7 +50,9 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
       `.${path.basename(target)}.${randomUUID()}.tmp`
     );
 
+    await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
     await mkdir(parent, { recursive: true });
+    await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
 
     try {
       const handle = await open(temporary, 'wx');
@@ -57,30 +65,45 @@ export class NodeProjectStorage implements ProjectStorageAdapter {
       }
 
       await rename(temporary, target);
+      await syncDirectoryBestEffort(parent);
     } finally {
       await rm(temporary, { force: true });
     }
   }
 
   async remove(relativePath: ProjectRelativePath): Promise<void> {
-    await rm(this.resolve(relativePath), { force: true });
+    const target = this.resolve(relativePath);
+    await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
+    await rm(target, { force: true });
   }
 
   async ensureDirectory(relativePath: ProjectRelativePath): Promise<void> {
-    await mkdir(this.resolve(relativePath), { recursive: true });
+    const target = this.resolve(relativePath);
+    await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
+    await mkdir(target, { recursive: true });
+    await assertNoSymbolicLinkTraversal(this.rootDirectory, target);
   }
 
   private resolve(relativePath: ProjectRelativePath): string {
     const normalizedRelativePath = toProjectRelativePath(relativePath);
-    const root = path.resolve(this.rootDirectory);
-    const target = path.resolve(root, normalizedRelativePath);
-    const rootPrefix = `${root}${path.sep}`;
+    return resolveInsideRoot(this.rootDirectory, normalizedRelativePath);
+  }
+}
 
-    if (target !== root && !target.startsWith(rootPrefix)) {
-      throw new TypeError('Storage path resolves outside project root');
+async function syncDirectoryBestEffort(directory: string): Promise<void> {
+  let handle;
+  try {
+    handle = await open(directory, 'r');
+    await handle.sync();
+  } catch (error) {
+    if (
+      !isNodeError(error) ||
+      !['EINVAL', 'EPERM', 'EISDIR', 'EBADF'].includes(error.code ?? '')
+    ) {
+      throw error;
     }
-
-    return target;
+  } finally {
+    await handle?.close();
   }
 }
 

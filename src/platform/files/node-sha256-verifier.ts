@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { toIsoTimestamp } from '../../domain';
-import { resolveFileReferencePath } from './file-paths';
+import { resolveFileReferencePathSafely } from './file-paths';
 import {
   FileVerificationError,
   type FileVerificationRequest,
@@ -16,7 +16,12 @@ export class NodeSha256FileVerifier implements FileVerifier {
   async verify(
     request: FileVerificationRequest
   ): Promise<FileVerificationResult> {
-    const target = resolveFileReferencePath(this.projectRoot, request.file);
+    let target: string;
+    try {
+      target = await resolveFileReferencePathSafely(this.projectRoot, request.file);
+    } catch {
+      throw new FileVerificationError('read_failed', 'Referenced file path is not safe');
+    }
     const expectedChecksum = request.expectedChecksum ?? request.file.checksumSha256;
 
     if (expectedChecksum !== undefined && !/^[a-f0-9]{64}$/i.test(expectedChecksum)) {

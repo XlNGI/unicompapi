@@ -1,6 +1,11 @@
 import path from 'node:path';
 import type { FileReference } from '../../domain';
-import { toProjectRelativePath } from '../storage';
+import {
+  assertNoSymbolicLinkTraversal,
+  assertNotSymbolicLink,
+  resolveInsideRoot,
+  toProjectRelativePath
+} from '../storage';
 
 export function resolveFileReferencePath(
   projectRoot: string,
@@ -16,12 +21,18 @@ export function resolveFileReferencePath(
 
   const root = path.resolve(projectRoot);
   const relative = toProjectRelativePath(file.locator.relativePath);
-  const target = path.resolve(root, relative);
-  const rootPrefix = `${root}${path.sep}`;
+  return resolveInsideRoot(root, relative);
+}
 
-  if (target !== root && !target.startsWith(rootPrefix)) {
-    throw new TypeError('File path resolves outside project root');
+export async function resolveFileReferencePathSafely(
+  projectRoot: string,
+  file: FileReference
+): Promise<string> {
+  const target = resolveFileReferencePath(projectRoot, file);
+  if (file.locator.kind === 'project') {
+    await assertNoSymbolicLinkTraversal(projectRoot, target);
+  } else {
+    await assertNotSymbolicLink(target);
   }
-
   return target;
 }

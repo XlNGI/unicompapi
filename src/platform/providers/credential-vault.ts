@@ -32,11 +32,14 @@ export type CredentialVerificationResult =
 
 export class SecureCredentialVault {
   private writeQueue: Promise<void> = Promise.resolve();
+  private readonly backupPath: string;
 
   constructor(
     private readonly vaultPath: string,
     private readonly protector: CredentialProtector
-  ) {}
+  ) {
+    this.backupPath = `${vaultPath}.bak`;
+  }
 
   async save(reference: string, value: string): Promise<void> {
     const safeReference = requireReference(reference);
@@ -45,9 +48,17 @@ export class SecureCredentialVault {
       throw new CredentialVaultUnavailableError();
     }
 
-    const encryptedValue = Buffer.from(this.protector.protect(value)).toString(
-      'base64'
-    );
+    const protectedBytes = this.protector.protect(value);
+    let roundTrip: string;
+    try {
+      roundTrip = this.protector.unprotect(protectedBytes);
+    } catch (error) {
+      throw new CredentialProtectionError('Credential encryption could not be verified', error);
+    }
+    if (roundTrip !== value) {
+      throw new CredentialProtectionError('Credential encryption verification did not match');
+    }
+    const encryptedValue = Buffer.from(protectedBytes).toString('base64');
     const operation = this.writeQueue.then(async () => {
       const snapshot = await this.loadSnapshot();
       const entry: EncryptedCredentialEntry = {
@@ -114,9 +125,12 @@ export class SecureCredentialVault {
     }
     const entry = await this.findEntry(requireReference(reference));
     if (!entry) throw new CredentialNotFoundError();
-    const value = this.protector.unprotect(
-      Buffer.from(entry.encryptedValue, 'base64')
-    );
+    let value: string;
+    try {
+      value = this.protector.unprotect(Buffer.from(entry.encryptedValue, 'base64'));
+    } catch (error) {
+      throw new CredentialUnreadableError(error);
+    }
     return operation(value);
   }
 
@@ -132,11 +146,20 @@ export class SecureCredentialVault {
   private async loadSnapshot(): Promise<EncryptedCredentialSnapshot> {
     try {
       return parseSnapshot(JSON.parse(await readFile(this.vaultPath, 'utf8')));
-    } catch (error) {
-      if (isNodeError(error) && error.code === 'ENOENT') {
-        return { schemaVersion: 1, entries: [] };
+    } catch (primaryError) {
+      try {
+        return parseSnapshot(JSON.parse(await readFile(this.backupPath, 'utf8')));
+      } catch (backupError) {
+        if (
+          isNodeError(primaryError) && primaryError.code === 'ENOENT' &&
+          isNodeError(backupError) && backupError.code === 'ENOENT'
+        ) {
+          return { schemaVersion: 1, entries: [] };
+        }
+        const failure = new Error('Credential vault is invalid and no valid backup is available');
+        Object.assign(failure, { cause: { primaryError, backupError } });
+        throw failure;
       }
-      throw error;
     }
   }
 
@@ -157,7 +180,15 @@ export class SecureCredentialVault {
       } finally {
         await handle.close();
       }
+      try {
+        const currentText = await readFile(this.vaultPath, 'utf8');
+        parseSnapshot(JSON.parse(currentText));
+        await writeTextAtomically(this.backupPath, currentText);
+      } catch (error) {
+        if (!isNodeError(error) || error.code !== 'ENOENT') throw error;
+      }
       await rename(temporary, this.vaultPath);
+      await syncDirectoryBestEffort(parent);
     } finally {
       await rm(temporary, { force: true });
     }
@@ -175,6 +206,55 @@ export class CredentialNotFoundError extends Error {
   constructor() {
     super('Credential is not configured');
     this.name = 'CredentialNotFoundError';
+  }
+}
+
+export class CredentialProtectionError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = 'CredentialProtectionError';
+  }
+}
+
+export class CredentialUnreadableError extends Error {
+  constructor(readonly cause?: unknown) {
+    super('Credential cannot be decrypted by the operating-system protector');
+    this.name = 'CredentialUnreadableError';
+  }
+}
+
+async function writeTextAtomically(target: string, content: string): Promise<void> {
+  const parent = path.dirname(target);
+  const temporary = path.join(parent, `.${path.basename(target)}.${randomUUID()}.tmp`);
+  await mkdir(parent, { recursive: true });
+  try {
+    const handle = await open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function syncDirectoryBestEffort(directory: string): Promise<void> {
+  let handle;
+  try {
+    handle = await open(directory, 'r');
+    await handle.sync();
+  } catch (error) {
+    if (
+      !isNodeError(error) ||
+      !['EINVAL', 'EPERM', 'EISDIR', 'EBADF'].includes(error.code ?? '')
+    ) {
+      throw error;
+    }
+  } finally {
+    await handle?.close();
   }
 }
 

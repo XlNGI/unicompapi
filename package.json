@@ -13,6 +13,7 @@
     "verify:handoff": "node scripts/verify-handoff.mjs",
     "audit:platform": "node scripts/audit-platform-assumptions.mjs",
     "collect:platform-evidence": "node scripts/collect-platform-evidence.mjs",
+    "verify:secure-storage": "electron scripts/verify-secure-storage.cjs",
     "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
     "test": "node --test tests/*.test.mjs tests/ui/*.test.mjs && vitest run tests/domain tests/platform",

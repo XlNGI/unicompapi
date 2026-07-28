@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "roots": ["electron", "scripts", "src"],
-  "extensions": [".ts", ".tsx", ".mjs"],
+  "extensions": [".ts", ".tsx", ".mjs", ".cjs"],
   "rules": [
     {
       "id": "direct-runtime-platform-access",
@@ -17,7 +17,6 @@
         "src/platform/ipc/settings-controller.ts",
         "src/platform/settings/cleanup-service.ts",
         "src/platform/settings/directory-migration.ts",
-        "src/platform/settings/directory-registry.ts",
         "src/platform/settings/performance-policy.ts"
       ]
     },
@@ -37,7 +36,6 @@
         "src/platform/ipc/settings-controller.ts",
         "src/platform/settings/cleanup-service.ts",
         "src/platform/settings/directory-migration.ts",
-        "src/platform/settings/directory-registry.ts",
         "src/platform/settings/performance-policy.ts",
         "src/platform/settings/shortcut-service.ts",
         "src/shared/settings-ipc.ts",

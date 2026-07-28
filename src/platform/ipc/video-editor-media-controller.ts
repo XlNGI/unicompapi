@@ -54,7 +54,7 @@ import {
   NodeSha256FileVerifier,
   NodeVideoInspector,
   VideoInspectionError,
-  resolveFileReferencePath,
+  resolveFileReferencePathSafely,
   type VideoInspection,
   type VideoInspector
 } from '../files';
@@ -180,7 +180,10 @@ export class VideoEditorMediaController {
       ) {
         throw mediaError('source_unavailable', 'The work source is not locally verified');
       }
-      const target = resolveFileReferencePath(context.session.rootDirectory, verified.file);
+      const target = await resolveFileReferencePathSafely(
+        context.session.rootDirectory,
+        verified.file
+      );
       const selected = await this.inspectStable(context, target);
       if (
         file.checksumSha256 &&
@@ -337,7 +340,10 @@ export class VideoEditorMediaController {
       }
       try {
         await new NodeImageInspector().inspect(
-          resolveFileReferencePath(context.session.rootDirectory, verified.file)
+          await resolveFileReferencePathSafely(
+            context.session.rootDirectory,
+            verified.file
+          )
         );
       } catch {
         throw mediaError('unsupported_image', 'The project work is not a supported image');
@@ -486,7 +492,10 @@ export class VideoEditorMediaController {
       const context = this.createContext();
       const resolved = await this.resolveClip(context, parsed.draftId, parsed.clipId);
       const verified = await this.requireVerifiedSource(context, resolved.clip);
-      const target = resolveFileReferencePath(context.session.rootDirectory, verified);
+      const target = await resolveFileReferencePathSafely(
+        context.session.rootDirectory,
+        verified
+      );
       const mimeType = videoMimeType(resolved.clip.source.identity.container);
       return {
         ...this.dependencies.handles.create(target, mimeType),
@@ -504,7 +513,7 @@ export class VideoEditorMediaController {
       const context = this.createContext();
       const resolved = await this.resolveClip(context, parsed.draftId, parsed.clipId);
       const source = await this.requireVerifiedSource(context, resolved.clip);
-      const sourcePath = resolveFileReferencePath(
+      const sourcePath = await resolveFileReferencePathSafely(
         context.session.rootDirectory,
         source
       );
@@ -816,7 +825,10 @@ export class VideoEditorMediaController {
     const issues = [...verified.issues];
     if (verified.file.state === 'available') {
       try {
-        const target = resolveFileReferencePath(context.session.rootDirectory, verified.file);
+        const target = await resolveFileReferencePathSafely(
+          context.session.rootDirectory,
+          verified.file
+        );
         const metadata = await stat(target);
         if (Math.trunc(metadata.mtimeMs) !== clip.source.identity.modifiedAtMs) {
           issues.push('metadata_changed');
