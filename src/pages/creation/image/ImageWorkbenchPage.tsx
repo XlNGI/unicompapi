@@ -356,8 +356,8 @@ export function ImageWorkbenchPage({
                 action={<Button disabled>选择一张图片</Button>}
                 description={
                   currentDraft.input
-                    ? '已保存项目内图片引用；受控预览将在 B2 接入。'
-                    : '本地单图选择与文件校验尚未接入；当前不会读取或上传图片。'
+                    ? '已保存项目内图片引用；仅在本地文件校验通过时提供受控预览。'
+                    : '当前草稿尚未关联图片；不会自动读取或上传文件。'
                 }
                 icon={currentDraft.input ? '图' : '＋'}
                 readOnly
@@ -382,12 +382,12 @@ export function ImageWorkbenchPage({
           <EmptyState
             description={
               currentDraft
-                ? 'B2 受控图片预览尚未接入；这里不会显示示例图或伪造结果。'
+                ? '仅显示经过主进程授权并通过本地校验的真实图片；不可用时保留异常状态。'
                 : '创建项目内本地草稿后，这里将承载输入图片、区域与结果状态。'
             }
             icon="画"
             readOnly
-            title={currentDraft ? '受控预览尚未接入' : '画布暂无内容'}
+            title={currentDraft ? '当前没有可用预览' : '画布暂无内容'}
           />
         </Card>
 
@@ -415,7 +415,7 @@ export function ImageWorkbenchPage({
               <dd>
                 {isGenerationImage
                   ? '待创建草稿后预检'
-                  : '未知，等待 B3 预检'}
+                  : '按当前模式能力事实检查'}
               </dd>
             </div>
             <div>
@@ -423,7 +423,7 @@ export function ImageWorkbenchPage({
               <dd>
                 {isGenerationImage
                   ? '由模型能力 Schema 动态提供'
-                  : '尚未提供 Schema'}
+                  : '由当前模式能力事实提供'}
               </dd>
             </div>
             <div>
@@ -438,7 +438,7 @@ export function ImageWorkbenchPage({
           <Button disabled>
             {isGenerationImage
               ? '创建并保存草稿后检查'
-              : '能力预检未接入，无法提交'}
+              : '保存草稿后检查真实提交条件'}
           </Button>
         </Card>
       </div>
@@ -448,7 +448,7 @@ export function ImageWorkbenchPage({
         <p>
           {isGenerationImage
             ? '创建项目内草稿后，可填写需求、选择单张参考图并检查真实提交条件。'
-            : '当前仅支持项目内图片草稿的创建、读取和保存。选图、预览、模型预检与任务提交等待 B2/B3。'}
+            : '当前模式使用受控单图、能力预检和提交端口；没有真实适配器时会明确阻断，不会伪造任务或结果。'}
         </p>
       </Card>
         </>

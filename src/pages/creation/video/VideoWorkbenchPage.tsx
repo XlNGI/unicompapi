@@ -340,7 +340,7 @@ export function VideoWorkbenchPage({
           <PanelHeading
             description={
               workspaceMode
-                ? '素材只接受 B2 受控端口提供的事实；上下文和镜头继续等待对应任务接入。'
+                ? '素材、上下文和镜头只采用当前受控端口提供的真实事实。'
                 : '阶段 7 技术架构批准前不建立编辑草稿。'
             }
             number="1"
@@ -427,18 +427,18 @@ export function VideoWorkbenchPage({
                 />
                 <CapabilityFact
                   label="视频生成能力"
-                  value="B3 预检端口已具备，页面接线待后续任务"
+                  value="按当前模型能力与草稿事实检查"
                 />
-                <CapabilityFact label="动态参数与素材限制" value="尚未提供" />
+                <CapabilityFact label="动态参数与素材限制" value="由当前模型能力 Schema 提供" />
                 <CapabilityFact
                   label="素材异常状态"
-                  value="B2 受控素材端口已具备，页面接线待后续任务"
+                  value="由受控素材端口返回真实状态"
                 />
                 <CapabilityFact label="预检状态" value={preflightLabel} />
                 <CapabilityFact label="在线适配器" value="不可用" />
                 <CapabilityFact label="费用与外发范围" value="未知" />
               </dl>
-              <Button disabled>B3 预检端口已具备，页面尚未接线</Button>
+              <Button disabled>创建并保存草稿后检查真实提交条件</Button>
             </>
           ) : (
             <EmptyState
@@ -455,7 +455,7 @@ export function VideoWorkbenchPage({
         <StatusPill tone="warning">真实离线状态</StatusPill>
         <p>
           {workspaceMode
-            ? '当前支持项目内视频草稿，并已具备 B2 素材端口、B3 预检/提交流水线和 B4 结果登记端口；A1 页面尚未接线。进度和真实结果继续等待后台适配器。'
+            ? '当前使用受控素材、动态能力、预检、提交和结果登记端口；没有真实后台适配器时会明确阻断，不会伪造进度或结果。'
             : '基础编辑将在阶段 7 独立开发；当前入口不会修改源视频，也不会自动执行编辑。'}
         </p>
       </Card>

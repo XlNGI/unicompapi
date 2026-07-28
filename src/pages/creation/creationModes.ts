@@ -5,7 +5,7 @@ export const imageCreationModes = [
     label: '快速生图',
     description: '以最少配置开始图片创作。',
     emptyTitle: '还没有快速生图草稿',
-    emptyDescription: '可先创建项目内本地草稿；参考图、能力预检和生成将在后续契约接入。',
+    emptyDescription: '可先创建项目内本地草稿；保存后可选择一张参考图并检查真实提交条件。',
     icon: '快'
   },
   {
@@ -14,7 +14,7 @@ export const imageCreationModes = [
     label: '专业生图',
     description: '为图片创作保留更完整的控制空间。',
     emptyTitle: '还没有专业生图草稿',
-    emptyDescription: '可先创建项目内本地草稿；上下文、动态参数和提交将在后续契约接入。',
+    emptyDescription: '可先创建项目内本地草稿；动态参数和提交条件只采用当前模型能力事实。',
     icon: '专'
   },
   {
@@ -41,7 +41,7 @@ export const imageCreationModes = [
     label: '图片转提示词',
     description: '从图片中整理可检查的提示词草稿。',
     emptyTitle: '还没有图片转提示词草稿',
-    emptyDescription: '可先创建项目内本地草稿；选择图片和分析能力将在后续契约接入。',
+    emptyDescription: '可先创建项目内本地草稿；选择图片后仍需真实分析适配器才能执行。',
     icon: '词'
   }
 ] as const;
@@ -62,7 +62,7 @@ export const videoCreationModes = [
     label: '文生视频',
     description: '从文本上下文整理视频创作草稿。',
     emptyTitle: '还没有文生视频草稿',
-    emptyDescription: '可先创建项目内本地草稿；上下文、镜头方案和提交仍等待受控端口。',
+    emptyDescription: '可先创建项目内本地草稿；镜头方案、素材槽位和提交条件采用动态能力事实。',
     icon: '文'
   },
   {

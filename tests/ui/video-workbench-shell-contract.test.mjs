@@ -30,21 +30,22 @@ test('video workbench uses only the real B1 local draft operations', () => {
   );
 });
 
-test('video workbench keeps blocked and unknown states honest', () => {
+test('video workbench keeps controlled and blocked states honest', () => {
   for (const text of [
     '需要先打开项目',
     '正在读取视频工作区',
     '本地视频草稿保存失败',
     '旧预检已过期',
     '未发现',
-    'B3 预检端口已具备',
-    'B2 受控素材端口已具备',
-    'A1 页面尚未接线',
+    '按当前模型能力与草稿事实检查',
+    '由受控素材端口返回真实状态',
+    '没有真实后台适配器时会明确阻断',
     '不可用',
-    '页面尚未接线'
+    '创建并保存草稿后检查真实提交条件'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }
+  assert.doesNotMatch(workbenchSource, /B2|B3|B4|A1 页面|页面尚未接线/);
   assert.doesNotMatch(
     workbenchSource,
     /OpenAI|Anthropic|Runway|Kling|Sora|16:9|1080p|24fps|50%|¥\d|\$\d/

@@ -66,7 +66,7 @@ export function ChatPage() {
         />
       </aside>
 
-      <main className="uc-chat-page__conversation">
+      <section className="uc-chat-page__conversation" aria-label="当前对话">
         <header className="uc-chat-page__header">
           <div>
             <div className="uc-page-skeleton__heading-row">
@@ -125,7 +125,7 @@ export function ChatPage() {
           </div>
         </section>
         <p className="uc-chat-page__message" aria-live="polite">{message}</p>
-      </main>
+      </section>
 
       <aside className="uc-chat-page__context" aria-labelledby="context-draft-title">
         <div className="uc-chat-page__panel-heading">

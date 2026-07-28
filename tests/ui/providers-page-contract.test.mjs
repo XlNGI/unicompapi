@@ -36,14 +36,17 @@ test('provider page keeps connection, catalog, model and capability facts separa
   assert.match(source, /declared_supported: '服务声明支持'/);
 });
 
-test('provider credentials stay write-only and masked', () => {
+test('provider credentials stay write-only and report the secure-storage status', () => {
   assert.match(source, /type="password"/);
   assert.match(source, /saveCredential/);
+  assert.match(source, /getCredentialStatus/);
   assert.match(source, /checkCredentialStorage/);
   assert.match(source, /deleteLocalCredential/);
-  assert.match(source, /••••••••/);
+  assert.match(source, /已安全保存（不回显）/);
+  assert.match(source, /安全存储暂不可验证/);
+  assert.match(source, /本地凭证已删除/);
   assert.match(source, /不等于撤销服务商侧/);
-  assert.doesNotMatch(source, /getCredential|readCredential|copyCredential/);
+  assert.doesNotMatch(source, /readCredential|copyCredential/);
 });
 
 test('provider page reports unavailable online adapters and unknown costs honestly', () => {
