@@ -30,6 +30,7 @@ body,
 body {
   margin: 0;
   overflow: hidden;
+  text-size-adjust: 100%;
   background:
     radial-gradient(circle at 20% 8%, var(--uc-shell-glow-secondary), transparent 28%),
     radial-gradient(circle at 82% 0%, var(--uc-shell-glow-primary), transparent 26%),
@@ -47,6 +48,22 @@ button {
   background: transparent;
 }
 
+.skip-link {
+  position: fixed;
+  top: var(--uc-space-2);
+  left: var(--uc-space-2);
+  z-index: 1000;
+  border-radius: var(--uc-radius-8);
+  padding: var(--uc-space-2) var(--uc-space-3);
+  color: var(--uc-color-text-inverse);
+  background: var(--uc-color-accent-fill);
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 .title-bar {
   position: relative;
   z-index: 100;
@@ -62,7 +79,7 @@ button {
 }
 
 .title-bar--mac .title-bar__brand {
-  padding-left: 78px;
+  padding-left: 80px;
 }
 
 .title-bar__brand {
@@ -335,6 +352,11 @@ button {
   padding: 34px;
 }
 
+.workspace:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: -2px;
+}
+
 .workspace-header {
   display: flex;
   justify-content: space-between;
@@ -410,5 +432,17 @@ button {
   *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .skip-link,
+  .theme-switch__trigger:focus-visible,
+  .theme-switch__option:focus-visible,
+  .window-control:focus-visible,
+  .nav-item:focus-visible,
+  .nav-subitem:focus-visible,
+  .workspace:focus-visible {
+    outline: 2px solid CanvasText;
   }
 }

@@ -25,7 +25,10 @@ export function AppLayout({
   onSecondaryNavigate
 }: AppLayoutProps) {
   return (
-    <main className="app-shell">
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <TitleBar />
       <div className="app-body">
         <Sidebar
@@ -34,8 +37,10 @@ export function AppLayout({
           onNavigate={onNavigate}
           onSecondaryNavigate={onSecondaryNavigate}
         />
-        <section className="workspace">{children}</section>
+        <main className="workspace" id="main-content" tabIndex={-1}>
+          {children}
+        </main>
       </div>
-    </main>
+    </div>
   );
 }

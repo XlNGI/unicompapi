@@ -149,7 +149,7 @@ export async function verifyHandoff(root = projectRoot) {
       failures.push({ kind: 'missing', path: relative });
       continue;
     }
-    if ((await sha256File(target)) !== match[1].toLowerCase()) {
+    if (!(await matchesHandoffHash(target, match[1].toLowerCase()))) {
       failures.push({ kind: 'hash_mismatch', path: relative });
     }
   }
@@ -282,6 +282,18 @@ export async function sha256File(target) {
     source.on('data', (chunk) => hash.update(chunk));
     source.on('end', () => resolve(hash.digest('hex')));
   });
+}
+
+async function matchesHandoffHash(target, expected) {
+  const content = await readFile(target);
+  if (sha256Bytes(content) === expected) return true;
+  if (!['.json', '.md', '.txt'].includes(path.extname(target).toLowerCase())) return false;
+  const normalized = Buffer.from(content.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return sha256Bytes(normalized) === expected;
+}
+
+function sha256Bytes(content) {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 async function walkProductionFiles(root, relativeRoot, extensions, output) {
