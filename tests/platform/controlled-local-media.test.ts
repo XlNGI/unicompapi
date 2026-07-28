@@ -74,6 +74,16 @@ async function createFixture() {
 }
 
 describe('ControlledLocalMediaController', () => {
+  it('revokes every opaque media handle during application cleanup', () => {
+    const handles = new LocalMediaHandleRegistry(() => 1_000, 5_000);
+    const created = handles.create('C:\\private\\preview.png', 'image/png');
+    const token = new URL(created.url).pathname.slice(1);
+
+    expect(handles.resolveEntry(token)).toBeDefined();
+    handles.clear();
+    expect(handles.resolveEntry(token)).toBeUndefined();
+  });
+
   it('creates an opaque media handle and reveals the file without returning paths', async () => {
     const fixture = await createFixture();
     const handles = new LocalMediaHandleRegistry(() => 1_000, 5_000);

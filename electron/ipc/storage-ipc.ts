@@ -19,6 +19,7 @@ import {
   VideoEditorController,
   VideoEditorMediaController,
   VideoExportController,
+  type ExportLifecycleInterruptionReason,
   createFfmpegMediaEngineAdapterFromEnvironment,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
@@ -31,7 +32,16 @@ import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc'
 import { videoSubmissionIpcChannels } from '../../src/shared/video-submission-ipc';
 import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
 
-export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
+export interface StorageIpcLifecycle {
+  resolveEntry(token: string): ReturnType<LocalMediaHandleRegistry['resolveEntry']>;
+  readonly activeExportCount: number;
+  interruptActiveExports(reason: ExportLifecycleInterruptionReason): Promise<number>;
+  dispose(): Promise<void>;
+}
+
+export function registerStorageIpcHandlers(options: {
+  readonly onActiveExportCountChanged?: (count: number) => void;
+} = {}): StorageIpcLifecycle {
   const sessionRegistry = new StorageProjectSessionRegistry();
   const choosePath = async (
     properties: Electron.OpenDialogOptions['properties'],
@@ -80,6 +90,7 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     mutations: videoMutations
   });
   const mediaEngine = createFfmpegMediaEngineAdapterFromEnvironment();
+  const previewAdapter = mediaEngine ?? createDevelopmentVideoEditorPreviewAdapter();
   const videoEditorMedia = new VideoEditorMediaController({
     getSession: () => sessionRegistry.get(),
     chooseAudioFile: () =>
@@ -108,11 +119,12 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     ),
     handles: mediaHandles,
     editor: videoEditors,
-    previewAdapter: mediaEngine ?? createDevelopmentVideoEditorPreviewAdapter()
+    previewAdapter
   });
   const videoExports = new VideoExportController({
     getSession: () => sessionRegistry.get(),
-    getAdapter: () => mediaEngine
+    getAdapter: () => mediaEngine,
+    onActiveCountChanged: options.onActiveExportCountChanged
   });
   const videoReferenceMedia = new VideoReferenceMediaController({
     getSession: () => sessionRegistry.get(),
@@ -383,5 +395,25 @@ export function registerStorageIpcHandlers(): LocalMediaHandleRegistry {
     videoSubmissionIpcChannels.receiveResult,
     (_event, request: unknown) => videoSubmissions.receiveResult(request)
   );
-  return mediaHandles;
+  return {
+    resolveEntry: (token) => mediaHandles.resolveEntry(token),
+    get activeExportCount() {
+      return videoExports.activeExportCount;
+    },
+    async interruptActiveExports(reason) {
+      const [count] = await Promise.all([
+        videoExports.interruptActiveExports(reason),
+        previewAdapter.interrupt?.()
+      ]);
+      return count;
+    },
+    async dispose() {
+      await Promise.all([
+        videoExports.interruptActiveExports('application_shutdown'),
+        previewAdapter.dispose?.()
+      ]);
+      await videoExports.waitForExports();
+      mediaHandles.clear();
+    }
+  };
 }

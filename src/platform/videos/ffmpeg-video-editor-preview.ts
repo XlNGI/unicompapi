@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,6 +12,7 @@ import {
   type VideoEditorPreviewArtifactResult,
   type VideoEditorPreviewPlan
 } from './video-editor-preview';
+import { ManagedProcessSupervisor } from '../runtime';
 
 export const developmentFfmpegVersion = '8.1.2';
 
@@ -31,6 +31,8 @@ export interface FfmpegVideoEditorPreviewAdapterOptions {
   readonly ffmpegPath: string;
   readonly adapterVersion?: string;
   readonly runCommand?: FfmpegCommandRunner;
+  readonly processSupervisor?: ManagedProcessSupervisor;
+  readonly commandTimeoutMs?: number;
 }
 
 /**
@@ -74,6 +76,7 @@ export class FfmpegVideoEditorPreviewAdapter
   readonly descriptor: VideoEditorPreviewAdapterDescriptor;
   private readonly ffmpegPath: string;
   private readonly runCommand: FfmpegCommandRunner;
+  private readonly processSupervisor?: ManagedProcessSupervisor;
 
   constructor(options: FfmpegVideoEditorPreviewAdapterOptions) {
     this.descriptor = {
@@ -81,7 +84,15 @@ export class FfmpegVideoEditorPreviewAdapter
       adapterVersion: options.adapterVersion ?? developmentFfmpegVersion
     };
     this.ffmpegPath = options.ffmpegPath;
-    this.runCommand = options.runCommand ?? runFfmpegCommand;
+    if (options.runCommand) {
+      this.runCommand = options.runCommand;
+      this.processSupervisor = options.processSupervisor;
+    } else {
+      this.processSupervisor = options.processSupervisor ?? new ManagedProcessSupervisor();
+      const timeoutMs = requireTimeout(options.commandTimeoutMs, 10 * 60_000);
+      this.runCommand = (command, args) =>
+        runFfmpegCommand(this.processSupervisor!, command, args, timeoutMs);
+    }
   }
 
   async requestArtifact(input: {
@@ -140,6 +151,14 @@ export class FfmpegVideoEditorPreviewAdapter
       mimeType: specification.mimeType
     };
     return { status: 'available', artifact };
+  }
+
+  async interrupt(): Promise<void> {
+    await this.processSupervisor?.terminateAll('cancelled');
+  }
+
+  async dispose(): Promise<void> {
+    await this.interrupt();
   }
 }
 
@@ -315,33 +334,37 @@ function isRegularFile(target: string): boolean {
   }
 }
 
-function runFfmpegCommand(
+async function runFfmpegCommand(
+  supervisor: ManagedProcessSupervisor,
   command: string,
-  args: readonly string[]
+  args: readonly string[],
+  timeoutMs: number
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, [...args], {
-      shell: false,
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'pipe']
-    });
-    let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      if (stderr.length < 16_384) stderr += chunk;
-    });
-    child.once('error', reject);
-    child.once('close', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      const suffix = stderr.trim() ? `: ${stderr.trim()}` : '';
-      reject(
-        new Error(
-          `FFmpeg preview failed (code=${code ?? 'null'}, signal=${signal ?? 'none'})${suffix}`
-        )
-      );
-    });
-  });
+  const result = await supervisor.start({
+    command,
+    args,
+    timeoutMs,
+    maxStdoutBytes: 0,
+    maxStderrBytes: 16_384
+  }).promise;
+  if (result.terminationReason === 'timed_out') {
+    throw new Error('FFmpeg preview timed out');
+  }
+  if (result.terminationReason) {
+    throw new Error(`FFmpeg preview was ${result.terminationReason}`);
+  }
+  if (result.code !== 0) {
+    const suffix = result.stderr.trim() ? `: ${result.stderr.trim()}` : '';
+    throw new Error(
+      `FFmpeg preview failed (code=${result.code ?? 'null'}, signal=${result.signal ?? 'none'})${suffix}`
+    );
+  }
+}
+
+function requireTimeout(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError('FFmpeg preview timeout is invalid');
+  }
+  return value;
 }

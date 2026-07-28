@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { link, mkdir, open, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +20,11 @@ import type {
   SourceTimeRange,
   TextOverlay
 } from '../../domain';
+import {
+  ManagedProcessSupervisor,
+  type ManagedProcessHandle,
+  type ManagedProcessResult
+} from '../runtime';
 
 export interface MediaEngineAdapterDescriptor {
   readonly adapterId: string;
@@ -151,6 +155,8 @@ export interface MediaEngineAdapter {
   ): Promise<MediaEngineExportResult>;
   cancel(jobId: string): Promise<MediaEngineCancelResult>;
   verifyOutput(outputPath: string): Promise<OutputVerification>;
+  interrupt?(): Promise<void>;
+  dispose?(): Promise<void>;
 }
 
 export type MediaEngineExportResult =
@@ -204,6 +210,10 @@ export interface FfmpegMediaEngineAdapterOptions {
   readonly ffprobePath: string;
   readonly adapterVersion?: string;
   readonly previewAdapter?: FfmpegVideoEditorPreviewAdapterOptions;
+  readonly processSupervisor?: ManagedProcessSupervisor;
+  readonly commandTimeoutMs?: number;
+  readonly previewTimeoutMs?: number;
+  readonly exportTimeoutMs?: number;
 }
 
 export interface FfmpegMediaEngineEnvironment {
@@ -234,20 +244,8 @@ export function createFfmpegMediaEngineAdapterFromEnvironment(
   });
 }
 
-interface ProcessResult {
-  readonly code: number | null;
-  readonly signal: NodeJS.Signals | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-interface ProcessHandle {
-  readonly promise: Promise<ProcessResult>;
-  cancel(): boolean;
-}
-
 interface ActiveJob {
-  readonly process: ProcessHandle;
+  readonly process: ManagedProcessHandle;
   cancelRequested: boolean;
 }
 
@@ -257,6 +255,9 @@ export class FfmpegMediaEngineAdapter
   private readonly ffmpegPath: string;
   private readonly ffprobePath: string;
   private readonly previewAdapter: FfmpegVideoEditorPreviewAdapter;
+  private readonly processSupervisor: ManagedProcessSupervisor;
+  private readonly commandTimeoutMs: number;
+  private readonly exportTimeoutMs: number;
   private readonly activeJobs = new Map<string, ActiveJob>();
   private readonly fontAvailability = new Map<string, Promise<boolean>>();
 
@@ -267,20 +268,35 @@ export class FfmpegMediaEngineAdapter
       adapterId: 'ffmpeg',
       adapterVersion: options.adapterVersion ?? 'unknown'
     };
+    this.processSupervisor = options.processSupervisor ?? new ManagedProcessSupervisor();
+    this.commandTimeoutMs = positiveTimeout(options.commandTimeoutMs, 30_000);
+    const previewTimeoutMs = positiveTimeout(options.previewTimeoutMs, 10 * 60_000);
+    this.exportTimeoutMs = positiveTimeout(options.exportTimeoutMs, 12 * 60 * 60_000);
     this.previewAdapter = new FfmpegVideoEditorPreviewAdapter(
       options.previewAdapter ?? {
         ffmpegPath: this.ffmpegPath,
-        adapterVersion: this.descriptor.adapterVersion
+        adapterVersion: this.descriptor.adapterVersion,
+        runCommand: async (command, args) => {
+          const result = await runManagedProcess(
+            this.processSupervisor,
+            command,
+            args,
+            previewTimeoutMs,
+            0,
+            32_000
+          );
+          requireSuccessfulProcess(result, command);
+        }
       }
     );
   }
 
   async getCapabilities(): Promise<MediaEngineCapabilities> {
     const [version, encoders, formats, filters] = await Promise.all([
-      runSimple(this.ffmpegPath, ['-version']),
-      runSimple(this.ffmpegPath, ['-hide_banner', '-encoders']),
-      runSimple(this.ffmpegPath, ['-hide_banner', '-formats']),
-      runSimple(this.ffmpegPath, ['-hide_banner', '-filters'])
+      this.runSimple(this.ffmpegPath, ['-version']),
+      this.runSimple(this.ffmpegPath, ['-hide_banner', '-encoders']),
+      this.runSimple(this.ffmpegPath, ['-hide_banner', '-formats']),
+      this.runSimple(this.ffmpegPath, ['-hide_banner', '-filters'])
     ]);
     return {
       descriptor: this.descriptor,
@@ -298,7 +314,7 @@ export class FfmpegMediaEngineAdapter
 
   async probe(source: MediaSource): Promise<MediaProbe> {
     const sourcePath = requireAbsolutePath(source.sourcePath, 'source');
-    const result = await runSimple(this.ffprobePath, [
+    const result = await this.runSimple(this.ffprobePath, [
       '-v',
       'error',
       '-print_format',
@@ -339,7 +355,7 @@ export class FfmpegMediaEngineAdapter
     if (!normalized) return Promise.resolve(false);
     const cached = this.fontAvailability.get(normalized);
     if (cached) return cached;
-    const check = runSimple(this.ffmpegPath, [
+    const check = this.runSimple(this.ffmpegPath, [
       '-hide_banner', '-loglevel', 'error',
       '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=0.04',
       '-vf', `drawtext=font='${escapeFilterValue(normalized)}':text='A'`,
@@ -382,9 +398,11 @@ export class FfmpegMediaEngineAdapter
     events.onProgress?.({ phase: 'starting' });
 
     let progressBuffer = '';
-    const process = spawnProcess(
+    const process = startManagedProcess(
+      this.processSupervisor,
       this.ffmpegPath,
       buildExportArguments(plan, temporaryPath),
+      this.exportTimeoutMs,
       (chunk) => {
         progressBuffer += chunk;
         const lines = progressBuffer.split(/\r?\n/);
@@ -411,16 +429,29 @@ export class FfmpegMediaEngineAdapter
     this.activeJobs.set(plan.jobId, active);
     try {
       const result = await process.promise;
-      if (active.cancelRequested || result.signal) {
+      if (
+        active.cancelRequested ||
+        result.terminationReason === 'cancelled' ||
+        result.terminationReason === 'shutdown'
+      ) {
         await rm(temporaryPath, { force: true });
         return { status: 'cancelled' };
+      }
+      if (result.terminationReason === 'timed_out') {
+        await rm(temporaryPath, { force: true });
+        return {
+          status: 'failed',
+          code: 'process_failed',
+          message: 'FFmpeg export timed out'
+        };
       }
       if (result.code !== 0) {
         await rm(temporaryPath, { force: true });
         return {
           status: 'failed',
           code: 'process_failed',
-          message: result.stderr.trim() || `FFmpeg exited with code ${result.code}`
+          message: result.stderr.trim() ||
+            `FFmpeg exited with code ${result.code} and signal ${result.signal ?? 'none'}`
         };
       }
       events.onProgress?.({ phase: 'verifying' });
@@ -487,7 +518,7 @@ export class FfmpegMediaEngineAdapter
     let probe: MediaProbe;
     try {
       probe = parseProbe(
-        await runSimple(this.ffprobePath, [
+        await this.runSimple(this.ffprobePath, [
           '-v',
           'error',
           '-print_format',
@@ -520,6 +551,30 @@ export class FfmpegMediaEngineAdapter
       width: video.width,
       height: video.height
     };
+  }
+
+  async dispose(): Promise<void> {
+    await this.interrupt();
+  }
+
+  async interrupt(): Promise<void> {
+    for (const active of this.activeJobs.values()) {
+      active.cancelRequested = true;
+      active.process.cancel('cancelled');
+    }
+    await this.processSupervisor.terminateAll('cancelled');
+    this.activeJobs.clear();
+  }
+
+  private async runSimple(command: string, args: readonly string[]): Promise<string> {
+    const result = await runManagedProcess(
+      this.processSupervisor,
+      command,
+      args,
+      this.commandTimeoutMs
+    );
+    requireSuccessfulProcess(result, command);
+    return result.stdout;
   }
 }
 
@@ -1005,53 +1060,56 @@ function normalizeFfmpegColor(value: string): string {
   return value.startsWith('#') ? `0x${value.slice(1, 7)}` : value;
 }
 
-function spawnProcess(
+function startManagedProcess(
+  supervisor: ManagedProcessSupervisor,
   command: string,
   args: readonly string[],
+  timeoutMs: number,
   onStdout?: (chunk: string) => void
-): ProcessHandle {
-  const child = spawn(command, [...args], {
-    shell: false,
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe']
+): ManagedProcessHandle {
+  return supervisor.start({
+    command,
+    args,
+    timeoutMs,
+    onStdout
   });
-  let stdout = '';
-  let stderr = '';
-  let closed = false;
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
-    stdout += chunk;
-    if (stdout.length > 512_000) stdout = stdout.slice(-512_000);
-    onStdout?.(chunk);
-  });
-  child.stderr.on('data', (chunk: string) => {
-    stderr += chunk;
-    if (stderr.length > 32_000) stderr = stderr.slice(-32_000);
-  });
-  const promise = new Promise<ProcessResult>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', (code, signal) => {
-      closed = true;
-      resolve({ code, signal, stdout, stderr });
-    });
-  });
-  return {
-    promise,
-    cancel: () => {
-      if (closed) return false;
-      return child.kill();
-    }
-  };
 }
 
-async function runSimple(command: string, args: readonly string[]): Promise<string> {
-  const process = spawnProcess(command, args);
-  const result = await process.promise;
+async function runManagedProcess(
+  supervisor: ManagedProcessSupervisor,
+  command: string,
+  args: readonly string[],
+  timeoutMs: number,
+  maxStdoutBytes = 512_000,
+  maxStderrBytes = 32_000
+): Promise<ManagedProcessResult> {
+  return supervisor.start({
+    command,
+    args,
+    timeoutMs,
+    maxStdoutBytes,
+    maxStderrBytes
+  }).promise;
+}
+
+function requireSuccessfulProcess(result: ManagedProcessResult, command: string): void {
+  if (result.terminationReason === 'timed_out') {
+    throw new Error(`${path.basename(command)} timed out`);
+  }
+  if (result.terminationReason) {
+    throw new Error(`${path.basename(command)} was ${result.terminationReason}`);
+  }
   if (result.code !== 0) {
     throw new Error(result.stderr.trim() || `${path.basename(command)} failed`);
   }
-  return result.stdout;
+}
+
+function positiveTimeout(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError('Media engine process timeout is invalid');
+  }
+  return value;
 }
 
 function temporaryOutputPath(outputPath: string): string {
