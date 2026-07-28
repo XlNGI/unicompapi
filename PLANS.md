@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2 Windows 实现基线和 A1 已合并 `develop`，A1 已通过项目负责人 Windows 手工验收，A2 前置条件已满足。B2 的 Windows 原生目录授权操作与 A1/B2 的 macOS 实机证据仍待补，不得据此宣称阶段 9 跨平台验收完成。阶段 9 不新增业务一级页面；安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3 已合并 `develop`，A2 前置条件已满足，B4 未启动。项目负责人批准的“阶段 9 C1｜对话与项目上下文应用层契约”第一批已通过 `b245f86` 合并 `develop`；第二批 `feature/project-context-registry` 已完成项目上下文领域、项目范围版本仓储、登记应用服务、457 项完整门禁及功能分支提交，等待审核合并。第三批 `feature/chat-context-ipc` 尚未创建。B2 Windows 原生目录授权、A1/B2/B3 macOS 实机及 B3 真实系统生命周期人工证据仍待补，不得据此宣称阶段 9 跨平台验收完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -685,3 +685,63 @@ B2 当前门禁为 140 项 Node UI/IPC/工具链测试与 267 项 Vitest 领域/
     docs/active/阶段9-B2-文件权限与安全存储记录.md
 
 未完成：Windows 原生目录选择器人工授权/撤销尚未执行；macOS 文件系统、目录书签、撤销/重授权、外接卷和 `safeStorage` 实机证据尚未执行。项目负责人于 2026-07-28 明确批准“先合并 B2”，因此 B2 已通过 `f47be6b Merge phase 9 cross-platform storage security` 合并并推送 `develop`，本地与远程功能分支保留。该决策只改变集成顺序，不把 `not_run` 改为通过，也不代表 B2 跨平台验收完成；本次未自动启动 B3，B3 仍须负责人单独确认并满足媒体工具链批准边界。
+
+## 阶段 9 B3｜进程、媒体、网络与系统生命周期（2026-07-28）
+
+项目负责人通过“b3启动”明确批准启动 B3。`feature/cross-platform-runtime-media` 从 `develop@a76890d` 建立，实现提交 `7aac020` 新增统一受控进程监督器，媒体命令固定结构化参数与 `shell: false`，能力探测、ffprobe、预览、缩略图、波形和软件导出均具有超时、有界输出、进程树终止和退出清理。Windows 使用 `taskkill /T /F`，macOS/POSIX 使用独立进程组、`SIGTERM` 与 `SIGKILL` 回退。开发者 A 在 B3 实施期间完成 A1，B3 已通过 `596e2ab` 同步 `origin/develop@b7169b6` 并保留双方窗口与生命周期实现。
+
+视频导出追踪真实活动 Execution；休眠、锁屏、禁止后台处理和应用退出会中断活动导出并落到 `recovery_required`，用户取消仍保持 `cancelled`，不创建假 Work 或重复完成。Electron 退出先停止媒体与导出，再释放快捷键、目录授权、代理运行时、短期媒体句柄和休眠阻止器。renderer 外链只允许无凭证 HTTPS URL。
+
+B3 同步 A1 后的当前门禁为 147 项 Node UI/IPC/工具链测试与 279 项 Vitest 领域/平台测试，共 426 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接包完整性和差异检查通过。平台审计扫描 184 个生产侧文件，登记 23 处直接运行时平台访问和 49 处平台字面量，0 违规。Windows `safeStorage`、快捷键、direct/system 代理解析、电源状态、FFmpeg `8.1.2` 开发工具链、真实媒体闭环和 4/4 Electron 进程响应/优雅退出残留 0 通过。工程记录见：
+
+    docs/active/阶段9-B3-进程媒体与系统生命周期记录.md
+
+未完成：Windows 真实睡眠/唤醒、锁屏/解锁、可见通知、通知声音和系统设置跳转未执行；B2 原生目录选择器人工项仍未执行；macOS 全部 B3 实机证据与媒体工具链批准仍缺失。项目负责人于 2026-07-28 明确批准“合并”，B3 已通过 `8b32ba7 Merge phase 9 cross-platform runtime media` 合并并推送 `develop`，本地与远程功能分支继续保留。该合并不把任何 `not_run` 改为通过，不代表 B3 或阶段 9 跨平台验收完成，也不自动启动 B4。
+
+## 阶段 9 C1 第一批｜对话领域与本地仓储（2026-07-28）
+
+项目负责人正式批准 C1 作为阶段 9 业务范围例外，并要求在真实供应商适配器、B4 和 A4 前完成。`feature/chat-domain-contracts` 从已合并 B3 的最新 `develop@134d406` 建立，工作区创建前保持干净。
+
+本分支新增 Conversation/Message 强类型 ID、应用级全局 Conversation 聚合、可选显式 `projectId`、active/archived/deleted 状态、软删除墓碑、Message 的 pending/streaming/completed/failed/cancelled 严格判别联合及双层 revision。用户消息作为 completed 不可变事实；assistant 消息只能按批准状态机转换，终态不可继续写入。未绑定项目的 Conversation 不能持久化附件；已绑定项目只允许同项目 AssetId/FileReferenceId，不保存绝对路径、Hash、endpoint 或原始附件内容。
+
+应用级 JSON 仓储实现 Schema version、文档 revision、严格运行时校验、显式连续迁移入口、聚合乐观并发、同路径跨实例串行写入、同目录临时文件、文件 `fsync`、原子替换、目录同步和最后有效备份。主文件损坏时只读取有效备份且不覆盖损坏证据；主文件和备份均无效时失败关闭。普通列表默认隐藏 archived/deleted，墓碑仍可显式读取。
+
+新增 14 项领域与仓储测试。完整门禁为 147 项 Node UI/IPC/工具链测试与 293 项 Vitest 领域/平台测试，共 440 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建通过，真实 FFmpeg 集成测试已执行。本分支未修改 Electron 主进程或 preload，不新增 Electron 烟测要求。工程记录见：
+
+    docs/active/阶段9-C1-对话领域与本地仓储记录.md
+
+未完成：ProjectContext 项目内版本仓储、登记草稿/预览/确认、应用服务、主进程控制器、受控 IPC/preload、附件内容解析和任何 React 接线均不在本分支。下一步先推送并合并本分支，再从最新 `develop` 创建 `feature/project-context-registry`；其后才启动 `feature/chat-context-ipc`。页面接线等待 A2 合并后另建独立小分支。
+
+第一批随后已通过 `b245f86 Merge phase 9 conversation domain contracts` 合并并推送 `develop`；`feature/chat-domain-contracts` 本地与远程分支继续保留。第二批已从该最新基线创建 `feature/project-context-registry`。
+
+## 阶段 9 C1 第二批｜项目上下文登记（2026-07-28）
+
+`feature/project-context-registry` 从包含第一批的 `develop@b245f86` 建立。本分支新增 ProjectContext 草稿、消息选择片段、稳定 contextId、不可变 revision 历史、currentRevision、active/deleted、sourceStatus、显式登记、内容/标签更新、墓碑删除和安全查询 DTO。
+
+草稿必须显式选择目标项目和一个已保存 Conversation；允许同一 Conversation 的多个 completed Message 片段，冻结 Message revision、角色、UTF-16 选择范围、顺序和规范化内容快照。跨 Conversation、未保存 Conversation、未完成 Message 和登记前来源变化均失败关闭。草稿不会进入候选列表；只有显式确认后才在项目仓储中原子移除草稿并创建正式 context revision 1。
+
+正式上下文的内容、标签、sourceStatus 和删除均追加新 revision，不覆盖旧版本。Conversation 后续软删除时上下文继续有效，只追加 `source_deleted`，登记内容快照与历史版本保持可读。普通删除上下文形成纯墓碑，不删除来源 Conversation。当前实现的版本化宽泛来源为 `conversation_selection`，不包含供应商、模型或页面名称；其他批准类别仅预留，不伪造具体来源流程。
+
+项目范围注册表位于 `entities/project-contexts.json`，草稿与正式上下文共享一个 Schema v1 文档。仓储实现严格校验、显式迁移入口、文档与实体 revision、串行写入、项目存储原子替换、有效备份和历史只追加验证。应用层 DTO 不返回路径、Hash、凭证、endpoint 或仓储信息，也不创建 Task、Execution 或 Work。
+
+新增 17 项领域、应用服务和仓储测试。完整门禁为 147 项 Node UI/IPC/工具链测试与 310 项 Vitest 领域/平台测试，共 457 项通过、0 失败、0 跳过；TypeScript、ESLint 和生产构建通过，真实 FFmpeg 集成测试已执行。本分支未修改 Electron 主进程或 preload，不新增 Electron 烟测要求。工程记录见：
+
+    docs/active/阶段9-C1-项目上下文登记记录.md
+
+未完成：第三批主进程控制器、共享 IPC、preload 白名单、Electron 组合根、Conversation 流式应用服务、adapter_unavailable 映射、受控附件接入和所有 React UI 均未实现。第二批必须先合并最新 `develop`，之后才允许创建 `feature/chat-context-ipc`；第三批修改 Electron/preload 后必须执行真实 Electron 启动烟测。
+
+第二批随后已通过 `9df9ce0 Merge phase 9 project context registry` 合并并推送 `develop`；`feature/project-context-registry` 本地与远程分支继续保留。第三批已从该最新基线创建 `feature/chat-context-ipc`。
+
+## 阶段 9 C1 第三批｜对话与项目上下文受控 IPC（2026-07-28）
+
+`feature/chat-context-ipc` 从同时包含第一批和第二批的 `develop@9df9ce0` 建立并已推送保留。本分支新增 Conversation 非 UI 应用服务、供应商无关流式应用服务端口、ConversationController、ProjectContextController、共享 IPC DTO/严格请求校验/稳定错误码、preload 命名白名单和 Electron 组合根。
+
+Conversation 创建可由用户显式选择是否绑定当前受控项目；未打开项目仍可保存未绑定纯文本 Conversation。renderer 只能提交受控 ID、文本、布尔确认和 revision，不能传绝对路径、仓储位置、任意附件位置、远端 operation ID、凭证或 endpoint。用户消息保存不接受附件；没有真实对话适配器时 `requestAssistantResponse` 返回 `adapter_unavailable` 且不创建 assistant Message、不制造片段、进度、费用或成功状态。流式 start/append/complete/fail/cancel 只存在于主进程应用服务边界。
+
+ProjectContext 控制器只从当前主进程 Project Session 派生项目范围，renderer 不传 projectId；未打开项目和其他项目 ID 均失败关闭。保存 Conversation、创建上下文草稿和显式登记保持独立；草稿登记必须确认，查询上下文不构成外发授权。应用级 Conversation 仓储继续位于 Electron userData，项目上下文继续位于目标项目 `entities/project-contexts.json`，不建立第二套事实源或 renderer 仓储。项目切换、关闭和应用退出会等待受控操作结束。
+
+新增 3 项 Node IPC/preload 契约测试和 9 项 Vitest 控制器/组合根测试。完整门禁为 150 项 Node 与 319 项 Vitest，共 469 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建和差异检查通过，真实 FFmpeg 集成测试已执行。Windows Electron 生产构建启动烟测新增 4 个进程，4/4 响应，清理后本次残留 0。工程记录见：
+
+    docs/active/阶段9-C1-对话与项目上下文受控IPC记录.md
+
+未完成：React 页面与创作工作区接线、`readProjectContext`/`readSavedProjectChats` 的页面候选语义、真实供应商/HTTP 适配器、供应商提交前确认、新原生附件选择、受控附件展示与内容解析均不在本分支。第三批实现等待项目负责人验收；未经批准不得合并 `develop`。

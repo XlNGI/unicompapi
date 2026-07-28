@@ -65,6 +65,8 @@ export interface VideoEditorPreviewArtifactAdapter {
      */
     readonly sourcePath: string;
   }): Promise<VideoEditorPreviewArtifactResult>;
+  interrupt?(): Promise<void>;
+  dispose?(): Promise<void>;
 }
 
 export class UnavailableVideoEditorPreviewAdapter

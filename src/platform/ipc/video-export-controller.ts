@@ -74,6 +74,7 @@ export interface VideoExportControllerDependencies {
   now?(): string;
   createId?(): string;
   onError?(error: unknown): void;
+  onActiveCountChanged?(count: number): void;
 }
 
 interface ExportContext {
@@ -88,8 +89,23 @@ interface ExportContext {
   readonly fileIndex: JsonFileIndexRepository;
 }
 
+export type ExportLifecycleInterruptionReason =
+  | 'system_suspend'
+  | 'screen_locked'
+  | 'background_processing_disabled'
+  | 'application_shutdown';
+
+interface RunningExport {
+  readonly adapter: MediaEngineAdapter;
+  readonly promise: Promise<void>;
+}
+
 export class VideoExportController {
-  private readonly running = new Map<string, Promise<void>>();
+  private readonly running = new Map<string, RunningExport>();
+  private readonly lifecycleInterruptions = new Map<
+    string,
+    ExportLifecycleInterruptionReason
+  >();
 
   constructor(private readonly dependencies: VideoExportControllerDependencies) {}
 
@@ -247,8 +263,28 @@ export class VideoExportController {
     });
   }
 
+  get activeExportCount(): number {
+    return this.running.size;
+  }
+
+  async interruptActiveExports(
+    reason: ExportLifecycleInterruptionReason
+  ): Promise<number> {
+    const entries = [...this.running.entries()];
+    for (const [executionId, running] of entries) {
+      this.lifecycleInterruptions.set(executionId, reason);
+      await running.adapter.cancel(executionId).catch((error) => {
+        this.dependencies.onError?.(error);
+        return { status: 'not_running' as const };
+      });
+    }
+    await Promise.allSettled(entries.map(([, running]) => running.promise));
+    return entries.length;
+  }
+
   waitForExports(): Promise<void> {
-    return Promise.all(this.running.values()).then(() => undefined);
+    return Promise.all([...this.running.values()].map((running) => running.promise))
+      .then(() => undefined);
   }
 
   private launch(
@@ -259,8 +295,13 @@ export class VideoExportController {
   ): void {
     const promise = this.run(context, plan, execution, adapter)
       .catch((error) => this.dependencies.onError?.(error))
-      .finally(() => this.running.delete(execution.id));
-    this.running.set(execution.id, promise);
+      .finally(() => {
+        this.running.delete(execution.id);
+        this.lifecycleInterruptions.delete(execution.id);
+        this.dependencies.onActiveCountChanged?.(this.running.size);
+      });
+    this.running.set(execution.id, { adapter, promise });
+    this.dependencies.onActiveCountChanged?.(this.running.size);
   }
 
   private async run(
@@ -272,9 +313,12 @@ export class VideoExportController {
     let execution = initial;
     try {
       execution = await this.move(context, execution, 'validating_sources');
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       if (await this.finishCancellation(context, execution)) return;
       const resolved = await verifyFrozenInputs(context, plan, adapter);
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       execution = await this.move(context, execution, 'preparing_media');
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       if (await this.finishCancellation(context, execution)) return;
       const outputPath = resolvePlanOutput(context.session.rootDirectory, plan);
       try {
@@ -286,8 +330,10 @@ export class VideoExportController {
         );
       }
       await assertOutputCapacity(outputPath, plan.estimatedOutputBytes);
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       const renderPlan = toMediaEnginePlan(plan, execution, resolved, outputPath);
       execution = await this.move(context, execution, 'encoding');
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       if (await this.finishCancellation(context, execution)) return;
       let progressQueue = Promise.resolve();
       const existing = await adapter.verifyOutput(outputPath);
@@ -317,6 +363,7 @@ export class VideoExportController {
           });
       await progressQueue;
       execution = (await context.executions.get(execution.id)) ?? execution;
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       if (result.status === 'cancelled') {
         if (execution.state !== 'cancel_requested') {
           execution = transitionExecution(execution, 'cancel_requested', this.now());
@@ -333,8 +380,10 @@ export class VideoExportController {
         );
       }
       execution = await this.move(context, execution, 'writing_file');
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       execution = await this.move(context, execution, 'verifying_file');
       const independent = await adapter.verifyOutput(outputPath);
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       if (independent.status !== 'verified') {
         throw new ExportRunError('retryable', 'Published output failed independent verification');
       }
@@ -349,11 +398,13 @@ export class VideoExportController {
         );
       }
       const file = await registerOutputFile(context, plan, execution, this.now());
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       const workId = toWorkId(this.id('video-export-work'));
       execution = await this.move(context, execution, 'registering_work', {
         outputFileId: file.id,
         workId
       });
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       const work = registerWork({
         id: workId,
         task: await requireExportTask(context, execution.taskId),
@@ -372,6 +423,7 @@ export class VideoExportController {
       await context.executions.save(execution);
     } catch (error) {
       this.dependencies.onError?.(error);
+      if (await this.finishLifecycleInterruption(context, execution)) return;
       const current = (await context.executions.get(execution.id)) ?? execution;
       if (current.state === 'cancel_requested') {
         await context.executions.save(
@@ -427,6 +479,28 @@ export class VideoExportController {
     if (execution.state !== 'cancel_requested') return false;
     await context.executions.save(
       transitionExecution(execution, 'cancelled', this.now())
+    );
+    return true;
+  }
+
+  private async finishLifecycleInterruption(
+    context: ExportContext,
+    execution: Execution
+  ): Promise<boolean> {
+    if (!this.lifecycleInterruptions.has(execution.id)) return false;
+    const current = (await context.executions.get(execution.id)) ?? execution;
+    if (current.state === 'completed' || current.state === 'cancelled') return true;
+    if (current.state === 'cancel_requested') {
+      await context.executions.save(
+        transitionExecution(current, 'cancelled', this.now())
+      );
+      return true;
+    }
+    const interrupted = current.state === 'interrupted'
+      ? current
+      : transitionExecution(current, 'interrupted', this.now());
+    await context.executions.save(
+      transitionExecution(interrupted, 'recovery_required', this.now())
     );
     return true;
   }
