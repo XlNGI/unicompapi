@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2 Windows 实现基线和 A1 已合并 `develop`，A1 已通过项目负责人 Windows 手工验收，A2 前置条件已满足。B2 的 Windows 原生目录授权操作与 A1/B2 的 macOS 实机证据仍待补，不得据此宣称阶段 9 跨平台验收完成。阶段 9 不新增业务一级页面；安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3 已合并 `develop`，A2 前置条件已满足，B4 未启动。项目负责人已批准“阶段 9 C1｜对话与项目上下文应用层契约”作为不新增业务能力一般限制的正式例外；第一批 `feature/chat-domain-contracts` 已完成对话领域、严格 Message 生命周期和应用级版本化本地仓储实现、440 项完整门禁及功能分支提交，等待推送并合并。B2 Windows 原生目录授权、A1/B2/B3 macOS 实机及 B3 真实系统生命周期人工证据仍待补，不得据此宣称阶段 9 跨平台验收完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -697,3 +697,17 @@ B3 同步 A1 后的当前门禁为 147 项 Node UI/IPC/工具链测试与 279 �
     docs/active/阶段9-B3-进程媒体与系统生命周期记录.md
 
 未完成：Windows 真实睡眠/唤醒、锁屏/解锁、可见通知、通知声音和系统设置跳转未执行；B2 原生目录选择器人工项仍未执行；macOS 全部 B3 实机证据与媒体工具链批准仍缺失。项目负责人于 2026-07-28 明确批准“合并”，B3 已通过 `8b32ba7 Merge phase 9 cross-platform runtime media` 合并并推送 `develop`，本地与远程功能分支继续保留。该合并不把任何 `not_run` 改为通过，不代表 B3 或阶段 9 跨平台验收完成，也不自动启动 B4。
+
+## 阶段 9 C1 第一批｜对话领域与本地仓储（2026-07-28）
+
+项目负责人正式批准 C1 作为阶段 9 业务范围例外，并要求在真实供应商适配器、B4 和 A4 前完成。`feature/chat-domain-contracts` 从已合并 B3 的最新 `develop@134d406` 建立，工作区创建前保持干净。
+
+本分支新增 Conversation/Message 强类型 ID、应用级全局 Conversation 聚合、可选显式 `projectId`、active/archived/deleted 状态、软删除墓碑、Message 的 pending/streaming/completed/failed/cancelled 严格判别联合及双层 revision。用户消息作为 completed 不可变事实；assistant 消息只能按批准状态机转换，终态不可继续写入。未绑定项目的 Conversation 不能持久化附件；已绑定项目只允许同项目 AssetId/FileReferenceId，不保存绝对路径、Hash、endpoint 或原始附件内容。
+
+应用级 JSON 仓储实现 Schema version、文档 revision、严格运行时校验、显式连续迁移入口、聚合乐观并发、同路径跨实例串行写入、同目录临时文件、文件 `fsync`、原子替换、目录同步和最后有效备份。主文件损坏时只读取有效备份且不覆盖损坏证据；主文件和备份均无效时失败关闭。普通列表默认隐藏 archived/deleted，墓碑仍可显式读取。
+
+新增 14 项领域与仓储测试。完整门禁为 147 项 Node UI/IPC/工具链测试与 293 项 Vitest 领域/平台测试，共 440 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建通过，真实 FFmpeg 集成测试已执行。本分支未修改 Electron 主进程或 preload，不新增 Electron 烟测要求。工程记录见：
+
+    docs/active/阶段9-C1-对话领域与本地仓储记录.md
+
+未完成：ProjectContext 项目内版本仓储、登记草稿/预览/确认、应用服务、主进程控制器、受控 IPC/preload、附件内容解析和任何 React 接线均不在本分支。下一步先推送并合并本分支，再从最新 `develop` 创建 `feature/project-context-registry`；其后才启动 `feature/chat-context-ipc`。页面接线等待 A2 合并后另建独立小分支。

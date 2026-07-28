@@ -1,4 +1,5 @@
 export * from './entities/asset';
+export * from './entities/conversation';
 export * from './entities/draft';
 export * from './entities/execution';
 export * from './entities/file-reference';
