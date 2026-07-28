@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3 已合并 `develop`，A2 前置条件已满足，B4 未启动。项目负责人已批准“阶段 9 C1｜对话与项目上下文应用层契约”作为不新增业务能力一般限制的正式例外；第一批 `feature/chat-domain-contracts` 已完成对话领域、严格 Message 生命周期和应用级版本化本地仓储实现、440 项完整门禁及功能分支提交，等待推送并合并。B2 Windows 原生目录授权、A1/B2/B3 macOS 实机及 B3 真实系统生命周期人工证据仍待补，不得据此宣称阶段 9 跨平台验收完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3 已合并 `develop`，A2 前置条件已满足，B4 未启动。项目负责人批准的“阶段 9 C1｜对话与项目上下文应用层契约”第一批已通过 `b245f86` 合并 `develop`；第二批 `feature/project-context-registry` 已完成项目上下文领域、项目范围版本仓储、登记应用服务、457 项完整门禁及功能分支提交，等待审核合并。第三批 `feature/chat-context-ipc` 尚未创建。B2 Windows 原生目录授权、A1/B2/B3 macOS 实机及 B3 真实系统生命周期人工证据仍待补，不得据此宣称阶段 9 跨平台验收完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -711,3 +711,21 @@ B3 同步 A1 后的当前门禁为 147 项 Node UI/IPC/工具链测试与 279 �
     docs/active/阶段9-C1-对话领域与本地仓储记录.md
 
 未完成：ProjectContext 项目内版本仓储、登记草稿/预览/确认、应用服务、主进程控制器、受控 IPC/preload、附件内容解析和任何 React 接线均不在本分支。下一步先推送并合并本分支，再从最新 `develop` 创建 `feature/project-context-registry`；其后才启动 `feature/chat-context-ipc`。页面接线等待 A2 合并后另建独立小分支。
+
+第一批随后已通过 `b245f86 Merge phase 9 conversation domain contracts` 合并并推送 `develop`；`feature/chat-domain-contracts` 本地与远程分支继续保留。第二批已从该最新基线创建 `feature/project-context-registry`。
+
+## 阶段 9 C1 第二批｜项目上下文登记（2026-07-28）
+
+`feature/project-context-registry` 从包含第一批的 `develop@b245f86` 建立。本分支新增 ProjectContext 草稿、消息选择片段、稳定 contextId、不可变 revision 历史、currentRevision、active/deleted、sourceStatus、显式登记、内容/标签更新、墓碑删除和安全查询 DTO。
+
+草稿必须显式选择目标项目和一个已保存 Conversation；允许同一 Conversation 的多个 completed Message 片段，冻结 Message revision、角色、UTF-16 选择范围、顺序和规范化内容快照。跨 Conversation、未保存 Conversation、未完成 Message 和登记前来源变化均失败关闭。草稿不会进入候选列表；只有显式确认后才在项目仓储中原子移除草稿并创建正式 context revision 1。
+
+正式上下文的内容、标签、sourceStatus 和删除均追加新 revision，不覆盖旧版本。Conversation 后续软删除时上下文继续有效，只追加 `source_deleted`，登记内容快照与历史版本保持可读。普通删除上下文形成纯墓碑，不删除来源 Conversation。当前实现的版本化宽泛来源为 `conversation_selection`，不包含供应商、模型或页面名称；其他批准类别仅预留，不伪造具体来源流程。
+
+项目范围注册表位于 `entities/project-contexts.json`，草稿与正式上下文共享一个 Schema v1 文档。仓储实现严格校验、显式迁移入口、文档与实体 revision、串行写入、项目存储原子替换、有效备份和历史只追加验证。应用层 DTO 不返回路径、Hash、凭证、endpoint 或仓储信息，也不创建 Task、Execution 或 Work。
+
+新增 17 项领域、应用服务和仓储测试。完整门禁为 147 项 Node UI/IPC/工具链测试与 310 项 Vitest 领域/平台测试，共 457 项通过、0 失败、0 跳过；TypeScript、ESLint 和生产构建通过，真实 FFmpeg 集成测试已执行。本分支未修改 Electron 主进程或 preload，不新增 Electron 烟测要求。工程记录见：
+
+    docs/active/阶段9-C1-项目上下文登记记录.md
+
+未完成：第三批主进程控制器、共享 IPC、preload 白名单、Electron 组合根、Conversation 流式应用服务、adapter_unavailable 映射、受控附件接入和所有 React UI 均未实现。第二批必须先合并最新 `develop`，之后才允许创建 `feature/chat-context-ipc`；第三批修改 Electron/preload 后必须执行真实 Electron 启动烟测。

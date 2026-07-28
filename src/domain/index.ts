@@ -5,6 +5,7 @@ export * from './entities/execution';
 export * from './entities/file-reference';
 export * from './entities/image-workspace';
 export * from './entities/project';
+export * from './entities/project-context';
 export * from './entities/prompt';
 export * from './entities/provider';
 export * from './entities/settings';
