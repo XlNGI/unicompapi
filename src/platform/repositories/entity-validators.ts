@@ -89,6 +89,19 @@ export const isExecutionEntity: EntityValidator = (value) =>
     : value.userAction === undefined) &&
   (value.remoteOperationId === undefined ||
     isNonBlankString(value.remoteOperationId)) &&
+  (value.providerOperationRecordId === undefined ||
+    isNonBlankString(value.providerOperationRecordId)) &&
+  (value.submissionOutcome === undefined ||
+    isOneOf(value.submissionOutcome, [
+      'accepted_async',
+      'completed_sync',
+      'submission_outcome_unknown',
+      'failed_before_submission'
+    ] as const)) &&
+  ((value.providerOperationRecordId === undefined &&
+    value.submissionOutcome === undefined) ||
+    (isNonBlankString(value.providerOperationRecordId) &&
+      typeof value.submissionOutcome === 'string')) &&
   (value.exportPlanId === undefined || isNonBlankString(value.exportPlanId)) &&
   (value.outputFileId === undefined || isNonBlankString(value.outputFileId)) &&
   (value.workId === undefined || isNonBlankString(value.workId)) &&

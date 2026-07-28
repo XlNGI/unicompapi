@@ -6,6 +6,7 @@ import type { ExecutionState } from './execution-state';
 export type TaskStatus =
   | 'awaiting_execution'
   | 'submitting'
+  | 'submission_outcome_unknown'
   | 'active'
   | 'remote_completed'
   | 'localizing'
@@ -19,6 +20,7 @@ export type TaskStatus =
 const taskStatusByExecutionState: Record<ExecutionState, TaskStatus> = {
   created: 'awaiting_execution',
   submitting: 'submitting',
+  submission_outcome_unknown: 'submission_outcome_unknown',
   queued: 'active',
   processing: 'active',
   validating_sources: 'active',

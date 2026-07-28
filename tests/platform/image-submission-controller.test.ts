@@ -29,6 +29,7 @@ import {
   ImageWorkspaceMutationCoordinator,
   JsonExecutionRepository,
   JsonImageWorkspaceRepository,
+  JsonProviderOperationRepository,
   JsonProviderRegistryStore,
   JsonTaskRepository,
   NodeProjectStorage
@@ -43,7 +44,10 @@ afterEach(async () => {
   );
 });
 
-async function createFixture(options: { readonly failingPort?: boolean } = {}) {
+async function createFixture(options: {
+  readonly failingPort?: boolean;
+  readonly submissionMode?: 'async' | 'sync' | 'unknown';
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-submission-'));
   roots.push(root);
   const projectId = toProjectId('project-submission');
@@ -137,7 +141,10 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     mediaKind: 'image',
     adapterKind: 'fixture_image_submit',
     authScheme: 'unknown',
-    executionLifecycle: 'asynchronous_polling',
+    executionLifecycle:
+      options.submissionMode === 'sync'
+        ? 'synchronous_completed'
+        : 'asynchronous_polling',
     supportedPurposes: ['image_generation'],
     createdAt: t0,
     updatedAt: t0
@@ -182,6 +189,25 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
           if (options.failingPort) {
             throw new ImageOperationPortError('retryable', 'temporary failure');
           }
+          if (options.submissionMode === 'unknown') {
+            throw new ImageOperationPortError(
+              'not_retryable',
+              'response lost after write',
+              'submission_outcome_unknown'
+            );
+          }
+          if (options.submissionMode === 'sync') {
+            return {
+              kind: 'completed_sync',
+              providerOperationId: 'provider-sync-operation',
+              results: [
+                {
+                  kind: 'remote_url',
+                  value: 'https://synthetic.invalid/image.png'
+                }
+              ]
+            };
+          }
           return {
             remoteOperationId: 'remote-operation-internal',
             state: 'queued'
@@ -191,6 +217,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     },
     createTaskId: () => 'task-submission',
     createExecutionId: () => executionIds.shift() ?? 'execution-fallback',
+    createProviderOperationRecordId: () => 'provider-operation-record-image',
     now: () => times.shift() ?? '2026-07-23T05:59:00.000Z'
   });
   return { controller, draft, modelId, projectId, registry, root, storage };
@@ -345,5 +372,58 @@ describe('ImageSubmissionController', () => {
       toExecutionId('execution-submission-1')
     );
     expect(stored?.state).toBe('created');
+  });
+
+  it('persists synchronous receipts and leaves result handling separate', async () => {
+    const fixture = await createFixture({ submissionMode: 'sync' });
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-submission' });
+    await expect(
+      fixture.controller.invokeExecution({
+        executionId: 'execution-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'remote_completed' }
+    });
+    const receipt = await new JsonProviderOperationRepository(
+      fixture.storage
+    ).getByExecution(toExecutionId('execution-submission-1'));
+    expect(receipt).toMatchObject({
+      outcome: {
+        kind: 'completed_sync',
+        providerOperationId: 'provider-sync-operation'
+      }
+    });
+  });
+
+  it('does not allow ordinary retry after an unknown paid submission outcome', async () => {
+    const fixture = await createFixture({ submissionMode: 'unknown' });
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-submission' });
+    await expect(
+      fixture.controller.invokeExecution({
+        executionId: 'execution-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'submission_outcome_unknown' }
+    });
+    await expect(
+      fixture.controller.createExecution({ taskId: 'task-submission' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'submission_outcome_unknown' }
+    });
   });
 });

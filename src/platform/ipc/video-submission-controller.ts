@@ -7,9 +7,12 @@ import {
   toDraftId,
   toExecutionId,
   toIsoTimestamp,
+  toProviderOperationRecordId,
   toTaskId,
   transitionExecution,
   type Execution,
+  type ProviderExecutionLifecycle,
+  type ProviderSubmitOutcome,
   type Task,
   type VideoSubmissionConfirmationSnapshot,
   type VideoSubmissionModeInput,
@@ -28,14 +31,17 @@ import {
   parameterValuesForVideoDraft,
   videoMaterialSelections,
   VideoOperationPortError,
+  type VideoGenerationSubmitResult,
   type VideoGenerationSubmitPort,
   type VideoMaterialFact
 } from '../videos';
 import type { JsonProviderRegistryStore } from '../providers';
+import { ProviderExecutionLifecycleService } from '../providers';
 import {
   JsonAssetRepository,
   JsonExecutionRepository,
   JsonFileReferenceRepository,
+  JsonProviderOperationRepository,
   JsonTaskRepository,
   JsonVideoWorkspaceRepository
 } from '../repositories';
@@ -55,6 +61,7 @@ export interface VideoSubmissionControllerDependencies {
   };
   createTaskId?(): string;
   createExecutionId?(): string;
+  createProviderOperationRecordId?(): string;
   now?(): string;
   onError?(error: unknown): void;
 }
@@ -190,6 +197,12 @@ export class VideoSubmissionController {
           throw submissionError('invalid_request', 'Task is not a video task');
         }
         const previous = await latestExecution(context.executionRepository, task);
+        if (previous?.state === 'submission_outcome_unknown') {
+          throw submissionError(
+            'submission_outcome_unknown',
+            'The previous paid submission outcome is unknown; create and confirm a new task before retrying'
+          );
+        }
         const createdAt = this.now();
         const execution = previous
           ? createRetryExecution(previous, this.createExecutionId(), createdAt)
@@ -236,39 +249,37 @@ export class VideoSubmissionController {
 
         const submitting = transitionExecution(execution, 'submitting', this.now());
         await context.executionRepository.save(submitting);
+        let outcome: ProviderSubmitOutcome;
         try {
-          const remote = await this.dependencies.operationPort.submit({
-            task,
-            execution: submitting
-          });
-          if (remote.remoteOperationId.trim().length === 0) {
-            throw new VideoOperationPortError(
-              'not_retryable',
-              'Remote adapter returned an invalid operation ID'
-            );
-          }
-          const submitted = transitionExecution(
-            submitting,
-            remote.state,
-            this.now(),
-            { remoteOperationId: remote.remoteOperationId }
+          outcome = normalizeVideoSubmitOutcome(
+            await this.dependencies.operationPort.submit({
+              task,
+              execution: submitting
+            })
           );
-          await context.executionRepository.save(submitted);
-          return toExecutionDto(submitted);
         } catch (error) {
-          const failure = transitionExecution(submitting, 'failed', this.now(), {
-            failure: {
-              stage: 'submitting',
-              message: 'The remote video generation could not be submitted',
-              retryability:
-                error instanceof VideoOperationPortError
-                  ? error.retryability
-                  : 'unknown'
-            }
-          });
-          await context.executionRepository.save(failure);
-          return toExecutionDto(failure);
+          outcome = videoSubmitFailureOutcome(error);
         }
+        const registry = await this.dependencies.providerRegistry.load();
+        const executionLifecycle = videoLifecycleForModel(
+          registry,
+          task.submission.video.modelId
+        );
+        const lifecycle = new ProviderExecutionLifecycleService({
+          executionRepository: context.executionRepository,
+          operationRepository: context.operationRepository,
+          createRecordId: () => this.createProviderOperationRecordId(),
+          now: () => this.now()
+        });
+        return toExecutionDto(
+          await lifecycle.applySubmitOutcome({
+            task,
+            execution: submitting,
+            mediaKind: 'video',
+            executionLifecycle,
+            outcome
+          })
+        );
       })
     );
   }
@@ -307,7 +318,8 @@ export class VideoSubmissionController {
       assetRepository: new JsonAssetRepository(storage, session.projectId),
       fileRepository: new JsonFileReferenceRepository(storage, session.projectId),
       taskRepository: new JsonTaskRepository(storage, session.projectId),
-      executionRepository: new JsonExecutionRepository(storage)
+      executionRepository: new JsonExecutionRepository(storage),
+      operationRepository: new JsonProviderOperationRepository(storage)
     };
   }
 
@@ -330,6 +342,13 @@ export class VideoSubmissionController {
   private createExecutionId() {
     return toExecutionId(
       this.dependencies.createExecutionId?.() ?? `execution-video-${randomUUID()}`
+    );
+  }
+
+  private createProviderOperationRecordId() {
+    return toProviderOperationRecordId(
+      this.dependencies.createProviderOperationRecordId?.() ??
+        `provider-operation-video-${randomUUID()}`
     );
   }
 
@@ -482,6 +501,60 @@ function toExecutionDto(execution: Execution): VideoExecutionDto {
     state: execution.state,
     retryability: execution.failure?.retryability
   };
+}
+
+function normalizeVideoSubmitOutcome(
+  result: VideoGenerationSubmitResult
+): ProviderSubmitOutcome {
+  if ('kind' in result) return result;
+  if (result.remoteOperationId.trim().length === 0) {
+    throw new VideoOperationPortError(
+      'not_retryable',
+      'Remote adapter returned an invalid operation ID'
+    );
+  }
+  return {
+    kind: 'accepted_async',
+    providerOperationId: result.remoteOperationId,
+    state: result.state
+  };
+}
+
+function videoSubmitFailureOutcome(error: unknown): ProviderSubmitOutcome {
+  const message = 'The remote video generation could not be submitted';
+  if (
+    error instanceof VideoOperationPortError &&
+    error.submissionStatus === 'submission_outcome_unknown'
+  ) {
+    return { kind: 'submission_outcome_unknown', message };
+  }
+  return {
+    kind: 'failed_before_submission',
+    message,
+    retryability:
+      error instanceof VideoOperationPortError
+        ? error.retryability
+        : 'unknown'
+  };
+}
+
+function videoLifecycleForModel(
+  registry: Awaited<ReturnType<JsonProviderRegistryStore['load']>>,
+  modelId: string
+): ProviderExecutionLifecycle {
+  const model = registry.models.find((candidate) => candidate.id === modelId);
+  const binding = model
+    ? registry.protocolBindings.find(
+        (candidate) => candidate.id === model.protocolBindingId
+      )
+    : undefined;
+  if (!binding) {
+    throw submissionError(
+      'no_route_candidate',
+      'The selected model has no provider protocol lifecycle'
+    );
+  }
+  return binding.executionLifecycle;
 }
 
 function submissionError(

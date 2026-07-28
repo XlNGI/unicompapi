@@ -20,6 +20,7 @@ export type ImageSubmissionErrorCode =
   | 'task_not_found'
   | 'execution_not_found'
   | 'invalid_execution_state'
+  | 'submission_outcome_unknown'
   | 'adapter_unavailable'
   | 'download_failed'
   | 'result_verification_failed'

@@ -28,6 +28,8 @@ export const imageSubmissionErrorMessages: Record<
   ImageSubmissionErrorCode,
   string
 > = {
+  submission_outcome_unknown:
+    'Submission outcome is unknown. Create a new task only after confirming the charge status.',
   project_not_open: '当前没有打开的项目。',
   invalid_request: '提交信息无效，请检查当前草稿。',
   draft_not_found: '当前草稿已不存在。',

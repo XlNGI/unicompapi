@@ -124,15 +124,41 @@ export interface ProviderProtocolBinding {
   readonly updatedAt: IsoTimestamp;
 }
 
+export type ProviderImmediateResultReference =
+  | {
+      readonly kind: 'remote_url';
+      readonly value: string;
+    }
+  | {
+      readonly kind: 'base64';
+      readonly value: string;
+      readonly mimeType: string;
+    }
+  | {
+      readonly kind: 'file_uri';
+      readonly value: string;
+    };
+
 export type ProviderSubmitOutcome =
   | {
-      readonly kind: 'asynchronous';
+      readonly kind: 'accepted_async';
       readonly providerOperationId: string;
       readonly state: 'queued' | 'processing';
     }
   | {
-      readonly kind: 'synchronous_completed';
+      readonly kind: 'completed_sync';
       readonly providerOperationId: string;
+      readonly results: readonly ProviderImmediateResultReference[];
+    }
+  | {
+      readonly kind: 'submission_outcome_unknown';
+      readonly providerOperationId?: string;
+      readonly message: string;
+    }
+  | {
+      readonly kind: 'failed_before_submission';
+      readonly message: string;
+      readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
     };
 
 export interface DynamicParameterFieldSchema {

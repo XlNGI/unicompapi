@@ -28,6 +28,7 @@ export type VideoSubmissionErrorCode =
   | 'task_not_found'
   | 'execution_not_found'
   | 'invalid_execution_state'
+  | 'submission_outcome_unknown'
   | 'adapter_unavailable'
   | 'result_discovery_failed'
   | 'download_failed'
