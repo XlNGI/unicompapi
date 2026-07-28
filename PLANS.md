@@ -729,3 +729,19 @@ B3 同步 A1 后的当前门禁为 147 项 Node UI/IPC/工具链测试与 279 �
     docs/active/阶段9-C1-项目上下文登记记录.md
 
 未完成：第三批主进程控制器、共享 IPC、preload 白名单、Electron 组合根、Conversation 流式应用服务、adapter_unavailable 映射、受控附件接入和所有 React UI 均未实现。第二批必须先合并最新 `develop`，之后才允许创建 `feature/chat-context-ipc`；第三批修改 Electron/preload 后必须执行真实 Electron 启动烟测。
+
+第二批随后已通过 `9df9ce0 Merge phase 9 project context registry` 合并并推送 `develop`；`feature/project-context-registry` 本地与远程分支继续保留。第三批已从该最新基线创建 `feature/chat-context-ipc`。
+
+## 阶段 9 C1 第三批｜对话与项目上下文受控 IPC（2026-07-28）
+
+`feature/chat-context-ipc` 从同时包含第一批和第二批的 `develop@9df9ce0` 建立并已推送保留。本分支新增 Conversation 非 UI 应用服务、供应商无关流式应用服务端口、ConversationController、ProjectContextController、共享 IPC DTO/严格请求校验/稳定错误码、preload 命名白名单和 Electron 组合根。
+
+Conversation 创建可由用户显式选择是否绑定当前受控项目；未打开项目仍可保存未绑定纯文本 Conversation。renderer 只能提交受控 ID、文本、布尔确认和 revision，不能传绝对路径、仓储位置、任意附件位置、远端 operation ID、凭证或 endpoint。用户消息保存不接受附件；没有真实对话适配器时 `requestAssistantResponse` 返回 `adapter_unavailable` 且不创建 assistant Message、不制造片段、进度、费用或成功状态。流式 start/append/complete/fail/cancel 只存在于主进程应用服务边界。
+
+ProjectContext 控制器只从当前主进程 Project Session 派生项目范围，renderer 不传 projectId；未打开项目和其他项目 ID 均失败关闭。保存 Conversation、创建上下文草稿和显式登记保持独立；草稿登记必须确认，查询上下文不构成外发授权。应用级 Conversation 仓储继续位于 Electron userData，项目上下文继续位于目标项目 `entities/project-contexts.json`，不建立第二套事实源或 renderer 仓储。项目切换、关闭和应用退出会等待受控操作结束。
+
+新增 3 项 Node IPC/preload 契约测试和 9 项 Vitest 控制器/组合根测试。完整门禁为 150 项 Node 与 319 项 Vitest，共 469 项通过、0 失败、0 跳过；TypeScript、ESLint、生产构建和差异检查通过，真实 FFmpeg 集成测试已执行。Windows Electron 生产构建启动烟测新增 4 个进程，4/4 响应，清理后本次残留 0。工程记录见：
+
+    docs/active/阶段9-C1-对话与项目上下文受控IPC记录.md
+
+未完成：React 页面与创作工作区接线、`readProjectContext`/`readSavedProjectChats` 的页面候选语义、真实供应商/HTTP 适配器、供应商提交前确认、新原生附件选择、受控附件展示与内容解析均不在本分支。第三批实现等待项目负责人验收；未经批准不得合并 `develop`。

@@ -31,6 +31,10 @@ import {
   settingsIpcChannels,
   type SettingsApi
 } from '../src/shared/settings-ipc';
+import {
+  chatContextIpcChannels,
+  type ChatContextApi
+} from '../src/shared/chat-context-ipc';
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -400,7 +404,130 @@ const settings: SettingsApi = {
     })
 };
 
+const chatContexts: ChatContextApi = {
+  createConversation: (title, bindToCurrentProject) =>
+    ipcRenderer.invoke(chatContextIpcChannels.createConversation, {
+      title,
+      bindToCurrentProject
+    }),
+  getConversation: (conversationId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getConversation, { conversationId }),
+  listConversations: (includeArchived, includeDeleted) =>
+    ipcRenderer.invoke(chatContextIpcChannels.listConversations, {
+      includeArchived,
+      includeDeleted
+    }),
+  renameConversation: (conversationId, expectedRevision, title) =>
+    ipcRenderer.invoke(chatContextIpcChannels.renameConversation, {
+      conversationId,
+      expectedRevision,
+      title
+    }),
+  archiveConversation: (conversationId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.archiveConversation, {
+      conversationId,
+      expectedRevision
+    }),
+  restoreConversation: (conversationId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.restoreConversation, {
+      conversationId,
+      expectedRevision
+    }),
+  deleteConversation: (conversationId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.deleteConversation, {
+      conversationId,
+      expectedRevision
+    }),
+  addUserMessage: (conversationId, expectedRevision, content) =>
+    ipcRenderer.invoke(chatContextIpcChannels.addUserMessage, {
+      conversationId,
+      expectedRevision,
+      content
+    }),
+  requestAssistantResponse: (conversationId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.requestAssistantResponse, {
+      conversationId,
+      expectedRevision
+    }),
+  cancelAssistantResponse: (conversationId, messageId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.cancelAssistantResponse, {
+      conversationId,
+      messageId,
+      expectedRevision
+    }),
+  createContextDraft: (conversationId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.createContextDraft, { conversationId }),
+  getContextDraftPreview: (draftId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getContextDraftPreview, { draftId }),
+  addContextMessageFragment: (
+    draftId,
+    expectedRevision,
+    messageId,
+    startUtf16,
+    endUtf16
+  ) =>
+    ipcRenderer.invoke(chatContextIpcChannels.addContextMessageFragment, {
+      draftId,
+      expectedRevision,
+      messageId,
+      startUtf16,
+      endUtf16
+    }),
+  removeContextMessageFragment: (draftId, expectedRevision, fragmentId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.removeContextMessageFragment, {
+      draftId,
+      expectedRevision,
+      fragmentId
+    }),
+  updateContextDraftLabels: (draftId, expectedRevision, labels) =>
+    ipcRenderer.invoke(chatContextIpcChannels.updateContextDraftLabels, {
+      draftId,
+      expectedRevision,
+      labels
+    }),
+  registerContextDraft: (draftId, expectedRevision, confirmed) =>
+    ipcRenderer.invoke(chatContextIpcChannels.registerContextDraft, {
+      draftId,
+      expectedRevision,
+      confirmed
+    }),
+  updateProjectContext: (
+    contextId,
+    expectedRevision,
+    contentSnapshot,
+    labels
+  ) =>
+    ipcRenderer.invoke(chatContextIpcChannels.updateProjectContext, {
+      contextId,
+      expectedRevision,
+      contentSnapshot,
+      labels
+    }),
+  deleteProjectContext: (contextId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.deleteProjectContext, {
+      contextId,
+      expectedRevision
+    }),
+  refreshContextSourceStatus: (contextId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.refreshContextSourceStatus, {
+      contextId,
+      expectedRevision
+    }),
+  listProjectContextCandidates: () =>
+    ipcRenderer.invoke(chatContextIpcChannels.listProjectContextCandidates),
+  getProjectContext: (contextId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getProjectContext, { contextId }),
+  getProjectContextRevision: (contextId, revision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getProjectContextRevision, {
+      contextId,
+      revision
+    }),
+  getContextSourceStatus: (contextId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getContextSourceStatus, { contextId })
+};
+
 contextBridge.exposeInMainWorld('unicomp', {
+  chatContexts,
   imageSubmissions,
   imageWorkspaces,
   videoSubmissions,

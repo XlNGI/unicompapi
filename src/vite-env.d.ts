@@ -8,10 +8,12 @@ import type { VideoWorkspaceApi } from './shared/video-workspace-ipc';
 import type { VideoSubmissionApi } from './shared/video-submission-ipc';
 import type { VideoEditorApi } from './shared/video-editor-ipc';
 import type { SettingsApi } from './shared/settings-ipc';
+import type { ChatContextApi } from './shared/chat-context-ipc';
 
 declare global {
   interface Window {
     unicomp?: {
+      chatContexts: ChatContextApi;
       imageWorkspaces: ImageWorkspaceApi;
       imageSubmissions: ImageSubmissionApi;
       videoSubmissions: VideoSubmissionApi;
