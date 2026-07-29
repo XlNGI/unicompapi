@@ -85,51 +85,6 @@
   gap: var(--uc-space-2);
 }
 
-.uc-image-workbench__mode-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(128px, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--uc-color-border-default);
-  border-radius: var(--uc-radius-8);
-  background: var(--uc-color-surface-base);
-}
-
-.uc-image-workbench__mode-option {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: var(--uc-space-2);
-  border: 0;
-  padding: var(--uc-space-2) var(--uc-space-4);
-  color: var(--uc-color-text-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.uc-image-workbench__mode-option + .uc-image-workbench__mode-option {
-  border-left: 1px solid var(--uc-color-border-default);
-}
-
-.uc-image-workbench__mode-option.is-active {
-  color: var(--uc-color-text-primary);
-  background: linear-gradient(
-    135deg,
-    var(--uc-color-accent-fill),
-    var(--uc-color-accent-pressed)
-  );
-}
-
-.uc-image-workbench__mode-option:focus-visible {
-  outline: 2px solid var(--uc-color-border-focus);
-  outline-offset: -2px;
-}
-
-.uc-image-workbench__mode-option > svg {
-  width: 15px;
-  height: 15px;
-}
-
 .uc-image-workbench[data-mode="quick_image"] .uc-image-workbench__project-strip {
   display: none;
 }
@@ -348,6 +303,20 @@
 
 .uc-image-quick__composer-actions .uc-image-quick__reference {
   min-width: 0;
+}
+
+.uc-image-quick__composer-actions .uc-image-quick__reference > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.uc-image-quick__reference-preview {
+  width: 64px;
+  height: 48px;
+  flex: 0 0 auto;
+  border: 1px solid var(--uc-color-border-default);
+  border-radius: var(--uc-radius-8);
+  object-fit: cover;
 }
 
 .uc-image-quick__primary-action {

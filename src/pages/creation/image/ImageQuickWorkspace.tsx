@@ -53,7 +53,7 @@ export function ImageQuickWorkspace({
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const imageSubmissions = window.unicomp?.imageSubmissions;
   const [input, setInput] = useState<ImageWorkspaceInputAssetDto>();
-  const [previewUrl, setPreviewUrl] = useState('');
+  const [inputPreviewUrl, setInputPreviewUrl] = useState('');
   const [preflight, setPreflight] = useState<ImagePreflightDto>();
   const [confirmations, setConfirmations] = useState(emptyImageConfirmations);
   const [busy, setBusy] = useState(false);
@@ -83,7 +83,7 @@ export function ImageQuickWorkspace({
   useEffect(() => {
     let active = true;
     setInput(undefined);
-    setPreviewUrl('');
+    setInputPreviewUrl('');
     if (!imageWorkspaces || !draft.input) return;
 
     async function loadInput() {
@@ -93,7 +93,7 @@ export function ImageQuickWorkspace({
       ]);
       if (!active) return;
       if (inputResult.ok) setInput(inputResult.value);
-      if (previewResult.ok) setPreviewUrl(previewResult.value.url);
+      if (previewResult.ok) setInputPreviewUrl(previewResult.value.url);
     }
 
     void loadInput().catch(() => {
@@ -140,7 +140,7 @@ export function ImageQuickWorkspace({
       onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(draft.draftId);
-      setPreviewUrl(preview.ok ? preview.value.url : '');
+      setInputPreviewUrl(preview.ok ? preview.value.url : '');
       onMessage('参考图已复制并登记到当前项目；没有上传、分析或生成。');
     } catch {
       onMessage('选择参考图失败，请重试。');
@@ -219,6 +219,13 @@ export function ImageQuickWorkspace({
           </label>
           <div className="uc-image-quick__composer-actions">
             <div className="uc-image-quick__reference">
+              {inputPreviewUrl ? (
+                <img
+                  alt={`参考图：${input?.name ?? '本地图片'}`}
+                  className="uc-image-quick__reference-preview"
+                  src={inputPreviewUrl}
+                />
+              ) : null}
               <div>
                 <strong>单张参考图（可选）</strong>
                 <span>
@@ -357,22 +364,23 @@ export function ImageQuickWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>生成结果</h2>
-              <p>只显示受控本地预览和主进程登记的真实结果。</p>
+              <p>只显示主进程登记的真实结果；参考图不会出现在这里。</p>
             </div>
           </header>
-          {previewUrl ? (
-            <figure className="uc-image-quick__preview">
-              <img alt={`参考图：${input?.name ?? '本地图片'}`} src={previewUrl} />
-              <figcaption>本地参考图预览，不代表生成结果。</figcaption>
-            </figure>
-          ) : (
-            <EmptyState
-              description="完成真实提交并接收结果后，生成图片会显示在这里。"
-              icon="画"
-              readOnly
-              title="尚无真实生成结果"
-            />
-          )}
+          <EmptyState
+            description={
+              submission.work
+                ? `${submission.work.name} 已校验并登记；当前结果接口未提供本地预览。`
+                : '完成真实提交并接收结果后，生成图片会显示在这里。'
+            }
+            icon="画"
+            readOnly
+            title={
+              submission.work
+                ? '结果已登记，暂无本地预览'
+                : '尚无真实生成结果'
+            }
+          />
           <div className="uc-image-quick__result-actions">
             <Button disabled variant="secondary">
               <LuRefreshCw aria-hidden="true" />

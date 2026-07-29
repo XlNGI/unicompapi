@@ -14,6 +14,10 @@ const submissionFlowSource = await readFile(
   'src/pages/creation/image/useImageSubmissionFlow.ts',
   'utf8'
 );
+const workbenchSource = await readFile(
+  'src/pages/creation/image/ImageWorkbenchPage.tsx',
+  'utf8'
+);
 const quickBundle = `${quickSource}\n${generationControlsSource}\n${submissionFlowSource}`;
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
@@ -58,6 +62,7 @@ test('quick image keeps draft, model parameters and confirmations explicit', () 
   assert.match(generationControlsSource, /parameterSchema\?\.fields\.map/);
   assert.match(quickSource, /\.derive\([\s\S]*'professional_image'/);
   assert.match(appSource, /'quick-image'[\s\S]*'professional-image'/);
+  assert.doesNotMatch(workbenchSource, /uc-image-workbench__mode-switch/);
 });
 
 test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
@@ -83,8 +88,15 @@ test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
 });
 
 test('quick image keeps unavailable adapters blocked without fake output', () => {
+  const composerIndex = quickSource.indexOf('uc-image-quick__composer');
+  const stageIndex = quickSource.indexOf('uc-image-quick__stage');
+  const composerSource = quickSource.slice(composerIndex, stageIndex);
+  const stageSource = quickSource.slice(stageIndex);
+
   assert.match(generationControlsSource, /adapter_unavailable/);
   assert.match(generationControlsSource, /没有配置真实图片生成适配器/);
+  assert.match(composerSource, /src=\{inputPreviewUrl\}/);
+  assert.doesNotMatch(stageSource, /inputPreviewUrl|参考图：/);
   assert.match(quickSource, /尚无真实生成结果/);
   assert.match(quickSource, /不会显示假进度或未校验结果/);
   assert.match(quickSource, /submission\.canCreateTask/);
