@@ -146,7 +146,7 @@ function ImageModelFields({
             },
             parameters: {
               capabilityEvidenceId: option.evidence.evidenceId,
-              values: {}
+              values: defaultParameterValues(option.evidence.parameterSchema)
             }
           }
         : {}
@@ -303,10 +303,14 @@ function getModelOptions(
           capability.modelId === model.modelId &&
           capability.capability === purpose
       );
-      const evidence =
-        evidenceItems.find((capability) =>
+      const accepted = evidenceItems
+        .filter((capability) =>
           ['verified_supported', 'user_confirmed'].includes(capability.state)
-        ) ?? evidenceItems[0];
+        )
+        .sort((left, right) => right.revision - left.revision);
+      const evidence = accepted.find(
+        (capability) => capability.evidenceId === model.capabilityEvidenceId
+      ) ?? accepted[0] ?? evidenceItems[0];
       const connection = registry.connections.find(
         (item) => item.connectionId === model.connectionId
       );
@@ -332,6 +336,25 @@ function getModelOptions(
         reason
       };
     });
+}
+
+function defaultParameterValues(
+  schema: ProviderCapabilitySummaryDto['parameterSchema']
+): Record<string, ImageWorkspaceParameterValueDto> {
+  const values: Record<string, ImageWorkspaceParameterValueDto> = {};
+  for (const field of schema?.fields ?? []) {
+    if (!field.required) continue;
+    if (field.kind === 'boolean') values[field.key] = false;
+    else if (field.kind === 'enum' && field.options?.[0] !== undefined) {
+      values[field.key] = field.options[0];
+    } else if (
+      (field.kind === 'number' || field.kind === 'integer') &&
+      field.minimum !== undefined
+    ) {
+      values[field.key] = field.minimum;
+    }
+  }
+  return values;
 }
 
 type ParameterField = NonNullable<

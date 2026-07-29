@@ -1,20 +1,22 @@
 import { app, net, safeStorage } from 'electron';
 import path from 'node:path';
 import {
-  ImageOperationPortError,
   ImageOperationRouter,
   JsonProviderOperationRepository,
   JsonProviderRegistryStore,
+  JsonViduLiveValidationStore,
   LocalImageResultReceiver,
   LocalVideoResultReceiver,
   NodeProjectStorage,
   ProjectImageMaterialResolver,
   SecureCredentialVault,
   ViduImmediateImageResultPort,
+  ViduLiveValidationApplicationError,
+  ViduLiveValidationApplicationService,
+  ViduLiveValidationCoordinator,
   ViduProviderPackage,
   ViduTransportFailure,
   createFrozenViduRegistryRecords,
-  VideoOperationPortError,
   VideoOperationRouter,
   type ImageOperationPorts,
   type ImageSubmissionControllerDependencies,
@@ -26,7 +28,7 @@ import {
   type VideoGenerationSubmitPort,
   type VideoSubmissionControllerDependencies
 } from '../../src/platform';
-import type { ProxyMode } from '../../src/domain';
+import type { ProviderSubmitOutcome, ProxyMode } from '../../src/domain';
 
 export interface ElectronViduCompositionOptions {
   readonly getProxyMode: () => Promise<ProxyMode>;
@@ -36,6 +38,7 @@ export class ElectronViduComposition {
   readonly registry: JsonProviderRegistryStore;
   readonly credentialVault: SecureCredentialVault;
   readonly providerPackage: ViduProviderPackage;
+  readonly liveValidation: ViduLiveValidationApplicationService;
 
   constructor(options: ElectronViduCompositionOptions) {
     const userDataPath = app.getPath('userData');
@@ -55,6 +58,15 @@ export class ElectronViduComposition {
       credentialVault: this.credentialVault,
       transport: new ElectronViduHttpTransport(),
       proxy: () => activeProxy
+    });
+    this.liveValidation = new ViduLiveValidationApplicationService({
+      registry: this.registry,
+      coordinator: new ViduLiveValidationCoordinator(
+        new JsonViduLiveValidationStore(
+          path.join(userDataPath, 'vidu-live-validation.json')
+        )
+      ),
+      connectionValidation: this.providerPackage.connectionValidation
     });
     void options.getProxyMode().then((proxy) => {
       activeProxy = proxy;
@@ -105,28 +117,74 @@ export class ElectronViduComposition {
     });
     const imagePort = {
       submit: async (request: Parameters<ImageOperationRouter['submit']>[0]) => {
-        const routed = await imageRouter.submit(request);
-        if (!routed.ok) {
-          throw new ImageOperationPortError(
-            'not_retryable',
-            routed.error.message
+        try {
+          await this.liveValidation.beforeSubmission(
+            'image',
+            request.task,
+            request.execution,
+            options.getSession
           );
+        } catch (error) {
+          return liveValidationFailure(error);
         }
-        return routed.value;
+        const routed = await imageRouter.submit(request);
+        const outcome = routed.ok
+          ? routed.value
+          : ({
+              kind: 'failed_before_submission',
+              message: routed.error.message,
+              retryability: 'not_retryable'
+            } as const);
+        await this.liveValidation.afterSubmission('image', outcome)
+          .catch(() => undefined);
+        return outcome;
       }
     };
     const videoPort: VideoGenerationSubmitPort = {
       submit: async (request) => {
-        const routed = await videoRouter.submit(request);
-        if (!routed.ok) {
-          throw new VideoOperationPortError(
-            'not_retryable',
-            routed.error.message
+        try {
+          await this.liveValidation.beforeSubmission(
+            'video',
+            request.task,
+            request.execution,
+            options.getSession
           );
+        } catch (error) {
+          return liveValidationFailure(error);
         }
-        return routed.value;
+        const routed = await videoRouter.submit(request);
+        const outcome = routed.ok
+          ? routed.value
+          : ({
+              kind: 'failed_before_submission',
+              message: routed.error.message,
+              retryability: 'not_retryable'
+            } as const);
+        await this.liveValidation.afterSubmission('video', outcome)
+          .catch(() => undefined);
+        return outcome;
       }
     };
+    const videoAsync: ProviderAsyncOperationPort = {
+      query: async (providerOperationId) => {
+        const status = await video.query(providerOperationId);
+        await this.liveValidation.recordPolling(status).catch(() => undefined);
+        return status;
+      },
+      cancel: async (providerOperationId) => {
+        const outcome = await video.cancel(providerOperationId);
+        if (outcome.state === 'cancelled') {
+          await this.liveValidation.recordPolling({ state: 'cancelled' })
+            .catch(() => undefined);
+        }
+        return outcome;
+      }
+    };
+    const videoReceiver = new LocalVideoResultReceiver({
+      getSession: options.getSession,
+      mutations: options.videoMutations,
+      port: video
+    });
     return {
       image: {
         image_generation: imagePort,
@@ -153,16 +211,35 @@ export class ElectronViduComposition {
               operations: new JsonProviderOperationRepository(storage),
               runtime: this.providerPackage.runtime
             })
-          }).receive(executionId);
+          }).receive(executionId).then(async (result) => {
+            if (result.ok) {
+              await this.liveValidation.recordLocalResult(
+                'image',
+                result.value.executionId,
+                result.value.workId,
+                options.getSession
+              ).catch(() => undefined);
+            }
+            return result;
+          });
         }
       },
       video: videoPort,
-      videoAsync: video,
-      videoResultReceiver: new LocalVideoResultReceiver({
-        getSession: options.getSession,
-        mutations: options.videoMutations,
-        port: video
-      })
+      videoAsync,
+      videoResultReceiver: {
+        receive: async (executionId) => {
+          const result = await videoReceiver.receive(executionId);
+          if (result.ok && result.value.works.length === 1) {
+            await this.liveValidation.recordLocalResult(
+              'video',
+              result.value.executionId,
+              result.value.works[0].workId,
+              options.getSession
+            ).catch(() => undefined);
+          }
+          return result;
+        }
+      }
     };
   }
 
@@ -170,6 +247,17 @@ export class ElectronViduComposition {
     this.providerPackage.dispose();
   }
 
+}
+
+function liveValidationFailure(error: unknown): ProviderSubmitOutcome {
+  const message = error instanceof ViduLiveValidationApplicationError
+    ? error.message
+    : 'The approved Vidu live validation gate could not be evaluated';
+  return {
+    kind: 'failed_before_submission',
+    message,
+    retryability: 'not_retryable'
+  };
 }
 
 class ElectronViduHttpTransport implements ViduHttpTransport {

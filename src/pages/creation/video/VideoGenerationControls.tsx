@@ -101,7 +101,7 @@ export function VideoGenerationModelFields({
             },
             parameters: {
               capabilityEvidenceId: option.evidence.evidenceId,
-              values: {}
+              values: defaultParameterValues(option.evidence.parameterSchema)
             }
           }
         : {}
@@ -245,6 +245,9 @@ function getVideoModelOptions(
   mode: VideoWorkspaceDtoMode
 ): readonly VideoModelOption[] {
   if (!registry) return [];
+  const capabilityPurpose = mode === 'image_to_video'
+    ? 'reference_to_video'
+    : 'video_generation';
   const routeModelIds = new Set(
     registry.routingPreferences
       .filter(
@@ -260,19 +263,23 @@ function getVideoModelOptions(
         registry.capabilities.some(
           (capability) =>
             capability.modelId === model.modelId &&
-            capability.capability === 'video_generation'
+            capability.capability === capabilityPurpose
         )
     )
     .map<VideoModelOption>((model) => {
       const evidenceItems = registry.capabilities.filter(
         (capability) =>
           capability.modelId === model.modelId &&
-          capability.capability === 'video_generation'
+          capability.capability === capabilityPurpose
       );
-      const evidence =
-        evidenceItems.find((capability) =>
+      const accepted = evidenceItems
+        .filter((capability) =>
           ['verified_supported', 'user_confirmed'].includes(capability.state)
-        ) ?? evidenceItems[0];
+        )
+        .sort((left, right) => right.revision - left.revision);
+      const evidence = accepted.find(
+        (capability) => capability.evidenceId === model.capabilityEvidenceId
+      ) ?? accepted[0] ?? evidenceItems[0];
       const connection = registry.connections.find(
         (item) => item.connectionId === model.connectionId
       );
@@ -303,6 +310,25 @@ function getVideoModelOptions(
         reason
       };
     });
+}
+
+function defaultParameterValues(
+  schema: ProviderCapabilitySummaryDto['parameterSchema']
+): Record<string, VideoWorkspaceParameterValueDto> {
+  const values: Record<string, VideoWorkspaceParameterValueDto> = {};
+  for (const field of schema?.fields ?? []) {
+    if (!field.required) continue;
+    if (field.kind === 'boolean') values[field.key] = false;
+    else if (field.kind === 'enum' && field.options?.[0] !== undefined) {
+      values[field.key] = field.options[0];
+    } else if (
+      (field.kind === 'number' || field.kind === 'integer') &&
+      field.minimum !== undefined
+    ) {
+      values[field.key] = field.minimum;
+    }
+  }
+  return values;
 }
 
 type ParameterField = NonNullable<

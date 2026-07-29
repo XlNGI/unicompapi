@@ -243,6 +243,7 @@ function isImageSubmissionSnapshot(value: unknown): boolean {
     isOneOf(value.mode, imageWorkspaceModes) &&
     isOneOf(value.purpose, [
       'image_generation',
+      'reference_to_image',
       'image_understanding',
       'image_editing',
       'image_to_prompt'

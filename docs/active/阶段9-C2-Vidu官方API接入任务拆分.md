@@ -2,9 +2,9 @@
 
 日期：2026-07-28
 
-状态：流程 1—6 已合并 `develop`；流程 7 已完成实现和分支门禁；流程 8 未启动且未批准
+状态：流程 1—8 已完成并合并 `develop`；真实 Vidu 收费入口已停止
 
-当前执行基线：`develop@90a2d58`
+当前执行基线：`develop@bd86cbf`（已同步 `origin/develop`）
 
 技术架构：
 
@@ -31,10 +31,10 @@
 | 4. 两个同步图片适配器 | `feature/vidu-image-adapters` | `merged_develop_d629d9c` | 流程 3 合并 |
 | 5. Q3 异步视频适配器 | `feature/vidu-video-adapter` | `merged_develop_f53b331` | 流程 4 合并 |
 | 6. Electron、页面与 Work 流转接线 | `feature/vidu-app-wiring` | `merged_develop_90a2d58` | 流程 5 合并 |
-| 7. 合成服务全链路验收 | `feature/vidu-e2e-validation` | `implemented_gates_passed` | 流程 6 合并 |
-| 8. 真实 Vidu 最小闭环 | `feature/vidu-live-validation` | `not_started` | 流程 1—7 合并且负责人再次批准 |
+| 7. 合成服务全链路验收 | `feature/vidu-e2e-validation` | `merged_develop_e4ba8c4_bd86cbf` | 流程 6 合并 |
+| 8. 真实 Vidu 最小闭环 | `feature/vidu-live-validation` | `merged_develop` | 流程 1—7 合并且负责人再次批准 |
 
-`feature/vidu-protocol-contracts` 已通过 `c03693f`、`feature/vidu-execution-lifecycle` 已通过 `7015624`、`feature/vidu-runtime` 已通过 `3a09d29`、`feature/vidu-image-adapters` 已通过 `d629d9c`、`feature/vidu-video-adapter` 已通过 `f53b331`、`feature/vidu-app-wiring` 已通过 `90a2d58` 非快进合并 `develop`，本地和远程功能分支均保留。流程 7 实现与验证事实见 `docs/active/阶段9-C2-流程7-Vidu合成服务全链路验收记录.md`。
+`feature/vidu-protocol-contracts` 已通过 `c03693f`、`feature/vidu-execution-lifecycle` 已通过 `7015624`、`feature/vidu-runtime` 已通过 `3a09d29`、`feature/vidu-image-adapters` 已通过 `d629d9c`、`feature/vidu-video-adapter` 已通过 `f53b331`、`feature/vidu-app-wiring` 已通过 `90a2d58` 非快进合并 `develop`。`feature/vidu-e2e-validation` 的实现与截断响应修复分别通过 `e4ba8c4` 和 `bd86cbf` 非快进合并 `develop`；`origin/develop` 已同步至 `bd86cbf`，各功能分支本地和远程均保留。流程 7 实现与验证事实见 `docs/active/阶段9-C2-流程7-Vidu合成服务全链路验收记录.md`。
 
 ## 三、流程 1｜协议、模型记录与强类型路由
 
@@ -208,4 +208,4 @@
 
 ## 十三、当前执行入口
 
-流程 7 已完成实现、测试、工程记录与分支门禁。按项目负责人连续授权，提交并推送 `feature/vidu-e2e-validation`，非快进合并并复验最新 `develop` 后立即停止。流程 8 仍未批准，不得创建分支、读取真实凭证、访问真实 Vidu 或发起收费请求。
+流程 7 已完成实现、测试、工程记录与分支门禁，并通过 `e4ba8c4` 与 `bd86cbf` 两次非快进合并 `develop`。流程 8 已在 `feature/vidu-live-validation` 完成真实 credits 鉴权、唯一一次 `q3-lite` 参考生图及图片 Work、用户显式派生图生视频草稿、唯一一次 `viduq3-turbo` 图生视频及视频 Work，脱敏状态为 `passed`。图片和视频预算均为 `accepted_or_completed`，不得继续发起真实 Vidu 请求；Token、远端标识、下载 URL、绝对路径和 Hash 不进入工程记录或 Git。A 的图片视觉和用户流程修复已进入 `develop@548818c`，流程 8 通过 `55c0457` 同步并以 554 项自动化、完整静态门禁和 Electron 烟测复验通过，随后通过 `Merge phase 9 C2 Vidu live validation` 非快进合并 `develop`。流程 8 到此停止，不自动启动 A3、B4、A4 或阶段 10。

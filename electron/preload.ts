@@ -139,7 +139,16 @@ const providers: ProviderApi = {
   deleteConnection: (connectionId) =>
     ipcRenderer.invoke(providerIpcChannels.deleteConnection, { connectionId }),
   setModelEnabled: (modelId, enabled) =>
-    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled })
+    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled }),
+  getViduLiveValidation: () =>
+    ipcRenderer.invoke(providerIpcChannels.getViduLiveValidation),
+  startViduLiveValidation: (approval) =>
+    ipcRenderer.invoke(providerIpcChannels.startViduLiveValidation, {
+      confirmLiveNetwork: approval.confirmLiveNetwork,
+      confirmCredentialUse: approval.confirmCredentialUse,
+      confirmImageBillableAttempt: approval.confirmImageBillableAttempt,
+      confirmVideoBillableAttempt: approval.confirmVideoBillableAttempt
+    })
 };
 
 const imageWorkspaces: ImageWorkspaceApi = {

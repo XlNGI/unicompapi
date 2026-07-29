@@ -45,3 +45,16 @@ test('provider management IPC exposes controlled connection and model mutations'
   assert.match(contract, /deleteConnection/);
   assert.match(contract, /setModelEnabled/);
 });
+
+test('Vidu live validation IPC is named, approval-bound and sensitive-free', () => {
+  assert.match(contract, /getViduLiveValidation/);
+  assert.match(contract, /startViduLiveValidation/);
+  assert.match(contract, /confirmImageBillableAttempt/);
+  assert.match(contract, /confirmVideoBillableAttempt/);
+  assert.match(preload, /providerIpcChannels\.getViduLiveValidation/);
+  assert.match(preload, /providerIpcChannels\.startViduLiveValidation/);
+  assert.doesNotMatch(
+    contract,
+    /providerOperationId|remoteOperationId|downloadUrl|absolutePath|checksumSha256|credentialReference|endpointTemplate/i
+  );
+});
