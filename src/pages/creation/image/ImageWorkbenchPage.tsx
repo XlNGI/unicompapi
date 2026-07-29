@@ -57,6 +57,7 @@ const modePresentation: Record<
 interface ImageWorkbenchPageProps {
   mode: ImageCreationMode;
   onNavigateToProfessional?: () => void;
+  onVideoDraftCreated?: (draftId: string) => void;
   onNavigateToImageMode?: (
     mode: ImageWorkspaceDtoMode
   ) => void;
@@ -65,6 +66,7 @@ interface ImageWorkbenchPageProps {
 export function ImageWorkbenchPage({
   mode,
   onNavigateToProfessional,
+  onVideoDraftCreated,
   onNavigateToImageMode
 }: ImageWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
@@ -296,6 +298,7 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToProfessional={onNavigateToProfessional}
+          onVideoDraftCreated={onVideoDraftCreated}
           registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'professional_image' ? (
@@ -305,6 +308,7 @@ export function ImageWorkbenchPage({
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
+          onVideoDraftCreated={onVideoDraftCreated}
           registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'image_understanding' ? (
@@ -324,6 +328,7 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigate={onNavigateToImageMode}
+          onVideoDraftCreated={onVideoDraftCreated}
           registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'image_to_prompt' ? (

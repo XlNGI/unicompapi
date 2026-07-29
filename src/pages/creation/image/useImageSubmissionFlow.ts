@@ -18,6 +18,7 @@ export function useImageSubmissionFlow(options: {
   readonly busy: boolean;
   readonly setBusy: (busy: boolean) => void;
   readonly onMessage: (message: string) => void;
+  readonly onVideoDraftCreated?: (draftId: string) => void;
   readonly errorMessages: Readonly<Record<ImageSubmissionErrorCode, string>>;
 }) {
   const submissions = window.unicomp?.imageSubmissions;
@@ -30,6 +31,7 @@ export function useImageSubmissionFlow(options: {
     options.candidate &&
     options.preflight.blockers.length === 0 &&
     allConfirmed(options.confirmations) &&
+    !task &&
     !options.busy
   );
 
@@ -67,7 +69,7 @@ export function useImageSubmissionFlow(options: {
   }
 
   async function createExecution() {
-    if (!submissions || !task || options.busy) return;
+    if (!submissions || !task || execution || options.busy) return;
     options.setBusy(true);
     try {
       const result = await submissions.createExecution(task.taskId);
@@ -128,6 +130,7 @@ export function useImageSubmissionFlow(options: {
         return;
       }
       options.onMessage('已从校验图片 Work 创建图生视频草稿；尚未创建视频任务。');
+      options.onVideoDraftCreated?.(result.value.draftId);
     } catch {
       options.onMessage('创建图生视频草稿失败，请重试。');
     } finally {

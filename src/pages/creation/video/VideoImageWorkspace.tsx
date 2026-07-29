@@ -198,12 +198,15 @@ export function VideoImageWorkspace({
       pollingAttempts.current += 1;
       void videoSubmissions.refreshExecution(execution.executionId)
         .then((result) => {
-          if (result.ok) setExecution(result.value);
+          if (result.ok) {
+            setExecution(result.value);
+            onMessage(`已刷新真实远端状态：${result.value.state}。`);
+          }
         })
         .catch(() => undefined);
     }, pollingDelayMs(pollingAttempts.current));
     return () => window.clearTimeout(timeout);
-  }, [execution, videoSubmissions]);
+  }, [execution, onMessage, videoSubmissions]);
 
   function changeDraft(next: ImageVideoDraftDto) {
     setPreflight(undefined);
@@ -421,6 +424,8 @@ export function VideoImageWorkspace({
   async function createTask() {
     if (
       !videoSubmissions ||
+      task ||
+      execution ||
       !preflight ||
       !selectedCandidate ||
       blockers.length ||
@@ -453,7 +458,7 @@ export function VideoImageWorkspace({
   }
 
   async function createExecution() {
-    if (!videoSubmissions || !task || busy) return;
+    if (!videoSubmissions || !task || execution || busy) return;
     setBusy(true);
     onMessage('');
     try {
@@ -544,7 +549,9 @@ export function VideoImageWorkspace({
     }
   }
 
-  const materialCount = Object.keys(materials).length;
+  const materialCount =
+    draft.imageToVideo.materials?.slots.filter((slot) => slot.selection)
+      .length ?? 0;
   const requiredSlotCount =
     draft.imageToVideo.materials?.slots.filter((slot) => slot.required)
       .length ?? 0;
@@ -810,6 +817,8 @@ export function VideoImageWorkspace({
                 !selectedCandidate ||
                 blockers.length > 0 ||
                 !allVideoConfirmationsAccepted(confirmations) ||
+                Boolean(task) ||
+                Boolean(execution) ||
                 busy
               }
               onClick={() => void createTask()}
@@ -817,7 +826,7 @@ export function VideoImageWorkspace({
               创建视频任务
             </Button>
             <Button
-              disabled={!task || busy}
+              disabled={!task || Boolean(execution) || busy}
               onClick={() => void createExecution()}
               variant="secondary"
             >

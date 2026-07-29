@@ -62,11 +62,13 @@ const staleReasonLabels: Record<VideoWorkspaceStaleReasonDto, string> = {
 interface VideoWorkbenchPageProps {
   readonly mode: VideoCreationMode;
   readonly onNavigateToTextToVideo?: () => void;
+  readonly preferredDraftId?: string;
 }
 
 export function VideoWorkbenchPage({
   mode,
-  onNavigateToTextToVideo
+  onNavigateToTextToVideo,
+  preferredDraftId
 }: VideoWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
@@ -80,7 +82,10 @@ export function VideoWorkbenchPage({
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
-  const currentDraft = drafts[drafts.length - 1];
+  const [selectedDraftId, setSelectedDraftId] = useState(preferredDraftId);
+  const currentDraft =
+    drafts.find((draft) => draft.draftId === selectedDraftId) ??
+    drafts[drafts.length - 1];
 
   useEffect(() => {
     let active = true;
@@ -120,10 +125,18 @@ export function VideoWorkbenchPage({
             setMessage(workspaceErrorMessages[draftResult.error.code]);
             return;
           }
-          setDrafts(
-            draftResult.value.filter(
-              (draft) => draft.mode === workspaceMode
-            )
+          const modeDrafts = draftResult.value.filter(
+            (draft) => draft.mode === workspaceMode
+          );
+          setDrafts(modeDrafts);
+          setSelectedDraftId((current) =>
+            preferredDraftId &&
+            modeDrafts.some((draft) => draft.draftId === preferredDraftId)
+              ? preferredDraftId
+              : current &&
+                  modeDrafts.some((draft) => draft.draftId === current)
+                ? current
+                : modeDrafts[modeDrafts.length - 1]?.draftId
           );
         }
 
@@ -145,7 +158,7 @@ export function VideoWorkbenchPage({
     return () => {
       active = false;
     };
-  }, [providers, storage, videoWorkspaces, workspaceMode]);
+  }, [preferredDraftId, providers, storage, videoWorkspaces, workspaceMode]);
 
   async function createDraft() {
     if (!videoWorkspaces || !session || !workspaceMode || busy) return;
@@ -158,6 +171,7 @@ export function VideoWorkbenchPage({
         return;
       }
       setDrafts((items) => [...items, result.value]);
+      setSelectedDraftId(result.value.draftId);
       setDirty(false);
       setMessage('本地视频草稿已创建；没有上传素材，也没有创建任务。');
     } catch {

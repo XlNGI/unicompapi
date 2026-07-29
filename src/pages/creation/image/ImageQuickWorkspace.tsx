@@ -39,6 +39,7 @@ interface ImageQuickWorkspaceProps {
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
   readonly onNavigateToProfessional?: () => void;
+  readonly onVideoDraftCreated?: (draftId: string) => void;
 }
 
 export function ImageQuickWorkspace({
@@ -48,7 +49,8 @@ export function ImageQuickWorkspace({
   onDraftChange,
   onDraftPersisted,
   onMessage,
-  onNavigateToProfessional
+  onNavigateToProfessional,
+  onVideoDraftCreated
 }: ImageQuickWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const imageSubmissions = window.unicomp?.imageSubmissions;
@@ -77,6 +79,7 @@ export function ImageQuickWorkspace({
     busy,
     setBusy,
     onMessage,
+    onVideoDraftCreated,
     errorMessages: submissionErrorMessages
   });
 
@@ -320,7 +323,7 @@ export function ImageQuickWorkspace({
               创建图片任务
             </Button>
             <Button
-              disabled={!submission.task || busy}
+              disabled={!submission.task || Boolean(submission.execution) || busy}
               onClick={() => void submission.createExecution()}
               variant="secondary"
             >

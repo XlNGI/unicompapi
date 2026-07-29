@@ -38,6 +38,7 @@ interface ImageProfessionalWorkspaceProps {
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
+  readonly onVideoDraftCreated?: (draftId: string) => void;
 }
 
 const supplementSourceLabels: Readonly<Record<string, string>> = {
@@ -56,7 +57,8 @@ export function ImageProfessionalWorkspace({
   registry,
   onDraftChange,
   onDraftPersisted,
-  onMessage
+  onMessage,
+  onVideoDraftCreated
 }: ImageProfessionalWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const imageSubmissions = window.unicomp?.imageSubmissions;
@@ -77,6 +79,7 @@ export function ImageProfessionalWorkspace({
     busy,
     setBusy,
     onMessage,
+    onVideoDraftCreated,
     errorMessages: imageSubmissionErrorMessages
   });
 
@@ -424,7 +427,7 @@ export function ImageProfessionalWorkspace({
               创建图片任务
             </Button>
             <Button
-              disabled={!submission.task || busy}
+              disabled={!submission.task || Boolean(submission.execution) || busy}
               onClick={() => void submission.createExecution()}
               variant="secondary"
             >
