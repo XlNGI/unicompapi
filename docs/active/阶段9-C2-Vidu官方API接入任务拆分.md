@@ -2,9 +2,9 @@
 
 日期：2026-07-28
 
-状态：流程 1—4 已合并 `develop`；流程 5 已完成实现和分支门禁；流程 6—8 未启动
+状态：流程 1—5 已合并 `develop`；流程 6 已完成实现和分支门禁；流程 7—8 未启动
 
-当前执行基线：`develop@d629d9c`
+当前执行基线：`develop@f53b331`
 
 技术架构：
 
@@ -29,12 +29,12 @@
 | 2. 同步与异步执行生命周期 | `feature/vidu-execution-lifecycle` | `merged_develop_7015624` | 流程 1 合并 |
 | 3. Vidu 共享安全运行时 | `feature/vidu-runtime` | `merged_develop_3a09d29` | 流程 2 合并 |
 | 4. 两个同步图片适配器 | `feature/vidu-image-adapters` | `merged_develop_d629d9c` | 流程 3 合并 |
-| 5. Q3 异步视频适配器 | `feature/vidu-video-adapter` | `implemented_gates_passed` | 流程 4 合并 |
-| 6. Electron、页面与 Work 流转接线 | `feature/vidu-app-wiring` | `not_started` | 流程 5 合并 |
+| 5. Q3 异步视频适配器 | `feature/vidu-video-adapter` | `merged_develop_f53b331` | 流程 4 合并 |
+| 6. Electron、页面与 Work 流转接线 | `feature/vidu-app-wiring` | `implemented_gates_passed` | 流程 5 合并 |
 | 7. 合成服务全链路验收 | `feature/vidu-e2e-validation` | `not_started` | 流程 6 合并 |
 | 8. 真实 Vidu 最小闭环 | `feature/vidu-live-validation` | `not_started` | 流程 1—7 合并且负责人再次批准 |
 
-`feature/vidu-protocol-contracts` 已通过 `c03693f`、`feature/vidu-execution-lifecycle` 已通过 `7015624`、`feature/vidu-runtime` 已通过 `3a09d29`、`feature/vidu-image-adapters` 已通过 `d629d9c` 非快进合并 `develop`，本地和远程功能分支均保留。流程 5 实现与验证事实见 `docs/active/阶段9-C2-流程5-Vidu异步视频适配器工程记录.md`。
+`feature/vidu-protocol-contracts` 已通过 `c03693f`、`feature/vidu-execution-lifecycle` 已通过 `7015624`、`feature/vidu-runtime` 已通过 `3a09d29`、`feature/vidu-image-adapters` 已通过 `d629d9c`、`feature/vidu-video-adapter` 已通过 `f53b331` 非快进合并 `develop`，本地和远程功能分支均保留。流程 6 实现与验证事实见 `docs/active/阶段9-C2-流程6-Electron页面与Work接线工程记录.md`。
 
 ## 三、流程 1｜协议、模型记录与强类型路由
 
@@ -208,4 +208,4 @@
 
 ## 十三、当前执行入口
 
-流程 5 已完成实现、测试、工程记录与分支门禁。按项目负责人连续授权，提交并推送 `feature/vidu-video-adapter`，非快进合并并复验最新 `develop` 后，才能从该基线创建 `feature/vidu-app-wiring`。仍禁止真实 Vidu HTTP、真实 Token、收费请求及提前启动流程 7 或流程 8。
+流程 6 已完成实现、测试、工程记录、Windows Electron 烟测与分支门禁。按项目负责人连续授权，提交并推送 `feature/vidu-app-wiring`，非快进合并并复验最新 `develop` 后，才能从该基线创建 `feature/vidu-e2e-validation`。流程 7 只允许本地合成服务，仍禁止真实 Vidu HTTP、真实 Token、收费请求及启动流程 8。

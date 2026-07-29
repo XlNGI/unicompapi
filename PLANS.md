@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c` 合并 `develop`；流程 5 已在 `feature/vidu-video-adapter` 完成实现和分支门禁，Node 157 项、Vitest 367 项，合计 524 项通过，等待按连续授权提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331` 合并 `develop`；流程 6 已在 `feature/vidu-app-wiring` 完成实现和分支门禁，Node 160 项、Vitest 371 项，合计 531 项通过，等待按连续授权提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -829,3 +829,13 @@ ViduProviderPackage
 流程 5 验证结果：`npm test` 为 Node 157 项与 Vitest 367 项，合计 524 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 211 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。所有 HTTP 都是内存合成 transport；真实 Vidu HTTP、真实 Token 和收费请求均为 0。本流程未修改 Electron/preload 或页面，因此无需 Electron 烟测。
 
 流程 5 未完成：实际 Electron transport、组合根、preload/IPC 和现有生成页面接线属于流程 6；本地合成服务的全协议故障矩阵与端到端闭环属于流程 7；真实 Vidu 联网和收费验证属于仍未批准的流程 8。Image V1 未决鉴权和请求结构不因本流程改变，冻结模型仍 disabled，Evidence 仍为 `declared_supported`。
+
+流程 5 已提交并推送 `feature/vidu-video-adapter`，随后通过 `f53b331 Merge phase 9 C2 Vidu Q3 video adapter` 非快进合并并推送 `develop`；合并后完整门禁再次通过，功能分支本地和远程均保留。
+
+流程 6 实际结果：Electron 主进程现在只创建一个共享 Vidu 组合根，Provider 管理、凭证、图片提交、视频提交和结果接收复用同一 `JsonProviderRegistryStore`、`SecureCredentialVault`、`ViduProviderPackage` 与受控 Electron transport。preload 只增加命名方法；图片和视频提交控制器执行精确请求字段校验，renderer 不能传路径、endpoint、远端 operation ID 或下载 URL。
+
+快速生图、专业生图和图片编辑页面复用显式 Task→Execution→提交→结果校验→Work 登记流程；带单图输入时使用 `reference_to_image` 强类型路由，不按模型名分支。图生视频页面接入恢复、带退避抖动的查询、手工刷新、取消与结果登记；图片 Work 只有在主进程重新核对项目归属、FileReference、SHA-256 与图片探测后，才能由用户显式创建图生视频草稿，不自动创建视频 Task 或 Execution。
+
+流程 6 验证结果：`npm test` 为 Node 160 项与 Vitest 371 项，合计 531 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 213 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。Windows Electron 生产构建烟测新增 4 个进程且 4 个全部响应，本次退出后残留 0；烟测前已有的 4 个旧 Electron 进程未被终止。浏览器在产品支持的 1080px 最小桌面宽度下无横向溢出、按钮裁切或重叠；390px 窄视口按既有桌面壳 `min-width: 1080px` 产生横向滚动，不作为移动端通过证据。真实 Vidu HTTP、Token 和收费请求均为 0。
+
+流程 6 未完成：冻结 Vidu 模型仍 disabled，CapabilityEvidence 仍为 `declared_supported`；Image V1 鉴权与 `images` 请求结构仍未确认。流程 7 负责本地合成服务全协议与故障矩阵，流程 8 的真实联网和收费仍未批准；本流程不等于阶段 9 A3、B4、A4 或跨平台验收完成。

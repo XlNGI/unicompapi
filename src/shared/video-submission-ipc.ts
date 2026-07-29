@@ -3,6 +3,9 @@ export const videoSubmissionIpcChannels = {
   createTask: 'video-submission:create-task',
   createExecution: 'video-submission:create-execution',
   invokeExecution: 'video-submission:invoke-execution',
+  refreshExecution: 'video-submission:refresh-execution',
+  cancelExecution: 'video-submission:cancel-execution',
+  recoverExecutions: 'video-submission:recover-executions',
   receiveResult: 'video-submission:receive-result'
 } as const;
 
@@ -166,6 +169,15 @@ export interface VideoSubmissionApi {
   invokeExecution(
     executionId: string
   ): Promise<VideoSubmissionResult<VideoExecutionDto>>;
+  refreshExecution(
+    executionId: string
+  ): Promise<VideoSubmissionResult<VideoExecutionDto>>;
+  cancelExecution(
+    executionId: string
+  ): Promise<VideoSubmissionResult<VideoExecutionDto>>;
+  recoverExecutions(draftId: string): Promise<
+    VideoSubmissionResult<readonly VideoExecutionDto[]>
+  >;
   receiveResult(
     executionId: string
   ): Promise<VideoSubmissionResult<VideoWorkRegisteredDto>>;

@@ -18,7 +18,11 @@ const selectorSource = await readFile(
   'src/pages/creation/WorkspaceContextSelector.tsx',
   'utf8'
 );
-const source = `${professionalSource}\n${controlsSource}\n${selectorSource}`;
+const submissionFlowSource = await readFile(
+  'src/pages/creation/image/useImageSubmissionFlow.ts',
+  'utf8'
+);
+const source = `${professionalSource}\n${controlsSource}\n${selectorSource}\n${submissionFlowSource}`;
 
 test('professional image keeps each context source distinct and honest', () => {
   for (const text of [
@@ -68,10 +72,10 @@ test('professional image uses only controlled local input and preflight', () => 
   }
 
   assert.match(workbenchSource, /ImageProfessionalWorkspace/);
-  assert.match(professionalSource, /提交生成任务/);
-  assert.match(professionalSource, /不会创建任务或伪造结果/);
+  assert.match(professionalSource, /提交图片生成/);
+  assert.match(professionalSource, /只有已验证并启用的协议能力/);
   assert.doesNotMatch(
     source,
-    /fetch\(|localStorage|absolutePath|upload|\.createTask\(|\.invokeExecution\(|OpenAI|Midjourney|1024x1024|45%/
+    /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/
   );
 });

@@ -254,6 +254,8 @@ function imageTaskKindMatchesPurpose(
   switch (purpose) {
     case 'image_generation':
       return kind === 'image_generation';
+    case 'reference_to_image':
+      return kind === 'image_generation';
     case 'image_understanding':
       return kind === 'image_analysis';
     case 'image_editing':

@@ -15,6 +15,7 @@ import {
   ImageSubmissionConfirmations,
   type GenerationImageDraftDto
 } from './ImageGenerationControls';
+import { useImageSubmissionFlow } from './useImageSubmissionFlow';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 
 interface ImageProfessionalWorkspaceProps {
@@ -54,6 +55,17 @@ export function ImageProfessionalWorkspace({
   const selectedCandidate = preflight?.candidates.find(
     (candidate) => candidate.modelId === draft.generation.model?.modelId
   );
+  const submission = useImageSubmissionFlow({
+    draftId: draft.draftId,
+    draftUpdatedAt: draft.updatedAt,
+    preflight,
+    candidate: selectedCandidate,
+    confirmations,
+    busy,
+    setBusy,
+    onMessage,
+    errorMessages: imageSubmissionErrorMessages
+  });
 
   useEffect(() => {
     let active = true;
@@ -335,7 +347,7 @@ export function ImageProfessionalWorkspace({
           />
           <div className="uc-image-quick__result-actions">
             <Button disabled variant="secondary">
-              保存到项目
+              {submission.work ? '已登记到项目' : '保存到项目'}
             </Button>
             <Button disabled variant="secondary">
               重新生成
@@ -383,14 +395,54 @@ export function ImageProfessionalWorkspace({
               onChange={setConfirmations}
             />
           ) : null}
-          <Button disabled>提交生成任务</Button>
+          <div className="uc-image-quick__submission-actions">
+            <Button
+              disabled={!submission.canCreateTask}
+              onClick={() => void submission.createTask()}
+            >
+              创建图片任务
+            </Button>
+            <Button
+              disabled={!submission.task || busy}
+              onClick={() => void submission.createExecution()}
+              variant="secondary"
+            >
+              创建执行记录
+            </Button>
+            <Button
+              disabled={!submission.execution || submission.execution.state !== 'created' || busy}
+              onClick={() => void submission.invokeExecution()}
+            >
+              提交图片生成
+            </Button>
+            <Button
+              disabled={!submission.execution || submission.execution.state !== 'remote_completed' || busy}
+              onClick={() => void submission.receiveResult()}
+              variant="secondary"
+            >
+              校验并登记结果
+            </Button>
+            <Button
+              disabled={!submission.work || busy}
+              onClick={() => void submission.createVideoDraft()}
+              variant="secondary"
+            >
+              创建图生视频草稿
+            </Button>
+          </div>
+          {submission.execution ? (
+            <p className="uc-image-quick__hint" role="status">
+              执行 #{submission.execution.attempt}：{submission.execution.state}
+              {submission.work ? `；已登记 ${submission.work.name}` : ''}
+            </p>
+          ) : null}
         </Card>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="warning">真实能力状态</StatusPill>
         <p>
-          当前只支持专业草稿、单张参考图、提示词分层和能力预检；缺少上下文选择接口和真实图片适配器，不会创建任务或伪造结果。
+          单张参考图、上下文、提示词分层和提交确认保持独立；只有已验证并启用的协议能力才能创建执行和登记真实 Work。
         </p>
       </Card>
     </>

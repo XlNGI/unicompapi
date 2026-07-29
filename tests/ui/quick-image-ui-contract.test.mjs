@@ -10,7 +10,11 @@ const generationControlsSource = await readFile(
   'src/pages/creation/image/ImageGenerationControls.tsx',
   'utf8'
 );
-const quickBundle = `${quickSource}\n${generationControlsSource}`;
+const submissionFlowSource = await readFile(
+  'src/pages/creation/image/useImageSubmissionFlow.ts',
+  'utf8'
+);
+const quickBundle = `${quickSource}\n${generationControlsSource}\n${submissionFlowSource}`;
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
 test('quick image page uses the controlled input and preflight APIs', () => {
@@ -20,8 +24,16 @@ test('quick image page uses the controlled input and preflight APIs', () => {
 
   assert.doesNotMatch(
     quickBundle,
-    /fetch\(|localStorage|absolutePath|upload|\.createTask\(|\.createExecution\(|\.invokeExecution\(|\.receiveResult\(|OpenAI|Midjourney|1024x1024|45%/
+    /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/
   );
+  for (const operation of [
+    'createTask',
+    'createExecution',
+    'invokeExecution',
+    'receiveResult'
+  ]) {
+    assert.match(submissionFlowSource, new RegExp(`submissions\\.${operation}\\(`));
+  }
 });
 
 test('quick image keeps draft, model parameters and confirmations explicit', () => {
@@ -48,9 +60,10 @@ test('quick image keeps draft, model parameters and confirmations explicit', () 
   assert.match(appSource, /'quick-image'[\s\S]*'professional-image'/);
 });
 
-test('quick image reports the honest no-adapter state without fake output', () => {
+test('quick image keeps unavailable adapters blocked without fake output', () => {
   assert.match(generationControlsSource, /adapter_unavailable/);
   assert.match(generationControlsSource, /没有配置真实图片生成适配器/);
   assert.match(quickSource, /尚无真实生成结果/);
-  assert.match(quickSource, /不会创建任务/);
+  assert.match(quickSource, /不会显示假进度或未校验结果/);
+  assert.match(quickSource, /submission\.canCreateTask/);
 });

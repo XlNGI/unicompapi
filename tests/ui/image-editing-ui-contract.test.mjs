@@ -18,7 +18,11 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
-const source = `${editingSource}\n${controlsSource}\n${regionSource}`;
+const submissionFlowSource = await readFile(
+  'src/pages/creation/image/useImageSubmissionFlow.ts',
+  'utf8'
+);
+const source = `${editingSource}\n${controlsSource}\n${regionSource}\n${submissionFlowSource}`;
 
 test('image editing keeps source, region, mask and requirements explicit', () => {
   for (const text of [
@@ -53,7 +57,7 @@ test('image editing uses controlled media and dynamic preflight facts', () => {
     '图片编辑模型',
     '检查编辑条件',
     '最终编辑要求',
-    '没有真实图片编辑适配器'
+    '图片编辑只在能力、凭证和提交确认全部通过后执行'
   ]) {
     assert.match(source, new RegExp(text));
   }
@@ -63,8 +67,10 @@ test('image editing uses controlled media and dynamic preflight facts', () => {
   assert.match(workbenchSource, /ImageEditingWorkspace/);
   assert.doesNotMatch(
     source,
-    /fetch\(|localStorage|absolutePath|upload|\.createTask\(|\.createExecution\(|\.invokeExecution\(|\.receiveResult\(/
+    /fetch\(|localStorage|absolutePath|upload/
   );
+  assert.match(editingSource, /useImageSubmissionFlow/);
+  assert.match(editingSource, /submission\.canCreateTask/);
 });
 
 test('image editing preserves lineage and derives without overwriting', () => {

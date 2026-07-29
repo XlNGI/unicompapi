@@ -46,6 +46,12 @@ afterEach(async () => {
 async function createFixture(options: {
   readonly failingPort?: boolean;
   readonly unknownOutcome?: boolean;
+  readonly queryResult?: {
+    readonly state: 'queued' | 'processing' | 'completed' | 'cancelled' | 'expired';
+  };
+  readonly cancelResult?: {
+    readonly state: 'cancelled' | 'processing' | 'unknown';
+  };
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-video-submit-'));
   roots.push(root);
@@ -184,6 +190,8 @@ async function createFixture(options: {
     '2026-07-23T11:04:00.000Z',
     '2026-07-23T11:05:00.000Z'
   ];
+  const queriedOperationIds: string[] = [];
+  const cancelledOperationIds: string[] = [];
   const controller = new VideoSubmissionController({
     getSession: () => ({
       projectId,
@@ -211,6 +219,16 @@ async function createFixture(options: {
         };
       }
     },
+    asyncOperationPort: {
+      query: async (providerOperationId) => {
+        queriedOperationIds.push(providerOperationId);
+        return options.queryResult ?? { state: 'processing' };
+      },
+      cancel: async (providerOperationId) => {
+        cancelledOperationIds.push(providerOperationId);
+        return options.cancelResult ?? { state: 'cancelled' };
+      }
+    },
     createTaskId: () => 'task-video-submission',
     createExecutionId: () =>
       executionIds.shift() ?? 'execution-video-fallback',
@@ -224,7 +242,9 @@ async function createFixture(options: {
     projectId,
     registry,
     root,
-    storage
+    storage,
+    queriedOperationIds,
+    cancelledOperationIds
   };
 }
 
@@ -429,5 +449,66 @@ describe('VideoSubmissionController', () => {
       toExecutionId('execution-video-submission-1')
     );
     expect(stored?.state).toBe('queued');
+  });
+
+  it('refreshes and cancels only through the stored provider operation', async () => {
+    const fixture = await createFixture();
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-video-submission' });
+    await fixture.controller.invokeExecution({
+      executionId: 'execution-video-submission-1'
+    });
+
+    const refreshed = await fixture.controller.refreshExecution({
+      executionId: 'execution-video-submission-1'
+    });
+    expect(refreshed).toMatchObject({ ok: true, value: { state: 'processing' } });
+    expect(JSON.stringify(refreshed)).not.toContain('remote-video-operation-internal');
+
+    const cancelled = await fixture.controller.cancelExecution({
+      executionId: 'execution-video-submission-1'
+    });
+    expect(cancelled).toMatchObject({ ok: true, value: { state: 'cancelled' } });
+    expect(fixture.queriedOperationIds).toEqual([
+      'remote-video-operation-internal'
+    ]);
+    expect(fixture.cancelledOperationIds).toEqual([
+      'remote-video-operation-internal'
+    ]);
+  });
+
+  it('recovers only executions belonging to the requested draft and rejects extra fields', async () => {
+    const fixture = await createFixture();
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-video-submission' });
+    await fixture.controller.invokeExecution({
+      executionId: 'execution-video-submission-1'
+    });
+
+    await expect(
+      fixture.controller.recoverExecutions({ draftId: 'draft-other' })
+    ).resolves.toEqual({ ok: true, value: [] });
+    await expect(
+      fixture.controller.recoverExecutions({ draftId: fixture.draft.id })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: [{ executionId: 'execution-video-submission-1', state: 'processing' }]
+    });
+    await expect(
+      fixture.controller.refreshExecution({
+        executionId: 'execution-video-submission-1',
+        endpoint: 'https://attacker.invalid'
+      })
+    ).resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 });

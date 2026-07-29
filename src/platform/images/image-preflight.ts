@@ -24,7 +24,10 @@ export function buildImagePreflight(
   draft: ImageWorkspaceDraft,
   registry: ProviderRegistrySnapshot
 ): ImagePreflightDto {
-  const purpose = imagePurposeForMode(draft.mode);
+  const purpose = draft.input &&
+    (draft.mode === 'quick_image' || draft.mode === 'professional_image')
+    ? 'reference_to_image'
+    : imagePurposeForMode(draft.mode);
   const blockers = new Set<ImageSubmissionErrorCode>();
   const candidateBlockers = new Set<ImageSubmissionErrorCode>();
 

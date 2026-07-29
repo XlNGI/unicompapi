@@ -21,6 +21,7 @@ import {
   directoryPurposes,
   settingsIpcChannels
 } from '../../src/shared/settings-ipc';
+import type { ProxyMode } from '../../src/domain';
 import {
   ElectronNotificationAdapter,
   ElectronDiagnosticLocationAdapter,
@@ -38,6 +39,7 @@ export interface SettingsIpcLifecycle {
     readonly preventSleepWhileActive: boolean;
     readonly pauseOnLowBattery: boolean;
   }>;
+  getProxyMode(): Promise<ProxyMode>;
   dispose(): void;
 }
 
@@ -209,6 +211,9 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
         preventSleepWhileActive: current.document.performance.preventSleepWhileActive,
         pauseOnLowBattery: current.document.performance.pauseOnLowBattery
       };
+    },
+    async getProxyMode() {
+      return (await repository.load()).document.network.proxy;
     },
     dispose() {
       shortcuts.release();
