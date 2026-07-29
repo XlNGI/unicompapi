@@ -29,7 +29,7 @@ export function AppLayout({
       <a className="skip-link" href="#main-content">
         跳到主要内容
       </a>
-      <TitleBar />
+      <TitleBar onNavigate={onNavigate} />
       <div className="app-body">
         <Sidebar
           activeItemId={activeItemId}
