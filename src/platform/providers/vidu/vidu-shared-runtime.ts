@@ -72,6 +72,7 @@ export interface ViduRuntimeResponse {
 
 export interface ViduResultDownloadRequest {
   readonly url: string;
+  readonly accept?: 'image/*' | 'video/*';
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
   readonly signal?: AbortSignal;
@@ -102,7 +103,11 @@ const protocolPaths: Readonly<Record<string, readonly RegExp[]>> = {
   'vidu.ent.v2.image.reference2image': [
     /^\/ent\/v2\/image\/reference2image\/[A-Za-z0-9._-]+$/
   ],
-  'vidu.ent.v2.reference2video': [/^\/ent\/v2\/reference2video$/]
+  'vidu.ent.v2.reference2video': [
+    /^\/ent\/v2\/reference2video$/,
+    /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/creations$/,
+    /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/cancel$/
+  ]
 };
 
 export class ViduSharedRuntime {
@@ -225,7 +230,7 @@ export class ViduSharedRuntime {
       const response = await this.options.transport.send({
         method: 'GET',
         url: url.toString(),
-        headers: { accept: 'image/*' },
+        headers: { accept: input.accept ?? 'image/*' },
         signal: controller.signal,
         timeoutMs,
         maxResponseBytes,

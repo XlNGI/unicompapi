@@ -7,13 +7,13 @@ export interface VideoRemoteCompletionFact {
 export interface VideoRemoteResultDescriptor {
   readonly remoteResultId: string;
   readonly name: string;
-  readonly declaredMimeType: 'video/mp4' | 'video/quicktime';
-  readonly declaredContainer: 'mp4' | 'quicktime';
-  readonly expectedSizeBytes: number;
-  readonly expectedChecksumSha256: string;
-  readonly expectedDurationMs: number;
-  readonly expectedWidth: number;
-  readonly expectedHeight: number;
+  readonly declaredMimeType?: 'video/mp4' | 'video/quicktime';
+  readonly declaredContainer?: 'mp4' | 'quicktime';
+  readonly expectedSizeBytes?: number;
+  readonly expectedChecksumSha256?: string;
+  readonly expectedDurationMs?: number;
+  readonly expectedWidth?: number;
+  readonly expectedHeight?: number;
 }
 
 export interface VideoResultPort {

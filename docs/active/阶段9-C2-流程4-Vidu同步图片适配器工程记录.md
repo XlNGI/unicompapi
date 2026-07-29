@@ -2,7 +2,7 @@
 
 日期：2026-07-29
 
-状态：实现和分支门禁已完成，等待连续授权下提交、推送与非快进合并 `develop`
+状态：已通过 `d629d9c` 非快进合并并推送 `develop`
 
 分支：`feature/vidu-image-adapters`
 

@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29` 合并 `develop`；流程 4 已在 `feature/vidu-image-adapters` 完成实现和分支门禁，Node 157 项、Vitest 359 项，合计 516 项通过，等待按连续授权提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c` 合并 `develop`；流程 5 已在 `feature/vidu-video-adapter` 完成实现和分支门禁，Node 157 项、Vitest 367 项，合计 524 项通过，等待按连续授权提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -819,3 +819,13 @@ ViduProviderPackage
 流程 4 验证结果：`npm test` 为 Node 157 项与 Vitest 359 项，合计 516 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 210 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。测试只使用内存合成 transport 和临时项目，不读取真实 Token、不访问真实 Vidu、不产生收费请求。本流程未修改 Electron/preload 或页面，因此无需 Electron 烟测。
 
 流程 4 未完成：Image V1 鉴权格式与 `images` 的最终请求结构必须保持未验证；冻结模型仍 disabled，Evidence 仍为 `declared_supported`。Q3 异步视频适配器、Electron 实际 transport 与组合根、页面接线、完整合成服务和真实收费验证分别属于流程 5—8，不得由本流程提前启动。
+
+流程 4 已提交并推送 `feature/vidu-image-adapters`，随后通过 `d629d9c Merge phase 9 C2 Vidu synchronous image adapters` 非快进合并并推送 `develop`；合并后完整门禁再次通过，功能分支本地和远程均保留。
+
+流程 5 实际结果：在唯一 `ViduProviderPackage` 下新增 `ViduReferenceVideoV2Adapter`，只覆盖冻结的五个 Q3 模型和 `vidu.ent.v2.reference2video` 协议。适配器强制单张受控图片、单个结果、5000 字提示词上限、序列化后 20MB 请求上限，并显式发送 `audio`；未发送 Q3 不支持的 `movement_amplitude` 或 `bgm`。五个模型时长按批准的官方保守交集校验，未在页面写死参数或启用冻结模型。
+
+异步实现严格解析 `task_id`，映射 `created/queueing/processing/success/failed`，提供有界指数退避与抖动轮询、取消和基于持久化 ProviderOperationRecord 的重启重发现。请求可能已送达但超时、断网、5xx 或响应损坏时返回 `submission_outcome_unknown`，不自动重提。查询成功后只保存私有结果 URL；同一 URL 保留首次发现时间并执行 24 小时到期门禁。视频下载继续走 HTTPS、重定向、响应大小和 Content-Type 边界；Vidu 未声明 MIME、容器、字节、Hash、时长或尺寸时不伪造远端事实，而由本地视频探测、SHA-256、原子发布、FileReference、索引和 Work 登记形成可信事实。
+
+流程 5 验证结果：`npm test` 为 Node 157 项与 Vitest 367 项，合计 524 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 211 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。所有 HTTP 都是内存合成 transport；真实 Vidu HTTP、真实 Token 和收费请求均为 0。本流程未修改 Electron/preload 或页面，因此无需 Electron 烟测。
+
+流程 5 未完成：实际 Electron transport、组合根、preload/IPC 和现有生成页面接线属于流程 6；本地合成服务的全协议故障矩阵与端到端闭环属于流程 7；真实 Vidu 联网和收费验证属于仍未批准的流程 8。Image V1 未决鉴权和请求结构不因本流程改变，冻结模型仍 disabled，Evidence 仍为 `declared_supported`。
