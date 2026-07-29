@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331` 合并 `develop`；流程 6 已在 `feature/vidu-app-wiring` 完成实现和分支门禁，Node 160 项、Vitest 371 项，合计 531 项通过，等待按连续授权提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331`、流程 6 已通过 `90a2d58` 合并 `develop`；流程 7 已在 `feature/vidu-e2e-validation` 完成本地合成服务全链路与分支门禁，Node 160 项、Vitest 376 项，合计 536 项通过，等待按连续授权提交、推送和合并。流程 8 的真实 Token、真实联网和收费请求仍须项目负责人再次明确批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -839,3 +839,13 @@ ViduProviderPackage
 流程 6 验证结果：`npm test` 为 Node 160 项与 Vitest 371 项，合计 531 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 213 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。Windows Electron 生产构建烟测新增 4 个进程且 4 个全部响应，本次退出后残留 0；烟测前已有的 4 个旧 Electron 进程未被终止。浏览器在产品支持的 1080px 最小桌面宽度下无横向溢出、按钮裁切或重叠；390px 窄视口按既有桌面壳 `min-width: 1080px` 产生横向滚动，不作为移动端通过证据。真实 Vidu HTTP、Token 和收费请求均为 0。
 
 流程 6 未完成：冻结 Vidu 模型仍 disabled，CapabilityEvidence 仍为 `declared_supported`；Image V1 鉴权与 `images` 请求结构仍未确认。流程 7 负责本地合成服务全协议与故障矩阵，流程 8 的真实联网和收费仍未批准；本流程不等于阶段 9 A3、B4、A4 或跨平台验收完成。
+
+流程 6 已提交并推送 `feature/vidu-app-wiring`，随后通过 `90a2d58 Merge phase 9 C2 Vidu application wiring` 非快进合并并推送 `develop`；合并后 531 项完整门禁和 Windows Electron 4/4 响应、受控关闭后本次残留 0 再次通过，功能分支本地和远程均保留。
+
+流程 7 实际结果：新增只实现 `ViduHttpTransport` 的本地合成服务与独立 `test:vidu-e2e` 命令，覆盖正确/错误鉴权、三个协议族、URL/base64/file URI、Q3 异步 task、跨媒体 `operation_model_mismatch` 且零 transport、未知提交零自动重试、429/5xx 退避、取消、重启重发现、结果 URL 到期、重定向、超限、截断与敏感字段扫描。完整闭环从显式图片 Task/Execution 开始，经过下载、图片探测、SHA-256、原子发布和图片 Work，用户再显式创建图生视频草稿、重新确认、提交、刷新、下载探测并登记视频 Work；未自动连续执行。
+
+流程 7 验收发现并最小修复三项实现缺陷：图生视频预检按 `reference_to_video` 查找协议与证据；已刷新到 `remote_completed` 的视频执行可继续进入结果接收且不重复状态转换；带 `Content-Length` 的响应必须与实际字节严格一致，拒绝截断。图片结果原子发布增加主进程内部测试注入点，生产默认仍使用同目录 `rename`，合成 `ENOSPC` 时临时文件清理、Execution 保留失败事实且不登记 Work。
+
+流程 7 分支验证结果：`npm test` 为 Node 160 项与 Vitest 376 项，合计 536 项通过，0 失败、0 跳过；`npm run test:vidu-e2e` 4 项通过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 213 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。Windows Electron 生产构建烟测新增 4 个进程且 4/4 响应，窗口关闭后本次残留 0；已有 4 个旧 Electron 进程未被终止。真实 Vidu HTTP、真实 Token 和收费请求均为 0。
+
+流程 7 未完成与风险：合成测试中的 test-only Token、Image V1 `token` 鉴权和输入形状只属于协议夹具，不构成官方验证；冻结生产模型继续 disabled，Evidence 继续 `declared_supported`。Image V1 鉴权与 `images` 结构、真实账户权限、模型可用性、费用和远端结果域名仍待流程 8。流程 8 尚未获准，不得创建分支、读取凭证、联网或收费；A3、B4、A4 和 macOS 实机也未因本流程完成而启动或通过。

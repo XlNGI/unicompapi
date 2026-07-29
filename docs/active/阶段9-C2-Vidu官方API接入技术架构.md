@@ -2,11 +2,11 @@
 
 日期：2026-07-28
 
-状态：流程 1—5 已合并，流程 6 已完成分支实现；流程 7 与真实联网、收费验证尚未完成
+状态：流程 1—6 已合并，流程 7 已完成分支实现；真实联网与收费验证尚未批准
 
 原阶段 9 规划基线：`252f5db Merge phase 8 integration closeout`
 
-当前执行基线：`develop@f53b331`
+当前执行基线：`develop@90a2d58`
 
 ## 一、架构结论
 
@@ -152,4 +152,4 @@ Token 只能由主进程在安全凭证回调内短时使用，不得进入 rend
 
     docs/active/阶段9-C2-Vidu官方API接入任务拆分.md
 
-流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331` 非快进合并 `develop`。流程 6 已在 `feature/vidu-app-wiring` 完成唯一 Electron Vidu 组合根、共享 Registry/Vault/runtime、命名 preload 白名单、图片三工作区显式提交与 Work 状态、图生视频查询/取消/恢复，以及经 SHA-256 复核的图片 Work 显式派生草稿。Image V1 的鉴权和 `images` 结构仍保持未验证，冻结模型保持 disabled，Evidence 保持 `declared_supported`。实现与验证事实见对应流程工程记录。流程 1—7 的连续实施授权不包含真实 Token、真实 Vidu 联网或收费调用。
+流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331`、流程 6 已通过 `90a2d58` 非快进合并 `develop`。流程 7 已在 `feature/vidu-e2e-validation` 完成本地合成服务、三协议与故障矩阵、图片 Work 显式派生图生视频草稿再登记视频 Work 的完整链路，并修复图生视频能力目的预检、`remote_completed` 结果接收和截断响应校验。Image V1 的鉴权和 `images` 结构仍保持未验证，冻结模型保持 disabled，Evidence 保持 `declared_supported`。实现与验证事实见对应流程工程记录。流程 8 的真实 Token、真实 Vidu 联网和收费调用仍须项目负责人再次明确批准。

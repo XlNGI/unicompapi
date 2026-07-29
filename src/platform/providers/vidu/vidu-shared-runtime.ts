@@ -510,12 +510,21 @@ function validateResponseSize(
   response: ViduHttpTransportResponse,
   maximum: number
 ): void {
-  const contentLength = Number(headerValue(response.headers, 'content-length'));
+  const declared = headerValue(response.headers, 'content-length');
+  const contentLength = Number(declared);
   if (
     response.body.byteLength > maximum ||
     (Number.isFinite(contentLength) && contentLength > maximum)
   ) {
     throw new ViduRuntimeError('response_too_large', 'not_retryable');
+  }
+  if (
+    declared !== undefined &&
+    (!Number.isSafeInteger(contentLength) ||
+      contentLength < 0 ||
+      contentLength !== response.body.byteLength)
+  ) {
+    throw new ViduRuntimeError('invalid_response', 'not_retryable');
   }
 }
 

@@ -45,6 +45,7 @@ export interface LocalImageResultReceiverDependencies {
   mutations: ImageWorkspaceMutationCoordinator;
   createFileId?(): string;
   createWorkId?(): string;
+  publishFile?(temporaryPath: string, finalPath: string): Promise<void>;
   now?(): string;
   onError?(error: unknown): void;
 }
@@ -243,7 +244,10 @@ export class LocalImageResultReceiver {
         finalPath = path.join(context.session.rootDirectory, relativePath);
         await mkdir(path.dirname(finalPath), { recursive: true });
         await syncFile(temporaryPath);
-        await rename(temporaryPath, finalPath);
+        await (this.dependencies.publishFile ?? rename)(
+          temporaryPath,
+          finalPath
+        );
         temporaryPath = undefined;
 
         const projectFile = createFileReference({
