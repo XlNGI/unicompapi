@@ -37,7 +37,7 @@
 
 ## 三、自动化与构建门禁
 
-- `npm test`：Node/UI 161 项、Vitest 387 项，合计 548 项通过，0 失败、0 跳过；
+- `npm test`：同步最新 UI 后 Node/UI 167 项、Vitest 387 项，合计 554 项通过，0 失败、0 跳过；
 - `npm run typecheck`：通过；
 - `npm run lint`：通过；
 - `npm run build`：通过；
@@ -46,6 +46,7 @@
 - `git diff --check`：通过；
 - Windows Electron 生产构建烟测：新增 4 个进程、4/4 响应、1 个窗口，退出后本次残留 0；烟测前不存在 Electron 基线进程；
 - 1280×720 可见检查：Provider 流程 8 面板、快速生图和图生视频工作区无重叠，浏览器控制台 0 错误。
+- `feature/image-creation-visual-alignment` 与 `feature/vidu-user-flow-ui-fixes` 已依次合并 `develop`；流程 8 通过 `55c0457` 非变基同步该 UI 基线，派生草稿跳转、素材计数、轮询状态和重复 Task/Execution 阻断均进入最终回归。
 
 以上门禁未读取真实 Token、未访问真实 Vidu、未产生收费请求。
 
