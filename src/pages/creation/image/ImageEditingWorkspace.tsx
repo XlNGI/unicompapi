@@ -16,6 +16,7 @@ import {
   type EditingImageDraftDto
 } from './ImageGenerationControls';
 import { ImageRegionFields } from './ImageRegionFields';
+import { useImageSubmissionFlow } from './useImageSubmissionFlow';
 
 type EditingTargetMode = 'professional_image' | 'image_to_prompt';
 type EditingListKey = 'mustKeep' | 'mustChange' | 'prohibited';
@@ -78,6 +79,17 @@ export function ImageEditingWorkspace({
   const selectedCandidate = preflight?.candidates.find(
     (candidate) => candidate.modelId === draft.editing.model?.modelId
   );
+  const submission = useImageSubmissionFlow({
+    draftId: draft.draftId,
+    draftUpdatedAt: draft.updatedAt,
+    preflight,
+    candidate: selectedCandidate,
+    confirmations,
+    busy,
+    setBusy,
+    onMessage,
+    errorMessages: editingErrorMessages
+  });
 
   useEffect(() => {
     let active = true;
@@ -368,9 +380,57 @@ export function ImageEditingWorkspace({
               promptLabel="最终编辑要求"
             />
           ) : null}
-          <Button disabled>提交图片编辑任务</Button>
+          <div className="uc-image-quick__submission-actions">
+            <Button
+              disabled={!submission.canCreateTask}
+              onClick={() => void submission.createTask()}
+            >
+              创建图片编辑任务
+            </Button>
+            <Button
+              disabled={!submission.task || busy}
+              onClick={() => void submission.createExecution()}
+              variant="secondary"
+            >
+              创建执行记录
+            </Button>
+            <Button
+              disabled={
+                !submission.execution ||
+                submission.execution.state !== 'created' ||
+                busy
+              }
+              onClick={() => void submission.invokeExecution()}
+            >
+              提交图片编辑
+            </Button>
+            <Button
+              disabled={
+                !submission.execution ||
+                submission.execution.state !== 'remote_completed' ||
+                busy
+              }
+              onClick={() => void submission.receiveResult()}
+              variant="secondary"
+            >
+              校验并登记新版本
+            </Button>
+            <Button
+              disabled={!submission.work || busy}
+              onClick={() => void submission.createVideoDraft()}
+              variant="secondary"
+            >
+              创建图生视频草稿
+            </Button>
+          </div>
+          {submission.execution ? (
+            <p className="uc-image-quick__hint" role="status">
+              执行 #{submission.execution.attempt}：{submission.execution.state}
+              {submission.work ? `；已登记 ${submission.work.name}` : ''}
+            </p>
+          ) : null}
           <p className="uc-image-quick__hint">
-            当前没有真实图片编辑适配器；不会创建任务、覆盖原图或伪造结果。
+            图片编辑只在能力、凭证和提交确认全部通过后执行；原图永远不会被覆盖。
           </p>
         </Card>
       </div>
@@ -404,7 +464,7 @@ export function ImageEditingWorkspace({
           </div>
           <div>
             <dt>当前结果</dt>
-            <dd>尚无真实编辑结果</dd>
+            <dd>{submission.work?.name ?? '尚无已校验编辑结果'}</dd>
           </div>
         </dl>
         <EmptyState
@@ -414,7 +474,9 @@ export function ImageEditingWorkspace({
           title="原图保持不变"
         />
         <div className="uc-image-quick__result-actions">
-          <Button disabled>保存新版本到项目</Button>
+          <Button disabled>
+            {submission.work ? '新版本已登记到项目' : '保存新版本到项目'}
+          </Button>
           <Button disabled variant="secondary">
             继续编辑新分支
           </Button>

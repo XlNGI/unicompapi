@@ -13,13 +13,16 @@ test('keeps video preflight, task, execution, invocation and result operations s
     'createTask',
     'createExecution',
     'invokeExecution',
+    'refreshExecution',
+    'cancelExecution',
+    'recoverExecutions',
     'receiveResult'
   ]) {
     assert.match(sharedSource, new RegExp(`\\b${operation}\\b`));
     assert.match(preloadSource, new RegExp(`videoSubmissionIpcChannels\\.${operation}`));
     assert.match(handlerSource, new RegExp(`videoSubmissionIpcChannels\\.${operation}`));
   }
-  assert.doesNotMatch(sharedSource, /upload|poll|progress|cancel/);
+  assert.doesNotMatch(sharedSource, /upload|progress|remoteOperationId|task_id/);
   assert.match(sharedSource, /result_verification_failed/);
   assert.match(sharedSource, /works: readonly/);
 });

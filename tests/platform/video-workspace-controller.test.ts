@@ -1,9 +1,25 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { toProjectId } from '../../src/domain';
-import { VideoWorkspaceController } from '../../src/platform';
+import {
+  toExecutionId,
+  toFileReferenceId,
+  toIsoTimestamp,
+  toProjectId,
+  toTaskId,
+  toWorkId,
+  type FileReference,
+  type Work
+} from '../../src/domain';
+import {
+  JsonFileReferenceRepository,
+  JsonTaskRepository,
+  JsonWorkRepository,
+  NodeProjectStorage,
+  VideoWorkspaceController
+} from '../../src/platform';
 
 const roots: string[] = [];
 
@@ -16,6 +32,7 @@ afterEach(async () => {
 async function createFixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-video-controller-'));
   roots.push(root);
+  const projectId = toProjectId('project-video-controller');
   const ids = ['draft-video-1', 'draft-video-2', 'draft-video-3'];
   const times = [
     '2026-07-23T11:00:00.000Z',
@@ -27,7 +44,7 @@ async function createFixture() {
   let lastError: unknown;
   const controller = new VideoWorkspaceController({
     getSession: () => ({
-      projectId: toProjectId('project-video-controller'),
+      projectId,
       projectName: 'Video project',
       rootDirectory: root
     }),
@@ -37,7 +54,7 @@ async function createFixture() {
       lastError = error;
     }
   });
-  return { controller, getLastError: () => lastError, root };
+  return { controller, getLastError: () => lastError, projectId, root };
 }
 
 describe('VideoWorkspaceController', () => {
@@ -201,4 +218,103 @@ describe('VideoWorkspaceController', () => {
     expect(serialized).not.toContain('remoteOperationId');
     expect(serialized).not.toContain('stack');
   });
+
+  it('creates an image-to-video draft only from an unchanged verified image Work', async () => {
+    const fixture = await createFixture();
+    const storage = new NodeProjectStorage(fixture.root);
+    const relativePath = 'files/verified-result.png';
+    const target = path.join(fixture.root, relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    const bytes = pngBytes(320, 180);
+    await writeFile(target, bytes);
+    const checksumSha256 = createHash('sha256').update(bytes).digest('hex');
+    const createdAt = toIsoTimestamp('2026-07-23T10:00:00.000Z');
+    const file: FileReference = {
+      schemaVersion: 1,
+      id: toFileReferenceId('file-image-work-source'),
+      projectId: fixture.projectId,
+      sourceExecutionId: toExecutionId('execution-image-work-source'),
+      locator: { kind: 'project', relativePath },
+      state: 'available',
+      sizeBytes: bytes.byteLength,
+      checksumSha256,
+      lastVerification: {
+        sizeBytes: bytes.byteLength,
+        checksumSha256,
+        matchesExpected: true,
+        verifiedAt: createdAt
+      },
+      createdAt,
+      updatedAt: createdAt
+    };
+    const work: Work = {
+      schemaVersion: 1,
+      id: toWorkId('work-image-source'),
+      projectId: fixture.projectId,
+      sourceTaskId: toTaskId('task-image-work-source'),
+      sourceExecutionId: toExecutionId('execution-image-work-source'),
+      fileId: file.id,
+      mediaKind: 'image',
+      name: 'Verified image result',
+      createdAt
+    };
+    await new JsonFileReferenceRepository(storage, fixture.projectId).save(file);
+    await new JsonWorkRepository(storage, fixture.projectId).save(work);
+
+    const created = await fixture.controller.createFromImageWork({
+      workId: work.id
+    });
+    expect(created).toMatchObject({
+      ok: true,
+      value: {
+        mode: 'image_to_video',
+        origin: { kind: 'new' },
+        imageToVideo: {
+          source: { mediaKind: 'image', role: 'reference' }
+        }
+      }
+    });
+    expect(await new JsonTaskRepository(storage, fixture.projectId).list(
+      fixture.projectId
+    )).toEqual([]);
+    expect(JSON.stringify(created)).not.toContain(fixture.root);
+    expect(JSON.stringify(created)).not.toContain(checksumSha256);
+
+    await writeFile(target, pngBytes(321, 180));
+    await expect(
+      fixture.controller.createFromImageWork({ workId: work.id })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'material_not_found' }
+    });
+  });
+
+  it('rejects non-image Works and renderer-supplied paths', async () => {
+    const fixture = await createFixture();
+    await expect(
+      fixture.controller.createFromImageWork({
+        workId: 'work-missing',
+        absolutePath: 'C:\\private\\source.png'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' }
+    });
+    await expect(
+      fixture.controller.createFromImageWork({ workId: 'work-missing' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'material_not_found' }
+    });
+  });
 });
+
+function pngBytes(width: number, height: number): Buffer {
+  const buffer = Buffer.alloc(24);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(buffer, 0);
+  buffer.writeUInt32BE(13, 8);
+  buffer.write('IHDR', 12, 'ascii');
+  buffer.writeUInt32BE(width, 16);
+  buffer.writeUInt32BE(height, 20);
+  return buffer;
+}

@@ -15,6 +15,7 @@ import {
   ImageSubmissionConfirmations,
   type GenerationImageDraftDto
 } from './ImageGenerationControls';
+import { useImageSubmissionFlow } from './useImageSubmissionFlow';
 
 interface ImageQuickWorkspaceProps {
   readonly dirty: boolean;
@@ -45,6 +46,17 @@ export function ImageQuickWorkspace({
   const selectedCandidate = preflight?.candidates.find(
     (candidate) => candidate.modelId === draft.generation.model?.modelId
   );
+  const submission = useImageSubmissionFlow({
+    draftId: draft.draftId,
+    draftUpdatedAt: draft.updatedAt,
+    preflight,
+    candidate: selectedCandidate,
+    confirmations,
+    busy,
+    setBusy,
+    onMessage,
+    errorMessages: submissionErrorMessages
+  });
 
   useEffect(() => {
     let active = true;
@@ -230,7 +242,7 @@ export function ImageQuickWorkspace({
           )}
           <div className="uc-image-quick__result-actions">
             <Button disabled variant="secondary">
-              保存到项目
+              {submission.work ? '已登记到项目' : '保存到项目'}
             </Button>
             <Button disabled variant="secondary">
               重新生成
@@ -284,10 +296,46 @@ export function ImageQuickWorkspace({
             />
           ) : null}
           <div className="uc-image-quick__submission-actions">
-            <Button disabled>
-              提交任务
+            <Button
+              disabled={!submission.canCreateTask}
+              onClick={() => void submission.createTask()}
+            >
+              创建图片任务
+            </Button>
+            <Button
+              disabled={!submission.task || busy}
+              onClick={() => void submission.createExecution()}
+              variant="secondary"
+            >
+              创建执行记录
+            </Button>
+            <Button
+              disabled={!submission.execution || submission.execution.state !== 'created' || busy}
+              onClick={() => void submission.invokeExecution()}
+            >
+              提交图片生成
+            </Button>
+            <Button
+              disabled={!submission.execution || submission.execution.state !== 'remote_completed' || busy}
+              onClick={() => void submission.receiveResult()}
+              variant="secondary"
+            >
+              校验并登记结果
+            </Button>
+            <Button
+              disabled={!submission.work || busy}
+              onClick={() => void submission.createVideoDraft()}
+              variant="secondary"
+            >
+              创建图生视频草稿
             </Button>
           </div>
+          {submission.execution ? (
+            <p className="uc-image-quick__hint" role="status">
+              执行 #{submission.execution.attempt}：{submission.execution.state}
+              {submission.work ? `；已登记 ${submission.work.name}` : ''}
+            </p>
+          ) : null}
         </Card>
       </div>
 
@@ -296,7 +344,7 @@ export function ImageQuickWorkspace({
           {preflight?.blockers.length === 0 ? '等待明确确认' : '真实能力状态'}
         </StatusPill>
         <p>
-          当前没有真实图片适配器，只支持保存草稿和查看阻断原因；不会创建任务、显示假进度或假结果。
+          图片提交和结果接收只在注册表、凭证与能力门禁全部通过后可用；页面不会显示假进度或未校验结果。
         </p>
       </Card>
     </>

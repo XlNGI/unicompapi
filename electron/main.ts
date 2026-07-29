@@ -18,6 +18,7 @@ import {
   normalizeTrustedExternalUrl,
   StorageProjectSessionRegistry
 } from '../src/platform';
+import { ElectronViduComposition } from './ipc/vidu-composition';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -37,6 +38,9 @@ protocol.registerSchemesAsPrivileged([
 let sleepBlockerId: number | undefined;
 let powerPolicyRead = Promise.resolve();
 const settingsLifecycle = registerSettingsIpcHandlers();
+const viduComposition = new ElectronViduComposition({
+  getProxyMode: () => settingsLifecycle.getProxyMode()
+});
 const projectSessionRegistry = new StorageProjectSessionRegistry();
 const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get()
@@ -44,6 +48,7 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,
   additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
+  vidu: viduComposition,
   onActiveExportCountChanged: (count) => {
     powerPolicyRead = powerPolicyRead
       .then(async () => {
@@ -53,7 +58,11 @@ const storageLifecycle = registerStorageIpcHandlers({
       .catch(() => updateSleepBlocker(false));
   }
 });
-registerProviderIpcHandlers();
+registerProviderIpcHandlers({
+  registry: viduComposition.registry,
+  credentialVault: viduComposition.credentialVault,
+  connectionValidation: viduComposition.providerPackage.connectionValidation
+});
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);
@@ -205,6 +214,7 @@ app.on('before-quit', (event) => {
     storageLifecycle.dispose(),
     chatContextLifecycle.waitForMutations()
   ]).finally(() => {
+    viduComposition.dispose();
     settingsLifecycle.dispose();
     updateSleepBlocker(false);
     cleanupCompleted = true;

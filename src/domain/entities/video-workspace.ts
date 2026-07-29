@@ -145,6 +145,7 @@ export interface TextToVideoWorkspace {
 }
 
 export interface ImageToVideoWorkspace {
+  readonly source?: VideoMaterialSelection;
   readonly materials?: VideoMaterialSlotSnapshot;
   readonly mustKeep: readonly string[];
   readonly allowedChanges: readonly string[];
@@ -557,7 +558,10 @@ function materialState(draft: VideoWorkspaceDraft): unknown {
     case 'text_to_video':
       return draft.textToVideo.materials;
     case 'image_to_video':
-      return draft.imageToVideo.materials;
+      return {
+        source: draft.imageToVideo.source,
+        materials: draft.imageToVideo.materials
+      };
   }
 }
 
@@ -690,6 +694,7 @@ function isImageToVideoWorkspace(
   return (
     isRecord(value) &&
     hasOnlyKeys(value, [
+      'source',
       'materials',
       'mustKeep',
       'allowedChanges',
@@ -699,6 +704,7 @@ function isImageToVideoWorkspace(
       'pace',
       'depthOfField'
     ]) &&
+    (value.source === undefined || isVideoMaterialSelection(value.source)) &&
     (value.materials === undefined ||
       isVideoMaterialSlotSnapshot(value.materials, generation)) &&
     isNonBlankStringArray(value.mustKeep) &&

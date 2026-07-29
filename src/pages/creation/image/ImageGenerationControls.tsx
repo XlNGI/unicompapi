@@ -72,7 +72,7 @@ export function ImageGenerationModelFields({
       model={draft.generation.model}
       onChange={(generation) => onDraftChange({ ...draft, generation })}
       parameters={draft.generation.parameters}
-      purpose="image_generation"
+      purpose={draft.input ? 'reference_to_image' : 'image_generation'}
       registry={registry}
     />
   );
@@ -115,7 +115,10 @@ function ImageModelFields({
   readonly label: string;
   readonly model?: ImageWorkspaceModelDto;
   readonly parameters?: ImageWorkspaceParametersDto;
-  readonly purpose: 'image_generation' | 'image_editing';
+  readonly purpose:
+    | 'image_generation'
+    | 'reference_to_image'
+    | 'image_editing';
   readonly registry?: ProviderRegistryDto;
   readonly onChange: (selection: {
     readonly model?: ImageWorkspaceModelDto;
@@ -275,7 +278,7 @@ interface GenerationModelOption {
 
 function getModelOptions(
   registry: ProviderRegistryDto | undefined,
-  purpose: 'image_generation' | 'image_editing'
+  purpose: 'image_generation' | 'reference_to_image' | 'image_editing'
 ): readonly GenerationModelOption[] {
   if (!registry) return [];
   const routeModelIds = new Set(

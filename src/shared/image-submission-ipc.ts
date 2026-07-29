@@ -73,6 +73,7 @@ export interface ImagePreflightDto {
   readonly draftUpdatedAt: string;
   readonly purpose:
     | 'image_generation'
+    | 'reference_to_image'
     | 'image_understanding'
     | 'image_editing'
     | 'image_to_prompt';

@@ -12,6 +12,7 @@ import {
   transitionExecution,
   type Execution,
   type ProviderExecutionLifecycle,
+  type ProviderOperationRecordId,
   type ProviderSubmitOutcome,
   type Task,
   type VideoSubmissionConfirmationSnapshot,
@@ -35,8 +36,14 @@ import {
   type VideoGenerationSubmitPort,
   type VideoMaterialFact
 } from '../videos';
-import type { JsonProviderRegistryStore } from '../providers';
-import { ProviderExecutionLifecycleService } from '../providers';
+import type {
+  JsonProviderRegistryStore,
+  ProviderAsyncOperationPort
+} from '../providers';
+import {
+  ProviderAsyncOperationCoordinator,
+  ProviderExecutionLifecycleService
+} from '../providers';
 import {
   JsonAssetRepository,
   JsonExecutionRepository,
@@ -54,6 +61,7 @@ export interface VideoSubmissionControllerDependencies {
   providerRegistry: JsonProviderRegistryStore;
   mutations: VideoWorkspaceMutationCoordinator;
   operationPort?: VideoGenerationSubmitPort;
+  asyncOperationPort?: ProviderAsyncOperationPort;
   resultReceiver?: {
     receive(
       executionId: string
@@ -304,6 +312,89 @@ export class VideoSubmissionController {
     }
   }
 
+  refreshExecution(
+    request: unknown
+  ): Promise<VideoSubmissionResult<VideoExecutionDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const executionId = parseId(request, 'executionId', toExecutionId);
+        const context = this.createContext();
+        const execution = await context.executionRepository.get(executionId);
+        if (!execution) {
+          throw submissionError('execution_not_found', 'Execution not found');
+        }
+        const recordId = requireAsyncRecord(execution);
+        return toExecutionDto(
+          await this.asyncCoordinator(context).refresh(recordId)
+        );
+      })
+    );
+  }
+
+  cancelExecution(
+    request: unknown
+  ): Promise<VideoSubmissionResult<VideoExecutionDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const executionId = parseId(request, 'executionId', toExecutionId);
+        const context = this.createContext();
+        const execution = await context.executionRepository.get(executionId);
+        if (!execution) {
+          throw submissionError('execution_not_found', 'Execution not found');
+        }
+        if (execution.state !== 'queued' && execution.state !== 'processing') {
+          throw submissionError(
+            'invalid_execution_state',
+            'Execution cannot be cancelled in its current state'
+          );
+        }
+        return toExecutionDto(
+          await this.asyncCoordinator(context).cancel(requireAsyncRecord(execution))
+        );
+      })
+    );
+  }
+
+  recoverExecutions(request: unknown): Promise<
+    VideoSubmissionResult<readonly VideoExecutionDto[]>
+  > {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const draftId = parseId(request, 'draftId', toDraftId);
+        const context = this.createContext();
+        const taskIds = new Set(
+          (await context.taskRepository.list(context.session.projectId))
+            .filter((task) => task.sourceDraftId === draftId)
+            .map((task) => task.id)
+        );
+        const lifecycle = new ProviderExecutionLifecycleService({
+          executionRepository: context.executionRepository,
+          operationRepository: context.operationRepository,
+          createRecordId: () => this.createProviderOperationRecordId(),
+          now: () => this.now()
+        });
+        const recovered: VideoExecutionDto[] = [];
+        for (const record of await lifecycle.listRecoverable()) {
+          if (record.mediaKind !== 'video' || !taskIds.has(record.taskId)) continue;
+          let execution = await context.executionRepository.get(record.executionId);
+          if (!execution) continue;
+          if (!execution.providerOperationRecordId && execution.state === 'submitting') {
+            execution = await lifecycle.recoverExecution(record.id);
+          }
+          if (
+            record.outcome.kind === 'accepted_async' &&
+            ['queued', 'processing', 'cancel_requested', 'cancellation_unknown']
+              .includes(execution.state)
+          ) {
+            execution = await this.asyncCoordinator(context).refresh(record.id);
+          }
+          recovered.push(toExecutionDto(execution));
+        }
+        return recovered;
+      })
+    );
+  }
+
   private createContext() {
     const session = this.dependencies.getSession();
     if (!session) {
@@ -311,6 +402,7 @@ export class VideoSubmissionController {
     }
     const storage = new NodeProjectStorage(session.rootDirectory);
     return {
+      session,
       workspaceRepository: new JsonVideoWorkspaceRepository(
         storage,
         session.projectId
@@ -331,6 +423,21 @@ export class VideoSubmissionController {
         ? preflight.blockers
         : [...preflight.blockers, 'adapter_unavailable']
     };
+  }
+
+  private asyncCoordinator(context: VideoSubmissionContext) {
+    if (!this.dependencies.asyncOperationPort) {
+      throw submissionError(
+        'adapter_unavailable',
+        'No asynchronous video adapter is configured'
+      );
+    }
+    return new ProviderAsyncOperationCoordinator(
+      context.executionRepository,
+      context.operationRepository,
+      this.dependencies.asyncOperationPort,
+      () => this.now()
+    );
   }
 
   private createTaskId() {
@@ -430,11 +537,11 @@ class VideoSubmissionControllerError extends Error {
 }
 
 function parseTaskRequest(request: unknown) {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, ['draftId', 'draftUpdatedAt', 'modelId', 'confirmations'])) {
     throw submissionError('invalid_request', 'Submission request is invalid');
   }
   return {
-    draftId: parseId(request, 'draftId', toDraftId),
+    draftId: parseIdValue(request.draftId, 'draftId', toDraftId),
     draftUpdatedAt: requireString(request.draftUpdatedAt),
     modelId: requireString(request.modelId),
     confirmations: isRecord(request.confirmations) ? request.confirmations : {}
@@ -446,11 +553,19 @@ function parseId<TValue>(
   field: string,
   convert: (value: string) => TValue
 ): TValue {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, [field])) {
     throw submissionError('invalid_request', `${field} is required`);
   }
+  return parseIdValue(request[field], field, convert);
+}
+
+function parseIdValue<TValue>(
+  value: unknown,
+  field: string,
+  convert: (value: string) => TValue
+): TValue {
   try {
-    return convert(requireString(request[field]));
+    return convert(requireString(value));
   } catch {
     throw submissionError('invalid_request', `${field} is invalid`);
   }
@@ -465,6 +580,14 @@ function requireString(value: unknown): string {
 
 function allConfirmationsAccepted(value: Record<string, unknown>): boolean {
   return (
+    hasExactKeys(value, [
+      'recipient',
+      'outboundScope',
+      'materials',
+      'costPrivacyRegion',
+      'finalPrompt',
+      'model'
+    ]) &&
     value.recipient === true &&
     value.outboundScope === true &&
     value.materials === true &&
@@ -472,6 +595,15 @@ function allConfirmationsAccepted(value: Record<string, unknown>): boolean {
     value.finalPrompt === true &&
     value.model === true
   );
+}
+
+function hasExactKeys(
+  value: unknown,
+  keys: readonly string[]
+): value is Record<string, unknown> {
+  return isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => keys.includes(key));
 }
 
 async function requireTask(
@@ -501,6 +633,16 @@ function toExecutionDto(execution: Execution): VideoExecutionDto {
     state: execution.state,
     retryability: execution.failure?.retryability
   };
+}
+
+function requireAsyncRecord(execution: Execution): ProviderOperationRecordId {
+  if (!execution.providerOperationRecordId) {
+    throw submissionError(
+      'invalid_execution_state',
+      'Execution does not have an asynchronous provider operation'
+    );
+  }
+  return execution.providerOperationRecordId;
 }
 
 function normalizeVideoSubmitOutcome(

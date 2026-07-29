@@ -362,11 +362,11 @@ class ImageSubmissionControllerError extends Error {
 }
 
 function parseTaskRequest(request: unknown) {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, ['draftId', 'draftUpdatedAt', 'modelId', 'confirmations'])) {
     throw submissionError('invalid_request', 'Submission request is invalid');
   }
   return {
-    draftId: parseId(request, 'draftId', toDraftId),
+    draftId: parseIdValue(request.draftId, 'draftId', toDraftId),
     draftUpdatedAt: requireString(request.draftUpdatedAt),
     modelId: requireString(request.modelId),
     confirmations: isRecord(request.confirmations) ? request.confirmations : {}
@@ -378,11 +378,19 @@ function parseId<TValue>(
   field: string,
   convert: (value: string) => TValue
 ): TValue {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, [field])) {
     throw submissionError('invalid_request', `${field} is required`);
   }
+  return parseIdValue(request[field], field, convert);
+}
+
+function parseIdValue<TValue>(
+  value: unknown,
+  field: string,
+  convert: (value: string) => TValue
+): TValue {
   try {
-    return convert(requireString(request[field]));
+    return convert(requireString(value));
   } catch {
     throw submissionError('invalid_request', `${field} is invalid`);
   }
@@ -397,12 +405,28 @@ function requireString(value: unknown): string {
 
 function allConfirmationsAccepted(value: Record<string, unknown>): boolean {
   return (
+    hasExactKeys(value, [
+      'recipient',
+      'outboundScope',
+      'cost',
+      'finalPrompt',
+      'model'
+    ]) &&
     value.recipient === true &&
     value.outboundScope === true &&
     value.cost === true &&
     value.finalPrompt === true &&
     value.model === true
   );
+}
+
+function hasExactKeys(
+  value: unknown,
+  keys: readonly string[]
+): value is Record<string, unknown> {
+  return isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => keys.includes(key));
 }
 
 async function requireTask(
