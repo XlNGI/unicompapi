@@ -846,6 +846,6 @@ ViduProviderPackage
 
 流程 7 验收发现并最小修复三项实现缺陷：图生视频预检按 `reference_to_video` 查找协议与证据；已刷新到 `remote_completed` 的视频执行可继续进入结果接收且不重复状态转换；带 `Content-Length` 的响应必须与实际字节严格一致，拒绝截断。图片结果原子发布增加主进程内部测试注入点，生产默认仍使用同目录 `rename`，合成 `ENOSPC` 时临时文件清理、Execution 保留失败事实且不登记 Work。
 
-流程 7 分支验证结果：`npm test` 为 Node 160 项与 Vitest 376 项，合计 536 项通过，0 失败、0 跳过；`npm run test:vidu-e2e` 4 项通过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 213 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。Windows Electron 生产构建烟测新增 4 个进程且 4/4 响应，窗口关闭后本次残留 0；已有 4 个旧 Electron 进程未被终止。真实 Vidu HTTP、真实 Token 和收费请求均为 0。
+流程 7 分支验证结果：`npm test` 为 Node 160 项与 Vitest 377 项，合计 537 项通过，0 失败、0 跳过；`npm run test:vidu-e2e` 4 项通过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 213 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。Windows Electron 生产构建烟测新增 4 个进程且 4/4 响应，窗口关闭后本次残留 0；已有 4 个旧 Electron 进程未被终止。真实 Vidu HTTP、真实 Token 和收费请求均为 0。
 
 流程 7 未完成与风险：合成测试中的 test-only Token、Image V1 `token` 鉴权和输入形状只属于协议夹具，不构成官方验证；冻结生产模型继续 disabled，Evidence 继续 `declared_supported`。Image V1 鉴权与 `images` 结构、真实账户权限、模型可用性、费用和远端结果域名仍待流程 8。流程 8 尚未获准，不得创建分支、读取凭证、联网或收费；A3、B4、A4 和 macOS 实机也未因本流程完成而启动或通过。

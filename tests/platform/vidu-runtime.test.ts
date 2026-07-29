@@ -190,6 +190,26 @@ describe('ViduSharedRuntime', () => {
     });
   });
 
+  it('does not compare encoded wire length with a decoded response body', async () => {
+    const fixture = await createFixture();
+    const runtime = runtimeFor(fixture);
+    const body = bytes({ credits: 1 });
+    fixture.transport.responses.push({
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-encoding': 'gzip',
+        'content-length': '8'
+      },
+      body
+    });
+
+    await expect(credits(runtime, fixture)).resolves.toMatchObject({
+      status: 200,
+      body
+    });
+  });
+
   it('validates the connection through credits without exposing the response', async () => {
     const fixture = await createFixture();
     fixture.transport.responses.push(response(200, {
