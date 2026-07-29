@@ -2,11 +2,11 @@
 
 日期：2026-07-28
 
-状态：流程 1—6 已合并，流程 7 已完成分支实现；真实联网与收费验证尚未批准
+状态：流程 1—7 已合并 `develop`；流程 8 已完成 Windows 开发态真实最小闭环并进入分支收口
 
 原阶段 9 规划基线：`252f5db Merge phase 8 integration closeout`
 
-当前执行基线：`develop@90a2d58`
+当前执行基线：`develop@bd86cbf`（已同步 `origin/develop`）
 
 ## 一、架构结论
 
@@ -152,4 +152,4 @@ Token 只能由主进程在安全凭证回调内短时使用，不得进入 rend
 
     docs/active/阶段9-C2-Vidu官方API接入任务拆分.md
 
-流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331`、流程 6 已通过 `90a2d58` 非快进合并 `develop`。流程 7 已在 `feature/vidu-e2e-validation` 完成本地合成服务、三协议与故障矩阵、图片 Work 显式派生图生视频草稿再登记视频 Work 的完整链路，并修复图生视频能力目的预检、`remote_completed` 结果接收和截断响应校验。Image V1 的鉴权和 `images` 结构仍保持未验证，冻结模型保持 disabled，Evidence 保持 `declared_supported`。实现与验证事实见对应流程工程记录。流程 8 的真实 Token、真实 Vidu 联网和收费调用仍须项目负责人再次明确批准。
+流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29`、流程 4 已通过 `d629d9c`、流程 5 已通过 `f53b331`、流程 6 已通过 `90a2d58` 非快进合并 `develop`。流程 7 已在 `feature/vidu-e2e-validation` 完成本地合成服务、三协议与故障矩阵、图片 Work 显式派生图生视频草稿再登记视频 Work 的完整链路，并通过 `e4ba8c4` 和 `bd86cbf` 非快进合并 `develop`。流程 8 已在 `feature/vidu-live-validation` 完成 `q3-lite` 参考生图与 `viduq3-turbo` 图生视频各一次真实验证，图片和视频结果均完成本地探测、字节校验、SHA-256、原子落盘和 Work 登记；两项预算均已用尽，不得继续发起真实 Vidu 请求。Image V1 的鉴权和 `images` 结构仍保持未验证且不因本次通过而晋级。流程 8 的真实结果只按对应工程记录中的脱敏事实认定。

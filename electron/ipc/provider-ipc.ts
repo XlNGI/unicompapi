@@ -3,7 +3,9 @@ import {
   type ConnectionValidationPort,
   ProviderCapabilityController,
   ProviderCredentialController,
-  ProviderRegistryController
+  ProviderRegistryController,
+  ViduLiveValidationController,
+  type ViduLiveValidationApplicationService
 } from '../../src/platform';
 import type {
   JsonProviderRegistryStore,
@@ -15,6 +17,7 @@ export function registerProviderIpcHandlers(options: {
   readonly registry: JsonProviderRegistryStore;
   readonly credentialVault: SecureCredentialVault;
   readonly connectionValidation: ConnectionValidationPort;
+  readonly liveValidation: ViduLiveValidationApplicationService;
 }): void {
   const registry = options.registry;
   const controller = new ProviderRegistryController(registry);
@@ -25,6 +28,9 @@ export function registerProviderIpcHandlers(options: {
   const capabilityController = new ProviderCapabilityController(registry, {
     connectionValidation: options.connectionValidation
   });
+  const liveValidationController = new ViduLiveValidationController(
+    options.liveValidation
+  );
   ipcMain.handle(providerIpcChannels.getRegistry, () =>
     controller.getRegistry()
   );
@@ -78,5 +84,11 @@ export function registerProviderIpcHandlers(options: {
   );
   ipcMain.handle(providerIpcChannels.setModelEnabled, (_event, input) =>
     capabilityController.setModelEnabled(input)
+  );
+  ipcMain.handle(providerIpcChannels.getViduLiveValidation, () =>
+    liveValidationController.getStatus()
+  );
+  ipcMain.handle(providerIpcChannels.startViduLiveValidation, (_event, input) =>
+    liveValidationController.start(input)
   );
 }

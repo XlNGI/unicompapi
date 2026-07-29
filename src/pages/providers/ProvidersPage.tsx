@@ -8,7 +8,9 @@ import type {
   CredentialActionResult,
   ProviderConnectionSummaryDto,
   ProviderManagementResult,
-  ProviderRegistryDto
+  ProviderRegistryDto,
+  ViduLiveValidationApprovalDto,
+  ViduLiveValidationStatusDto
 } from '../../shared/provider-ipc';
 import '../../styles/pages.css';
 
@@ -22,6 +24,39 @@ const emptyRegistry: ProviderRegistryDto = {
   models: [],
   capabilities: [],
   routingPreferences: []
+};
+
+const emptyLiveApproval: ViduLiveValidationApprovalDto = {
+  confirmLiveNetwork: false,
+  confirmCredentialUse: false,
+  confirmImageBillableAttempt: false,
+  confirmVideoBillableAttempt: false
+};
+
+const liveValidationStatusLabels: Record<
+  ViduLiveValidationStatusDto['status'],
+  string
+> = {
+  not_started: '尚未启动',
+  active: '验证进行中',
+  passed: '最小闭环已通过',
+  failed: '验证已失败',
+  blocked: '验证已阻断'
+};
+
+const liveStageLabels: Record<
+  ViduLiveValidationStatusDto['events'][number]['stage'],
+  string
+> = {
+  readiness: '准入检查',
+  credits_validation: '账户与鉴权',
+  image_submission: '真实生图提交',
+  image_local_result: '图片本地作品',
+  video_confirmation: '视频提交确认',
+  video_submission: '真实视频提交',
+  video_polling: '视频任务状态',
+  video_local_result: '视频本地作品',
+  flow: '流程状态'
 };
 
 const connectionLabels: Record<string, string> = {
@@ -109,6 +144,10 @@ export function ProvidersPage() {
   const [editConnectionName, setEditConnectionName] = useState('');
   const [editEndpoint, setEditEndpoint] = useState('');
   const [credentialStatus, setCredentialStatus] = useState<string>();
+  const [liveValidation, setLiveValidation] =
+    useState<ViduLiveValidationStatusDto>();
+  const [liveApproval, setLiveApproval] =
+    useState<ViduLiveValidationApprovalDto>(emptyLiveApproval);
 
   async function refreshRegistry(preferredConnectionId?: string) {
     if (!providersApi) {
@@ -157,6 +196,15 @@ export function ProvidersPage() {
     return () => {
       active = false;
     };
+  }, [providersApi]);
+
+  useEffect(() => {
+    let active = true;
+    if (!providersApi) return () => { active = false; };
+    void providersApi.getViduLiveValidation().then((result) => {
+      if (active && result.ok) setLiveValidation(result.value);
+    }).catch(() => undefined);
+    return () => { active = false; };
   }, [providersApi]);
 
   const selectedConnection = registry.connections.find(
@@ -320,6 +368,38 @@ export function ProvidersPage() {
     if (saved) setCredential('');
   }
 
+  async function handleStartLiveValidation() {
+    if (
+      !providersApi ||
+      busy ||
+      !Object.values(liveApproval).every(Boolean)
+    ) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await providersApi.startViduLiveValidation(liveApproval);
+      if (!result.ok) {
+        setMessage(
+          result.error.code === 'connection_not_ready'
+            ? 'Vidu Token 或账户验证未通过；未发生生图或视频收费提交。'
+            : result.error.code === 'already_started'
+              ? '流程 8 已经启动，不能重复领取收费测试次数。'
+              : '流程 8 启动失败，未发生收费提交。'
+        );
+        await refreshRegistry('connection-vidu-default');
+        return;
+      }
+      setLiveValidation(result.value);
+      setLiveApproval(emptyLiveApproval);
+      setMessage('Vidu 鉴权已通过；已开放一次参考生图和一次图生视频验证。');
+      await refreshRegistry('connection-vidu-default');
+    } catch {
+      setMessage('流程 8 启动失败，未发生收费提交。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSaveConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!providersApi || !selectedConnection || !editConnectionName.trim()) return;
@@ -394,8 +474,81 @@ export function ProvidersPage() {
       </header>
 
       <Card className="uc-provider-page__notice">
-        <strong>真实离线状态</strong>
-        <span>后台 Base URL、鉴权和接口契约尚未提供；在线验证、目录同步和能力验证会明确返回不可用，不会伪造成功。</span>
+        <strong>真实调用边界</strong>
+        <span>凭证只保存在本机安全存储；每次创作仍会单独确认接收方、外发范围、模型和未知费用，失败不会伪造成功。</span>
+      </Card>
+
+      <Card className="uc-provider-page__live-validation">
+        <div className="uc-provider-page__section-heading">
+          <div>
+            <h2>Vidu 最小闭环验证</h2>
+            <p>Windows 开发态真实鉴权、单图单输出与单视频单输出验证。</p>
+          </div>
+          <StatusPill
+            tone={
+              liveValidation?.status === 'passed'
+                ? 'success'
+                : liveValidation?.status === 'failed'
+                  ? 'danger'
+                  : liveValidation?.status === 'active'
+                    ? 'info'
+                    : 'warning'
+            }
+          >
+            {liveValidationStatusLabels[liveValidation?.status ?? 'not_started']}
+          </StatusPill>
+        </div>
+        {(liveValidation?.status ?? 'not_started') === 'not_started' ? (
+          <div className="uc-provider-page__live-start">
+            <div className="uc-provider-page__live-approvals">
+              <Approval
+                checked={liveApproval.confirmLiveNetwork}
+                label="允许本次验证连接 Vidu 官方服务"
+                onChange={(checked) => setLiveApproval((current) => ({ ...current, confirmLiveNetwork: checked }))}
+              />
+              <Approval
+                checked={liveApproval.confirmCredentialUse}
+                label="允许主进程使用本机安全存储中的 Token"
+                onChange={(checked) => setLiveApproval((current) => ({ ...current, confirmCredentialUse: checked }))}
+              />
+              <Approval
+                checked={liveApproval.confirmImageBillableAttempt}
+                label="批准最多一次真实图片收费提交"
+                onChange={(checked) => setLiveApproval((current) => ({ ...current, confirmImageBillableAttempt: checked }))}
+              />
+              <Approval
+                checked={liveApproval.confirmVideoBillableAttempt}
+                label="批准最多一次真实视频收费提交"
+                onChange={(checked) => setLiveApproval((current) => ({ ...current, confirmVideoBillableAttempt: checked }))}
+              />
+            </div>
+            <Button
+              disabled={busy || !providersApi || !Object.values(liveApproval).every(Boolean)}
+              onClick={() => void handleStartLiveValidation()}
+            >
+              验证鉴权并启动
+            </Button>
+          </div>
+        ) : (
+          <div className="uc-provider-page__live-facts">
+            <span>图片次数：{describeBudget(liveValidation!.budget.image)}</span>
+            <span>视频次数：{describeBudget(liveValidation!.budget.video)}</span>
+            <span>最后更新：{liveValidation?.updatedAt ? new Date(liveValidation.updatedAt).toLocaleString('zh-CN') : '无'}</span>
+          </div>
+        )}
+        {liveValidation?.events.length ? (
+          <ol className="uc-provider-page__live-events">
+            {liveValidation.events.slice(-5).map((event) => (
+              <li key={event.sequence}>
+                <span>{liveStageLabels[event.stage]}</span>
+                <StatusPill tone={event.state === 'succeeded' ? 'success' : event.state === 'failed' ? 'danger' : 'info'}>
+                  {event.state}
+                </StatusPill>
+                <time>{new Date(event.recordedAt).toLocaleString('zh-CN')}</time>
+              </li>
+            ))}
+          </ol>
+        ) : null}
       </Card>
 
       {message && <p className="uc-provider-page__message" role="status">{message}</p>}
@@ -778,4 +931,35 @@ export function ProvidersPage() {
       )}
     </section>
   );
+}
+
+function Approval({
+  checked,
+  label,
+  onChange
+}: {
+  readonly checked: boolean;
+  readonly label: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="uc-provider-page__live-approval">
+      <input
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function describeBudget(
+  budget: ViduLiveValidationStatusDto['budget']['image']
+): string {
+  if (budget.billingFact === 'accepted_or_completed') return '已使用';
+  if (budget.billingFact === 'submission_outcome_unknown') return '结果未知，不可重试';
+  if (budget.claimState === 'claimed') return '已领取';
+  if (budget.claimState === 'available') return '可用 1 次';
+  return '不可用';
 }

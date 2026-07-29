@@ -16,8 +16,77 @@ export const providerIpcChannels = {
   updateConnection: 'providers:update-connection',
   setConnectionEnabled: 'providers:set-connection-enabled',
   deleteConnection: 'providers:delete-connection',
-  setModelEnabled: 'providers:set-model-enabled'
+  setModelEnabled: 'providers:set-model-enabled',
+  getViduLiveValidation: 'providers:get-vidu-live-validation',
+  startViduLiveValidation: 'providers:start-vidu-live-validation'
 } as const;
+
+export type ViduLiveValidationIpcErrorCode =
+  | 'invalid_request'
+  | 'already_started'
+  | 'connection_not_ready'
+  | 'validation_operation_failed';
+
+export interface ViduLiveValidationApprovalDto {
+  readonly confirmLiveNetwork: boolean;
+  readonly confirmCredentialUse: boolean;
+  readonly confirmImageBillableAttempt: boolean;
+  readonly confirmVideoBillableAttempt: boolean;
+}
+
+export interface ViduLiveValidationStatusDto {
+  readonly status: 'not_started' | 'active' | 'passed' | 'failed' | 'blocked';
+  readonly startedAt?: string;
+  readonly updatedAt?: string;
+  readonly stopCode?: string;
+  readonly budget: {
+    readonly image: {
+      readonly claimState: 'available' | 'claimed' | 'not_available';
+      readonly billingFact:
+        | 'not_attempted'
+        | 'attempt_claimed'
+        | 'accepted_or_completed'
+        | 'failed_before_submission'
+        | 'submission_outcome_unknown';
+    };
+    readonly video: {
+      readonly claimState: 'available' | 'claimed' | 'not_available';
+      readonly billingFact:
+        | 'not_attempted'
+        | 'attempt_claimed'
+        | 'accepted_or_completed'
+        | 'failed_before_submission'
+        | 'submission_outcome_unknown';
+    };
+  };
+  readonly events: readonly {
+    readonly sequence: number;
+    readonly stage:
+      | 'readiness'
+      | 'credits_validation'
+      | 'image_submission'
+      | 'image_local_result'
+      | 'video_confirmation'
+      | 'video_submission'
+      | 'video_polling'
+      | 'video_local_result'
+      | 'flow';
+    readonly state: 'claimed' | 'progress' | 'succeeded' | 'failed' | 'blocked';
+    readonly recordedAt: string;
+    readonly errorCode?: string;
+    readonly providerState?: string;
+  }[];
+}
+
+export type ViduLiveValidationIpcResult =
+  | { readonly ok: true; readonly value: ViduLiveValidationStatusDto }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: ViduLiveValidationIpcErrorCode;
+        readonly message: string;
+      };
+    };
 
 export type ProviderManagementErrorCode =
   | 'adapter_unavailable'
@@ -294,4 +363,8 @@ export interface ProviderApi {
     modelId: string,
     enabled: boolean
   ): Promise<ProviderManagementResult>;
+  getViduLiveValidation(): Promise<ViduLiveValidationIpcResult>;
+  startViduLiveValidation(
+    approval: ViduLiveValidationApprovalDto
+  ): Promise<ViduLiveValidationIpcResult>;
 }

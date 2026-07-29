@@ -96,6 +96,13 @@ export class JsonProviderRegistryStore {
     await operation;
   }
 
+  async ensureFrozenViduCatalog(): Promise<void> {
+    const current = await this.load();
+    const next = mergeMissingFrozenViduRecords(current);
+    if (next === current) return;
+    await this.save(next);
+  }
+
   private async write(snapshot: ProviderRegistrySnapshot): Promise<void> {
     try {
       const current = parseSnapshot(
@@ -125,6 +132,49 @@ export class JsonProviderRegistryStore {
       await rm(temporary, { force: true });
     }
   }
+}
+
+function mergeMissingFrozenViduRecords(
+  current: ProviderRegistrySnapshot
+): ProviderRegistrySnapshot {
+  const frozen = createFrozenViduRegistryRecords();
+  const providers = appendMissingById(current.providers, frozen.providers);
+  const connections = appendMissingById(current.connections, frozen.connections);
+  const protocolBindings = appendMissingById(
+    current.protocolBindings,
+    frozen.protocolBindings
+  );
+  const models = appendMissingById(current.models, frozen.models);
+  const capabilities = appendMissingById(
+    current.capabilities,
+    frozen.capabilities
+  );
+  if (
+    providers === current.providers &&
+    connections === current.connections &&
+    protocolBindings === current.protocolBindings &&
+    models === current.models &&
+    capabilities === current.capabilities
+  ) {
+    return current;
+  }
+  return {
+    ...current,
+    providers,
+    connections,
+    protocolBindings,
+    models,
+    capabilities
+  };
+}
+
+function appendMissingById<T extends { readonly id: string }>(
+  current: readonly T[],
+  frozen: readonly T[]
+): readonly T[] {
+  const existingIds = new Set(current.map((record) => record.id));
+  const missing = frozen.filter((record) => !existingIds.has(record.id));
+  return missing.length === 0 ? current : [...current, ...missing];
 }
 
 export class ProviderRegistryController {

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createProvider,
   createProviderConnection,
@@ -110,6 +110,130 @@ describe('ProviderCredentialController', () => {
         value: 'fixture-value'
       })
     ).toMatchObject({ ok: false, error: { code: 'connection_not_found' } });
+  });
+
+  it('rotates a replacement credential and clears prior connection validation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-provider-credential-'));
+    roots.push(root);
+    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const vault = new SecureCredentialVault(
+      path.join(root, 'secure-credentials.json'),
+      protector()
+    );
+    const controller = new ProviderCredentialController(registry, vault);
+    const provider = createProvider({
+      id: toProviderId('provider-replace-fixture'),
+      name: 'Replace fixture provider',
+      accessCategory: 'online',
+      identityState: 'verified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const connection = createProviderConnection({
+      id: toConnectionId('connection-replace-fixture'),
+      providerId: provider.id,
+      name: 'Replace fixture connection',
+      state: 'available',
+      identityState: 'verified',
+      credentialState: 'valid',
+      credentialReference: 'credential-replace-old',
+      lastConnectionValidationAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    await vault.save('credential-replace-old', 'old-fixture-value');
+    await registry.save({
+      schemaVersion: 2,
+      providers: [provider],
+      connections: [connection],
+      protocolBindings: [],
+      models: [],
+      capabilities: [],
+      routingPreferences: []
+    });
+
+    expect(
+      await controller.saveCredential({
+        connectionId: connection.id,
+        value: 'new-fixture-value'
+      })
+    ).toEqual({ ok: true, value: { state: 'saved' } });
+    const savedConnection = (await registry.load()).connections[0];
+    expect(savedConnection).toMatchObject({
+      state: 'saved',
+      identityState: 'unverified',
+      credentialState: 'saved'
+    });
+    expect(savedConnection.lastConnectionValidationAt).toBeUndefined();
+    expect(savedConnection.credentialReference).not.toBe(
+      connection.credentialReference
+    );
+    expect(await vault.status('credential-replace-old')).toBe('not_configured');
+    await expect(
+      vault.useValue(savedConnection.credentialReference!, async (value) => value)
+    ).resolves.toBe('new-fixture-value');
+  });
+
+  it('keeps the previous credential and validation facts when registry save fails', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-provider-credential-'));
+    roots.push(root);
+    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const vaultPath = path.join(root, 'secure-credentials.json');
+    const vault = new SecureCredentialVault(vaultPath, protector());
+    const controller = new ProviderCredentialController(registry, vault);
+    const provider = createProvider({
+      id: toProviderId('provider-rollback-fixture'),
+      name: 'Rollback fixture provider',
+      accessCategory: 'online',
+      identityState: 'verified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const connection = createProviderConnection({
+      id: toConnectionId('connection-rollback-fixture'),
+      providerId: provider.id,
+      name: 'Rollback fixture connection',
+      state: 'available',
+      identityState: 'verified',
+      credentialState: 'valid',
+      credentialReference: 'credential-rollback-old',
+      lastConnectionValidationAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    await vault.save('credential-rollback-old', 'old-fixture-value');
+    await registry.save({
+      schemaVersion: 2,
+      providers: [provider],
+      connections: [connection],
+      protocolBindings: [],
+      models: [],
+      capabilities: [],
+      routingPreferences: []
+    });
+    vi.spyOn(registry, 'save').mockRejectedValueOnce(
+      new Error('fixture registry failure')
+    );
+
+    expect(
+      await controller.saveCredential({
+        connectionId: connection.id,
+        value: 'new-fixture-value'
+      })
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'credential_operation_failed' }
+    });
+    expect((await registry.load()).connections[0]).toEqual(connection);
+    await expect(
+      vault.useValue('credential-rollback-old', async (value) => value)
+    ).resolves.toBe('old-fixture-value');
+    const vaultSnapshot = JSON.parse(await readFile(vaultPath, 'utf8')) as {
+      entries: { reference: string }[];
+    };
+    expect(vaultSnapshot.entries.map((entry) => entry.reference)).toEqual([
+      'credential-rollback-old'
+    ]);
   });
 
   it('soft-deletes a connection while preserving historical model facts', async () => {

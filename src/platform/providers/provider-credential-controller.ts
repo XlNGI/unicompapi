@@ -23,8 +23,8 @@ export class ProviderCredentialController {
         (item) => item.id === connectionId
       );
       if (!connection) return failure('connection_not_found');
-      const createdReference = connection.credentialReference === undefined;
-      const reference = connection.credentialReference ?? `credential-${randomUUID()}`;
+      const previousReference = connection.credentialReference;
+      const reference = `credential-${randomUUID()}`;
       await this.vault.save(reference, value);
       try {
         await this.registry.save({
@@ -33,12 +33,21 @@ export class ProviderCredentialController {
             ...connection,
             credentialReference: reference,
             credentialState: 'saved',
+            state:
+              connection.state === 'disabled' || connection.state === 'deleted'
+                ? connection.state
+                : 'saved',
+            identityState: 'unverified',
+            lastConnectionValidationAt: undefined,
             updatedAt: toIsoTimestamp(new Date().toISOString())
           })
         });
       } catch (error) {
-        if (createdReference) await this.vault.remove(reference).catch(() => false);
+        await this.vault.remove(reference).catch(() => false);
         throw error;
+      }
+      if (previousReference) {
+        await this.vault.remove(previousReference).catch(() => false);
       }
       return { ok: true, value: { state: 'saved' } };
     } catch (error) {

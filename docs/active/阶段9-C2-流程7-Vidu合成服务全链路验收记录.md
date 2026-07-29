@@ -2,11 +2,13 @@
 
 日期：2026-07-29
 
-状态：实现和分支门禁已完成，等待连续授权下提交、推送与非快进合并 `develop`
+状态：已完成并通过门禁；实现与截断响应修复已分别通过 `e4ba8c4` 和 `bd86cbf` 非快进合并 `develop`，`origin/develop` 已同步至 `bd86cbf`
 
 分支：`feature/vidu-e2e-validation`
 
 基线：`develop@90a2d586a29ccdac1ba044ca13d4f3f548fe5ace`
+
+合并结果：`e4ba8c4 Merge phase 9 C2 Vidu synthetic end-to-end validation`、`bd86cbf Merge Vidu decoded response length fix`
 
 ## 一、范围与安全边界
 
@@ -47,12 +49,12 @@
 - `npm run audit:platform`：扫描 213 个文件，0 违规；
 - `npm run verify:handoff`：50 个 checksum 条目、27 个资产，0 失败；
 - `git diff --check`：通过；
-- Windows Electron 生产构建烟测：新增 4 个进程、4/4 响应，窗口关闭后本次残留 0；烟测前已有 4 个旧 Electron 进程未被终止。
+- Windows Electron 生产构建烟测：新增 4 个进程、4/4 响应并出现 1 个窗口；程序化关闭未让主进程自行退出，随后仅清理本次仓库进程，清理后本次残留 0；烟测前已有 4 个旧 Electron 进程未被终止。
 
 ## 五、未完成项与停止边界
 
 - 合成夹具中的 Image V1 `token` 鉴权和输入结构只用于验证架构分支，不构成官方 `verified_supported` 证据；
 - Image V1 准确鉴权、`images` 结构、真实模型权限、账户、费用、远端 MIME/域名和 URL 有效期仍未通过官方环境验证；
 - 冻结 Vidu 模型继续 disabled，CapabilityEvidence 继续 `declared_supported`；
-- 流程 8 尚未批准。流程 7 合并并复验后立即停止，不创建 `feature/vidu-live-validation`，不读取真实 Token，不联网，不收费；
+- 流程 7 已合并并同步 `origin/develop@bd86cbf`；流程 8 尚未批准，不创建 `feature/vidu-live-validation`，不读取真实 Token，不联网，不收费；
 - 阶段 9 A3、B4、A4、macOS 实机和阶段 10 发布准入均未因本流程完成而通过。

@@ -186,6 +186,89 @@ describe('JsonProviderRegistryStore', () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/price|cost|duration|resolution/i);
   });
 
+  it('adds missing frozen Vidu records to an existing v2 registry without changing user records', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
+    roots.push(root);
+    const registryPath = path.join(root, 'registry.json');
+    const store = new JsonProviderRegistryStore(registryPath);
+    const provider = createProvider({
+      id: toProviderId('provider-custom'),
+      name: 'Custom provider',
+      accessCategory: 'custom_remote',
+      identityState: 'unverified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const connection = createProviderConnection({
+      id: toConnectionId('connection-custom-deleted'),
+      providerId: provider.id,
+      name: 'Deleted custom connection',
+      state: 'deleted',
+      identityState: 'unverified',
+      credentialState: 'saved',
+      credentialReference: 'credential-reference-must-survive',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    await store.save({
+      schemaVersion: 2,
+      providers: [provider],
+      connections: [connection],
+      protocolBindings: [],
+      models: [],
+      capabilities: [],
+      routingPreferences: []
+    });
+
+    await store.ensureFrozenViduCatalog();
+
+    const snapshot = await store.load();
+    expect(snapshot.providers[0]).toEqual(provider);
+    expect(snapshot.connections[0]).toEqual(connection);
+    expect(snapshot.providers.some((item) => item.id === 'provider-vidu')).toBe(true);
+    expect(
+      snapshot.connections.some((item) => item.id === 'connection-vidu-default')
+    ).toBe(true);
+    expect(snapshot.protocolBindings).toHaveLength(3);
+    expect(snapshot.models).toHaveLength(10);
+    expect(snapshot.capabilities.length).toBeGreaterThan(10);
+  });
+
+  it('preserves existing same-id Vidu records and immutable capability history', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
+    roots.push(root);
+    const registryPath = path.join(root, 'registry.json');
+    const store = new JsonProviderRegistryStore(registryPath);
+    const seeded = await store.load();
+    const viduProvider = seeded.providers[0];
+    const viduConnection = seeded.connections[0];
+    const firstEvidence = seeded.capabilities[0];
+    if (!viduProvider || !viduConnection || !firstEvidence) {
+      throw new Error('frozen Vidu fixture missing');
+    }
+    const existingProvider = { ...viduProvider, name: 'Existing Vidu record' };
+    const deletedConnection = {
+      ...viduConnection,
+      state: 'deleted' as const,
+      credentialState: 'saved' as const,
+      credentialReference: 'existing-credential-reference'
+    };
+    await store.save({
+      ...seeded,
+      providers: [existingProvider],
+      connections: [deletedConnection],
+    });
+
+    await store.ensureFrozenViduCatalog();
+
+    const snapshot = await store.load();
+    expect(snapshot.providers[0]).toEqual(existingProvider);
+    expect(snapshot.connections[0]).toEqual(deletedConnection);
+    expect(snapshot.capabilities).toEqual(seeded.capabilities);
+    expect(snapshot.capabilities.filter((item) => item.id === firstEvidence.id)).toHaveLength(1);
+    expect(snapshot.models).toHaveLength(10);
+  });
+
   it('rejects removal or mutation of persisted capability history', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);

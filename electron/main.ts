@@ -61,7 +61,8 @@ const storageLifecycle = registerStorageIpcHandlers({
 registerProviderIpcHandlers({
   registry: viduComposition.registry,
   credentialVault: viduComposition.credentialVault,
-  connectionValidation: viduComposition.providerPackage.connectionValidation
+  connectionValidation: viduComposition.providerPackage.connectionValidation,
+  liveValidation: viduComposition.liveValidation
 });
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {
@@ -158,6 +159,7 @@ function createMainWindow(): BrowserWindow {
 
 app.whenReady().then(async () => {
   await settingsLifecycle.activate();
+  await viduComposition.registry.ensureFrozenViduCatalog();
   protocol.handle('unicomp-media', async (request) => {
     const url = new URL(request.url);
     const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
