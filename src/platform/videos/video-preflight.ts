@@ -4,6 +4,7 @@ import type {
   DynamicParameterSchema,
   ModelCapabilityEvidence,
   ProviderAccessCategory,
+  ProviderOperationPurpose,
   VideoDynamicParameterValue,
   VideoGenerationModeCapabilitySchema,
   VideoMaterialSelection,
@@ -36,6 +37,10 @@ export function buildVideoPreflight(
   registry: ProviderRegistrySnapshot,
   materialFacts: readonly VideoMaterialFact[]
 ): VideoPreflightDto {
+  const capabilityPurpose: ProviderOperationPurpose =
+    draft.mode === 'image_to_video'
+      ? 'reference_to_video'
+      : 'video_generation';
   const blockers = new Set<VideoSubmissionErrorCode>();
   const candidateDiscoveryBlockers = new Set<VideoSubmissionErrorCode>();
 
@@ -52,6 +57,9 @@ export function buildVideoPreflight(
   );
   const providers = new Map(
     registry.providers.map((provider) => [provider.id, provider])
+  );
+  const bindings = new Map(
+    registry.protocolBindings.map((binding) => [binding.id, binding])
   );
   const selectedModelId = draft.generation.model?.modelId;
   const preferences = registry.routingPreferences
@@ -73,11 +81,20 @@ export function buildVideoPreflight(
     if (!model?.enabled || connection?.state !== 'available' || !provider) {
       continue;
     }
+    const binding = bindings.get(model.protocolBindingId);
+    if (
+      model.mediaKind !== 'video' ||
+      binding?.mediaKind !== 'video' ||
+      !binding.supportedPurposes.includes(capabilityPurpose)
+    ) {
+      candidateDiscoveryBlockers.add('no_route_candidate');
+      continue;
+    }
 
     const evidence = selectEvidence(
       registry.capabilities,
       model.id,
-      'video_generation'
+      capabilityPurpose
     );
     if (!evidence) {
       candidateDiscoveryBlockers.add('capability_unverified');
@@ -406,7 +423,7 @@ function selectEvidence(
           item.state as (typeof acceptedCapabilityStates)[number]
         )
     )
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
 }
 
 function outboundScopeForAccess(

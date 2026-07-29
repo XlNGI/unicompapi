@@ -11,6 +11,7 @@ const operations = [
   'createConversation',
   'getConversation',
   'listConversations',
+  'listConversationCandidates',
   'renameConversation',
   'archiveConversation',
   'restoreConversation',

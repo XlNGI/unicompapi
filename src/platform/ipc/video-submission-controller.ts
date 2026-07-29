@@ -7,9 +7,13 @@ import {
   toDraftId,
   toExecutionId,
   toIsoTimestamp,
+  toProviderOperationRecordId,
   toTaskId,
   transitionExecution,
   type Execution,
+  type ProviderExecutionLifecycle,
+  type ProviderOperationRecordId,
+  type ProviderSubmitOutcome,
   type Task,
   type VideoSubmissionConfirmationSnapshot,
   type VideoSubmissionModeInput,
@@ -28,14 +32,23 @@ import {
   parameterValuesForVideoDraft,
   videoMaterialSelections,
   VideoOperationPortError,
+  type VideoGenerationSubmitResult,
   type VideoGenerationSubmitPort,
   type VideoMaterialFact
 } from '../videos';
-import type { JsonProviderRegistryStore } from '../providers';
+import type {
+  JsonProviderRegistryStore,
+  ProviderAsyncOperationPort
+} from '../providers';
+import {
+  ProviderAsyncOperationCoordinator,
+  ProviderExecutionLifecycleService
+} from '../providers';
 import {
   JsonAssetRepository,
   JsonExecutionRepository,
   JsonFileReferenceRepository,
+  JsonProviderOperationRepository,
   JsonTaskRepository,
   JsonVideoWorkspaceRepository
 } from '../repositories';
@@ -48,6 +61,7 @@ export interface VideoSubmissionControllerDependencies {
   providerRegistry: JsonProviderRegistryStore;
   mutations: VideoWorkspaceMutationCoordinator;
   operationPort?: VideoGenerationSubmitPort;
+  asyncOperationPort?: ProviderAsyncOperationPort;
   resultReceiver?: {
     receive(
       executionId: string
@@ -55,6 +69,7 @@ export interface VideoSubmissionControllerDependencies {
   };
   createTaskId?(): string;
   createExecutionId?(): string;
+  createProviderOperationRecordId?(): string;
   now?(): string;
   onError?(error: unknown): void;
 }
@@ -190,6 +205,12 @@ export class VideoSubmissionController {
           throw submissionError('invalid_request', 'Task is not a video task');
         }
         const previous = await latestExecution(context.executionRepository, task);
+        if (previous?.state === 'submission_outcome_unknown') {
+          throw submissionError(
+            'submission_outcome_unknown',
+            'The previous paid submission outcome is unknown; create and confirm a new task before retrying'
+          );
+        }
         const createdAt = this.now();
         const execution = previous
           ? createRetryExecution(previous, this.createExecutionId(), createdAt)
@@ -236,39 +257,37 @@ export class VideoSubmissionController {
 
         const submitting = transitionExecution(execution, 'submitting', this.now());
         await context.executionRepository.save(submitting);
+        let outcome: ProviderSubmitOutcome;
         try {
-          const remote = await this.dependencies.operationPort.submit({
-            task,
-            execution: submitting
-          });
-          if (remote.remoteOperationId.trim().length === 0) {
-            throw new VideoOperationPortError(
-              'not_retryable',
-              'Remote adapter returned an invalid operation ID'
-            );
-          }
-          const submitted = transitionExecution(
-            submitting,
-            remote.state,
-            this.now(),
-            { remoteOperationId: remote.remoteOperationId }
+          outcome = normalizeVideoSubmitOutcome(
+            await this.dependencies.operationPort.submit({
+              task,
+              execution: submitting
+            })
           );
-          await context.executionRepository.save(submitted);
-          return toExecutionDto(submitted);
         } catch (error) {
-          const failure = transitionExecution(submitting, 'failed', this.now(), {
-            failure: {
-              stage: 'submitting',
-              message: 'The remote video generation could not be submitted',
-              retryability:
-                error instanceof VideoOperationPortError
-                  ? error.retryability
-                  : 'unknown'
-            }
-          });
-          await context.executionRepository.save(failure);
-          return toExecutionDto(failure);
+          outcome = videoSubmitFailureOutcome(error);
         }
+        const registry = await this.dependencies.providerRegistry.load();
+        const executionLifecycle = videoLifecycleForModel(
+          registry,
+          task.submission.video.modelId
+        );
+        const lifecycle = new ProviderExecutionLifecycleService({
+          executionRepository: context.executionRepository,
+          operationRepository: context.operationRepository,
+          createRecordId: () => this.createProviderOperationRecordId(),
+          now: () => this.now()
+        });
+        return toExecutionDto(
+          await lifecycle.applySubmitOutcome({
+            task,
+            execution: submitting,
+            mediaKind: 'video',
+            executionLifecycle,
+            outcome
+          })
+        );
       })
     );
   }
@@ -293,6 +312,89 @@ export class VideoSubmissionController {
     }
   }
 
+  refreshExecution(
+    request: unknown
+  ): Promise<VideoSubmissionResult<VideoExecutionDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const executionId = parseId(request, 'executionId', toExecutionId);
+        const context = this.createContext();
+        const execution = await context.executionRepository.get(executionId);
+        if (!execution) {
+          throw submissionError('execution_not_found', 'Execution not found');
+        }
+        const recordId = requireAsyncRecord(execution);
+        return toExecutionDto(
+          await this.asyncCoordinator(context).refresh(recordId)
+        );
+      })
+    );
+  }
+
+  cancelExecution(
+    request: unknown
+  ): Promise<VideoSubmissionResult<VideoExecutionDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const executionId = parseId(request, 'executionId', toExecutionId);
+        const context = this.createContext();
+        const execution = await context.executionRepository.get(executionId);
+        if (!execution) {
+          throw submissionError('execution_not_found', 'Execution not found');
+        }
+        if (execution.state !== 'queued' && execution.state !== 'processing') {
+          throw submissionError(
+            'invalid_execution_state',
+            'Execution cannot be cancelled in its current state'
+          );
+        }
+        return toExecutionDto(
+          await this.asyncCoordinator(context).cancel(requireAsyncRecord(execution))
+        );
+      })
+    );
+  }
+
+  recoverExecutions(request: unknown): Promise<
+    VideoSubmissionResult<readonly VideoExecutionDto[]>
+  > {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const draftId = parseId(request, 'draftId', toDraftId);
+        const context = this.createContext();
+        const taskIds = new Set(
+          (await context.taskRepository.list(context.session.projectId))
+            .filter((task) => task.sourceDraftId === draftId)
+            .map((task) => task.id)
+        );
+        const lifecycle = new ProviderExecutionLifecycleService({
+          executionRepository: context.executionRepository,
+          operationRepository: context.operationRepository,
+          createRecordId: () => this.createProviderOperationRecordId(),
+          now: () => this.now()
+        });
+        const recovered: VideoExecutionDto[] = [];
+        for (const record of await lifecycle.listRecoverable()) {
+          if (record.mediaKind !== 'video' || !taskIds.has(record.taskId)) continue;
+          let execution = await context.executionRepository.get(record.executionId);
+          if (!execution) continue;
+          if (!execution.providerOperationRecordId && execution.state === 'submitting') {
+            execution = await lifecycle.recoverExecution(record.id);
+          }
+          if (
+            record.outcome.kind === 'accepted_async' &&
+            ['queued', 'processing', 'cancel_requested', 'cancellation_unknown']
+              .includes(execution.state)
+          ) {
+            execution = await this.asyncCoordinator(context).refresh(record.id);
+          }
+          recovered.push(toExecutionDto(execution));
+        }
+        return recovered;
+      })
+    );
+  }
+
   private createContext() {
     const session = this.dependencies.getSession();
     if (!session) {
@@ -300,6 +402,7 @@ export class VideoSubmissionController {
     }
     const storage = new NodeProjectStorage(session.rootDirectory);
     return {
+      session,
       workspaceRepository: new JsonVideoWorkspaceRepository(
         storage,
         session.projectId
@@ -307,7 +410,8 @@ export class VideoSubmissionController {
       assetRepository: new JsonAssetRepository(storage, session.projectId),
       fileRepository: new JsonFileReferenceRepository(storage, session.projectId),
       taskRepository: new JsonTaskRepository(storage, session.projectId),
-      executionRepository: new JsonExecutionRepository(storage)
+      executionRepository: new JsonExecutionRepository(storage),
+      operationRepository: new JsonProviderOperationRepository(storage)
     };
   }
 
@@ -321,6 +425,21 @@ export class VideoSubmissionController {
     };
   }
 
+  private asyncCoordinator(context: VideoSubmissionContext) {
+    if (!this.dependencies.asyncOperationPort) {
+      throw submissionError(
+        'adapter_unavailable',
+        'No asynchronous video adapter is configured'
+      );
+    }
+    return new ProviderAsyncOperationCoordinator(
+      context.executionRepository,
+      context.operationRepository,
+      this.dependencies.asyncOperationPort,
+      () => this.now()
+    );
+  }
+
   private createTaskId() {
     return toTaskId(
       this.dependencies.createTaskId?.() ?? `task-video-${randomUUID()}`
@@ -330,6 +449,13 @@ export class VideoSubmissionController {
   private createExecutionId() {
     return toExecutionId(
       this.dependencies.createExecutionId?.() ?? `execution-video-${randomUUID()}`
+    );
+  }
+
+  private createProviderOperationRecordId() {
+    return toProviderOperationRecordId(
+      this.dependencies.createProviderOperationRecordId?.() ??
+        `provider-operation-video-${randomUUID()}`
     );
   }
 
@@ -411,11 +537,11 @@ class VideoSubmissionControllerError extends Error {
 }
 
 function parseTaskRequest(request: unknown) {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, ['draftId', 'draftUpdatedAt', 'modelId', 'confirmations'])) {
     throw submissionError('invalid_request', 'Submission request is invalid');
   }
   return {
-    draftId: parseId(request, 'draftId', toDraftId),
+    draftId: parseIdValue(request.draftId, 'draftId', toDraftId),
     draftUpdatedAt: requireString(request.draftUpdatedAt),
     modelId: requireString(request.modelId),
     confirmations: isRecord(request.confirmations) ? request.confirmations : {}
@@ -427,11 +553,19 @@ function parseId<TValue>(
   field: string,
   convert: (value: string) => TValue
 ): TValue {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, [field])) {
     throw submissionError('invalid_request', `${field} is required`);
   }
+  return parseIdValue(request[field], field, convert);
+}
+
+function parseIdValue<TValue>(
+  value: unknown,
+  field: string,
+  convert: (value: string) => TValue
+): TValue {
   try {
-    return convert(requireString(request[field]));
+    return convert(requireString(value));
   } catch {
     throw submissionError('invalid_request', `${field} is invalid`);
   }
@@ -446,6 +580,14 @@ function requireString(value: unknown): string {
 
 function allConfirmationsAccepted(value: Record<string, unknown>): boolean {
   return (
+    hasExactKeys(value, [
+      'recipient',
+      'outboundScope',
+      'materials',
+      'costPrivacyRegion',
+      'finalPrompt',
+      'model'
+    ]) &&
     value.recipient === true &&
     value.outboundScope === true &&
     value.materials === true &&
@@ -453,6 +595,15 @@ function allConfirmationsAccepted(value: Record<string, unknown>): boolean {
     value.finalPrompt === true &&
     value.model === true
   );
+}
+
+function hasExactKeys(
+  value: unknown,
+  keys: readonly string[]
+): value is Record<string, unknown> {
+  return isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => keys.includes(key));
 }
 
 async function requireTask(
@@ -482,6 +633,70 @@ function toExecutionDto(execution: Execution): VideoExecutionDto {
     state: execution.state,
     retryability: execution.failure?.retryability
   };
+}
+
+function requireAsyncRecord(execution: Execution): ProviderOperationRecordId {
+  if (!execution.providerOperationRecordId) {
+    throw submissionError(
+      'invalid_execution_state',
+      'Execution does not have an asynchronous provider operation'
+    );
+  }
+  return execution.providerOperationRecordId;
+}
+
+function normalizeVideoSubmitOutcome(
+  result: VideoGenerationSubmitResult
+): ProviderSubmitOutcome {
+  if ('kind' in result) return result;
+  if (result.remoteOperationId.trim().length === 0) {
+    throw new VideoOperationPortError(
+      'not_retryable',
+      'Remote adapter returned an invalid operation ID'
+    );
+  }
+  return {
+    kind: 'accepted_async',
+    providerOperationId: result.remoteOperationId,
+    state: result.state
+  };
+}
+
+function videoSubmitFailureOutcome(error: unknown): ProviderSubmitOutcome {
+  const message = 'The remote video generation could not be submitted';
+  if (
+    error instanceof VideoOperationPortError &&
+    error.submissionStatus === 'submission_outcome_unknown'
+  ) {
+    return { kind: 'submission_outcome_unknown', message };
+  }
+  return {
+    kind: 'failed_before_submission',
+    message,
+    retryability:
+      error instanceof VideoOperationPortError
+        ? error.retryability
+        : 'unknown'
+  };
+}
+
+function videoLifecycleForModel(
+  registry: Awaited<ReturnType<JsonProviderRegistryStore['load']>>,
+  modelId: string
+): ProviderExecutionLifecycle {
+  const model = registry.models.find((candidate) => candidate.id === modelId);
+  const binding = model
+    ? registry.protocolBindings.find(
+        (candidate) => candidate.id === model.protocolBindingId
+      )
+    : undefined;
+  if (!binding) {
+    throw submissionError(
+      'no_route_candidate',
+      'The selected model has no provider protocol lifecycle'
+    );
+  }
+  return binding.executionLifecycle;
 }
 
 function submissionError(

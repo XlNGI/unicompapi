@@ -9,6 +9,7 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   toCapabilityEvidenceId,
   toConnectionId,
@@ -16,6 +17,7 @@ import {
   toExecutionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProjectId,
   toProviderId,
   toRoutingPreferenceId,
@@ -27,6 +29,7 @@ import {
   ImageWorkspaceMutationCoordinator,
   JsonExecutionRepository,
   JsonImageWorkspaceRepository,
+  JsonProviderOperationRepository,
   JsonProviderRegistryStore,
   JsonTaskRepository,
   NodeProjectStorage
@@ -41,7 +44,10 @@ afterEach(async () => {
   );
 });
 
-async function createFixture(options: { readonly failingPort?: boolean } = {}) {
+async function createFixture(options: {
+  readonly failingPort?: boolean;
+  readonly submissionMode?: 'async' | 'sync' | 'unknown';
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-submission-'));
   roots.push(root);
   const projectId = toProjectId('project-submission');
@@ -95,7 +101,10 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     id: modelId,
     providerId: provider.id,
     connectionId: connection.id,
-    name: 'submission-model',
+    protocolBindingId: toProtocolBindingId('protocol-image-submission'),
+    providerModelKey: 'submission-model',
+    mediaKind: 'image',
+    revision: 1,
     displayName: 'Submission model',
     enabled: true,
     createdAt: t0,
@@ -104,6 +113,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
   const evidence = createModelCapabilityEvidence({
     id: evidenceId,
     modelId,
+    revision: 1,
     capability: 'image_generation',
     state: 'verified_supported',
     source: 'connection_verified',
@@ -120,12 +130,30 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
       ]
     },
     observedAt: t0,
+    recordedAt: t0
+  });
+  const binding = createProviderProtocolBinding({
+    id: model.protocolBindingId,
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'fixture.image.submit',
+    protocolVersion: '1',
+    mediaKind: 'image',
+    adapterKind: 'fixture_image_submit',
+    authScheme: 'unknown',
+    executionLifecycle:
+      options.submissionMode === 'sync'
+        ? 'synchronous_completed'
+        : 'asynchronous_polling',
+    supportedPurposes: ['image_generation'],
+    createdAt: t0,
     updatedAt: t0
   });
   await registry.save({
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [binding],
     models: [model],
     capabilities: [evidence],
     routingPreferences: [
@@ -161,6 +189,25 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
           if (options.failingPort) {
             throw new ImageOperationPortError('retryable', 'temporary failure');
           }
+          if (options.submissionMode === 'unknown') {
+            throw new ImageOperationPortError(
+              'not_retryable',
+              'response lost after write',
+              'submission_outcome_unknown'
+            );
+          }
+          if (options.submissionMode === 'sync') {
+            return {
+              kind: 'completed_sync',
+              providerOperationId: 'provider-sync-operation',
+              results: [
+                {
+                  kind: 'remote_url',
+                  value: 'https://synthetic.invalid/image.png'
+                }
+              ]
+            };
+          }
           return {
             remoteOperationId: 'remote-operation-internal',
             state: 'queued'
@@ -170,6 +217,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     },
     createTaskId: () => 'task-submission',
     createExecutionId: () => executionIds.shift() ?? 'execution-fallback',
+    createProviderOperationRecordId: () => 'provider-operation-record-image',
     now: () => times.shift() ?? '2026-07-23T05:59:00.000Z'
   });
   return { controller, draft, modelId, projectId, registry, root, storage };
@@ -324,5 +372,58 @@ describe('ImageSubmissionController', () => {
       toExecutionId('execution-submission-1')
     );
     expect(stored?.state).toBe('created');
+  });
+
+  it('persists synchronous receipts and leaves result handling separate', async () => {
+    const fixture = await createFixture({ submissionMode: 'sync' });
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-submission' });
+    await expect(
+      fixture.controller.invokeExecution({
+        executionId: 'execution-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'remote_completed' }
+    });
+    const receipt = await new JsonProviderOperationRepository(
+      fixture.storage
+    ).getByExecution(toExecutionId('execution-submission-1'));
+    expect(receipt).toMatchObject({
+      outcome: {
+        kind: 'completed_sync',
+        providerOperationId: 'provider-sync-operation'
+      }
+    });
+  });
+
+  it('does not allow ordinary retry after an unknown paid submission outcome', async () => {
+    const fixture = await createFixture({ submissionMode: 'unknown' });
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-submission' });
+    await expect(
+      fixture.controller.invokeExecution({
+        executionId: 'execution-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'submission_outcome_unknown' }
+    });
+    await expect(
+      fixture.controller.createExecution({ taskId: 'task-submission' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'submission_outcome_unknown' }
+    });
   });
 });

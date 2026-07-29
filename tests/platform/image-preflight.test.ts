@@ -6,12 +6,14 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   toCapabilityEvidenceId,
   toConnectionId,
   toDraftId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProjectId,
   toProviderId,
   toRoutingPreferenceId,
@@ -76,7 +78,10 @@ function createRegistry(
     id: modelId,
     providerId: provider.id,
     connectionId: connection.id,
-    name: 'configured-model',
+    protocolBindingId: toProtocolBindingId('protocol-image-preflight'),
+    providerModelKey: 'configured-model',
+    mediaKind: 'image',
+    revision: 1,
     displayName: 'Configured model',
     enabled: true,
     createdAt: now,
@@ -85,6 +90,7 @@ function createRegistry(
   const evidence = createModelCapabilityEvidence({
     id: evidenceId,
     modelId: model.id,
+    revision: 1,
     capability: 'image_generation',
     state: options.verified === false ? 'unknown' : 'verified_supported',
     source: 'connection_verified',
@@ -103,6 +109,20 @@ function createRegistry(
           ]
         },
     observedAt: now,
+    recordedAt: now
+  });
+  const binding = createProviderProtocolBinding({
+    id: model.protocolBindingId,
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'fixture.image',
+    protocolVersion: '1',
+    mediaKind: 'image',
+    adapterKind: 'fixture_image',
+    authScheme: 'unknown',
+    executionLifecycle: 'synchronous_completed',
+    supportedPurposes: ['image_generation'],
+    createdAt: now,
     updatedAt: now
   });
   const route = createRoutingPreference({
@@ -114,9 +134,10 @@ function createRegistry(
     updatedAt: now
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [binding],
     models: [model],
     capabilities: [evidence],
     routingPreferences: [route]

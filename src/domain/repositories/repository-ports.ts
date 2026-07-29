@@ -4,6 +4,7 @@ import type { Execution } from '../entities/execution';
 import type { FileReference } from '../entities/file-reference';
 import type { ImageWorkspaceDraft } from '../entities/image-workspace';
 import type { Project } from '../entities/project';
+import type { ProviderOperationRecord } from '../entities/provider-operation';
 import type {
   ProjectContextDraftV1,
   ProjectContextV1,
@@ -37,6 +38,7 @@ import type {
   ProjectContextDraftId,
   ProjectContextId,
   ProviderId,
+  ProviderOperationRecordId,
   RoutingPreferenceId,
   TaskId,
   VideoEditDraftId,
@@ -136,6 +138,13 @@ export interface ExecutionRepository {
   get(id: ExecutionId): Promise<Execution | undefined>;
   list(taskId: TaskId): Promise<readonly Execution[]>;
   save(execution: Execution): Promise<void>;
+}
+
+export interface ProviderOperationRepository {
+  get(id: ProviderOperationRecordId): Promise<ProviderOperationRecord | undefined>;
+  getByExecution(executionId: ExecutionId): Promise<ProviderOperationRecord | undefined>;
+  list(taskId?: TaskId): Promise<readonly ProviderOperationRecord[]>;
+  save(record: ProviderOperationRecord): Promise<void>;
 }
 
 export interface WorkRepository {

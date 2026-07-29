@@ -14,18 +14,27 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
-const source = `${professionalSource}\n${controlsSource}`;
+const selectorSource = await readFile(
+  'src/pages/creation/WorkspaceContextSelector.tsx',
+  'utf8'
+);
+const submissionFlowSource = await readFile(
+  'src/pages/creation/image/useImageSubmissionFlow.ts',
+  'utf8'
+);
+const source = `${professionalSource}\n${controlsSource}\n${selectorSource}\n${submissionFlowSource}`;
 
 test('professional image keeps each context source distinct and honest', () => {
   for (const text of [
     '项目素材',
     '项目上下文',
-    '已保存的对话上下文',
+    '已保存的对话',
     '单张参考图',
     '参考图用途',
-    '尚未提供三类上下文的候选列表接口'
+    '候选只在点击后读取',
+    '保存草稿不构成向服务商外发授权'
   ]) {
-    assert.match(professionalSource, new RegExp(text));
+    assert.match(source, new RegExp(text));
   }
 
   for (const kind of [
@@ -33,8 +42,9 @@ test('professional image keeps each context source distinct and honest', () => {
     'project_context',
     'saved_conversation'
   ]) {
-    assert.match(professionalSource, new RegExp(`kind: '${kind}'`));
+    assert.match(selectorSource, new RegExp(`kind: '${kind}'`));
   }
+  assert.match(professionalSource, /WorkspaceContextSelector/);
 });
 
 test('professional image preserves the three prompt layers and dynamic facts', () => {
@@ -62,10 +72,10 @@ test('professional image uses only controlled local input and preflight', () => 
   }
 
   assert.match(workbenchSource, /ImageProfessionalWorkspace/);
-  assert.match(professionalSource, /提交生成任务/);
-  assert.match(professionalSource, /不会创建任务或伪造结果/);
+  assert.match(professionalSource, /提交图片生成/);
+  assert.match(professionalSource, /只有已验证并启用的协议能力/);
   assert.doesNotMatch(
     source,
-    /fetch\(|localStorage|absolutePath|upload|\.createTask\(|\.invokeExecution\(|OpenAI|Midjourney|1024x1024|45%/
+    /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/
   );
 });

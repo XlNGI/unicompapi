@@ -7,7 +7,8 @@ export const videoWorkspaceIpcChannels = {
   selectMaterial: 'video-workspace:select-material',
   getMaterial: 'video-workspace:get-material',
   clearMaterial: 'video-workspace:clear-material',
-  createMaterialPreview: 'video-workspace:create-material-preview'
+  createMaterialPreview: 'video-workspace:create-material-preview',
+  createFromImageWork: 'video-workspace:create-from-image-work'
 } as const;
 
 export const videoWorkspaceDtoModes = [
@@ -217,8 +218,9 @@ export type VideoWorkspaceDraftDto = VideoWorkspaceDraftDtoBase &
         };
       }
     | {
-        readonly mode: 'image_to_video';
-        readonly imageToVideo: {
+      readonly mode: 'image_to_video';
+      readonly imageToVideo: {
+          readonly source?: VideoWorkspaceMaterialSelectionDto;
           readonly materials?: VideoWorkspaceMaterialSlotsDto;
           readonly mustKeep: readonly string[];
           readonly allowedChanges: readonly string[];
@@ -247,6 +249,9 @@ export interface VideoWorkspaceApi {
   derive(
     sourceDraftId: string,
     targetMode: VideoWorkspaceDtoMode
+  ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceDraftDto>>;
+  createFromImageWork(
+    workId: string
   ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceDraftDto>>;
   selectMaterial(
     draftId: string,

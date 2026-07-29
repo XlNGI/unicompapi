@@ -31,6 +31,7 @@ import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ip
 import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
 import { videoSubmissionIpcChannels } from '../../src/shared/video-submission-ipc';
 import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
+import type { ElectronViduComposition } from './vidu-composition';
 
 export interface StorageIpcLifecycle {
   resolveEntry(token: string): ReturnType<LocalMediaHandleRegistry['resolveEntry']>;
@@ -43,6 +44,7 @@ export function registerStorageIpcHandlers(options: {
   readonly onActiveExportCountChanged?: (count: number) => void;
   readonly sessionRegistry?: StorageProjectSessionRegistry;
   readonly additionalSessionChangeGuards?: readonly (() => Promise<void>)[];
+  readonly vidu?: ElectronViduComposition;
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -65,9 +67,14 @@ export function registerStorageIpcHandlers(options: {
   const mediaHandles = new LocalMediaHandleRegistry();
   const imageMutations = new ImageWorkspaceMutationCoordinator();
   const videoMutations = new VideoWorkspaceMutationCoordinator();
-  const providerRegistry = new JsonProviderRegistryStore(
+  const providerRegistry = options.vidu?.registry ?? new JsonProviderRegistryStore(
     path.join(app.getPath('userData'), 'provider-registry.json')
   );
+  const providerOperations = options.vidu?.createOperationPorts({
+    getSession: () => sessionRegistry.get(),
+    imageMutations,
+    videoMutations
+  });
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),
     mutations: imageMutations
@@ -81,7 +88,9 @@ export function registerStorageIpcHandlers(options: {
   const imageSubmissions = new ImageSubmissionController({
     getSession: () => sessionRegistry.get(),
     providerRegistry,
-    mutations: imageMutations
+    mutations: imageMutations,
+    operationPorts: providerOperations?.image,
+    resultReceiver: providerOperations?.imageResultReceiver
   });
   const videoWorkspaces = new VideoWorkspaceController({
     getSession: () => sessionRegistry.get(),
@@ -149,7 +158,10 @@ export function registerStorageIpcHandlers(options: {
   const videoSubmissions = new VideoSubmissionController({
     getSession: () => sessionRegistry.get(),
     providerRegistry,
-    mutations: videoMutations
+    mutations: videoMutations,
+    operationPort: providerOperations?.video,
+    asyncOperationPort: providerOperations?.videoAsync,
+    resultReceiver: providerOperations?.videoResultReceiver
   });
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
@@ -281,6 +293,10 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(videoWorkspaceIpcChannels.derive, (_event, request: unknown) =>
     videoWorkspaces.derive(request)
   );
+  ipcMain.handle(
+    videoWorkspaceIpcChannels.createFromImageWork,
+    (_event, request: unknown) => videoWorkspaces.createFromImageWork(request)
+  );
   ipcMain.handle(videoEditorIpcChannels.create, (_event, request: unknown) =>
     videoEditors.create(request)
   );
@@ -393,6 +409,18 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(
     videoSubmissionIpcChannels.invokeExecution,
     (_event, request: unknown) => videoSubmissions.invokeExecution(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.refreshExecution,
+    (_event, request: unknown) => videoSubmissions.refreshExecution(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.cancelExecution,
+    (_event, request: unknown) => videoSubmissions.cancelExecution(request)
+  );
+  ipcMain.handle(
+    videoSubmissionIpcChannels.recoverExecutions,
+    (_event, request: unknown) => videoSubmissions.recoverExecutions(request)
   );
   ipcMain.handle(
     videoSubmissionIpcChannels.receiveResult,

@@ -1,6 +1,7 @@
 export const executionStates = [
   'created',
   'submitting',
+  'submission_outcome_unknown',
   'queued',
   'processing',
   'validating_sources',

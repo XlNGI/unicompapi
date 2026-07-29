@@ -220,6 +220,10 @@ const videoWorkspaces: VideoWorkspaceApi = {
     ipcRenderer.invoke(videoWorkspaceIpcChannels.createMaterialPreview, {
       draftId,
       target
+    }),
+  createFromImageWork: (workId) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.createFromImageWork, {
+      workId
     })
 };
 
@@ -239,6 +243,16 @@ const videoSubmissions: VideoSubmissionApi = {
     ipcRenderer.invoke(videoSubmissionIpcChannels.invokeExecution, {
       executionId
     }),
+  refreshExecution: (executionId) =>
+    ipcRenderer.invoke(videoSubmissionIpcChannels.refreshExecution, {
+      executionId
+    }),
+  cancelExecution: (executionId) =>
+    ipcRenderer.invoke(videoSubmissionIpcChannels.cancelExecution, {
+      executionId
+    }),
+  recoverExecutions: (draftId) =>
+    ipcRenderer.invoke(videoSubmissionIpcChannels.recoverExecutions, { draftId }),
   receiveResult: (executionId) =>
     ipcRenderer.invoke(videoSubmissionIpcChannels.receiveResult, {
       executionId
@@ -417,6 +431,8 @@ const chatContexts: ChatContextApi = {
       includeArchived,
       includeDeleted
     }),
+  listConversationCandidates: () =>
+    ipcRenderer.invoke(chatContextIpcChannels.listConversationCandidates),
   renameConversation: (conversationId, expectedRevision, title) =>
     ipcRenderer.invoke(chatContextIpcChannels.renameConversation, {
       conversationId,

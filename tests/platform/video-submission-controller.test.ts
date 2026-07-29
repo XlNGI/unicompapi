@@ -8,6 +8,7 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   createVideoWorkspaceDraft,
   toCapabilityEvidenceId,
@@ -16,6 +17,7 @@ import {
   toExecutionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProjectId,
   toProviderId,
   toRoutingPreferenceId,
@@ -41,7 +43,16 @@ afterEach(async () => {
   );
 });
 
-async function createFixture(options: { readonly failingPort?: boolean } = {}) {
+async function createFixture(options: {
+  readonly failingPort?: boolean;
+  readonly unknownOutcome?: boolean;
+  readonly queryResult?: {
+    readonly state: 'queued' | 'processing' | 'completed' | 'cancelled' | 'expired';
+  };
+  readonly cancelResult?: {
+    readonly state: 'cancelled' | 'processing' | 'unknown';
+  };
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-video-submit-'));
   roots.push(root);
   const projectId = toProjectId('project-video-submission');
@@ -100,7 +111,10 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     id: modelId,
     providerId: provider.id,
     connectionId: connection.id,
-    name: 'video-submission-model',
+    protocolBindingId: toProtocolBindingId('protocol-video-submission'),
+    providerModelKey: 'video-submission-model',
+    mediaKind: 'video',
+    revision: 1,
     displayName: 'Video submission model',
     enabled: true,
     createdAt: t0,
@@ -109,6 +123,7 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
   const evidence = createModelCapabilityEvidence({
     id: evidenceId,
     modelId,
+    revision: 1,
     capability: 'video_generation',
     state: 'verified_supported',
     source: 'connection_verified',
@@ -129,12 +144,27 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
       modes: [{ mode: 'quick_video' }]
     },
     observedAt: t0,
+    recordedAt: t0
+  });
+  const binding = createProviderProtocolBinding({
+    id: model.protocolBindingId,
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'fixture.video.submit',
+    protocolVersion: '1',
+    mediaKind: 'video',
+    adapterKind: 'fixture_video_submit',
+    authScheme: 'unknown',
+    executionLifecycle: 'asynchronous_polling',
+    supportedPurposes: ['video_generation'],
+    createdAt: t0,
     updatedAt: t0
   });
   await registry.save({
-    schemaVersion: 1,
+    schemaVersion: 2,
     providers: [provider],
     connections: [connection],
+    protocolBindings: [binding],
     models: [model],
     capabilities: [evidence],
     routingPreferences: [
@@ -160,6 +190,8 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     '2026-07-23T11:04:00.000Z',
     '2026-07-23T11:05:00.000Z'
   ];
+  const queriedOperationIds: string[] = [];
+  const cancelledOperationIds: string[] = [];
   const controller = new VideoSubmissionController({
     getSession: () => ({
       projectId,
@@ -174,15 +206,33 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
         if (options.failingPort) {
           throw new VideoOperationPortError('retryable', 'temporary failure');
         }
+        if (options.unknownOutcome) {
+          throw new VideoOperationPortError(
+            'not_retryable',
+            'response lost after write',
+            'submission_outcome_unknown'
+          );
+        }
         return {
           remoteOperationId: 'remote-video-operation-internal',
           state: 'queued'
         };
       }
     },
+    asyncOperationPort: {
+      query: async (providerOperationId) => {
+        queriedOperationIds.push(providerOperationId);
+        return options.queryResult ?? { state: 'processing' };
+      },
+      cancel: async (providerOperationId) => {
+        cancelledOperationIds.push(providerOperationId);
+        return options.cancelResult ?? { state: 'cancelled' };
+      }
+    },
     createTaskId: () => 'task-video-submission',
     createExecutionId: () =>
       executionIds.shift() ?? 'execution-video-fallback',
+    createProviderOperationRecordId: () => 'provider-operation-record-video',
     now: () => times.shift() ?? '2026-07-23T11:59:00.000Z'
   });
   return {
@@ -192,7 +242,9 @@ async function createFixture(options: { readonly failingPort?: boolean } = {}) {
     projectId,
     registry,
     root,
-    storage
+    storage,
+    queriedOperationIds,
+    cancelledOperationIds
   };
 }
 
@@ -302,6 +354,40 @@ describe('VideoSubmissionController', () => {
     });
   });
 
+  it('does not allow ordinary retry after an unknown paid submission outcome', async () => {
+    const fixture = await createFixture({ unknownOutcome: true });
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({
+      taskId: 'task-video-submission'
+    });
+    await expect(
+      fixture.controller.invokeExecution({
+        executionId: 'execution-video-submission-1'
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'submission_outcome_unknown' }
+    });
+    await expect(
+      fixture.controller.createExecution({ taskId: 'task-video-submission' })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'submission_outcome_unknown' }
+    });
+    const stored = await new JsonExecutionRepository(fixture.storage).get(
+      toExecutionId('execution-video-submission-1')
+    );
+    expect(stored).toMatchObject({
+      state: 'submission_outcome_unknown',
+      submissionOutcome: 'submission_outcome_unknown'
+    });
+  });
+
   it('returns adapter unavailable without mutating a created execution', async () => {
     const fixture = await createFixture();
     await fixture.controller.createTask({
@@ -363,5 +449,66 @@ describe('VideoSubmissionController', () => {
       toExecutionId('execution-video-submission-1')
     );
     expect(stored?.state).toBe('queued');
+  });
+
+  it('refreshes and cancels only through the stored provider operation', async () => {
+    const fixture = await createFixture();
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-video-submission' });
+    await fixture.controller.invokeExecution({
+      executionId: 'execution-video-submission-1'
+    });
+
+    const refreshed = await fixture.controller.refreshExecution({
+      executionId: 'execution-video-submission-1'
+    });
+    expect(refreshed).toMatchObject({ ok: true, value: { state: 'processing' } });
+    expect(JSON.stringify(refreshed)).not.toContain('remote-video-operation-internal');
+
+    const cancelled = await fixture.controller.cancelExecution({
+      executionId: 'execution-video-submission-1'
+    });
+    expect(cancelled).toMatchObject({ ok: true, value: { state: 'cancelled' } });
+    expect(fixture.queriedOperationIds).toEqual([
+      'remote-video-operation-internal'
+    ]);
+    expect(fixture.cancelledOperationIds).toEqual([
+      'remote-video-operation-internal'
+    ]);
+  });
+
+  it('recovers only executions belonging to the requested draft and rejects extra fields', async () => {
+    const fixture = await createFixture();
+    await fixture.controller.createTask({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      modelId: fixture.modelId,
+      confirmations
+    });
+    await fixture.controller.createExecution({ taskId: 'task-video-submission' });
+    await fixture.controller.invokeExecution({
+      executionId: 'execution-video-submission-1'
+    });
+
+    await expect(
+      fixture.controller.recoverExecutions({ draftId: 'draft-other' })
+    ).resolves.toEqual({ ok: true, value: [] });
+    await expect(
+      fixture.controller.recoverExecutions({ draftId: fixture.draft.id })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: [{ executionId: 'execution-video-submission-1', state: 'processing' }]
+    });
+    await expect(
+      fixture.controller.refreshExecution({
+        executionId: 'execution-video-submission-1',
+        endpoint: 'https://attacker.invalid'
+      })
+    ).resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
   });
 });

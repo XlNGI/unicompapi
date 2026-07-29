@@ -18,10 +18,20 @@ const allowedTransitions: Record<ExecutionState, readonly ExecutionState[]> = {
   submitting: [
     'queued',
     'processing',
+    'remote_completed',
+    'submission_outcome_unknown',
     'failed',
     'cancellation_unknown'
   ],
-  queued: ['processing', 'validating_sources', 'cancel_requested', 'failed', 'expired', 'interrupted'],
+  submission_outcome_unknown: [
+    'queued',
+    'processing',
+    'remote_completed',
+    'cancelled',
+    'failed',
+    'expired'
+  ],
+  queued: ['processing', 'remote_completed', 'validating_sources', 'cancel_requested', 'cancelled', 'failed', 'expired', 'interrupted'],
   validating_sources: ['preparing_media', 'needs_user_action', 'cancel_requested', 'failed', 'interrupted'],
   preparing_media: ['encoding', 'needs_user_action', 'cancel_requested', 'failed', 'interrupted'],
   encoding: ['writing_file', 'cancel_requested', 'failed', 'interrupted'],
@@ -31,6 +41,7 @@ const allowedTransitions: Record<ExecutionState, readonly ExecutionState[]> = {
   processing: [
     'remote_completed',
     'cancel_requested',
+    'cancelled',
     'failed',
     'expired'
   ],
@@ -73,6 +84,8 @@ export interface ExecutionTransitionContext {
   readonly failure?: ExecutionFailure;
   readonly userAction?: ExecutionUserAction;
   readonly remoteOperationId?: string;
+  readonly providerOperationRecordId?: Execution['providerOperationRecordId'];
+  readonly submissionOutcome?: Execution['submissionOutcome'];
   readonly progress?: Execution['progress'];
   readonly outputFileId?: Execution['outputFileId'];
   readonly workId?: Execution['workId'];
@@ -152,6 +165,30 @@ export function transitionExecution(
     );
   }
 
+  if (
+    context.submissionOutcome !== undefined &&
+    ![
+      'queued',
+      'processing',
+      'remote_completed',
+      'submission_outcome_unknown',
+      'failed'
+    ].includes(nextState)
+  ) {
+    throw new InvariantViolationError(
+      'submission outcome can only be attached during provider submission'
+    );
+  }
+
+  if (
+    context.providerOperationRecordId !== undefined &&
+    context.submissionOutcome === undefined
+  ) {
+    throw new InvariantViolationError(
+      'provider operation record requires a submission outcome'
+    );
+  }
+
   return {
     ...execution,
     state: nextState,
@@ -159,6 +196,10 @@ export function transitionExecution(
     userAction: context.userAction,
     remoteOperationId:
       context.remoteOperationId ?? execution.remoteOperationId,
+    providerOperationRecordId:
+      context.providerOperationRecordId ?? execution.providerOperationRecordId,
+    submissionOutcome:
+      context.submissionOutcome ?? execution.submissionOutcome,
     progress: context.progress ?? execution.progress,
     outputFileId: context.outputFileId ?? execution.outputFileId,
     workId: context.workId ?? execution.workId,
@@ -181,6 +222,13 @@ export function createRetryExecution(
   if (previous.state === 'cancellation_unknown') {
     throw new RetryNotAllowedError(
       'cannot retry while remote cancellation status is unknown'
+    );
+  }
+
+
+  if (previous.state === 'submission_outcome_unknown') {
+    throw new RetryNotAllowedError(
+      'cannot retry an execution whose paid submission outcome is unknown'
     );
   }
 

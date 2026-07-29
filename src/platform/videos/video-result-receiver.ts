@@ -53,6 +53,7 @@ export interface LocalVideoResultReceiverDependencies {
   createFileId?(): string;
   createWorkId?(): string;
   now?(): string;
+  maximumResultBytes?: number;
   onError?(error: unknown): void;
 }
 
@@ -72,11 +73,16 @@ interface ResultCandidate {
 
 export class LocalVideoResultReceiver {
   private readonly videoInspector: VideoInspector;
+  private readonly maximumResultBytes: number;
 
   constructor(
     private readonly dependencies: LocalVideoResultReceiverDependencies
   ) {
     this.videoInspector = dependencies.videoInspector ?? new NodeVideoInspector();
+    this.maximumResultBytes = dependencies.maximumResultBytes ?? 512 * 1024 * 1024;
+    if (!Number.isSafeInteger(this.maximumResultBytes) || this.maximumResultBytes < 1) {
+      throw new TypeError('maximum video result bytes must be a positive integer');
+    }
   }
 
   receive(
@@ -96,7 +102,9 @@ export class LocalVideoResultReceiver {
           throw receiverError('execution_not_found', 'Execution not found');
         }
         if (
-          (execution.state !== 'queued' && execution.state !== 'processing') ||
+          !['queued', 'processing', 'remote_completed'].includes(
+            execution.state
+          ) ||
           !execution.remoteOperationId
         ) {
           throw receiverError(
@@ -129,13 +137,15 @@ export class LocalVideoResultReceiver {
           await context.executionRepository.save(processing);
           execution = processing;
         }
-        const remoteCompleted = transitionExecution(
-          execution,
-          'remote_completed',
-          this.now()
-        );
-        await context.executionRepository.save(remoteCompleted);
-        execution = remoteCompleted;
+        if (execution.state === 'processing') {
+          const remoteCompleted = transitionExecution(
+            execution,
+            'remote_completed',
+            this.now()
+          );
+          await context.executionRepository.save(remoteCompleted);
+          execution = remoteCompleted;
+        }
         const downloading = transitionExecution(
           execution,
           'downloading',
@@ -320,7 +330,9 @@ export class LocalVideoResultReceiver {
       );
       await pipeline(
         source,
-        expectedByteLimit(descriptor.expectedSizeBytes),
+        expectedByteLimit(
+          descriptor.expectedSizeBytes ?? this.maximumResultBytes
+        ),
         createWriteStream(temporaryPath, { flags: 'wx' })
       );
     } catch (error) {
@@ -532,13 +544,20 @@ function validateDescriptors(
       name.length === 0 ||
       name === '.' ||
       name === '..' ||
-      !['video/mp4', 'video/quicktime'].includes(descriptor.declaredMimeType) ||
-      !['mp4', 'quicktime'].includes(descriptor.declaredContainer) ||
-      !isPositiveSafeInteger(descriptor.expectedSizeBytes) ||
-      !/^[a-f0-9]{64}$/.test(descriptor.expectedChecksumSha256) ||
-      !isPositiveSafeInteger(descriptor.expectedDurationMs) ||
-      !isPositiveSafeInteger(descriptor.expectedWidth) ||
-      !isPositiveSafeInteger(descriptor.expectedHeight)
+      (descriptor.declaredMimeType !== undefined &&
+        !['video/mp4', 'video/quicktime'].includes(descriptor.declaredMimeType)) ||
+      (descriptor.declaredContainer !== undefined &&
+        !['mp4', 'quicktime'].includes(descriptor.declaredContainer)) ||
+      (descriptor.expectedSizeBytes !== undefined &&
+        !isPositiveSafeInteger(descriptor.expectedSizeBytes)) ||
+      (descriptor.expectedChecksumSha256 !== undefined &&
+        !/^[a-f0-9]{64}$/.test(descriptor.expectedChecksumSha256)) ||
+      (descriptor.expectedDurationMs !== undefined &&
+        !isPositiveSafeInteger(descriptor.expectedDurationMs)) ||
+      (descriptor.expectedWidth !== undefined &&
+        !isPositiveSafeInteger(descriptor.expectedWidth)) ||
+      (descriptor.expectedHeight !== undefined &&
+        !isPositiveSafeInteger(descriptor.expectedHeight))
     ) {
       throw receiverError(
         'result_verification_failed',
@@ -578,14 +597,21 @@ function assertExpectedResult(
   verification: { readonly checksumSha256: string; readonly sizeBytes: number }
 ): void {
   if (
-    descriptor.declaredMimeType !== inspection.mimeType ||
-    descriptor.declaredContainer !== inspection.container ||
-    descriptor.expectedSizeBytes !== inspection.sizeBytes ||
-    descriptor.expectedSizeBytes !== verification.sizeBytes ||
-    descriptor.expectedChecksumSha256 !== verification.checksumSha256 ||
-    descriptor.expectedDurationMs !== inspection.durationMs ||
-    descriptor.expectedWidth !== inspection.width ||
-    descriptor.expectedHeight !== inspection.height
+    (descriptor.declaredMimeType !== undefined &&
+      descriptor.declaredMimeType !== inspection.mimeType) ||
+    (descriptor.declaredContainer !== undefined &&
+      descriptor.declaredContainer !== inspection.container) ||
+    (descriptor.expectedSizeBytes !== undefined &&
+      (descriptor.expectedSizeBytes !== inspection.sizeBytes ||
+        descriptor.expectedSizeBytes !== verification.sizeBytes)) ||
+    (descriptor.expectedChecksumSha256 !== undefined &&
+      descriptor.expectedChecksumSha256 !== verification.checksumSha256) ||
+    (descriptor.expectedDurationMs !== undefined &&
+      descriptor.expectedDurationMs !== inspection.durationMs) ||
+    (descriptor.expectedWidth !== undefined &&
+      descriptor.expectedWidth !== inspection.width) ||
+    (descriptor.expectedHeight !== undefined &&
+      descriptor.expectedHeight !== inspection.height)
   ) {
     throw receiverError(
       'result_verification_failed',

@@ -28,6 +28,8 @@ export const imageSubmissionErrorMessages: Record<
   ImageSubmissionErrorCode,
   string
 > = {
+  submission_outcome_unknown:
+    'Submission outcome is unknown. Create a new task only after confirming the charge status.',
   project_not_open: '当前没有打开的项目。',
   invalid_request: '提交信息无效，请检查当前草稿。',
   draft_not_found: '当前草稿已不存在。',
@@ -70,7 +72,7 @@ export function ImageGenerationModelFields({
       model={draft.generation.model}
       onChange={(generation) => onDraftChange({ ...draft, generation })}
       parameters={draft.generation.parameters}
-      purpose="image_generation"
+      purpose={draft.input ? 'reference_to_image' : 'image_generation'}
       registry={registry}
     />
   );
@@ -113,7 +115,10 @@ function ImageModelFields({
   readonly label: string;
   readonly model?: ImageWorkspaceModelDto;
   readonly parameters?: ImageWorkspaceParametersDto;
-  readonly purpose: 'image_generation' | 'image_editing';
+  readonly purpose:
+    | 'image_generation'
+    | 'reference_to_image'
+    | 'image_editing';
   readonly registry?: ProviderRegistryDto;
   readonly onChange: (selection: {
     readonly model?: ImageWorkspaceModelDto;
@@ -273,7 +278,7 @@ interface GenerationModelOption {
 
 function getModelOptions(
   registry: ProviderRegistryDto | undefined,
-  purpose: 'image_generation' | 'image_editing'
+  purpose: 'image_generation' | 'reference_to_image' | 'image_editing'
 ): readonly GenerationModelOption[] {
   if (!registry) return [];
   const routeModelIds = new Set(

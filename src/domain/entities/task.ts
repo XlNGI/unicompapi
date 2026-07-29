@@ -36,6 +36,7 @@ import type {
 
 export type ImageOperationPurpose =
   | 'image_generation'
+  | 'reference_to_image'
   | 'image_understanding'
   | 'image_editing'
   | 'image_to_prompt';
@@ -172,7 +173,12 @@ export function createImageTask(input: CreateImageTaskInput): Task {
   if (input.confirmation.mode !== input.draft.mode) {
     throw new InvariantViolationError('image confirmation mode does not match draft');
   }
-  if (input.confirmation.purpose !== imagePurposeForMode(input.draft.mode)) {
+  const expectedPurpose = input.draft.input &&
+    (input.draft.mode === 'quick_image' ||
+      input.draft.mode === 'professional_image')
+    ? 'reference_to_image'
+    : imagePurposeForMode(input.draft.mode);
+  if (input.confirmation.purpose !== expectedPurpose) {
     throw new InvariantViolationError(
       'image confirmation purpose does not match draft'
     );

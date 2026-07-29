@@ -24,7 +24,10 @@ export function buildImagePreflight(
   draft: ImageWorkspaceDraft,
   registry: ProviderRegistrySnapshot
 ): ImagePreflightDto {
-  const purpose = imagePurposeForMode(draft.mode);
+  const purpose = draft.input &&
+    (draft.mode === 'quick_image' || draft.mode === 'professional_image')
+    ? 'reference_to_image'
+    : imagePurposeForMode(draft.mode);
   const blockers = new Set<ImageSubmissionErrorCode>();
   const candidateBlockers = new Set<ImageSubmissionErrorCode>();
 
@@ -44,6 +47,9 @@ export function buildImagePreflight(
   );
   const providers = new Map(
     registry.providers.map((provider) => [provider.id, provider])
+  );
+  const bindings = new Map(
+    registry.protocolBindings.map((binding) => [binding.id, binding])
   );
   const candidates: ImagePreflightCandidateDto[] = [];
   const selectedModelId = selectedModelForDraft(draft);
@@ -65,6 +71,15 @@ export function buildImagePreflight(
     const connection = model ? connections.get(model.connectionId) : undefined;
     const provider = connection ? providers.get(connection.providerId) : undefined;
     if (!model?.enabled || connection?.state !== 'available' || !provider) {
+      continue;
+    }
+    const binding = bindings.get(model.protocolBindingId);
+    if (
+      model.mediaKind !== 'image' ||
+      binding?.mediaKind !== 'image' ||
+      !binding.supportedPurposes.includes(purpose)
+    ) {
+      candidateBlockers.add('no_route_candidate');
       continue;
     }
 
@@ -201,7 +216,7 @@ function selectEvidence(
           item.state as (typeof acceptedCapabilityStates)[number]
         )
     )
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
 }
 
 function requiresInput(draft: ImageWorkspaceDraft): boolean {

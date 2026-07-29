@@ -1,32 +1,30 @@
-import { app, ipcMain, safeStorage } from 'electron';
-import path from 'node:path';
+import { ipcMain } from 'electron';
 import {
-  JsonProviderRegistryStore,
+  type ConnectionValidationPort,
   ProviderCapabilityController,
   ProviderCredentialController,
-  ProviderRegistryController,
+  ProviderRegistryController
+} from '../../src/platform';
+import type {
+  JsonProviderRegistryStore,
   SecureCredentialVault
 } from '../../src/platform';
 import { providerIpcChannels } from '../../src/shared/provider-ipc';
 
-export function registerProviderIpcHandlers(): void {
-  const userDataPath = app.getPath('userData');
-  const registry = new JsonProviderRegistryStore(
-    path.join(userDataPath, 'provider-registry.json')
-  );
+export function registerProviderIpcHandlers(options: {
+  readonly registry: JsonProviderRegistryStore;
+  readonly credentialVault: SecureCredentialVault;
+  readonly connectionValidation: ConnectionValidationPort;
+}): void {
+  const registry = options.registry;
   const controller = new ProviderRegistryController(registry);
   const credentialController = new ProviderCredentialController(
     registry,
-    new SecureCredentialVault(
-      path.join(userDataPath, 'secure-credentials.json'),
-      {
-        isAvailable: () => safeStorage.isEncryptionAvailable(),
-        protect: (value) => safeStorage.encryptString(value),
-        unprotect: (value) => safeStorage.decryptString(Buffer.from(value))
-      }
-    )
+    options.credentialVault
   );
-  const capabilityController = new ProviderCapabilityController(registry);
+  const capabilityController = new ProviderCapabilityController(registry, {
+    connectionValidation: options.connectionValidation
+  });
   ipcMain.handle(providerIpcChannels.getRegistry, () =>
     controller.getRegistry()
   );

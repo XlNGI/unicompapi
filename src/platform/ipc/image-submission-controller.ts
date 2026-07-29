@@ -7,10 +7,13 @@ import {
   toDraftId,
   toExecutionId,
   toIsoTimestamp,
+  toProviderOperationRecordId,
   toTaskId,
   transitionExecution,
   type Execution,
   type ImageSubmissionConfirmationSnapshot,
+  type ProviderExecutionLifecycle,
+  type ProviderSubmitOutcome,
   type Task
 } from '../../domain';
 import type {
@@ -25,12 +28,15 @@ import {
   buildImagePreflight,
   ImageOperationPortError,
   parameterValuesForDraft,
+  type ImageOperationSubmitResult,
   type ImageOperationPorts
 } from '../images';
 import type { JsonProviderRegistryStore } from '../providers';
+import { ProviderExecutionLifecycleService } from '../providers';
 import {
   JsonExecutionRepository,
   JsonImageWorkspaceRepository,
+  JsonProviderOperationRepository,
   JsonTaskRepository
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
@@ -49,6 +55,7 @@ export interface ImageSubmissionControllerDependencies {
   resultReceiver?: ImageResultReceiver;
   createTaskId?(): string;
   createExecutionId?(): string;
+  createProviderOperationRecordId?(): string;
   now?(): string;
   onError?(error: unknown): void;
 }
@@ -174,6 +181,12 @@ export class ImageSubmissionController {
           throw submissionError('invalid_request', 'Task is not an image task');
         }
         const previous = await latestExecution(context.executionRepository, task);
+        if (previous?.state === 'submission_outcome_unknown') {
+          throw submissionError(
+            'submission_outcome_unknown',
+            'The previous paid submission outcome is unknown; create and confirm a new task before retrying'
+          );
+        }
         const createdAt = this.now();
         const execution = previous
           ? createRetryExecution(previous, this.createExecutionId(), createdAt)
@@ -220,36 +233,34 @@ export class ImageSubmissionController {
 
         const submitting = transitionExecution(execution, 'submitting', this.now());
         await context.executionRepository.save(submitting);
+        let outcome: ProviderSubmitOutcome;
         try {
-          const remote = await port.submit({ task, execution: submitting });
-          if (remote.remoteOperationId.trim().length === 0) {
-            throw new ImageOperationPortError(
-              'not_retryable',
-              'Remote adapter returned an invalid operation ID'
-            );
-          }
-          const submitted = transitionExecution(
-            submitting,
-            remote.state,
-            this.now(),
-            { remoteOperationId: remote.remoteOperationId }
+          outcome = normalizeImageSubmitOutcome(
+            await port.submit({ task, execution: submitting })
           );
-          await context.executionRepository.save(submitted);
-          return toExecutionDto(submitted);
         } catch (error) {
-          const failure = transitionExecution(submitting, 'failed', this.now(), {
-            failure: {
-              stage: 'submitting',
-              message: 'The remote image operation could not be submitted',
-              retryability:
-                error instanceof ImageOperationPortError
-                  ? error.retryability
-                  : 'unknown'
-            }
-          });
-          await context.executionRepository.save(failure);
-          return toExecutionDto(failure);
+          outcome = submitFailureOutcome(error, 'image');
         }
+        const registry = await this.dependencies.providerRegistry.load();
+        const executionLifecycle = lifecycleForModel(
+          registry,
+          image.modelId
+        );
+        const lifecycle = new ProviderExecutionLifecycleService({
+          executionRepository: context.executionRepository,
+          operationRepository: context.operationRepository,
+          createRecordId: () => this.createProviderOperationRecordId(),
+          now: () => this.now()
+        });
+        return toExecutionDto(
+          await lifecycle.applySubmitOutcome({
+            task,
+            execution: submitting,
+            mediaKind: 'image',
+            executionLifecycle,
+            outcome
+          })
+        );
       })
     );
   }
@@ -286,7 +297,8 @@ export class ImageSubmissionController {
         session.projectId
       ),
       taskRepository: new JsonTaskRepository(storage, session.projectId),
-      executionRepository: new JsonExecutionRepository(storage)
+      executionRepository: new JsonExecutionRepository(storage),
+      operationRepository: new JsonProviderOperationRepository(storage)
     };
   }
 
@@ -311,6 +323,13 @@ export class ImageSubmissionController {
   private createExecutionId() {
     return toExecutionId(
       this.dependencies.createExecutionId?.() ?? `execution-image-${randomUUID()}`
+    );
+  }
+
+  private createProviderOperationRecordId() {
+    return toProviderOperationRecordId(
+      this.dependencies.createProviderOperationRecordId?.() ??
+        `provider-operation-image-${randomUUID()}`
     );
   }
 
@@ -343,11 +362,11 @@ class ImageSubmissionControllerError extends Error {
 }
 
 function parseTaskRequest(request: unknown) {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, ['draftId', 'draftUpdatedAt', 'modelId', 'confirmations'])) {
     throw submissionError('invalid_request', 'Submission request is invalid');
   }
   return {
-    draftId: parseId(request, 'draftId', toDraftId),
+    draftId: parseIdValue(request.draftId, 'draftId', toDraftId),
     draftUpdatedAt: requireString(request.draftUpdatedAt),
     modelId: requireString(request.modelId),
     confirmations: isRecord(request.confirmations) ? request.confirmations : {}
@@ -359,11 +378,19 @@ function parseId<TValue>(
   field: string,
   convert: (value: string) => TValue
 ): TValue {
-  if (!isRecord(request)) {
+  if (!hasExactKeys(request, [field])) {
     throw submissionError('invalid_request', `${field} is required`);
   }
+  return parseIdValue(request[field], field, convert);
+}
+
+function parseIdValue<TValue>(
+  value: unknown,
+  field: string,
+  convert: (value: string) => TValue
+): TValue {
   try {
-    return convert(requireString(request[field]));
+    return convert(requireString(value));
   } catch {
     throw submissionError('invalid_request', `${field} is invalid`);
   }
@@ -378,12 +405,28 @@ function requireString(value: unknown): string {
 
 function allConfirmationsAccepted(value: Record<string, unknown>): boolean {
   return (
+    hasExactKeys(value, [
+      'recipient',
+      'outboundScope',
+      'cost',
+      'finalPrompt',
+      'model'
+    ]) &&
     value.recipient === true &&
     value.outboundScope === true &&
     value.cost === true &&
     value.finalPrompt === true &&
     value.model === true
   );
+}
+
+function hasExactKeys(
+  value: unknown,
+  keys: readonly string[]
+): value is Record<string, unknown> {
+  return isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => keys.includes(key));
 }
 
 async function requireTask(
@@ -413,6 +456,66 @@ function toExecutionDto(execution: Execution): ImageExecutionDto {
     state: execution.state,
     retryability: execution.failure?.retryability
   };
+}
+
+function normalizeImageSubmitOutcome(
+  result: ImageOperationSubmitResult
+): ProviderSubmitOutcome {
+  if ('kind' in result) return result;
+  if (result.remoteOperationId.trim().length === 0) {
+    throw new ImageOperationPortError(
+      'not_retryable',
+      'Remote adapter returned an invalid operation ID'
+    );
+  }
+  return {
+    kind: 'accepted_async',
+    providerOperationId: result.remoteOperationId,
+    state: result.state
+  };
+}
+
+function submitFailureOutcome(
+  error: unknown,
+  mediaKind: 'image'
+): ProviderSubmitOutcome {
+  const message = `The remote ${mediaKind} operation could not be submitted`;
+  if (
+    error instanceof ImageOperationPortError &&
+    error.submissionStatus === 'submission_outcome_unknown'
+  ) {
+    return {
+      kind: 'submission_outcome_unknown',
+      message
+    };
+  }
+  return {
+    kind: 'failed_before_submission',
+    message,
+    retryability:
+      error instanceof ImageOperationPortError
+        ? error.retryability
+        : 'unknown'
+  };
+}
+
+function lifecycleForModel(
+  registry: Awaited<ReturnType<JsonProviderRegistryStore['load']>>,
+  modelId: string
+): ProviderExecutionLifecycle {
+  const model = registry.models.find((candidate) => candidate.id === modelId);
+  const binding = model
+    ? registry.protocolBindings.find(
+        (candidate) => candidate.id === model.protocolBindingId
+      )
+    : undefined;
+  if (!binding) {
+    throw submissionError(
+      'no_route_candidate',
+      'The selected model has no provider protocol lifecycle'
+    );
+  }
+  return binding.executionLifecycle;
 }
 
 function submissionError(

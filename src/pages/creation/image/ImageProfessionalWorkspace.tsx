@@ -5,7 +5,6 @@ import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
 import type { ImagePreflightDto } from '../../../shared/image-submission-ipc';
 import type {
-  ImageWorkspaceContextDto,
   ImageWorkspaceInputAssetDto
 } from '../../../shared/image-workspace-ipc';
 import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
@@ -16,6 +15,8 @@ import {
   ImageSubmissionConfirmations,
   type GenerationImageDraftDto
 } from './ImageGenerationControls';
+import { useImageSubmissionFlow } from './useImageSubmissionFlow';
+import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 
 interface ImageProfessionalWorkspaceProps {
   readonly dirty: boolean;
@@ -25,32 +26,6 @@ interface ImageProfessionalWorkspaceProps {
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
-
-const contextSections: readonly {
-  readonly kind: ImageWorkspaceContextDto['kind'];
-  readonly title: string;
-  readonly description: string;
-  readonly action: string;
-}[] = [
-  {
-    kind: 'project_asset',
-    title: '项目素材',
-    description: '只使用用户明确选择的当前项目素材。',
-    action: '选择项目素材'
-  },
-  {
-    kind: 'project_context',
-    title: '项目上下文',
-    description: '不默认读取整个项目历史。',
-    action: '选择项目上下文'
-  },
-  {
-    kind: 'saved_conversation',
-    title: '已保存的对话上下文',
-    description: '不使用未保存或其他项目的对话。',
-    action: '选择已保存对话'
-  }
-];
 
 const supplementSourceLabels: Readonly<Record<string, string>> = {
   project_context: '项目上下文',
@@ -80,6 +55,17 @@ export function ImageProfessionalWorkspace({
   const selectedCandidate = preflight?.candidates.find(
     (candidate) => candidate.modelId === draft.generation.model?.modelId
   );
+  const submission = useImageSubmissionFlow({
+    draftId: draft.draftId,
+    draftUpdatedAt: draft.updatedAt,
+    preflight,
+    candidate: selectedCandidate,
+    confirmations,
+    busy,
+    setBusy,
+    onMessage,
+    errorMessages: imageSubmissionErrorMessages
+  });
 
   useEffect(() => {
     let active = true;
@@ -211,33 +197,15 @@ export function ImageProfessionalWorkspace({
             <small>{draft.prompt.originalInput.length} / 1000</small>
           </label>
 
-          <div className="uc-image-professional__contexts">
-            {contextSections.map((section) => {
-              const count = draft.contextReferences.filter(
-                (reference) => reference.kind === section.kind
-              ).length;
-              return (
-                <section
-                  className="uc-image-professional__context"
-                  key={section.kind}
-                >
-                  <div>
-                    <strong>{section.title}</strong>
-                    <span>{section.description}</span>
-                  </div>
-                  <div className="uc-image-professional__context-action">
-                    <Button disabled variant="secondary">
-                      {section.action}
-                    </Button>
-                    <span>已选 {count} 项</span>
-                  </div>
-                </section>
-              );
+          <WorkspaceContextSelector
+            disabled={busy}
+            onChange={(contextReferences) => changeDraft({
+              ...draft,
+              contextReferences
             })}
-          </div>
-          <p className="uc-image-quick__hint">
-            当前 DTO 尚未提供三类上下文的候选列表接口，因此不能新增选择。
-          </p>
+            onMessage={onMessage}
+            references={draft.contextReferences}
+          />
 
           <section className="uc-image-professional__reference">
             <div className="uc-image-quick__reference">
@@ -379,7 +347,7 @@ export function ImageProfessionalWorkspace({
           />
           <div className="uc-image-quick__result-actions">
             <Button disabled variant="secondary">
-              保存到项目
+              {submission.work ? '已登记到项目' : '保存到项目'}
             </Button>
             <Button disabled variant="secondary">
               重新生成
@@ -427,14 +395,54 @@ export function ImageProfessionalWorkspace({
               onChange={setConfirmations}
             />
           ) : null}
-          <Button disabled>提交生成任务</Button>
+          <div className="uc-image-quick__submission-actions">
+            <Button
+              disabled={!submission.canCreateTask}
+              onClick={() => void submission.createTask()}
+            >
+              创建图片任务
+            </Button>
+            <Button
+              disabled={!submission.task || busy}
+              onClick={() => void submission.createExecution()}
+              variant="secondary"
+            >
+              创建执行记录
+            </Button>
+            <Button
+              disabled={!submission.execution || submission.execution.state !== 'created' || busy}
+              onClick={() => void submission.invokeExecution()}
+            >
+              提交图片生成
+            </Button>
+            <Button
+              disabled={!submission.execution || submission.execution.state !== 'remote_completed' || busy}
+              onClick={() => void submission.receiveResult()}
+              variant="secondary"
+            >
+              校验并登记结果
+            </Button>
+            <Button
+              disabled={!submission.work || busy}
+              onClick={() => void submission.createVideoDraft()}
+              variant="secondary"
+            >
+              创建图生视频草稿
+            </Button>
+          </div>
+          {submission.execution ? (
+            <p className="uc-image-quick__hint" role="status">
+              执行 #{submission.execution.attempt}：{submission.execution.state}
+              {submission.work ? `；已登记 ${submission.work.name}` : ''}
+            </p>
+          ) : null}
         </Card>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="warning">真实能力状态</StatusPill>
         <p>
-          当前只支持专业草稿、单张参考图、提示词分层和能力预检；缺少上下文选择接口和真实图片适配器，不会创建任务或伪造结果。
+          单张参考图、上下文、提示词分层和提交确认保持独立；只有已验证并启用的协议能力才能创建执行和登记真实 Work。
         </p>
       </Card>
     </>

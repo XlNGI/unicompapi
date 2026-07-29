@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -7,7 +7,8 @@ import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
 import type {
   VideoExecutionDto,
   VideoPreflightDto,
-  VideoTaskCreatedDto
+  VideoTaskCreatedDto,
+  VideoWorkRegisteredDto
 } from '../../../shared/video-submission-ipc';
 import type {
   VideoWorkspaceDraftDto,
@@ -54,6 +55,13 @@ const staleReasonLabels: Record<VideoWorkspaceStaleReasonDto, string> = {
   parameters_changed: '参数已变化'
 };
 
+const queryableExecutionStates = [
+  'queued',
+  'processing',
+  'cancel_requested',
+  'cancellation_unknown'
+] as const;
+
 export function VideoImageWorkspace({
   dirty,
   draft,
@@ -74,7 +82,9 @@ export function VideoImageWorkspace({
   const [confirmations, setConfirmations] = useState(emptyVideoConfirmations);
   const [task, setTask] = useState<VideoTaskCreatedDto>();
   const [execution, setExecution] = useState<VideoExecutionDto>();
+  const [registered, setRegistered] = useState<VideoWorkRegisteredDto>();
   const [busy, setBusy] = useState(false);
+  const pollingAttempts = useRef(0);
   const selectedCandidate = preflight?.candidates.find(
     (candidate) => candidate.modelId === draft.generation.model?.modelId
   );
@@ -158,7 +168,42 @@ export function VideoImageWorkspace({
     setConfirmations(emptyVideoConfirmations);
     setTask(undefined);
     setExecution(undefined);
+    setRegistered(undefined);
+    pollingAttempts.current = 0;
   }, [draft.updatedAt]);
+
+  useEffect(() => {
+    let active = true;
+    if (!videoSubmissions) return;
+    void videoSubmissions.recoverExecutions(draft.draftId).then((result) => {
+      if (!active || !result.ok || result.value.length === 0) return;
+      pollingAttempts.current = 0;
+      setExecution(result.value[result.value.length - 1]);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [draft.draftId, videoSubmissions]);
+
+  useEffect(() => {
+    if (
+      !videoSubmissions ||
+      !execution ||
+      !queryableExecutionStates.includes(
+        execution.state as (typeof queryableExecutionStates)[number]
+      ) ||
+      pollingAttempts.current >= 120
+    ) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      pollingAttempts.current += 1;
+      void videoSubmissions.refreshExecution(execution.executionId)
+        .then((result) => {
+          if (result.ok) setExecution(result.value);
+        })
+        .catch(() => undefined);
+    }, pollingDelayMs(pollingAttempts.current));
+    return () => window.clearTimeout(timeout);
+  }, [execution, videoSubmissions]);
 
   function changeDraft(next: ImageVideoDraftDto) {
     setPreflight(undefined);
@@ -198,7 +243,7 @@ export function VideoImageWorkspace({
     );
     const slots =
       schema?.mode === 'image_to_video'
-        ? schema.materialSlots.map((slot) => {
+        ? schema.materialSlots.map((slot, index) => {
             const previous = previousSlots.get(slot.id);
             const selectionStillValid =
               previous?.role === slot.role &&
@@ -208,7 +253,11 @@ export function VideoImageWorkspace({
               ...slot,
               selection: selectionStillValid
                 ? previous.selection
-                : undefined
+                : index === 0 &&
+                    draft.imageToVideo.source?.mediaKind === 'image' &&
+                    slot.acceptedMediaKinds.includes('image')
+                  ? draft.imageToVideo.source
+                  : undefined
             };
           })
         : undefined;
@@ -436,9 +485,60 @@ export function VideoImageWorkspace({
         return;
       }
       setExecution(result.value);
+      pollingAttempts.current = 0;
       onMessage(`远端调用已返回真实状态：${result.value.state}。`);
     } catch {
       onMessage('提交视频生成失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshExecution() {
+    if (!videoSubmissions || !execution || busy) return;
+    setBusy(true);
+    try {
+      const result = await videoSubmissions.refreshExecution(execution.executionId);
+      if (!result.ok) {
+        onMessage(videoSubmissionErrorMessages[result.error.code]);
+        return;
+      }
+      setExecution(result.value);
+      onMessage(`已刷新真实远端状态：${result.value.state}。`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelExecution() {
+    if (!videoSubmissions || !execution || busy) return;
+    setBusy(true);
+    try {
+      const result = await videoSubmissions.cancelExecution(execution.executionId);
+      if (!result.ok) {
+        onMessage(videoSubmissionErrorMessages[result.error.code]);
+        return;
+      }
+      setExecution(result.value);
+      onMessage(`取消请求已返回真实状态：${result.value.state}。`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function receiveResult() {
+    if (!videoSubmissions || !execution || execution.state !== 'remote_completed' || busy)
+      return;
+    setBusy(true);
+    try {
+      const result = await videoSubmissions.receiveResult(execution.executionId);
+      if (!result.ok) {
+        onMessage(videoSubmissionErrorMessages[result.error.code]);
+        return;
+      }
+      setRegistered(result.value);
+      setExecution((current) => current ? { ...current, state: 'completed' } : current);
+      onMessage(`已校验并登记 ${result.value.works.length} 个视频 Work。`);
     } finally {
       setBusy(false);
     }
@@ -461,6 +561,12 @@ export function VideoImageWorkspace({
                 title="动态素材槽位"
               />
               <dl className="uc-image-workbench__capability-list">
+                <Fact
+                  label="图片 Work 来源"
+                  value={draft.imageToVideo.source
+                    ? `已登记 Asset ${draft.imageToVideo.source.assetId}`
+                    : '无'}
+                />
                 <Fact
                   label="当前模式能力"
                   value={
@@ -723,6 +829,32 @@ export function VideoImageWorkspace({
             >
               提交视频生成
             </Button>
+            <Button
+              disabled={
+                !execution ||
+                !queryableExecutionStates.includes(
+                  execution.state as (typeof queryableExecutionStates)[number]
+                ) ||
+                busy
+              }
+              onClick={() => void refreshExecution()}
+              variant="secondary"
+            >
+              刷新状态
+            </Button>
+            <Button
+              disabled={!execution || !['queued', 'processing'].includes(execution.state) || busy}
+              onClick={() => void cancelExecution()}
+              variant="secondary"
+            >
+              取消生成
+            </Button>
+            <Button
+              disabled={!execution || execution.state !== 'remote_completed' || busy}
+              onClick={() => void receiveResult()}
+            >
+              校验并登记结果
+            </Button>
           </div>
           {task ? (
             <p className="uc-image-quick__hint" role="status">
@@ -732,10 +864,15 @@ export function VideoImageWorkspace({
                 : '；尚未创建执行记录'}
             </p>
           ) : null}
+          {registered ? (
+            <p className="uc-image-quick__hint" role="status">
+              已登记视频作品：{registered.works.map((work) => work.name).join('、')}
+            </p>
+          ) : null}
           <section className="uc-video-image__handoff">
             <strong>结果与基础编辑边界</strong>
             <p>
-              只有视频结果正式下载、校验并登记为 Work 后才能进入基础编辑；B4 结果登记端口已具备，但当前没有可接收的真实结果，阶段 7 编辑器也未实现。
+              只有视频结果正式下载、校验并登记为 Work 后才能进入基础编辑；远端完成状态本身不代表本地作品已完成。
             </p>
             <Button disabled variant="secondary">
               进入基础编辑（等待正式 Work 与阶段 7）
@@ -749,11 +886,16 @@ export function VideoImageWorkspace({
           {blockers.length === 0 && preflight ? '等待明确确认' : '真实能力状态'}
         </StatusPill>
         <p>
-          当前没有图片识别、提示词增强或真实视频适配器；B4 结果登记端口保持真实不可用状态，页面只保存可追溯本地草稿、受控素材和真实阻断。
+          图片识别和提示词增强仍无真实端口；视频提交、查询、取消和结果登记只在注册表、凭证与能力门禁全部通过后可用。
         </p>
       </Card>
     </>
   );
+}
+
+function pollingDelayMs(attempt: number): number {
+  const backoff = Math.min(30_000, 2_000 * 2 ** Math.floor(attempt / 5));
+  return Math.round(backoff * (0.85 + Math.random() * 0.3));
 }
 
 function describeArtifact(artifact: {

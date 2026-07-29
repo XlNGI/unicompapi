@@ -4,16 +4,20 @@ import {
   createProvider,
   createProviderConnection,
   createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
   providerAccessCategories,
   toCapabilityEvidenceId,
   toConnectionId,
   toIsoTimestamp,
   toModelId,
+  toProtocolBindingId,
   toProviderId,
   toRoutingPreferenceId,
   type ProviderConnection,
+  type ModelCapabilityEvidence,
   type ProviderModel,
+  type ProviderProtocolBinding,
   type DynamicParameterSchema,
   type VideoGenerationCapabilitySchema
 } from '../../domain';
@@ -286,6 +290,7 @@ export class ProviderCapabilityController {
             ? {
                 ...candidate,
                 enabled: item.enabled as boolean,
+                revision: candidate.revision + 1,
                 updatedAt: toIsoTimestamp(new Date().toISOString())
               }
             : candidate
@@ -314,7 +319,12 @@ export class ProviderCapabilityController {
       const existingByName = new Map(
         snapshot.models
           .filter((item) => item.connectionId === connection.id)
-          .map((item) => [item.name, item])
+          .map((item) => [item.providerModelKey, item])
+      );
+      const unclassified = ensureUnclassifiedBinding(
+        snapshot.protocolBindings,
+        connection,
+        observedAt
       );
       const catalogNames = new Set<string>();
       const synced = result.entries.map((entry) => {
@@ -325,12 +335,19 @@ export class ProviderCapabilityController {
         catalogNames.add(externalId);
         const existing = existingByName.get(externalId);
         return existing
-          ? { ...existing, displayName: requireNonBlank(entry.displayName, 'displayName'), updatedAt: observedAt }
+          ? updateCatalogModel(
+              existing,
+              requireNonBlank(entry.displayName, 'displayName'),
+              observedAt
+            )
           : createProviderModel({
               id: toModelId(`model-${randomUUID()}`),
               providerId: connection.providerId,
               connectionId: connection.id,
-              name: externalId,
+              protocolBindingId: unclassified.binding.id,
+              providerModelKey: externalId,
+              mediaKind: 'unknown',
+              revision: 1,
               displayName: requireNonBlank(entry.displayName, 'displayName'),
               enabled: false,
               createdAt: observedAt,
@@ -339,10 +356,12 @@ export class ProviderCapabilityController {
       });
       const retainedModels = snapshot.models.filter(
         (item) =>
-          item.connectionId !== connection.id || !catalogNames.has(item.name)
+          item.connectionId !== connection.id ||
+          !catalogNames.has(item.providerModelKey)
       );
       await this.registry.save({
         ...snapshot,
+        protocolBindings: unclassified.protocolBindings,
         models: [...retainedModels, ...synced]
       });
       return {
@@ -367,23 +386,37 @@ export class ProviderCapabilityController {
       if (!connection) return failure('connection_not_found');
       if (
         snapshot.models.some(
-          (model) => model.connectionId === connection.id && model.name === name
+          (model) =>
+            model.connectionId === connection.id &&
+            model.providerModelKey === name
         )
       ) {
         return failure('model_already_exists');
       }
       const now = toIsoTimestamp(new Date().toISOString());
+      const unclassified = ensureUnclassifiedBinding(
+        snapshot.protocolBindings,
+        connection,
+        now
+      );
       const model = createProviderModel({
         id: toModelId(`model-${randomUUID()}`),
         providerId: connection.providerId,
         connectionId: connection.id,
-        name,
+        protocolBindingId: unclassified.binding.id,
+        providerModelKey: name,
+        mediaKind: 'unknown',
+        revision: 1,
         displayName,
         enabled: false,
         createdAt: now,
         updatedAt: now
       });
-      await this.registry.save({ ...snapshot, models: [...snapshot.models, model] });
+      await this.registry.save({
+        ...snapshot,
+        protocolBindings: unclassified.protocolBindings,
+        models: [...snapshot.models, model]
+      });
       return {
         ok: true,
         value: { state: 'registered_unverified', modelId: model.id }
@@ -407,9 +440,16 @@ export class ProviderCapabilityController {
         capability
       );
       const observedAt = toIsoTimestamp(observation.observedAt);
+      const previous = latestCapabilityEvidence(
+        snapshot.capabilities,
+        model.id,
+        capability,
+        'connection_verified'
+      );
       const evidence = createModelCapabilityEvidence({
         id: toCapabilityEvidenceId(`capability-${randomUUID()}`),
         modelId: model.id,
+        revision: (previous?.revision ?? 0) + 1,
         capability,
         state: observation.state,
         source: 'connection_verified',
@@ -417,17 +457,22 @@ export class ProviderCapabilityController {
         parameterSchema: observation.parameterSchema,
         videoGenerationSchema: observation.videoGenerationSchema,
         observedAt,
-        updatedAt: observedAt
+        recordedAt: observedAt,
+        supersedesEvidenceId: previous?.id
       });
-      const capabilities = snapshot.capabilities.filter(
-        (candidate) =>
-          candidate.modelId !== evidence.modelId ||
-          candidate.capability !== evidence.capability ||
-          candidate.source !== 'connection_verified'
-      );
       await this.registry.save({
         ...snapshot,
-        capabilities: [...capabilities, evidence]
+        models: snapshot.models.map((candidate) =>
+          candidate.id === model.id
+            ? {
+                ...candidate,
+                revision: candidate.revision + 1,
+                capabilityEvidenceId: evidence.id,
+                updatedAt: observedAt
+              }
+            : candidate
+        ),
+        capabilities: [...snapshot.capabilities, evidence]
       });
       return {
         ok: true,
@@ -455,24 +500,36 @@ export class ProviderCapabilityController {
         return failure('model_not_found');
       }
       const now = toIsoTimestamp(new Date().toISOString());
+      const previous = latestCapabilityEvidence(
+        snapshot.capabilities,
+        toModelId(modelId),
+        capability,
+        'user_confirmed'
+      );
       const evidence = createModelCapabilityEvidence({
         id: toCapabilityEvidenceId(`capability-${randomUUID()}`),
         modelId: toModelId(modelId),
+        revision: (previous?.revision ?? 0) + 1,
         capability,
         state: item.state,
         source: 'user_confirmed',
         observedAt: now,
-        updatedAt: now
+        recordedAt: now,
+        supersedesEvidenceId: previous?.id
       });
-      const capabilities = snapshot.capabilities.filter(
-        (candidate) =>
-          candidate.modelId !== evidence.modelId ||
-          candidate.capability !== evidence.capability ||
-          candidate.source !== 'user_confirmed'
-      );
       await this.registry.save({
         ...snapshot,
-        capabilities: [...capabilities, evidence]
+        models: snapshot.models.map((candidate) =>
+          candidate.id === evidence.modelId
+            ? {
+                ...candidate,
+                revision: candidate.revision + 1,
+                capabilityEvidenceId: evidence.id,
+                updatedAt: now
+              }
+            : candidate
+        ),
+        capabilities: [...snapshot.capabilities, evidence]
       });
       return {
         ok: true,
@@ -545,7 +602,16 @@ export class ProviderCapabilityController {
         snapshot.models
           .filter(
             (model) =>
-              model.enabled && routableConnections.has(model.connectionId)
+              model.enabled &&
+              routableConnections.has(model.connectionId) &&
+              snapshot.protocolBindings.some(
+                (binding) =>
+                  binding.id === model.protocolBindingId &&
+                  (binding.mediaKind === 'unknown' ||
+                    binding.supportedPurposes.includes(
+                      purpose as (typeof binding.supportedPurposes)[number]
+                    ))
+              )
           )
           .map((model) => model.id)
       );
@@ -576,6 +642,66 @@ export class ProviderCapabilityController {
       return failure(mapError(error));
     }
   }
+}
+
+function ensureUnclassifiedBinding(
+  existing: readonly ProviderProtocolBinding[],
+  connection: ProviderConnection,
+  now: ReturnType<typeof toIsoTimestamp>
+): {
+  readonly binding: ProviderProtocolBinding;
+  readonly protocolBindings: readonly ProviderProtocolBinding[];
+} {
+  const id = toProtocolBindingId(
+    `protocol-binding-unclassified-${connection.id}`
+  );
+  const binding = existing.find((candidate) => candidate.id === id);
+  if (binding) return { binding, protocolBindings: existing };
+  const created = createProviderProtocolBinding({
+    id,
+    providerId: connection.providerId,
+    connectionId: connection.id,
+    protocolId: 'unclassified',
+    protocolVersion: '1',
+    mediaKind: 'unknown',
+    adapterKind: 'adapter_unavailable',
+    authScheme: 'unknown',
+    executionLifecycle: 'unknown',
+    supportedPurposes: [],
+    createdAt: now,
+    updatedAt: now
+  });
+  return { binding: created, protocolBindings: [...existing, created] };
+}
+
+function updateCatalogModel(
+  model: ProviderModel,
+  displayName: string,
+  updatedAt: ReturnType<typeof toIsoTimestamp>
+): ProviderModel {
+  if (model.displayName === displayName) return model;
+  return {
+    ...model,
+    displayName,
+    revision: model.revision + 1,
+    updatedAt
+  };
+}
+
+function latestCapabilityEvidence(
+  capabilities: readonly ModelCapabilityEvidence[],
+  modelId: ProviderModel['id'],
+  capability: string,
+  source: ModelCapabilityEvidence['source']
+): ModelCapabilityEvidence | undefined {
+  return capabilities
+    .filter(
+      (candidate) =>
+        candidate.modelId === modelId &&
+        candidate.capability === capability &&
+        candidate.source === source
+    )
+    .sort((left, right) => right.revision - left.revision)[0];
 }
 
 function parseIdInput(value: unknown, field: string): string {

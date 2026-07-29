@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
   applyVideoWorkspaceChangeStaleness,
+  createAsset,
   createEmptyVideoWorkspaceDraft,
   createVideoWorkspaceDraft,
   deriveVideoWorkspaceDraft,
   isVideoWorkspaceDraft,
   toDraftId,
+  toAssetId,
   toIsoTimestamp,
   videoWorkspaceModes,
   type VideoWorkspaceDraft,
@@ -16,8 +18,19 @@ import type {
   VideoWorkspaceIpcErrorCode,
   VideoWorkspaceIpcResult
 } from '../../shared/video-workspace-ipc';
-import { JsonVideoWorkspaceRepository } from '../repositories';
+import {
+  JsonAssetRepository,
+  JsonFileReferenceRepository,
+  JsonTaskRepository,
+  JsonVideoWorkspaceRepository,
+  JsonWorkRepository
+} from '../repositories';
 import { NodeProjectStorage } from '../storage';
+import {
+  NodeImageInspector,
+  NodeSha256FileVerifier,
+  resolveFileReferencePathSafely
+} from '../files';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { VideoWorkspaceMutationCoordinator } from './video-workspace-mutations';
 
@@ -166,6 +179,118 @@ export class VideoWorkspaceController {
     );
   }
 
+  createFromImageWork(
+    request: unknown
+  ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceDraftDto>> {
+    return this.enqueueMutation(() =>
+      this.execute(async () => {
+        const workId = parseStringId(request, 'workId');
+        const context = this.createContext();
+        const works = new JsonWorkRepository(
+          context.storage,
+          context.session.projectId
+        );
+        const files = new JsonFileReferenceRepository(
+          context.storage,
+          context.session.projectId
+        );
+        const assets = new JsonAssetRepository(
+          context.storage,
+          context.session.projectId
+        );
+        const tasks = new JsonTaskRepository(
+          context.storage,
+          context.session.projectId
+        );
+        const work = (await works.list(context.session.projectId)).find(
+          (candidate) => candidate.id === workId
+        );
+        if (!work || work.mediaKind !== 'image') {
+          throw controllerError(
+            'material_not_found',
+            'A verified image Work is required'
+          );
+        }
+        const file = await files.get(work.fileId);
+        if (!file || file.state !== 'available') {
+          throw controllerError(
+            'material_not_found',
+            'The image Work file is unavailable'
+          );
+        }
+        if (!file.checksumSha256) {
+          throw controllerError(
+            'material_not_found',
+            'The image Work does not have a verified file identity'
+          );
+        }
+        const verification = await new NodeSha256FileVerifier(
+          context.session.rootDirectory
+        ).verify({ file, expectedChecksum: file.checksumSha256 });
+        if (!verification.matchesExpected) {
+          throw controllerError(
+            'material_not_found',
+            'The image Work file changed after registration'
+          );
+        }
+        const target = await resolveFileReferencePathSafely(
+          context.session.rootDirectory,
+          file
+        );
+        const inspection = await new NodeImageInspector().inspect(target);
+        const existing = (await assets.list(context.session.projectId)).find(
+          (candidate) => candidate.fileId === file.id && candidate.mediaKind === 'image'
+        );
+        const createdAt = this.now();
+        const asset = existing ?? createAsset({
+          id: toAssetId(`asset-work-image-${randomUUID()}`),
+          projectId: context.session.projectId,
+          fileId: file.id,
+          name: work.name,
+          mediaKind: 'image',
+          origin: 'generated',
+          role: 'reference',
+          imageMetadata: {
+            mimeType: inspection.mimeType,
+            width: inspection.width,
+            height: inspection.height
+          },
+          createdAt
+        });
+        if (!existing) await assets.save(asset);
+        const sourceTask = await tasks.get(work.sourceTaskId);
+        const parentMode = sourceTask?.submission.image?.mode ?? 'professional_image';
+        const draft = createEmptyVideoWorkspaceDraft({
+          id: this.createDraftId(),
+          projectId: context.session.projectId,
+          mode: 'image_to_video',
+          createdAt,
+          origin: sourceTask
+            ? {
+                kind: 'derived',
+                parentDraftId: sourceTask.sourceDraftId as ReturnType<typeof toDraftId>,
+                parentMode
+              }
+            : { kind: 'new' }
+        });
+        const withSource = createVideoWorkspaceDraft({
+          ...draft,
+          imageToVideo: {
+            ...draft.imageToVideo,
+            source: {
+              assetId: asset.id,
+              mediaKind: 'image',
+              role: 'reference',
+              selectedAt: createdAt
+            }
+          }
+        });
+        await context.repository.save(withSource);
+        return toVideoWorkspaceDto(withSource);
+      })
+    );
+  }
+
   private createContext() {
     const session = this.dependencies.getSession();
     if (!session) {
@@ -177,6 +302,7 @@ export class VideoWorkspaceController {
     const storage = new NodeProjectStorage(session.rootDirectory);
     return {
       session,
+      storage,
       repository: new JsonVideoWorkspaceRepository(
         storage,
         session.projectId
@@ -212,6 +338,15 @@ export class VideoWorkspaceController {
   ): Promise<VideoWorkspaceIpcResult<T>> {
     return this.mutations.enqueue(operation);
   }
+}
+
+function parseStringId(request: unknown, field: string): string {
+  if (!isRecord(request) || Object.keys(request).length !== 1 ||
+    Object.keys(request)[0] !== field || typeof request[field] !== 'string' ||
+    request[field].trim().length === 0) {
+    throw controllerError('invalid_request', `${field} is required`);
+  }
+  return request[field].trim();
 }
 
 class VideoWorkspaceControllerError extends Error {

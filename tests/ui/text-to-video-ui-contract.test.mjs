@@ -14,7 +14,11 @@ const shellSource = await readFile(
   'src/pages/creation/video/VideoWorkbenchPage.tsx',
   'utf8'
 );
-const bundle = `${textSource}\n${controlsSource}\n${shellSource}`;
+const selectorSource = await readFile(
+  'src/pages/creation/WorkspaceContextSelector.tsx',
+  'utf8'
+);
+const bundle = `${textSource}\n${controlsSource}\n${shellSource}\n${selectorSource}`;
 
 test('text to video keeps the main workflow compact and ordered', () => {
   for (const className of [
@@ -35,16 +39,17 @@ test('text to video keeps text sources and contexts explicit', () => {
     '长文本 / 故事 / 脚本',
     '项目素材',
     '项目上下文',
-    '已保存的对话上下文',
+    '已保存的对话',
     '已明确选择',
-    '不会自动读取'
+    '候选只在点击后读取'
   ]) {
     assert.match(bundle, new RegExp(text.replace(/\//g, '\\/')));
   }
   assert.doesNotMatch(
     bundle,
-    /localStorage|selectContext\(|loadProjectContext\(|loadConversation\(/
+    /localStorage|selectContext\(|loadProjectContext\(|loadConversation\(|getConversation\(/
   );
+  assert.match(textSource, /WorkspaceContextSelector/);
 });
 
 test('text to video uses dynamic slots and controlled local media only', () => {

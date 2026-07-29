@@ -229,6 +229,46 @@ describe('LocalVideoResultReceiver', () => {
     expect(await listOrEmpty(path.join(fixture.root, 'tmp'))).toEqual([]);
   });
 
+  it('derives trusted video facts locally when the provider declares only a result ID', async () => {
+    const video = videoFixture({
+      remoteResultId: 'provider-url-only',
+      name: 'provider-url-only'
+    });
+    const fixture = await createFixture({
+      videos: [{
+        ...video,
+        descriptor: {
+          remoteResultId: video.descriptor.remoteResultId,
+          name: video.descriptor.name
+        }
+      }]
+    });
+
+    await expect(
+      fixture.receiver.receive('execution-video-result')
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        works: [{
+          workId: 'work-video-result-1',
+          name: 'provider-url-only'
+        }]
+      }
+    });
+    const files = await new JsonFileReferenceRepository(
+      fixture.storage,
+      fixture.projectId
+    ).list(fixture.projectId);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      state: 'available',
+      sizeBytes: video.bytes.length
+    });
+    expect(files[0]?.checksumSha256).toBe(
+      createHash('sha256').update(video.bytes).digest('hex')
+    );
+  });
+
   it('rejects a service declaration mismatch without creating a work', async () => {
     const video = videoFixture({ remoteResultId: 'bad-result', name: 'bad.mp4' });
     const fixture = await createFixture({
