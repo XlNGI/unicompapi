@@ -39,7 +39,7 @@
 
 分支门禁结果：
 
-- `npm test`：Node 160 项、Vitest 376 项，合计 536 项通过，0 失败、0 跳过；
+- `npm test`：Node 160 项、Vitest 377 项，合计 537 项通过，0 失败、0 跳过；
 - `npm run test:vidu-e2e`：4 项通过；
 - `npm run typecheck`：通过；
 - `npm run lint`：通过；

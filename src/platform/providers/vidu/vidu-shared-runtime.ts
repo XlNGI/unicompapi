@@ -512,6 +512,9 @@ function validateResponseSize(
 ): void {
   const declared = headerValue(response.headers, 'content-length');
   const contentLength = Number(declared);
+  const contentEncoding = headerValue(response.headers, 'content-encoding')
+    ?.trim()
+    .toLowerCase();
   if (
     response.body.byteLength > maximum ||
     (Number.isFinite(contentLength) && contentLength > maximum)
@@ -520,6 +523,9 @@ function validateResponseSize(
   }
   if (
     declared !== undefined &&
+    (contentEncoding === undefined ||
+      contentEncoding === '' ||
+      contentEncoding === 'identity') &&
     (!Number.isSafeInteger(contentLength) ||
       contentLength < 0 ||
       contentLength !== response.body.byteLength)
