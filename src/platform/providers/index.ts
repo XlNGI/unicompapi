@@ -5,3 +5,4 @@ export * from './provider-capability-services';
 export * from './provider-operation-router';
 export * from './provider-execution-lifecycle';
 export * from './vidu-protocol-catalog';
+export * from './vidu';
