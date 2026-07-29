@@ -69,11 +69,13 @@ export function App() {
   );
   const [activeSubItemId, setActiveSubItemId] =
     useState<SecondaryNavigationItemId>();
+  const [openedVideoDraftId, setOpenedVideoDraftId] = useState<string>();
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
 
   function handleNavigate(itemId: NavigationItemId) {
+    setOpenedVideoDraftId(undefined);
     setActiveItemId(itemId);
     setActiveSubItemId(getSecondaryNavigationItems(itemId)[0]?.id);
   }
@@ -82,12 +84,19 @@ export function App() {
     itemId: NavigationItemId,
     subItemId: SecondaryNavigationItemId
   ) {
+    setOpenedVideoDraftId(undefined);
     setActiveItemId(itemId);
     setActiveSubItemId(subItemId);
   }
 
   function handleImageModeNavigate(mode: ImageWorkspaceDtoMode) {
     handleSecondaryNavigate('image-creation', imageModeNavigationIds[mode]);
+  }
+
+  function handleVideoDraftCreated(draftId: string) {
+    setOpenedVideoDraftId(draftId);
+    setActiveItemId('video-creation');
+    setActiveSubItemId('image-to-video');
   }
 
   return (
@@ -105,9 +114,14 @@ export function App() {
         <LibraryPage onNavigate={handleNavigate} />
       ) : activeSubItemId === 'quick-image' ? (
         <ImageQuickPage
+          onVideoDraftCreated={handleVideoDraftCreated}
           onNavigateToProfessional={() =>
             handleSecondaryNavigate('image-creation', 'professional-image')
           }
+        />
+      ) : activeSubItemId === 'professional-image' ? (
+        <ImageProfessionalPage
+          onVideoDraftCreated={handleVideoDraftCreated}
         />
       ) : activeSubItemId === 'image-understanding' ? (
         <ImageUnderstandingPage
@@ -116,6 +130,7 @@ export function App() {
       ) : activeSubItemId === 'image-editing' ? (
         <ImageEditingPage
           onNavigateToImageMode={handleImageModeNavigate}
+          onVideoDraftCreated={handleVideoDraftCreated}
         />
       ) : activeSubItemId === 'image-to-prompt' ? (
         <ImageToPromptPage
@@ -127,6 +142,8 @@ export function App() {
             handleSecondaryNavigate('video-creation', 'text-to-video')
           }
         />
+      ) : activeSubItemId === 'image-to-video' ? (
+        <ImageToVideoPage preferredDraftId={openedVideoDraftId} />
       ) : activeSubItemId === 'video-editing' ? (
         <VideoEditingPage onNavigate={handleNavigate} />
       ) : (

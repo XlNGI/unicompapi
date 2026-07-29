@@ -41,6 +41,7 @@ interface ImageEditingWorkspaceProps {
   readonly onDraftPersisted: (draft: EditingImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
   readonly onNavigate?: (mode: EditingTargetMode) => void;
+  readonly onVideoDraftCreated?: (draftId: string) => void;
 }
 
 const editingErrorMessages = {
@@ -79,7 +80,8 @@ export function ImageEditingWorkspace({
   onDraftChange,
   onDraftPersisted,
   onMessage,
-  onNavigate
+  onNavigate,
+  onVideoDraftCreated
 }: ImageEditingWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const imageSubmissions = window.unicomp?.imageSubmissions;
@@ -100,6 +102,7 @@ export function ImageEditingWorkspace({
     busy,
     setBusy,
     onMessage,
+    onVideoDraftCreated,
     errorMessages: editingErrorMessages
   });
 
@@ -404,7 +407,7 @@ export function ImageEditingWorkspace({
               创建图片编辑任务
             </Button>
             <Button
-              disabled={!submission.task || busy}
+              disabled={!submission.task || Boolean(submission.execution) || busy}
               onClick={() => void submission.createExecution()}
               variant="secondary"
             >

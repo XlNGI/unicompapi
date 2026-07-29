@@ -18,6 +18,14 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
+const professionalSource = await readFile(
+  'src/pages/creation/image/ImageProfessionalWorkspace.tsx',
+  'utf8'
+);
+const editingSource = await readFile(
+  'src/pages/creation/image/ImageEditingWorkspace.tsx',
+  'utf8'
+);
 const quickBundle = `${quickSource}\n${generationControlsSource}\n${submissionFlowSource}`;
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
@@ -100,4 +108,46 @@ test('quick image keeps unavailable adapters blocked without fake output', () =>
   assert.match(quickSource, /尚无真实生成结果/);
   assert.match(quickSource, /不会显示假进度或未校验结果/);
   assert.match(quickSource, /submission\.canCreateTask/);
+});
+
+test('image Work handoff opens only the derived image-to-video draft', () => {
+  const handoffStart = submissionFlowSource.indexOf(
+    'async function createVideoDraft'
+  );
+  const handoffEnd = submissionFlowSource.indexOf(
+    'function reportError',
+    handoffStart
+  );
+  const handoffSource = submissionFlowSource.slice(handoffStart, handoffEnd);
+
+  assert.match(handoffSource, /createFromImageWork\(work\.workId\)/);
+  assert.match(
+    handoffSource,
+    /onVideoDraftCreated\?\.\(result\.value\.draftId\)/
+  );
+  assert.doesNotMatch(
+    handoffSource,
+    /submissions\.(createTask|createExecution|invokeExecution)/
+  );
+  assert.match(
+    appSource,
+    /setOpenedVideoDraftId\(draftId\)[\s\S]*setActiveItemId\('video-creation'\)[\s\S]*setActiveSubItemId\('image-to-video'\)/
+  );
+});
+
+test('image task and execution creation are disabled after they exist', () => {
+  assert.match(
+    submissionFlowSource,
+    /allConfirmed\(options\.confirmations\)[\s\S]*!task[\s\S]*!options\.busy/
+  );
+  assert.match(
+    submissionFlowSource,
+    /if \(!submissions \|\| !task \|\| execution \|\| options\.busy\) return/
+  );
+  for (const source of [quickSource, professionalSource, editingSource]) {
+    assert.match(
+      source,
+      /disabled=\{!submission\.task \|\| Boolean\(submission\.execution\) \|\| busy\}/
+    );
+  }
 });
