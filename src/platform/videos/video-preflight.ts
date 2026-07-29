@@ -4,6 +4,7 @@ import type {
   DynamicParameterSchema,
   ModelCapabilityEvidence,
   ProviderAccessCategory,
+  ProviderOperationPurpose,
   VideoDynamicParameterValue,
   VideoGenerationModeCapabilitySchema,
   VideoMaterialSelection,
@@ -36,6 +37,10 @@ export function buildVideoPreflight(
   registry: ProviderRegistrySnapshot,
   materialFacts: readonly VideoMaterialFact[]
 ): VideoPreflightDto {
+  const capabilityPurpose: ProviderOperationPurpose =
+    draft.mode === 'image_to_video'
+      ? 'reference_to_video'
+      : 'video_generation';
   const blockers = new Set<VideoSubmissionErrorCode>();
   const candidateDiscoveryBlockers = new Set<VideoSubmissionErrorCode>();
 
@@ -80,7 +85,7 @@ export function buildVideoPreflight(
     if (
       model.mediaKind !== 'video' ||
       binding?.mediaKind !== 'video' ||
-      !binding.supportedPurposes.includes('video_generation')
+      !binding.supportedPurposes.includes(capabilityPurpose)
     ) {
       candidateDiscoveryBlockers.add('no_route_candidate');
       continue;
@@ -89,7 +94,7 @@ export function buildVideoPreflight(
     const evidence = selectEvidence(
       registry.capabilities,
       model.id,
-      'video_generation'
+      capabilityPurpose
     );
     if (!evidence) {
       candidateDiscoveryBlockers.add('capability_unverified');

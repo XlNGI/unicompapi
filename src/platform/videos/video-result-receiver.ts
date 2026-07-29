@@ -102,7 +102,9 @@ export class LocalVideoResultReceiver {
           throw receiverError('execution_not_found', 'Execution not found');
         }
         if (
-          (execution.state !== 'queued' && execution.state !== 'processing') ||
+          !['queued', 'processing', 'remote_completed'].includes(
+            execution.state
+          ) ||
           !execution.remoteOperationId
         ) {
           throw receiverError(
@@ -135,13 +137,15 @@ export class LocalVideoResultReceiver {
           await context.executionRepository.save(processing);
           execution = processing;
         }
-        const remoteCompleted = transitionExecution(
-          execution,
-          'remote_completed',
-          this.now()
-        );
-        await context.executionRepository.save(remoteCompleted);
-        execution = remoteCompleted;
+        if (execution.state === 'processing') {
+          const remoteCompleted = transitionExecution(
+            execution,
+            'remote_completed',
+            this.now()
+          );
+          await context.executionRepository.save(remoteCompleted);
+          execution = remoteCompleted;
+        }
         const downloading = transitionExecution(
           execution,
           'downloading',

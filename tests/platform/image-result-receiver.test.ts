@@ -47,7 +47,10 @@ function pngBytes(width: number, height: number) {
   return buffer;
 }
 
-async function createFixture(options: { readonly badChecksum?: boolean } = {}) {
+async function createFixture(options: {
+  readonly badChecksum?: boolean;
+  readonly diskFull?: boolean;
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-result-'));
   roots.push(root);
   await mkdir(path.join(root, 'tmp'), { recursive: true });
@@ -137,6 +140,13 @@ async function createFixture(options: { readonly badChecksum?: boolean } = {}) {
     mutations: new ImageWorkspaceMutationCoordinator(),
     createFileId: () => 'file-image-result',
     createWorkId: () => 'work-image-result',
+    publishFile: options.diskFull
+      ? async () => {
+          throw Object.assign(new Error('synthetic disk full'), {
+            code: 'ENOSPC'
+          });
+        }
+      : undefined,
     now: () => times.shift() ?? '2026-07-23T06:59:00.000Z'
   });
   return { projectId, receiver, root, storage };
@@ -198,5 +208,29 @@ describe('LocalImageResultReceiver', () => {
       failure: { retryability: 'not_retryable' }
     });
     await expect(readdir(path.join(fixture.root, 'tmp'))).resolves.toEqual([]);
+  });
+
+  it('preserves failure facts and creates no Work when atomic publish runs out of disk', async () => {
+    const fixture = await createFixture({ diskFull: true });
+
+    await expect(
+      fixture.receiver.receive('execution-image-result')
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'download_failed' }
+    });
+    await expect(
+      new JsonWorkRepository(fixture.storage, fixture.projectId).list(
+        fixture.projectId
+      )
+    ).resolves.toEqual([]);
+    await expect(readdir(path.join(fixture.root, 'tmp'))).resolves.toEqual([]);
+    const execution = await new JsonExecutionRepository(fixture.storage).get(
+      toExecutionId('execution-image-result')
+    );
+    expect(execution).toMatchObject({
+      state: 'failed',
+      failure: { stage: 'writing' }
+    });
   });
 });
