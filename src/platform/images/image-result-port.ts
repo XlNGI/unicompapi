@@ -1,3 +1,12 @@
+import type { ProviderOperationRecordId } from '../../domain';
+
+export type ImageResultOperationReference =
+  | { readonly kind: 'remote_operation'; readonly id: string }
+  | {
+      readonly kind: 'provider_operation_record';
+      readonly id: ProviderOperationRecordId;
+    };
+
 export interface ImageRemoteResultDescriptor {
   readonly name: string;
   readonly declaredMimeType?: string;
@@ -7,9 +16,12 @@ export interface ImageRemoteResultDescriptor {
 
 export interface ImageResultPort {
   getCompletedResult(
-    remoteOperationId: string
+    operation: ImageResultOperationReference
   ): Promise<ImageRemoteResultDescriptor | undefined>;
-  download(remoteOperationId: string, destinationPath: string): Promise<void>;
+  download(
+    operation: ImageResultOperationReference,
+    destinationPath: string
+  ): Promise<void>;
 }
 
 export class ImageResultPortError extends Error {

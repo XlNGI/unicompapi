@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624` 合并 `develop`；流程 3 已在 `feature/vidu-runtime` 完成实现和分支门禁，Node 157 项、Vitest 345 项，合计 502 项通过，等待在连续授权下提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624`、流程 3 已通过 `3a09d29` 合并 `develop`；流程 4 已在 `feature/vidu-image-adapters` 完成实现和分支门禁，Node 157 项、Vitest 359 项，合计 516 项通过，等待按连续授权提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -811,3 +811,11 @@ ViduProviderPackage
 流程 3 验证结果：`npm test` 为 Node 157 项与 Vitest 345 项，合计 502 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 207 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。本流程未修改 Electron/preload 或页面，不需要 Electron 启动烟测；测试只使用内存合成 transport，真实 Vidu HTTP 调用为 0。
 
 流程 3 未完成：Electron 组合根的实际 transport 注入、两个同步图片协议适配器、Q3 视频协议适配器、受控结果接收与 Work 流转、可见页面接线和合成服务端到端验证属于后续流程。Image2 鉴权仍保持 unknown；冻结模型仍为 disabled，Evidence 仍为 `declared_supported`。
+
+流程 4 实际结果：在唯一 `ViduProviderPackage` 下新增 `ViduImageV1Adapter` 与 `ViduGeminiImageV2Adapter`，没有按模型拆适配器，也未引入第四种异步图片协议。两个适配器都强制单图、单输出，序列化和 Base64 后的 POST Body 上限为 20MB；Gemini V2 严格使用官方 `Token` 鉴权、`content/part/inlineData` 请求结构并只解析单个 `fileData.fileUri`，不发送受限 `imageSearch`。Image V1 支持 generations/edits 与 URL/`b64_json` 解析，但官方资料中的 `Authorization: xxx` 以及 `images` 表格/示例结构冲突仍未解决，因此冻结生产绑定继续保持 `authScheme=unknown`，未显式注入已验证协议画像时在 HTTP 前阻断。
+
+流程 4 同时新增项目范围的受控图片素材解析器：只按当前受控项目的 AssetId 解析 FileReference，重新检查存在性、媒体类型、尺寸、字节与 SHA-256 后才产生内部 Base64，不向 renderer 返回路径或 Hash。同步结果继续保存在私有 ProviderOperationRecord；URL/file URI 经 HTTPS、非本机地址、手工重定向、响应上限和图片 Content-Type 边界下载，Base64 严格解码。现有结果接收器已兼容 `completed_sync`，并在图片探测、SHA-256、原子发布、FileReference、索引和 Work 登记之间保留幂等恢复点，避免 Work 写入或 Execution 收口之间形成不可恢复断裂。
+
+流程 4 验证结果：`npm test` 为 Node 157 项与 Vitest 359 项，合计 516 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 210 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。测试只使用内存合成 transport 和临时项目，不读取真实 Token、不访问真实 Vidu、不产生收费请求。本流程未修改 Electron/preload 或页面，因此无需 Electron 烟测。
+
+流程 4 未完成：Image V1 鉴权格式与 `images` 的最终请求结构必须保持未验证；冻结模型仍 disabled，Evidence 仍为 `declared_supported`。Q3 异步视频适配器、Electron 实际 transport 与组合根、页面接线、完整合成服务和真实收费验证分别属于流程 5—8，不得由本流程提前启动。

@@ -35,6 +35,7 @@ import type { ImageWorkspaceMutationCoordinator } from '../ipc/image-workspace-m
 import type { StorageProjectSession } from '../ipc/storage-ipc-controller';
 import type {
   ImageRemoteResultDescriptor,
+  ImageResultOperationReference,
   ImageResultPort
 } from './image-result-port';
 
@@ -71,22 +72,51 @@ export class LocalImageResultReceiver {
         if (!execution) {
           throw receiverError('execution_not_found', 'Execution not found');
         }
-        if (
-          (execution.state !== 'queued' && execution.state !== 'processing') ||
-          !execution.remoteOperationId
-        ) {
+        const existingWork = (
+          await context.workRepository.list(context.session.projectId)
+        ).find((work) => work.sourceExecutionId === execution?.id);
+        if (existingWork) {
+          const existingFile = await context.fileRepository.get(existingWork.fileId);
+          if (!existingFile || existingFile.state !== 'available') {
+            throw receiverError(
+              'result_verification_failed',
+              'Registered image work does not have an available file'
+            );
+          }
+          if (execution.state === 'verifying') {
+            execution = transitionExecution(execution, 'completed', this.now(), {
+              outputFileId: existingFile.id,
+              workId: existingWork.id
+            });
+            await context.executionRepository.save(execution);
+          } else if (execution.state !== 'completed') {
+            throw receiverError(
+              'invalid_execution_state',
+              'Registered image work has an incompatible execution state'
+            );
+          }
+          return {
+            ok: true,
+            value: {
+              workId: existingWork.id,
+              executionId: execution.id,
+              name: existingWork.name
+            }
+          };
+        }
+        const operation = resultOperationForExecution(execution);
+        if (!operation) {
           throw receiverError(
             'invalid_execution_state',
             'Execution does not have a completed remote result'
           );
         }
-        const remoteOperationId = execution.remoteOperationId;
         const task = await context.taskRepository.get(execution.taskId);
         if (!task?.submission.image) {
           throw receiverError('task_not_found', 'Image task not found');
         }
         const descriptor = await this.dependencies.port.getCompletedResult(
-          remoteOperationId
+          operation
         );
         if (!descriptor) {
           throw receiverError(
@@ -96,17 +126,71 @@ export class LocalImageResultReceiver {
         }
         validateDescriptor(descriptor);
 
+        if (execution.state === 'verifying') {
+          const availableFile = (
+            await context.fileRepository.list(context.session.projectId)
+          ).find(
+            (file) =>
+              file.sourceExecutionId === execution?.id &&
+              file.state === 'available'
+          );
+          if (!availableFile || availableFile.locator.kind !== 'project') {
+            throw receiverError(
+              'result_verification_failed',
+              'Verified image result could not be recovered'
+            );
+          }
+          await context.indexRepository.load();
+          await context.indexRepository.upsert({
+            fileId: availableFile.id,
+            relativePath: toProjectRelativePath(
+              availableFile.locator.relativePath
+            ),
+            state: availableFile.state,
+            sizeBytes: availableFile.sizeBytes,
+            checksumSha256: availableFile.checksumSha256,
+            updatedAt: availableFile.updatedAt
+          });
+          const workId = this.createWorkId();
+          const completed = transitionExecution(
+            execution,
+            'completed',
+            this.now(),
+            { outputFileId: availableFile.id, workId }
+          );
+          const work = registerWork({
+            id: workId,
+            task,
+            execution: completed,
+            file: availableFile,
+            mediaKind: 'image',
+            name: path.basename(descriptor.name),
+            parentWorkId: task.submission.image.parentWorkId,
+            createdAt: this.now()
+          });
+          await context.workRepository.save(work);
+          await context.executionRepository.save(completed);
+          return {
+            ok: true,
+            value: { workId: work.id, executionId: completed.id, name: work.name }
+          };
+        }
+
         if (execution.state === 'queued') {
           execution = transitionExecution(execution, 'processing', this.now());
         }
-        execution = transitionExecution(
-          execution,
-          'remote_completed',
-          this.now()
-        );
-        await context.executionRepository.save(execution);
-        execution = transitionExecution(execution, 'downloading', this.now());
-        await context.executionRepository.save(execution);
+        if (execution.state === 'processing') {
+          execution = transitionExecution(
+            execution,
+            'remote_completed',
+            this.now()
+          );
+          await context.executionRepository.save(execution);
+        }
+        if (execution.state === 'remote_completed') {
+          execution = transitionExecution(execution, 'downloading', this.now());
+          await context.executionRepository.save(execution);
+        }
 
         const temporaryName = `${execution.id}-${randomUUID()}.download`;
         temporaryPath = path.join(
@@ -116,7 +200,7 @@ export class LocalImageResultReceiver {
         );
         await mkdir(path.dirname(temporaryPath), { recursive: true });
         await this.dependencies.port.download(
-          remoteOperationId,
+          operation,
           temporaryPath
         );
 
@@ -125,6 +209,12 @@ export class LocalImageResultReceiver {
           throw receiverError(
             'result_verification_failed',
             'Downloaded result is not a regular file'
+          );
+        }
+        if (downloadedMetadata.size > 20 * 1024 * 1024) {
+          throw receiverError(
+            'result_verification_failed',
+            'Downloaded result exceeds the allowed size'
           );
         }
 
@@ -141,8 +231,10 @@ export class LocalImageResultReceiver {
         ).verify({ file: provisional });
         assertExpectedResult(descriptor, inspection, verification);
 
-        execution = transitionExecution(execution, 'writing', this.now());
-        await context.executionRepository.save(execution);
+        if (execution.state === 'downloading') {
+          execution = transitionExecution(execution, 'writing', this.now());
+          await context.executionRepository.save(execution);
+        }
         const workId = this.createWorkId();
         const extension = extensionForMime(inspection.mimeType);
         const relativePath = toProjectRelativePath(
@@ -196,12 +288,15 @@ export class LocalImageResultReceiver {
           checksumSha256: availableFile.checksumSha256,
           updatedAt: availableFile.updatedAt
         });
-        execution = transitionExecution(execution, 'completed', this.now());
-        await context.executionRepository.save(execution);
+        const workIdForCompletion = workId;
+        const completed = transitionExecution(execution, 'completed', this.now(), {
+          outputFileId: availableFile.id,
+          workId: workIdForCompletion
+        });
         const work = registerWork({
-          id: workId,
+          id: workIdForCompletion,
           task,
-          execution,
+          execution: completed,
           file: availableFile,
           mediaKind: 'image',
           name: path.basename(descriptor.name),
@@ -209,6 +304,8 @@ export class LocalImageResultReceiver {
           createdAt: this.now()
         });
         await context.workRepository.save(work);
+        await context.executionRepository.save(completed);
+        execution = completed;
         finalPath = undefined;
         return {
           ok: true,
@@ -220,7 +317,7 @@ export class LocalImageResultReceiver {
         };
       } catch (error) {
         this.dependencies.onError?.(error);
-        if (execution && canFailExecution(execution)) {
+        if (execution && canFailExecution(execution, finalFileRecorded)) {
           try {
             const failure = transitionExecution(execution, 'failed', this.now(), {
               failure: {
@@ -278,6 +375,30 @@ export class LocalImageResultReceiver {
       this.dependencies.now?.() ?? new Date().toISOString()
     );
   }
+}
+
+function resultOperationForExecution(
+  execution: Execution
+): ImageResultOperationReference | undefined {
+  if (
+    ['remote_completed', 'downloading', 'writing', 'verifying'].includes(
+      execution.state
+    ) &&
+    execution.submissionOutcome === 'completed_sync' &&
+    execution.providerOperationRecordId
+  ) {
+    return {
+      kind: 'provider_operation_record',
+      id: execution.providerOperationRecordId
+    };
+  }
+  if (
+    (execution.state === 'queued' || execution.state === 'processing') &&
+    execution.remoteOperationId
+  ) {
+    return { kind: 'remote_operation', id: execution.remoteOperationId };
+  }
+  return undefined;
 }
 
 class ImageResultReceiverError extends Error {
@@ -369,7 +490,11 @@ async function syncFile(target: string): Promise<void> {
   }
 }
 
-function canFailExecution(execution: Execution): boolean {
+function canFailExecution(
+  execution: Execution,
+  verifiedFileRecorded: boolean
+): boolean {
+  if (verifiedFileRecorded && execution.state === 'verifying') return false;
   return [
     'submitting',
     'queued',
