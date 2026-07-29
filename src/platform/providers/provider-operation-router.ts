@@ -232,12 +232,16 @@ function operationForTask(
     task.submission.kind === 'video_generation' &&
     task.submission.video?.purpose === 'video_generation'
   ) {
+    const purpose = task.submission.video.materials.length === 1 &&
+      task.submission.video.materials[0]?.mediaKind === 'image'
+      ? 'reference_to_video'
+      : 'video_generation';
     return {
       modelId: task.submission.video.modelId,
       capabilityEvidenceId: task.submission.video.capabilityEvidenceId,
       providerId: task.submission.video.providerId,
       connectionId: task.submission.video.connectionId,
-      purpose: task.submission.video.purpose
+      purpose
     };
   }
   return undefined;
