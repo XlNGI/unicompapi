@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  LuBadgeCheck,
+  LuFileText,
+  LuImage,
+  LuMessageCircle
+} from 'react-icons/lu';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
@@ -174,6 +180,13 @@ export function WorkspaceContextSelector({
                   }
                   variant="secondary"
                 >
+                  {section.kind === 'project_asset' ? (
+                    <LuImage aria-hidden="true" />
+                  ) : section.kind === 'project_context' ? (
+                    <LuFileText aria-hidden="true" />
+                  ) : (
+                    <LuMessageCircle aria-hidden="true" />
+                  )}
                   {section.action}
                 </Button>
                 <span>已明确选择 {count} 项</span>
@@ -252,7 +265,10 @@ export function WorkspaceContextSelector({
             </div>
           )}
           <div className="uc-context-selector__actions">
-            <Button onClick={() => setOpenKind(undefined)}>完成</Button>
+            <Button onClick={() => setOpenKind(undefined)}>
+              <LuBadgeCheck aria-hidden="true" />
+              完成
+            </Button>
           </div>
         </dialog>
       ) : null}

@@ -1,4 +1,17 @@
 import { useEffect, useState } from 'react';
+import {
+  LuBadgeCheck,
+  LuCirclePlay,
+  LuFolderInput,
+  LuImagePlus,
+  LuListPlus,
+  LuRefreshCw,
+  LuRotateCcw,
+  LuShieldCheck,
+  LuSparkles,
+  LuTrash2,
+  LuVideo
+} from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -222,6 +235,7 @@ export function ImageProfessionalWorkspace({
                 onClick={() => void selectReference()}
                 variant="secondary"
               >
+                <LuImagePlus aria-hidden="true" />
                 {input ? '重新选择参考图' : '选择一张参考图'}
               </Button>
             </div>
@@ -317,6 +331,7 @@ export function ImageProfessionalWorkspace({
               }
               variant="secondary"
             >
+              <LuRotateCcw aria-hidden="true" />
               恢复原始输入
             </Button>
             <Button
@@ -333,9 +348,11 @@ export function ImageProfessionalWorkspace({
               }
               variant="secondary"
             >
+              <LuTrash2 aria-hidden="true" />
               清除系统补充
             </Button>
             <Button disabled variant="secondary">
+              <LuRefreshCw aria-hidden="true" />
               重新增强
             </Button>
           </div>
@@ -347,9 +364,11 @@ export function ImageProfessionalWorkspace({
           />
           <div className="uc-image-quick__result-actions">
             <Button disabled variant="secondary">
+              <LuFolderInput aria-hidden="true" />
               {submission.work ? '已登记到项目' : '保存到项目'}
             </Button>
             <Button disabled variant="secondary">
+              <LuRefreshCw aria-hidden="true" />
               重新生成
             </Button>
           </div>
@@ -373,6 +392,7 @@ export function ImageProfessionalWorkspace({
             onClick={() => void checkSubmission()}
             variant="secondary"
           >
+            <LuShieldCheck aria-hidden="true" />
             检查提交条件
           </Button>
           {preflight ? (
@@ -400,6 +420,7 @@ export function ImageProfessionalWorkspace({
               disabled={!submission.canCreateTask}
               onClick={() => void submission.createTask()}
             >
+              <LuListPlus aria-hidden="true" />
               创建图片任务
             </Button>
             <Button
@@ -407,12 +428,14 @@ export function ImageProfessionalWorkspace({
               onClick={() => void submission.createExecution()}
               variant="secondary"
             >
+              <LuCirclePlay aria-hidden="true" />
               创建执行记录
             </Button>
             <Button
               disabled={!submission.execution || submission.execution.state !== 'created' || busy}
               onClick={() => void submission.invokeExecution()}
             >
+              <LuSparkles aria-hidden="true" />
               提交图片生成
             </Button>
             <Button
@@ -420,6 +443,7 @@ export function ImageProfessionalWorkspace({
               onClick={() => void submission.receiveResult()}
               variant="secondary"
             >
+              <LuBadgeCheck aria-hidden="true" />
               校验并登记结果
             </Button>
             <Button
@@ -427,6 +451,7 @@ export function ImageProfessionalWorkspace({
               onClick={() => void submission.createVideoDraft()}
               variant="secondary"
             >
+              <LuVideo aria-hidden="true" />
               创建图生视频草稿
             </Button>
           </div>

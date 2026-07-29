@@ -1,4 +1,14 @@
 import { useEffect, useState } from 'react';
+import {
+  LuImage,
+  LuImagePlus,
+  LuPencil,
+  LuSave,
+  LuScanSearch,
+  LuScanText,
+  LuShieldCheck,
+  LuSparkles
+} from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -255,7 +265,8 @@ export function ImageUnderstandingWorkspace({
 
   return (
     <>
-      <div className="uc-image-understanding__workspace">
+      <div className="uc-image-understanding__layout">
+        <div className="uc-image-understanding__workspace">
         <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
@@ -278,6 +289,7 @@ export function ImageUnderstandingWorkspace({
               onClick={() => void selectSource()}
               variant="secondary"
             >
+              <LuImagePlus aria-hidden="true" />
               {input ? '重新选择图片' : '选择一张图片'}
             </Button>
           </div>
@@ -385,6 +397,7 @@ export function ImageUnderstandingWorkspace({
             onClick={() => void checkRecognition()}
             variant="secondary"
           >
+            <LuShieldCheck aria-hidden="true" />
             检查识别条件
           </Button>
           {preflight ? (
@@ -430,14 +443,17 @@ export function ImageUnderstandingWorkspace({
               promptLabel="识别目的"
             />
           ) : null}
-          <Button disabled>开始识别</Button>
+          <Button disabled>
+            <LuScanSearch aria-hidden="true" />
+            开始识别
+          </Button>
           <p className="uc-image-quick__hint">
             当前没有真实图片识别适配器；不会创建任务、上传图片或伪造结果。
           </p>
         </Card>
-      </div>
+        </div>
 
-      <Card className="uc-image-understanding__results">
+        <Card className="uc-image-understanding__results">
         <header className="uc-image-understanding__results-heading">
           <div>
             <h2>结构化识别结果</h2>
@@ -486,6 +502,7 @@ export function ImageUnderstandingWorkspace({
                         }}
                         variant="ghost"
                       >
+                        <LuPencil aria-hidden="true" />
                         修订此项
                       </Button>
                     </li>
@@ -543,10 +560,12 @@ export function ImageUnderstandingWorkspace({
             onClick={addRevision}
             variant="secondary"
           >
+            <LuSave aria-hidden="true" />
             保存为独立修订
           </Button>
         </div>
-      </Card>
+        </Card>
+      </div>
 
       <Card className="uc-image-workbench__notice">
         <StatusPill tone="warning">后续操作</StatusPill>
@@ -557,6 +576,7 @@ export function ImageUnderstandingWorkspace({
             onClick={() => void deriveDraft('image_to_prompt')}
             variant="secondary"
           >
+            <LuScanText aria-hidden="true" />
             转为提示词草稿
           </Button>
           <Button
@@ -564,6 +584,7 @@ export function ImageUnderstandingWorkspace({
             onClick={() => void deriveDraft('image_editing')}
             variant="secondary"
           >
+            <LuImage aria-hidden="true" />
             进入图片编辑
           </Button>
           <Button
@@ -571,6 +592,7 @@ export function ImageUnderstandingWorkspace({
             onClick={() => void deriveDraft('professional_image')}
             variant="secondary"
           >
+            <LuSparkles aria-hidden="true" />
             进入专业生图
           </Button>
         </div>

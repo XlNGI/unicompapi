@@ -1,4 +1,16 @@
 import { useEffect, useState } from 'react';
+import {
+  LuArrowRight,
+  LuBadgeCheck,
+  LuCirclePlay,
+  LuFolderInput,
+  LuImagePlus,
+  LuListPlus,
+  LuRefreshCw,
+  LuShieldCheck,
+  LuSparkles,
+  LuVideo
+} from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -175,8 +187,8 @@ export function ImageQuickWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace">
-        <Card className="uc-image-workbench__panel">
+      <div className="uc-image-workbench__workspace uc-image-quick__workspace">
+        <Card className="uc-image-workbench__panel uc-image-quick__composer">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -209,6 +221,7 @@ export function ImageQuickWorkspace({
               onClick={() => void selectReference()}
               variant="secondary"
             >
+              <LuImagePlus aria-hidden="true" />
               {input ? '重新选择参考图' : '选择一张参考图'}
             </Button>
           </div>
@@ -219,7 +232,7 @@ export function ImageQuickWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas">
+        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-image-quick__stage">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
@@ -242,9 +255,11 @@ export function ImageQuickWorkspace({
           )}
           <div className="uc-image-quick__result-actions">
             <Button disabled variant="secondary">
+              <LuFolderInput aria-hidden="true" />
               {submission.work ? '已登记到项目' : '保存到项目'}
             </Button>
             <Button disabled variant="secondary">
+              <LuRefreshCw aria-hidden="true" />
               重新生成
             </Button>
             <Button
@@ -252,12 +267,13 @@ export function ImageQuickWorkspace({
               onClick={() => void enterProfessional()}
               variant="secondary"
             >
+              <LuArrowRight aria-hidden="true" />
               进入专业创作
             </Button>
           </div>
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-image-quick__inspector">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
             <div>
@@ -275,6 +291,7 @@ export function ImageQuickWorkspace({
             onClick={() => void checkSubmission()}
             variant="secondary"
           >
+            <LuShieldCheck aria-hidden="true" />
             检查提交条件
           </Button>
           {preflight ? (
@@ -300,6 +317,7 @@ export function ImageQuickWorkspace({
               disabled={!submission.canCreateTask}
               onClick={() => void submission.createTask()}
             >
+              <LuListPlus aria-hidden="true" />
               创建图片任务
             </Button>
             <Button
@@ -307,12 +325,14 @@ export function ImageQuickWorkspace({
               onClick={() => void submission.createExecution()}
               variant="secondary"
             >
+              <LuCirclePlay aria-hidden="true" />
               创建执行记录
             </Button>
             <Button
               disabled={!submission.execution || submission.execution.state !== 'created' || busy}
               onClick={() => void submission.invokeExecution()}
             >
+              <LuSparkles aria-hidden="true" />
               提交图片生成
             </Button>
             <Button
@@ -320,6 +340,7 @@ export function ImageQuickWorkspace({
               onClick={() => void submission.receiveResult()}
               variant="secondary"
             >
+              <LuBadgeCheck aria-hidden="true" />
               校验并登记结果
             </Button>
             <Button
@@ -327,6 +348,7 @@ export function ImageQuickWorkspace({
               onClick={() => void submission.createVideoDraft()}
               variant="secondary"
             >
+              <LuVideo aria-hidden="true" />
               创建图生视频草稿
             </Button>
           </div>
