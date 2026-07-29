@@ -3,6 +3,7 @@ import type {
   ProviderProtocolBinding,
   ProxyMode
 } from '../../../domain';
+import { isIP } from 'node:net';
 import {
   CredentialNotFoundError,
   CredentialUnreadableError,
@@ -67,6 +68,18 @@ export interface ViduRuntimeResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: Uint8Array;
+}
+
+export interface ViduResultDownloadRequest {
+  readonly url: string;
+  readonly timeoutMs?: number;
+  readonly maxResponseBytes?: number;
+  readonly signal?: AbortSignal;
+}
+
+export interface ViduResultDownloadResponse {
+  readonly body: Uint8Array;
+  readonly contentType?: string;
 }
 
 export interface ViduSharedRuntimeOptions {
@@ -169,6 +182,84 @@ export class ViduSharedRuntime {
         event: 'request_failed',
         method: input.method,
         protocolId: input.binding?.protocolId ?? 'vidu.connection',
+        errorCode: mapped.code,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+      throw mapped;
+    } finally {
+      clearTimeout(timeout);
+      removeExternalAbort();
+      this.active.delete(controller);
+    }
+  }
+
+  async downloadResult(
+    input: ViduResultDownloadRequest
+  ): Promise<ViduResultDownloadResponse> {
+    if (this.disposed) {
+      throw new ViduRuntimeError('runtime_shutting_down', 'not_retryable');
+    }
+    const url = parseResultUrl(input.url);
+    const timeoutMs = input.timeoutMs ?? this.options.defaultTimeoutMs ?? 30_000;
+    const maxResponseBytes = input.maxResponseBytes ?? 20 * 1024 * 1024;
+    if (
+      !Number.isInteger(timeoutMs) ||
+      timeoutMs < 1 ||
+      !Number.isInteger(maxResponseBytes) ||
+      maxResponseBytes < 1
+    ) {
+      throw new ViduRuntimeError('invalid_request', 'not_retryable');
+    }
+
+    const controller = new AbortController();
+    const removeExternalAbort = linkAbort(input.signal, controller);
+    this.active.add(controller);
+    const startedAt = this.now();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    this.log({ event: 'request_started', method: 'GET', protocolId: 'vidu.result' });
+    try {
+      const response = await this.options.transport.send({
+        method: 'GET',
+        url: url.toString(),
+        headers: { accept: 'image/*' },
+        signal: controller.signal,
+        timeoutMs,
+        maxResponseBytes,
+        proxy: this.options.proxy?.() ?? { kind: 'system_default' },
+        redirect: 'manual'
+      });
+      validateResponseSize(response, maxResponseBytes);
+      if (response.status >= 300 && response.status < 400) {
+        throw new ViduRuntimeError('redirect_not_allowed', 'not_retryable');
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw mapHttpStatus(response.status, response.headers);
+      }
+      this.log({
+        event: 'request_completed',
+        method: 'GET',
+        protocolId: 'vidu.result',
+        status: response.status,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+      return {
+        body: Uint8Array.from(response.body),
+        contentType: normalizeContentType(response.headers)
+      };
+    } catch (error) {
+      const mapped = mapRuntimeFailure(
+        error,
+        controller.signal.aborted,
+        timedOut
+      );
+      this.log({
+        event: 'request_failed',
+        method: 'GET',
+        protocolId: 'vidu.result',
         errorCode: mapped.code,
         elapsedMs: Math.max(0, this.now() - startedAt)
       });
@@ -283,6 +374,38 @@ export class ViduSharedRuntime {
   private now(): number {
     return this.options.now?.() ?? Date.now();
   }
+}
+
+function parseResultUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ViduRuntimeError('invalid_response', 'not_retryable');
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (
+    url.protocol !== 'https:' ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.hash.length > 0 ||
+    isIP(hostname) !== 0 ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    !hostname.includes('.')
+  ) {
+    throw new ViduRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  return url;
+}
+
+function normalizeContentType(
+  headers: Readonly<Record<string, string>>
+): string | undefined {
+  const normalized = normalizeHeaders(headers)['content-type'];
+  const value = normalized?.split(';', 1)[0]?.trim().toLowerCase();
+  return value || undefined;
 }
 
 function validateConnection(connection: ProviderConnection, baseUrl: URL): void {
