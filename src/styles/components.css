@@ -1,6 +1,10 @@
 @import "./tokens.css";
 
 .uc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--uc-space-2);
   min-height: 32px;
   border: 1px solid transparent;
   border-radius: var(--uc-radius-8);
@@ -94,6 +98,12 @@
 .uc-empty-state__title,
 .uc-empty-state__description {
   margin: 0;
+}
+
+.uc-button > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
 }
 
 .uc-empty-state[data-read-only="true"] {

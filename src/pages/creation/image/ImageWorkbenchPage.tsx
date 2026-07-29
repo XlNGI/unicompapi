@@ -1,4 +1,10 @@
 import { useEffect, useState } from 'react';
+import {
+  LuFilePlus2,
+  LuImagePlus,
+  LuSave,
+  LuShieldCheck
+} from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -37,9 +43,21 @@ const draftStateLabels: Record<ImageWorkspaceDraftDto['state'], string> = {
   archived: '已归档'
 };
 
+const modePresentation: Record<
+  ImageWorkspaceDtoMode,
+  { readonly number: string; readonly badge: string }
+> = {
+  quick_image: { number: '01', badge: '简约模式' },
+  professional_image: { number: '02', badge: '专业模式' },
+  image_understanding: { number: '03', badge: '理解图片内容' },
+  image_editing: { number: '04', badge: '专业模式' },
+  image_to_prompt: { number: '05', badge: '专业模式' }
+};
+
 interface ImageWorkbenchPageProps {
   mode: ImageCreationMode;
   onNavigateToProfessional?: () => void;
+  onVideoDraftCreated?: (draftId: string) => void;
   onNavigateToImageMode?: (
     mode: ImageWorkspaceDtoMode
   ) => void;
@@ -48,6 +66,7 @@ interface ImageWorkbenchPageProps {
 export function ImageWorkbenchPage({
   mode,
   onNavigateToProfessional,
+  onVideoDraftCreated,
   onNavigateToImageMode
 }: ImageWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
@@ -66,6 +85,7 @@ export function ImageWorkbenchPage({
   const isGenerationImage =
     mode.workspaceMode === 'quick_image' ||
     mode.workspaceMode === 'professional_image';
+  const presentation = modePresentation[mode.workspaceMode];
 
   useEffect(() => {
     let active = true;
@@ -201,25 +221,37 @@ export function ImageWorkbenchPage({
       : '未打开项目';
 
   return (
-    <section className="uc-image-workbench" aria-labelledby={`${mode.id}-title`}>
+    <section
+      className="uc-image-workbench"
+      data-mode={mode.workspaceMode}
+      aria-labelledby={`${mode.id}-title`}
+    >
       <header className="uc-image-workbench__header">
         <div>
           <div className="uc-page-skeleton__heading-row">
             <h1 className="uc-page-skeleton__title" id={`${mode.id}-title`}>
+              {mode.workspaceMode === 'quick_image' ? null : (
+                <span aria-hidden="true">{presentation.number}</span>
+              )}{' '}
               {mode.label}
             </h1>
-            <StatusPill tone={session ? 'info' : 'warning'}>
-              {projectStatus}
-            </StatusPill>
+            <StatusPill tone="info">{presentation.badge}</StatusPill>
+            {mode.workspaceMode === 'quick_image' ? null : (
+              <StatusPill tone={session ? 'info' : 'warning'}>
+                {projectStatus}
+              </StatusPill>
+            )}
           </div>
           <p className="uc-page-skeleton__description">{mode.description}</p>
         </div>
         <div className="uc-image-workbench__header-actions">
+          <div className="uc-image-workbench__draft-actions">
           <Button
             disabled={!session || busy}
             onClick={() => void createDraft()}
             variant="secondary"
           >
+            <LuFilePlus2 aria-hidden="true" />
             {busy ? '请稍候…' : '新建本地草稿'}
           </Button>
           <Button
@@ -233,8 +265,10 @@ export function ImageWorkbenchPage({
             }
             onClick={() => void saveDraft()}
           >
+            <LuSave aria-hidden="true" />
             保存本地草稿
           </Button>
+          </div>
         </div>
       </header>
 
@@ -264,6 +298,7 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToProfessional={onNavigateToProfessional}
+          onVideoDraftCreated={onVideoDraftCreated}
           registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'professional_image' ? (
@@ -273,6 +308,7 @@ export function ImageWorkbenchPage({
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
+          onVideoDraftCreated={onVideoDraftCreated}
           registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'image_understanding' ? (
@@ -292,6 +328,7 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigate={onNavigateToImageMode}
+          onVideoDraftCreated={onVideoDraftCreated}
           registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'image_to_prompt' ? (
@@ -333,6 +370,7 @@ export function ImageWorkbenchPage({
             <EmptyState
               action={
                 <Button disabled={busy} onClick={() => void createDraft()}>
+                  <LuFilePlus2 aria-hidden="true" />
                   创建本地草稿
                 </Button>
               }
@@ -353,7 +391,12 @@ export function ImageWorkbenchPage({
                 </span>
               </div>
               <EmptyState
-                action={<Button disabled>选择一张图片</Button>}
+                action={
+                  <Button disabled>
+                    <LuImagePlus aria-hidden="true" />
+                    选择一张图片
+                  </Button>
+                }
                 description={
                   currentDraft.input
                     ? '已保存项目内图片引用；仅在本地文件校验通过时提供受控预览。'
@@ -436,6 +479,7 @@ export function ImageWorkbenchPage({
             </div>
           </dl>
           <Button disabled>
+            <LuShieldCheck aria-hidden="true" />
             {isGenerationImage
               ? '创建并保存草稿后检查'
               : '保存草稿后检查真实提交条件'}

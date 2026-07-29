@@ -96,9 +96,35 @@ test('does not expose prohibited secondary navigation entries', () => {
   );
 });
 
-test('labels each secondary navigation container as a group', () => {
+test('renders navigation as accessible icon dropdowns', () => {
   assert.match(sidebarSource, /role="group"/);
   assert.match(sidebarSource, /aria-label=\{`\$\{item\.label\}二级导航`\}/);
+  assert.doesNotMatch(sidebarSource, /createPortal/);
+  for (const id of [
+    'chat',
+    'projects',
+    'image-creation',
+    'video-creation',
+    'tasks',
+    'library',
+    'providers',
+    'settings'
+  ]) {
+    assert.match(sidebarSource, new RegExp(`['"]?${id}['"]?:`));
+  }
+  for (const id of [
+    'quick-image',
+    'professional-image',
+    'image-understanding',
+    'image-editing',
+    'image-to-prompt',
+    'quick-video',
+    'text-to-video',
+    'image-to-video',
+    'video-editing'
+  ]) {
+    assert.match(sidebarSource, new RegExp(`['"]${id}['"]:`));
+  }
 });
 
 test('keeps an expanded creation parent open and returns to its first mode', () => {

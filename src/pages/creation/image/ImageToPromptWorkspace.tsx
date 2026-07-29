@@ -1,4 +1,11 @@
 import { useEffect, useState } from 'react';
+import {
+  LuImage,
+  LuImagePlus,
+  LuScanText,
+  LuShieldCheck,
+  LuSparkles
+} from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -237,7 +244,8 @@ export function ImageToPromptWorkspace({
 
   return (
     <>
-      <div className="uc-image-to-prompt__workspace">
+      <div className="uc-image-to-prompt__layout">
+        <div className="uc-image-to-prompt__workspace">
         <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
@@ -260,6 +268,7 @@ export function ImageToPromptWorkspace({
               onClick={() => void selectSource()}
               variant="secondary"
             >
+              <LuImagePlus aria-hidden="true" />
               {input ? '更换图片' : '选择一张图片'}
             </Button>
           </div>
@@ -359,6 +368,7 @@ export function ImageToPromptWorkspace({
             onClick={() => void checkAnalysis()}
             variant="secondary"
           >
+            <LuShieldCheck aria-hidden="true" />
             检查分析条件
           </Button>
           {preflight ? (
@@ -401,6 +411,7 @@ export function ImageToPromptWorkspace({
             />
           ) : null}
           <Button disabled>
+            <LuScanText aria-hidden="true" />
             {analysis.analysisState === 'stale'
               ? '重新分析并更新草稿'
               : '分析图片并生成提示词草稿'}
@@ -409,9 +420,9 @@ export function ImageToPromptWorkspace({
             当前没有真实图片转提示词适配器；不会创建任务、上传图片或伪造草稿。
           </p>
         </Card>
-      </div>
+        </div>
 
-      <Card className="uc-image-to-prompt__results">
+        <Card className="uc-image-to-prompt__results">
         <header className="uc-image-understanding__results-heading">
           <div>
             <h2>分析结果与提示词草稿</h2>
@@ -509,7 +520,8 @@ export function ImageToPromptWorkspace({
         <p className="uc-image-quick__hint">
           使用页面顶部“保存本地草稿”保存修改；提示词草稿不是作品，也不会自动生成图片。
         </p>
-      </Card>
+        </Card>
+      </div>
 
       <Card className="uc-image-workbench__notice">
         <StatusPill tone="warning">后续操作</StatusPill>
@@ -520,6 +532,7 @@ export function ImageToPromptWorkspace({
             onClick={() => void deriveDraft('professional_image')}
             variant="secondary"
           >
+            <LuSparkles aria-hidden="true" />
             进入专业生图草稿
           </Button>
           <Button
@@ -527,6 +540,7 @@ export function ImageToPromptWorkspace({
             onClick={() => void deriveDraft('image_editing')}
             variant="secondary"
           >
+            <LuImage aria-hidden="true" />
             进入图片编辑草稿
           </Button>
         </div>

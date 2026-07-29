@@ -14,6 +14,10 @@ const shellSource = await readFile(
   'src/pages/creation/video/VideoWorkbenchPage.tsx',
   'utf8'
 );
+const pageSource = await readFile(
+  'src/pages/creation/video/ImageToVideoPage.tsx',
+  'utf8'
+);
 const bundle = `${imageVideoSource}\n${controlsSource}\n${shellSource}`;
 
 test('image to video uses only capability-driven material slots', () => {
@@ -109,4 +113,46 @@ test('image to video preserves prompt, stale and submission boundaries', () => {
 test('video shell renders the image to video workspace', () => {
   assert.match(shellSource, /currentDraft\?\.mode === 'image_to_video'/);
   assert.match(shellSource, /<VideoImageWorkspace/);
+});
+
+test('image to video opens the requested derived draft and counts selected slots', () => {
+  assert.match(pageSource, /preferredDraftId=\{preferredDraftId\}/);
+  assert.match(
+    shellSource,
+    /drafts\.find\(\(draft\) => draft\.draftId === selectedDraftId\)/
+  );
+  assert.match(
+    imageVideoSource,
+    /materials\?\.slots\.filter\(\(slot\) => slot\.selection\)[\s\S]*\.length \?\? 0/
+  );
+  assert.match(
+    imageVideoSource,
+    /materialSummary=\{`\$\{materialCount\} 个受控槽位素材`\}/
+  );
+});
+
+test('automatic polling reports the refreshed execution state', () => {
+  assert.match(
+    imageVideoSource,
+    /refreshExecution\(execution\.executionId\)[\s\S]*setExecution\(result\.value\)[\s\S]*已刷新真实远端状态：\$\{result\.value\.state\}/
+  );
+});
+
+test('image to video blocks duplicate task and execution creation', () => {
+  assert.match(
+    imageVideoSource,
+    /!videoSubmissions \|\|[\s\S]*task \|\|[\s\S]*execution \|\|[\s\S]*!preflight/
+  );
+  assert.match(
+    imageVideoSource,
+    /if \(!videoSubmissions \|\| !task \|\| execution \|\| busy\) return/
+  );
+  assert.match(
+    imageVideoSource,
+    /!allVideoConfirmationsAccepted\(confirmations\) \|\|[\s\S]*Boolean\(task\) \|\|[\s\S]*Boolean\(execution\) \|\|[\s\S]*busy/
+  );
+  assert.match(
+    imageVideoSource,
+    /disabled=\{!task \|\| Boolean\(execution\) \|\| busy\}/
+  );
 });

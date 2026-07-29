@@ -1,4 +1,16 @@
 import { useEffect, useState } from 'react';
+import {
+  LuBadgeCheck,
+  LuCirclePlay,
+  LuGitBranch,
+  LuImagePlus,
+  LuListPlus,
+  LuSave,
+  LuScanText,
+  LuShieldCheck,
+  LuSparkles,
+  LuVideo
+} from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -29,6 +41,7 @@ interface ImageEditingWorkspaceProps {
   readonly onDraftPersisted: (draft: EditingImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
   readonly onNavigate?: (mode: EditingTargetMode) => void;
+  readonly onVideoDraftCreated?: (draftId: string) => void;
 }
 
 const editingErrorMessages = {
@@ -67,7 +80,8 @@ export function ImageEditingWorkspace({
   onDraftChange,
   onDraftPersisted,
   onMessage,
-  onNavigate
+  onNavigate,
+  onVideoDraftCreated
 }: ImageEditingWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const imageSubmissions = window.unicomp?.imageSubmissions;
@@ -88,6 +102,7 @@ export function ImageEditingWorkspace({
     busy,
     setBusy,
     onMessage,
+    onVideoDraftCreated,
     errorMessages: editingErrorMessages
   });
 
@@ -244,6 +259,7 @@ export function ImageEditingWorkspace({
               onClick={() => void selectSource()}
               variant="secondary"
             >
+              <LuImagePlus aria-hidden="true" />
               {input ? '更换原图' : '选择一张原图'}
             </Button>
           </div>
@@ -334,6 +350,7 @@ export function ImageEditingWorkspace({
               </span>
             </div>
             <Button disabled variant="secondary">
+              <LuImagePlus aria-hidden="true" />
               选择蒙版
             </Button>
           </div>
@@ -357,6 +374,7 @@ export function ImageEditingWorkspace({
             onClick={() => void checkEditing()}
             variant="secondary"
           >
+            <LuShieldCheck aria-hidden="true" />
             检查编辑条件
           </Button>
           {preflight ? (
@@ -385,13 +403,15 @@ export function ImageEditingWorkspace({
               disabled={!submission.canCreateTask}
               onClick={() => void submission.createTask()}
             >
+              <LuListPlus aria-hidden="true" />
               创建图片编辑任务
             </Button>
             <Button
-              disabled={!submission.task || busy}
+              disabled={!submission.task || Boolean(submission.execution) || busy}
               onClick={() => void submission.createExecution()}
               variant="secondary"
             >
+              <LuCirclePlay aria-hidden="true" />
               创建执行记录
             </Button>
             <Button
@@ -402,6 +422,7 @@ export function ImageEditingWorkspace({
               }
               onClick={() => void submission.invokeExecution()}
             >
+              <LuSparkles aria-hidden="true" />
               提交图片编辑
             </Button>
             <Button
@@ -413,6 +434,7 @@ export function ImageEditingWorkspace({
               onClick={() => void submission.receiveResult()}
               variant="secondary"
             >
+              <LuBadgeCheck aria-hidden="true" />
               校验并登记新版本
             </Button>
             <Button
@@ -420,6 +442,7 @@ export function ImageEditingWorkspace({
               onClick={() => void submission.createVideoDraft()}
               variant="secondary"
             >
+              <LuVideo aria-hidden="true" />
               创建图生视频草稿
             </Button>
           </div>
@@ -475,9 +498,11 @@ export function ImageEditingWorkspace({
         />
         <div className="uc-image-quick__result-actions">
           <Button disabled>
+            <LuSave aria-hidden="true" />
             {submission.work ? '新版本已登记到项目' : '保存新版本到项目'}
           </Button>
           <Button disabled variant="secondary">
+            <LuGitBranch aria-hidden="true" />
             继续编辑新分支
           </Button>
         </div>
@@ -492,6 +517,7 @@ export function ImageEditingWorkspace({
             onClick={() => void deriveDraft('image_to_prompt')}
             variant="secondary"
           >
+            <LuScanText aria-hidden="true" />
             转为提示词草稿
           </Button>
           <Button
@@ -499,6 +525,7 @@ export function ImageEditingWorkspace({
             onClick={() => void deriveDraft('professional_image')}
             variant="secondary"
           >
+            <LuSparkles aria-hidden="true" />
             进入专业生图
           </Button>
         </div>
