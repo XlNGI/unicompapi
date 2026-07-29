@@ -3,7 +3,9 @@ import {
   LuFilePlus2,
   LuImagePlus,
   LuSave,
-  LuShieldCheck
+  LuShieldCheck,
+  LuSlidersHorizontal,
+  LuZap
 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
@@ -228,16 +230,42 @@ export function ImageWorkbenchPage({
         <div>
           <div className="uc-page-skeleton__heading-row">
             <h1 className="uc-page-skeleton__title" id={`${mode.id}-title`}>
-              <span aria-hidden="true">{presentation.number}</span> {mode.label}
+              {mode.workspaceMode === 'quick_image' ? null : (
+                <span aria-hidden="true">{presentation.number}</span>
+              )}{' '}
+              {mode.label}
             </h1>
             <StatusPill tone="info">{presentation.badge}</StatusPill>
-            <StatusPill tone={session ? 'info' : 'warning'}>
-              {projectStatus}
-            </StatusPill>
+            {mode.workspaceMode === 'quick_image' ? null : (
+              <StatusPill tone={session ? 'info' : 'warning'}>
+                {projectStatus}
+              </StatusPill>
+            )}
           </div>
           <p className="uc-page-skeleton__description">{mode.description}</p>
         </div>
         <div className="uc-image-workbench__header-actions">
+          {mode.workspaceMode === 'quick_image' ? (
+            <div className="uc-image-workbench__mode-switch" aria-label="图片创作模式">
+              <button
+                aria-current="page"
+                className="uc-image-workbench__mode-option is-active"
+                type="button"
+              >
+                <LuZap aria-hidden="true" />
+                快速生图
+              </button>
+              <button
+                className="uc-image-workbench__mode-option"
+                onClick={onNavigateToProfessional}
+                type="button"
+              >
+                <LuSlidersHorizontal aria-hidden="true" />
+                专业创作
+              </button>
+            </div>
+          ) : null}
+          <div className="uc-image-workbench__draft-actions">
           <Button
             disabled={!session || busy}
             onClick={() => void createDraft()}
@@ -260,6 +288,7 @@ export function ImageWorkbenchPage({
             <LuSave aria-hidden="true" />
             保存本地草稿
           </Button>
+          </div>
         </div>
       </header>
 

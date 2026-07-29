@@ -38,10 +38,10 @@ test('quick image page uses the controlled input and preflight APIs', () => {
 
 test('quick image keeps draft, model parameters and confirmations explicit', () => {
   for (const text of [
-    '一句话需求',
+    '输入一句话，UniComp AI 为你生成图片',
     '单张参考图（可选）',
     '保存本地草稿',
-    '检查提交条件',
+    '检查并准备生成',
     '逐项确认本次提交',
     '费用状态：未知',
     '提交任务',
@@ -58,6 +58,28 @@ test('quick image keeps draft, model parameters and confirmations explicit', () 
   assert.match(generationControlsSource, /parameterSchema\?\.fields\.map/);
   assert.match(quickSource, /\.derive\([\s\S]*'professional_image'/);
   assert.match(appSource, /'quick-image'[\s\S]*'professional-image'/);
+});
+
+test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
+  const composerIndex = quickSource.indexOf('uc-image-quick__composer');
+  const inspectorIndex = quickSource.indexOf('uc-image-quick__inspector');
+  const stageIndex = quickSource.indexOf('uc-image-quick__stage');
+
+  assert.ok(composerIndex >= 0, 'quick image composer is missing');
+  assert.ok(inspectorIndex > composerIndex, 'step 2 must follow step 1');
+  assert.ok(stageIndex > inspectorIndex, 'step 3 must follow step 2');
+  assert.match(
+    quickSource.slice(composerIndex, inspectorIndex),
+    /<span aria-hidden="true">1<\/span>/
+  );
+  assert.match(
+    quickSource.slice(inspectorIndex, stageIndex),
+    /<span aria-hidden="true">2<\/span>/
+  );
+  assert.match(
+    quickSource.slice(stageIndex),
+    /<span aria-hidden="true">3<\/span>/
+  );
 });
 
 test('quick image keeps unavailable adapters blocked without fake output', () => {

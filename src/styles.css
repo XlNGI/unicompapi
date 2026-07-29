@@ -68,7 +68,7 @@ button {
   position: relative;
   z-index: 100;
   display: grid;
-  grid-template-columns: 184px minmax(32px, 1fr) auto;
+  grid-template-columns: 160px minmax(32px, 1fr) auto;
   height: 42px;
   border-bottom: 1px solid var(--uc-color-border-subtle);
   color: var(--uc-color-text-secondary);
@@ -113,7 +113,62 @@ button {
 }
 
 .title-bar__drag-region {
+  flex: 1 1 auto;
   min-width: 32px;
+}
+
+.title-bar__context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.title-bar__project,
+.title-bar__utility {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--uc-space-2);
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--uc-radius-8);
+  padding: var(--uc-space-1) var(--uc-space-3);
+  color: var(--uc-color-text-secondary);
+  background: transparent;
+  font-size: var(--uc-font-size-caption);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar__project {
+  max-width: min(320px, 40vw);
+  border-color: var(--uc-color-border-default);
+  background: var(--uc-color-surface-base);
+}
+
+.title-bar__project span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-bar__project svg,
+.title-bar__utility svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.title-bar__project:hover,
+.title-bar__utility:hover {
+  border-color: var(--uc-color-border-strong);
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-subtle);
+}
+
+.title-bar__project:focus-visible,
+.title-bar__utility:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: -2px;
 }
 
 .title-bar__actions {
@@ -154,6 +209,8 @@ button {
 
 .theme-switch__trigger:focus-visible,
 .theme-switch__option:focus-visible,
+.title-bar__project:focus-visible,
+.title-bar__utility:focus-visible,
 .window-control:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: -2px;
@@ -251,14 +308,14 @@ button {
 
 .app-body {
   display: grid;
-  grid-template-columns: 184px minmax(0, 1fr);
+  grid-template-columns: 160px minmax(0, 1fr);
   min-height: 0;
 }
 
 .sidebar {
   overflow-y: auto;
   border-right: 1px solid var(--uc-color-border-subtle);
-  padding: 12px;
+  padding: 12px 10px;
   background: var(--uc-navigation-surface);
   backdrop-filter: blur(16px);
 }
@@ -392,7 +449,7 @@ button {
 .workspace {
   min-width: 0;
   overflow: auto;
-  padding: 20px;
+  padding: 16px;
 }
 
 .workspace:focus-visible {

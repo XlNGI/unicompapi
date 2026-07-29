@@ -74,7 +74,64 @@
 }
 
 .uc-image-workbench__header-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.uc-image-workbench__draft-actions {
+  display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--uc-space-2);
+}
+
+.uc-image-workbench__mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(128px, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--uc-color-border-default);
+  border-radius: var(--uc-radius-8);
+  background: var(--uc-color-surface-base);
+}
+
+.uc-image-workbench__mode-option {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--uc-space-2);
+  border: 0;
+  padding: var(--uc-space-2) var(--uc-space-4);
+  color: var(--uc-color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.uc-image-workbench__mode-option + .uc-image-workbench__mode-option {
+  border-left: 1px solid var(--uc-color-border-default);
+}
+
+.uc-image-workbench__mode-option.is-active {
+  color: var(--uc-color-text-primary);
+  background: linear-gradient(
+    135deg,
+    var(--uc-color-accent-fill),
+    var(--uc-color-accent-pressed)
+  );
+}
+
+.uc-image-workbench__mode-option:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: -2px;
+}
+
+.uc-image-workbench__mode-option > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.uc-image-workbench[data-mode="quick_image"] .uc-image-workbench__project-strip {
+  display: none;
 }
 
 .uc-image-workbench__project-strip {
@@ -282,6 +339,22 @@
   );
 }
 
+.uc-image-quick__composer-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: var(--uc-space-3);
+}
+
+.uc-image-quick__composer-actions .uc-image-quick__reference {
+  min-width: 0;
+}
+
+.uc-image-quick__primary-action {
+  min-width: 220px;
+  font-size: var(--uc-font-size-body);
+}
+
 .uc-image-quick__reference span,
 .uc-image-quick__hint,
 .uc-image-quick__preview figcaption,
@@ -308,6 +381,7 @@
   grid-template-columns: 1fr;
   grid-template-areas:
     "composer"
+    "delivery"
     "inspector"
     "stage";
 }
@@ -323,6 +397,61 @@
 
 .uc-image-quick__inspector {
   grid-area: inspector;
+}
+
+.uc-image-quick__delivery-strip {
+  display: grid;
+  grid-area: delivery;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0 !important;
+}
+
+.uc-image-quick__delivery-strip > div {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "icon detail";
+  gap: 0 var(--uc-space-2);
+  min-width: 0;
+  padding: var(--uc-space-3) var(--uc-space-4);
+}
+
+.uc-image-quick__delivery-strip > div + div {
+  border-left: 1px solid var(--uc-color-border-subtle);
+}
+
+.uc-image-quick__delivery-strip svg {
+  grid-area: icon;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--uc-color-text-accent);
+}
+
+.uc-image-quick__delivery-strip span,
+.uc-image-quick__delivery-strip strong,
+.uc-image-quick__delivery-strip small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-image-quick__delivery-strip span {
+  grid-area: label;
+  color: var(--uc-color-text-tertiary);
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-image-quick__delivery-strip strong {
+  grid-area: value;
+  font-size: var(--uc-font-size-label);
+}
+
+.uc-image-quick__delivery-strip small {
+  grid-area: detail;
+  color: var(--uc-color-text-secondary);
 }
 
 .uc-image-quick__inspector .uc-image-quick__parameters,
@@ -1493,6 +1622,25 @@
 }
 
 @media (max-width: 1180px) {
+  .uc-image-workbench__header-actions,
+  .uc-image-workbench__draft-actions {
+    justify-content: flex-start;
+  }
+
+  .uc-image-quick__composer-actions,
+  .uc-image-quick__delivery-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .uc-image-quick__delivery-strip > div + div {
+    border-top: 1px solid var(--uc-color-border-subtle);
+    border-left: 0;
+  }
+
+  .uc-image-quick__primary-action {
+    width: 100%;
+  }
+
   .uc-video-editor__workspace {
     grid-template-columns: 1fr;
   }

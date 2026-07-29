@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import {
   LuArrowRight,
   LuBadgeCheck,
+  LuCircleDollarSign,
   LuCirclePlay,
+  LuCloud,
   LuFolderInput,
   LuImagePlus,
   LuListPlus,
@@ -58,6 +60,14 @@ export function ImageQuickWorkspace({
   const selectedCandidate = preflight?.candidates.find(
     (candidate) => candidate.modelId === draft.generation.model?.modelId
   );
+  const outboundScope = selectedCandidate
+    ? {
+        local_device: '仅在本机处理',
+        local_network: '仅在局域网处理',
+        external_service: '将发送到外部服务',
+        unknown: '发送范围未知'
+      }[selectedCandidate.outboundScope]
+    : '检查后确认发送范围';
   const submission = useImageSubmissionFlow({
     draftId: draft.draftId,
     draftUpdatedAt: draft.updatedAt,
@@ -192,8 +202,8 @@ export function ImageQuickWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
-              <h2>一句话需求</h2>
-              <p>原始输入与最终提示词分别保存；快速模式不自动增强。</p>
+              <h2>输入一句话，UniComp AI 为你生成图片</h2>
+              <p>支持自然语言描述和一张可选参考图。</p>
             </div>
           </header>
           <label className="uc-image-quick__field">
@@ -207,22 +217,32 @@ export function ImageQuickWorkspace({
             />
             <small>{draft.prompt.originalInput.length} / 1000</small>
           </label>
-          <div className="uc-image-quick__reference">
-            <div>
-              <strong>单张参考图（可选）</strong>
-              <span>
-                {input
-                  ? `${input.name} · ${input.width} × ${input.height}`
-                  : '选择后只复制到当前项目，不会上传或分析。'}
-              </span>
+          <div className="uc-image-quick__composer-actions">
+            <div className="uc-image-quick__reference">
+              <div>
+                <strong>单张参考图（可选）</strong>
+                <span>
+                  {input
+                    ? `${input.name} · ${input.width} × ${input.height}`
+                    : '选择后只复制到当前项目，不会上传或分析。'}
+                </span>
+              </div>
+              <Button
+                disabled={!imageWorkspaces || dirty || busy}
+                onClick={() => void selectReference()}
+                variant="secondary"
+              >
+                <LuImagePlus aria-hidden="true" />
+                {input ? '重新选择参考图' : '添加参考图'}
+              </Button>
             </div>
             <Button
-              disabled={!imageWorkspaces || dirty || busy}
-              onClick={() => void selectReference()}
-              variant="secondary"
+              className="uc-image-quick__primary-action"
+              disabled={!imageSubmissions || dirty || busy}
+              onClick={() => void checkSubmission()}
             >
-              <LuImagePlus aria-hidden="true" />
-              {input ? '重新选择参考图' : '选择一张参考图'}
+              <LuSparkles aria-hidden="true" />
+              检查并准备生成
             </Button>
           </div>
           {dirty ? (
@@ -232,53 +252,33 @@ export function ImageQuickWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-image-quick__stage">
-          <header className="uc-image-workbench__panel-heading">
-            <span aria-hidden="true">2</span>
-            <div>
-              <h2>参考与结果</h2>
-              <p>只显示受控本地预览和主进程登记的真实结果。</p>
-            </div>
-          </header>
-          {previewUrl ? (
-            <figure className="uc-image-quick__preview">
-              <img alt={`参考图：${input?.name ?? '本地图片'}`} src={previewUrl} />
-              <figcaption>本地参考图预览，不代表生成结果。</figcaption>
-            </figure>
-          ) : (
-            <EmptyState
-              description="填写一句话需求后可直接生成；参考图不是必填项。"
-              icon="画"
-              readOnly
-              title="尚无真实生成结果"
-            />
-          )}
-          <div className="uc-image-quick__result-actions">
-            <Button disabled variant="secondary">
-              <LuFolderInput aria-hidden="true" />
-              {submission.work ? '已登记到项目' : '保存到项目'}
-            </Button>
-            <Button disabled variant="secondary">
-              <LuRefreshCw aria-hidden="true" />
-              重新生成
-            </Button>
-            <Button
-              disabled={dirty || busy}
-              onClick={() => void enterProfessional()}
-              variant="secondary"
-            >
-              <LuArrowRight aria-hidden="true" />
-              进入专业创作
-            </Button>
+        <Card className="uc-image-quick__delivery-strip">
+          <div>
+            <LuCloud aria-hidden="true" />
+            <span>将发送至</span>
+            <strong>{selectedCandidate?.recipientName ?? '检查后确认接收方'}</strong>
+            <small>{selectedCandidate?.modelName ?? '模型尚未确认'}</small>
+          </div>
+          <div>
+            <LuCircleDollarSign aria-hidden="true" />
+            <span>费用状态</span>
+            <strong>未知</strong>
+            <small>以服务商账单为准</small>
+          </div>
+          <div>
+            <LuShieldCheck aria-hidden="true" />
+            <span>数据离开本机</span>
+            <strong>{outboundScope}</strong>
+            <small>提交前必须再次确认</small>
           </div>
         </Card>
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-image-quick__inspector">
           <header className="uc-image-workbench__panel-heading">
-            <span aria-hidden="true">3</span>
+            <span aria-hidden="true">2</span>
             <div>
-              <h2>模型、参数与确认</h2>
-              <p>模型、参数和阻断原因全部来自本机真实 DTO。</p>
+              <h2>服务、参数与提交确认</h2>
+              <p>所有动态能力、费用、外发范围和阻断原因均来自真实预检。</p>
             </div>
           </header>
           <ImageGenerationModelFields
@@ -286,14 +286,6 @@ export function ImageQuickWorkspace({
             onDraftChange={changeDraft}
             registry={registry}
           />
-          <Button
-            disabled={!imageSubmissions || dirty || busy}
-            onClick={() => void checkSubmission()}
-            variant="secondary"
-          >
-            <LuShieldCheck aria-hidden="true" />
-            检查提交条件
-          </Button>
           {preflight ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>
@@ -358,6 +350,47 @@ export function ImageQuickWorkspace({
               {submission.work ? `；已登记 ${submission.work.name}` : ''}
             </p>
           ) : null}
+        </Card>
+
+        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-image-quick__stage">
+          <header className="uc-image-workbench__panel-heading">
+            <span aria-hidden="true">3</span>
+            <div>
+              <h2>生成结果</h2>
+              <p>只显示受控本地预览和主进程登记的真实结果。</p>
+            </div>
+          </header>
+          {previewUrl ? (
+            <figure className="uc-image-quick__preview">
+              <img alt={`参考图：${input?.name ?? '本地图片'}`} src={previewUrl} />
+              <figcaption>本地参考图预览，不代表生成结果。</figcaption>
+            </figure>
+          ) : (
+            <EmptyState
+              description="完成真实提交并接收结果后，生成图片会显示在这里。"
+              icon="画"
+              readOnly
+              title="尚无真实生成结果"
+            />
+          )}
+          <div className="uc-image-quick__result-actions">
+            <Button disabled variant="secondary">
+              <LuRefreshCw aria-hidden="true" />
+              重新生成
+            </Button>
+            <Button disabled variant="secondary">
+              <LuFolderInput aria-hidden="true" />
+              {submission.work ? '已登记到项目' : '保存到项目'}
+            </Button>
+            <Button
+              disabled={dirty || busy}
+              onClick={() => void enterProfessional()}
+              variant="secondary"
+            >
+              <LuArrowRight aria-hidden="true" />
+              进入专业创作
+            </Button>
+          </div>
         </Card>
       </div>
 
