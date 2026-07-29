@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f` 合并 `develop`；流程 2 已在 `feature/vidu-execution-lifecycle` 完成实现和分支门禁，Node 157 项、Vitest 339 项，合计 496 项通过，等待在连续授权下提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
+当前状态：阶段 8 已完成最终联调并正式收口；阶段 9 B1、B2、A1、B3、A2 与 C1 对话/项目上下文后端及 UI 接线已合并 `develop`，C1 UI 通过 `e278b63` 合并，合并记录为 `a6a04a5`。A3、B4、A4 尚未完成。C2 流程 1 已通过 `c03693f`、流程 2 已通过 `7015624` 合并 `develop`；流程 3 已在 `feature/vidu-runtime` 完成实现和分支门禁，Node 157 项、Vitest 345 项，合计 502 项通过，等待在连续授权下提交、推送和合并。流程 1—7 禁止真实 Token、真实联网和收费请求，流程 8 仍须在前置全部通过后再次批准。项目负责人确认当前以 Windows 为主，macOS 实机验收延期为备用项并保持 `not_run/deferred`，不得据此宣称阶段 9 跨平台矩阵完成。安装包、代码签名、公证、生产更新、生产媒体组件分发、SBOM 和正式发布准入仍属于阶段 10。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
@@ -804,4 +804,10 @@ ViduProviderPackage
 
 流程 2 验证结果：`npm test` 为 Node 157 项与 Vitest 339 项，合计 496 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 203 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。本流程未修改 Electron 主进程或 preload，不需要 Electron 烟测；没有 HTTP、Token、真实联网或收费请求。
 
-流程 2 未完成：Vidu 安全 HTTP 运行时、两个同步图片适配器、Q3 视频适配器、结果下载/探测/Work 完整接线与合成服务端到端验证属于后续流程。冻结 Vidu 模型仍保持禁用和 `declared_supported`；A3、B4、A4 与流程 8 均未启动。
+流程 2 已提交并推送 `feature/vidu-execution-lifecycle`，随后通过 `7015624 Merge phase 9 C2 provider execution lifecycle` 非快进合并并推送 `develop`；合并后完整门禁再次通过，功能分支本地和远程均保留。
+
+流程 3 实际结果：新增唯一 `ViduProviderPackage` 与 `ViduSharedRuntime`。共享运行时只能在 `SecureCredentialVault.useValue` 主进程回调内取用 Token，向受控 HTTP transport 发送固定 `Authorization: Token`，日志只记录方法、协议、状态、错误码和耗时。运行时强制 HTTPS、固定 Vidu 基础 origin、协议路径白名单、连接/协议绑定一致性、手工重定向拒绝、20MB 默认请求上限、受限响应上限、超时、外部取消、运行时退出时取消全部在途请求，以及稳定、无敏感信息的错误映射。代理选择以受控 `ProxyMode` 传递给 transport，未在 renderer 创建网络能力。`ViduConnectionValidationPort` 仅通过 `/ent/v2/credits` 合成调用更新可用性事实，不返回账户、费用、Token 或响应正文。
+
+流程 3 验证结果：`npm test` 为 Node 157 项与 Vitest 345 项，合计 502 项通过，0 失败、0 跳过；`npm run typecheck`、`npm run lint`、`npm run build`、`npm run audit:platform`、`npm run verify:handoff` 与 `git diff --check` 全部通过。平台审计扫描 207 个文件且 0 违规，交接包 50 个校验项、27 个资产均无失败。本流程未修改 Electron/preload 或页面，不需要 Electron 启动烟测；测试只使用内存合成 transport，真实 Vidu HTTP 调用为 0。
+
+流程 3 未完成：Electron 组合根的实际 transport 注入、两个同步图片协议适配器、Q3 视频协议适配器、受控结果接收与 Work 流转、可见页面接线和合成服务端到端验证属于后续流程。Image2 鉴权仍保持 unknown；冻结模型仍为 disabled，Evidence 仍为 `declared_supported`。
