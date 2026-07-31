@@ -918,4 +918,10 @@ B4 已通过 `7489f6a` 非快进合并 `develop`；随后按顺序完成 A4。Wi
 
     docs/active/多服务商功能路由分阶段实施计划.md
 
-当前状态：仅完成计划，不启动实现。项目负责人已于 2026-07-31 冻结快速页规则：快速生图固定为纯文生图 `text_to_image`，快速视频固定为纯文生视频 `text_to_video`，两个快速页均不接收参考素材，也不得因素材存在而静默切换功能；需要素材的图生图、图生视频等能力进入对应专业页面。第一支 `feature/local-json-persistence-foundation` 仍需项目负责人单独批准，并需明确修改范围、联网权限和费用上限。后台契约与适配器必须先于 UI；真实 API、凭证验证和收费测试必须另立专项批准。
+项目负责人已于 2026-07-31 冻结快速页规则：快速生图固定为纯文生图 `text_to_image`，快速视频固定为纯文生视频 `text_to_video`，两个快速页均不接收参考素材，也不得因素材存在而静默切换功能；需要素材的图生图、图生视频等能力进入对应专业页面。
+
+M1 `feature/local-json-persistence-foundation` 已获批准并完成实现 `f0e6ecc`。新增按规范化绝对路径共享的写入协调、原子变更与有效备份、Schema envelope、revision/CAS、顺序迁移与 legacy 只读模型、`ProjectMetadataUnitOfWork`、SubmissionIntent journal 和四类恢复决策；通用 JSON 仓储、文件索引、ProviderOperation、会话、项目上下文与设置仓储已接入共享协调。完整门禁为 Node 178 项、Vitest 395 项，共 573 项通过，类型检查、Lint、生产构建、平台审计、交接校验、恢复审计和差异检查通过；真实 HTTP 0 次、费用 0。工程记录见：
+
+    docs/active/多服务商功能路由-M1本地JSON持久化基础记录.md
+
+项目负责人已授权 Codex 在符合门禁后自行验收并非快进合并 `develop`。M1 合并后停止；M2 第一支 `feature/vidu-runtime-authorization-closure` 尚未批准。后台契约与适配器必须先于 UI；真实 API、凭证验证和收费测试必须另立专项批准。
