@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "targetId": "windows-x64-primary",
+  "sourceCommit": "de7003b",
+  "collectedAt": "2026-07-31T09:17:36.197Z",
+  "status": "passed",
+  "matrix": {
+    "cases": 16,
+    "faultTypes": 9,
+    "domains": 7,
+    "invariants": 5,
+    "evidenceReferences": 17
+  },
+  "security": {
+    "publicContractFiles": 10,
+    "sourceFiles": 55,
+    "evidenceFiles": 9,
+    "violations": 0
+  },
+  "artifacts": {
+    "trackedFiles": 544,
+    "prohibited": 0
+  },
+  "violations": []
+}
