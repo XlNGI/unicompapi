@@ -30,9 +30,9 @@ ViduProviderPackage
 
 本专项可以形成 Windows 开发态的最小真实闭环，但不改变以下事实：
 
-- 阶段 9 A3、B4、A4 尚未完成；
-- macOS 实机与现有 Windows 人工阻断项仍为 `not_run/deferred`；
-- Vidu Windows 开发态闭环成功不等于阶段 9 跨平台验收完成；
+- 本专项形成时阶段 9 A3、B4、A4 尚未完成；当前三项均已完成并由独立 A4 门禁正式收口；
+- macOS 实机保持 `not_run/deferred`；原 Windows 人工项已由项目负责人在 A4 直接确认通过；
+- Vidu Windows 开发态闭环本身不等于阶段 9 验收完成；阶段 9 的最终结论来自后续 A4 综合收口；
 - 安装包、签名、公证、生产更新、生产媒体组件分发、SBOM、发布回滚和正式发布准入仍属于阶段 10；
 - Vidu 不提供 LLM，对话回复仍需后续独立 LLM 适配器；ChatPage 不得成为直接生成入口。
 
