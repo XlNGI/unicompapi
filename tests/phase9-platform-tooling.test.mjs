@@ -15,10 +15,11 @@ import {
   writeEvidenceManifest
 } from '../scripts/phase9-platform-common.mjs';
 
-test('freezes required real-device Windows and macOS target requirements', async () => {
+test('keeps Windows required and preserves the deferred macOS real-device target', async () => {
   const matrix = await readTargetMatrix();
   assert.deepEqual(matrix.targets.map((target) => target.os), ['win32', 'darwin']);
-  assert.equal(matrix.targets.every((target) => target.required), true);
+  assert.equal(matrix.targets[0].required, true);
+  assert.equal(matrix.targets[1].required, false);
   assert.equal(matrix.targets.every((target) => target.executionMode === 'real_device'), true);
   assert.equal(
     matrix.targets.every((target) => target.architecturePolicy === 'record_observed_only'),
@@ -26,7 +27,7 @@ test('freezes required real-device Windows and macOS target requirements', async
   );
   assert.throws(
     () => validateTargetMatrix({ schemaVersion: 1, targets: [matrix.targets[0]] }),
-    /requires macOS evidence/
+    /requires a macOS target/
   );
   assert.throws(
     () => validateTargetMatrix({

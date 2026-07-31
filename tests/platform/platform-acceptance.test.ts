@@ -40,7 +40,7 @@ const matrix = {
       allowedArchitectures: ['arm64', 'x64'],
       architecturePolicy: 'record_observed_only',
       executionMode: 'real_device',
-      required: true,
+      required: false,
       requiredSuites: suites
     }
   ]
@@ -61,13 +61,15 @@ const runtime = {
 };
 
 describe('Phase 9 platform acceptance contracts', () => {
-  it('strictly requires Windows and macOS real-device targets', () => {
+  it('requires Windows evidence and preserves the optional macOS real-device target', () => {
     const parsed = parsePlatformTargetMatrix(matrix);
     expect(parsed.targets).toHaveLength(2);
+    expect(parsed.targets[0].required).toBe(true);
+    expect(parsed.targets[1].required).toBe(false);
     expect(() => parsePlatformTargetMatrix({
       ...matrix,
       targets: [matrix.targets[0]]
-    })).toThrow('requires macOS evidence');
+    })).toThrow('requires a macOS target');
     expect(() => parsePlatformTargetMatrix({
       ...matrix,
       cloudRunnerCountsAsRealDevice: true
