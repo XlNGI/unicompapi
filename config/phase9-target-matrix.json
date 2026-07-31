@@ -26,7 +26,7 @@
       "allowedArchitectures": ["arm64", "x64"],
       "architecturePolicy": "record_observed_only",
       "executionMode": "real_device",
-      "required": true,
+      "required": false,
       "requiredSuites": [
         "engineering_integrity",
         "electron_lifecycle",

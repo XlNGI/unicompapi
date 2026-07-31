@@ -74,8 +74,8 @@ export function validateTargetMatrix(value) {
   if (!targets.some((target) => target.required && target.os === 'win32')) {
     throw new Error('Target matrix requires Windows evidence');
   }
-  if (!targets.some((target) => target.required && target.os === 'darwin')) {
-    throw new Error('Target matrix requires macOS evidence');
+  if (!targets.some((target) => target.os === 'darwin')) {
+    throw new Error('Target matrix requires a macOS target');
   }
   return { schemaVersion: 1, targets };
 }

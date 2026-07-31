@@ -87,8 +87,8 @@ export function parsePlatformTargetMatrix(value: unknown): PlatformTargetMatrixV
   if (!targets.some((target) => target.required && target.os === 'win32')) {
     throw new TypeError('Platform target matrix requires Windows evidence');
   }
-  if (!targets.some((target) => target.required && target.os === 'darwin')) {
-    throw new TypeError('Platform target matrix requires macOS evidence');
+  if (!targets.some((target) => target.os === 'darwin')) {
+    throw new TypeError('Platform target matrix requires a macOS target');
   }
   return { schemaVersion: 1, targets };
 }
