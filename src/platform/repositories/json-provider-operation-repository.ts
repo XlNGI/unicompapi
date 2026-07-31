@@ -20,6 +20,7 @@ import { RepositoryDataError } from './repository-data-error';
 
 interface ProviderOperationDocumentV2 {
   readonly schemaVersion: 2;
+  readonly revision: number;
   readonly records: readonly ProviderOperationRecord[];
 }
 
@@ -30,28 +31,23 @@ interface ProviderOperationDocumentV1 {
 
 export class JsonProviderOperationRepository
   implements ProviderOperationRepository {
-  private writeQueue: Promise<void> = Promise.resolve();
-
   constructor(private readonly storage: ProjectStorageAdapter) {}
 
   async get(
     id: ProviderOperationRecordId
   ): Promise<ProviderOperationRecord | undefined> {
-    await this.writeQueue;
     return (await this.read()).records.find((record) => record.id === id);
   }
 
   async getByExecution(
     executionId: ExecutionId
   ): Promise<ProviderOperationRecord | undefined> {
-    await this.writeQueue;
     return (await this.read()).records.find(
       (record) => record.executionId === executionId
     );
   }
 
   async list(taskId?: TaskId): Promise<readonly ProviderOperationRecord[]> {
-    await this.writeQueue;
     const records = (await this.read()).records;
     return taskId
       ? records.filter((record) => record.taskId === taskId)
@@ -60,45 +56,54 @@ export class JsonProviderOperationRepository
 
   async save(record: ProviderOperationRecord): Promise<void> {
     const validated = parseRecord(record);
-    const operation = this.writeQueue.then(async () => {
-      const document = await this.read();
-      const existing = document.records.find((item) => item.id === validated.id);
-      if (existing) {
-        if (JSON.stringify(existing) !== JSON.stringify(validated)) {
+    await this.storage.withExclusiveAccess(
+      [projectStoragePaths.entities.providerOperations],
+      async () => {
+        const document = await this.read();
+        const existing = document.records.find((item) => item.id === validated.id);
+        if (existing) {
+          if (JSON.stringify(existing) !== JSON.stringify(validated)) {
+            throw new RepositoryDataError(
+              projectStoragePaths.entities.providerOperations,
+              'provider operation receipts are immutable'
+            );
+          }
+          return;
+        }
+        if (
+          document.records.some(
+            (item) => item.executionId === validated.executionId
+          )
+        ) {
           throw new RepositoryDataError(
             projectStoragePaths.entities.providerOperations,
-            'provider operation receipts are immutable'
+            'an execution already has a provider operation receipt'
           );
         }
-        return;
-      }
-      if (
-        document.records.some(
-          (item) => item.executionId === validated.executionId
-        )
-      ) {
-        throw new RepositoryDataError(
+        await this.storage.writeJsonAtomically<ProviderOperationDocumentV2>(
           projectStoragePaths.entities.providerOperations,
-          'an execution already has a provider operation receipt'
+          {
+            schemaVersion: 2,
+            revision: document.revision + 1,
+            records: [...document.records, validated]
+          },
+          { backup: true }
         );
       }
-      await this.storage.writeJsonAtomically<ProviderOperationDocumentV2>(
-        projectStoragePaths.entities.providerOperations,
-        {
-          schemaVersion: 2,
-          records: [...document.records, validated]
-        }
-      );
-    });
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
+    );
   }
 
   private async read(): Promise<ProviderOperationDocumentV2> {
-    const value = await this.storage.readJson<unknown>(
-      projectStoragePaths.entities.providerOperations
+    const loaded = await this.storage.readJsonWithBackup(
+      projectStoragePaths.entities.providerOperations,
+      parseProviderOperationDocument
     );
-    if (value === undefined) return { schemaVersion: 2, records: [] };
+    if (!loaded) return { schemaVersion: 2, revision: 0, records: [] };
+    return loaded.value;
+  }
+}
+
+function parseProviderOperationDocument(value: unknown): ProviderOperationDocumentV2 {
     const migrated = migrateProviderOperationDocument(value);
     if (
       !isRecord(migrated) ||
@@ -120,8 +125,11 @@ export class JsonProviderOperationRepository
       ids.add(record.id);
       executionIds.add(record.executionId);
     }
-    return { schemaVersion: 2, records };
-  }
+    const revision = isRecord(migrated) && migrated.revision !== undefined
+      ? Number(migrated.revision)
+      : 0;
+    if (!Number.isSafeInteger(revision) || revision < 0) throw invalidDocument();
+    return { schemaVersion: 2, revision, records };
 }
 
 export function migrateProviderOperationDocument(value: unknown): unknown {
@@ -130,6 +138,7 @@ export function migrateProviderOperationDocument(value: unknown): unknown {
   const legacy = value as unknown as ProviderOperationDocumentV1;
   return {
     schemaVersion: 2,
+    revision: 0,
     records: legacy.records.map((record) => ({
       ...record,
       schemaVersion: 2,

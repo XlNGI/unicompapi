@@ -59,13 +59,12 @@ interface PersistedEntity {
 }
 
 interface EntityCollection<TEntity> {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
+  readonly revision: number;
   readonly entities: readonly TEntity[];
 }
 
 class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends string> {
-  private writeQueue: Promise<void> = Promise.resolve();
-
   constructor(
     private readonly storage: ProjectStorageAdapter,
     private readonly path: ProjectRelativePath,
@@ -76,7 +75,6 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
   ) {}
 
   async get<TId extends string>(id: TId): Promise<TEntity | undefined> {
-    await this.writeQueue;
     const collection = await this.read();
     return collection.entities.find((entity) => entity.id === id);
   }
@@ -85,7 +83,6 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
     if (this.exclusiveScope) {
       this.assertScope(scopeId);
     }
-    await this.writeQueue;
     const collection = await this.read();
     return this.exclusiveScope
       ? collection.entities
@@ -103,7 +100,7 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
       throw new RepositoryDataError(this.path, 'cannot save an invalid entity');
     }
 
-    const operation = this.writeQueue.then(async () => {
+    await this.storage.withExclusiveAccess([this.path], async () => {
       const collection = await this.read();
       const entities = collection.entities.filter(
         (current) => current.id !== entity.id
@@ -112,27 +109,37 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
       await this.storage.writeJsonAtomically<EntityCollection<TEntity>>(
         this.path,
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
+          revision: collection.revision + 1,
           entities: [...entities, entity]
-        }
+        },
+        { backup: true }
       );
     });
-
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
   }
 
   private async read(): Promise<EntityCollection<TEntity>> {
-    const value = await this.storage.readJson<unknown>(this.path);
-
-    if (value === undefined) {
-      return { schemaVersion: 1, entities: [] };
+    const loaded = await this.storage.readJsonWithBackup(
+      this.path,
+      (value) => this.parse(value)
+    );
+    if (!loaded) {
+      return { schemaVersion: 2, revision: 0, entities: [] };
     }
+    return loaded.value;
+  }
 
-    if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.entities)) {
+  private parse(value: unknown): EntityCollection<TEntity> {
+    if (
+      !isRecord(value) ||
+      ![1, 2].includes(Number(value.schemaVersion)) ||
+      !Array.isArray(value.entities) ||
+      (value.schemaVersion === 2 &&
+        (!Number.isSafeInteger(value.revision) || Number(value.revision) < 0))
+    ) {
       throw new RepositoryDataError(
         this.path,
-        'expected a version 1 entity collection'
+        'expected a supported revisioned entity collection'
       );
     }
 
@@ -174,7 +181,11 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
       ids.add(entity.id);
     }
 
-    return value as unknown as EntityCollection<TEntity>;
+    return {
+      schemaVersion: 2,
+      revision: value.schemaVersion === 1 ? 0 : Number(value.revision),
+      entities: value.entities as readonly TEntity[]
+    };
   }
 
   private assertScope(scopeId: TScopeId): void {
@@ -188,39 +199,35 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
 }
 
 export class JsonProjectRepository implements ProjectRepository {
-  private writeQueue: Promise<void> = Promise.resolve();
-
   constructor(
     private readonly storage: ProjectStorageAdapter,
     private readonly projectId: ProjectId
   ) {}
 
   async load(): Promise<Project | undefined> {
-    await this.writeQueue;
-    const value = await this.storage.readJson<unknown>(projectStoragePaths.manifest);
-
-    if (value === undefined) {
-      return undefined;
-    }
-
-    if (
-      !isRecord(value) ||
-      value.schemaVersion !== 1 ||
-      typeof value.id !== 'string' ||
-      value.id.trim().length === 0 ||
-      value.id !== this.projectId ||
-      typeof value.name !== 'string' ||
-      value.name.trim().length === 0 ||
-      !isCanonicalIsoTimestamp(value.createdAt) ||
-      !isCanonicalIsoTimestamp(value.updatedAt)
-    ) {
-      throw new RepositoryDataError(
-        projectStoragePaths.manifest,
-        'expected a valid version 1 project manifest'
-      );
-    }
-
-    return value as unknown as Project;
+    const loaded = await this.storage.readJsonWithBackup(
+      projectStoragePaths.manifest,
+      (value) => {
+        if (
+          !isRecord(value) ||
+          value.schemaVersion !== 1 ||
+          typeof value.id !== 'string' ||
+          value.id.trim().length === 0 ||
+          value.id !== this.projectId ||
+          typeof value.name !== 'string' ||
+          value.name.trim().length === 0 ||
+          !isCanonicalIsoTimestamp(value.createdAt) ||
+          !isCanonicalIsoTimestamp(value.updatedAt)
+        ) {
+          throw new RepositoryDataError(
+            projectStoragePaths.manifest,
+            'expected a valid version 1 project manifest'
+          );
+        }
+        return value as unknown as Project;
+      }
+    );
+    return loaded?.value;
   }
 
   async save(project: Project): Promise<void> {
@@ -231,12 +238,11 @@ export class JsonProjectRepository implements ProjectRepository {
       );
     }
 
-    const operation = this.writeQueue.then(() =>
-      this.storage.writeJsonAtomically(projectStoragePaths.manifest, project)
+    await this.storage.writeJsonAtomically(
+      projectStoragePaths.manifest,
+      project,
+      { backup: true }
     );
-
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
   }
 }
 

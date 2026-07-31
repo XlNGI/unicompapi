@@ -34,11 +34,18 @@ export const projectStoragePaths = {
       'entities/provider-operations.json'
     ),
     works: toProjectRelativePath('entities/works.json'),
+    metadataUnit: toProjectRelativePath('entities/project-metadata.json'),
     projectContexts: toProjectRelativePath('entities/project-contexts.json'),
     projectContextsBackup: toProjectRelativePath(
       'entities/project-contexts.json.bak'
     )
   },
+  journals: {
+    submissionIntents: toProjectRelativePath(
+      'journals/submission-intents.json'
+    )
+  },
+  journalsDirectory: toProjectRelativePath('journals'),
   index: toProjectRelativePath('index/file-index.json'),
   filesDirectory: toProjectRelativePath('files'),
   temporaryDirectory: toProjectRelativePath('tmp')

@@ -51,8 +51,12 @@ describe('JsonSettingsRepository', () => {
     expect((await readdir(root)).some((name) => name.endsWith('.tmp'))).toBe(false);
   });
 
-  it('serializes competing writers and rejects the stale revision', async () => {
-    const { repository } = await fixture();
+  it('serializes competing repository instances and rejects the stale revision', async () => {
+    const { root, repository } = await fixture();
+    const other = new JsonSettingsRepository(
+      path.join(root, 'settings.json'),
+      () => '2026-07-27T00:00:09.000Z'
+    );
     const initial = await repository.load();
     const first = parseSettingsValues({
       ...toSettingsValues(initial.document),
@@ -65,7 +69,7 @@ describe('JsonSettingsRepository', () => {
 
     const results = await Promise.allSettled([
       repository.replace(0, first),
-      repository.replace(0, second)
+      other.replace(0, second)
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const rejected = results.find((result) => result.status === 'rejected');
