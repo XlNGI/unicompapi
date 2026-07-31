@@ -74,9 +74,9 @@
     {
       "caseId": "a3.windows.project_lead_electron_editor_settings",
       "suite": "full_product_ui",
-      "status": "not_run",
-      "evidenceRefs": [],
-      "note": "Project lead manual Electron acceptance is pending"
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/a3-editor-settings-summary.md"],
+      "note": "Project lead explicitly approved the Windows Electron A3 manual acceptance on 2026-07-31"
     },
     {
       "caseId": "a3.windows.native_directory_picker_authorization",
