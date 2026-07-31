@@ -21,6 +21,7 @@ export interface FileIndexEntry {
 
 export interface ProjectFileIndex {
   readonly schemaVersion: 1;
+  readonly revision: number;
   readonly projectId: ProjectId;
   readonly entries: readonly FileIndexEntry[];
 }
@@ -30,6 +31,7 @@ export function createEmptyProjectFileIndex(
 ): ProjectFileIndex {
   return {
     schemaVersion: 1,
+    revision: 0,
     projectId,
     entries: []
   };
@@ -54,6 +56,7 @@ export function upsertFileIndexEntry(
 
   return {
     ...index,
+    revision: index.revision + 1,
     entries: [...entries, {
       ...entry,
       relativePath: toProjectRelativePath(entry.relativePath)
@@ -67,6 +70,7 @@ export function removeFileIndexEntry(
 ): ProjectFileIndex {
   return {
     ...index,
+    revision: index.revision + 1,
     entries: index.entries.filter((entry) => entry.fileId !== fileId)
   };
 }

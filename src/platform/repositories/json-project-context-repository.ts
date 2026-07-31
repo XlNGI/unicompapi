@@ -68,11 +68,6 @@ interface RegistryLoadResult {
   readonly source: ProjectContextRegistryLoadSource;
 }
 
-const storageQueues = new WeakMap<
-  ProjectStorageAdapter,
-  Map<ProjectRelativePath, Promise<void>>
->();
-
 export class JsonProjectContextRepository
   implements ProjectContextRepository {
   constructor(
@@ -299,17 +294,20 @@ export class JsonProjectContextRepository
   }
 
   private async waitForWrites(): Promise<void> {
-    await (queueFor(this.storage).get(projectStoragePaths.entities.projectContexts)
-      ?? Promise.resolve());
+    await this.storage.withExclusiveAccess(
+      [projectStoragePaths.entities.projectContexts],
+      async () => undefined
+    );
   }
 
   private async enqueueWrite(operation: () => Promise<void>): Promise<void> {
-    const queues = queueFor(this.storage);
-    const storagePath = projectStoragePaths.entities.projectContexts;
-    const previous = queues.get(storagePath) ?? Promise.resolve();
-    const current = previous.then(operation);
-    queues.set(storagePath, current.catch(() => undefined));
-    await current;
+    await this.storage.withExclusiveAccess(
+      [
+        projectStoragePaths.entities.projectContexts,
+        projectStoragePaths.entities.projectContextsBackup
+      ],
+      operation
+    );
   }
 
   private async readCurrent(): Promise<RegistryLoadResult> {
@@ -552,17 +550,6 @@ function assertHistoryAppendOnly(
   ) {
     throw dataError('project context history must be append-only');
   }
-}
-
-function queueFor(
-  storage: ProjectStorageAdapter
-): Map<ProjectRelativePath, Promise<void>> {
-  let queues = storageQueues.get(storage);
-  if (!queues) {
-    queues = new Map();
-    storageQueues.set(storage, queues);
-  }
-  return queues;
 }
 
 function requireExpectedRevision(value: number): void {

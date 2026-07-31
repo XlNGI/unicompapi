@@ -17,15 +17,12 @@ import {
 import { RepositoryDataError } from './repository-data-error';
 
 export class JsonFileIndexRepository {
-  private writeQueue: Promise<void> = Promise.resolve();
-
   constructor(
     private readonly storage: ProjectStorageAdapter,
     private readonly projectId: ProjectId
   ) {}
 
   async load(): Promise<ProjectFileIndex> {
-    await this.writeQueue;
     return this.read();
   }
 
@@ -34,43 +31,53 @@ export class JsonFileIndexRepository {
   }
 
   async upsert(entry: FileIndexEntry): Promise<void> {
-    const operation = this.writeQueue.then(async () => {
+    await this.storage.withExclusiveAccess([projectStoragePaths.index], async () => {
       const index = await this.read();
       const updated = upsertFileIndexEntry(index, entry);
-      await this.storage.writeJsonAtomically(projectStoragePaths.index, updated);
+      await this.storage.writeJsonAtomically(
+        projectStoragePaths.index,
+        updated,
+        { backup: true }
+      );
     });
-
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
   }
 
   async replace(entries: readonly FileIndexEntry[]): Promise<void> {
-    const operation = this.writeQueue.then(async () => {
+    await this.storage.withExclusiveAccess([projectStoragePaths.index], async () => {
+      const current = await this.read();
       let index = createEmptyProjectFileIndex(this.projectId);
 
       for (const entry of entries) {
         index = upsertFileIndexEntry(index, entry);
       }
 
-      await this.storage.writeJsonAtomically(projectStoragePaths.index, index);
+      await this.storage.writeJsonAtomically(
+        projectStoragePaths.index,
+        { ...index, revision: current.revision + 1 },
+        { backup: true }
+      );
     });
-
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
   }
 
   private async read(): Promise<ProjectFileIndex> {
-    const value = await this.storage.readJson<unknown>(projectStoragePaths.index);
-
-    if (value === undefined) {
+    const loaded = await this.storage.readJsonWithBackup(
+      projectStoragePaths.index,
+      (value) => this.parse(value)
+    );
+    if (!loaded) {
       return createEmptyProjectFileIndex(this.projectId);
     }
+    return loaded.value;
+  }
 
+  private parse(value: unknown): ProjectFileIndex {
     if (
       !isRecord(value) ||
       value.schemaVersion !== 1 ||
       value.projectId !== this.projectId ||
-      !Array.isArray(value.entries)
+      !Array.isArray(value.entries) ||
+      (value.revision !== undefined &&
+        (!Number.isSafeInteger(value.revision) || Number(value.revision) < 0))
     ) {
       throw new RepositoryDataError(
         projectStoragePaths.index,
@@ -100,7 +107,10 @@ export class JsonFileIndexRepository {
       paths.add(entry.relativePath);
     }
 
-    return value as unknown as ProjectFileIndex;
+    return {
+      ...(value as unknown as ProjectFileIndex),
+      revision: value.revision === undefined ? 0 : Number(value.revision)
+    };
   }
 }
 

@@ -11,6 +11,7 @@ import {
   type ConversationStatus,
   type IsoTimestamp
 } from '../../domain';
+import { sharedFileWriteCoordinator } from '../storage';
 
 export type ConversationLoadSource = 'primary' | 'backup' | 'default';
 
@@ -52,8 +53,6 @@ interface ConversationLoadResult {
   readonly source: ConversationLoadSource;
   readonly primaryText?: string;
 }
-
-const writeQueues = new Map<string, Promise<void>>();
 
 export class JsonConversationRepository implements ConversationRepository {
   private readonly conversationPath: string;
@@ -163,14 +162,17 @@ export class JsonConversationRepository implements ConversationRepository {
   }
 
   private async waitForWrites(): Promise<void> {
-    await (writeQueues.get(this.conversationPath) ?? Promise.resolve());
+    await sharedFileWriteCoordinator.runExclusive(
+      this.conversationPath,
+      async () => undefined
+    );
   }
 
   private async enqueueWrite(operation: () => Promise<void>): Promise<void> {
-    const previous = writeQueues.get(this.conversationPath) ?? Promise.resolve();
-    const current = previous.then(operation);
-    writeQueues.set(this.conversationPath, current.catch(() => undefined));
-    await current;
+    await sharedFileWriteCoordinator.runExclusiveMany(
+      [this.conversationPath, this.backupPath],
+      operation
+    );
   }
 
   private async readCurrent(): Promise<ConversationLoadResult> {

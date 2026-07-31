@@ -9,6 +9,7 @@ import {
   type SettingsDocumentV1,
   type SettingsValues
 } from '../../domain';
+import { sharedFileWriteCoordinator } from '../storage';
 
 export type SettingsLoadSource = 'primary' | 'backup' | 'default';
 
@@ -46,20 +47,23 @@ export class SettingsDataError extends Error {
 }
 
 export class JsonSettingsRepository implements SettingsRepository {
-  private queue: Promise<void> = Promise.resolve();
+  private readonly settingsPath: string;
   private readonly backupPath: string;
 
   constructor(
-    private readonly settingsPath: string,
+    settingsPath: string,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly migrations: readonly SettingsMigration[] = []
   ) {
-    this.backupPath = `${settingsPath}.bak`;
+    this.settingsPath = path.resolve(settingsPath);
+    this.backupPath = `${this.settingsPath}.bak`;
   }
 
   async load(): Promise<SettingsLoadResult> {
-    await this.queue;
-    return this.readCurrent();
+    return sharedFileWriteCoordinator.runExclusive(
+      this.settingsPath,
+      () => this.readCurrent()
+    );
   }
 
   async replace(
@@ -68,7 +72,9 @@ export class JsonSettingsRepository implements SettingsRepository {
   ): Promise<SettingsLoadResult> {
     const validatedValues = parseSettingsValues(values);
     let result: SettingsLoadResult | undefined;
-    const operation = this.queue.then(async () => {
+    await sharedFileWriteCoordinator.runExclusiveMany(
+      [this.settingsPath, this.backupPath],
+      async () => {
       const current = await this.readCurrent();
       if (current.document.revision !== expectedRevision) {
         throw new SettingsRevisionConflictError(
@@ -83,9 +89,8 @@ export class JsonSettingsRepository implements SettingsRepository {
       );
       await this.writeDocument(document, current.source);
       result = { document, source: 'primary' };
-    });
-    this.queue = operation.catch(() => undefined);
-    await operation;
+      }
+    );
     if (!result) throw new SettingsDataError('Settings write did not produce a result');
     return result;
   }
