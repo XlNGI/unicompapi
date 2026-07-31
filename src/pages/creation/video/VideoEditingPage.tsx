@@ -63,6 +63,8 @@ const errorMessages: Partial<Record<VideoEditorIpcErrorCode, string>> = {
   workspace_storage_error: '草稿未能写入项目，请检查存储后继续。'
 };
 
+const defaultTextFontFamily = 'Arial';
+
 type EditorError = Extract<
   VideoEditorIpcResult<unknown>,
   { readonly ok: false }
@@ -2138,7 +2140,7 @@ function TextInspector({
         <label>文字内容<textarea defaultValue={selected?.content ?? ''} name="content" rows={3} /></label>
         <label>开始（毫秒）<input defaultValue={(selected?.range.startUs ?? 0) / 1000} min="0" name="startMs" step="1" type="number" /></label>
         <label>结束（毫秒）<input defaultValue={(selected?.range.endUs ?? totalDurationUs) / 1000} min="1" name="endMs" step="1" type="number" /></label>
-        <label>字体<input defaultValue={selected?.style.requestedFontFamily ?? 'Segoe UI'} name="fontFamily" /></label>
+        <label>字体<input defaultValue={selected?.style.requestedFontFamily ?? defaultTextFontFamily} name="fontFamily" /></label>
         <label>字号（px）<input defaultValue={(selected?.style.fontSizeMilliPx ?? 32_000) / 1000} min="1" name="fontSizePx" step="0.1" type="number" /></label>
         <label>对齐<select defaultValue={selected?.style.alignment ?? 'center'} name="alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
         <label>水平位置（%）<input defaultValue={(selected?.position.xPermille ?? 500) / 10} max="100" min="0" name="xPercent" step="0.1" type="number" /></label>
