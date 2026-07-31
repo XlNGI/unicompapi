@@ -859,3 +859,17 @@ ViduProviderPackage
 流程 8 在 A 的图片视觉分支与用户流程修复依次合并 `develop` 后，通过 `55c0457 Merge latest develop into Vidu live validation` 非变基同步。最终集成门禁为 Node 167 项与 Vitest 387 项，合计 554 项通过，0 失败、0 跳过；类型检查、lint、生产构建、平台审计、交接包校验和差异检查全部通过。隔离用户目录的 Windows Electron 烟测新增 4 个进程、4/4 响应、包含 renderer，退出后本次残留 0；该回归未读取真实凭证、未访问 Vidu、未产生新增收费请求。
 
 流程 8 真实验证结论：`GET /ent/v2/credits` 鉴权通过；唯一一次 `q3-lite` 参考生图已完成并登记图片 Work；用户显式创建图生视频草稿后，唯一一次 `viduq3-turbo` 图生视频已完成并登记视频 Work。流程脱敏状态为 `passed`，图片和视频预算事实均为 `accepted_or_completed`，不得继续发起真实 Vidu 请求。Image V1 未决协议不参与本次真实调用且仍保持未验证；macOS、A3、B4、A4 和阶段 10 不因本流程通过而完成。
+
+## 阶段 9 A3｜视频编辑与本地设置跨平台验收（2026-07-31）
+
+`feature/cross-platform-editor-settings-ui` 从已完成 C2 流程 8 合并的 `develop@6df95b9` 建立，实现提交为 `cb7d156`。本分支将视频文字默认字体从 Windows 专属 `Segoe UI` 改为 Windows/macOS 均具备的 `Arial`；renderer 继续只读取受控平台状态，不使用 `process.platform`、`navigator.platform` 或 User-Agent 推断。
+
+真实 FFmpeg 诊断确认不存在字体不会直接失败，而会静默解析为系统回退字体。媒体适配器现在解析 `drawtext` 实际使用的字体文件，并与明确不存在字体的回退解析比较，防止把回退误判为用户请求字体可用。新增测试同时锁定字体缺失、源文件丢失、存储断开、空间不足、取消、失败、恢复、Task `completed` 加 `workId` 正式作品门禁、设置 10 分类、平台快捷键映射和响应式工作区。
+
+验证结果：A3/UI 目标测试 33 项、真实媒体适配器测试 10 项通过；完整门禁为 Node/UI/工具链 171 项与 Vitest 领域/平台 388 项，共 559 项通过，0 失败、0 跳过。TypeScript、ESLint、生产构建、平台审计、交接包、媒体工具链、运行时集成、安全存储与差异检查全部通过；平台审计扫描 216 个生产侧文件且 0 违规。Windows Electron 烟测新增 4 个进程、4/4 响应，清理后本次残留 0。浏览器 1920×1080、1280×900、1080×720 下编辑器和设置页无横向溢出，设置分类、主题、焦点和控制台检查通过。
+
+当前结论只为“Windows 实现、自动化门禁与可见 UI 基线完成”。项目负责人 Windows Electron 视频编辑与设置手工验收尚未执行，A3 不标记完成，也不合并 `develop`。macOS A3 实机为 `not_run/deferred`，macOS 媒体工具链仍未批准；Windows 原生目录授权/撤销、真实睡眠/锁屏、可见通知/声音/系统设置仍为 `not_run`。B4、A4 和阶段 10 均未启动；本次未读取凭证、未访问 Vidu、未产生收费请求。
+
+工程记录见：
+
+    docs/active/阶段9-A3-视频编辑与本地设置跨平台验收记录.md
