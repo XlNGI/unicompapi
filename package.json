@@ -7,7 +7,7 @@
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "node scripts/run-dev.mjs",
-    "dev:app": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev:app": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "setup:media-engine": "node scripts/setup-media-engine.mjs",
     "verify:media-engine": "node scripts/verify-media-engine.mjs",
     "verify:handoff": "node scripts/verify-handoff.mjs",
