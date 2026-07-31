@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "requiredFaultTypes": [
+    "execution_file_corruption",
+    "storage_disconnected",
+    "permission_revoked",
+    "disk_full",
+    "process_failure",
+    "network_failure",
+    "cancellation_interruption",
+    "suspend_interruption",
+    "application_restart"
+  ],
+  "requiredDomains": [
+    "project",
+    "image_result",
+    "video_result",
+    "video_export",
+    "task_work",
+    "settings",
+    "diagnostics"
+  ],
+  "requiredInvariants": [
+    "verified_local_file_before_completion",
+    "failed_attempt_history_preserved",
+    "temporary_artifact_not_completion",
+    "no_directory_escape_or_overwrite",
+    "no_sensitive_data_exposure"
+  ],
+  "cases": [
+    {
+      "id": "P9-B4-001",
+      "domain": "project",
+      "faultTypes": ["execution_file_corruption"],
+      "invariants": ["failed_attempt_history_preserved", "no_directory_escape_or_overwrite"],
+      "evidence": [
+        {
+          "file": "tests/platform/json-repositories.test.ts",
+          "testName": "rejects unknown collection versions and duplicate IDs"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-002",
+      "domain": "project",
+      "faultTypes": ["storage_disconnected"],
+      "invariants": ["temporary_artifact_not_completion", "no_directory_escape_or_overwrite"],
+      "evidence": [
+        {
+          "file": "tests/platform/settings-storage-services.test.ts",
+          "testName": "rejects a stale manifest and a disconnected target at execution"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-003",
+      "domain": "settings",
+      "faultTypes": ["permission_revoked"],
+      "invariants": ["no_directory_escape_or_overwrite", "no_sensitive_data_exposure"],
+      "evidence": [
+        {
+          "file": "tests/platform/settings-storage-services.test.ts",
+          "testName": "rejects symbolic-link directory registrations and reports revoked authorization"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-004",
+      "domain": "image_result",
+      "faultTypes": ["disk_full"],
+      "invariants": ["verified_local_file_before_completion", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/image-result-receiver.test.ts",
+          "testName": "preserves failure facts and creates no Work when atomic publish runs out of disk"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-005",
+      "domain": "video_export",
+      "faultTypes": ["process_failure"],
+      "invariants": ["failed_attempt_history_preserved", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/managed-process.test.ts",
+          "testName": "marks timeouts explicitly and terminates the process"
+        },
+        {
+          "file": "tests/platform/video-export-controller-faults.test.ts",
+          "testName": "persists a source action requirement and never registers an output Work"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-006",
+      "domain": "video_result",
+      "faultTypes": ["network_failure"],
+      "invariants": ["failed_attempt_history_preserved", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/video-result-receiver.test.ts",
+          "testName": "records retryable result discovery failures without inventing completion"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-007",
+      "domain": "video_export",
+      "faultTypes": ["cancellation_interruption"],
+      "invariants": ["temporary_artifact_not_completion", "verified_local_file_before_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/video-export-controller-faults.test.ts",
+          "testName": "does not create a Work until process cancellation is confirmed"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-008",
+      "domain": "video_export",
+      "faultTypes": ["suspend_interruption"],
+      "invariants": ["failed_attempt_history_preserved", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/video-export-controller-faults.test.ts",
+          "testName": "maps suspend interruption to recovery required without duplicate completion"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-009",
+      "domain": "task_work",
+      "faultTypes": ["application_restart"],
+      "invariants": ["failed_attempt_history_preserved", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/video-export-controller-faults.test.ts",
+          "testName": "marks an abandoned active attempt as recovery required on startup scan"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-010",
+      "domain": "task_work",
+      "faultTypes": ["process_failure"],
+      "invariants": ["failed_attempt_history_preserved", "verified_local_file_before_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/video-export-controller-faults.test.ts",
+          "testName": "keeps a failed attempt and completes a new retry attempt"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-011",
+      "domain": "video_result",
+      "faultTypes": ["execution_file_corruption"],
+      "invariants": ["verified_local_file_before_completion", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/video-result-receiver.test.ts",
+          "testName": "rejects a checksum mismatch after streaming and trusted inspection"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-012",
+      "domain": "image_result",
+      "faultTypes": ["execution_file_corruption"],
+      "invariants": ["verified_local_file_before_completion", "temporary_artifact_not_completion"],
+      "evidence": [
+        {
+          "file": "tests/platform/image-result-receiver.test.ts",
+          "testName": "rejects checksum mismatch, creates no work and records a failed execution"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-013",
+      "domain": "settings",
+      "faultTypes": ["execution_file_corruption", "application_restart"],
+      "invariants": ["failed_attempt_history_preserved", "no_directory_escape_or_overwrite"],
+      "evidence": [
+        {
+          "file": "tests/platform/settings-storage-services.test.ts",
+          "testName": "migrates the v1 registry and recovers the last valid backup"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-014",
+      "domain": "project",
+      "faultTypes": ["execution_file_corruption"],
+      "invariants": ["verified_local_file_before_completion", "no_directory_escape_or_overwrite"],
+      "evidence": [
+        {
+          "file": "tests/platform/backup-restore.test.ts",
+          "testName": "does not replace the target when backup verification fails"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-015",
+      "domain": "diagnostics",
+      "faultTypes": ["execution_file_corruption"],
+      "invariants": ["no_sensitive_data_exposure", "no_directory_escape_or_overwrite"],
+      "evidence": [
+        {
+          "file": "tests/platform/settings-b4-services.test.ts",
+          "testName": "generates a verified local-only bundle with strict redaction"
+        }
+      ]
+    },
+    {
+      "id": "P9-B4-016",
+      "domain": "settings",
+      "faultTypes": ["permission_revoked"],
+      "invariants": ["no_sensitive_data_exposure", "no_directory_escape_or_overwrite"],
+      "evidence": [
+        {
+          "file": "tests/platform/settings-b4-services.test.ts",
+          "testName": "clears only userData allowlist files and never project or external content"
+        }
+      ]
+    }
+  ]
+}
