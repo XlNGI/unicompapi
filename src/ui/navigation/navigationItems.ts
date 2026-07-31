@@ -9,7 +9,7 @@ export const navigationItems = [
   {
     id: 'chat',
     label: '对话',
-    description: '用于独立问答、分析、整理和上下文沉淀。'
+    description: '用于保存对话，并将明确选择的消息片段登记为项目上下文。'
   },
   {
     id: 'projects',
@@ -19,32 +19,32 @@ export const navigationItems = [
   {
     id: 'image-creation',
     label: '图片创作',
-    description: '图片创作页面骨架，具体创作流程将在后续阶段接入。'
+    description: '进入快速、专业、识别、编辑和图片转提示词工作区。'
   },
   {
     id: 'video-creation',
     label: '视频创作',
-    description: '视频创作页面骨架，具体创作流程将在后续阶段接入。'
+    description: '进入快速、文生、图生视频和基础编辑工作区。'
   },
   {
     id: 'tasks',
     label: '任务中心',
-    description: '任务管理页面骨架，暂不展示业务数据。'
+    description: '查看当前项目的真实任务、执行状态和详情。'
   },
   {
     id: 'library',
     label: '作品库',
-    description: '本地作品管理页面骨架，暂不展示业务数据。'
+    description: '查看经本地校验并已登记的图片、视频和导出作品。'
   },
   {
     id: 'providers',
     label: '模型与服务商',
-    description: '模型与服务商管理页面骨架，暂不连接后台服务。'
+    description: '管理服务商、连接、本机凭证、模型能力和路由。'
   },
   {
     id: 'settings',
     label: '本地设置',
-    description: '本地应用设置页面骨架，具体设置项将在后续阶段接入。'
+    description: '管理本地应用的十类设置、诊断和更新状态。'
   }
 ] as const;
 
