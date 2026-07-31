@@ -121,6 +121,96 @@ export function findTargetRequirement(matrix, runtime) {
   return target;
 }
 
+export function validateEvidenceManifest(value) {
+  exactKeys(value, [
+    'schemaVersion', 'targetId', 'sourceCommit', 'collectedAt', 'runtime', 'results'
+  ], 'evidence manifest');
+  if (value.schemaVersion !== 1 || !Array.isArray(value.results)) {
+    throw new Error('Evidence manifest version or results are invalid');
+  }
+  if (!nonBlank(value.targetId)) throw new Error('Evidence target id is invalid');
+  if (!/^[a-f0-9]{7,40}$/i.test(value.sourceCommit)) throw new Error('Evidence source commit is invalid');
+  if (!Number.isFinite(Date.parse(value.collectedAt))) throw new Error('Evidence collection time is invalid');
+  const runtime = validateRuntimeFacts(value.runtime);
+  const caseIds = new Set();
+  const results = value.results.map((result) => {
+    const allowedKeys = result && typeof result === 'object' && 'note' in result
+      ? ['caseId', 'suite', 'status', 'evidenceRefs', 'note']
+      : ['caseId', 'suite', 'status', 'evidenceRefs'];
+    exactKeys(result, allowedKeys, 'evidence result');
+    if (!nonBlank(result.caseId) || caseIds.has(result.caseId)) {
+      throw new Error('Evidence case ids must be unique and non-empty');
+    }
+    caseIds.add(result.caseId);
+    if (!acceptanceSuites.includes(result.suite)) throw new Error('Evidence suite is invalid');
+    if (!acceptanceStatuses.includes(result.status)) throw new Error('Evidence status is invalid');
+    if (!Array.isArray(result.evidenceRefs)) throw new Error('Evidence references are invalid');
+    const evidenceRefs = result.evidenceRefs.map((reference) => {
+      const normalized = safeRelativePath(reference);
+      if (!normalized.startsWith('docs/active/evidence/phase9/')) {
+        throw new Error('Evidence references must stay inside the Phase 9 evidence root');
+      }
+      return normalized;
+    });
+    return {
+      caseId: result.caseId,
+      suite: result.suite,
+      status: result.status,
+      evidenceRefs,
+      ...(result.note === undefined ? {} : { note: requiredText(result.note, 'evidence note') })
+    };
+  });
+  return {
+    schemaVersion: 1,
+    targetId: value.targetId,
+    sourceCommit: value.sourceCommit.toLowerCase(),
+    collectedAt: new Date(value.collectedAt).toISOString(),
+    runtime,
+    results
+  };
+}
+
+export function isTargetAcceptanceComplete(target, results) {
+  return target.requiredSuites.every((suite) => {
+    const suiteResults = results.filter((result) => result.suite === suite);
+    return suiteResults.length > 0 && suiteResults.every((result) => result.status === 'passed');
+  });
+}
+
+function validateRuntimeFacts(value) {
+  exactKeys(value, [
+    'schemaVersion', 'os', 'osVersion', 'architecture', 'nodeVersion',
+    'electronVersion', 'pathSeparator', 'caseSensitivity',
+    'unicodeNormalization', 'locale', 'timeZone'
+  ], 'runtime facts');
+  if (value.schemaVersion !== 1 || !['win32', 'darwin'].includes(value.os)) {
+    throw new Error('Runtime facts version or OS is invalid');
+  }
+  if (!['x64', 'arm64'].includes(value.architecture)) throw new Error('Runtime architecture is invalid');
+  if (!['\\', '/'].includes(value.pathSeparator)) throw new Error('Runtime path separator is invalid');
+  if (!['sensitive', 'insensitive', 'unknown'].includes(value.caseSensitivity)) {
+    throw new Error('Runtime case sensitivity is invalid');
+  }
+  if (!['preserved', 'normalized', 'unknown'].includes(value.unicodeNormalization)) {
+    throw new Error('Runtime Unicode normalization is invalid');
+  }
+  return {
+    schemaVersion: 1,
+    os: value.os,
+    osVersion: requiredText(value.osVersion, 'OS version'),
+    architecture: value.architecture,
+    nodeVersion: requiredText(value.nodeVersion, 'Node version'),
+    electronVersion: value.electronVersion === null
+      ? null
+      : requiredText(value.electronVersion, 'Electron version'),
+    pathSeparator: value.pathSeparator,
+    caseSensitivity: value.caseSensitivity,
+    unicodeNormalization: value.unicodeNormalization,
+    locale: requiredText(value.locale, 'locale'),
+    timeZone: requiredText(value.timeZone, 'time zone')
+  };
+}
+
 export async function verifyHandoff(root = projectRoot) {
   const handoffRoot = path.join(
     root,
