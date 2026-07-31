@@ -260,6 +260,7 @@ export class FfmpegMediaEngineAdapter
   private readonly exportTimeoutMs: number;
   private readonly activeJobs = new Map<string, ActiveJob>();
   private readonly fontAvailability = new Map<string, Promise<boolean>>();
+  private fallbackFontResolution?: Promise<string | undefined>;
 
   constructor(options: FfmpegMediaEngineAdapterOptions) {
     this.ffmpegPath = requireAbsolutePath(options.ffmpegPath, 'ffmpeg');
@@ -355,17 +356,38 @@ export class FfmpegMediaEngineAdapter
     if (!normalized) return Promise.resolve(false);
     const cached = this.fontAvailability.get(normalized);
     if (cached) return cached;
-    const check = this.runSimple(this.ffmpegPath, [
-      '-hide_banner', '-loglevel', 'error',
-      '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=0.04',
-      '-vf', `drawtext=font='${escapeFilterValue(normalized)}':text='A'`,
-      '-frames:v', '1', '-f', 'null', '-'
+    this.fallbackFontResolution ??= this.resolveFontFamily(
+      '__unicomp_font_probe_missing_family__'
+    );
+    const check = Promise.all([
+      this.resolveFontFamily(normalized),
+      this.fallbackFontResolution
     ]).then(
-      () => true,
+      ([resolved, fallback]) =>
+        resolved !== undefined &&
+        (fallback === undefined || normalizeResolvedFontPath(resolved) !== normalizeResolvedFontPath(fallback)),
       () => false
     );
     this.fontAvailability.set(normalized, check);
     return check;
+  }
+
+  private async resolveFontFamily(fontFamily: string): Promise<string | undefined> {
+    const result = await runManagedProcess(
+      this.processSupervisor,
+      this.ffmpegPath,
+      [
+        '-hide_banner', '-loglevel', 'verbose',
+        '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=0.04',
+        '-vf', `drawtext=font='${escapeFilterValue(fontFamily)}':text='A'`,
+        '-frames:v', '1', '-f', 'null', '-'
+      ],
+      this.commandTimeoutMs,
+      32_000,
+      64_000
+    );
+    requireSuccessfulProcess(result, this.ffmpegPath);
+    return parseResolvedFontPath(result.stderr);
   }
 
   async export(
@@ -576,6 +598,14 @@ export class FfmpegMediaEngineAdapter
     requireSuccessfulProcess(result, command);
     return result.stdout;
   }
+}
+
+export function parseResolvedFontPath(report: string): string | undefined {
+  return report.match(/\bUsing "([^"\r\n]+)"/)?.[1];
+}
+
+function normalizeResolvedFontPath(value: string): string {
+  return value.replace(/\\/g, '/').toLocaleLowerCase('en-US');
 }
 
 export function buildExportArguments(

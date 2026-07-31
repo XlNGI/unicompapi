@@ -11,6 +11,7 @@ import {
   createFfmpegMediaEngineAdapterFromEnvironment,
   parseEncoderNames,
   parseProbe,
+  parseResolvedFontPath,
   type MediaEngineExportPlan
 } from '../../src/platform';
 
@@ -88,6 +89,15 @@ describe('media engine adapter contracts', () => {
     ].join('\n');
     expect(parseEncoderNames(report, 'video')).toEqual(['h264', 'libvpx-vp9']);
     expect(parseEncoderNames(report, 'audio')).toEqual(['libopus']);
+  });
+
+  it('extracts only the font file that FFmpeg actually resolved', () => {
+    expect(
+      parseResolvedFontPath(
+        '[Parsed_drawtext_0] Using "C:/Windows/fonts/arial.ttf"\n'
+      )
+    ).toBe('C:/Windows/fonts/arial.ttf');
+    expect(parseResolvedFontPath('Fontconfig error: no default config')).toBeUndefined();
   });
 
   it('builds an argument array with no shell expression or untrusted codec', () => {
@@ -169,6 +179,10 @@ describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () =>
     const capabilities = await adapter.getCapabilities();
     expect(capabilities.videoEncoders).toContain('libvpx-vp9');
     expect(capabilities.audioEncoders).toContain('libopus');
+    await expect(adapter.validateFontFamily('Arial')).resolves.toBe(true);
+    await expect(
+      adapter.validateFontFamily('__unicomp_font_that_does_not_exist__')
+    ).resolves.toBe(false);
 
     const probe = await adapter.probe({ sourcePath });
     expect(probe.durationUs).toBeGreaterThan(0);
@@ -329,7 +343,7 @@ describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () =>
           content: 'UniComp',
           range: { startUs: 100_000, endUs: 900_000 },
           style: {
-            requestedFontFamily: 'Segoe UI',
+            requestedFontFamily: 'Arial',
             fontSizeMilliPx: 12_000,
             alignment: 'center',
             opacityPermille: 900,
