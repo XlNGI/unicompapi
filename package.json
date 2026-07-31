@@ -13,6 +13,7 @@
     "verify:handoff": "node scripts/verify-handoff.mjs",
     "audit:platform": "node scripts/audit-platform-assumptions.mjs",
     "verify:recovery-audit": "node scripts/verify-phase9-recovery-audit.mjs",
+    "verify:phase9-closeout": "node scripts/verify-phase9-closeout.mjs",
     "collect:platform-evidence": "node scripts/collect-platform-evidence.mjs",
     "verify:secure-storage": "electron scripts/verify-secure-storage.cjs",
     "verify:runtime-integrations": "electron scripts/verify-runtime-integrations.cjs",
