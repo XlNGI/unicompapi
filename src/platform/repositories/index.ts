@@ -2,6 +2,7 @@ export * from './json-repositories';
 export * from './json-conversation-repository';
 export * from './json-project-conversation-repository';
 export * from './json-conversation-response-draft-repository';
+export * from './json-conversation-response-execution-repository';
 export * from './json-project-context-repository';
 export * from './project-context-snapshot';
 export * from './json-provider-invocation-repository';

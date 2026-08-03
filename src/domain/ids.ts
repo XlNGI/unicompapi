@@ -26,6 +26,7 @@ export type ConversationId = DomainId<'ConversationId'>;
 export type MessageId = DomainId<'MessageId'>;
 export type ConversationResponseDraftId = DomainId<'ConversationResponseDraftId'>;
 export type ConversationResponseExecutionId = DomainId<'ConversationResponseExecutionId'>;
+export type ConversationResponseStreamEventId = DomainId<'ConversationResponseStreamEventId'>;
 export type ProjectContextId = DomainId<'ProjectContextId'>;
 export type ProjectContextDraftId = DomainId<'ProjectContextDraftId'>;
 export type ProjectContextFragmentId = DomainId<'ProjectContextFragmentId'>;
@@ -83,6 +84,8 @@ export const toConversationResponseDraftId = (value: string) =>
   toDomainId(value, 'ConversationResponseDraftId');
 export const toConversationResponseExecutionId = (value: string) =>
   toDomainId(value, 'ConversationResponseExecutionId');
+export const toConversationResponseStreamEventId = (value: string) =>
+  toDomainId(value, 'ConversationResponseStreamEventId');
 export const toProjectContextId = (value: string) =>
   toDomainId(value, 'ProjectContextId');
 export const toProjectContextDraftId = (value: string) =>
