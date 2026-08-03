@@ -9,6 +9,8 @@ export const storageIpcChannels = {
   listProjects: 'storage:list-projects',
   listTasks: 'storage:list-tasks',
   getTaskDetails: 'storage:get-task-details',
+  listCallRecords: 'storage:list-call-records',
+  getCallDetails: 'storage:get-call-details',
   listWorks: 'storage:list-works',
   getWorkDetails: 'storage:get-work-details',
   createWorkMediaHandle: 'storage:create-work-media-handle',
@@ -109,6 +111,107 @@ export interface StorageTaskDetailsDto extends StorageTaskSummaryDto {
   readonly finalPrompt: string;
 }
 
+export interface StorageCallRecordFilterDto {
+  readonly projectId?: string;
+  readonly productFeature?: string;
+  readonly providerId?: string;
+  readonly connectionId?: string;
+  readonly modelId?: string;
+  readonly state?: string;
+  readonly createdFrom?: string;
+  readonly createdTo?: string;
+  readonly offset?: number;
+  readonly limit?: number;
+}
+
+export interface StorageCallRecordSummaryDto {
+  readonly invocationAttemptId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly subjectKind: 'media' | 'conversation';
+  readonly productFeature: string;
+  readonly providerId: string;
+  readonly connectionId: string;
+  readonly modelId: string;
+  readonly providerName?: string;
+  readonly connectionName?: string;
+  readonly modelName?: string;
+  readonly displayNameAvailability: 'snapshotted' | 'unavailable';
+  readonly state: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly durationMs?: string;
+  readonly retryOfInvocationAttemptId?: string;
+  readonly usageAvailability: string;
+  readonly localResultCount: number;
+  readonly resultRegistrationState: 'registered' | 'not_registered' | 'not_applicable';
+}
+
+export interface StorageCallRecordListDto {
+  readonly items: readonly StorageCallRecordSummaryDto[];
+  readonly total: number;
+  readonly offset: number;
+  readonly limit: number;
+  readonly issues: readonly StorageReadModelIssueDto[];
+}
+
+export type StorageCallSubjectDto =
+  | {
+      readonly kind: 'media';
+      readonly taskId: string;
+      readonly executionId: string;
+    }
+  | {
+      readonly kind: 'conversation';
+      readonly conversationId: string;
+      readonly userMessageId: string;
+      readonly responseExecutionId: string;
+    };
+
+export interface StorageCallTimelineEventDto {
+  readonly sequence: number;
+  readonly type: string;
+  readonly safeCode?: string;
+  readonly occurredAt: string;
+}
+
+export interface StorageCallUsageFactDto {
+  readonly metricId: string;
+  readonly quantity: string;
+  readonly unit: string;
+  readonly source: string;
+}
+
+export interface StorageCallUsageDto {
+  readonly availability: string;
+  readonly facts: readonly StorageCallUsageFactDto[];
+  readonly calculatedAt: string;
+}
+
+export interface StorageCallLocalResultDto {
+  readonly mediaKind: 'image' | 'video' | 'text';
+  readonly outputCount: number;
+  readonly durationMs?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly byteLength?: string;
+  readonly validationState: 'pending' | 'valid' | 'invalid';
+  readonly observedAt: string;
+}
+
+export interface StorageCallResultRegistrationDto {
+  readonly state: 'registered' | 'not_registered' | 'not_applicable';
+  readonly workIds: readonly string[];
+}
+
+export interface StorageCallDetailsDto extends StorageCallRecordSummaryDto {
+  readonly subject: StorageCallSubjectDto;
+  readonly timeline: readonly StorageCallTimelineEventDto[];
+  readonly usage: StorageCallUsageDto;
+  readonly localResults: readonly StorageCallLocalResultDto[];
+  readonly resultRegistration: StorageCallResultRegistrationDto;
+}
+
 export interface StorageWorkSummaryDto {
   readonly workId: string;
   readonly projectId: string;
@@ -163,6 +266,12 @@ export interface StorageApi {
   getTaskDetails(
     taskId: string
   ): Promise<StorageIpcResult<StorageTaskDetailsDto | undefined>>;
+  listCallRecords(
+    filter?: StorageCallRecordFilterDto
+  ): Promise<StorageIpcResult<StorageCallRecordListDto>>;
+  getCallDetails(
+    invocationAttemptId: string
+  ): Promise<StorageIpcResult<StorageCallDetailsDto | undefined>>;
   listWorks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageWorkSummaryDto>>
   >;

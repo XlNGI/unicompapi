@@ -27,13 +27,16 @@ export interface ProviderExecutionRouteSnapshotV1 {
   readonly adapterKey: string;
   readonly adapterVersion: string;
   readonly providerId: ProviderId;
+  readonly providerDisplayName?: string;
   readonly connectionId: ConnectionId;
+  readonly connectionDisplayName?: string;
   readonly connectionRevision: number;
   readonly connectionConfigVersionId: string;
   readonly endpointPolicyId: string;
   readonly endpointPolicyRevision: number;
   readonly credentialVersionId: string;
   readonly modelId: ModelId;
+  readonly modelDisplayName?: string;
   readonly modelRevision: number;
   readonly profileId: string;
   readonly profileRevision: number;
@@ -103,7 +106,12 @@ export function parseProviderExecutionRouteSnapshot(
       'runtimeAuthorizationClaimId',
       'createdAt'
     ],
-    ['internalPurpose'],
+    [
+      'internalPurpose',
+      'providerDisplayName',
+      'connectionDisplayName',
+      'modelDisplayName'
+    ],
     'provider execution route snapshot'
   );
   if (item.schemaVersion !== 1) {
@@ -121,7 +129,18 @@ export function parseProviderExecutionRouteSnapshot(
     adapterKey: safeKey(item.adapterKey, 'route.adapterKey'),
     adapterVersion: version(item.adapterVersion, 'route.adapterVersion'),
     providerId: toProviderId(nonBlank(item.providerId, 'route.providerId')),
+    ...(item.providerDisplayName === undefined
+      ? {}
+      : { providerDisplayName: displayName(item.providerDisplayName, 'route.providerDisplayName') }),
     connectionId: toConnectionId(nonBlank(item.connectionId, 'route.connectionId')),
+    ...(item.connectionDisplayName === undefined
+      ? {}
+      : {
+          connectionDisplayName: displayName(
+            item.connectionDisplayName,
+            'route.connectionDisplayName'
+          )
+        }),
     connectionRevision: positiveInteger(item.connectionRevision, 'route.connectionRevision'),
     connectionConfigVersionId: opaqueId(
       item.connectionConfigVersionId,
@@ -134,6 +153,9 @@ export function parseProviderExecutionRouteSnapshot(
     ),
     credentialVersionId: opaqueId(item.credentialVersionId, 'route.credentialVersionId'),
     modelId: toModelId(nonBlank(item.modelId, 'route.modelId')),
+    ...(item.modelDisplayName === undefined
+      ? {}
+      : { modelDisplayName: displayName(item.modelDisplayName, 'route.modelDisplayName') }),
     modelRevision: positiveInteger(item.modelRevision, 'route.modelRevision'),
     profileId: opaqueId(item.profileId, 'route.profileId'),
     profileRevision: positiveInteger(item.profileRevision, 'route.profileRevision'),
@@ -223,6 +245,14 @@ function safeKey(value: unknown, label: string): string {
     throw new InvariantViolationError(`${label} is invalid`);
   }
   return key;
+}
+
+function displayName(value: unknown, label: string): string {
+  const name = nonBlank(value, label);
+  if (name.length > 160 || /[\u0000-\u001f\u007f]/.test(name)) {
+    throw new InvariantViolationError(`${label} is invalid`);
+  }
+  return name;
 }
 
 function opaqueId(value: unknown, label: string): string {

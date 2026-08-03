@@ -51,11 +51,16 @@ export class JsonProviderInvocationRepository
   }
 
   async listEvents(
-    attemptId: ProviderInvocationAttemptId
+    attemptId?: ProviderInvocationAttemptId
   ): Promise<readonly ProviderInvocationEventV1[]> {
     return (await this.read()).events
-      .filter((event) => event.invocationAttemptId === attemptId)
-      .sort((left, right) => left.sequence - right.sequence);
+      .filter((event) =>
+        attemptId === undefined || event.invocationAttemptId === attemptId
+      )
+      .sort((left, right) =>
+        left.invocationAttemptId.localeCompare(right.invocationAttemptId) ||
+        left.sequence - right.sequence
+      );
   }
 
   async create(

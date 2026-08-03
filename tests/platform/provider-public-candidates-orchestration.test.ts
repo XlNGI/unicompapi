@@ -457,7 +457,12 @@ describe('provider submission orchestration', () => {
     expect(acceptance).toMatchObject({
       intent: { status: 'provider_accepted' },
       invocationAttempt: { state: 'accepted' },
-      routeSnapshot: { runtimeAuthorizationClaimId: 'claim-public-orchestration' }
+      routeSnapshot: {
+        providerDisplayName: '服务商 A',
+        connectionDisplayName: '连接 A',
+        modelDisplayName: '模型 A',
+        runtimeAuthorizationClaimId: 'claim-public-orchestration'
+      }
     });
     expect((await fixture.ledger.load()).claims[0]).toMatchObject({ state: 'request_started' });
     await expect(fixture.acceptances.scanRecovery()).resolves.toMatchObject([{
