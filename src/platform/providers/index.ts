@@ -18,3 +18,4 @@ export * from './vidu-protocol-catalog';
 export * from './vidu';
 export * from './deepseek';
 export * from './volcengine';
+export * from './kling';

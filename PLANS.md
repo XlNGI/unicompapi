@@ -1074,3 +1074,14 @@ M3 第五支 `feature/volcengine-seedance-video-adapter` 已从 `develop@ac7cb96
     docs/active/多服务商功能路由-M3-Seedance视频适配器记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第六支 `feature/kling-video-adapter`；该支必须依据快手可灵官方合同证据、精确异步提交/查询/取消/结果/Usage 映射和合成 transport 完成，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
+
+M3 第六支 `feature/kling-video-adapter` 已从 `develop@375d44d` 建立，实现提交为 `8b02a40`。该支新增版本化 Kling API 2.0 Package、结构化 API Key CredentialSchema、固定中国区 HTTPS EndpointPolicy、无免费验证的 `manual_exact` 模型登记模板、视频 Adapter/Protocol、动态 Profile/ParameterSchema 工厂和安全 Runtime；Package 不发布固定模型名，能力只来自用户登记的精确模型端点键与受控 Profile，不按名称猜测。
+
+文生视频严格无素材；图生视频只允许一张项目内已复检 JPG/PNG 首帧。请求拒绝任意 URL、多图、首尾帧、回调、外部任务 ID、tools 和未知 JSON；查询只使用单个 `task_ids` 并精确映射 `submitted/processing/succeeded/failed`。官方未发布取消端点，因此取消固定不发 HTTP 并返回 `processing`，不伪造远端已取消。Billing 使用精确十进制记录现金、刊例价和视频资源包扣减；未知提交、缺失 Billing、畸形 Billing 分别记录 `unknown_outcome/not_reported/invalid_response`。防盗链 URL 不进入描述或日志，只留内存并按任务创建后 30 天失效；应用重启只能按原 RouteSnapshot attach 同一任务，任何失败不自动重试或切换服务商。
+
+第六支完整门禁为 Node 179 项与 Vitest 523 项，共 702 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、268 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁、差异检查和 Kling 范围敏感值扫描全部通过。该支未修改 Electron、preload 或 UI，不触发新增可见 Electron 烟测；真实服务商数据面 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。官方证据与工程记录见：
+
+    docs/active/多服务商功能路由-M3-Kling官方合同证据.md
+    docs/active/多服务商功能路由-M3-Kling视频适配器记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第七支 `feature/newapi-provider-package`；该支必须依据 NewAPI 官方兼容协议证据、精确 Package/Adapter/Profile 映射和合成 transport 完成，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
