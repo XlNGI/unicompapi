@@ -1182,3 +1182,5 @@ M6 `feature/provider-routing-optimization-closeout` 已从 `develop@24dcb9b` 建
     docs/active/多服务商功能路由-M6-优化收口记录.md
 
 M0—M6 在批准边界内全部完成，M6 自验收为 `passed`，允许非快进合并 `develop`。合并后停止在阶段 10 准入前；阶段 10、真实 API 专项、macOS 实机与媒体工具链扩展均未启动，后续必须由项目负责人单独批准。
+
+M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-routing-optimization-closeout` 本地与远程分支继续保留。多服务商功能路由 M0—M6 至此正式完成；当前停止在阶段 10 准入前，没有自动启动阶段 10 或任何真实 API、macOS 实机与媒体工具链扩展工作。
