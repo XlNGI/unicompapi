@@ -1009,3 +1009,15 @@ M2 第十支 `feature/provider-public-candidates-orchestration` 已从 `develop@
     docs/active/多服务商功能路由-M2-候选与提交编排记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-contracts-data-migration`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M2 第十一支 `feature/provider-contracts-data-migration` 已从 `develop@c15b1ec` 建立，实现提交为 `27cd6d5`。该支新增项目级追加式合同迁移读模型和 `migrations/provider-contracts-v1.json`，以规范化源事实 SHA-256 指纹实现顺序无关、幂等重复和变更追加；原始 Draft、Task、Execution、ProviderOperation、Work、Conversation、Message 与 ProjectContext 均不覆盖，迁移文件通过共享原子写入和 `.bak` 保留恢复路径。
+
+快速生图无素材迁移为 `text_to_image`，单图迁移到专业 `reference_to_image`；快速视频无素材迁移为 `text_to_video`，单图迁移到专业 `image_to_video`，视频或多素材进入只读阻断。旧模型、Evidence、参数和确认清除并要求重新确认，`saved_conversation` 必须先显式登记 ProjectContext。旧调用只生成脱敏 legacy 投影，不伪造 ProviderInvocationAttempt/Event 或 usage；历史 usage 为 `not_collected_legacy`，缺失精确路由的异步记录为 `legacy_route_unavailable + unrecoverable`。`projectId=null` 历史 Conversation 保持未绑定只读。
+
+该支同时新增 Provider/Connection 精确 Package ownership 迁移，要求完整模板、策略、配置版本和唯一精确协议绑定；未映射记录保持原状，不按名称、URL 或未知 JSON 猜测。Registry 覆盖前保存 `.bak`，显式恢复继续单调增加 revision；CAS 冲突重新读取最新事实，重复迁移不增加 revision。
+
+第十一支完整门禁为 Node 179 项与 Vitest 464 项，共 643 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、253 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-合同数据迁移记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。M2 在合同与迁移范围内完成；合并后从最新 `develop` 创建 M3 第一支 `feature/provider-management-framework`。UI 仍必须等待 M4 后台集成验收通过，真实 API、凭证验证和收费测试必须另立专项批准。
