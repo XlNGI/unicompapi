@@ -1,44 +1,26 @@
 import { useEffect, useState } from 'react';
 import {
-  LuBadgeCheck,
-  LuCirclePlay,
-  LuFolderInput,
+  LuFileImage,
   LuImagePlus,
-  LuListPlus,
-  LuRefreshCw,
   LuRotateCcw,
-  LuShieldCheck,
-  LuSparkles,
   LuTrash2,
-  LuVideo
+  LuType
 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
-import type { ImagePreflightDto } from '../../../shared/image-submission-ipc';
-import type {
-  ImageWorkspaceInputAssetDto
-} from '../../../shared/image-workspace-ipc';
-import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
-import {
-  emptyImageConfirmations,
-  ImageGenerationModelFields,
-  imageSubmissionErrorMessages,
-  ImageSubmissionConfirmations,
-  type GenerationImageDraftDto
-} from './ImageGenerationControls';
-import { useImageSubmissionFlow } from './useImageSubmissionFlow';
+import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
+import type { GenerationImageDraftDto } from './ImageGenerationControls';
+import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 
 interface ImageProfessionalWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
-  readonly registry?: ProviderRegistryDto;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
-  readonly onVideoDraftCreated?: (draftId: string) => void;
 }
 
 const supplementSourceLabels: Readonly<Record<string, string>> = {
@@ -54,68 +36,73 @@ const supplementSourceLabels: Readonly<Record<string, string>> = {
 export function ImageProfessionalWorkspace({
   dirty,
   draft,
-  registry,
   onDraftChange,
   onDraftPersisted,
-  onMessage,
-  onVideoDraftCreated
+  onMessage
 }: ImageProfessionalWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
-  const imageSubmissions = window.unicomp?.imageSubmissions;
   const [input, setInput] = useState<ImageWorkspaceInputAssetDto>();
   const [previewUrl, setPreviewUrl] = useState('');
-  const [preflight, setPreflight] = useState<ImagePreflightDto>();
-  const [confirmations, setConfirmations] = useState(emptyImageConfirmations);
   const [busy, setBusy] = useState(false);
-  const selectedCandidate = preflight?.candidates.find(
-    (candidate) => candidate.modelId === draft.generation.model?.modelId
+  const productFeature = draft.featureSelection?.productFeature === 'text_to_image' ||
+    draft.featureSelection?.productFeature === 'reference_to_image'
+    ? draft.featureSelection.productFeature
+    : undefined;
+  const unsupportedContexts = draft.contextReferences.filter(
+    (reference) =>
+      reference.kind !== 'project_context' ||
+      reference.contextRevision === undefined ||
+      reference.includeInPrompt === undefined
   );
-  const submission = useImageSubmissionFlow({
-    draftId: draft.draftId,
-    draftUpdatedAt: draft.updatedAt,
-    preflight,
-    candidate: selectedCandidate,
-    confirmations,
-    busy,
-    setBusy,
-    onMessage,
-    onVideoDraftCreated,
-    errorMessages: imageSubmissionErrorMessages
-  });
+  const blockedReason = !productFeature
+    ? '请先明确选择文生图或图生图。'
+    : productFeature === 'text_to_image' && draft.input
+      ? '文生图不能包含图片，请先清除当前图片。'
+      : productFeature === 'reference_to_image' && !draft.input
+        ? '图生图必须选择恰好一张图片。'
+        : unsupportedContexts.length > 0
+          ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+          : undefined;
 
   useEffect(() => {
     let active = true;
     setInput(undefined);
     setPreviewUrl('');
     if (!imageWorkspaces || !draft.input) return;
-
-    async function loadInput() {
-      const [inputResult, previewResult] = await Promise.all([
-        imageWorkspaces!.getInput(draft.draftId),
-        imageWorkspaces!.createInputPreview(draft.draftId)
-      ]);
+    void Promise.all([
+      imageWorkspaces.getInput(draft.draftId),
+      imageWorkspaces.createInputPreview(draft.draftId)
+    ]).then(([inputResult, previewResult]) => {
       if (!active) return;
       if (inputResult.ok) setInput(inputResult.value);
       if (previewResult.ok) setPreviewUrl(previewResult.value.url);
-    }
-
-    void loadInput().catch(() => {
-      if (active) onMessage('参考图读取失败，请重新选择。');
+    }).catch(() => {
+      if (active) onMessage('项目图片读取失败，请重新选择。');
     });
     return () => {
       active = false;
     };
   }, [draft.draftId, draft.input?.assetId, imageWorkspaces, onMessage]);
 
-  useEffect(() => {
-    setPreflight(undefined);
-    setConfirmations(emptyImageConfirmations);
-  }, [draft.updatedAt]);
-
   function changeDraft(next: GenerationImageDraftDto) {
-    setPreflight(undefined);
-    setConfirmations(emptyImageConfirmations);
     onDraftChange({ ...next, state: 'editing' });
+  }
+
+  function selectFeature(nextFeature: 'text_to_image' | 'reference_to_image') {
+    if (nextFeature === productFeature) return;
+    if (nextFeature === 'text_to_image' && draft.input) {
+      onMessage('切换文生图前请先清除当前图片。');
+      return;
+    }
+    changeDraft({
+      ...draft,
+      generation: {},
+      featureSelection: {
+        productFeature: nextFeature,
+        parameterValues: {}
+      }
+    });
+    onMessage('生图方式已更改；请保存草稿后重新选择服务和参数。');
   }
 
   function changeOriginalInput(value: string) {
@@ -144,7 +131,12 @@ export function ImageProfessionalWorkspace({
   }
 
   async function selectReference() {
-    if (!imageWorkspaces || dirty || busy) return;
+    if (
+      !imageWorkspaces ||
+      productFeature !== 'reference_to_image' ||
+      dirty ||
+      busy
+    ) return;
     setBusy(true);
     onMessage('');
     try {
@@ -158,36 +150,46 @@ export function ImageProfessionalWorkspace({
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(draft.draftId);
       setPreviewUrl(preview.ok ? preview.value.url : '');
-      onMessage('参考图已复制并登记到当前项目；没有上传、分析或生成。');
+      onMessage('图片已复制并登记到当前项目；没有上传、分析或生成。');
     } catch {
-      onMessage('选择参考图失败，请重试。');
+      onMessage('选择图片失败，请重试。');
     } finally {
       setBusy(false);
     }
   }
 
-  async function checkSubmission() {
-    if (!imageSubmissions || dirty || busy) return;
+  async function clearReference() {
+    if (!imageWorkspaces || !draft.input || dirty || busy) return;
     setBusy(true);
     onMessage('');
     try {
-      const result = await imageSubmissions.preflight(draft.draftId);
+      const result = await imageWorkspaces.clearInput(draft.draftId);
       if (!result.ok) {
-        onMessage(imageSubmissionErrorMessages[result.error.code]);
+        onMessage(result.error.message);
         return;
       }
-      setPreflight(result.value);
-      setConfirmations(emptyImageConfirmations);
-      onMessage(
-        result.value.blockers.length
-          ? '检查完成：当前存在阻断项，没有创建任务。'
-          : '检查通过：请核对并确认全部提交事实。'
-      );
+      onDraftPersisted(result.value as GenerationImageDraftDto);
+      setInput(undefined);
+      setPreviewUrl('');
+      onMessage('已从当前草稿清除图片引用；项目内原始素材记录保持不变。');
     } catch {
-      onMessage('提交条件检查失败，请重试。');
+      onMessage('清除图片失败，请重试。');
     } finally {
       setBusy(false);
     }
+  }
+
+  function clearUnsupportedContexts() {
+    changeDraft({
+      ...draft,
+      contextReferences: draft.contextReferences.filter(
+        (reference) =>
+          reference.kind === 'project_context' &&
+          reference.contextRevision !== undefined &&
+          reference.includeInPrompt !== undefined
+      )
+    });
+    onMessage('已从草稿清除不受支持或未固定 revision 的旧上下文。');
   }
 
   return (
@@ -197,10 +199,32 @@ export function ImageProfessionalWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
-              <h2>输入来源与上下文</h2>
-              <p>只使用明确选择并保存在草稿中的内容。</p>
+              <h2>创作方式与输入</h2>
+              <p>生图方式、图片和项目上下文均需明确选择并保存。</p>
             </div>
           </header>
+
+          <div aria-label="生图方式" className="uc-image-feature-mode" role="group">
+            <button
+              aria-pressed={productFeature === 'text_to_image'}
+              className="uc-image-feature-mode__option"
+              onClick={() => selectFeature('text_to_image')}
+              type="button"
+            >
+              <LuType aria-hidden="true" />
+              <span><strong>文生图</strong><small>仅文字输入</small></span>
+            </button>
+            <button
+              aria-pressed={productFeature === 'reference_to_image'}
+              className="uc-image-feature-mode__option"
+              onClick={() => selectFeature('reference_to_image')}
+              type="button"
+            >
+              <LuFileImage aria-hidden="true" />
+              <span><strong>图生图</strong><small>恰好一张图片</small></span>
+            </button>
+          </div>
+
           <label className="uc-image-quick__field">
             <span>原始创作需求</span>
             <textarea
@@ -213,6 +237,55 @@ export function ImageProfessionalWorkspace({
             <small>{draft.prompt.originalInput.length} / 1000</small>
           </label>
 
+          {productFeature === 'reference_to_image' ? (
+            <section className="uc-image-professional__reference">
+              <div className="uc-image-quick__reference">
+                <div>
+                  <strong>项目图片</strong>
+                  <span>
+                    {input
+                      ? `${input.name} · ${input.width} × ${input.height}`
+                      : '选择后只复制并登记到当前项目，不会自动外发。'}
+                  </span>
+                </div>
+                <div className="uc-image-feature-panel__media-actions">
+                  <Button
+                    disabled={!imageWorkspaces || dirty || busy}
+                    onClick={() => void selectReference()}
+                    variant="secondary"
+                  >
+                    <LuImagePlus aria-hidden="true" />
+                    {input ? '替换图片' : '选择图片'}
+                  </Button>
+                  <Button
+                    disabled={!imageWorkspaces || !draft.input || dirty || busy}
+                    onClick={() => void clearReference()}
+                    variant="secondary"
+                  >
+                    <LuTrash2 aria-hidden="true" />
+                    清除图片
+                  </Button>
+                </div>
+              </div>
+              {previewUrl ? (
+                <figure className="uc-image-professional__preview">
+                  <img alt={`项目图片：${input?.name ?? '本地图片'}`} src={previewUrl} />
+                  <figcaption>受控本地预览，不代表生成结果。</figcaption>
+                </figure>
+              ) : null}
+              <label className="uc-image-quick__field">
+                <span>图片用途</span>
+                <input
+                  disabled={!draft.input}
+                  maxLength={200}
+                  onChange={(event) => changeReferencePurpose(event.target.value)}
+                  placeholder="例如：仅参考构图，不复制人物"
+                  value={draft.input?.purpose ?? ''}
+                />
+              </label>
+            </section>
+          ) : null}
+
           <WorkspaceContextSelector
             disabled={busy}
             onChange={(contextReferences) => changeDraft({
@@ -220,52 +293,18 @@ export function ImageProfessionalWorkspace({
               contextReferences
             })}
             onMessage={onMessage}
+            projectContextsOnly
             references={draft.contextReferences}
           />
-
-          <section className="uc-image-professional__reference">
-            <div className="uc-image-quick__reference">
-              <div>
-                <strong>单张参考图</strong>
-                <span>
-                  {input
-                    ? `${input.name} · ${input.width} × ${input.height}`
-                    : '选择后只登记到当前项目，不会上传或分析。'}
-                </span>
-              </div>
-              <Button
-                disabled={!imageWorkspaces || dirty || busy}
-                onClick={() => void selectReference()}
-                variant="secondary"
-              >
-                <LuImagePlus aria-hidden="true" />
-                {input ? '重新选择参考图' : '选择一张参考图'}
+          {unsupportedContexts.length > 0 ? (
+            <div className="uc-image-quick__preflight" role="status">
+              <strong>发现旧上下文引用</strong>
+              <span>专业生图只接受固定 revision 的 ProjectContext。</span>
+              <Button onClick={clearUnsupportedContexts} variant="secondary">
+                <LuTrash2 aria-hidden="true" />
+                清理旧上下文
               </Button>
             </div>
-            {previewUrl ? (
-              <figure className="uc-image-professional__preview">
-                <img
-                  alt={`参考图：${input?.name ?? '本地图片'}`}
-                  src={previewUrl}
-                />
-                <figcaption>受控本地预览，不代表生成结果。</figcaption>
-              </figure>
-            ) : null}
-            <label className="uc-image-quick__field">
-              <span>参考图用途</span>
-              <input
-                disabled={!draft.input}
-                maxLength={200}
-                onChange={(event) => changeReferencePurpose(event.target.value)}
-                placeholder="例如：仅参考构图，不复制人物"
-                value={draft.input?.purpose ?? ''}
-              />
-            </label>
-          </section>
-          {dirty ? (
-            <p className="uc-image-quick__hint" role="status">
-              请先点击页面顶部“保存本地草稿”，再选择图片或检查提交条件。
-            </p>
           ) : null}
         </Card>
 
@@ -288,10 +327,7 @@ export function ImageProfessionalWorkspace({
                 <ul>
                   {draft.prompt.systemSupplements.map((supplement, index) => (
                     <li key={`${supplement.source}-${index}`}>
-                      <small>
-                        {supplementSourceLabels[supplement.source] ??
-                          supplement.source}
-                      </small>
+                      <small>{supplementSourceLabels[supplement.source] ?? supplement.source}</small>
                       <span>{supplement.content}</span>
                     </li>
                   ))}
@@ -305,15 +341,10 @@ export function ImageProfessionalWorkspace({
               <textarea
                 aria-label="最终提交提示词"
                 maxLength={2000}
-                onChange={(event) =>
-                  changeDraft({
-                    ...draft,
-                    prompt: {
-                      ...draft.prompt,
-                      finalPrompt: event.target.value
-                    }
-                  })
-                }
+                onChange={(event) => changeDraft({
+                  ...draft,
+                  prompt: { ...draft.prompt, finalPrompt: event.target.value }
+                })}
                 rows={9}
                 value={draft.prompt.finalPrompt}
               />
@@ -322,59 +353,23 @@ export function ImageProfessionalWorkspace({
           </div>
           <div className="uc-image-quick__result-actions">
             <Button
-              disabled={draft.prompt.systemSupplements.length === 0}
-              onClick={() =>
-                changeDraft({
-                  ...draft,
-                  prompt: {
-                    ...draft.prompt,
-                    finalPrompt: draft.prompt.originalInput
-                  }
-                })
-              }
+              disabled={draft.prompt.finalPrompt === draft.prompt.originalInput}
+              onClick={() => changeDraft({
+                ...draft,
+                prompt: { ...draft.prompt, finalPrompt: draft.prompt.originalInput }
+              })}
               variant="secondary"
             >
               <LuRotateCcw aria-hidden="true" />
               恢复原始输入
             </Button>
-            <Button
-              disabled={draft.prompt.systemSupplements.length === 0}
-              onClick={() =>
-                changeDraft({
-                  ...draft,
-                  prompt: {
-                    originalInput: draft.prompt.originalInput,
-                    systemSupplements: [],
-                    finalPrompt: draft.prompt.originalInput
-                  }
-                })
-              }
-              variant="secondary"
-            >
-              <LuTrash2 aria-hidden="true" />
-              清除系统补充
-            </Button>
-            <Button disabled variant="secondary">
-              <LuRefreshCw aria-hidden="true" />
-              重新增强
-            </Button>
           </div>
           <EmptyState
-            description="当前没有真实图片适配器，不显示示例结果或生成进度。"
+            description="只有通过安全路由提交并完成本地文件校验后，结果才会登记为作品。"
             icon="画"
             readOnly
             title="尚无真实生成结果"
           />
-          <div className="uc-image-quick__result-actions">
-            <Button disabled variant="secondary">
-              <LuFolderInput aria-hidden="true" />
-              {submission.work ? '已登记到项目' : '保存到项目'}
-            </Button>
-            <Button disabled variant="secondary">
-              <LuRefreshCw aria-hidden="true" />
-              重新生成
-            </Button>
-          </div>
         </Card>
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
@@ -382,95 +377,23 @@ export function ImageProfessionalWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>服务、参数与确认</h2>
-              <p>模型和参数只来自本机能力事实。</p>
+              <p>候选只基于当前生图方式和已保存草稿事实。</p>
             </div>
           </header>
-          <ImageGenerationModelFields
+          <ImageFeatureSubmissionPanel
+            blockedReason={blockedReason}
+            dirty={dirty}
             draft={draft}
-            onDraftChange={changeDraft}
-            registry={registry}
+            onDraftChange={onDraftChange}
+            onMessage={onMessage}
           />
-          <Button
-            disabled={!imageSubmissions || dirty || busy}
-            onClick={() => void checkSubmission()}
-            variant="secondary"
-          >
-            <LuShieldCheck aria-hidden="true" />
-            检查提交条件
-          </Button>
-          {preflight ? (
-            <div className="uc-image-quick__preflight" role="status">
-              <strong>
-                {preflight.blockers.length ? '当前无法提交' : '提交条件已通过'}
-              </strong>
-              {preflight.blockers.map((blocker) => (
-                <span key={blocker}>
-                  • {imageSubmissionErrorMessages[blocker]}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {selectedCandidate ? (
-            <ImageSubmissionConfirmations
-              candidate={selectedCandidate}
-              confirmations={confirmations}
-              finalPrompt={draft.prompt.finalPrompt}
-              onChange={setConfirmations}
-            />
-          ) : null}
-          <div className="uc-image-quick__submission-actions">
-            <Button
-              disabled={!submission.canCreateTask}
-              onClick={() => void submission.createTask()}
-            >
-              <LuListPlus aria-hidden="true" />
-              创建图片任务
-            </Button>
-            <Button
-              disabled={!submission.task || Boolean(submission.execution) || busy}
-              onClick={() => void submission.createExecution()}
-              variant="secondary"
-            >
-              <LuCirclePlay aria-hidden="true" />
-              创建执行记录
-            </Button>
-            <Button
-              disabled={!submission.execution || submission.execution.state !== 'created' || busy}
-              onClick={() => void submission.invokeExecution()}
-            >
-              <LuSparkles aria-hidden="true" />
-              提交图片生成
-            </Button>
-            <Button
-              disabled={!submission.execution || submission.execution.state !== 'remote_completed' || busy}
-              onClick={() => void submission.receiveResult()}
-              variant="secondary"
-            >
-              <LuBadgeCheck aria-hidden="true" />
-              校验并登记结果
-            </Button>
-            <Button
-              disabled={!submission.work || busy}
-              onClick={() => void submission.createVideoDraft()}
-              variant="secondary"
-            >
-              <LuVideo aria-hidden="true" />
-              创建图生视频草稿
-            </Button>
-          </div>
-          {submission.execution ? (
-            <p className="uc-image-quick__hint" role="status">
-              执行 #{submission.execution.attempt}：{submission.execution.state}
-              {submission.work ? `；已登记 ${submission.work.name}` : ''}
-            </p>
-          ) : null}
         </Card>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="warning">真实能力状态</StatusPill>
+        <StatusPill tone="warning">在线运行未授权</StatusPill>
         <p>
-          单张参考图、上下文、提示词分层和提交确认保持独立；只有已验证并启用的协议能力才能创建执行和登记真实 Work。
+          候选、参数、图片、上下文和外发确认相互独立；任何事实变化都会使旧选择令牌失效。
         </p>
       </Card>
     </>

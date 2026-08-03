@@ -38,7 +38,12 @@ test('saved conversation candidates contain summaries but no message content', (
   assert.doesNotMatch(candidate, /messages:|content:|attachments:|MessageDto/);
 });
 
-test('selector stores only controlled reference kinds and ids', () => {
+test('selector pins project contexts while saved conversations remain ID-only', () => {
   assert.match(selector, /\{ kind, referenceId \}/);
+  assert.match(selector, /contextRevision,/);
+  assert.match(selector, /candidate\.revision\s*\n\s*\)}/);
+  assert.match(selector, /includeInPrompt: true/);
+  assert.match(image, /projectContextsOnly/);
+  assert.doesNotMatch(video, /projectContextsOnly/);
   assert.doesNotMatch(selector, /absolutePath|checksumSha256|apiKey|endpoint|remoteOperationId/);
 });

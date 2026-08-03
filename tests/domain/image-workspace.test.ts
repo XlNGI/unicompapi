@@ -175,6 +175,31 @@ describe('image workspace contracts', () => {
     expect('taskId' in derived).toBe(false);
   });
 
+  it('migrates a legacy quick image input to explicit professional reference-to-image', () => {
+    const source = createImageWorkspaceDraft({
+      ...createEmpty('quick_image'),
+      input: {
+        assetId: toAssetId('asset-legacy-quick-reference'),
+        role: 'reference' as const,
+        selectedAt: t0
+      }
+    });
+    const derived = deriveImageWorkspaceDraft({
+      id: toDraftId('draft-derived-professional-reference'),
+      source,
+      targetMode: 'professional_image',
+      createdAt: t1
+    });
+    expect(derived).toMatchObject({
+      mode: 'professional_image',
+      featureSelection: {
+        productFeature: 'reference_to_image',
+        parameterValues: {}
+      },
+      input: { role: 'reference' }
+    });
+  });
+
   it('marks an existing image-to-prompt result stale without deleting it', () => {
     const base = createEmpty('image_to_prompt') as ImageToPromptWorkspaceDraft;
     const analyzed = createImageWorkspaceDraft({

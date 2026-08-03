@@ -1136,3 +1136,11 @@ M5 第二支 `feature/ui-conversation-context-wiring` 已从 `develop@82ca9c4` �
     docs/active/多服务商功能路由-M5-对话与上下文UI接线记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第三支 `feature/ui-image-feature-wiring`；快速生图固定为纯文生图，不接收参考图或其他参考素材，只消费已合并安全 DTO 与提交端口，不访问真实服务商、真实凭证、收费调用或阶段 10。
+
+M5 第三支 `feature/ui-image-feature-wiring` 已从 `develop@bc91fda` 建立，实现提交为 `1ed2772`。该支把快速生图和专业生图接到安全图片候选、动态 `ParameterSchema`、固定草稿 revision、一次性路由选择令牌、外发确认和受控提交端口；快速生图固定为纯文生图，旧带图或上下文草稿只能显式迁移到专业生图，专业页显式区分文生图和恰好单图的图生图，并只接受固定 revision 的 ProjectContext。
+
+权威最小窗口同步从旧 `1080x720` 落实为 `800x720`，紧凑标题栏、导航和图片页单列布局无横向溢出。完整门禁为 Node 185 项与 Vitest 571 项，共 756 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接包校验、恢复审计、阶段 9 关闭门禁、安全存储、运行时集成和差异检查通过。浏览器 `1440x900`、`800x720` 无横向溢出或控件重叠，控制台 0 警告、0 错误；Windows Electron 隔离烟测 4/4 响应、1 个可见窗口、正常关闭残留 0。工程记录见：
+
+    docs/active/多服务商功能路由-M5-图片功能UI接线记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第四支 `feature/ui-video-feature-wiring`；快速视频固定为纯文生视频，不接收参考图片、参考视频或其他参考素材，只消费已合并安全 DTO、异步恢复与提交端口，不访问真实服务商、真实凭证、收费调用或阶段 10。

@@ -16,6 +16,10 @@ import {
   type ImageSubmissionApi
 } from '../src/shared/image-submission-ipc';
 import {
+  imageFeatureIpcChannels,
+  type ImageFeatureApi
+} from '../src/shared/image-feature-ipc';
+import {
   videoWorkspaceIpcChannels,
   type VideoWorkspaceApi
 } from '../src/shared/video-workspace-ipc';
@@ -119,6 +123,8 @@ const imageWorkspaces: ImageWorkspaceApi = {
     }),
   selectInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.selectInput, { draftId }),
+  clearInput: (draftId) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.clearInput, { draftId }),
   getInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.getInput, { draftId }),
   createInputPreview: (draftId) =>
@@ -147,6 +153,33 @@ const imageSubmissions: ImageSubmissionApi = {
     ipcRenderer.invoke(imageSubmissionIpcChannels.receiveResult, {
       executionId
     })
+};
+
+const imageFeatures: ImageFeatureApi = {
+  listCandidates: (draftId, draftUpdatedAt) =>
+    ipcRenderer.invoke(imageFeatureIpcChannels.listCandidates, {
+      draftId,
+      draftUpdatedAt
+    }),
+  prepareSubmission: (draftId, draftUpdatedAt, candidateId) =>
+    ipcRenderer.invoke(imageFeatureIpcChannels.prepareSubmission, {
+      draftId,
+      draftUpdatedAt,
+      candidateId
+    }),
+  submitDraft: (
+    draftId,
+    draftUpdatedAt,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  ) => ipcRenderer.invoke(imageFeatureIpcChannels.submitDraft, {
+    draftId,
+    draftUpdatedAt,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  })
 };
 
 const videoWorkspaces: VideoWorkspaceApi = {
@@ -558,6 +591,7 @@ const chatContexts: ChatContextApi = {
 contextBridge.exposeInMainWorld('unicomp', {
   chatContexts,
   imageSubmissions,
+  imageFeatures,
   imageWorkspaces,
   videoSubmissions,
   videoEditors,

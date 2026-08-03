@@ -82,8 +82,9 @@ export function ImageWorkbenchPage({
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const currentDraft = drafts[drafts.length - 1];
+  const isQuickImage = mode.workspaceMode === 'quick_image';
   const isGenerationImage =
-    mode.workspaceMode === 'quick_image' ||
+    isQuickImage ||
     mode.workspaceMode === 'professional_image';
   const presentation = modePresentation[mode.workspaceMode];
 
@@ -295,11 +296,8 @@ export function ImageWorkbenchPage({
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
-          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToProfessional={onNavigateToProfessional}
-          onVideoDraftCreated={onVideoDraftCreated}
-          registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'professional_image' ? (
         <ImageProfessionalWorkspace
@@ -308,8 +306,6 @@ export function ImageWorkbenchPage({
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
-          onVideoDraftCreated={onVideoDraftCreated}
-          registry={providerRegistry}
         />
       ) : currentDraft?.mode === 'image_understanding' ? (
         <ImageUnderstandingWorkspace
@@ -347,8 +343,12 @@ export function ImageWorkbenchPage({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
-              <h2>输入与上下文</h2>
-              <p>单次工作区最多关联一张图片。</p>
+              <h2>{isQuickImage ? '文字需求' : '输入与上下文'}</h2>
+              <p>
+                {isQuickImage
+                  ? '快速生图固定为纯文生图，不接收图片或上下文。'
+                  : '单次工作区最多关联一张图片。'}
+              </p>
             </div>
           </header>
           {loading ? (
@@ -418,19 +418,31 @@ export function ImageWorkbenchPage({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
-              <h2>画布与预览</h2>
-              <p>只显示经过主进程授权的本地媒体。</p>
+              <h2>{isQuickImage ? '结果预览' : '画布与预览'}</h2>
+              <p>
+                {isQuickImage
+                  ? '只显示通过本地文件校验并登记的真实生成结果。'
+                  : '只显示经过主进程授权的本地媒体。'}
+              </p>
             </div>
           </header>
           <EmptyState
             description={
-              currentDraft
+              isQuickImage
+                ? '创建项目内草稿后，这里将显示通过本地校验并登记的真实生成结果。'
+                : currentDraft
                 ? '仅显示经过主进程授权并通过本地校验的真实图片；不可用时保留异常状态。'
                 : '创建项目内本地草稿后，这里将承载输入图片、区域与结果状态。'
             }
             icon="画"
             readOnly
-            title={currentDraft ? '当前没有可用预览' : '画布暂无内容'}
+            title={
+              isQuickImage
+                ? '暂无生成结果'
+                : currentDraft
+                  ? '当前没有可用预览'
+                  : '画布暂无内容'
+            }
           />
         </Card>
 
@@ -490,8 +502,10 @@ export function ImageWorkbenchPage({
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="warning">真实离线状态</StatusPill>
         <p>
-          {isGenerationImage
-            ? '创建项目内草稿后，可填写需求、选择单张参考图并检查真实提交条件。'
+          {isQuickImage
+            ? '创建项目内草稿后，可填写文字需求并检查真实提交条件。'
+            : isGenerationImage
+              ? '创建项目内草稿后，可填写需求、选择单张图片并检查真实提交条件。'
             : '当前模式使用受控单图、能力预检和提交端口；没有真实适配器时会明确阻断，不会伪造任务或结果。'}
         </p>
       </Card>

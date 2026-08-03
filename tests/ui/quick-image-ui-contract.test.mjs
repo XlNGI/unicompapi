@@ -6,148 +6,90 @@ const quickSource = await readFile(
   'src/pages/creation/image/ImageQuickWorkspace.tsx',
   'utf8'
 );
-const generationControlsSource = await readFile(
-  'src/pages/creation/image/ImageGenerationControls.tsx',
-  'utf8'
-);
-const submissionFlowSource = await readFile(
-  'src/pages/creation/image/useImageSubmissionFlow.ts',
+const featurePanelSource = await readFile(
+  'src/pages/creation/image/ImageFeatureSubmissionPanel.tsx',
   'utf8'
 );
 const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
-const professionalSource = await readFile(
-  'src/pages/creation/image/ImageProfessionalWorkspace.tsx',
-  'utf8'
-);
-const editingSource = await readFile(
-  'src/pages/creation/image/ImageEditingWorkspace.tsx',
-  'utf8'
-);
-const quickBundle = `${quickSource}\n${generationControlsSource}\n${submissionFlowSource}`;
-const appSource = await readFile('src/ui/App.tsx', 'utf8');
+const source = `${quickSource}\n${featurePanelSource}`;
 
-test('quick image page uses the controlled input and preflight APIs', () => {
-  for (const operation of ['selectInput', 'createInputPreview', 'preflight']) {
-    assert.match(quickBundle, new RegExp(`\\.${operation}\\(`));
-  }
-
+test('quick image is pure text-to-image with no material or context entry', () => {
+  assert.match(quickSource, /productFeature: 'text_to_image'/);
+  assert.match(quickSource, /0 份图片素材 · 0 份上下文/);
   assert.doesNotMatch(
-    quickBundle,
-    /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/
+    quickSource,
+    /selectInput|createInputPreview|WorkspaceContextSelector|LuImagePlus|添加参考|选择参考|单张参考/
   );
-  for (const operation of [
-    'createTask',
-    'createExecution',
-    'invokeExecution',
-    'receiveResult'
-  ]) {
-    assert.match(submissionFlowSource, new RegExp(`submissions\\.${operation}\\(`));
-  }
+  assert.doesNotMatch(quickSource, /imageSubmissions|ProviderRegistry|CapabilityEvidence/);
+  assert.match(workbenchSource, /isQuickImage \? '文字需求' : '输入与上下文'/);
+  assert.match(
+    workbenchSource,
+    /快速生图固定为纯文生图，不接收图片或上下文。/
+  );
+  assert.match(
+    workbenchSource,
+    /isQuickImage[\s\S]*创建项目内草稿后，可填写文字需求并检查真实提交条件。/
+  );
+  assert.match(workbenchSource, /isQuickImage \? '结果预览' : '画布与预览'/);
+  assert.match(
+    workbenchSource,
+    /创建项目内草稿后，这里将显示通过本地校验并登记的真实生成结果。/
+  );
 });
 
-test('quick image keeps draft, model parameters and confirmations explicit', () => {
-  for (const text of [
-    '输入一句话，UniComp AI 为你生成图片',
-    '单张参考图（可选）',
-    '保存本地草稿',
-    '检查并准备生成',
-    '逐项确认本次提交',
-    '费用状态：未知',
-    '提交任务',
-    '保存到项目',
-    '重新生成',
-    '进入专业创作'
-  ]) {
-    assert.match(
-      `${quickBundle}\n${appSource}`,
-      new RegExp(text.replace(/[（）]/g, '\\$&'))
-    );
-  }
-
-  assert.match(generationControlsSource, /parameterSchema\?\.fields\.map/);
+test('legacy quick drafts can only derive into professional creation', () => {
+  assert.match(quickSource, /const legacyReason = draft\.input/);
+  assert.match(quickSource, /旧草稿需要迁移/);
   assert.match(quickSource, /\.derive\([\s\S]*'professional_image'/);
-  assert.match(appSource, /'quick-image'[\s\S]*'professional-image'/);
-  assert.doesNotMatch(workbenchSource, /uc-image-workbench__mode-switch/);
+  assert.match(quickSource, /blockedReason=\{legacyReason\}/);
+  assert.doesNotMatch(quickSource, /clearInput\(|selectInput\(/);
+});
+
+test('quick image uses the safe feature DTO and one business submission action', () => {
+  assert.match(quickSource, /ImageFeatureSubmissionPanel/);
+  for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
+    assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));
+  }
+  assert.match(featurePanelSource, /parameterSchema\.fields\.map/);
+  assert.match(featurePanelSource, /服务商 \/ 连接 \/ 模型/);
+  assert.match(featurePanelSource, /确认本次外发/);
+  assert.match(featurePanelSource, /确认并提交/);
+  assert.doesNotMatch(featurePanelSource, /defaultParameterValues|ImageGenerationModelFields/);
+  assert.doesNotMatch(
+    source,
+    /创建图片任务|创建执行记录|createTask\(|createExecution\(|invokeExecution\(|receiveResult\(/
+  );
 });
 
 test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
   const composerIndex = quickSource.indexOf('uc-image-quick__composer');
   const inspectorIndex = quickSource.indexOf('uc-image-quick__inspector');
   const stageIndex = quickSource.indexOf('uc-image-quick__stage');
-
   assert.ok(composerIndex >= 0, 'quick image composer is missing');
   assert.ok(inspectorIndex > composerIndex, 'step 2 must follow step 1');
   assert.ok(stageIndex > inspectorIndex, 'step 3 must follow step 2');
-  assert.match(
-    quickSource.slice(composerIndex, inspectorIndex),
-    /<span aria-hidden="true">1<\/span>/
-  );
-  assert.match(
-    quickSource.slice(inspectorIndex, stageIndex),
-    /<span aria-hidden="true">2<\/span>/
-  );
-  assert.match(
-    quickSource.slice(stageIndex),
-    /<span aria-hidden="true">3<\/span>/
-  );
+  assert.match(quickSource.slice(composerIndex, inspectorIndex), />1</);
+  assert.match(quickSource.slice(inspectorIndex, stageIndex), />2</);
+  assert.match(quickSource.slice(stageIndex), />3</);
 });
 
-test('quick image keeps unavailable adapters blocked without fake output', () => {
-  const composerIndex = quickSource.indexOf('uc-image-quick__composer');
-  const stageIndex = quickSource.indexOf('uc-image-quick__stage');
-  const composerSource = quickSource.slice(composerIndex, stageIndex);
-  const stageSource = quickSource.slice(stageIndex);
-
-  assert.match(generationControlsSource, /adapter_unavailable/);
-  assert.match(generationControlsSource, /没有配置真实图片生成适配器/);
-  assert.match(composerSource, /src=\{inputPreviewUrl\}/);
-  assert.doesNotMatch(stageSource, /inputPreviewUrl|参考图：/);
+test('quick image keeps unavailable runtime blocked without fake output', () => {
+  assert.match(featurePanelSource, /runtime_not_allowed/);
+  assert.match(featurePanelSource, /在线图片运行尚未获准，没有发出请求/);
   assert.match(quickSource, /尚无真实生成结果/);
-  assert.match(quickSource, /不会显示假进度或未校验结果/);
-  assert.match(quickSource, /submission\.canCreateTask/);
-});
-
-test('image Work handoff opens only the derived image-to-video draft', () => {
-  const handoffStart = submissionFlowSource.indexOf(
-    'async function createVideoDraft'
-  );
-  const handoffEnd = submissionFlowSource.indexOf(
-    'function reportError',
-    handoffStart
-  );
-  const handoffSource = submissionFlowSource.slice(handoffStart, handoffEnd);
-
-  assert.match(handoffSource, /createFromImageWork\(work\.workId\)/);
-  assert.match(
-    handoffSource,
-    /onVideoDraftCreated\?\.\(result\.value\.draftId\)/
-  );
+  assert.match(quickSource, /不会创建请求、费用或假结果/);
   assert.doesNotMatch(
-    handoffSource,
-    /submissions\.(createTask|createExecution|invokeExecution)/
-  );
-  assert.match(
-    appSource,
-    /setOpenedVideoDraftId\(draftId\)[\s\S]*setActiveItemId\('video-creation'\)[\s\S]*setActiveSubItemId\('image-to-video'\)/
+    source,
+    /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/
   );
 });
 
-test('image task and execution creation are disabled after they exist', () => {
-  assert.match(
-    submissionFlowSource,
-    /allConfirmed\(options\.confirmations\)[\s\S]*!task[\s\S]*!options\.busy/
-  );
-  assert.match(
-    submissionFlowSource,
-    /if \(!submissions \|\| !task \|\| execution \|\| options\.busy\) return/
-  );
-  for (const source of [quickSource, professionalSource, editingSource]) {
-    assert.match(
-      source,
-      /disabled=\{!submission\.task \|\| Boolean\(submission\.execution\) \|\| busy\}/
-    );
-  }
+test('workbench does not pass the old provider registry into quick image', () => {
+  const start = workbenchSource.indexOf('<ImageQuickWorkspace');
+  const end = workbenchSource.indexOf('/>', start);
+  const invocation = workbenchSource.slice(start, end);
+  assert.doesNotMatch(invocation, /registry=|onVideoDraftCreated/);
 });

@@ -5,6 +5,7 @@ export const imageWorkspaceIpcChannels = {
   list: 'image-workspace:list',
   derive: 'image-workspace:derive',
   selectInput: 'image-workspace:select-input',
+  clearInput: 'image-workspace:clear-input',
   getInput: 'image-workspace:get-input',
   createInputPreview: 'image-workspace:create-input-preview'
 } as const;
@@ -75,6 +76,21 @@ export interface ImageWorkspaceInputDto {
 export interface ImageWorkspaceContextDto {
   readonly kind: 'project_asset' | 'project_context' | 'saved_conversation';
   readonly referenceId: string;
+  readonly contextRevision?: number;
+  readonly includeInPrompt?: boolean;
+}
+
+export interface ImageWorkspaceFeatureSelectionDto {
+  readonly productFeature:
+    | 'image_understanding'
+    | 'image_to_prompt'
+    | 'text_to_image'
+    | 'reference_to_image'
+    | 'image_edit';
+  readonly candidateId?: string;
+  readonly parameterSchemaId?: string;
+  readonly parameterSchemaRevision?: number;
+  readonly parameterValues: Readonly<Record<string, ImageWorkspaceParameterValueDto>>;
 }
 
 export interface ImageWorkspaceModelDto {
@@ -136,6 +152,7 @@ interface ImageWorkspaceDraftDtoBase {
   readonly prompt: ImageWorkspacePromptDto;
   readonly input?: ImageWorkspaceInputDto;
   readonly contextReferences: readonly ImageWorkspaceContextDto[];
+  readonly featureSelection?: ImageWorkspaceFeatureSelectionDto;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -220,6 +237,9 @@ export interface ImageWorkspaceApi {
   selectInput(
     draftId: string
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;
+  clearInput(
+    draftId: string
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
   getInput(
     draftId: string
   ): Promise<

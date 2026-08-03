@@ -39,6 +39,14 @@ test('provides keyboard focus paths for shell and theme controls', () => {
   assert.match(themeSwitch, /triggerRef\.current\?\.focus\(\)/);
 });
 
+test('keeps the approved 800 by 720 compact desktop minimum usable', () => {
+  assert.match(main, /minWidth: 800/);
+  assert.match(main, /minHeight: 720/);
+  assert.match(styles, /#root \{[\s\S]*?min-width: 800px;[\s\S]*?min-height: 720px;/);
+  assert.match(styles, /@media \(max-width: 900px\)/);
+  assert.match(styles, /grid-template-columns: 136px minmax\(0, 1fr\)/);
+});
+
 test('uses native platform font fallbacks and accessibility media preferences', () => {
   assert.match(tokens, /--uc-font-family-ui: -apple-system, BlinkMacSystemFont/);
   assert.match(tokens, /"Segoe UI Variable"/);
