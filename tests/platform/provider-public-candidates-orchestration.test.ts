@@ -31,7 +31,8 @@ import {
   toTaskId,
   toUsageSchemaId,
   type FeatureCandidateSubjectV1,
-  type ProductFeature
+  type ProductFeature,
+  type ProviderPackageDescriptor
 } from '../../src/domain';
 import {
   FeatureSubmissionError,
@@ -40,6 +41,8 @@ import {
   ProjectMetadataUnitOfWork,
   ProjectSubmissionAcceptanceStore,
   ProviderFeatureCandidateService,
+  ProviderPackageRegistry,
+  ProviderSubmissionDispatchBridge,
   ProviderSubmissionOrchestrator,
   RouteSelectionTokenVault,
   RuntimeAuthorizationLedger,
@@ -50,8 +53,7 @@ import {
   type ProviderSubmissionOrchestrationIdFactory,
   type ResolvedFeatureCandidateV1,
   type ResolvedFeatureSubjectV1,
-  type SubmissionArtifactFactoryPort,
-  type SubmissionDispatchPort
+  type SubmissionArtifactFactoryPort
 } from '../../src/platform';
 
 const roots: string[] = [];
@@ -398,33 +400,42 @@ describe('provider submission orchestration', () => {
     });
     const order: string[] = [];
     let dispatchCount = 0;
-    const dispatch: SubmissionDispatchPort = {
-      async submit(input) {
-        dispatchCount += 1;
-        expect(await fixture.acceptances.list()).toHaveLength(1);
-        order.push('accepted_project_facts');
-        await input.beforeRequestStarted();
-        order.push('request_started');
-        return {
-          kind: 'accepted_async',
-          providerOperationId: 'provider-operation-public',
-          providerOperationRecord: createProviderOperationRecord({
-            id: toProviderOperationRecordId('provider-operation-record-public'),
-            taskId: toTaskId('task-public-orchestration'),
-            executionId: toExecutionId('execution-public-orchestration'),
-            mediaKind: 'image',
-            executionLifecycle: 'asynchronous_polling',
-            outcome: {
-              kind: 'accepted_async',
-              providerOperationId: 'provider-operation-public',
-              state: 'queued'
-            },
-            createdAt: t1,
-            updatedAt: t1
-          })
-        };
-      }
-    };
+    const dispatch = new ProviderSubmissionDispatchBridge(
+      new ProviderPackageRegistry([submissionPackageFixture()]),
+      [{
+        packageId: 'provider.package',
+        packageVersion: '1.0.0',
+        adapterKey: 'provider.adapter',
+        adapterVersion: '1.0.0',
+        protocolId: 'provider.protocol',
+        protocolVersion: '1.0.0',
+        async submit(input) {
+          dispatchCount += 1;
+          expect(await fixture.acceptances.list()).toHaveLength(1);
+          order.push('accepted_project_facts');
+          await input.beforeRequestStarted();
+          order.push('request_started');
+          return {
+            kind: 'accepted_async',
+            providerOperationId: 'provider-operation-public',
+            providerOperationRecord: createProviderOperationRecord({
+              id: toProviderOperationRecordId('provider-operation-record-public'),
+              taskId: toTaskId('task-public-orchestration'),
+              executionId: toExecutionId('execution-public-orchestration'),
+              mediaKind: 'image',
+              executionLifecycle: 'asynchronous_polling',
+              outcome: {
+                kind: 'accepted_async',
+                providerOperationId: 'provider-operation-public',
+                state: 'queued'
+              },
+              createdAt: t1,
+              updatedAt: t1
+            })
+          };
+        }
+      }]
+    );
     const orchestrator = new ProviderSubmissionOrchestrator(
       service,
       fixture.acceptances,
@@ -693,3 +704,64 @@ describe('provider submission orchestration', () => {
     })).toThrow(SubmissionOrchestrationError);
   });
 });
+
+function submissionPackageFixture(): ProviderPackageDescriptor {
+  return {
+    packageId: 'provider.package',
+    packageVersion: '1.0.0',
+    displayName: 'Submission Fixture',
+    credentialSchemas: [{
+      schemaId: 'credential.provider-fixture',
+      version: 1,
+      fields: [{
+        key: 'api_key',
+        label: 'API key',
+        secret: true,
+        required: true,
+        kind: 'token'
+      }]
+    }],
+    endpointPolicies: [{
+      policyId: 'endpoint.provider-fixture',
+      revision: 1,
+      allowedSchemes: ['https'],
+      allowedHosts: ['api.provider-fixture.test'],
+      allowedPorts: [443],
+      allowedPathPrefixes: ['/v1'],
+      redirectPolicy: 'deny',
+      proxyPolicy: 'system',
+      allowLoopback: false,
+      allowPrivateNetwork: false,
+      allowLoopbackHttp: false,
+      dnsRebindingProtection: 'required',
+      fixedBaseUrl: 'https://api.provider-fixture.test/v1'
+    }],
+    adapters: [{
+      adapterId: 'provider.adapter',
+      adapterVersion: '1.0.0',
+      protocolId: 'provider.protocol',
+      protocolVersion: '1.0.0',
+      operations: ['submit', 'query', 'cancel', 'receive_result']
+    }],
+    templates: [{
+      templateId: 'provider-fixture-official',
+      kind: 'official',
+      displayName: 'Provider Fixture Official',
+      baseUrlMode: 'fixed',
+      credentialSchemaId: 'credential.provider-fixture',
+      credentialSchemaVersion: 1,
+      connectionPolicyId: 'connection.provider-fixture',
+      connectionPolicyRevision: 1,
+      discoveryPolicyId: 'discovery.provider-fixture',
+      discoveryPolicyRevision: 1,
+      endpointPolicyId: 'endpoint.provider-fixture',
+      endpointPolicyRevision: 1,
+      adapterBindings: [{
+        adapterId: 'provider.adapter',
+        adapterVersion: '1.0.0'
+      }],
+      freeConnectionValidation: false,
+      modelDiscoveryKind: 'manual_exact'
+    }]
+  };
+}
