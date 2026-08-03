@@ -1096,3 +1096,13 @@ M3 第七支 `feature/newapi-provider-package` 已从 `develop@507c306` 建立�
     docs/active/多服务商功能路由-M3-NewAPI服务商包记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第八支 `feature/vidu-provider-package-migration`；该支只迁移现有 C2 Vidu 包到通用合同，不联网、不恢复流程 8 预算、不晋级 Image V1、不修改 UI、不启动阶段 10。
+
+M3 第八支 `feature/vidu-provider-package-migration` 已从 `develop@99583cf` 建立，实现提交为 `f7f4cc6`。该支将既有 C2 Vidu 迁移为单一官方 Package、三个精确 Adapter/Protocol、10 个冻结 Model Definition/Profile、ParameterSchema V2、空指标 UsageSchema 和原 RouteSnapshot 薄适配层；迁移幂等补齐 Provider/Connection ownership 和连接合同，同时保留连接状态、凭证引用和既有能力证据。
+
+Image V1 固定 `disabled` 并在 HTTP 前拒绝；Gemini 图片与 Q3 视频默认 `restricted`，流程 8 证据不自动取得正式运行授权。提交、查询、取消和结果接收精确校验原连接 revision/config、凭证版本、模型/Profile/Binding/Schema；图片重启必须 `attachResult`，视频重启必须 `attachOperation`，不回退当前连接。Electron 旧提交、查询、取消和结果接收共五条网络入口全部硬关闭；新 RouteSnapshot 适配器未提前接入 UI/IPC。
+
+第八支完整门禁为 Node 179 项与 Vitest 546 项，共 725 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、277 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁、差异检查和 Vidu 范围敏感值扫描全部通过。Windows Electron 隔离烟测新增 4 个进程、4/4 响应、1 个可见窗口，正常关闭后残留 0。真实 Vidu HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M3-Vidu服务商包迁移记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。M3 到此完成；合并后从最新 `develop` 创建 M4 `feature/provider-backend-integration-acceptance`，只用合成 transport 验收后台统一闭环。M4 通过前不得启动任何 UI 分支，不得访问真实服务商、读取真实凭证、产生收费调用或启动阶段 10。
