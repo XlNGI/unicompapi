@@ -91,6 +91,7 @@ export type ViduLiveValidationIpcResult =
 
 export type ProviderManagementErrorCode =
   | 'adapter_unavailable'
+  | 'provider_registry_conflict'
   | 'provider_not_found'
   | 'connection_not_found'
   | 'model_not_found'
@@ -214,6 +215,10 @@ export interface ProviderModelSummaryDto {
   readonly mediaKind: 'image' | 'video' | 'unknown';
   readonly revision: number;
   readonly capabilityEvidenceId?: string;
+  readonly activeProfileId?: string;
+  readonly catalogState: 'present' | 'missing' | 'retired';
+  readonly catalogRevision?: number;
+  readonly lastSeenAt?: string;
   readonly displayName: string;
   readonly enabled: boolean;
 }
@@ -301,6 +306,7 @@ export interface ProviderRoutingSummaryDto {
 }
 
 export interface ProviderRegistryDto {
+  readonly registryRevision?: number;
   readonly providers: readonly ProviderSummaryDto[];
   readonly connections: readonly ProviderConnectionSummaryDto[];
   readonly protocolBindings: readonly ProviderProtocolBindingSummaryDto[];
