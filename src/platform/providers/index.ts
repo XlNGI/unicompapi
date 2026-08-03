@@ -19,3 +19,4 @@ export * from './vidu';
 export * from './deepseek';
 export * from './volcengine';
 export * from './kling';
+export * from './newapi';
