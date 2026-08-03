@@ -1,3 +1,5 @@
+import type { ProductFeature } from './product-feature';
+
 export const catalogStates = ['present', 'missing', 'retired'] as const;
 export type CatalogState = (typeof catalogStates)[number];
 
@@ -10,7 +12,7 @@ export const modelProfileStatuses = [
 export type ModelProfileStatus = (typeof modelProfileStatuses)[number];
 
 export interface ModelFeatureProfileFeature {
-  readonly productFeature: string;
+  readonly productFeature: ProductFeature;
   readonly internalPurpose?: string;
   readonly parameterSchemaId: string;
   readonly resultSchemaId: string;
