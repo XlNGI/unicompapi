@@ -24,6 +24,7 @@ import {
   toProviderId,
   toRoutingPreferenceId,
   modelProfileStatuses,
+  parseProductFeature,
   type DynamicParameterSchema,
   type ModelCapabilityEvidence,
   type ModelFeatureProfile,
@@ -842,7 +843,7 @@ function parseProfileTemplate(value: unknown): ModelFeatureProfileTemplate {
 function parseProfileFeature(value: unknown): ModelFeatureProfileFeature {
   const item = requireRecord(value);
   return {
-    productFeature: requireStableString(item.productFeature),
+    productFeature: parseProductFeature(item.productFeature),
     internalPurpose:
       item.internalPurpose === undefined
         ? undefined

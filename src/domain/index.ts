@@ -6,6 +6,7 @@ export * from './entities/file-reference';
 export * from './entities/image-workspace';
 export * from './entities/project';
 export * from './entities/project-context';
+export * from './entities/product-feature';
 export * from './entities/prompt';
 export * from './entities/provider';
 export * from './entities/provider-package';
