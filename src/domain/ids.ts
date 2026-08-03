@@ -24,6 +24,7 @@ export type VideoClipId = DomainId<'VideoClipId'>;
 export type TextOverlayId = DomainId<'TextOverlayId'>;
 export type ConversationId = DomainId<'ConversationId'>;
 export type MessageId = DomainId<'MessageId'>;
+export type ConversationResponseDraftId = DomainId<'ConversationResponseDraftId'>;
 export type ProjectContextId = DomainId<'ProjectContextId'>;
 export type ProjectContextDraftId = DomainId<'ProjectContextDraftId'>;
 export type ProjectContextFragmentId = DomainId<'ProjectContextFragmentId'>;
@@ -71,6 +72,8 @@ export const toConversationId = (value: string) =>
   toDomainId(value, 'ConversationId');
 export const toMessageId = (value: string) =>
   toDomainId(value, 'MessageId');
+export const toConversationResponseDraftId = (value: string) =>
+  toDomainId(value, 'ConversationResponseDraftId');
 export const toProjectContextId = (value: string) =>
   toDomainId(value, 'ProjectContextId');
 export const toProjectContextDraftId = (value: string) =>

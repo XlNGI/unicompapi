@@ -193,6 +193,24 @@ export function createConversation(input: CreateConversationInput): ActiveConver
   }) as ActiveConversation;
 }
 
+export function createProjectConversation(
+  input: CreateConversationInput & { readonly projectId: ProjectId }
+): ActiveConversation {
+  if (input.projectId === null || input.projectId === undefined) {
+    throw new InvariantViolationError('new project conversations require a project ID');
+  }
+  return createConversation(input);
+}
+
+export function assertConversationBelongsToProject(
+  conversation: Conversation,
+  projectId: ProjectId
+): void {
+  if (conversation.projectId === null || conversation.projectId !== projectId) {
+    throw new InvariantViolationError('conversation does not belong to the active project');
+  }
+}
+
 export function renameConversation(
   conversation: Conversation,
   title: string,
