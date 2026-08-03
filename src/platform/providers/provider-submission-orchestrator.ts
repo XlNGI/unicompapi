@@ -50,6 +50,7 @@ export interface ProviderSubmissionOrchestrationIdFactory {
 }
 
 export interface RuntimeAuthorizationOrchestrationPort {
+  getClaim?(claimId: string): Promise<RuntimeAuthorizationClaim | undefined>;
   claimSubmission(input: RuntimeAuthorizationClaimInput): Promise<RuntimeAuthorizationClaim>;
   markRequestStarted(claimId: string, now?: string): Promise<RuntimeAuthorizationClaim>;
   releaseBeforeRequest(claimId: string, now?: string): Promise<RuntimeAuthorizationClaim>;

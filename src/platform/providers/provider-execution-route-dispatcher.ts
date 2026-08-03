@@ -1,7 +1,8 @@
 import {
   parseProviderExecutionRouteSnapshot,
   type ProviderAdapterOperation,
-  type ProviderExecutionRouteSnapshotV1
+  type ProviderExecutionRouteSnapshotV1,
+  type ProviderInvocationAttemptId
 } from '../../domain';
 
 export interface ProviderExecutionRouteAdapter<
@@ -20,8 +21,14 @@ export interface ProviderExecutionRouteAdapter<
   >[];
   submit?(
     route: ProviderExecutionRouteSnapshotV1,
-    request: TSubmitRequest
+    request: TSubmitRequest,
+    beforeRequestStarted?: () => Promise<void>
   ): Promise<TSubmitResult>;
+  attachOperation?(input: {
+    readonly routeSnapshot: ProviderExecutionRouteSnapshotV1;
+    readonly providerOperationId: string;
+    readonly invocationAttemptId: ProviderInvocationAttemptId;
+  }): Promise<void>;
   query?(
     route: ProviderExecutionRouteSnapshotV1,
     providerOperationId: string
@@ -92,11 +99,26 @@ export class ProviderExecutionRouteDispatcher<
 
   async submit(
     route: ProviderExecutionRouteSnapshotV1,
-    request: TSubmitRequest
+    request: TSubmitRequest,
+    beforeRequestStarted?: () => Promise<void>
   ): Promise<TSubmitResult> {
     const { snapshot, adapter } = this.resolve(route, 'submit');
     if (!adapter.submit) throw invalidOperationContract('submit');
-    return adapter.submit(snapshot, request);
+    return adapter.submit(snapshot, request, beforeRequestStarted);
+  }
+
+  async attachOperation(
+    route: ProviderExecutionRouteSnapshotV1,
+    providerOperationId: string,
+    invocationAttemptId: ProviderInvocationAttemptId
+  ): Promise<void> {
+    const { snapshot, adapter } = this.resolve(route);
+    if (!adapter.attachOperation) return;
+    await adapter.attachOperation({
+      routeSnapshot: snapshot,
+      providerOperationId: opaqueRemoteId(providerOperationId),
+      invocationAttemptId
+    });
   }
 
   async query(
@@ -128,7 +150,7 @@ export class ProviderExecutionRouteDispatcher<
 
   private resolve(
     route: ProviderExecutionRouteSnapshotV1,
-    operation: Extract<ProviderAdapterOperation, 'submit' | 'query' | 'cancel' | 'receive_result'>
+    operation?: Extract<ProviderAdapterOperation, 'submit' | 'query' | 'cancel' | 'receive_result'>
   ) {
     const snapshot = parseProviderExecutionRouteSnapshot(route);
     const exact = this.adapters.get(
@@ -145,7 +167,7 @@ export class ProviderExecutionRouteDispatcher<
           : 'The adapter captured by the route snapshot is unavailable'
       );
     }
-    if (!exact.operations.includes(operation)) {
+    if (operation && !exact.operations.includes(operation)) {
       throw new ProviderExecutionRouteDispatchError(
         'operation_unsupported',
         `The route adapter does not support ${operation}`

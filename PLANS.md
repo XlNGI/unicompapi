@@ -1106,3 +1106,13 @@ Image V1 固定 `disabled` 并在 HTTP 前拒绝；Gemini 图片与 Q3 视频默
     docs/active/多服务商功能路由-M3-Vidu服务商包迁移记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。M3 到此完成；合并后从最新 `develop` 创建 M4 `feature/provider-backend-integration-acceptance`，只用合成 transport 验收后台统一闭环。M4 通过前不得启动任何 UI 分支，不得访问真实服务商、读取真实凭证、产生收费调用或启动阶段 10。
+
+M4 `feature/provider-backend-integration-acceptance` 已从 `develop@cd6e24f` 建立，实现提交为 `ebac373`。该支新增 Registry 驱动候选源、精确 Feature Contract Registry、统一提交派发桥、InvocationSupervisor 和共享受控传输安全层；候选只组合精确 Model Profile、Package/Binding、版本化 Schema 与 RuntimeAccessPolicy，快速生图/视频保持 required-only 纯文本，专业图生图/图生视频保持单张受控图片。
+
+阶段 9 的 10 个提交适配器现按 `packageId + packageVersion + adapterKey@version + protocol` 精确注册，版本或归属过期时在调用前关闭且不 fallback。统一 Supervisor 只按原 RouteSnapshot 执行 query/cancel/receiveResult 与重启 attach，同一 SubmissionIntent 串行化并去重事件；撤销授权后适配器调用为 0，请求开始后崩溃或账本/项目事实落盘间隙进入安全恢复，任何未知结果不自动重试。共享传输层冻结完整 DNS 地址集并执行回环/私网政策、origin、超时、响应上限、头校验和稳定错误脱敏；本支只使用合成 DNS 与执行器。
+
+完整门禁为 Node 179 项与 Vitest 561 项，共 740 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、280 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。本支未修改 React、preload 或 Electron 接线，不触发新增可见窗口烟测；真实服务商 HTTP 0 次、真实 DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M4-后台集成验收记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。M4 合并后从最新 `develop` 创建 M5 第一支 `feature/ui-provider-management-wiring`，只接通官方/自定义入口、凭证、验证、模型发现和启停，并只消费已合并安全 DTO 与管理端口；不得访问真实服务商、读取真实凭证、产生收费调用或启动阶段 10。

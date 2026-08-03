@@ -111,6 +111,7 @@ export const submissionIntentStatuses = [
   'request_started',
   'provider_accepted',
   'completed',
+  'failed',
   'failed_before_submission',
   'cancelled',
   'unknown_outcome'
@@ -348,8 +349,9 @@ export function transitionSubmissionIntent(
     authorization_not_claimed: [],
     authorization_claimed: ['request_started', 'failed_before_submission', 'cancelled'],
     request_started: ['provider_accepted', 'completed', 'failed_before_submission', 'unknown_outcome'],
-    provider_accepted: ['completed', 'cancelled', 'unknown_outcome'],
+    provider_accepted: ['completed', 'failed', 'cancelled', 'unknown_outcome'],
     completed: [],
+    failed: [],
     failed_before_submission: [],
     cancelled: [],
     unknown_outcome: []
@@ -408,7 +410,7 @@ export function parseSubmissionIntent(value: unknown): SubmissionIntentV1 {
     throw new InvariantViolationError(`${status} submission intent requires an operation ID`);
   }
   if (
-    ['authorization_not_claimed', 'failed_before_submission', 'unknown_outcome'].includes(status) &&
+    ['authorization_not_claimed', 'failed', 'failed_before_submission', 'unknown_outcome'].includes(status) &&
     !safeCodeValue
   ) {
     throw new InvariantViolationError(`${status} submission intent requires a safe code`);

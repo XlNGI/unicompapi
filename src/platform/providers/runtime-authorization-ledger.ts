@@ -229,6 +229,12 @@ export class RuntimeAuthorizationLedger {
     return this.store.load();
   }
 
+  async getClaim(claimId: string): Promise<RuntimeAuthorizationClaim | undefined> {
+    const id = opaqueId(claimId, 'claimId');
+    const claim = (await this.store.load()).claims.find((item) => item.claimId === id);
+    return claim ? structuredClone(claim) : undefined;
+  }
+
   async upsertPolicy(
     policy: RuntimeAccessPolicy,
     expectedRevision?: number
