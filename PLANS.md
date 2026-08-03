@@ -1170,3 +1170,15 @@ Windows Electron 首轮已满足 4/4 响应、1 个窗口和残留 0，但关闭
     docs/active/多服务商功能路由-M5-UI验收收口记录.md
 
 M5 自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M6 单独收口分支 `feature/provider-routing-optimization-closeout`，只执行完整回归、证据汇总、计划状态和阶段 10 前停止边界；不新增业务能力、真实服务商联网、真实凭证读取/验证、收费调用、macOS 实机与媒体工具链或阶段 10。
+
+M6 `feature/provider-routing-optimization-closeout` 已从 `develop@24dcb9b` 建立，证据提交为 `254db45`。该支没有修改业务代码，只完成 M1—M5 合并树的最终统一回归、分支保留审计、安全与费用边界、Windows Electron 捕获式烟测和机器可读证据。
+
+最终门禁为 Node 195 项与 Vitest 581 项，共 776 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、291 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、阶段 9 关闭门禁、安全存储、运行时集成和差异检查全部通过。M5 深浅主题与五档窗口共 130 个 UI 组合继续有效。最终 Electron 隔离烟测 4/4 响应、1 个可见窗口、显式 stdout/stderr 捕获为空、正常关闭残留 0、仓库制品 0。
+
+计划内 M1—M5 共 27 个功能分支本地与远程均为 27/27。M5 首轮 GPU 关闭日志和 M6 早期继承 stderr/TLS 临时文件均已记录并解决；最终证据不包含未解释失败或跳过。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。证据与记录见：
+
+    docs/active/evidence/provider-routing/m6-closeout.json
+    docs/active/evidence/provider-routing/m6-closeout-summary.md
+    docs/active/多服务商功能路由-M6-优化收口记录.md
+
+M0—M6 在批准边界内全部完成，M6 自验收为 `passed`，允许非快进合并 `develop`。合并后停止在阶段 10 准入前；阶段 10、真实 API 专项、macOS 实机与媒体工具链扩展均未启动，后续必须由项目负责人单独批准。
