@@ -31,7 +31,9 @@ import {
   ViduLiveValidationController,
   ViduLiveValidationCoordinator,
   ViduLiveValidationDataError,
+  ViduRuntimeAuthorizationClosedError,
   createFrozenViduRegistryRecords,
+  denyViduRuntimeAuthorization,
   toProjectRelativePath
 } from '../../src/platform';
 
@@ -291,6 +293,20 @@ describe('Vidu live validation application service', () => {
       state: 'verified_supported',
       source: 'system_observed'
     });
+
+    const blockedExecution = createExecution({
+      id: toExecutionId('execution-live-video-after-pass'),
+      taskId: toTaskId('task-live-video'),
+      createdAt: t0
+    });
+    await expect(
+      fixture.service.beforeSubmission(
+        'video',
+        videoTaskFor(promotedVideo, blockedExecution.id, sourceAsset.id),
+        blockedExecution,
+        () => session(fixture.root)
+      )
+    ).rejects.toMatchObject({ code: 'validation_not_active' });
   });
 
   it('does not initialize or claim a paid attempt when credits validation fails', async () => {
@@ -348,7 +364,7 @@ describe('Vidu live validation application service', () => {
     });
   });
 
-  it('rejects cross-model scope before invocation and returns a sensitive-free DTO', async () => {
+  it('closes the validation IPC before credits validation and keeps status DTOs sensitive-free', async () => {
     const fixture = await createApplicationFixture();
     const controller = new ViduLiveValidationController(fixture.service);
     expect(
@@ -356,11 +372,17 @@ describe('Vidu live validation application service', () => {
         ...approvedInput(),
         confirmVideoBillableAttempt: false
       })
-    ).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
-    expect(await controller.start(approvedInput())).toMatchObject({
-      ok: true,
-      value: { status: 'active' }
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'runtime_authorization_closed' }
     });
+    expect(await controller.start(approvedInput())).toMatchObject({
+      ok: false,
+      error: { code: 'runtime_authorization_closed' }
+    });
+    expect(fixture.validationCalls).toBe(0);
+
+    await fixture.service.start(approvedInput());
     const registry = await fixture.registry.load();
     const imageModel = model(registry, 'q3-lite');
     const wrongModel = model(registry, 'viduq3-turbo');
@@ -396,6 +418,19 @@ describe('Vidu live validation application service', () => {
     expect(JSON.stringify(status)).not.toMatch(
       /token|credential|providerOperation|task_id|download|https?:|absolute|sha256|hash/i
     );
+  });
+
+  it('throws the dedicated closure error before a transport can run', async () => {
+    let httpCalls = 0;
+    const submit = async () => {
+      denyViduRuntimeAuthorization();
+      httpCalls += 1;
+    };
+
+    await expect(submit()).rejects.toBeInstanceOf(
+      ViduRuntimeAuthorizationClosedError
+    );
+    expect(httpCalls).toBe(0);
   });
 });
 

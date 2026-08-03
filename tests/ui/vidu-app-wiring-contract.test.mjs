@@ -49,6 +49,21 @@ test('Electron owns one shared Vidu registry, vault and provider package', () =>
   assert.match(compositionSource, /createFrozenViduRegistryRecords\(\)\.protocolBindings\[0\]/);
 });
 
+test('Vidu image and video submissions are hard-blocked before live validation and routing', () => {
+  assert.equal(
+    (compositionSource.match(/denyViduRuntimeAuthorization\(\);/g) ?? []).length,
+    2
+  );
+  assert.equal(
+    (
+      compositionSource.match(
+        /denyViduRuntimeAuthorization\(\);[\s\S]*?await this\.liveValidation\.beforeSubmission\([\s\S]*?\);[\s\S]*?const routed = await (?:image|video)Router\.submit\(request\);/g
+      ) ?? []
+    ).length,
+    2
+  );
+});
+
 test('preload exposes named lifecycle methods without generic Electron access', () => {
   for (const operation of [
     'createFromImageWork',

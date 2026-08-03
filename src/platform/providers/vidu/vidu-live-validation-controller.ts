@@ -8,6 +8,10 @@ import {
   type ViduLiveValidationApplicationService
 } from './vidu-live-validation-service';
 import type { ViduLiveValidationRecord } from './vidu-live-validation';
+import {
+  denyViduRuntimeAuthorization,
+  ViduRuntimeAuthorizationClosedError
+} from './vidu-runtime-authorization-closure';
 
 export class ViduLiveValidationController {
   constructor(
@@ -27,6 +31,9 @@ export class ViduLiveValidationController {
 
   async start(input: unknown): Promise<ViduLiveValidationIpcResult> {
     try {
+      // The historical flow-8 validation channel is permanently closed here.
+      // This guard runs before the service can read credentials or validate credits.
+      denyViduRuntimeAuthorization();
       return {
         ok: true,
         value: toStatusDto(await this.service.start(input))
@@ -77,6 +84,9 @@ function toStatusDto(
 }
 
 function mapError(error: unknown): ViduLiveValidationIpcErrorCode {
+  if (error instanceof ViduRuntimeAuthorizationClosedError) {
+    return 'runtime_authorization_closed';
+  }
   if (!(error instanceof ViduLiveValidationApplicationError)) {
     return 'validation_operation_failed';
   }
@@ -95,6 +105,8 @@ function failure(code: ViduLiveValidationIpcErrorCode): ViduLiveValidationIpcRes
     invalid_request: 'Every live validation approval must be confirmed',
     already_started: 'The approved Vidu live validation has already started',
     connection_not_ready: 'The Vidu credential or credits validation is unavailable',
+    runtime_authorization_closed:
+      'Vidu submissions and live validation are disabled until formal runtime authorization is approved',
     validation_operation_failed: 'The Vidu live validation operation failed safely'
   };
   return { ok: false, error: { code, message: messages[code] } };
