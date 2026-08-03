@@ -1152,3 +1152,11 @@ Electron 只注册现有 Vidu 包中合同完整的 `image_to_video` Schema；Se
     docs/active/多服务商功能路由-M5-视频功能UI接线记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第五支 `feature/ui-task-call-records-wiring`；只把任务中心接到已合并的安全调用读模型、状态、时间线、用量完整性和本地结果事实，不公开 RouteSnapshot、Endpoint、凭证、Prompt、远端 operation、签名 URL、绝对路径、Hash 或原始响应，不访问真实服务商、真实凭证、收费调用或阶段 10。
+
+M5 第五支 `feature/ui-task-call-records-wiring` 已从 `develop@f1ec7e8` 建立，实现提交为 `b7db775`。该支在任务中心保留原本地任务视图并新增调用记录分段，接通项目、功能、服务商、连接、模型、状态和日期筛选，以及安全调用列表与详情、脱敏时间线、总耗时、重试归属、用量完整性和本地结果事实；renderer 不接收 RouteSnapshot、Endpoint、凭证、Prompt、远端 operation、签名 URL、绝对路径、Hash 或原始响应。
+
+完整门禁为 Node 192 项与 Vitest 581 项，共 773 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、291 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、阶段 9 关闭门禁、安全存储、运行时集成和差异检查全部通过。浏览器 `1440x900`、`800x720` 无横向溢出、控件重叠或文字裁切，零尺寸可用控件为 0，控制台 0 警告、0 错误；Windows Electron 隔离烟测 4/4 响应、1 个可见窗口、正常关闭残留 0、错误日志为空。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。工程记录见：
+
+    docs/active/多服务商功能路由-M5-任务调用记录UI接线记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第六支 `feature/ui-provider-acceptance-closeout`；只做多服务商 UI 的响应式、逐按钮、安全边界、Electron 可见窗口和完整回归收口，不新增后台能力、真实服务商联网、真实凭证读取/验证、收费调用、macOS 实机与媒体工具链或阶段 10。
