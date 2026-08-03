@@ -7,5 +7,6 @@ export * from './provider-credential-controller';
 export * from './provider-capability-services';
 export * from './provider-operation-router';
 export * from './provider-execution-lifecycle';
+export * from './runtime-authorization-ledger';
 export * from './vidu-protocol-catalog';
 export * from './vidu';
