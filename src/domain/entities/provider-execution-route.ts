@@ -36,6 +36,7 @@ export interface ProviderExecutionRouteSnapshotV1 {
   readonly endpointPolicyRevision: number;
   readonly credentialVersionId: string;
   readonly modelId: ModelId;
+  readonly providerModelKey?: string;
   readonly modelDisplayName?: string;
   readonly modelRevision: number;
   readonly profileId: string;
@@ -110,6 +111,7 @@ export function parseProviderExecutionRouteSnapshot(
       'internalPurpose',
       'providerDisplayName',
       'connectionDisplayName',
+      'providerModelKey',
       'modelDisplayName'
     ],
     'provider execution route snapshot'
@@ -153,6 +155,9 @@ export function parseProviderExecutionRouteSnapshot(
     ),
     credentialVersionId: opaqueId(item.credentialVersionId, 'route.credentialVersionId'),
     modelId: toModelId(nonBlank(item.modelId, 'route.modelId')),
+    ...(item.providerModelKey === undefined
+      ? {}
+      : { providerModelKey: providerModelKey(item.providerModelKey) }),
     ...(item.modelDisplayName === undefined
       ? {}
       : { modelDisplayName: displayName(item.modelDisplayName, 'route.modelDisplayName') }),
@@ -253,6 +258,14 @@ function displayName(value: unknown, label: string): string {
     throw new InvariantViolationError(`${label} is invalid`);
   }
   return name;
+}
+
+function providerModelKey(value: unknown): string {
+  const key = nonBlank(value, 'route.providerModelKey');
+  if (key.length > 256 || /[\u0000-\u001f\u007f]/.test(key)) {
+    throw new InvariantViolationError('route.providerModelKey is invalid');
+  }
+  return key;
 }
 
 function opaqueId(value: unknown, label: string): string {
