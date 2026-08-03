@@ -1144,3 +1144,11 @@ M5 第三支 `feature/ui-image-feature-wiring` 已从 `develop@bc91fda` 建立�
     docs/active/多服务商功能路由-M5-图片功能UI接线记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第四支 `feature/ui-video-feature-wiring`；快速视频固定为纯文生视频，不接收参考图片、参考视频或其他参考素材，只消费已合并安全 DTO、异步恢复与提交端口，不访问真实服务商、真实凭证、收费调用或阶段 10。
+
+M5 第四支 `feature/ui-video-feature-wiring` 已从 `develop@b23675b` 建立，实现提交为 `574eafc`。该支把快速视频、文生视频和图生视频接到安全视频候选、动态 `ParameterSchema`、固定草稿 revision、一次性路由选择令牌、外发确认和受控提交端口；快速视频固定为纯文生视频且无素材/上下文入口，文生视频只接受固定 revision 的 ProjectContext，图生视频只接受恰好一张受控图片。旧草稿必须显式迁移或清理，不静默切换功能或丢弃历史输入。
+
+Electron 只注册现有 Vidu 包中合同完整的 `image_to_video` Schema；Seedance、Kling、NewAPI 和 `text_to_video` 缺少精确动态 Schema 时保持无候选，不伪造能力。完整门禁为 Node 188 项与 Vitest 581 项，共 769 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、290 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。浏览器 `1440x900`、`800x720` 无横向溢出、控件重叠或文字裁切，零尺寸可用控件为 0，控制台 0 警告、0 错误；Windows Electron 隔离烟测 4/4 响应、1 个可见窗口、正常关闭残留 0、错误日志为空。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。工程记录见：
+
+    docs/active/多服务商功能路由-M5-视频功能UI接线记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第五支 `feature/ui-task-call-records-wiring`；只把任务中心接到已合并的安全调用读模型、状态、时间线、用量完整性和本地结果事实，不公开 RouteSnapshot、Endpoint、凭证、Prompt、远端 operation、签名 URL、绝对路径、Hash 或原始响应，不访问真实服务商、真实凭证、收费调用或阶段 10。
