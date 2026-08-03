@@ -195,6 +195,9 @@ export class ProviderSubmissionOrchestrator {
       id: routeSnapshotId,
       projectId: prepared.subject.projectId,
       ...prepared.candidate.routeTemplate,
+      providerDisplayName: prepared.candidate.providerName,
+      connectionDisplayName: prepared.candidate.connectionName,
+      modelDisplayName: prepared.candidate.modelName,
       runtimeAuthorizationClaimId: claimId,
       createdAt
     });

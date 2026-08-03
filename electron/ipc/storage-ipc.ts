@@ -4,6 +4,7 @@ import {
   StorageIpcController,
   JsonProjectCatalogStore,
   GlobalReadModelController,
+  ProviderInvocationReadModelController,
   ControlledLocalMediaController,
   ImageLocalMediaController,
   ImageSubmissionController,
@@ -23,7 +24,8 @@ import {
   createFfmpegMediaEngineAdapterFromEnvironment,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
-  createDevelopmentVideoEditorPreviewAdapter
+  createDevelopmentVideoEditorPreviewAdapter,
+  type ProviderUsageSchemaResolverPort
 } from '../../src/platform';
 import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
@@ -45,6 +47,7 @@ export function registerStorageIpcHandlers(options: {
   readonly sessionRegistry?: StorageProjectSessionRegistry;
   readonly additionalSessionChangeGuards?: readonly (() => Promise<void>)[];
   readonly vidu?: ElectronViduComposition;
+  readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -167,6 +170,10 @@ export function registerStorageIpcHandlers(options: {
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
   const readModels = new GlobalReadModelController(catalog);
+  const callReadModels = new ProviderInvocationReadModelController(
+    catalog,
+    options.providerUsageSchemas
+  );
   const localMedia = new ControlledLocalMediaController({
     catalog,
     handles: mediaHandles,
@@ -217,6 +224,12 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.listTasks, () => readModels.listTasks());
   ipcMain.handle(storageIpcChannels.getTaskDetails, (_event, request: unknown) =>
     readModels.getTaskDetails(request)
+  );
+  ipcMain.handle(storageIpcChannels.listCallRecords, (_event, request: unknown) =>
+    callReadModels.listCallRecords(request)
+  );
+  ipcMain.handle(storageIpcChannels.getCallDetails, (_event, request: unknown) =>
+    callReadModels.getCallDetails(request)
   );
   ipcMain.handle(storageIpcChannels.listWorks, () => readModels.listWorks());
   ipcMain.handle(storageIpcChannels.getWorkDetails, (_event, request: unknown) =>

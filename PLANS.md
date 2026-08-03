@@ -1031,3 +1031,13 @@ M3 第一支 `feature/provider-management-framework` 已从 `develop@d95e6f1` �
     docs/active/多服务商功能路由-M3-供应商管理框架记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第二支 `feature/provider-invocation-read-model`；该支只实现媒体与文本调用安全读模型和受控查询端口，不修改任务中心 React 页面，不启动真实 API、凭证验证、收费测试或阶段 10。
+
+M3 第二支 `feature/provider-invocation-read-model` 已从 `develop@0eec911` 建立，实现提交为 `cf51cfe`。该支新增跨项目媒体/文本调用安全读模型，聚合不可变 RouteSnapshot、ProviderInvocationAttempt/Event、UsageObservation、LocalResultObservation 与 Work 登记事实；列表支持项目、ProductFeature、Provider、Connection、Model、状态、时间筛选与稳定分页，详情返回脱敏时间线、终态耗时、重试关系、白名单用量、本地结果属性和 Work 登记状态。
+
+用量只按精确 `UsageSchema ID + revision` 解释，存在观察但缺失精确 Schema 时失败关闭；提交编排器把 Provider、Connection、Model 的提交时显示名写入不可变 RouteSnapshot，旧快照缺失显示名时保持 `unavailable`。新增命名 Electron IPC/preload 读取端口，公开 DTO 不包含 RouteSnapshot ID、Package/Adapter、Endpoint、凭证、运行授权、Prompt、路径、Hash、远端 operation、原始响应、签名 URL 或原始日志；本支未修改任务中心 React 页面。
+
+第二支完整门禁为 Node 179 项与 Vitest 475 项，共 654 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、255 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。Windows 生产 Electron 隔离烟测新增 4 个进程、4/4 响应、1 个可见窗口，正常关闭后本轮残留 0，原有 6 个 Electron 进程未触碰。真实 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0；macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M3-调用读模型记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第三支 `feature/deepseek-chat-adapter`；该支必须依据官方合同证据、精确协议映射和合成 transport 完成文本提交、流式响应、失败、中断、恢复与 UsageSchema 测试，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。

@@ -53,6 +53,10 @@ const storage: StorageApi = {
   listTasks: () => ipcRenderer.invoke(storageIpcChannels.listTasks),
   getTaskDetails: (taskId) =>
     ipcRenderer.invoke(storageIpcChannels.getTaskDetails, { taskId }),
+  listCallRecords: (filter) =>
+    ipcRenderer.invoke(storageIpcChannels.listCallRecords, filter ?? {}),
+  getCallDetails: (invocationAttemptId) =>
+    ipcRenderer.invoke(storageIpcChannels.getCallDetails, { invocationAttemptId }),
   listWorks: () => ipcRenderer.invoke(storageIpcChannels.listWorks),
   getWorkDetails: (workId) =>
     ipcRenderer.invoke(storageIpcChannels.getWorkDetails, { workId }),

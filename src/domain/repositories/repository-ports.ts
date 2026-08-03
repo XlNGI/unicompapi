@@ -118,7 +118,9 @@ export interface ProviderInvocationRepository {
   readonly projectId: ProjectId;
   get(id: ProviderInvocationAttemptId): Promise<ProviderInvocationAttemptV1 | undefined>;
   list(): Promise<readonly ProviderInvocationAttemptV1[]>;
-  listEvents(attemptId: ProviderInvocationAttemptId): Promise<readonly ProviderInvocationEventV1[]>;
+  listEvents(
+    attemptId?: ProviderInvocationAttemptId
+  ): Promise<readonly ProviderInvocationEventV1[]>;
   create(
     attempt: ProviderInvocationAttemptV1,
     initialEvent: ProviderInvocationEventV1
