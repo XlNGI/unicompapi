@@ -42,6 +42,15 @@ export const projectStoragePaths = {
     conversations: toProjectRelativePath('entities/conversations.json'),
     conversationResponseDrafts: toProjectRelativePath(
       'entities/conversation-response-drafts.json'
+    ),
+    providerInvocations: toProjectRelativePath(
+      'entities/provider-invocations.json'
+    ),
+    providerUsageObservations: toProjectRelativePath(
+      'entities/provider-usage-observations.json'
+    ),
+    localResultObservations: toProjectRelativePath(
+      'entities/local-result-observations.json'
     )
   },
   journals: {

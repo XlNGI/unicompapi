@@ -21,6 +21,17 @@ import type {
 } from '../entities/conversation';
 import type { ConversationResponseDraftV1 } from '../entities/conversation-response';
 import type {
+  ProviderInvocationAttemptV1,
+  ProviderInvocationEventV1
+} from '../entities/provider-invocation';
+import type {
+  LocalResultObservationV1,
+  ProviderUsageObservationV1,
+  ProviderUsageSummaryV1,
+  UsageAvailabilityOverride,
+  UsageSchemaV1
+} from '../entities/provider-usage';
+import type {
   ModelCapabilityEvidence,
   Provider,
   ProviderConnection,
@@ -39,6 +50,10 @@ import type {
   ProjectId,
   ProjectContextDraftId,
   ProjectContextId,
+  ProviderInvocationAttemptId,
+  ProviderInvocationEventId,
+  ProviderUsageObservationId,
+  LocalResultObservationId,
   ProviderId,
   ProviderOperationRecordId,
   RoutingPreferenceId,
@@ -48,6 +63,7 @@ import type {
   WorkId
 } from '../ids';
 import type { ConversationId } from '../ids';
+import type { IsoTimestamp } from '../timestamps';
 
 export interface ConversationListOptions {
   readonly statuses?: readonly ConversationStatus[];
@@ -71,6 +87,38 @@ export interface ConversationResponseDraftRepository {
   list(conversationId?: ConversationId): Promise<readonly ConversationResponseDraftV1[]>;
   create(draft: ConversationResponseDraftV1): Promise<void>;
   save(draft: ConversationResponseDraftV1, expectedRevision: number): Promise<void>;
+}
+
+export interface ProviderInvocationRepository {
+  readonly projectId: ProjectId;
+  get(id: ProviderInvocationAttemptId): Promise<ProviderInvocationAttemptV1 | undefined>;
+  list(): Promise<readonly ProviderInvocationAttemptV1[]>;
+  listEvents(attemptId: ProviderInvocationAttemptId): Promise<readonly ProviderInvocationEventV1[]>;
+  create(
+    attempt: ProviderInvocationAttemptV1,
+    initialEvent: ProviderInvocationEventV1
+  ): Promise<void>;
+  appendEvent(event: ProviderInvocationEventV1): Promise<void>;
+  getEvent(id: ProviderInvocationEventId): Promise<ProviderInvocationEventV1 | undefined>;
+}
+
+export interface ProviderUsageObservationRepository {
+  get(id: ProviderUsageObservationId): Promise<ProviderUsageObservationV1 | undefined>;
+  list(attemptId?: ProviderInvocationAttemptId): Promise<readonly ProviderUsageObservationV1[]>;
+  append(observation: ProviderUsageObservationV1, schema: UsageSchemaV1): Promise<void>;
+  summarize(input: {
+    readonly attemptId: ProviderInvocationAttemptId;
+    readonly schema: UsageSchemaV1;
+    readonly attemptState: ProviderInvocationAttemptV1['state'];
+    readonly calculatedAt: IsoTimestamp;
+    readonly availabilityOverride?: UsageAvailabilityOverride;
+  }): Promise<ProviderUsageSummaryV1>;
+}
+
+export interface LocalResultObservationRepository {
+  get(id: LocalResultObservationId): Promise<LocalResultObservationV1 | undefined>;
+  list(attemptId?: ProviderInvocationAttemptId): Promise<readonly LocalResultObservationV1[]>;
+  append(observation: LocalResultObservationV1): Promise<void>;
 }
 
 export interface ProjectContextRepository {

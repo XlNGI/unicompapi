@@ -25,9 +25,16 @@ export type TextOverlayId = DomainId<'TextOverlayId'>;
 export type ConversationId = DomainId<'ConversationId'>;
 export type MessageId = DomainId<'MessageId'>;
 export type ConversationResponseDraftId = DomainId<'ConversationResponseDraftId'>;
+export type ConversationResponseExecutionId = DomainId<'ConversationResponseExecutionId'>;
 export type ProjectContextId = DomainId<'ProjectContextId'>;
 export type ProjectContextDraftId = DomainId<'ProjectContextDraftId'>;
 export type ProjectContextFragmentId = DomainId<'ProjectContextFragmentId'>;
+export type ProviderInvocationAttemptId = DomainId<'ProviderInvocationAttemptId'>;
+export type ProviderInvocationEventId = DomainId<'ProviderInvocationEventId'>;
+export type ProviderUsageObservationId = DomainId<'ProviderUsageObservationId'>;
+export type LocalResultObservationId = DomainId<'LocalResultObservationId'>;
+export type UsageSchemaId = DomainId<'UsageSchemaId'>;
+export type ProviderExecutionRouteSnapshotId = DomainId<'ProviderExecutionRouteSnapshotId'>;
 
 function toDomainId<Name extends string>(value: string, label: Name): DomainId<Name> {
   const normalized = value.trim();
@@ -74,9 +81,23 @@ export const toMessageId = (value: string) =>
   toDomainId(value, 'MessageId');
 export const toConversationResponseDraftId = (value: string) =>
   toDomainId(value, 'ConversationResponseDraftId');
+export const toConversationResponseExecutionId = (value: string) =>
+  toDomainId(value, 'ConversationResponseExecutionId');
 export const toProjectContextId = (value: string) =>
   toDomainId(value, 'ProjectContextId');
 export const toProjectContextDraftId = (value: string) =>
   toDomainId(value, 'ProjectContextDraftId');
 export const toProjectContextFragmentId = (value: string) =>
   toDomainId(value, 'ProjectContextFragmentId');
+export const toProviderInvocationAttemptId = (value: string) =>
+  toDomainId(value, 'ProviderInvocationAttemptId');
+export const toProviderInvocationEventId = (value: string) =>
+  toDomainId(value, 'ProviderInvocationEventId');
+export const toProviderUsageObservationId = (value: string) =>
+  toDomainId(value, 'ProviderUsageObservationId');
+export const toLocalResultObservationId = (value: string) =>
+  toDomainId(value, 'LocalResultObservationId');
+export const toUsageSchemaId = (value: string) =>
+  toDomainId(value, 'UsageSchemaId');
+export const toProviderExecutionRouteSnapshotId = (value: string) =>
+  toDomainId(value, 'ProviderExecutionRouteSnapshotId');
