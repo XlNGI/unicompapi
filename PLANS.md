@@ -1085,3 +1085,14 @@ M3 第六支 `feature/kling-video-adapter` 已从 `develop@375d44d` 建立，实
     docs/active/多服务商功能路由-M3-Kling视频适配器记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第七支 `feature/newapi-provider-package`；该支必须依据 NewAPI 官方兼容协议证据、精确 Package/Adapter/Profile 映射和合成 transport 完成，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
+
+M3 第七支 `feature/newapi-provider-package` 已从 `develop@507c306` 建立，实现提交为 `3bd21c1`。该支新增 NewAPI compatible Package、必填自定义 `/v1` Base URL、结构化 API Key、版本化 EndpointPolicy、Chat/Image/Video 三个适配器、动态 Model Definition/Profile/ParameterSchema 工厂与共享安全 Runtime；Package 不预置模型，`GET /models` 只同步精确 ID 和安全显示名，未知模型保持无 Profile，不按名称猜能力。
+
+文本适配器只使用受控流式 Chat Completions，拒绝 tools、user、audio、多模态和未知 JSON，精确记录 token Usage；图片适配器只开放无素材 `text_to_image`，单个 Base64/URL 结果必须经受控下载和文件头复检，官方图片编辑响应合同不足因此 `image_edit` 保持 blocked；视频适配器使用受控 multipart，文生视频无素材，图生视频只允许一张项目内 JPG/PNG，查询精确映射 `queued/in_progress/completed/failed` 并从同一连接 `/content` 下载。官方没有视频取消和 Usage 合同，因此取消不发 HTTP、终态 Usage 记为 `not_reported`。
+
+第七支完整门禁为 Node 179 项与 Vitest 542 项，共 721 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、274 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁、差异检查和 NewAPI 范围敏感值扫描全部通过。该支未修改 Electron、preload 或 UI，不触发新增可见 Electron 烟测；真实服务商数据面 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。官方证据与工程记录见：
+
+    docs/active/多服务商功能路由-M3-NewAPI官方合同证据.md
+    docs/active/多服务商功能路由-M3-NewAPI服务商包记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第八支 `feature/vidu-provider-package-migration`；该支只迁移现有 C2 Vidu 包到通用合同，不联网、不恢复流程 8 预算、不晋级 Image V1、不修改 UI、不启动阶段 10。
