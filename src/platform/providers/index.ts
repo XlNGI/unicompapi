@@ -8,6 +8,8 @@ export * from './provider-capability-services';
 export * from './provider-operation-router';
 export * from './provider-execution-route-dispatcher';
 export * from './conversation-response-streaming';
+export * from './provider-feature-candidates';
+export * from './provider-submission-orchestrator';
 export * from './provider-execution-lifecycle';
 export * from './runtime-authorization-ledger';
 export * from './vidu-protocol-catalog';

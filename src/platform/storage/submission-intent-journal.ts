@@ -213,7 +213,7 @@ function validateTransition(
   const transitions: Record<SubmissionIntentStage, readonly SubmissionIntentStage[]> = {
     intent_recorded: ['authorization_claimed', 'failed_before_request', 'cancelled'],
     authorization_claimed: ['request_started', 'failed_before_request', 'cancelled'],
-    request_started: ['provider_accepted', 'unknown_outcome'],
+    request_started: ['provider_accepted', 'failed_before_request', 'unknown_outcome'],
     provider_accepted: ['completed', 'cancelled', 'unknown_outcome'],
     completed: [],
     failed_before_request: [],
