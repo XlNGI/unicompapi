@@ -10,6 +10,7 @@ import type {
   StorageTaskSummaryDto
 } from '../../shared/storage-ipc';
 import '../../styles/pages.css';
+import { CallRecordsView } from './CallRecordsView';
 
 interface TasksPageProps {
   onNavigate?: (itemId: 'projects' | 'library') => void;
@@ -58,6 +59,7 @@ function taskState(state?: string) {
 }
 
 export function TasksPage({ onNavigate }: TasksPageProps) {
+  const [view, setView] = useState<'tasks' | 'calls'>('tasks');
   const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>([]);
   const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
@@ -150,13 +152,45 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
             <StatusPill tone="info">全局视图</StatusPill>
           </div>
           <p className="uc-page-skeleton__description">
-            查看所有本地项目中的真实任务状态、来源和提交内容。
+            {view === 'tasks'
+              ? '查看所有本地项目中的真实任务状态、来源和提交内容。'
+              : '查看每次服务商调用的状态、上游用量和本地结果事实。'}
           </p>
         </div>
-        <StatusPill>{tasks.length} 个任务</StatusPill>
+        <StatusPill>{view === 'tasks' ? `${tasks.length} 个任务` : '只读调用事实'}</StatusPill>
       </header>
 
-      <Card className="uc-task-center__filters">
+      <div aria-label="任务中心视图" className="uc-task-center__view-tabs" role="tablist">
+        <button
+          aria-controls="task-records-panel"
+          aria-selected={view === 'tasks'}
+          id="task-records-tab"
+          onClick={() => setView('tasks')}
+          role="tab"
+          type="button"
+        >
+          任务
+        </button>
+        <button
+          aria-controls="call-records-panel"
+          aria-selected={view === 'calls'}
+          id="call-records-tab"
+          onClick={() => setView('calls')}
+          role="tab"
+          type="button"
+        >
+          调用记录
+        </button>
+      </div>
+
+      {view === 'tasks' ? (
+        <div
+          aria-labelledby="task-records-tab"
+          className="uc-task-center__tab-panel"
+          id="task-records-panel"
+          role="tabpanel"
+        >
+          <Card className="uc-task-center__filters">
         <label>
           搜索任务
           <input
@@ -184,7 +218,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
             ))}
           </select>
         </label>
-      </Card>
+          </Card>
 
       {issues.length > 0 && (
         <Card className="uc-task-center__issues" role="status">
@@ -254,7 +288,11 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
         </div>
       )}
 
-      <p className="uc-task-center__message" aria-live="polite">{message}</p>
+          <p className="uc-task-center__message" aria-live="polite">{message}</p>
+        </div>
+      ) : (
+        <CallRecordsView onNavigate={onNavigate} />
+      )}
     </section>
   );
 }

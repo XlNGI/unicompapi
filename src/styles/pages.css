@@ -2061,11 +2061,56 @@
   gap: var(--uc-space-4);
 }
 
+.uc-task-center__view-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(112px, 1fr));
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: var(--uc-radius-8);
+  background: var(--uc-color-surface-base);
+}
+
+.uc-task-center__view-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  padding: var(--uc-space-2) var(--uc-space-4);
+  color: var(--uc-color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.uc-task-center__view-tabs button[aria-selected="true"] {
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-selected);
+}
+
+.uc-task-center__view-tabs button:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: 2px;
+}
+
 .uc-task-center__filters {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) 200px 200px;
   gap: var(--uc-space-3);
   padding: var(--uc-space-4);
+}
+
+.uc-task-center__call-view {
+  display: grid;
+  gap: var(--uc-space-5);
+}
+
+.uc-task-center__tab-panel {
+  display: grid;
+  gap: var(--uc-space-5);
+}
+
+.uc-task-center__call-filters {
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
 }
 
 .uc-task-center__filters label {
@@ -2177,6 +2222,14 @@
   line-height: var(--uc-line-height-caption);
 }
 
+.uc-task-center__call {
+  overflow-wrap: anywhere;
+}
+
+.uc-task-center__call > small:last-child {
+  grid-column: 1 / -1;
+}
+
 .uc-task-center__details-content {
   display: grid;
   gap: var(--uc-space-4);
@@ -2218,6 +2271,95 @@
   justify-content: flex-start;
 }
 
+.uc-task-center__call-section {
+  display: grid;
+  gap: var(--uc-space-3);
+  padding-top: var(--uc-space-4);
+  border-top: 1px solid var(--uc-color-border-subtle);
+}
+
+.uc-task-center__timeline {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.uc-task-center__timeline li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--uc-space-2);
+  min-height: 54px;
+}
+
+.uc-task-center__timeline li > span {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border: 2px solid var(--uc-color-accent-fill);
+  border-radius: 50%;
+  background: var(--uc-color-surface-raised);
+}
+
+.uc-task-center__timeline li:not(:last-child) > span::after {
+  position: absolute;
+  top: 9px;
+  bottom: -43px;
+  left: 2px;
+  width: 1px;
+  background: var(--uc-color-border-default);
+  content: '';
+}
+
+.uc-task-center__timeline li > div,
+.uc-task-center__result-list article {
+  display: grid;
+  gap: var(--uc-space-1);
+  min-width: 0;
+}
+
+.uc-task-center__timeline small,
+.uc-task-center__usage-list small,
+.uc-task-center__result-list small {
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-caption);
+  overflow-wrap: anywhere;
+}
+
+.uc-task-center__usage-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--uc-space-2);
+  margin: 0;
+}
+
+.uc-task-center__usage-list div,
+.uc-task-center__result-list article {
+  padding: var(--uc-space-3);
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: var(--uc-radius-8);
+  background: var(--uc-color-surface-base);
+}
+
+.uc-task-center__usage-list dt {
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  overflow-wrap: anywhere;
+}
+
+.uc-task-center__usage-list dd {
+  margin: var(--uc-space-1) 0;
+  font-weight: 600;
+}
+
+.uc-task-center__result-list {
+  display: grid;
+  gap: var(--uc-space-2);
+}
+
 @media (max-width: 980px) {
   .uc-task-center__filters,
   .uc-task-center__workspace {
@@ -2227,6 +2369,19 @@
   .uc-task-center__list {
     border-right: 0;
     border-bottom: 1px solid var(--uc-color-border-subtle);
+  }
+
+  .uc-task-center__view-tabs {
+    width: 100%;
+  }
+
+  .uc-task-center__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .uc-task-center__details-heading,
+  .uc-task-center__actions {
+    flex-wrap: wrap;
   }
 }
 
