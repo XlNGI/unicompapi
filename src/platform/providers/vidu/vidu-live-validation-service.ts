@@ -196,18 +196,6 @@ export class ViduLiveValidationApplicationService {
     ) {
       throw scopeMismatch();
     }
-    if (record?.status === 'passed') {
-      const evidence = snapshot.capabilities.find(
-        (candidate) => candidate.id === submission.capabilityEvidenceId
-      );
-      if (
-        evidence?.state === 'verified_supported' &&
-        evidence.source === 'system_observed'
-      ) {
-        return;
-      }
-      throw scopeMismatch();
-    }
     if (record?.status !== 'active') {
       throw new ViduLiveValidationApplicationError(
         'validation_not_active',

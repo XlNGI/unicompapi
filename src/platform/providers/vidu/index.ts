@@ -8,3 +8,4 @@ export * from './vidu-video-adapter';
 export * from './vidu-live-validation';
 export * from './vidu-live-validation-service';
 export * from './vidu-live-validation-controller';
+export * from './vidu-runtime-authorization-closure';

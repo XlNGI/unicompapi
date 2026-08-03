@@ -924,4 +924,10 @@ M1 `feature/local-json-persistence-foundation` 已获批准并完成实现 `f0e6
 
     docs/active/多服务商功能路由-M1本地JSON持久化基础记录.md
 
-项目负责人已授权 Codex 在符合门禁后自行验收并非快进合并 `develop`。M1 合并后停止；M2 第一支 `feature/vidu-runtime-authorization-closure` 尚未批准。后台契约与适配器必须先于 UI；真实 API、凭证验证和收费测试必须另立专项批准。
+项目负责人已授权 Codex 在符合门禁后自行验收并非快进合并 `develop`。M1 已通过 `3f419bf` 非快进合并并停止；M2 第一支 `feature/vidu-runtime-authorization-closure` 随后获单独批准，实现提交为 `b2e6d94`。该支新增 Vidu 专用运行授权关闭闸门，在 live-validation IPC 的 credits 校验前以及 Electron 图片/视频路由前硬拒绝，移除 `passed + system_observed` 自动放行；不提前实现通用 `RuntimeAccessPolicy`，不改 UI、协议适配器或阶段 10。
+
+M2 第一支完整门禁为 Node 179 项与 Vitest 396 项，共 575 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、224 文件平台审计、50 项交接校验、27 个权威资产、恢复审计、运行时集成、安全存储和差异检查通过。Windows Electron 隔离用户目录烟测新增 4 个进程、4/4 响应、1 个可见窗口，正常关闭后残留 0。验证启动的 credits 校验调用为 0，关闭闸门位于图片/视频 HTTP 路径前；未读取真实凭证、未访问 Vidu、未产生收费请求，费用为 0。工程记录见：
+
+    docs/active/多服务商功能路由-M2-Vidu运行授权关闭记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`；合并后停止。M2 第二支 `feature/provider-package-connection-contracts` 未获批准，不自动启动。后台契约与适配器必须先于 UI；真实 API、凭证验证和收费测试必须另立专项批准。

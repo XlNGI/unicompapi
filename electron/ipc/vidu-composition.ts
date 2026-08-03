@@ -15,6 +15,8 @@ import {
   ViduLiveValidationApplicationService,
   ViduLiveValidationCoordinator,
   ViduProviderPackage,
+  ViduRuntimeAuthorizationClosedError,
+  denyViduRuntimeAuthorization,
   ViduTransportFailure,
   createFrozenViduRegistryRecords,
   VideoOperationRouter,
@@ -118,6 +120,7 @@ export class ElectronViduComposition {
     const imagePort = {
       submit: async (request: Parameters<ImageOperationRouter['submit']>[0]) => {
         try {
+          denyViduRuntimeAuthorization();
           await this.liveValidation.beforeSubmission(
             'image',
             request.task,
@@ -143,6 +146,7 @@ export class ElectronViduComposition {
     const videoPort: VideoGenerationSubmitPort = {
       submit: async (request) => {
         try {
+          denyViduRuntimeAuthorization();
           await this.liveValidation.beforeSubmission(
             'video',
             request.task,
@@ -252,6 +256,8 @@ export class ElectronViduComposition {
 function liveValidationFailure(error: unknown): ProviderSubmitOutcome {
   const message = error instanceof ViduLiveValidationApplicationError
     ? error.message
+    : error instanceof ViduRuntimeAuthorizationClosedError
+      ? error.message
     : 'The approved Vidu live validation gate could not be evaluated';
   return {
     kind: 'failed_before_submission',

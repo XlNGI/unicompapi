@@ -25,6 +25,7 @@ export type ViduLiveValidationIpcErrorCode =
   | 'invalid_request'
   | 'already_started'
   | 'connection_not_ready'
+  | 'runtime_authorization_closed'
   | 'validation_operation_failed';
 
 export interface ViduLiveValidationApprovalDto {
