@@ -40,7 +40,10 @@ test('global pages consume controlled desktop facts and preserve abnormal states
   assert.match(sources.library, /storage\.createWorkMediaHandle/);
   assert.match(sources.library, /storage\.revealWorkFile/);
   assert.match(sources.library, /storage\.relinkFile/);
-  assert.match(sources.providers, /providersApi\.getCredentialStatus/);
+  assert.match(sources.providers, /providersApi\.getRegistry/);
+  assert.match(sources.providers, /providersApi\.listTemplates/);
+  assert.match(sources.providers, /selectedConnection\.credentialState/);
+  assert.match(sources.providers, /adapter_unavailable/);
 });
 
 test('A2 pages do not branch on the renderer platform or claim fake work', () => {

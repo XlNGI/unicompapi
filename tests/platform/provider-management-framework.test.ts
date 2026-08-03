@@ -44,12 +44,21 @@ describe('provider management framework', () => {
         templateId: 'fixture-official-catalog',
         kind: 'official',
         freeConnectionValidation: true,
-        modelDiscoveryKind: 'catalog'
+        modelDiscoveryKind: 'catalog',
+        validationAction: 'available',
+        modelDiscoveryAction: 'catalog_available'
       }),
       expect.objectContaining({
         templateId: 'fixture-compatible-manual',
         kind: 'compatible_custom',
-        baseUrlMode: 'required'
+        baseUrlMode: 'required',
+        validationAction: 'available',
+        modelDiscoveryAction: 'manual_exact'
+      }),
+      expect.objectContaining({
+        templateId: 'fixture-official-no-free',
+        validationAction: 'unsupported',
+        modelDiscoveryAction: 'catalog_available'
       })
     ]));
     expect(JSON.stringify(templates)).not.toMatch(
@@ -105,6 +114,36 @@ describe('provider management framework', () => {
     expect(await readFile(fixture.vaultPath, 'utf8')).not.toContain(
       'must-never-be-persisted'
     );
+  });
+
+  it('marks live management actions as approval-bound when no adapter is installed', async () => {
+    const fixture = await frameworkFixture();
+    const withoutLiveAdapters = new ProviderManagementFramework(
+      fixture.packages,
+      fixture.registry,
+      fixture.vault,
+      new ProviderManagementAdapterRegistry(fixture.packages, []),
+      fixture.audit,
+      { now: () => t2 }
+    );
+
+    expect(withoutLiveAdapters.listTemplates()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        templateId: 'fixture-official-catalog',
+        validationAction: 'requires_live_api_approval',
+        modelDiscoveryAction: 'requires_live_api_approval'
+      }),
+      expect.objectContaining({
+        templateId: 'fixture-compatible-manual',
+        validationAction: 'requires_live_api_approval',
+        modelDiscoveryAction: 'manual_exact'
+      }),
+      expect.objectContaining({
+        templateId: 'fixture-official-no-free',
+        validationAction: 'unsupported',
+        modelDiscoveryAction: 'requires_live_api_approval'
+      })
+    ]));
   });
 
   it('validates only through the exact approved free adapter and never changes profiles or runtime authorization', async () => {

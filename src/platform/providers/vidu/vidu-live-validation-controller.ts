@@ -1,8 +1,3 @@
-import type {
-  ViduLiveValidationIpcErrorCode,
-  ViduLiveValidationIpcResult,
-  ViduLiveValidationStatusDto
-} from '../../../shared/provider-ipc';
 import {
   ViduLiveValidationApplicationError,
   type ViduLiveValidationApplicationService
@@ -12,6 +7,54 @@ import {
   denyViduRuntimeAuthorization,
   ViduRuntimeAuthorizationClosedError
 } from './vidu-runtime-authorization-closure';
+
+type ViduLiveValidationIpcErrorCode =
+  | 'invalid_request'
+  | 'already_started'
+  | 'connection_not_ready'
+  | 'runtime_authorization_closed'
+  | 'validation_operation_failed';
+
+interface ViduLiveValidationStatusDto {
+  readonly status: 'not_started' | 'active' | 'passed' | 'failed' | 'blocked';
+  readonly startedAt?: string;
+  readonly updatedAt?: string;
+  readonly stopCode?: string;
+  readonly budget: {
+    readonly image: ViduLiveValidationBudgetStatusDto;
+    readonly video: ViduLiveValidationBudgetStatusDto;
+  };
+  readonly events: readonly ViduLiveValidationEventStatusDto[];
+}
+
+interface ViduLiveValidationBudgetStatusDto {
+  readonly claimState: 'available' | 'claimed' | 'not_available';
+  readonly billingFact:
+    | 'not_attempted'
+    | 'attempt_claimed'
+    | 'accepted_or_completed'
+    | 'failed_before_submission'
+    | 'submission_outcome_unknown';
+}
+
+interface ViduLiveValidationEventStatusDto {
+  readonly sequence: number;
+  readonly stage: ViduLiveValidationRecord['events'][number]['stage'];
+  readonly state: ViduLiveValidationRecord['events'][number]['state'];
+  readonly recordedAt: string;
+  readonly errorCode?: string;
+  readonly providerState?: string;
+}
+
+type ViduLiveValidationIpcResult =
+  | { readonly ok: true; readonly value: ViduLiveValidationStatusDto }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: ViduLiveValidationIpcErrorCode;
+        readonly message: string;
+      };
+    };
 
 export class ViduLiveValidationController {
   constructor(

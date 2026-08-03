@@ -71,88 +71,37 @@ const storage: StorageApi = {
 
 const providers: ProviderApi = {
   getRegistry: () => ipcRenderer.invoke(providerIpcChannels.getRegistry),
-  saveCredential: (connectionId, value) =>
-    ipcRenderer.invoke(providerIpcChannels.saveCredential, {
+  listTemplates: () => ipcRenderer.invoke(providerIpcChannels.listTemplates),
+  createConnection: (input) =>
+    ipcRenderer.invoke(providerIpcChannels.createConnection, input),
+  rotateCredential: (connectionId, credentials) =>
+    ipcRenderer.invoke(providerIpcChannels.rotateCredential, {
       connectionId,
-      value
-    }),
-  deleteLocalCredential: (connectionId) =>
-    ipcRenderer.invoke(providerIpcChannels.deleteLocalCredential, {
-      connectionId
-    }),
-  getCredentialStatus: (connectionId) =>
-    ipcRenderer.invoke(providerIpcChannels.getCredentialStatus, {
-      connectionId
-    }),
-  checkCredentialStorage: (connectionId) =>
-    ipcRenderer.invoke(providerIpcChannels.checkCredentialStorage, {
-      connectionId
+      credentials
     }),
   validateConnection: (connectionId) =>
     ipcRenderer.invoke(providerIpcChannels.validateConnection, { connectionId }),
   syncModelCatalog: (connectionId) =>
     ipcRenderer.invoke(providerIpcChannels.syncModelCatalog, { connectionId }),
-  registerManualModel: (connectionId, name, displayName) =>
-    ipcRenderer.invoke(providerIpcChannels.registerManualModel, {
+  registerExactModel: (connectionId, providerModelKey, displayName) =>
+    ipcRenderer.invoke(providerIpcChannels.registerExactModel, {
       connectionId,
-      name,
+      providerModelKey,
       displayName
-    }),
-  validateCapability: (modelId, capability) =>
-    ipcRenderer.invoke(providerIpcChannels.validateCapability, {
-      modelId,
-      capability
-    }),
-  recordUserCapability: (modelId, capability, state) =>
-    ipcRenderer.invoke(providerIpcChannels.recordUserCapability, {
-      modelId,
-      capability,
-      state
-    }),
-  saveRoutingPreference: (purpose, modelId, priority, enabled) =>
-    ipcRenderer.invoke(providerIpcChannels.saveRoutingPreference, {
-      purpose,
-      modelId,
-      priority,
-      enabled
-    }),
-  planRoute: (purpose) =>
-    ipcRenderer.invoke(providerIpcChannels.planRoute, { purpose }),
-  createProvider: (name, accessCategory) =>
-    ipcRenderer.invoke(providerIpcChannels.createProvider, {
-      name,
-      accessCategory
-    }),
-  createConnection: (providerId, name, endpoint) =>
-    ipcRenderer.invoke(providerIpcChannels.createConnection, {
-      providerId,
-      name,
-      endpoint
-    }),
-  updateConnection: (connectionId, name, endpoint) =>
-    ipcRenderer.invoke(providerIpcChannels.updateConnection, {
-      connectionId,
-      name,
-      endpoint
     }),
   setConnectionEnabled: (connectionId, enabled) =>
     ipcRenderer.invoke(providerIpcChannels.setConnectionEnabled, {
       connectionId,
       enabled
     }),
-  deleteConnection: (connectionId) =>
-    ipcRenderer.invoke(providerIpcChannels.deleteConnection, { connectionId }),
+  deleteConnection: (connectionId, abandonActiveOperations = false) =>
+    ipcRenderer.invoke(providerIpcChannels.deleteConnection, {
+      connectionId,
+      confirmLocalDeletion: true,
+      abandonActiveOperations
+    }),
   setModelEnabled: (modelId, enabled) =>
-    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled }),
-  getViduLiveValidation: () =>
-    ipcRenderer.invoke(providerIpcChannels.getViduLiveValidation),
-  startViduLiveValidation: (approval) =>
-    ipcRenderer.invoke(providerIpcChannels.startViduLiveValidation, {
-      confirmLiveNetwork: approval.confirmLiveNetwork,
-      confirmCredentialUse: approval.confirmCredentialUse,
-      confirmImageBillableAttempt: approval.confirmImageBillableAttempt,
-      confirmVideoBillableAttempt: approval.confirmVideoBillableAttempt
-    })
+    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled })
 };
 
 const imageWorkspaces: ImageWorkspaceApi = {
