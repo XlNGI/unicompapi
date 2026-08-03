@@ -38,6 +38,10 @@ export const projectStoragePaths = {
     projectContexts: toProjectRelativePath('entities/project-contexts.json'),
     projectContextsBackup: toProjectRelativePath(
       'entities/project-contexts.json.bak'
+    ),
+    conversations: toProjectRelativePath('entities/conversations.json'),
+    conversationResponseDrafts: toProjectRelativePath(
+      'entities/conversation-response-drafts.json'
     )
   },
   journals: {

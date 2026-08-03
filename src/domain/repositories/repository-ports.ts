@@ -19,6 +19,7 @@ import type {
   Conversation,
   ConversationStatus
 } from '../entities/conversation';
+import type { ConversationResponseDraftV1 } from '../entities/conversation-response';
 import type {
   ModelCapabilityEvidence,
   Provider,
@@ -30,6 +31,7 @@ import type {
   AssetId,
   CapabilityEvidenceId,
   ConnectionId,
+  ConversationResponseDraftId,
   DraftId,
   ExecutionId,
   FileReferenceId,
@@ -57,6 +59,18 @@ export interface ConversationRepository {
   list(options?: ConversationListOptions): Promise<readonly Conversation[]>;
   create(conversation: Conversation): Promise<void>;
   save(conversation: Conversation, expectedRevision: number): Promise<void>;
+}
+
+export interface ProjectConversationRepository extends ConversationRepository {
+  readonly projectId: ProjectId;
+}
+
+export interface ConversationResponseDraftRepository {
+  readonly projectId: ProjectId;
+  get(id: ConversationResponseDraftId): Promise<ConversationResponseDraftV1 | undefined>;
+  list(conversationId?: ConversationId): Promise<readonly ConversationResponseDraftV1[]>;
+  create(draft: ConversationResponseDraftV1): Promise<void>;
+  save(draft: ConversationResponseDraftV1, expectedRevision: number): Promise<void>;
 }
 
 export interface ProjectContextRepository {
