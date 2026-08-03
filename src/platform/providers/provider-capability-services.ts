@@ -22,6 +22,7 @@ import type {
   RoutePlanResult
 } from '../../shared/provider-ipc';
 import type { JsonProviderRegistryStore } from './provider-registry';
+import { ProviderRegistryConflictError } from './provider-registry';
 
 export interface ConnectionValidationObservation {
   readonly state: 'available' | 'unavailable';
@@ -81,30 +82,42 @@ export class ProviderCapabilityController {
   async validateConnection(input: unknown): Promise<ProviderManagementResult> {
     try {
       const connectionId = parseIdInput(input, 'connectionId');
+      if (!this.ports.connectionValidation) {
+        return failure('adapter_unavailable');
+      }
       const snapshot = await this.registry.load();
       const connection = snapshot.connections.find(
         (item) => item.id === connectionId
       );
       if (!connection) return failure('connection_not_found');
-      if (!this.ports.connectionValidation) {
-        return failure('adapter_unavailable');
-      }
       const observation = await this.ports.connectionValidation.validate(connection);
       const observedAt = toIsoTimestamp(observation.observedAt);
-      await this.registry.save({
-        ...snapshot,
-        connections: snapshot.connections.map((item) =>
-          item.id === connection.id
-            ? {
-                ...item,
-                state: observation.state,
-                identityState: observation.identityState,
-                credentialState: observation.credentialState,
-                lastConnectionValidationAt: observedAt,
-                updatedAt: observedAt
-              }
-            : item
-        )
+      await this.registry.mutate((latest) => {
+        const current = latest.connections.find((item) => item.id === connectionId);
+        if (!current) {
+          throw new ProviderCapabilityError(
+            'connection_not_found',
+            'The provider connection disappeared during validation'
+          );
+        }
+        return {
+          snapshot: {
+            ...latest,
+            connections: latest.connections.map((item) =>
+              item.id === current.id
+                ? {
+                    ...item,
+                    state: observation.state,
+                    identityState: observation.identityState,
+                    credentialState: observation.credentialState,
+                    lastConnectionValidationAt: observedAt,
+                    updatedAt: observedAt
+                  }
+                : item
+            )
+          },
+          result: undefined
+        };
       });
       return {
         ok: true,
@@ -132,30 +145,39 @@ export class ProviderCapabilityController {
       const item = requireRecord(input);
       const connectionId = requireId(item.connectionId, 'connectionId');
       if (typeof item.enabled !== 'boolean') return failure('invalid_request');
-      const snapshot = await this.registry.load();
-      const connection = snapshot.connections.find(
-        (candidate) => candidate.id === connectionId
-      );
-      if (!connection) return failure('connection_not_found');
-      if (connection.state === 'deleted') return failure('invalid_request');
-      const state = item.enabled
-        ? connection.endpoint
-          ? 'saved'
-          : 'unconfigured'
-        : 'disabled';
-      await this.registry.save({
-        ...snapshot,
-        connections: snapshot.connections.map((candidate) =>
-          candidate.id === connection.id
-            ? {
-                ...candidate,
-                state,
-                updatedAt: toIsoTimestamp(new Date().toISOString())
-              }
-            : candidate
-        )
+      const result = await this.registry.mutate((snapshot) => {
+        const connection = snapshot.connections.find(
+          (candidate) => candidate.id === connectionId
+        );
+        if (!connection) {
+          throw new ProviderCapabilityError(
+            'connection_not_found',
+            'The provider connection was not found'
+          );
+        }
+        if (connection.state === 'deleted') throw new TypeError('connection is deleted');
+        const state = item.enabled
+          ? connection.endpoint
+            ? 'saved'
+            : 'unconfigured'
+          : 'disabled';
+        return {
+          snapshot: {
+            ...snapshot,
+            connections: snapshot.connections.map((candidate) =>
+              candidate.id === connection.id
+                ? {
+                    ...candidate,
+                    state,
+                    updatedAt: toIsoTimestamp(new Date().toISOString())
+                  }
+                : candidate
+            )
+          },
+          result: { state, connectionId: connection.id }
+        };
       });
-      return { ok: true, value: { state, connectionId: connection.id } };
+      return { ok: true, value: result };
     } catch (error) {
       return failure(mapError(error));
     }
@@ -166,35 +188,49 @@ export class ProviderCapabilityController {
       const item = requireRecord(input);
       const modelId = requireId(item.modelId, 'modelId');
       if (typeof item.enabled !== 'boolean') return failure('invalid_request');
-      const snapshot = await this.registry.load();
-      const model = snapshot.models.find((candidate) => candidate.id === modelId);
-      if (!model) return failure('model_not_found');
-      const connection = snapshot.connections.find(
-        (candidate) => candidate.id === model.connectionId
-      );
-      if (
-        !connection ||
-        connection.state === 'deleted' ||
-        (item.enabled && connection.state === 'disabled')
-      ) {
-        return failure('invalid_request');
-      }
-      await this.registry.save({
-        ...snapshot,
-        models: snapshot.models.map((candidate) =>
-          candidate.id === model.id
-            ? {
-                ...candidate,
-                enabled: item.enabled as boolean,
-                revision: candidate.revision + 1,
-                updatedAt: toIsoTimestamp(new Date().toISOString())
-              }
-            : candidate
-        )
+      const modelState = await this.registry.mutate<{ state: string; modelId: string }>((snapshot) => {
+        const model = snapshot.models.find((candidate) => candidate.id === modelId);
+        if (!model) {
+          throw new ProviderCapabilityError(
+            'model_not_found',
+            'The provider model was not found'
+          );
+        }
+        const connection = snapshot.connections.find(
+          (candidate) => candidate.id === model.connectionId
+        );
+        if (
+          !connection ||
+          connection.state === 'deleted' ||
+          (item.enabled && connection.state === 'disabled') ||
+          ((model.catalogState ?? 'present') !== 'present' && item.enabled)
+        ) {
+          throw new TypeError('model cannot be enabled');
+        }
+        const updatedAt = toIsoTimestamp(new Date().toISOString());
+        return {
+          snapshot: {
+            ...snapshot,
+            models: snapshot.models.map((candidate) =>
+              candidate.id === model.id
+                ? {
+                    ...candidate,
+                    enabled: item.enabled as boolean,
+                    revision: candidate.revision + 1,
+                    updatedAt
+                  }
+                : candidate
+            )
+          },
+          result: {
+            state: item.enabled ? 'enabled' : 'disabled',
+            modelId: model.id
+          }
+        };
       });
       return {
         ok: true,
-        value: { state: item.enabled ? 'enabled' : 'disabled', modelId: model.id }
+        value: modelState
       };
     } catch (error) {
       return failure(mapError(error));
@@ -212,57 +248,99 @@ export class ProviderCapabilityController {
       if (!this.ports.modelCatalogSync) return failure('adapter_unavailable');
       const result = await this.ports.modelCatalogSync.sync(connection);
       const observedAt = toIsoTimestamp(result.observedAt);
-      const existingByName = new Map(
-        snapshot.models
-          .filter((item) => item.connectionId === connection.id)
-          .map((item) => [item.providerModelKey, item])
-      );
-      const unclassified = ensureUnclassifiedBinding(
-        snapshot.protocolBindings,
-        connection,
-        observedAt
-      );
-      const catalogNames = new Set<string>();
-      const synced = result.entries.map((entry) => {
-        const externalId = requireNonBlank(entry.externalId, 'externalId');
-        if (catalogNames.has(externalId)) {
-          throw new TypeError('Model catalog contains duplicate entries');
+      const syncedCount = await this.registry.mutate<number>((latest) => {
+        const currentConnection = latest.connections.find(
+          (item) => item.id === connectionId
+        );
+        if (!currentConnection) {
+          throw new ProviderCapabilityError(
+            'connection_not_found',
+            'The provider connection disappeared during catalog sync'
+          );
         }
-        catalogNames.add(externalId);
-        const existing = existingByName.get(externalId);
-        return existing
-          ? updateCatalogModel(
-              existing,
-              requireNonBlank(entry.displayName, 'displayName'),
-              observedAt
-            )
-          : createProviderModel({
-              id: toModelId(`model-${randomUUID()}`),
-              providerId: connection.providerId,
-              connectionId: connection.id,
-              protocolBindingId: unclassified.binding.id,
-              providerModelKey: externalId,
-              mediaKind: 'unknown',
-              revision: 1,
-              displayName: requireNonBlank(entry.displayName, 'displayName'),
-              enabled: false,
-              createdAt: observedAt,
-              updatedAt: observedAt
-            });
-      });
-      const retainedModels = snapshot.models.filter(
-        (item) =>
-          item.connectionId !== connection.id ||
-          !catalogNames.has(item.providerModelKey)
-      );
-      await this.registry.save({
-        ...snapshot,
-        protocolBindings: unclassified.protocolBindings,
-        models: [...retainedModels, ...synced]
+        const existingByName = new Map(
+          latest.models
+            .filter((item) => item.connectionId === currentConnection.id)
+            .map((item) => [item.providerModelKey, item])
+        );
+        const unclassified = ensureUnclassifiedBinding(
+          latest.protocolBindings,
+          currentConnection,
+          observedAt
+        );
+        const nextCatalogRevision = nextConnectionCatalogRevision(
+          latest.models,
+          currentConnection.id
+        );
+        const catalogNames = new Set<string>();
+        const synced = result.entries.map((entry) => {
+          const externalId = requireNonBlank(entry.externalId, 'externalId');
+          if (catalogNames.has(externalId)) {
+            throw new TypeError('Model catalog contains duplicate entries');
+          }
+          catalogNames.add(externalId);
+          const existing = existingByName.get(externalId);
+          return existing
+            ? updateCatalogModel(
+                existing,
+                requireNonBlank(entry.displayName, 'displayName'),
+                observedAt,
+                nextCatalogRevision
+              )
+            : createProviderModel({
+                id: toModelId(`model-${randomUUID()}`),
+                providerId: currentConnection.providerId,
+                connectionId: currentConnection.id,
+                protocolBindingId: unclassified.binding.id,
+                providerModelKey: externalId,
+                mediaKind: 'unknown',
+                revision: 1,
+                catalogState: 'present',
+                catalogRevision: nextCatalogRevision,
+                lastSeenAt: observedAt,
+                displayName: requireNonBlank(entry.displayName, 'displayName'),
+                enabled: false,
+                createdAt: observedAt,
+                updatedAt: observedAt
+              });
+        });
+        const missing = latest.models.map((item) => {
+          if (
+            item.connectionId !== currentConnection.id ||
+            catalogNames.has(item.providerModelKey)
+          ) {
+            return item;
+          }
+          const nextState: NonNullable<ProviderModel['catalogState']> =
+            item.catalogState === 'retired' ? 'retired' : 'missing';
+          return {
+            ...item,
+            catalogState: nextState,
+            catalogRevision: nextCatalogRevision,
+            enabled: false,
+            revision: item.revision + 1,
+            updatedAt: observedAt
+          };
+        });
+        return {
+          snapshot: {
+            ...latest,
+            protocolBindings: unclassified.protocolBindings,
+            models: [
+              ...missing.filter(
+                (item) =>
+                  item.connectionId !== currentConnection.id ||
+                  !catalogNames.has(item.providerModelKey)
+              ),
+              ...synced
+            ]
+          },
+          result: synced.length
+        };
       });
       return {
         ok: true,
-        value: { state: 'catalog_synced', count: synced.length, observedAt }
+        value: { state: 'catalog_synced', count: syncedCount, observedAt }
       };
     } catch (error) {
       return failure(mapError(error));
@@ -275,43 +353,56 @@ export class ProviderCapabilityController {
       const connectionId = requireId(item.connectionId, 'connectionId');
       const name = requireNonBlank(item.name, 'name');
       const displayName = requireNonBlank(item.displayName, 'displayName');
-      const snapshot = await this.registry.load();
-      const connection = snapshot.connections.find(
-        (candidate) => candidate.id === connectionId
-      );
-      if (!connection) return failure('connection_not_found');
-      if (
-        snapshot.models.some(
-          (model) =>
-            model.connectionId === connection.id &&
-            model.providerModelKey === name
-        )
-      ) {
-        return failure('model_already_exists');
-      }
-      const now = toIsoTimestamp(new Date().toISOString());
-      const unclassified = ensureUnclassifiedBinding(
-        snapshot.protocolBindings,
-        connection,
-        now
-      );
-      const model = createProviderModel({
-        id: toModelId(`model-${randomUUID()}`),
-        providerId: connection.providerId,
-        connectionId: connection.id,
-        protocolBindingId: unclassified.binding.id,
-        providerModelKey: name,
-        mediaKind: 'unknown',
-        revision: 1,
-        displayName,
-        enabled: false,
-        createdAt: now,
-        updatedAt: now
-      });
-      await this.registry.save({
-        ...snapshot,
-        protocolBindings: unclassified.protocolBindings,
-        models: [...snapshot.models, model]
+      const model = await this.registry.mutate((snapshot) => {
+        const connection = snapshot.connections.find(
+          (candidate) => candidate.id === connectionId
+        );
+        if (!connection) {
+          throw new ProviderCapabilityError(
+            'connection_not_found',
+            'The provider connection was not found'
+          );
+        }
+        if (
+          snapshot.models.some(
+            (candidate) =>
+              candidate.connectionId === connection.id &&
+              candidate.providerModelKey === name
+          )
+        ) {
+          throw new ProviderCapabilityError(
+            'model_already_exists',
+            'The provider model is already registered'
+          );
+        }
+        const now = toIsoTimestamp(new Date().toISOString());
+        const unclassified = ensureUnclassifiedBinding(
+          snapshot.protocolBindings,
+          connection,
+          now
+        );
+        const created = createProviderModel({
+          id: toModelId(`model-${randomUUID()}`),
+          providerId: connection.providerId,
+          connectionId: connection.id,
+          protocolBindingId: unclassified.binding.id,
+          providerModelKey: name,
+          mediaKind: 'unknown',
+          revision: 1,
+          catalogState: 'present',
+          displayName,
+          enabled: false,
+          createdAt: now,
+          updatedAt: now
+        });
+        return {
+          snapshot: {
+            ...snapshot,
+            protocolBindings: unclassified.protocolBindings,
+            models: [...snapshot.models, created]
+          },
+          result: created
+        };
       });
       return {
         ok: true,
@@ -336,39 +427,51 @@ export class ProviderCapabilityController {
         capability
       );
       const observedAt = toIsoTimestamp(observation.observedAt);
-      const previous = latestCapabilityEvidence(
-        snapshot.capabilities,
-        model.id,
-        capability,
-        'connection_verified'
-      );
-      const evidence = createModelCapabilityEvidence({
-        id: toCapabilityEvidenceId(`capability-${randomUUID()}`),
-        modelId: model.id,
-        revision: (previous?.revision ?? 0) + 1,
-        capability,
-        state: observation.state,
-        source: 'connection_verified',
-        constraint: observation.constraint,
-        parameterSchema: observation.parameterSchema,
-        videoGenerationSchema: observation.videoGenerationSchema,
-        observedAt,
-        recordedAt: observedAt,
-        supersedesEvidenceId: previous?.id
-      });
-      await this.registry.save({
-        ...snapshot,
-        models: snapshot.models.map((candidate) =>
-          candidate.id === model.id
-            ? {
-                ...candidate,
-                revision: candidate.revision + 1,
-                capabilityEvidenceId: evidence.id,
-                updatedAt: observedAt
-              }
-            : candidate
-        ),
-        capabilities: [...snapshot.capabilities, evidence]
+      const evidence = await this.registry.mutate((latest) => {
+        const currentModel = latest.models.find((candidate) => candidate.id === modelId);
+        if (!currentModel) {
+          throw new ProviderCapabilityError(
+            'model_not_found',
+            'The provider model disappeared during capability validation'
+          );
+        }
+        const previous = latestCapabilityEvidence(
+          latest.capabilities,
+          currentModel.id,
+          capability,
+          'connection_verified'
+        );
+        const nextEvidence = createModelCapabilityEvidence({
+          id: toCapabilityEvidenceId(`capability-${randomUUID()}`),
+          modelId: currentModel.id,
+          revision: (previous?.revision ?? 0) + 1,
+          capability,
+          state: observation.state,
+          source: 'connection_verified',
+          constraint: observation.constraint,
+          parameterSchema: observation.parameterSchema,
+          videoGenerationSchema: observation.videoGenerationSchema,
+          observedAt,
+          recordedAt: observedAt,
+          supersedesEvidenceId: previous?.id
+        });
+        return {
+          snapshot: {
+            ...latest,
+            models: latest.models.map((candidate) =>
+              candidate.id === currentModel.id
+                ? {
+                    ...candidate,
+                    revision: candidate.revision + 1,
+                    capabilityEvidenceId: nextEvidence.id,
+                    updatedAt: observedAt
+                  }
+                : candidate
+            ),
+            capabilities: [...latest.capabilities, nextEvidence]
+          },
+          result: nextEvidence
+        };
       });
       return {
         ok: true,
@@ -396,36 +499,48 @@ export class ProviderCapabilityController {
         return failure('model_not_found');
       }
       const now = toIsoTimestamp(new Date().toISOString());
-      const previous = latestCapabilityEvidence(
-        snapshot.capabilities,
-        toModelId(modelId),
-        capability,
-        'user_confirmed'
-      );
-      const evidence = createModelCapabilityEvidence({
-        id: toCapabilityEvidenceId(`capability-${randomUUID()}`),
-        modelId: toModelId(modelId),
-        revision: (previous?.revision ?? 0) + 1,
-        capability,
-        state: item.state,
-        source: 'user_confirmed',
-        observedAt: now,
-        recordedAt: now,
-        supersedesEvidenceId: previous?.id
-      });
-      await this.registry.save({
-        ...snapshot,
-        models: snapshot.models.map((candidate) =>
-          candidate.id === evidence.modelId
-            ? {
-                ...candidate,
-                revision: candidate.revision + 1,
-                capabilityEvidenceId: evidence.id,
-                updatedAt: now
-              }
-            : candidate
-        ),
-        capabilities: [...snapshot.capabilities, evidence]
+      const evidence = await this.registry.mutate((latest) => {
+        const currentModel = latest.models.find((candidate) => candidate.id === modelId);
+        if (!currentModel) {
+          throw new ProviderCapabilityError(
+            'model_not_found',
+            'The provider model disappeared during capability update'
+          );
+        }
+        const previous = latestCapabilityEvidence(
+          latest.capabilities,
+          currentModel.id,
+          capability,
+          'user_confirmed'
+        );
+        const nextEvidence = createModelCapabilityEvidence({
+          id: toCapabilityEvidenceId(`capability-${randomUUID()}`),
+          modelId: currentModel.id,
+          revision: (previous?.revision ?? 0) + 1,
+          capability,
+          state: item.state as 'user_confirmed' | 'unsupported',
+          source: 'user_confirmed',
+          observedAt: now,
+          recordedAt: now,
+          supersedesEvidenceId: previous?.id
+        });
+        return {
+          snapshot: {
+            ...latest,
+            models: latest.models.map((candidate) =>
+              candidate.id === currentModel.id
+                ? {
+                    ...candidate,
+                    revision: candidate.revision + 1,
+                    capabilityEvidenceId: nextEvidence.id,
+                    updatedAt: now
+                  }
+                : candidate
+            ),
+            capabilities: [...latest.capabilities, nextEvidence]
+          },
+          result: nextEvidence
+        };
       });
       return {
         ok: true,
@@ -448,30 +563,37 @@ export class ProviderCapabilityController {
       ) {
         return failure('invalid_request');
       }
-      const snapshot = await this.registry.load();
-      if (!snapshot.models.some((model) => model.id === modelId)) {
-        return failure('model_not_found');
-      }
-      const existing = snapshot.routingPreferences.find(
-        (preference) =>
-          preference.purpose === purpose && preference.modelId === modelId
-      );
-      const preference = createRoutingPreference({
-        id: existing?.id ?? toRoutingPreferenceId(`routing-${randomUUID()}`),
-        purpose,
-        modelId: toModelId(modelId),
-        priority: Number(item.priority),
-        enabled: item.enabled,
-        updatedAt: toIsoTimestamp(new Date().toISOString())
-      });
-      await this.registry.save({
-        ...snapshot,
-        routingPreferences: [
-          ...snapshot.routingPreferences.filter(
-            (candidate) => candidate.id !== preference.id
-          ),
-          preference
-        ]
+      const preference = await this.registry.mutate((snapshot) => {
+        if (!snapshot.models.some((model) => model.id === modelId)) {
+          throw new ProviderCapabilityError(
+            'model_not_found',
+            'The provider model was not found'
+          );
+        }
+        const existing = snapshot.routingPreferences.find(
+          (candidate) =>
+            candidate.purpose === purpose && candidate.modelId === modelId
+        );
+        const created = createRoutingPreference({
+          id: existing?.id ?? toRoutingPreferenceId(`routing-${randomUUID()}`),
+          purpose,
+          modelId: toModelId(modelId),
+          priority: Number(item.priority),
+          enabled: item.enabled as boolean,
+          updatedAt: toIsoTimestamp(new Date().toISOString())
+        });
+        return {
+          snapshot: {
+            ...snapshot,
+            routingPreferences: [
+              ...snapshot.routingPreferences.filter(
+                (candidate) => candidate.id !== created.id
+              ),
+              created
+            ]
+          },
+          result: created
+        };
       });
       return {
         ok: true,
@@ -499,6 +621,12 @@ export class ProviderCapabilityController {
           .filter(
             (model) =>
               model.enabled &&
+              (model.catalogState ?? 'present') === 'present' &&
+              snapshot.modelProfiles?.some(
+                (profile) =>
+                  profile.profileId === model.activeProfileId &&
+                  profile.status === 'verified'
+              ) === true &&
               routableConnections.has(model.connectionId) &&
               snapshot.protocolBindings.some(
                 (binding) =>
@@ -573,15 +701,39 @@ function ensureUnclassifiedBinding(
 function updateCatalogModel(
   model: ProviderModel,
   displayName: string,
-  updatedAt: ReturnType<typeof toIsoTimestamp>
+  updatedAt: ReturnType<typeof toIsoTimestamp>,
+  catalogRevision: number
 ): ProviderModel {
-  if (model.displayName === displayName) return model;
+  if (
+    model.displayName === displayName &&
+    (model.catalogState ?? 'present') === 'present' &&
+    model.catalogRevision === catalogRevision
+  ) {
+    return model;
+  }
   return {
     ...model,
     displayName,
+    catalogState: 'present',
+    catalogRevision,
+    lastSeenAt: updatedAt,
     revision: model.revision + 1,
     updatedAt
   };
+}
+
+function nextConnectionCatalogRevision(
+  models: readonly ProviderModel[],
+  connectionId: ProviderModel['connectionId']
+): number {
+  return (
+    Math.max(
+      0,
+      ...models
+        .filter((model) => model.connectionId === connectionId)
+        .map((model) => model.catalogRevision ?? 0)
+    ) + 1
+  );
 }
 
 function latestCapabilityEvidence(
@@ -610,6 +762,16 @@ function parseTextInput(value: unknown, field: string): string {
   return requireNonBlank(item[field], field);
 }
 
+class ProviderCapabilityError extends Error {
+  constructor(
+    readonly code: ProviderManagementErrorCode,
+    message: string
+  ) {
+    super(message);
+    this.name = 'ProviderCapabilityError';
+  }
+}
+
 function requireId(value: unknown, field: string): string {
   const result = requireNonBlank(value, field);
   if (result.length > 200) throw new TypeError(`${field} is invalid`);
@@ -631,6 +793,10 @@ function requireRecord(value: unknown): Record<string, unknown> {
 }
 
 function mapError(error: unknown): ProviderManagementErrorCode {
+  if (error instanceof ProviderCapabilityError) return error.code;
+  if (error instanceof ProviderRegistryConflictError) {
+    return 'provider_registry_conflict';
+  }
   return error instanceof TypeError ? 'invalid_request' : 'provider_operation_failed';
 }
 
@@ -645,6 +811,7 @@ function failure(
 } {
   const messages = {
     adapter_unavailable: 'The provider adapter is not configured',
+    provider_registry_conflict: 'The provider registry changed; retry the operation',
     provider_not_found: 'The provider was not found',
     connection_not_found: 'The provider connection was not found',
     model_not_found: 'The provider model was not found',

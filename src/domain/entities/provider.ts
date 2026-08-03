@@ -16,6 +16,7 @@ import type {
   ProviderConnectionAdapterBinding,
   ProviderTemplateKind
 } from './provider-package';
+import type { CatalogState } from './provider-catalog';
 
 export const providerAccessCategories = [
   'online',
@@ -274,6 +275,10 @@ export interface ProviderModel {
   readonly revision: number;
   readonly displayName: string;
   readonly capabilityEvidenceId?: CapabilityEvidenceId;
+  readonly activeProfileId?: string;
+  readonly catalogState?: CatalogState;
+  readonly catalogRevision?: number;
+  readonly lastSeenAt?: IsoTimestamp;
   readonly enabled: boolean;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
@@ -442,6 +447,7 @@ export function createProviderModel(
   return {
     ...input,
     schemaVersion: 2,
+    catalogState: input.catalogState ?? 'present',
     providerModelKey: requireNonBlank(
       input.providerModelKey,
       'model.providerModelKey'

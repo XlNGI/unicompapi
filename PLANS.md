@@ -941,3 +941,13 @@ M2 第二支完整门禁为 Node 179 项与 Vitest 405 项，共 584 项通过�
     docs/active/多服务商功能路由-M2-Package与连接合同记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-registry-atomic-catalog`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M2 第三支 `feature/provider-registry-atomic-catalog` 已从 `develop@1dc653c` 建立，实现提交为 `d2688f9`。该支新增单调 `registryRevision`、跨 Store 共享绝对路径协调的 CAS 和 `mutate` 原子更新；ProviderModel 增加 `present/missing/retired`、目录 revision、`lastSeenAt` 与活动 Profile；新增精确 `ProviderModelDefinition`、`ModelFeatureProfileTemplate`、`ModelFeatureProfile` 合同，禁止通过模型名称或未知 JSON 猜测 Profile。
+
+第三支同时将连接验证、目录同步、手工模型登记、能力验证、用户能力记录、路由偏好和模型/连接启停改为最新快照 mutation，目录消失模型被保留但退出候选并强制禁用；`declared` Profile 不进入候选，只有 `verified` Profile 可以参与路由。Vidu 合成验证在 Registry 写入后重新读取最新 revision，未恢复流程 8。
+
+第三支完整门禁为 Node 179 项与 Vitest 409 项，共 588 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、229 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，因此不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-Registry原子目录记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-runtime-authorization-contracts`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。

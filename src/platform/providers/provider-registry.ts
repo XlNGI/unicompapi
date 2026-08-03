@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  catalogStates,
   capabilityEvidenceSources,
   capabilityStates,
   cloneVideoGenerationCapabilitySchema,
@@ -22,8 +23,13 @@ import {
   toProtocolBindingId,
   toProviderId,
   toRoutingPreferenceId,
+  modelProfileStatuses,
   type DynamicParameterSchema,
   type ModelCapabilityEvidence,
+  type ModelFeatureProfile,
+  type ModelFeatureProfileFeature,
+  type ModelFeatureProfileTemplate,
+  type ProviderModelDefinition,
   type Provider,
   type ProviderConnection,
   type ProviderConnectionAdapterBinding,
@@ -38,16 +44,35 @@ import type {
   ProviderIpcResult,
   ProviderRegistryDto
 } from '../../shared/provider-ipc';
+import { sharedFileWriteCoordinator } from '../storage';
 import { createFrozenViduRegistryRecords } from './vidu-protocol-catalog';
 
 export interface ProviderRegistrySnapshot {
   readonly schemaVersion: 2;
+  readonly registryRevision?: number;
   readonly providers: readonly Provider[];
   readonly connections: readonly ProviderConnection[];
   readonly protocolBindings: readonly ProviderProtocolBinding[];
   readonly models: readonly ProviderModel[];
   readonly capabilities: readonly ModelCapabilityEvidence[];
   readonly routingPreferences: readonly RoutingPreference[];
+  readonly modelDefinitions?: readonly ProviderModelDefinition[];
+  readonly modelProfiles?: readonly ModelFeatureProfile[];
+}
+
+export interface ProviderRegistryMutation<T> {
+  readonly snapshot: ProviderRegistrySnapshot;
+  readonly result: T;
+}
+
+export class ProviderRegistryConflictError extends Error {
+  readonly actualRevision: number;
+
+  constructor(actualRevision: number) {
+    super('Provider registry changed before the requested update was applied');
+    this.name = 'ProviderRegistryConflictError';
+    this.actualRevision = actualRevision;
+  }
 }
 
 interface LegacyProviderModel {
@@ -77,25 +102,48 @@ interface LegacyCapabilityEvidence {
 }
 
 export class JsonProviderRegistryStore {
-  private writeQueue: Promise<void> = Promise.resolve();
-
   constructor(private readonly registryPath: string) {}
 
   async load(): Promise<ProviderRegistrySnapshot> {
-    await this.writeQueue;
-    try {
-      return parseSnapshot(JSON.parse(await readFile(this.registryPath, 'utf8')));
-    } catch (error) {
-      if (isNodeError(error) && error.code === 'ENOENT') return emptySnapshot();
-      throw error;
-    }
+    return (await this.readDisk()) ?? emptySnapshot();
   }
 
   async save(snapshot: ProviderRegistrySnapshot): Promise<void> {
     const validated = parseSnapshot(snapshot);
-    const operation = this.writeQueue.then(() => this.write(validated));
-    this.writeQueue = operation.catch(() => undefined);
-    await operation;
+    const expectedRevision = registryRevision(validated);
+    await sharedFileWriteCoordinator.runExclusive(this.registryPath, async () => {
+      const current = await this.readDisk();
+      if (current && registryRevision(current) !== expectedRevision) {
+        throw new ProviderRegistryConflictError(registryRevision(current));
+      }
+      const nextRevision = current
+        ? registryRevision(current) + 1
+        : expectedRevision;
+      await this.write(
+        { ...validated, registryRevision: nextRevision },
+        current
+      );
+    });
+  }
+
+  async mutate<T>(
+    mutator: (
+      snapshot: ProviderRegistrySnapshot
+    ) => ProviderRegistryMutation<T> | Promise<ProviderRegistryMutation<T>>
+  ): Promise<T> {
+    return sharedFileWriteCoordinator.runExclusive(this.registryPath, async () => {
+      const current = await this.readDisk();
+      const base = current ?? emptySnapshot();
+      const mutation = await mutator(base);
+      const next = parseSnapshot({
+        ...mutation.snapshot,
+        registryRevision: current
+          ? registryRevision(current) + 1
+          : registryRevision(base)
+      });
+      await this.write(next, current);
+      return mutation.result;
+    });
   }
 
   async ensureFrozenViduCatalog(): Promise<void> {
@@ -105,15 +153,20 @@ export class JsonProviderRegistryStore {
     await this.save(next);
   }
 
-  private async write(snapshot: ProviderRegistrySnapshot): Promise<void> {
+  private async readDisk(): Promise<ProviderRegistrySnapshot | undefined> {
     try {
-      const current = parseSnapshot(
-        JSON.parse(await readFile(this.registryPath, 'utf8'))
-      );
-      assertCapabilityHistoryPreserved(current, snapshot);
+      return parseSnapshot(JSON.parse(await readFile(this.registryPath, 'utf8')));
     } catch (error) {
-      if (!isNodeError(error) || error.code !== 'ENOENT') throw error;
+      if (isNodeError(error) && error.code === 'ENOENT') return undefined;
+      throw error;
     }
+  }
+
+  private async write(
+    snapshot: ProviderRegistrySnapshot,
+    current: ProviderRegistrySnapshot | undefined
+  ): Promise<void> {
+    if (current) assertCapabilityHistoryPreserved(current, snapshot);
 
     const parent = path.dirname(this.registryPath);
     const temporary = path.join(
@@ -188,6 +241,7 @@ export class ProviderRegistryController {
       return {
         ok: true,
         value: {
+          registryRevision: registryRevision(snapshot),
           providers: snapshot.providers.map((provider) => ({
             providerId: provider.id,
             name: provider.name,
@@ -224,6 +278,10 @@ export class ProviderRegistryController {
             mediaKind: model.mediaKind,
             revision: model.revision,
             capabilityEvidenceId: model.capabilityEvidenceId,
+            activeProfileId: model.activeProfileId,
+            catalogState: model.catalogState ?? 'present',
+            catalogRevision: model.catalogRevision,
+            lastSeenAt: model.lastSeenAt,
             displayName: model.displayName,
             enabled: model.enabled
           })),
@@ -266,12 +324,15 @@ function emptySnapshot(): ProviderRegistrySnapshot {
   const vidu = createFrozenViduRegistryRecords();
   return {
     schemaVersion: 2,
+    registryRevision: 1,
     providers: vidu.providers,
     connections: vidu.connections,
     protocolBindings: vidu.protocolBindings,
     models: vidu.models,
     capabilities: vidu.capabilities,
-    routingPreferences: []
+    routingPreferences: [],
+    modelDefinitions: [],
+    modelProfiles: []
   };
 }
 
@@ -343,12 +404,15 @@ export function migrateProviderRegistrySnapshot(value: unknown): unknown {
 
   return {
     schemaVersion: 2,
+    registryRevision: 1,
     providers,
     connections,
     protocolBindings,
     models,
     capabilities: migratedCapabilities,
-    routingPreferences
+    routingPreferences,
+    modelDefinitions: [],
+    modelProfiles: []
   };
 }
 
@@ -373,6 +437,13 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   const models = migrated.models.map(parseModel);
   const capabilities = migrated.capabilities.map(parseCapability);
   const routingPreferences = migrated.routingPreferences.map(parseRouting);
+  const modelDefinitions = Array.isArray(migrated.modelDefinitions)
+    ? migrated.modelDefinitions.map(parseModelDefinition)
+    : [];
+  const modelProfiles = Array.isArray(migrated.modelProfiles)
+    ? migrated.modelProfiles.map(parseModelProfile)
+    : [];
+  const revision = parseRegistryRevision(migrated.registryRevision);
 
   assertUnique(providers.map((item) => item.id), 'provider');
   assertUnique(connections.map((item) => item.id), 'connection');
@@ -380,6 +451,19 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   assertUnique(models.map((item) => item.id), 'model');
   assertUnique(capabilities.map((item) => item.id), 'capability evidence');
   assertUnique(routingPreferences.map((item) => item.id), 'routing preference');
+  assertUnique(
+    modelDefinitions.map((item) => item.definitionId),
+    'model definition'
+  );
+  assertUnique(
+    modelDefinitions.flatMap((definition) =>
+      definition.profileTemplates.map(
+        (template) => `${definition.packageId}:${template.templateId}`
+      )
+    ),
+    'package profile template'
+  );
+  assertUnique(modelProfiles.map((item) => item.profileId), 'model profile');
   assertUnique(
     connections.flatMap((item) =>
       item.connectionConfigVersionId ? [item.connectionConfigVersionId] : []
@@ -398,6 +482,7 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   const bindingsById = new Map(protocolBindings.map((item) => [item.id, item]));
   const modelsById = new Map(models.map((item) => [item.id, item]));
   const capabilitiesById = new Map(capabilities.map((item) => [item.id, item]));
+  const profilesById = new Map(modelProfiles.map((item) => [item.profileId, item]));
 
   if (
     connections.some((item) => {
@@ -429,7 +514,42 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
       );
     }) ||
     capabilities.some((item) => !modelsById.has(item.modelId)) ||
-    routingPreferences.some((item) => !modelsById.has(item.modelId))
+    routingPreferences.some((item) => !modelsById.has(item.modelId)) ||
+    modelProfiles.some((profile) => {
+      const model = modelsById.get(profile.modelId as ProviderModel['id']);
+      const provider = model ? providersById.get(model.providerId) : undefined;
+      const binding = model
+        ? bindingsById.get(model.protocolBindingId)
+        : undefined;
+      const definition = modelDefinitions.find(
+        (candidate) =>
+          candidate.packageId === profile.packageId &&
+          candidate.providerModelKey === model?.providerModelKey &&
+          candidate.profileTemplates.some(
+            (template) => template.templateId === profile.sourceTemplateId
+          )
+      );
+      const template = definition?.profileTemplates.find(
+        (candidate) => candidate.templateId === profile.sourceTemplateId
+      );
+      return (
+        !model ||
+        model.protocolBindingId !== profile.protocolBindingId ||
+        profile.modelRevision > model.revision ||
+        !provider ||
+        provider.packageId !== profile.packageId ||
+        !binding ||
+        binding.adapterKind !== profile.adapterKey ||
+        !definition ||
+        !template ||
+        template.adapterKey !== profile.adapterKey ||
+        template.protocolDefinitionId !== binding.protocolId ||
+        profile.evidenceIds.some((evidenceId) => {
+          const evidence = capabilitiesById.get(toCapabilityEvidenceId(evidenceId));
+          return !evidence || evidence.modelId !== model.id;
+        })
+      );
+    })
   ) {
     throw new TypeError('Provider registry contains invalid references');
   }
@@ -441,16 +561,26 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
       throw new TypeError('Provider model capability pointer is invalid');
     }
   }
+  for (const model of models) {
+    if (!model.activeProfileId) continue;
+    const profile = profilesById.get(model.activeProfileId);
+    if (!profile || profile.modelId !== model.id) {
+      throw new TypeError('Provider model profile pointer is invalid');
+    }
+  }
   validateCapabilityHistory(capabilities, capabilitiesById);
 
   return {
     schemaVersion: 2,
+    registryRevision: revision,
     providers,
     connections,
     protocolBindings,
     models,
     capabilities,
-    routingPreferences
+    routingPreferences,
+    modelDefinitions,
+    modelProfiles
   };
 }
 
@@ -646,9 +776,121 @@ function parseModel(value: unknown): ProviderModel {
       item.capabilityEvidenceId === undefined
         ? undefined
         : toCapabilityEvidenceId(String(item.capabilityEvidenceId)),
+    activeProfileId:
+      item.activeProfileId === undefined
+        ? undefined
+        : requireStableString(item.activeProfileId),
+    catalogState:
+      item.catalogState === undefined
+        ? 'present'
+        : parseCatalogState(item.catalogState),
+    catalogRevision:
+      item.catalogRevision === undefined
+        ? undefined
+        : requirePositiveIntegerValue(item.catalogRevision),
+    lastSeenAt: optionalTimestamp(item.lastSeenAt),
     enabled: item.enabled,
     createdAt: toIsoTimestamp(String(item.createdAt)),
     updatedAt: toIsoTimestamp(String(item.updatedAt))
+  };
+}
+
+function parseModelDefinition(value: unknown): ProviderModelDefinition {
+  const item = requireRecord(value);
+  if (item.schemaVersion !== 1 || !Array.isArray(item.profileTemplates)) {
+    throw new TypeError('Provider model definition is invalid');
+  }
+  const profileTemplates = item.profileTemplates.map(parseProfileTemplate);
+  assertUnique(
+    profileTemplates.map((template) => template.templateId),
+    'model profile template'
+  );
+  return {
+    schemaVersion: 1,
+    definitionId: requireStableString(item.definitionId),
+    packageId: requireStableString(item.packageId),
+    packageVersion: requireVersionString(item.packageVersion),
+    providerModelKey: requireNonBlankString(item.providerModelKey),
+    profileTemplates
+  };
+}
+
+function parseProfileTemplate(value: unknown): ModelFeatureProfileTemplate {
+  const item = requireRecord(value);
+  if (
+    !Array.isArray(item.features) ||
+    typeof item.adapterKey !== 'string' ||
+    typeof item.protocolDefinitionId !== 'string' ||
+    typeof item.sourceDocumentRevision !== 'string'
+  ) {
+    throw new TypeError('Model profile template is invalid');
+  }
+  const features = item.features.map(parseProfileFeature);
+  assertUnique(
+    features.map((feature) => feature.productFeature),
+    'model profile feature'
+  );
+  return {
+    templateId: requireStableString(item.templateId),
+    adapterKey: requireStableString(item.adapterKey),
+    protocolDefinitionId: requireStableString(item.protocolDefinitionId),
+    features,
+    sourceDocumentRevision: requireNonBlankString(item.sourceDocumentRevision)
+  };
+}
+
+function parseProfileFeature(value: unknown): ModelFeatureProfileFeature {
+  const item = requireRecord(value);
+  return {
+    productFeature: requireStableString(item.productFeature),
+    internalPurpose:
+      item.internalPurpose === undefined
+        ? undefined
+        : requireNonBlankString(item.internalPurpose),
+    parameterSchemaId: requireStableString(item.parameterSchemaId),
+    resultSchemaId: requireStableString(item.resultSchemaId),
+    usageSchemaId: requireStableString(item.usageSchemaId),
+    constraintSetId: requireStableString(item.constraintSetId)
+  };
+}
+
+function parseModelProfile(value: unknown): ModelFeatureProfile {
+  const item = requireRecord(value);
+  if (
+    item.schemaVersion !== 1 ||
+    !Number.isSafeInteger(item.revision) ||
+    Number(item.revision) < 1 ||
+    !Number.isSafeInteger(item.modelRevision) ||
+    Number(item.modelRevision) < 1 ||
+    !Array.isArray(item.features) ||
+    !Array.isArray(item.evidenceIds)
+  ) {
+    throw new TypeError('Model feature profile is invalid');
+  }
+  requireOneOf(item.status, modelProfileStatuses);
+  const features = item.features.map(parseProfileFeature);
+  assertUnique(
+    features.map((feature) => feature.productFeature),
+    'model profile feature'
+  );
+  const evidenceIds = item.evidenceIds.map((evidenceId) =>
+    toCapabilityEvidenceId(String(evidenceId))
+  );
+  assertUnique(evidenceIds, 'model profile evidence');
+  return {
+    schemaVersion: 1,
+    profileId: requireStableString(item.profileId),
+    revision: Number(item.revision),
+    packageId: requireStableString(item.packageId),
+    sourceTemplateId: requireStableString(item.sourceTemplateId),
+    adapterKey: requireStableString(item.adapterKey),
+    modelId: requireStableString(item.modelId),
+    modelRevision: Number(item.modelRevision),
+    protocolBindingId: requireStableString(item.protocolBindingId),
+    status: item.status as ModelFeatureProfile['status'],
+    features,
+    evidenceIds,
+    recordedAt: toIsoTimestamp(String(item.recordedAt))
   };
 }
 
@@ -971,6 +1213,22 @@ function assertUnique(values: readonly string[], label: string): void {
   if (new Set(values).size !== values.length) {
     throw new TypeError(`Provider registry contains duplicate ${label} IDs`);
   }
+}
+
+function registryRevision(value: ProviderRegistrySnapshot): number {
+  return value.registryRevision ?? 1;
+}
+
+function parseRegistryRevision(value: unknown): number {
+  if (value === undefined) return 1;
+  return requirePositiveIntegerValue(value);
+}
+
+function parseCatalogState(
+  value: unknown
+): NonNullable<ProviderModel['catalogState']> {
+  requireOneOf(value, catalogStates);
+  return value as NonNullable<ProviderModel['catalogState']>;
 }
 
 function requireVersionAndName(item: Record<string, unknown>): void {

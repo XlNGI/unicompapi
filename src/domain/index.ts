@@ -9,6 +9,7 @@ export * from './entities/project-context';
 export * from './entities/prompt';
 export * from './entities/provider';
 export * from './entities/provider-package';
+export * from './entities/provider-catalog';
 export * from './entities/provider-operation';
 export * from './entities/settings';
 export * from './entities/task';

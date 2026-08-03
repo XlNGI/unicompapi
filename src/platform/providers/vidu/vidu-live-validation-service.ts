@@ -163,7 +163,10 @@ export class ViduLiveValidationApplicationService {
       await this.options.coordinator.recordCreditsValidation({
         outcome: 'succeeded'
       });
-      await this.installValidationScope(validatedSnapshot, record.validationId);
+      await this.installValidationScope(
+        await this.options.registry.load(),
+        record.validationId
+      );
     } catch {
       await this.stopForLocalStateFailure('flow');
       throw new ViduLiveValidationApplicationError(

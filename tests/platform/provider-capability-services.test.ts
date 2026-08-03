@@ -118,15 +118,7 @@ describe('ProviderCapabilityController', () => {
       ok: true,
       value: {
         purpose: 'fixture_purpose',
-        candidates: [
-          {
-            modelId: registered.value.modelId,
-            priority: 0,
-            costState: 'unknown',
-            privacyState: 'unknown',
-            regionState: 'unknown'
-          }
-        ],
+        candidates: [],
         requiresSubmissionConfirmation: true
       }
     });
