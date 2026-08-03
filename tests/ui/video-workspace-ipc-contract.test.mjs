@@ -74,3 +74,12 @@ test('keeps generation drafts separate from the phase 7 editor', () => {
   assert.doesNotMatch(sharedSource, /timeline|exportPlan|mediaEngine/);
   assert.match(domainSource, /VideoEditHandoffIntent/);
 });
+
+test('video drafts carry explicit feature selection and one image source target', () => {
+  assert.match(sharedSource, /VideoWorkspaceFeatureSelectionDto/);
+  assert.match(sharedSource, /featureSelection/);
+  assert.match(sharedSource, /kind: 'image_source'/);
+  assert.match(domainSource, /defaultVideoFeatureForMode/);
+  assert.match(domainSource, /contextRevision/);
+  assert.match(domainSource, /includeInPrompt/);
+});

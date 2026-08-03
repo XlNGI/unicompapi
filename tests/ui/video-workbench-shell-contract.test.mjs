@@ -23,7 +23,7 @@ test('video workbench uses only the real B1 local draft operations', () => {
   assert.match(workbenchSource, /videoWorkspaces\.list\(\)/);
   assert.match(workbenchSource, /videoWorkspaces\.create\(workspaceMode\)/);
   assert.match(workbenchSource, /videoWorkspaces\.update\(/);
-  assert.match(workbenchSource, /providers[\s\S]{0,50}\.getRegistry\(\)/);
+  assert.doesNotMatch(workbenchSource, /providers[\s\S]{0,50}\.getRegistry\(\)/);
   assert.doesNotMatch(
     workbenchSource,
     /fetch\(|upload|submitTask|createTask|createExecution|invokeExecution|receiveResult|localStorage/
@@ -35,13 +35,12 @@ test('video workbench keeps controlled and blocked states honest', () => {
     '需要先打开项目',
     '正在读取视频工作区',
     '本地视频草稿保存失败',
-    '旧预检已过期',
-    '未发现',
-    '按当前模型能力与草稿事实检查',
-    '由受控素材端口返回真实状态',
-    '没有真实后台适配器时会明确阻断',
-    '不可用',
-    '创建并保存草稿后检查真实提交条件'
+    '视频服务候选',
+    '按当前功能与已保存草稿事实读取',
+    '快速与文生视频无素材；图生视频恰好一张图片',
+    '运行授权',
+    '不会发出请求，也不会伪造进度或结果',
+    '创建并保存草稿后，页面才会读取匹配的安全候选'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }

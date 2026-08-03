@@ -138,6 +138,7 @@ export function App() {
         />
       ) : activeSubItemId === 'quick-video' ? (
         <VideoQuickPage
+          onNavigateToImageToVideo={handleVideoDraftCreated}
           onNavigateToTextToVideo={() =>
             handleSecondaryNavigate('video-creation', 'text-to-video')
           }

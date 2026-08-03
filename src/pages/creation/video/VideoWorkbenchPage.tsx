@@ -3,12 +3,10 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
-import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
 import type { StorageProjectSessionDto } from '../../../shared/storage-ipc';
 import type {
   VideoWorkspaceDraftDto,
-  VideoWorkspaceIpcErrorCode,
-  VideoWorkspaceStaleReasonDto
+  VideoWorkspaceIpcErrorCode
 } from '../../../shared/video-workspace-ipc';
 import '../../../styles/pages.css';
 import type { VideoCreationMode } from '../creationModes';
@@ -40,44 +38,25 @@ const draftStateLabels: Record<VideoWorkspaceDraftDto['state'], string> = {
   archived: '已归档'
 };
 
-const preflightStateLabels: Record<
-  VideoWorkspaceDraftDto['generation']['preflight']['state'],
-  string
-> = {
-  not_created: '尚未检查',
-  current: '检查结果有效',
-  stale: '旧预检已过期'
-};
-
-const staleReasonLabels: Record<VideoWorkspaceStaleReasonDto, string> = {
-  prompt_changed: '提示词已变化',
-  materials_changed: '素材已变化',
-  context_changed: '上下文已变化',
-  shot_plan_changed: '镜头方案已变化',
-  requirements_changed: '关键要求已变化',
-  model_changed: '模型已变化',
-  parameters_changed: '参数已变化'
-};
-
 interface VideoWorkbenchPageProps {
   readonly mode: VideoCreationMode;
   readonly onNavigateToTextToVideo?: () => void;
+  readonly onNavigateToImageToVideo?: (draftId: string) => void;
   readonly preferredDraftId?: string;
 }
 
 export function VideoWorkbenchPage({
   mode,
   onNavigateToTextToVideo,
+  onNavigateToImageToVideo,
   preferredDraftId
 }: VideoWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
-  const providers = window.unicomp?.providers;
   const workspaceMode =
     'workspaceMode' in mode ? mode.workspaceMode : undefined;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [drafts, setDrafts] = useState<readonly VideoWorkspaceDraftDto[]>([]);
-  const [registry, setRegistry] = useState<ProviderRegistryDto>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -95,7 +74,6 @@ export function VideoWorkbenchPage({
       setMessage('');
       setSession(undefined);
       setDrafts([]);
-      setRegistry(undefined);
       setDirty(false);
 
       if (!storage) {
@@ -140,13 +118,6 @@ export function VideoWorkbenchPage({
           );
         }
 
-        if (providers && workspaceMode) {
-          const registryResult = await providers
-            .getRegistry()
-            .catch(() => undefined);
-          if (!active) return;
-          if (registryResult?.ok) setRegistry(registryResult.value);
-        }
       } catch {
         if (active) setMessage('读取本地视频工作区失败，请重试。');
       } finally {
@@ -158,7 +129,7 @@ export function VideoWorkbenchPage({
     return () => {
       active = false;
     };
-  }, [preferredDraftId, providers, storage, videoWorkspaces, workspaceMode]);
+  }, [preferredDraftId, storage, videoWorkspaces, workspaceMode]);
 
   async function createDraft() {
     if (!videoWorkspaces || !session || !workspaceMode || busy) return;
@@ -218,16 +189,6 @@ export function VideoWorkbenchPage({
     setDirty(hasUnsavedChanges);
   }
 
-  const videoRouteModelIds = new Set(
-    registry?.routingPreferences
-      .filter((route) => route.enabled && route.purpose === 'video_generation')
-      .map((route) => route.modelId) ?? []
-  );
-  const videoRouteModelCount = registry
-    ? registry.models.filter(
-        (model) => model.enabled && videoRouteModelIds.has(model.modelId)
-      ).length
-    : undefined;
   const projectStatus = loading
     ? '正在读取'
     : session
@@ -235,15 +196,6 @@ export function VideoWorkbenchPage({
         ? '项目内本地草稿'
         : '阶段 7 未接入'
       : '未打开项目';
-  const preflight = currentDraft?.generation.preflight;
-  const preflightLabel = preflight
-    ? preflight.state === 'stale' && preflight.staleReasons.length > 0
-      ? `${preflightStateLabels.stale}：${preflight.staleReasons
-          .map((reason) => staleReasonLabels[reason])
-          .join('、')}`
-      : preflightStateLabels[preflight.state]
-    : '尚未创建草稿';
-
   return (
     <section
       className="uc-image-workbench uc-video-workbench"
@@ -324,19 +276,16 @@ export function VideoWorkbenchPage({
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
-          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
+          onNavigateToImageToVideo={onNavigateToImageToVideo}
           onNavigateToTextToVideo={onNavigateToTextToVideo}
-          registry={registry}
         />
       ) : currentDraft?.mode === 'text_to_video' ? (
         <VideoTextWorkspace
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
-          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
-          registry={registry}
         />
       ) : currentDraft?.mode === 'image_to_video' ? (
         <VideoImageWorkspace
@@ -345,7 +294,6 @@ export function VideoWorkbenchPage({
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
-          registry={registry}
         />
       ) : (
         <>
@@ -430,29 +378,24 @@ export function VideoWorkbenchPage({
             <>
               <dl className="uc-image-workbench__capability-list">
                 <CapabilityFact
-                  label="已启用视频路由"
-                  value={
-                    videoRouteModelCount === undefined
-                      ? '状态未知'
-                      : videoRouteModelCount === 0
-                        ? '未发现'
-                        : `${videoRouteModelCount} 个`
-                  }
+                  label="视频服务候选"
+                  value="创建并保存草稿后按功能读取"
                 />
                 <CapabilityFact
                   label="视频生成能力"
-                  value="按当前模型能力与草稿事实检查"
+                  value="按当前功能与已保存草稿事实读取"
                 />
-                <CapabilityFact label="动态参数与素材限制" value="由当前模型能力 Schema 提供" />
+                <CapabilityFact label="动态参数" value="由安全 ParameterSchema 提供" />
                 <CapabilityFact
-                  label="素材异常状态"
-                  value="由受控素材端口返回真实状态"
+                  label="素材边界"
+                  value="快速与文生视频无素材；图生视频恰好一张图片"
                 />
-                <CapabilityFact label="预检状态" value={preflightLabel} />
-                <CapabilityFact label="在线适配器" value="不可用" />
+                <CapabilityFact label="运行授权" value="默认关闭" />
                 <CapabilityFact label="费用与外发范围" value="未知" />
               </dl>
-              <Button disabled>创建并保存草稿后检查真实提交条件</Button>
+              <p className="uc-image-quick__hint">
+                创建并保存草稿后，页面才会读取匹配的安全候选。
+              </p>
             </>
           ) : (
             <EmptyState
@@ -469,7 +412,7 @@ export function VideoWorkbenchPage({
         <StatusPill tone="warning">真实离线状态</StatusPill>
         <p>
           {workspaceMode
-            ? '当前使用受控素材、动态能力、预检、提交和结果登记端口；没有真实后台适配器时会明确阻断，不会伪造进度或结果。'
+            ? '当前使用安全候选、动态参数、受控素材和确认提交端口；运行授权关闭时不会发出请求，也不会伪造进度或结果。'
             : '基础编辑将在阶段 7 独立开发；当前入口不会修改源视频，也不会自动执行编辑。'}
         </p>
       </Card>

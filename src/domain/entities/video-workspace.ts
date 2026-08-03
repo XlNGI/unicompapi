@@ -74,6 +74,20 @@ export type VideoDynamicParameterValue =
 export interface VideoContextReference {
   readonly kind: VideoContextKind;
   readonly referenceId: string;
+  readonly contextRevision?: number;
+  readonly includeInPrompt?: boolean;
+}
+
+export type VideoWorkspaceProductFeature =
+  | 'text_to_video'
+  | 'image_to_video';
+
+export interface VideoFeatureSelection {
+  readonly productFeature: VideoWorkspaceProductFeature;
+  readonly candidateId?: string;
+  readonly parameterSchemaId?: string;
+  readonly parameterSchemaRevision?: number;
+  readonly parameterValues: Readonly<Record<string, VideoDynamicParameterValue>>;
 }
 
 export interface VideoModelSelection {
@@ -180,6 +194,7 @@ interface VideoWorkspaceDraftBase {
   readonly origin: VideoWorkspaceOrigin;
   readonly prompt: PromptSnapshot;
   readonly contextReferences: readonly VideoContextReference[];
+  readonly featureSelection?: VideoFeatureSelection;
   readonly generation: VideoGenerationWorkspace;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
@@ -257,6 +272,10 @@ export function createEmptyVideoWorkspaceDraft<
     origin: input.origin ?? { kind: 'new' as const },
     prompt: emptyPrompt(),
     contextReferences: [],
+    featureSelection: {
+      productFeature: defaultVideoFeatureForMode(input.mode),
+      parameterValues: {}
+    },
     generation: emptyGeneration(),
     createdAt: input.createdAt,
     updatedAt: input.createdAt
@@ -326,13 +345,34 @@ export function deriveVideoWorkspaceDraft(input: {
     }
   });
 
-  return {
+  const shared = {
     ...derived,
     prompt: clonePrompt(input.source.prompt),
     contextReferences: input.source.contextReferences.map((reference) => ({
       ...reference
-    }))
+    })),
+    featureSelection: derived.featureSelection
   };
+
+  if (
+    shared.mode === 'image_to_video' &&
+    input.source.mode === 'quick_video' &&
+    input.source.quick.reference?.mediaKind === 'image'
+  ) {
+    return {
+      ...shared,
+      featureSelection: {
+        productFeature: 'image_to_video',
+        parameterValues: {}
+      },
+      imageToVideo: {
+        ...shared.imageToVideo,
+        source: { ...input.source.quick.reference }
+      }
+    };
+  }
+
+  return shared;
 }
 
 export function createVideoEditHandoffIntent(
@@ -477,6 +517,7 @@ export function isVideoWorkspaceDraft(
       'origin',
       'prompt',
       'contextReferences',
+      'featureSelection',
       'generation',
       'createdAt',
       'updatedAt',
@@ -489,6 +530,8 @@ export function isVideoWorkspaceDraft(
     !isVideoWorkspaceOrigin(value.origin) ||
     !isPromptSnapshot(value.prompt) ||
     !isVideoContextReferences(value.contextReferences) ||
+    (value.featureSelection !== undefined &&
+      !isVideoFeatureSelection(value.featureSelection, value.mode)) ||
     !isVideoGenerationWorkspace(value.generation) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
@@ -617,12 +660,64 @@ function isVideoContextReferences(value: unknown): boolean {
     value.every(
       (reference) =>
         isRecord(reference) &&
-        hasOnlyKeys(reference, ['kind', 'referenceId']) &&
+        hasOnlyKeys(reference, [
+          'kind',
+          'referenceId',
+          'contextRevision',
+          'includeInPrompt'
+        ]) &&
         isOneOf(reference.kind, videoContextKinds) &&
-        isNonBlankString(reference.referenceId)
+        isNonBlankString(reference.referenceId) &&
+        (reference.kind !== 'project_context'
+          ? reference.contextRevision === undefined &&
+            reference.includeInPrompt === undefined
+          : reference.contextRevision === undefined
+            ? reference.includeInPrompt === undefined
+            : Number.isSafeInteger(reference.contextRevision) &&
+              Number(reference.contextRevision) >= 1 &&
+              typeof reference.includeInPrompt === 'boolean')
     ) &&
     new Set(keys).size === keys.length
   );
+}
+
+function isVideoFeatureSelection(
+  value: unknown,
+  mode: VideoWorkspaceMode
+): boolean {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      'productFeature',
+      'candidateId',
+      'parameterSchemaId',
+      'parameterSchemaRevision',
+      'parameterValues'
+    ]) ||
+    value.productFeature !== defaultVideoFeatureForMode(mode) ||
+    !isRecord(value.parameterValues) ||
+    !Object.values(value.parameterValues).every(isVideoDynamicParameterValue)
+  ) {
+    return false;
+  }
+  const hasCandidate = value.candidateId !== undefined;
+  const hasSchemaId = value.parameterSchemaId !== undefined;
+  const hasSchemaRevision = value.parameterSchemaRevision !== undefined;
+  if (hasCandidate !== hasSchemaId || hasCandidate !== hasSchemaRevision) {
+    return false;
+  }
+  return !hasCandidate || (
+    isNonBlankString(value.candidateId) &&
+    isNonBlankString(value.parameterSchemaId) &&
+    Number.isSafeInteger(value.parameterSchemaRevision) &&
+    Number(value.parameterSchemaRevision) >= 1
+  );
+}
+
+export function defaultVideoFeatureForMode(
+  mode: VideoWorkspaceMode
+): VideoWorkspaceProductFeature {
+  return mode === 'image_to_video' ? 'image_to_video' : 'text_to_video';
 }
 
 function isVideoGenerationWorkspace(value: unknown): boolean {

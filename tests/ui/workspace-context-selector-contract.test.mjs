@@ -44,6 +44,6 @@ test('selector pins project contexts while saved conversations remain ID-only', 
   assert.match(selector, /candidate\.revision\s*\n\s*\)}/);
   assert.match(selector, /includeInPrompt: true/);
   assert.match(image, /projectContextsOnly/);
-  assert.doesNotMatch(video, /projectContextsOnly/);
+  assert.match(video, /projectContextsOnly/);
   assert.doesNotMatch(selector, /absolutePath|checksumSha256|apiKey|endpoint|remoteOperationId/);
 });

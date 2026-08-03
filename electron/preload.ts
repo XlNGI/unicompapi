@@ -24,6 +24,10 @@ import {
   type VideoWorkspaceApi
 } from '../src/shared/video-workspace-ipc';
 import {
+  videoFeatureIpcChannels,
+  type VideoFeatureApi
+} from '../src/shared/video-feature-ipc';
+import {
   videoSubmissionIpcChannels,
   type VideoSubmissionApi
 } from '../src/shared/video-submission-ipc';
@@ -174,6 +178,33 @@ const imageFeatures: ImageFeatureApi = {
     confirmationId,
     confirmed
   ) => ipcRenderer.invoke(imageFeatureIpcChannels.submitDraft, {
+    draftId,
+    draftUpdatedAt,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  })
+};
+
+const videoFeatures: VideoFeatureApi = {
+  listCandidates: (draftId, draftUpdatedAt) =>
+    ipcRenderer.invoke(videoFeatureIpcChannels.listCandidates, {
+      draftId,
+      draftUpdatedAt
+    }),
+  prepareSubmission: (draftId, draftUpdatedAt, candidateId) =>
+    ipcRenderer.invoke(videoFeatureIpcChannels.prepareSubmission, {
+      draftId,
+      draftUpdatedAt,
+      candidateId
+    }),
+  submitDraft: (
+    draftId,
+    draftUpdatedAt,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  ) => ipcRenderer.invoke(videoFeatureIpcChannels.submitDraft, {
     draftId,
     draftUpdatedAt,
     routeSelectionToken,
@@ -592,6 +623,7 @@ contextBridge.exposeInMainWorld('unicomp', {
   chatContexts,
   imageSubmissions,
   imageFeatures,
+  videoFeatures,
   imageWorkspaces,
   videoSubmissions,
   videoEditors,

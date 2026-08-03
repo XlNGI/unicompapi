@@ -2,113 +2,46 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const textSource = await readFile(
-  'src/pages/creation/video/VideoTextWorkspace.tsx',
-  'utf8'
-);
-const controlsSource = await readFile(
-  'src/pages/creation/video/VideoGenerationControls.tsx',
-  'utf8'
-);
-const shellSource = await readFile(
-  'src/pages/creation/video/VideoWorkbenchPage.tsx',
-  'utf8'
-);
-const selectorSource = await readFile(
-  'src/pages/creation/WorkspaceContextSelector.tsx',
-  'utf8'
-);
-const bundle = `${textSource}\n${controlsSource}\n${shellSource}\n${selectorSource}`;
+const source = await readFile('src/pages/creation/video/VideoTextWorkspace.tsx', 'utf8');
+const panel = await readFile('src/pages/creation/video/VideoFeatureSubmissionPanel.tsx', 'utf8');
+const selector = await readFile('src/pages/creation/WorkspaceContextSelector.tsx', 'utf8');
+const bundle = `${source}\n${panel}\n${selector}`;
 
-test('text to video keeps the main workflow compact and ordered', () => {
-  for (const className of [
-    'uc-video-text__main',
-    'uc-video-text__work-grid',
-    'uc-video-text__materials',
-    'uc-video-text__shots',
-    'uc-video-text__prompt',
-    'uc-video-text__submit'
-  ]) {
-    assert.match(textSource, new RegExp(className));
-  }
+test('text-to-video is fixed to text input and pinned project context', () => {
+  assert.match(source, /productFeature !== 'text_to_video'/);
+  assert.match(source, /WorkspaceContextSelector/);
+  assert.match(source, /projectContextsOnly/);
+  assert.match(source, /contextRevision === undefined/);
+  assert.match(source, /includeInPrompt === undefined/);
+  assert.match(selector, /includeInPrompt: true/);
 });
 
-test('text to video keeps text sources and contexts explicit', () => {
-  for (const text of [
-    '短创意',
-    '长文本 / 故事 / 脚本',
-    '项目素材',
-    '项目上下文',
-    '已保存的对话',
-    '已明确选择',
-    '候选只在点击后读取'
-  ]) {
-    assert.match(bundle, new RegExp(text.replace(/\//g, '\\/')));
-  }
-  assert.doesNotMatch(
-    bundle,
-    /localStorage|selectContext\(|loadProjectContext\(|loadConversation\(|getConversation\(/
-  );
-  assert.match(textSource, /WorkspaceContextSelector/);
+test('text-to-video exposes no material selection and handles legacy slots explicitly', () => {
+  assert.match(source, /removeLegacyMaterials/);
+  assert.match(source, /明确移除旧素材槽位/);
+  assert.doesNotMatch(source, /selectMaterial\(|getMaterial\(|createMaterialPreview\(/);
+  assert.doesNotMatch(source, /schema\.materialSlots|acceptedMediaKinds/);
 });
 
-test('text to video uses dynamic slots and controlled local media only', () => {
-  for (const operation of [
-    'selectMaterial',
-    'getMaterial',
-    'clearMaterial',
-    'createMaterialPreview'
-  ]) {
-    assert.match(textSource, new RegExp(`\\.${operation}\\(`));
-  }
-  assert.match(textSource, /schema\.materialSlots\.map/);
-  assert.match(textSource, /acceptedMediaKinds/);
-  assert.doesNotMatch(
-    bundle,
-    /absolutePath|remoteOperationId|upload\(|analy[sz]e\(|fetch\(/
-  );
+test('text-to-video can explicitly remove unsupported legacy contexts', () => {
+  assert.match(source, /removeUnsupportedContexts/);
+  assert.match(source, /明确移除旧上下文/);
+  assert.match(source, /reference\.kind === 'project_context'/);
+  assert.match(source, /reference\.contextRevision !== undefined/);
+  assert.match(source, /reference\.includeInPrompt !== undefined/);
 });
 
-test('text to video keeps editable shots and storyboard local', () => {
-  for (const text of [
-    '镜头方案与分镜状态',
-    '添加镜头',
-    '主体动作',
-    '运镜',
-    '节奏',
-    '景深',
-    '上移',
-    '下移',
-    '删除镜头',
-    '生成镜头草稿（缺少真实端口）',
-    '生成分镜草稿（缺少真实端口）'
-  ]) {
-    assert.match(bundle, new RegExp(text.replace(/[（）]/g, '\\$&')));
+test('text-to-video keeps prompt and shot planning local', () => {
+  for (const fact of ['originalInput', 'finalPrompt', 'sourceKind', 'shots', '添加镜头']) {
+    assert.match(source, new RegExp(fact));
   }
-  assert.match(textSource, /minimumShots/);
-  assert.match(textSource, /maximumShots/);
+  assert.match(source, /emptyStoryboard/);
+  assert.doesNotMatch(bundle, /fetch\(|upload\(|analy[sz]e\(|absolutePath/);
 });
 
-test('text to video preserves three prompt layers and separated submission', () => {
-  for (const text of [
-    '用户原始输入',
-    '系统补充内容',
-    '最终提交提示词',
-    '检查提交条件',
-    '逐项确认本次视频提交',
-    '创建视频任务',
-    '创建执行记录',
-    '提交视频生成',
-    'adapter_unavailable'
-  ]) {
-    assert.match(bundle, new RegExp(text));
-  }
-  for (const operation of [
-    'preflight',
-    'createTask',
-    'createExecution',
-    'invokeExecution'
-  ]) {
-    assert.match(textSource, new RegExp(`\\.${operation}\\(`));
-  }
+test('text-to-video uses only the unified candidate and confirmation panel', () => {
+  assert.match(source, /VideoFeatureSubmissionPanel/);
+  assert.match(panel, /routeSelectionToken/);
+  assert.match(panel, /confirmationId/);
+  assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
 });

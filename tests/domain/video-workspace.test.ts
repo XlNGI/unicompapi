@@ -56,6 +56,11 @@ describe('video workspace contracts', () => {
     expect(drafts.every((draft) => draft.state === 'editing')).toBe(true);
     expect(drafts.every((draft) => !('taskId' in draft))).toBe(true);
     expect(drafts.every((draft) => !('absolutePath' in draft))).toBe(true);
+    expect(drafts.map((draft) => draft.featureSelection?.productFeature)).toEqual([
+      'text_to_video',
+      'text_to_video',
+      'image_to_video'
+    ]);
   });
 
   it('keeps quick video to one optional explicit reference', () => {
@@ -248,6 +253,55 @@ describe('video workspace contracts', () => {
     if (derived.mode !== 'text_to_video') throw new Error('unexpected mode');
     expect(derived.textToVideo.materials).toBeUndefined();
     expect('taskId' in derived).toBe(false);
+  });
+
+  it('migrates one legacy quick image only through an explicit image-to-video derivation', () => {
+    const base = createEmpty('quick_video');
+    if (base.mode !== 'quick_video') throw new Error('unexpected mode');
+    const source = createVideoWorkspaceDraft({
+      ...base,
+      quick: {
+        reference: {
+          assetId: toAssetId('asset-legacy-quick-image'),
+          mediaKind: 'image',
+          role: 'legacy-reference',
+          selectedAt: t0
+        }
+      }
+    });
+    const derived = deriveVideoWorkspaceDraft({
+      id: toDraftId('draft-derived-image-video'),
+      source,
+      targetMode: 'image_to_video',
+      createdAt: t1
+    });
+    if (derived.mode !== 'image_to_video') throw new Error('unexpected mode');
+    expect(derived.imageToVideo.source?.assetId).toBe('asset-legacy-quick-image');
+    expect(derived.featureSelection).toEqual({
+      productFeature: 'image_to_video',
+      parameterValues: {}
+    });
+    expect(source.quick.reference?.assetId).toBe('asset-legacy-quick-image');
+  });
+
+  it('requires complete candidate and pinned context selection shapes', () => {
+    const text = createEmpty('text_to_video');
+    expect(isVideoWorkspaceDraft({
+      ...text,
+      featureSelection: {
+        productFeature: 'text_to_video',
+        candidateId: 'candidate-only',
+        parameterValues: {}
+      }
+    })).toBe(false);
+    expect(isVideoWorkspaceDraft({
+      ...text,
+      contextReferences: [{
+        kind: 'project_context',
+        referenceId: 'context-1',
+        contextRevision: 1
+      }]
+    })).toBe(false);
   });
 
   it('marks prompt, shot, material and requirement dependent facts stale', () => {

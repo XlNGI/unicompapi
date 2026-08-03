@@ -81,7 +81,9 @@ function box(type: string, payload: Buffer): Buffer {
   return Buffer.concat([header, payload]);
 }
 
-async function createFixture(mode: 'quick_video' | 'text_to_video' = 'quick_video') {
+async function createFixture(
+  mode: 'quick_video' | 'text_to_video' | 'image_to_video' = 'quick_video'
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-video-material-'));
   roots.push(root);
   const projectRoot = path.join(root, 'project');
@@ -173,6 +175,41 @@ async function createFixture(mode: 'quick_video' | 'text_to_video' = 'quick_vide
 }
 
 describe('VideoReferenceMediaController', () => {
+  it('binds exactly one verified image to the image-to-video source target', async () => {
+    const fixture = await createFixture('image_to_video');
+    fixture.selectImage();
+    const target = { kind: 'image_source' } as const;
+    const selected = await fixture.controller.selectMaterial({
+      draftId: fixture.draft.id,
+      target,
+      mediaKind: 'image'
+    });
+    if (!selected.ok || selected.value.cancelled) throw fixture.getLastError();
+    expect(selected.value).toMatchObject({
+      draft: {
+        imageToVideo: {
+          source: {
+            mediaKind: 'image',
+            role: 'image_to_video_source'
+          }
+        }
+      },
+      material: { mediaKind: 'image', mimeType: 'image/png' }
+    });
+    await expect(fixture.controller.selectMaterial({
+      draftId: fixture.draft.id,
+      target,
+      mediaKind: 'video'
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'material_type_mismatch' }
+    });
+    await expect(fixture.controller.getMaterial({
+      draftId: fixture.draft.id,
+      target
+    })).resolves.toEqual({ ok: true, value: selected.value.material });
+  });
+
   it('registers a verified external video without exposing its path or hash', async () => {
     const fixture = await createFixture();
     const result = await fixture.controller.selectMaterial({
