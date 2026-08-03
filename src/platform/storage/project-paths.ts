@@ -51,6 +51,9 @@ export const projectStoragePaths = {
     ),
     localResultObservations: toProjectRelativePath(
       'entities/local-result-observations.json'
+    ),
+    providerExecutionRouteSnapshots: toProjectRelativePath(
+      'entities/provider-execution-route-snapshots.json'
     )
   },
   journals: {

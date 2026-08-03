@@ -31,6 +31,7 @@ import type {
   UsageAvailabilityOverride,
   UsageSchemaV1
 } from '../entities/provider-usage';
+import type { ProviderExecutionRouteSnapshotV1 } from '../entities/provider-execution-route';
 import type {
   ModelCapabilityEvidence,
   Provider,
@@ -50,6 +51,7 @@ import type {
   ProjectId,
   ProjectContextDraftId,
   ProjectContextId,
+  ProviderExecutionRouteSnapshotId,
   ProviderInvocationAttemptId,
   ProviderInvocationEventId,
   ProviderUsageObservationId,
@@ -119,6 +121,13 @@ export interface LocalResultObservationRepository {
   get(id: LocalResultObservationId): Promise<LocalResultObservationV1 | undefined>;
   list(attemptId?: ProviderInvocationAttemptId): Promise<readonly LocalResultObservationV1[]>;
   append(observation: LocalResultObservationV1): Promise<void>;
+}
+
+export interface ProviderExecutionRouteSnapshotRepository {
+  readonly projectId: ProjectId;
+  get(id: ProviderExecutionRouteSnapshotId): Promise<ProviderExecutionRouteSnapshotV1 | undefined>;
+  list(): Promise<readonly ProviderExecutionRouteSnapshotV1[]>;
+  save(snapshot: ProviderExecutionRouteSnapshotV1): Promise<void>;
 }
 
 export interface ProjectContextRepository {
