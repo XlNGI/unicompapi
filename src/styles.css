@@ -23,7 +23,7 @@
 html,
 body,
 #root {
-  min-width: 1080px;
+  min-width: 800px;
   min-height: 720px;
 }
 
@@ -524,6 +524,52 @@ button {
 
 .platform-card strong {
   font-size: 26px;
+}
+
+@media (max-width: 900px) {
+  .title-bar {
+    grid-template-columns: 136px minmax(0, 1fr) auto;
+  }
+
+  .title-bar__brand {
+    padding-inline: 10px;
+  }
+
+  .title-bar__project {
+    max-width: 230px;
+  }
+
+  .title-bar__utility {
+    gap: 0;
+    padding-inline: var(--uc-space-2);
+  }
+
+  .title-bar__utility span,
+  .theme-switch__trigger > span:not(.theme-switch__icon):not(.theme-switch__chevron) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .app-body {
+    grid-template-columns: 136px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding-inline: 8px;
+  }
+
+  .nav-item {
+    padding-inline: var(--uc-space-2);
+  }
+
+  .nav-sublist {
+    margin-left: 14px;
+    padding-left: 6px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

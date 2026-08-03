@@ -10,6 +10,7 @@ export * from './provider-operation-router';
 export * from './provider-execution-route-dispatcher';
 export * from './conversation-response-streaming';
 export * from './project-conversation-response';
+export * from './project-image-feature';
 export * from './provider-feature-candidates';
 export * from './provider-registry-feature-candidates';
 export * from './provider-submission-orchestrator';

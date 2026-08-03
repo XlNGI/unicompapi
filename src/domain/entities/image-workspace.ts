@@ -92,6 +92,23 @@ export interface ImageInputReference {
 export interface ImageContextReference {
   readonly kind: ImageContextKind;
   readonly referenceId: string;
+  readonly contextRevision?: number;
+  readonly includeInPrompt?: boolean;
+}
+
+export type ImageWorkspaceProductFeature =
+  | 'image_understanding'
+  | 'image_to_prompt'
+  | 'text_to_image'
+  | 'reference_to_image'
+  | 'image_edit';
+
+export interface ImageFeatureSelection {
+  readonly productFeature: ImageWorkspaceProductFeature;
+  readonly candidateId?: string;
+  readonly parameterSchemaId?: string;
+  readonly parameterSchemaRevision?: number;
+  readonly parameterValues: Readonly<Record<string, DynamicParameterValue>>;
 }
 
 export interface ImageModelSelection {
@@ -185,6 +202,7 @@ interface ImageWorkspaceDraftBase {
   readonly prompt: PromptSnapshot;
   readonly input?: ImageInputReference;
   readonly contextReferences: readonly ImageContextReference[];
+  readonly featureSelection?: ImageFeatureSelection;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -264,6 +282,10 @@ export function createEmptyImageWorkspaceDraft<
     origin: input.origin ?? { kind: 'new' as const },
     prompt: emptyPrompt(),
     contextReferences: [],
+    featureSelection: {
+      productFeature: defaultImageFeatureForMode(input.mode),
+      parameterValues: {}
+    },
     createdAt: input.createdAt,
     updatedAt: input.createdAt
   };
@@ -353,7 +375,16 @@ export function deriveImageWorkspaceDraft(input: {
       : undefined,
     contextReferences: input.source.contextReferences.map((reference) => ({
       ...reference
-    }))
+    })),
+    featureSelection:
+      input.targetMode === 'professional_image' &&
+      input.source.mode === 'quick_image' &&
+      sourceInput
+        ? {
+            productFeature: 'reference_to_image' as const,
+            parameterValues: {}
+          }
+        : derived.featureSelection
   };
 
   if (shared.mode === 'image_editing' && sourceInput) {
@@ -511,6 +542,7 @@ export function isImageWorkspaceDraft(
       'prompt',
       'input',
       'contextReferences',
+      'featureSelection',
       'createdAt',
       'updatedAt',
       modeField
@@ -528,6 +560,8 @@ export function isImageWorkspaceDraft(
     !isPromptSnapshot(value.prompt) ||
     (value.input !== undefined && !isImageInput(value.input, value.mode)) ||
     !isContextReferences(value.contextReferences) ||
+    (value.featureSelection !== undefined &&
+      !isFeatureSelection(value.featureSelection, value.mode)) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt)
   ) {
@@ -632,13 +666,87 @@ function isContextReferences(value: unknown): boolean {
   return (
     Array.isArray(value) &&
     value.every(
-      (reference) =>
-        isRecord(reference) &&
-        hasOnlyKeys(reference, ['kind', 'referenceId']) &&
-        isOneOf(reference.kind, imageContextKinds) &&
-        isNonBlankString(reference.referenceId)
+      (reference) => {
+        if (
+          !isRecord(reference) ||
+          !hasOnlyKeys(reference, [
+            'kind',
+            'referenceId',
+            'contextRevision',
+            'includeInPrompt'
+          ]) ||
+          !isOneOf(reference.kind, imageContextKinds) ||
+          !isNonBlankString(reference.referenceId)
+        ) {
+          return false;
+        }
+        if (reference.kind !== 'project_context') {
+          return reference.contextRevision === undefined &&
+            reference.includeInPrompt === undefined;
+        }
+        if (reference.contextRevision === undefined) {
+          return reference.includeInPrompt === undefined;
+        }
+        return Number.isSafeInteger(reference.contextRevision) &&
+          Number(reference.contextRevision) >= 1 &&
+          typeof reference.includeInPrompt === 'boolean';
+      }
     )
   );
+}
+
+function isFeatureSelection(
+  value: unknown,
+  mode: ImageWorkspaceMode
+): boolean {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      'productFeature',
+      'candidateId',
+      'parameterSchemaId',
+      'parameterSchemaRevision',
+      'parameterValues'
+    ]) ||
+    !imageFeaturesForMode(mode).includes(
+      value.productFeature as ImageWorkspaceProductFeature
+    ) ||
+    !isRecord(value.parameterValues) ||
+    !Object.values(value.parameterValues).every(isDynamicParameterValue)
+  ) {
+    return false;
+  }
+  const hasCandidate = value.candidateId !== undefined;
+  const hasSchemaId = value.parameterSchemaId !== undefined;
+  const hasSchemaRevision = value.parameterSchemaRevision !== undefined;
+  if (hasCandidate !== hasSchemaId || hasCandidate !== hasSchemaRevision) {
+    return false;
+  }
+  return !hasCandidate || (
+    isNonBlankString(value.candidateId) &&
+    isNonBlankString(value.parameterSchemaId) &&
+    Number.isSafeInteger(value.parameterSchemaRevision) &&
+    Number(value.parameterSchemaRevision) >= 1
+  );
+}
+
+export function defaultImageFeatureForMode(
+  mode: ImageWorkspaceMode
+): ImageWorkspaceProductFeature {
+  if (mode === 'quick_image' || mode === 'professional_image') {
+    return 'text_to_image';
+  }
+  if (mode === 'image_understanding') return 'image_understanding';
+  if (mode === 'image_to_prompt') return 'image_to_prompt';
+  return 'image_edit';
+}
+
+function imageFeaturesForMode(
+  mode: ImageWorkspaceMode
+): readonly ImageWorkspaceProductFeature[] {
+  return mode === 'professional_image'
+    ? ['text_to_image', 'reference_to_image']
+    : [defaultImageFeatureForMode(mode)];
 }
 
 function isGenerationWorkspace(value: unknown): boolean {

@@ -39,7 +39,10 @@ function pngHeader(width: number, height: number, suffix = '') {
   return Buffer.concat([buffer, Buffer.from(suffix)]);
 }
 
-async function createFixture(options: { readonly analyzed?: boolean } = {}) {
+async function createFixture(options: {
+  readonly analyzed?: boolean;
+  readonly quick?: boolean;
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-input-'));
   roots.push(root);
   const selectedPath = path.join(root, 'selected-image.dat');
@@ -53,7 +56,11 @@ async function createFixture(options: { readonly analyzed?: boolean } = {}) {
   const base = createEmptyImageWorkspaceDraft({
     id: toDraftId('draft-image-input'),
     projectId,
-    mode: options.analyzed ? 'image_to_prompt' : 'quick_image',
+    mode: options.analyzed
+      ? 'image_to_prompt'
+      : options.quick
+        ? 'quick_image'
+        : 'professional_image',
     createdAt: t0
   });
   const draft = options.analyzed && base.mode === 'image_to_prompt'
@@ -67,7 +74,16 @@ async function createFixture(options: { readonly analyzed?: boolean } = {}) {
           analyzedAt: t0
         }
       })
-    : base;
+    : base.mode === 'professional_image'
+      ? createImageWorkspaceDraft({
+          ...base,
+          state: 'saved',
+          featureSelection: {
+            productFeature: 'reference_to_image',
+            parameterValues: {}
+          }
+        })
+      : base;
   await workspaceRepository.save(draft);
   const handles = new LocalMediaHandleRegistry(
     () => Date.parse('2026-07-23T03:10:00.000Z')
@@ -183,6 +199,20 @@ describe('ImageLocalMediaController', () => {
     await expect(
       fixture.storage.readJson(projectStoragePaths.entities.works)
     ).resolves.toBeUndefined();
+  });
+
+  it('rejects image selection from quick text-to-image before opening media', async () => {
+    const fixture = await createFixture({ quick: true });
+    await expect(fixture.controller.selectInput({ draftId: fixture.draft.id }))
+      .resolves.toMatchObject({
+        ok: false,
+        error: { code: 'invalid_request' }
+      });
+    await expect(
+      new JsonAssetRepository(fixture.storage, fixture.projectId).list(
+        fixture.projectId
+      )
+    ).resolves.toEqual([]);
   });
 
   it('creates a short-lived preview handle only after re-verification', async () => {

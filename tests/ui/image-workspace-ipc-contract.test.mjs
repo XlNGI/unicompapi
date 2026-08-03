@@ -18,6 +18,7 @@ test('exposes only the controlled local image workspace operations', () => {
     'list',
     'derive',
     'selectInput',
+    'clearInput',
     'getInput',
     'createInputPreview'
   ]) {
@@ -40,6 +41,9 @@ test('exposes only the controlled local image workspace operations', () => {
     sharedSource,
     /rootDirectory|absolutePath|checksumSha256|credentialReference|errorStack/
   );
+  assert.match(sharedSource, /featureSelection/);
+  assert.match(sharedSource, /contextRevision/);
+  assert.match(sharedSource, /includeInPrompt/);
   assert.doesNotMatch(
     sharedSource,
     /upload|generateImage|analyzeImage|submitTask|createTask|rendererPath/

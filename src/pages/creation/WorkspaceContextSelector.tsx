@@ -16,6 +16,8 @@ import type {
 export interface WorkspaceContextReference {
   readonly kind: 'project_asset' | 'project_context' | 'saved_conversation';
   readonly referenceId: string;
+  readonly contextRevision?: number;
+  readonly includeInPrompt?: boolean;
 }
 
 interface WorkspaceContextSelectorProps {
@@ -23,6 +25,7 @@ interface WorkspaceContextSelectorProps {
   readonly references: readonly WorkspaceContextReference[];
   readonly onChange: (references: readonly WorkspaceContextReference[]) => void;
   readonly onMessage: (message: string) => void;
+  readonly projectContextsOnly?: boolean;
 }
 
 type SelectableKind = 'project_context' | 'saved_conversation';
@@ -57,7 +60,8 @@ export function WorkspaceContextSelector({
   disabled = false,
   references,
   onChange,
-  onMessage
+  onMessage,
+  projectContextsOnly = false
 }: WorkspaceContextSelectorProps) {
   const chat = window.unicomp?.chatContexts;
   const settings = window.unicomp?.settings;
@@ -131,12 +135,35 @@ export function WorkspaceContextSelector({
     }
   }
 
-  function toggle(kind: SelectableKind, referenceId: string, checked: boolean) {
+  function toggle(
+    kind: SelectableKind,
+    referenceId: string,
+    checked: boolean,
+    contextRevision?: number
+  ) {
+    if (kind === 'project_context' && contextRevision === undefined) {
+      onMessage('项目上下文 revision 无效，请重新读取候选。');
+      return;
+    }
     const exists = references.some(
       (reference) => reference.kind === kind && reference.referenceId === referenceId
     );
-    if (checked && !exists) {
-      onChange([...references, { kind, referenceId }]);
+    if (checked) {
+      const next = kind === 'project_context'
+        ? {
+            kind,
+            referenceId,
+            contextRevision,
+            includeInPrompt: true
+          } as const
+        : { kind, referenceId } as const;
+      onChange([
+        ...references.filter(
+          (reference) =>
+            reference.kind !== kind || reference.referenceId !== referenceId
+        ),
+        next
+      ]);
     } else if (!checked && exists) {
       onChange(
         references.filter(
@@ -148,11 +175,14 @@ export function WorkspaceContextSelector({
   }
 
   const candidates = openKind === 'project_context' ? contexts : conversations;
+  const visibleSections = projectContextsOnly
+    ? sections.filter((section) => section.kind === 'project_context')
+    : sections;
 
   return (
     <>
       <div className="uc-image-professional__contexts">
-        {sections.map((section) => {
+        {visibleSections.map((section) => {
           const count = references.filter((reference) => reference.kind === section.kind).length;
           const permitted = section.kind === 'project_asset'
             ? false
@@ -238,8 +268,19 @@ export function WorkspaceContextSelector({
                 ? contexts.map((candidate) => (
                     <label key={candidate.contextId}>
                       <input
-                        checked={references.some((item) => item.kind === openKind && item.referenceId === candidate.contextId)}
-                        onChange={(event) => toggle(openKind, candidate.contextId, event.target.checked)}
+                        checked={references.some(
+                          (item) =>
+                            item.kind === openKind &&
+                            item.referenceId === candidate.contextId &&
+                            item.contextRevision === candidate.revision &&
+                            item.includeInPrompt === true
+                        )}
+                        onChange={(event) => toggle(
+                          openKind,
+                          candidate.contextId,
+                          event.target.checked,
+                          candidate.revision
+                        )}
                         type="checkbox"
                       />
                       <span>

@@ -18,5 +18,6 @@ export * from './video-submission-controller';
 export * from './settings-controller';
 export * from './conversation-controller';
 export * from './conversation-response-controller';
+export * from './image-feature-controller';
 export * from './project-context-controller';
 export * from './chat-context-runtime';

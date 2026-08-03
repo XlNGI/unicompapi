@@ -66,6 +66,7 @@ export class ImageLocalMediaController {
         const draftId = parseDraftId(request);
         const context = this.createContext();
         const draft = await requireDraft(context.workspaceRepository, draftId);
+        assertInputSelectionAllowed(draft);
         const selectedPath = await this.dependencies.chooseImageFile();
 
         if (!selectedPath) {
@@ -118,6 +119,42 @@ export class ImageLocalMediaController {
           draft: toImageWorkspaceDto(updated),
           input: toInputDto(asset, file)
         };
+      })
+    );
+  }
+
+  clearInput(
+    request: unknown
+  ): Promise<ImageWorkspaceIpcResult<ReturnType<typeof toImageWorkspaceDto>>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const draftId = parseDraftId(request);
+        const context = this.createContext();
+        const draft = await requireDraft(context.workspaceRepository, draftId);
+        if (!draft.input) return toImageWorkspaceDto(draft);
+        const updatedAt = toIsoTimestamp(new Date().toISOString());
+        const shared = {
+          ...draft,
+          state: 'editing' as const,
+          input: undefined,
+          updatedAt
+        };
+        const candidate = createImageWorkspaceDraft(
+          draft.mode === 'image_editing'
+            ? {
+                ...shared,
+                mode: draft.mode,
+                editing: { ...draft.editing, lineage: undefined }
+              }
+            : shared as ImageWorkspaceDraft
+        );
+        const updated = applyImageWorkspaceChangeStaleness(
+          draft,
+          candidate,
+          updatedAt
+        );
+        await context.workspaceRepository.save(updated);
+        return toImageWorkspaceDto(updated);
       })
     );
   }
@@ -376,6 +413,24 @@ function inputRoleForMode(mode: ImageWorkspaceDraft['mode']) {
   return mode === 'quick_image' || mode === 'professional_image'
     ? 'reference' as const
     : 'source' as const;
+}
+
+function assertInputSelectionAllowed(draft: ImageWorkspaceDraft): void {
+  if (draft.mode === 'quick_image') {
+    throw new ImageLocalMediaError(
+      'invalid_request',
+      'Quick image generation is text-only and cannot accept reference media'
+    );
+  }
+  if (
+    draft.mode === 'professional_image' &&
+    draft.featureSelection?.productFeature !== 'reference_to_image'
+  ) {
+    throw new ImageLocalMediaError(
+      'invalid_request',
+      'Professional image generation must explicitly select reference-to-image first'
+    );
+  }
 }
 
 function toInputDto(

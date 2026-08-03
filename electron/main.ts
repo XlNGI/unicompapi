@@ -74,6 +74,7 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
 });
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,
+  providerPackages,
   additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
   vidu: viduComposition,
   onActiveExportCountChanged: (count) => {
@@ -131,7 +132,7 @@ function createMainWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    minWidth: 1080,
+    minWidth: 800,
     minHeight: 720,
     show: false,
     title: 'UniComp',
