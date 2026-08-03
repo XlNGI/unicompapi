@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M6",
+  "status": "passed",
+  "sourceBranch": "develop",
+  "sourceCommit": "24dcb9bf1f6a30b5f04ea26f8e27e7a10963ef31",
+  "collectedAt": "2026-08-04T00:30:19+08:00",
+  "automation": {
+    "nodeTests": 195,
+    "vitestTests": 581,
+    "totalTests": 776,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed",
+    "viteModules": 89,
+    "platformAuditFiles": 291,
+    "platformAuditViolations": 0,
+    "handoffChecksums": 50,
+    "handoffAssets": 27,
+    "recoveryAudit": "passed",
+    "phase9Closeout": "passed",
+    "secureStorage": "passed",
+    "runtimeIntegrations": "passed",
+    "diffCheck": "passed"
+  },
+  "uiAcceptance": {
+    "evidence": "docs/active/多服务商功能路由-M5-UI验收收口记录.md",
+    "themes": 2,
+    "viewports": [
+      "800x720",
+      "960x720",
+      "1280x820",
+      "1440x900",
+      "1920x1080"
+    ],
+    "pageThemeViewportCombinations": 130,
+    "layoutFailures": 0,
+    "multiplePrimaryActionFailures": 0
+  },
+  "windowsElectron": {
+    "architecture": "x64",
+    "backgroundNetworkingDisabled": true,
+    "newProcesses": 4,
+    "respondingProcesses": 4,
+    "visibleWindows": 1,
+    "capturedStderrLines": 0,
+    "unexpectedErrors": 0,
+    "residualProcesses": 0,
+    "repositoryArtifacts": 0
+  },
+  "branchRetention": {
+    "plannedBranches": 27,
+    "localBranchesPresent": 27,
+    "remoteBranchesPresent": 27,
+    "missingLocal": [],
+    "missingRemote": []
+  },
+  "securityAndCost": {
+    "recoveryAuditTrackedFiles": 694,
+    "prohibitedTrackedArtifacts": 0,
+    "publicContractViolations": 0,
+    "realProviderHttpRequests": 0,
+    "realProviderDnsRequests": 0,
+    "realCredentialReadsOrValidations": 0,
+    "billableCalls": 0,
+    "cost": 0
+  },
+  "deferred": {
+    "macosPrimary": "not_run/deferred",
+    "mediaToolchainExpansion": "not_run/deferred",
+    "phase10": "not_started",
+    "realApiSpecialty": "not_started",
+    "imageV1": "unverified"
+  }
+}
