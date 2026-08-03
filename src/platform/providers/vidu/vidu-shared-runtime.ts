@@ -14,28 +14,16 @@ import {
   ViduRuntimeError,
   ViduTransportFailure
 } from './vidu-runtime-errors';
+import type {
+  ControlledProviderTransport,
+  ControlledProviderTransportRequest,
+  ControlledProviderTransportResponse
+} from '../controlled-provider-transport';
 
-export interface ViduHttpTransportRequest {
-  readonly method: 'GET' | 'POST';
-  readonly url: string;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly body?: Uint8Array;
-  readonly signal: AbortSignal;
-  readonly timeoutMs: number;
-  readonly maxResponseBytes: number;
-  readonly proxy: ProxyMode;
-  readonly redirect: 'manual';
-}
-
-export interface ViduHttpTransportResponse {
-  readonly status: number;
-  readonly headers: Readonly<Record<string, string>>;
-  readonly body: Uint8Array;
-}
-
-export interface ViduHttpTransport {
-  send(request: ViduHttpTransportRequest): Promise<ViduHttpTransportResponse>;
-}
+export type ViduHttpTransportRequest =
+  ControlledProviderTransportRequest<'GET' | 'POST'>;
+export type ViduHttpTransportResponse = ControlledProviderTransportResponse;
+export type ViduHttpTransport = ControlledProviderTransport<'GET' | 'POST'>;
 
 export interface ViduSafeLogEvent {
   readonly event:
@@ -62,6 +50,7 @@ export interface ViduRuntimeRequest {
   readonly maxRequestBytes?: number;
   readonly maxResponseBytes?: number;
   readonly signal?: AbortSignal;
+  readonly beforeRequestStarted?: () => Promise<void>;
 }
 
 export interface ViduRuntimeResponse {
@@ -150,12 +139,14 @@ export class ViduSharedRuntime {
         if (credential !== undefined) {
           headers.authorization = `Token ${credential}`;
         }
+        await input.beforeRequestStarted?.();
         const response = await this.options.transport.send({
           ...request,
           headers,
           signal: controller.signal,
           proxy: this.options.proxy?.() ?? { kind: 'system_default' },
-          redirect: 'manual'
+          redirect: 'manual',
+          dnsRebindingProtection: 'required'
         });
         validateResponseSize(response, request.maxResponseBytes);
         if (response.status >= 300 && response.status < 400) {
@@ -235,7 +226,8 @@ export class ViduSharedRuntime {
         timeoutMs,
         maxResponseBytes,
         proxy: this.options.proxy?.() ?? { kind: 'system_default' },
-        redirect: 'manual'
+        redirect: 'manual',
+        dnsRebindingProtection: 'required'
       });
       validateResponseSize(response, maxResponseBytes);
       if (response.status >= 300 && response.status < 400) {
@@ -343,7 +335,8 @@ export class ViduSharedRuntime {
       url: url.toString(),
       body: input.body ? Uint8Array.from(input.body) : undefined,
       timeoutMs,
-      maxResponseBytes
+      maxResponseBytes,
+      dnsRebindingProtection: 'required'
     };
   }
 

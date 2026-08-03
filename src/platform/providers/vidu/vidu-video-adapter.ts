@@ -25,6 +25,7 @@ import {
   type ControlledImageMaterialPort
 } from './controlled-image-material';
 import type { ViduConnectionPort } from './vidu-image-adapters';
+import type { ViduAdapterRequestControl } from './vidu-image-adapters';
 import { ViduRuntimeError } from './vidu-runtime-errors';
 import type { ViduSharedRuntime } from './vidu-shared-runtime';
 
@@ -57,7 +58,10 @@ export class ViduReferenceVideoV2Adapter
     validateConfiguredBinding(dependencies.binding, dependencies.connectionId);
   }
 
-  async submit(request: ProviderProtocolSubmitRequest): Promise<ProviderSubmitOutcome> {
+  async submit(
+    request: ProviderProtocolSubmitRequest,
+    control: ViduAdapterRequestControl = {}
+  ): Promise<ProviderSubmitOutcome> {
     let requestSent = false;
     try {
       validateSubmitRequest(request, this.dependencies.binding);
@@ -78,7 +82,6 @@ export class ViduReferenceVideoV2Adapter
         audio: parameters.audio,
         ...parameters.optional
       });
-      requestSent = true;
       const response = await this.dependencies.runtime.request({
         connection,
         binding: request.binding,
@@ -88,7 +91,12 @@ export class ViduReferenceVideoV2Adapter
         contentType: 'application/json',
         authScheme: 'token',
         maxRequestBytes: maximumRequestBytes,
-        maxResponseBytes: 2 * 1024 * 1024
+        maxResponseBytes: 2 * 1024 * 1024,
+        signal: control.signal,
+        beforeRequestStarted: async () => {
+          await control.beforeRequestStarted?.();
+          requestSent = true;
+        }
       });
       return {
         kind: 'accepted_async',

@@ -46,13 +46,17 @@ test('Electron owns one shared Vidu registry, vault and provider package', () =>
   assert.match(mainSource, /registerStorageIpcHandlers\(\{[\s\S]*vidu: viduComposition/);
   assert.match(providerHandlerSource, /readonly registry: JsonProviderRegistryStore/);
   assert.match(storageHandlerSource, /options\.vidu\?\.registry/);
-  assert.match(compositionSource, /createFrozenViduRegistryRecords\(\)\.protocolBindings\[0\]/);
+  assert.match(
+    compositionSource,
+    /createFrozenViduRegistryRecords\(\)\.protocolBindings\.find\([\s\S]*?VIDU_PROTOCOL_BINDING_IDS\.referenceVideoV2/
+  );
+  assert.doesNotMatch(compositionSource, /protocolBindings\[0\]/);
 });
 
-test('Vidu image and video submissions are hard-blocked before live validation and routing', () => {
+test('all legacy Vidu network paths are hard-blocked', () => {
   assert.equal(
     (compositionSource.match(/denyViduRuntimeAuthorization\(\);/g) ?? []).length,
-    2
+    5
   );
   assert.equal(
     (
@@ -62,6 +66,13 @@ test('Vidu image and video submissions are hard-blocked before live validation a
     ).length,
     2
   );
+  for (const continuation of [
+    /query: async \(providerOperationId\) => \{\s*denyViduRuntimeAuthorization\(\);/,
+    /cancel: async \(providerOperationId\) => \{\s*denyViduRuntimeAuthorization\(\);/,
+    /videoResultReceiver:[\s\S]*receive: async \(executionId\) => \{\s*denyViduRuntimeAuthorization\(\);/
+  ]) {
+    assert.match(compositionSource, continuation);
+  }
 });
 
 test('preload exposes named lifecycle methods without generic Electron access', () => {

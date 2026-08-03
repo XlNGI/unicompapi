@@ -17,8 +17,20 @@ import {
 import type { ControlledImageMaterialPort } from './controlled-image-material';
 import { ViduReferenceVideoV2Adapter } from './vidu-video-adapter';
 import type { ProviderProtocolBinding } from '../../../domain';
+import {
+  VIDU_PROVIDER_PACKAGE_ID,
+  viduProviderPackageDescriptor
+} from './vidu-contracts';
+import {
+  ViduImageRouteAdapter,
+  ViduVideoRouteAdapter,
+  type ViduExecutionRouteResolverPort,
+  type ViduParameterSchemaResolverPort,
+  type ViduRouteAdapterIdFactory,
+  type ViduUsageObservationSinkPort
+} from './vidu-route-adapters';
 
-export const VIDU_PROVIDER_PACKAGE_ID = 'provider-package-vidu-v1';
+export { VIDU_PROVIDER_PACKAGE_ID } from './vidu-contracts';
 
 export class ViduConnectionValidationPort
   implements ConnectionValidationPort {
@@ -62,6 +74,7 @@ export class ViduConnectionValidationPort
 
 export class ViduProviderPackage {
   readonly id = VIDU_PROVIDER_PACKAGE_ID;
+  readonly descriptor = viduProviderPackageDescriptor;
   readonly runtime: ViduSharedRuntime;
   readonly connectionValidation: ViduConnectionValidationPort;
 
@@ -103,6 +116,33 @@ export class ViduProviderPackage {
       connectionId: options.connectionId,
       now: options.now
     });
+  }
+
+  createRouteAdapters(options: {
+    readonly routes: ViduExecutionRouteResolverPort;
+    readonly parameterSchemas: ViduParameterSchemaResolverPort;
+    readonly materials: ControlledImageMaterialPort;
+    readonly usage: ViduUsageObservationSinkPort;
+    readonly ids?: ViduRouteAdapterIdFactory;
+    readonly now?: () => string;
+  }) {
+    const dependencies = {
+      runtime: this.runtime,
+      routes: options.routes,
+      parameterSchemas: options.parameterSchemas,
+      materials: options.materials,
+      usage: options.usage,
+      ids: options.ids,
+      now: options.now
+    };
+    return {
+      imageV1: new ViduImageRouteAdapter('image_v1', dependencies),
+      geminiImageV2: new ViduImageRouteAdapter(
+        'gemini_image_v2',
+        dependencies
+      ),
+      referenceVideoV2: new ViduVideoRouteAdapter(dependencies)
+    };
   }
 
   dispose(): void {
