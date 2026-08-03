@@ -13,10 +13,34 @@ import {
   type ModelCapabilityEvidence,
   type Provider,
   type ProviderConnection,
+  type ModelFeatureProfile,
+  type ParameterSchemaV2,
+  type ProviderModelDefinition,
   type ProviderModel,
   type ProviderOperationPurpose,
   type ProviderProtocolBinding
 } from '../../domain';
+import {
+  VIDU_CREDENTIAL_SCHEMA_ID,
+  VIDU_ENDPOINT_POLICY_ID,
+  VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+  VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION,
+  VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
+  VIDU_GEMINI_IMAGE_V2_PROTOCOL_VERSION,
+  VIDU_IMAGE_V1_ADAPTER_ID,
+  VIDU_IMAGE_V1_ADAPTER_VERSION,
+  VIDU_IMAGE_V1_PROTOCOL_ID,
+  VIDU_IMAGE_V1_PROTOCOL_VERSION,
+  VIDU_OFFICIAL_TEMPLATE_ID,
+  VIDU_PROVIDER_PACKAGE_ID,
+  VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
+  VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
+  VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
+  createViduModelContract,
+  frozenViduModelKeys
+} from './vidu/vidu-contracts';
 
 export const VIDU_PROVIDER_ID = toProviderId('provider-vidu');
 export const VIDU_CONNECTION_ID = toConnectionId('connection-vidu-default');
@@ -31,25 +55,15 @@ export const VIDU_PROTOCOL_BINDING_IDS = {
   )
 } as const;
 
-export const frozenViduModelKeys = [
-  'viduq3-drama',
-  'viduq3-ad',
-  'viduq3-mix',
-  'viduq3-turbo',
-  'viduq3',
-  'viduimage-2',
-  'q2-fast',
-  'q2-pro',
-  'q3-fast',
-  'q3-lite'
-] as const;
-
 export interface FrozenViduRegistryRecords {
   readonly providers: readonly Provider[];
   readonly connections: readonly ProviderConnection[];
   readonly protocolBindings: readonly ProviderProtocolBinding[];
   readonly models: readonly ProviderModel[];
   readonly capabilities: readonly ModelCapabilityEvidence[];
+  readonly modelDefinitions: readonly ProviderModelDefinition[];
+  readonly modelProfiles: readonly ModelFeatureProfile[];
+  readonly parameterSchemas: readonly ParameterSchemaV2[];
 }
 
 const catalogTimestamp = toIsoTimestamp('2026-07-28T00:00:00.000Z');
@@ -58,6 +72,8 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
   const provider = createProvider({
     id: VIDU_PROVIDER_ID,
     name: 'Vidu',
+    packageId: VIDU_PROVIDER_PACKAGE_ID,
+    packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
     accessCategory: 'online',
     identityState: 'unverified',
     createdAt: catalogTimestamp,
@@ -67,6 +83,42 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
     id: VIDU_CONNECTION_ID,
     providerId: provider.id,
     name: 'Vidu official connection',
+    endpoint: 'https://api.vidu.cn',
+    packageId: VIDU_PROVIDER_PACKAGE_ID,
+    packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
+    templateId: VIDU_OFFICIAL_TEMPLATE_ID,
+    templateKind: 'official',
+    credentialSchemaId: VIDU_CREDENTIAL_SCHEMA_ID,
+    credentialSchemaVersion: 1,
+    credentialVersionId: 'credential-version-vidu-unconfigured-v1',
+    connectionPolicyId: 'connection.vidu.official',
+    connectionPolicyRevision: 1,
+    discoveryPolicyId: 'discovery.vidu.packaged-catalog',
+    discoveryPolicyRevision: 1,
+    endpointPolicyId: VIDU_ENDPOINT_POLICY_ID,
+    endpointPolicyRevision: 1,
+    connectionConfigVersionId: 'connection-config-vidu-default-v1',
+    connectionRevision: 1,
+    adapterBindings: [
+      {
+        adapterId: VIDU_IMAGE_V1_ADAPTER_ID,
+        adapterVersion: VIDU_IMAGE_V1_ADAPTER_VERSION,
+        protocolId: VIDU_IMAGE_V1_PROTOCOL_ID,
+        protocolVersion: VIDU_IMAGE_V1_PROTOCOL_VERSION
+      },
+      {
+        adapterId: VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+        adapterVersion: VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION,
+        protocolId: VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
+        protocolVersion: VIDU_GEMINI_IMAGE_V2_PROTOCOL_VERSION
+      },
+      {
+        adapterId: VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+        adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
+        protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
+        protocolVersion: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION
+      }
+    ],
     state: 'unconfigured',
     identityState: 'unverified',
     credentialState: 'not_configured',
@@ -78,10 +130,10 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
       id: VIDU_PROTOCOL_BINDING_IDS.referenceVideoV2,
       providerId: provider.id,
       connectionId: connection.id,
-      protocolId: 'vidu.ent.v2.reference2video',
-      protocolVersion: '2',
+      protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
       mediaKind: 'video',
-      adapterKind: 'vidu_reference_video_v2',
+      adapterKind: VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
       endpointTemplate: 'https://api.vidu.cn/ent/v2/reference2video',
       authScheme: 'token',
       executionLifecycle: 'asynchronous_polling',
@@ -93,10 +145,10 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
       id: VIDU_PROTOCOL_BINDING_IDS.imageV1,
       providerId: provider.id,
       connectionId: connection.id,
-      protocolId: 'vidu.ent.v1.images',
-      protocolVersion: '1',
+      protocolId: VIDU_IMAGE_V1_PROTOCOL_ID,
+      protocolVersion: VIDU_IMAGE_V1_PROTOCOL_VERSION,
       mediaKind: 'image',
-      adapterKind: 'vidu_image_v1',
+      adapterKind: VIDU_IMAGE_V1_ADAPTER_ID,
       endpointTemplate: 'https://api.vidu.cn/ent/v1/images/{operation}',
       authScheme: 'unknown',
       executionLifecycle: 'synchronous_completed',
@@ -108,10 +160,10 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
       id: VIDU_PROTOCOL_BINDING_IDS.geminiImageV2,
       providerId: provider.id,
       connectionId: connection.id,
-      protocolId: 'vidu.ent.v2.image.reference2image',
-      protocolVersion: '2',
+      protocolId: VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_GEMINI_IMAGE_V2_PROTOCOL_VERSION,
       mediaKind: 'image',
-      adapterKind: 'vidu_gemini_image_v2',
+      adapterKind: VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
       endpointTemplate:
         'https://api.vidu.cn/ent/v2/image/reference2image/{providerModelKey}',
       authScheme: 'token',
@@ -181,11 +233,41 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
     });
   });
 
+  const modelDefinitions: ProviderModelDefinition[] = [];
+  const modelProfiles: ModelFeatureProfile[] = [];
+  const parameterSchemas: ParameterSchemaV2[] = [];
+  for (const model of models) {
+    const contract = createViduModelContract(model.providerModelKey);
+    const template = contract.definition.profileTemplates[0];
+    modelDefinitions.push(contract.definition);
+    parameterSchemas.push(...contract.parameterSchemas);
+    modelProfiles.push({
+      schemaVersion: 1,
+      profileId: `profile-vidu-${model.providerModelKey}-migration-v1`,
+      revision: 1,
+      packageId: VIDU_PROVIDER_PACKAGE_ID,
+      sourceTemplateId: template.templateId,
+      adapterKey: template.adapterKey,
+      modelId: model.id,
+      modelRevision: model.revision,
+      protocolBindingId: model.protocolBindingId,
+      status: contract.defaultProfileStatus,
+      features: template.features,
+      evidenceIds: capabilities
+        .filter((evidence) => evidence.modelId === model.id)
+        .map((evidence) => evidence.id),
+      recordedAt: catalogTimestamp
+    });
+  }
+
   return {
     providers: [provider],
     connections: [connection],
     protocolBindings,
     models,
-    capabilities
+    capabilities,
+    modelDefinitions,
+    modelProfiles,
+    parameterSchemas
   };
 }

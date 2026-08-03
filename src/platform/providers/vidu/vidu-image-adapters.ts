@@ -32,14 +32,23 @@ export interface ViduImageV1AdapterOptions {
   readonly base64Encoding?: 'raw' | 'data_url';
 }
 
+export interface ViduAdapterRequestControl {
+  readonly beforeRequestStarted?: () => Promise<void>;
+  readonly signal?: AbortSignal;
+}
+
 export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
   constructor(
     private readonly dependencies: ViduImageAdapterDependencies,
     private readonly options: ViduImageV1AdapterOptions = {}
   ) {}
 
-  async submit(request: ProviderProtocolSubmitRequest): Promise<ProviderSubmitOutcome> {
+  async submit(
+    request: ProviderProtocolSubmitRequest,
+    control: ViduAdapterRequestControl = {}
+  ): Promise<ProviderSubmitOutcome> {
     const providerOperationId = this.createOperationId();
+    let requestStarted = false;
     try {
       validateCommonRequest(request, 'vidu.ent.v1.images', 'vidu_image_v1');
       if (request.binding.authScheme !== 'token') {
@@ -95,7 +104,12 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
         contentType: 'application/json',
         authScheme: 'token',
         maxRequestBytes: maximumRequestBytes,
-        maxResponseBytes: 2 * 1024 * 1024
+        maxResponseBytes: 2 * 1024 * 1024,
+        signal: control.signal,
+        beforeRequestStarted: async () => {
+          await control.beforeRequestStarted?.();
+          requestStarted = true;
+        }
       });
       return {
         kind: 'completed_sync',
@@ -103,7 +117,7 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
         results: [parseImageV1Result(response.body)]
       };
     } catch (error) {
-      return mapSubmitFailure(error, providerOperationId);
+      return mapSubmitFailure(error, providerOperationId, requestStarted);
     }
   }
 
@@ -134,8 +148,12 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
 export class ViduGeminiImageV2Adapter implements ProviderProtocolSubmitPort {
   constructor(private readonly dependencies: ViduImageAdapterDependencies) {}
 
-  async submit(request: ProviderProtocolSubmitRequest): Promise<ProviderSubmitOutcome> {
+  async submit(
+    request: ProviderProtocolSubmitRequest,
+    control: ViduAdapterRequestControl = {}
+  ): Promise<ProviderSubmitOutcome> {
     const providerOperationId = this.createOperationId();
+    let requestStarted = false;
     try {
       validateCommonRequest(
         request,
@@ -197,7 +215,12 @@ export class ViduGeminiImageV2Adapter implements ProviderProtocolSubmitPort {
         contentType: 'application/json',
         authScheme: 'token',
         maxRequestBytes: maximumRequestBytes,
-        maxResponseBytes: 2 * 1024 * 1024
+        maxResponseBytes: 2 * 1024 * 1024,
+        signal: control.signal,
+        beforeRequestStarted: async () => {
+          await control.beforeRequestStarted?.();
+          requestStarted = true;
+        }
       });
       return {
         kind: 'completed_sync',
@@ -205,7 +228,7 @@ export class ViduGeminiImageV2Adapter implements ProviderProtocolSubmitPort {
         results: [{ kind: 'file_uri', value: parseGeminiFileUri(response.body) }]
       };
     } catch (error) {
-      return mapSubmitFailure(error, providerOperationId);
+      return mapSubmitFailure(error, providerOperationId, requestStarted);
     }
   }
 
@@ -444,7 +467,8 @@ function requireModelPathSegment(value: string): string {
 
 function mapSubmitFailure(
   error: unknown,
-  providerOperationId: string
+  providerOperationId: string,
+  requestStarted: boolean
 ): ProviderSubmitOutcome {
   if (error instanceof ViduImageAdapterError) {
     return failedBeforeSubmission(error.message, error.retryability);
@@ -453,7 +477,7 @@ function mapSubmitFailure(
     return failedBeforeSubmission(error.message, 'not_retryable');
   }
   if (error instanceof ViduRuntimeError) {
-    if (
+    if (requestStarted &&
       [
         'timeout',
         'network_error',

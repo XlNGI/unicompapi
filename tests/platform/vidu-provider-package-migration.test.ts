@@ -1,0 +1,509 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  createProvider,
+  createProviderConnection,
+  createProviderExecutionRouteSnapshot,
+  toIsoTimestamp,
+  toProjectId,
+  toProviderExecutionRouteSnapshotId,
+  toProviderInvocationAttemptId,
+  type ModelFeatureProfile,
+  type ParameterValue,
+  type ProviderExecutionRouteSnapshotV1,
+  type ProviderModel,
+  type ProviderUsageObservationV1
+} from '../../src/domain';
+import {
+  JsonProviderRegistryStore,
+  ProviderPackageRegistry,
+  SecureCredentialVault,
+  VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+  VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION,
+  VIDU_IMAGE_V1_ADAPTER_ID,
+  VIDU_IMAGE_V1_ADAPTER_VERSION,
+  VIDU_PROVIDER_PACKAGE_ID,
+  VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
+  ViduPackagedParameterSchemaResolver,
+  ViduProviderPackage,
+  ViduRegistryExecutionRouteResolver,
+  createFrozenViduRegistryRecords,
+  createViduModelContract,
+  viduProviderPackageDescriptor,
+  type ControlledImageMaterialPort,
+  type CredentialProtector
+} from '../../src/platform';
+import {
+  SyntheticViduService,
+  isoBmffVideo,
+  pngBytes
+} from '../fixtures/vidu-synthetic-service';
+
+const roots: string[] = [];
+const timestamp = toIsoTimestamp('2026-08-03T10:00:00.000Z');
+const projectId = toProjectId('project-vidu-route-migration');
+const syntheticCredentialValue = 'route-fixture-credential-value';
+
+afterEach(async () => {
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+  );
+});
+
+describe('Vidu Provider Package migration', () => {
+  it('publishes one official package and exact frozen model contracts', () => {
+    const registry = new ProviderPackageRegistry([
+      viduProviderPackageDescriptor
+    ]);
+    const template = registry.resolveTemplate(
+      VIDU_PROVIDER_PACKAGE_ID,
+      'vidu-official'
+    );
+
+    expect(template.package.packageVersion).toBe(VIDU_PROVIDER_PACKAGE_VERSION);
+    expect(template.template).toMatchObject({
+      kind: 'official',
+      baseUrlMode: 'fixed',
+      freeConnectionValidation: false,
+      modelDiscoveryKind: 'none'
+    });
+    expect(template.adapters.map((adapter) => adapter.adapterId)).toEqual([
+      VIDU_IMAGE_V1_ADAPTER_ID,
+      VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+      VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
+    ]);
+    expect(registry.resolveEndpoint(template, undefined, false)).toBe(
+      'https://api.vidu.cn/'
+    );
+
+    const imageV1 = createViduModelContract('viduimage-2');
+    expect(imageV1.defaultProfileStatus).toBe('disabled');
+    expect(
+      imageV1.definition.profileTemplates[0].features.map(
+        (feature) => feature.productFeature
+      )
+    ).toEqual(['text_to_image', 'image_edit']);
+    expect(createViduModelContract('q3-lite')).toMatchObject({
+      defaultProfileStatus: 'restricted'
+    });
+    expect(createViduModelContract('viduq3-turbo')).toMatchObject({
+      defaultProfileStatus: 'restricted'
+    });
+    expect(() => createViduModelContract('viduq3-guessed')).toThrow(
+      'exact frozen model key'
+    );
+  });
+
+  it('idempotently upgrades legacy frozen records without changing runtime facts', async () => {
+    const root = await makeRoot('vidu-registry-migration-');
+    const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const frozen = createFrozenViduRegistryRecords();
+    const provider = createProvider({
+      id: frozen.providers[0].id,
+      name: 'Existing Vidu',
+      accessCategory: 'online',
+      identityState: 'verified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const connection = createProviderConnection({
+      id: frozen.connections[0].id,
+      providerId: provider.id,
+      name: 'Existing Vidu connection',
+      endpoint: 'https://api.vidu.cn',
+      state: 'available',
+      identityState: 'verified',
+      credentialState: 'valid',
+      credentialReference: 'existing-vidu-credential-reference',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    await store.save({
+      schemaVersion: 2,
+      providers: [provider],
+      connections: [connection],
+      protocolBindings: frozen.protocolBindings,
+      models: frozen.models,
+      capabilities: frozen.capabilities,
+      routingPreferences: [],
+      modelDefinitions: [],
+      modelProfiles: []
+    });
+
+    await store.ensureFrozenViduCatalog();
+    const migrated = await store.load();
+    const revision = migrated.registryRevision;
+    await store.ensureFrozenViduCatalog();
+    const repeated = await store.load();
+
+    expect(repeated.registryRevision).toBe(revision);
+    expect(repeated.providers[0]).toMatchObject({
+      name: 'Existing Vidu',
+      packageId: VIDU_PROVIDER_PACKAGE_ID,
+      packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
+      identityState: 'verified'
+    });
+    expect(repeated.connections[0]).toMatchObject({
+      state: 'available',
+      credentialState: 'valid',
+      credentialReference: 'existing-vidu-credential-reference',
+      packageId: VIDU_PROVIDER_PACKAGE_ID,
+      connectionRevision: 1
+    });
+    expect(repeated.modelDefinitions).toHaveLength(10);
+    expect(repeated.modelProfiles).toHaveLength(10);
+    expect(repeated.models.every((model) => model.activeProfileId)).toBe(true);
+    expect(profileFor(repeated.modelProfiles!, 'viduimage-2', repeated.models).status)
+      .toBe('disabled');
+    expect(profileFor(repeated.modelProfiles!, 'q3-lite', repeated.models).status)
+      .toBe('restricted');
+    expect(profileFor(
+      repeated.modelProfiles!,
+      'viduq3-turbo',
+      repeated.models
+    ).status).toBe('restricted');
+  });
+});
+
+describe('Vidu RouteSnapshot adapters', () => {
+  it('blocks Image V1 and stale routes before HTTP, then receives one Gemini image', async () => {
+    const fixture = await routeFixture();
+    const imageV1Route = routeFor(fixture.snapshot, 'viduimage-2', 'text_to_image');
+    const geminiRoute = routeFor(
+      fixture.snapshot,
+      'q3-lite',
+      'reference_to_image'
+    );
+
+    await expect(fixture.adapters.imageV1.submit(imageV1Route, {
+      request: dispatchRequest(imageV1Route, false)
+    })).resolves.toMatchObject({
+      kind: 'failed_before_submission',
+      retryability: 'not_retryable'
+    });
+    expect(fixture.service.requests).toHaveLength(0);
+
+    await expect(fixture.adapters.geminiImageV2.submit(
+      { ...geminiRoute, connectionRevision: geminiRoute.connectionRevision + 1 },
+      { request: dispatchRequest(geminiRoute, true) }
+    )).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    expect(fixture.service.requests).toHaveLength(0);
+
+    let requestStarted = 0;
+    const outcome = await fixture.adapters.geminiImageV2.submit(geminiRoute, {
+      request: dispatchRequest(geminiRoute, true),
+      beforeRequestStarted: async () => { requestStarted += 1; }
+    });
+    expect(outcome).toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'file_uri' }]
+    });
+    expect(requestStarted).toBe(1);
+    if (outcome.kind !== 'completed_sync') throw new Error('image outcome');
+    const bytes = await readAll(await fixture.adapters.geminiImageV2.receiveResult(
+      geminiRoute,
+      {
+        providerOperationId: outcome.providerOperationId,
+        result: outcome.results[0]
+      }
+    ));
+    expect(bytes).toEqual(pngBytes(8, 8));
+    const restarted = fixture.providerPackage.createRouteAdapters({
+      routes: new ViduRegistryExecutionRouteResolver(fixture.registry),
+      parameterSchemas: new ViduPackagedParameterSchemaResolver(),
+      materials: fixture.materials,
+      usage: { append: async (observation) => { fixture.usage.push(observation); } }
+    }).geminiImageV2;
+    const resultReference = {
+      providerOperationId: outcome.providerOperationId,
+      result: outcome.results[0]
+    };
+    await expect(restarted.receiveResult(geminiRoute, resultReference))
+      .rejects.toMatchObject({ code: 'vidu.result_route_unavailable' });
+    await restarted.attachResult({
+      routeSnapshot: geminiRoute,
+      ...resultReference
+    });
+    await expect(readAll(await restarted.receiveResult(
+      geminiRoute,
+      resultReference
+    ))).resolves.toEqual(pngBytes(8, 8));
+    expect(fixture.usage).toHaveLength(1);
+    expect(fixture.usage[0].status).toBe('not_reported');
+    expect(JSON.stringify(fixture.usage)).not.toContain(syntheticCredentialValue);
+  });
+
+  it('uses the captured route for video query, cancel, restart attach and result receipt', async () => {
+    const fixture = await routeFixture();
+    const route = routeFor(
+      fixture.snapshot,
+      'viduq3-turbo',
+      'image_to_video'
+    );
+    let requestStarted = 0;
+    const submitted = await fixture.adapters.referenceVideoV2.submit(route, {
+      request: dispatchRequest(route, true, { audio: false, duration: 3 }),
+      beforeRequestStarted: async () => { requestStarted += 1; }
+    });
+    expect(submitted).toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'synthetic-video-task',
+      state: 'queued'
+    });
+    expect(requestStarted).toBe(1);
+
+    await expect(fixture.adapters.referenceVideoV2.query(
+      route,
+      'synthetic-video-task'
+    )).resolves.toEqual({ state: 'completed' });
+    await expect(fixture.adapters.referenceVideoV2.cancel(
+      route,
+      'synthetic-video-task'
+    )).resolves.toEqual({ state: 'cancelled' });
+    expect(fixture.usage.filter((item) => item.status === 'not_reported'))
+      .toHaveLength(1);
+
+    const restarted = fixture.providerPackage.createRouteAdapters({
+      routes: new ViduRegistryExecutionRouteResolver(fixture.registry),
+      parameterSchemas: new ViduPackagedParameterSchemaResolver(),
+      materials: fixture.materials,
+      usage: { append: async (observation) => { fixture.usage.push(observation); } }
+    }).referenceVideoV2;
+    await expect(restarted.receiveResult(route, {
+      providerOperationId: 'synthetic-video-task',
+      remoteResultId: 'synthetic-video-result'
+    })).rejects.toMatchObject({ code: 'vidu.operation_route_unavailable' });
+
+    await restarted.attachOperation({
+      routeSnapshot: route,
+      providerOperationId: 'synthetic-video-task',
+      invocationAttemptId: toProviderInvocationAttemptId(
+        'attempt-viduimage-route'
+      ),
+      usageAlreadyPersisted: true
+    });
+    const bytes = await readAll(await restarted.receiveResult(route, {
+      providerOperationId: 'synthetic-video-task',
+      remoteResultId: 'synthetic-video-result'
+    }));
+    expect(bytes).toEqual(isoBmffVideo());
+    expect(fixture.service.count(
+      'GET',
+      '/ent/v2/tasks/synthetic-video-task/creations'
+    )).toBeGreaterThanOrEqual(2);
+    expect(fixture.service.requests.every(
+      (request) => request.dnsRebindingProtection === 'required'
+    )).toBe(true);
+    expect(JSON.stringify({ usage: fixture.usage, requests: fixture.service.requests }))
+      .not.toContain(syntheticCredentialValue);
+  });
+});
+
+async function routeFixture() {
+  const root = await makeRoot('vidu-route-migration-');
+  const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+  await registry.ensureFrozenViduCatalog();
+  const initial = await registry.load();
+  const credentialReference = 'credential-vidu-route-synthetic';
+  await registry.save({
+    ...initial,
+    connections: initial.connections.map((connection) => ({
+      ...connection,
+      state: 'available' as const,
+      identityState: 'verified' as const,
+      credentialState: 'valid' as const,
+      credentialReference,
+      updatedAt: timestamp
+    })),
+    models: initial.models.map((model) => ({
+      ...model,
+      enabled: ['q3-lite', 'viduq3-turbo'].includes(model.providerModelKey),
+      updatedAt: timestamp
+    })),
+    modelProfiles: initial.modelProfiles!.map((profile) => {
+      const model = initial.models.find((candidate) => candidate.id === profile.modelId);
+      return model && ['q3-lite', 'viduq3-turbo'].includes(model.providerModelKey)
+        ? { ...profile, status: 'verified' as const, recordedAt: timestamp }
+        : profile;
+    })
+  });
+  const snapshot = await registry.load();
+  const vault = new SecureCredentialVault(
+    path.join(root, 'credentials.json'),
+    protector()
+  );
+  await vault.save(credentialReference, syntheticCredentialValue);
+  const service = new SyntheticViduService(syntheticCredentialValue);
+  const imageUrl =
+    'https://results.synthetic.invalid/reference.png?signature=private';
+  const videoUrl =
+    'https://results.synthetic.invalid/generated.mp4?signature=private';
+  service.registerDownload(imageUrl, pngBytes(8, 8), 'image/png');
+  service.registerDownload(videoUrl, isoBmffVideo(), 'video/mp4');
+  const providerPackage = new ViduProviderPackage({
+    credentialVault: vault,
+    transport: service
+  });
+  const materials: ControlledImageMaterialPort = {
+    resolve: async (input) => ({
+      assetId: input.assetId,
+      mimeType: 'image/png',
+      width: 8,
+      height: 8,
+      sizeBytes: pngBytes(8, 8).byteLength,
+      base64: pngBytes(8, 8).toString('base64')
+    })
+  };
+  const usage: ProviderUsageObservationV1[] = [];
+  const adapters = providerPackage.createRouteAdapters({
+    routes: new ViduRegistryExecutionRouteResolver(registry),
+    parameterSchemas: new ViduPackagedParameterSchemaResolver(),
+    materials,
+    usage: { append: async (observation) => { usage.push(observation); } },
+    ids: {
+      nextProviderOperationId: sequentialId('vidu-route-image'),
+      nextProviderUsageObservationId: () =>
+        `vidu-route-usage-${usage.length + 1}` as ProviderUsageObservationV1['id']
+    },
+    now: () => timestamp
+  });
+  return {
+    root,
+    registry,
+    snapshot,
+    service,
+    providerPackage,
+    materials,
+    usage,
+    adapters
+  };
+}
+
+function routeFor(
+  snapshot: Awaited<ReturnType<JsonProviderRegistryStore['load']>>,
+  modelKey: string,
+  productFeature: ProviderExecutionRouteSnapshotV1['productFeature']
+): ProviderExecutionRouteSnapshotV1 {
+  const provider = snapshot.providers[0];
+  const connection = snapshot.connections[0];
+  const model = snapshot.models.find(
+    (candidate) => candidate.providerModelKey === modelKey
+  );
+  const profile = snapshot.modelProfiles?.find(
+    (candidate) => candidate.profileId === model?.activeProfileId
+  );
+  const binding = snapshot.protocolBindings.find(
+    (candidate) => candidate.id === model?.protocolBindingId
+  );
+  const feature = profile?.features.find(
+    (candidate) => candidate.productFeature === productFeature
+  );
+  if (!provider || !connection || !model || !profile || !binding || !feature) {
+    throw new Error('Vidu route fixture is incomplete');
+  }
+  const adapterVersion = binding.adapterKind === VIDU_IMAGE_V1_ADAPTER_ID
+    ? VIDU_IMAGE_V1_ADAPTER_VERSION
+    : binding.adapterKind === VIDU_GEMINI_IMAGE_V2_ADAPTER_ID
+      ? VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION
+      : VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION;
+  return createProviderExecutionRouteSnapshot({
+    id: toProviderExecutionRouteSnapshotId(
+      `route-vidu-${modelKey}-${productFeature}`
+    ),
+    projectId,
+    packageId: provider.packageId!,
+    packageVersion: provider.packageVersion!,
+    adapterKey: binding.adapterKind,
+    adapterVersion,
+    providerId: provider.id,
+    providerDisplayName: provider.name,
+    connectionId: connection.id,
+    connectionDisplayName: connection.name,
+    connectionRevision: connection.connectionRevision!,
+    connectionConfigVersionId: connection.connectionConfigVersionId!,
+    endpointPolicyId: connection.endpointPolicyId!,
+    endpointPolicyRevision: connection.endpointPolicyRevision!,
+    credentialVersionId: connection.credentialVersionId!,
+    modelId: model.id,
+    providerModelKey: model.providerModelKey,
+    modelDisplayName: model.displayName,
+    modelRevision: model.revision,
+    profileId: profile.profileId,
+    profileRevision: profile.revision,
+    protocolBindingId: binding.id,
+    protocolBindingRevision: 1,
+    productFeature,
+    internalPurpose: feature.internalPurpose,
+    featureMappingVersion: 1,
+    parameterSchemaId: feature.parameterSchemaId,
+    parameterSchemaRevision: 1,
+    resultSchemaId: feature.resultSchemaId,
+    resultSchemaRevision: 1,
+    usageSchemaId: feature.usageSchemaId as ProviderExecutionRouteSnapshotV1['usageSchemaId'],
+    usageSchemaRevision: 1,
+    constraintSetId: feature.constraintSetId,
+    constraintSetRevision: 1,
+    runtimePolicyId: 'runtime-policy.vidu-closed',
+    runtimePolicyRevision: 1,
+    runtimeAuthorizationClaimId: 'runtime-claim-vidu-synthetic',
+    createdAt: timestamp
+  });
+}
+
+function dispatchRequest(
+  route: ProviderExecutionRouteSnapshotV1,
+  withAsset: boolean,
+  parameterValues: Readonly<Record<string, ParameterValue>> = {}
+) {
+  return {
+    invocationAttemptId: toProviderInvocationAttemptId(
+      'attempt-viduimage-route'
+    ),
+    projectId: route.projectId,
+    prompt: 'Create a synthetic Vidu result',
+    ...(withAsset ? { assetId: 'asset-vidu-route-input' } : {}),
+    parameterValues
+  };
+}
+
+function profileFor(
+  profiles: readonly ModelFeatureProfile[],
+  modelKey: string,
+  models: readonly ProviderModel[]
+): ModelFeatureProfile {
+  const model = models.find((candidate) => candidate.providerModelKey === modelKey);
+  const profile = profiles.find((candidate) => candidate.modelId === model?.id);
+  if (!profile) throw new Error('Vidu profile fixture is unavailable');
+  return profile;
+}
+
+function protector(): CredentialProtector {
+  return {
+    isAvailable: () => true,
+    protect: (value) =>
+      Buffer.from([...Buffer.from(value, 'utf8')].map((byte) => byte ^ 0x5a)),
+    unprotect: (value) =>
+      Buffer.from([...value].map((byte) => byte ^ 0x5a)).toString('utf8')
+  };
+}
+
+function sequentialId(prefix: string): () => string {
+  let next = 1;
+  return () => `${prefix}-${next++}`;
+}
+
+async function makeRoot(prefix: string): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), prefix));
+  roots.push(root);
+  return root;
+}
+
+async function readAll(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}

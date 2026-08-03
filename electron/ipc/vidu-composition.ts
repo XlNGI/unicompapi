@@ -19,6 +19,7 @@ import {
   denyViduRuntimeAuthorization,
   ViduTransportFailure,
   createFrozenViduRegistryRecords,
+  VIDU_PROTOCOL_BINDING_IDS,
   VideoOperationRouter,
   type ImageOperationPorts,
   type ImageSubmissionControllerDependencies,
@@ -99,7 +100,12 @@ export class ElectronViduComposition {
         return snapshot.connections.find((item) => item.id === connectionId);
       }
     };
-    const frozenBinding = createFrozenViduRegistryRecords().protocolBindings[0];
+    const frozenBinding = createFrozenViduRegistryRecords().protocolBindings.find(
+      (binding) => binding.id === VIDU_PROTOCOL_BINDING_IDS.referenceVideoV2
+    );
+    if (!frozenBinding) {
+      throw new Error('The frozen Vidu video protocol binding is unavailable');
+    }
     const images = this.providerPackage.createImageAdapters({
       connections,
       materials
@@ -171,11 +177,13 @@ export class ElectronViduComposition {
     };
     const videoAsync: ProviderAsyncOperationPort = {
       query: async (providerOperationId) => {
+        denyViduRuntimeAuthorization();
         const status = await video.query(providerOperationId);
         await this.liveValidation.recordPolling(status).catch(() => undefined);
         return status;
       },
       cancel: async (providerOperationId) => {
+        denyViduRuntimeAuthorization();
         const outcome = await video.cancel(providerOperationId);
         if (outcome.state === 'cancelled') {
           await this.liveValidation.recordPolling({ state: 'cancelled' })
@@ -232,6 +240,7 @@ export class ElectronViduComposition {
       videoAsync,
       videoResultReceiver: {
         receive: async (executionId) => {
+          denyViduRuntimeAuthorization();
           const result = await videoReceiver.receive(executionId);
           if (result.ok && result.value.works.length === 1) {
             await this.liveValidation.recordLocalResult(

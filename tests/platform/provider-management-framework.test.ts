@@ -465,17 +465,20 @@ describe('provider management framework', () => {
       preference.modelId === model.id
     )?.enabled).toBe(false);
 
-    const legacy = snapshot.models.find((candidate) =>
+    const unregisteredViduModel = snapshot.models.find((candidate) =>
       candidate.connectionId === 'connection-vidu-default'
     );
-    if (!legacy) throw new Error('frozen legacy model fixture missing');
+    if (!unregisteredViduModel) throw new Error('frozen Vidu model fixture missing');
     await expect(fixture.framework.setModelEnabled({
-      modelId: legacy.id,
+      modelId: unregisteredViduModel.id,
       enabled: false
     })).resolves.toMatchObject({
       ok: false,
-      error: { code: 'connection_contract_stale' }
+      error: { code: 'package_not_found' }
     });
+    expect((await fixture.registry.load()).models.find((candidate) =>
+      candidate.id === unregisteredViduModel.id
+    )?.enabled).toBe(unregisteredViduModel.enabled);
   });
 
   it('blocks deletion with active operations, then explicitly abandons and soft-deletes without history loss', async () => {

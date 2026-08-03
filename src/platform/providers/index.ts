@@ -1,4 +1,5 @@
 export * from './provider-registry';
+export * from './controlled-provider-transport';
 export * from './provider-package-registry';
 export * from './provider-connection-contract-service';
 export * from './provider-model-catalog';

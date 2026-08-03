@@ -14,6 +14,7 @@ export interface SyntheticRequestFact {
   readonly url: string;
   readonly bodyBytes: number;
   readonly authorized: boolean;
+  readonly dnsRebindingProtection: 'required';
 }
 
 export class SyntheticViduService implements ViduHttpTransport {
@@ -68,7 +69,8 @@ export class SyntheticViduService implements ViduHttpTransport {
       method: request.method,
       url: request.url,
       bodyBytes: request.body?.byteLength ?? 0,
-      authorized
+      authorized,
+      dnsRebindingProtection: request.dnsRebindingProtection
     });
 
     const queued = this.actions.get(routeKey(request.method, url.pathname));

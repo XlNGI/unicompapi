@@ -58,35 +58,14 @@ export class ViduImmediateImageResultPort implements ImageResultPort {
         'The synchronous image result receipt is unavailable'
       );
     }
-    if (result.kind === 'base64') {
-      await writeExclusive(
-        destinationPath,
-        decodeBase64(result.value, this.maximumResultBytes)
-      );
-      return;
-    }
-    try {
-      const downloaded = await this.dependencies.runtime.downloadResult({
-        url: result.value,
-        maxResponseBytes: this.maximumResultBytes
-      });
-      if (downloaded.contentType && !downloaded.contentType.startsWith('image/')) {
-        throw new ImageResultPortError(
-          'not_retryable',
-          'The provider result is not an image'
-        );
-      }
-      await writeExclusive(destinationPath, downloaded.body);
-    } catch (error) {
-      if (error instanceof ImageResultPortError) throw error;
-      if (error instanceof ViduRuntimeError) {
-        throw new ImageResultPortError(error.retryability, error.message);
-      }
-      throw new ImageResultPortError(
-        'unknown',
-        'The provider image result could not be downloaded'
-      );
-    }
+    await writeExclusive(
+      destinationPath,
+      await readViduImmediateImageResult(
+        result,
+        this.dependencies.runtime,
+        this.maximumResultBytes
+      )
+    );
   }
 
   private async loadResult(
@@ -95,6 +74,43 @@ export class ViduImmediateImageResultPort implements ImageResultPort {
     if (operation.kind !== 'provider_operation_record') return undefined;
     const record = await this.dependencies.operations.get(operation.id);
     return resultFromRecord(record);
+  }
+}
+
+export async function readViduImmediateImageResult(
+  result: ProviderImmediateResultReference,
+  runtime: ViduSharedRuntime,
+  maximumResultBytes = 20 * 1024 * 1024,
+  signal?: AbortSignal
+): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maximumResultBytes) || maximumResultBytes < 1) {
+    throw new TypeError('maximum image result bytes must be a positive integer');
+  }
+  if (result.kind === 'base64') {
+    return decodeBase64(result.value, maximumResultBytes);
+  }
+  try {
+    const downloaded = await runtime.downloadResult({
+      url: result.value,
+      maxResponseBytes: maximumResultBytes,
+      signal
+    });
+    if (downloaded.contentType && !downloaded.contentType.startsWith('image/')) {
+      throw new ImageResultPortError(
+        'not_retryable',
+        'The provider result is not an image'
+      );
+    }
+    return downloaded.body;
+  } catch (error) {
+    if (error instanceof ImageResultPortError) throw error;
+    if (error instanceof ViduRuntimeError) {
+      throw new ImageResultPortError(error.retryability, error.message);
+    }
+    throw new ImageResultPortError(
+      'unknown',
+      'The provider image result could not be downloaded'
+    );
   }
 }
 
