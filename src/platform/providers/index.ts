@@ -1,4 +1,6 @@
 export * from './provider-registry';
+export * from './provider-package-registry';
+export * from './provider-connection-contract-service';
 export * from './credential-vault';
 export * from './provider-credential-controller';
 export * from './provider-capability-services';

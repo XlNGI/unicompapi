@@ -1,18 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
   createModelCapabilityEvidence,
-  createProvider,
-  createProviderConnection,
   createProviderModel,
   createProviderProtocolBinding,
   createRoutingPreference,
-  providerAccessCategories,
   toCapabilityEvidenceId,
-  toConnectionId,
   toIsoTimestamp,
   toModelId,
   toProtocolBindingId,
-  toProviderId,
   toRoutingPreferenceId,
   type ProviderConnection,
   type ModelCapabilityEvidence,
@@ -120,115 +115,16 @@ export class ProviderCapabilityController {
     }
   }
 
-  async createProvider(input: unknown): Promise<ProviderManagementResult> {
-    try {
-      const item = requireRecord(input);
-      const name = requireNonBlank(item.name, 'name');
-      if (
-        typeof item.accessCategory !== 'string' ||
-        !providerAccessCategories.includes(
-          item.accessCategory as (typeof providerAccessCategories)[number]
-        )
-      ) {
-        return failure('invalid_request');
-      }
-      const snapshot = await this.registry.load();
-      const now = toIsoTimestamp(new Date().toISOString());
-      const provider = createProvider({
-        id: toProviderId(`provider-${randomUUID()}`),
-        name,
-        accessCategory: item.accessCategory as (typeof providerAccessCategories)[number],
-        identityState: 'unverified',
-        createdAt: now,
-        updatedAt: now
-      });
-      await this.registry.save({
-        ...snapshot,
-        providers: [...snapshot.providers, provider]
-      });
-      return {
-        ok: true,
-        value: { state: 'provider_created', providerId: provider.id }
-      };
-    } catch (error) {
-      return failure(mapError(error));
-    }
+  async createProvider(_input: unknown): Promise<ProviderManagementResult> {
+    return failure('adapter_unavailable');
   }
 
-  async createConnection(input: unknown): Promise<ProviderManagementResult> {
-    try {
-      const item = requireRecord(input);
-      const providerId = requireId(item.providerId, 'providerId');
-      const name = requireNonBlank(item.name, 'name');
-      const endpoint = requireNullableEndpoint(item.endpoint);
-      const snapshot = await this.registry.load();
-      if (!snapshot.providers.some((provider) => provider.id === providerId)) {
-        return failure('provider_not_found');
-      }
-      const now = toIsoTimestamp(new Date().toISOString());
-      const connection = createProviderConnection({
-        id: toConnectionId(`connection-${randomUUID()}`),
-        providerId: toProviderId(providerId),
-        name,
-        endpoint,
-        state: endpoint ? 'saved' : 'unconfigured',
-        identityState: 'unverified',
-        credentialState: 'not_configured',
-        createdAt: now,
-        updatedAt: now
-      });
-      await this.registry.save({
-        ...snapshot,
-        connections: [...snapshot.connections, connection]
-      });
-      return {
-        ok: true,
-        value: { state: connection.state, connectionId: connection.id }
-      };
-    } catch (error) {
-      return failure(mapError(error));
-    }
+  async createConnection(_input: unknown): Promise<ProviderManagementResult> {
+    return failure('adapter_unavailable');
   }
 
-  async updateConnection(input: unknown): Promise<ProviderManagementResult> {
-    try {
-      const item = requireRecord(input);
-      const connectionId = requireId(item.connectionId, 'connectionId');
-      const name = requireNonBlank(item.name, 'name');
-      const endpoint = requireNullableEndpoint(item.endpoint);
-      const snapshot = await this.registry.load();
-      const connection = snapshot.connections.find(
-        (candidate) => candidate.id === connectionId
-      );
-      if (!connection) return failure('connection_not_found');
-      if (connection.state === 'deleted') return failure('invalid_request');
-      const now = toIsoTimestamp(new Date().toISOString());
-      const state =
-        connection.state === 'disabled'
-          ? 'disabled'
-          : endpoint
-            ? 'saved'
-            : 'unconfigured';
-      await this.registry.save({
-        ...snapshot,
-        connections: snapshot.connections.map((candidate) =>
-          candidate.id === connection.id
-            ? {
-                ...candidate,
-                name,
-                endpoint,
-                state,
-                identityState: 'unverified',
-                lastConnectionValidationAt: undefined,
-                updatedAt: now
-              }
-            : candidate
-        )
-      });
-      return { ok: true, value: { state, connectionId: connection.id } };
-    } catch (error) {
-      return failure(mapError(error));
-    }
+  async updateConnection(_input: unknown): Promise<ProviderManagementResult> {
+    return failure('adapter_unavailable');
   }
 
   async setConnectionEnabled(input: unknown): Promise<ProviderManagementResult> {
@@ -725,11 +621,6 @@ function requireNonBlank(value: unknown, field: string): string {
     throw new TypeError(`${field} is invalid`);
   }
   return value;
-}
-
-function requireNullableEndpoint(value: unknown): string | undefined {
-  if (value === null) return undefined;
-  return requireNonBlank(value, 'endpoint');
 }
 
 function requireRecord(value: unknown): Record<string, unknown> {

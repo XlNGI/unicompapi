@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
+import type { StructuredCredentialRecord } from '../../domain';
 
 export interface CredentialProtector {
   isAvailable(): boolean;
@@ -11,6 +12,7 @@ export interface CredentialProtector {
 interface EncryptedCredentialEntry {
   readonly reference: string;
   readonly encryptedValue: string;
+  readonly payloadKind?: 'text' | 'structured_record';
   readonly updatedAt: string;
 }
 
@@ -42,8 +44,28 @@ export class SecureCredentialVault {
   }
 
   async save(reference: string, value: string): Promise<void> {
-    const safeReference = requireReference(reference);
     requireCredentialValue(value);
+    await this.savePayload(reference, value, 'text');
+  }
+
+  async saveRecord(
+    reference: string,
+    record: StructuredCredentialRecord
+  ): Promise<void> {
+    const normalized = parseStructuredCredentialRecord(record);
+    await this.savePayload(
+      reference,
+      JSON.stringify(normalized),
+      'structured_record'
+    );
+  }
+
+  private async savePayload(
+    reference: string,
+    value: string,
+    payloadKind: 'text' | 'structured_record'
+  ): Promise<void> {
+    const safeReference = requireReference(reference);
     if (!this.protector.isAvailable()) {
       throw new CredentialVaultUnavailableError();
     }
@@ -64,6 +86,7 @@ export class SecureCredentialVault {
       const entry: EncryptedCredentialEntry = {
         reference: safeReference,
         encryptedValue,
+        payloadKind,
         updatedAt: new Date().toISOString()
       };
       await this.writeSnapshot({
@@ -125,13 +148,44 @@ export class SecureCredentialVault {
     }
     const entry = await this.findEntry(requireReference(reference));
     if (!entry) throw new CredentialNotFoundError();
-    let value: string;
+    if ((entry.payloadKind ?? 'text') !== 'text') {
+      throw new CredentialPayloadKindError('text');
+    }
+    const value = this.decryptEntry(entry);
+    return operation(value);
+  }
+
+  /** Keeps structured credential fields inside a main-process callback boundary. */
+  async useRecord<T>(
+    reference: string,
+    operation: (record: StructuredCredentialRecord) => Promise<T>
+  ): Promise<T> {
+    if (!this.protector.isAvailable()) {
+      throw new CredentialVaultUnavailableError();
+    }
+    const entry = await this.findEntry(requireReference(reference));
+    if (!entry) throw new CredentialNotFoundError();
+    if (entry.payloadKind !== 'structured_record') {
+      throw new CredentialPayloadKindError('structured_record');
+    }
+    let record: StructuredCredentialRecord;
     try {
-      value = this.protector.unprotect(Buffer.from(entry.encryptedValue, 'base64'));
+      record = parseStructuredCredentialRecord(JSON.parse(this.decryptEntry(entry)));
+    } catch (error) {
+      if (error instanceof CredentialUnreadableError) throw error;
+      throw new CredentialUnreadableError(error);
+    }
+    return operation(record);
+  }
+
+  private decryptEntry(entry: EncryptedCredentialEntry): string {
+    try {
+      return this.protector.unprotect(
+        Buffer.from(entry.encryptedValue, 'base64')
+      );
     } catch (error) {
       throw new CredentialUnreadableError(error);
     }
-    return operation(value);
   }
 
   private async findEntry(
@@ -223,6 +277,13 @@ export class CredentialUnreadableError extends Error {
   }
 }
 
+export class CredentialPayloadKindError extends Error {
+  constructor(readonly expectedKind: 'text' | 'structured_record') {
+    super(`Credential payload is not a ${expectedKind} value`);
+    this.name = 'CredentialPayloadKindError';
+  }
+}
+
 async function writeTextAtomically(target: string, content: string): Promise<void> {
   const parent = path.dirname(target);
   const temporary = path.join(parent, `.${path.basename(target)}.${randomUUID()}.tmp`);
@@ -283,10 +344,56 @@ function parseSnapshot(value: unknown): EncryptedCredentialSnapshot {
     return {
       reference,
       encryptedValue: candidate.encryptedValue,
+      payloadKind: parsePayloadKind(candidate.payloadKind),
       updatedAt: candidate.updatedAt
     };
   });
   return { schemaVersion: 1, entries };
+}
+
+function parsePayloadKind(
+  value: unknown
+): EncryptedCredentialEntry['payloadKind'] {
+  if (value === undefined) return undefined;
+  if (value !== 'text' && value !== 'structured_record') {
+    throw new TypeError('Credential entry payload kind is invalid');
+  }
+  return value;
+}
+
+function parseStructuredCredentialRecord(
+  value: unknown
+): StructuredCredentialRecord {
+  if (!isRecord(value) || !isRecord(value.values)) {
+    throw new TypeError('Structured credential record is invalid');
+  }
+  const schemaId = requireReference(value.schemaId);
+  if (!Number.isSafeInteger(value.schemaVersion) || Number(value.schemaVersion) < 1) {
+    throw new TypeError('Structured credential schema version is invalid');
+  }
+  const values: Record<string, string> = {};
+  for (const [key, fieldValue] of Object.entries(value.values)) {
+    const safeKey = requireCredentialFieldKey(key);
+    requireCredentialValue(fieldValue as string);
+    values[safeKey] = fieldValue as string;
+  }
+  return {
+    schemaId,
+    schemaVersion: Number(value.schemaVersion),
+    values
+  };
+}
+
+function requireCredentialFieldKey(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 128 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
+  ) {
+    throw new TypeError('Credential field key is invalid');
+  }
+  return value;
 }
 
 function requireReference(value: unknown): string {
