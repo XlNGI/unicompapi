@@ -1021,3 +1021,13 @@ M2 第十一支 `feature/provider-contracts-data-migration` 已从 `develop@c15b
     docs/active/多服务商功能路由-M2-合同数据迁移记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。M2 在合同与迁移范围内完成；合并后从最新 `develop` 创建 M3 第一支 `feature/provider-management-framework`。UI 仍必须等待 M4 后台集成验收通过，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M3 第一支 `feature/provider-management-framework` 已从 `develop@d95e6f1` 建立，实现提交为 `0e532ac`。该支新增只读安全模板、Package-owned 连接创建、精确管理适配器 Registry、结构化凭证轮换、无费用连接验证、模型目录同步、精确手工模型登记、连接/模型启停、活跃 operation 删除门禁、软删除和应用级 Provider 管理审计。
+
+目录同步只保存精确 model key 与安全显示名，不推断功能；目录消失模型保留为 `missing` 并关闭相关路由偏好。模型只有在连接可用、目录为 `present`、Binding 精确且活动 Profile 为 `verified` 时才能启用；连接或模型停用同步关闭相关路由。通用管理只能修改 Package-owned 记录，未迁移的冻结 Vidu legacy 数据不会被误改。凭证轮换保留活跃 operation 引用的旧版本，普通删除在活跃 operation 存在时拒绝，显式放弃后记录不可恢复并仅执行本地软删除；历史 Provider、Connection、Model、Task、Execution、Message、Work 和来源事实均保留。
+
+第一支完整门禁为 Node 179 项与 Vitest 472 项，共 651 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、254 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M3-供应商管理框架记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第二支 `feature/provider-invocation-read-model`；该支只实现媒体与文本调用安全读模型和受控查询端口，不修改任务中心 React 页面，不启动真实 API、凭证验证、收费测试或阶段 10。
