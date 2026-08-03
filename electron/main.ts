@@ -15,8 +15,17 @@ import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
 import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
 import {
+  deepSeekProviderPackageDescriptor,
+  JsonProviderManagementAuditStore,
+  klingProviderPackageDescriptor,
+  newApiProviderPackageDescriptor,
   normalizeTrustedExternalUrl,
-  StorageProjectSessionRegistry
+  ProviderManagementAdapterRegistry,
+  ProviderManagementFramework,
+  ProviderPackageRegistry,
+  StorageProjectSessionRegistry,
+  viduProviderPackageDescriptor,
+  volcengineProviderPackageDescriptor
 } from '../src/platform';
 import { ElectronViduComposition } from './ipc/vidu-composition';
 
@@ -41,6 +50,22 @@ const settingsLifecycle = registerSettingsIpcHandlers();
 const viduComposition = new ElectronViduComposition({
   getProxyMode: () => settingsLifecycle.getProxyMode()
 });
+const providerPackages = new ProviderPackageRegistry([
+  deepSeekProviderPackageDescriptor,
+  volcengineProviderPackageDescriptor,
+  klingProviderPackageDescriptor,
+  newApiProviderPackageDescriptor,
+  viduProviderPackageDescriptor
+]);
+const providerManagement = new ProviderManagementFramework(
+  providerPackages,
+  viduComposition.registry,
+  viduComposition.credentialVault,
+  new ProviderManagementAdapterRegistry(providerPackages, []),
+  new JsonProviderManagementAuditStore(
+    path.join(app.getPath('userData'), 'provider-management-audit.json')
+  )
+);
 const projectSessionRegistry = new StorageProjectSessionRegistry();
 const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get()
@@ -60,9 +85,7 @@ const storageLifecycle = registerStorageIpcHandlers({
 });
 registerProviderIpcHandlers({
   registry: viduComposition.registry,
-  credentialVault: viduComposition.credentialVault,
-  connectionValidation: viduComposition.providerPackage.connectionValidation,
-  liveValidation: viduComposition.liveValidation
+  management: providerManagement
 });
 
 function getWindowFromEvent(event: { sender: Electron.WebContents }): BrowserWindow | null {

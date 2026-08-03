@@ -1,93 +1,15 @@
 export const providerIpcChannels = {
   getRegistry: 'providers:get-registry',
-  saveCredential: 'providers:save-credential',
-  deleteLocalCredential: 'providers:delete-local-credential',
-  getCredentialStatus: 'providers:get-credential-status',
-  checkCredentialStorage: 'providers:check-credential-storage',
-  validateConnection: 'providers:validate-connection',
-  syncModelCatalog: 'providers:sync-model-catalog',
-  registerManualModel: 'providers:register-manual-model',
-  validateCapability: 'providers:validate-capability',
-  recordUserCapability: 'providers:record-user-capability',
-  saveRoutingPreference: 'providers:save-routing-preference',
-  planRoute: 'providers:plan-route',
-  createProvider: 'providers:create-provider',
-  createConnection: 'providers:create-connection',
-  updateConnection: 'providers:update-connection',
-  setConnectionEnabled: 'providers:set-connection-enabled',
-  deleteConnection: 'providers:delete-connection',
-  setModelEnabled: 'providers:set-model-enabled',
-  getViduLiveValidation: 'providers:get-vidu-live-validation',
-  startViduLiveValidation: 'providers:start-vidu-live-validation'
+  listTemplates: 'providers:list-templates',
+  createConnection: 'providers:create-managed-connection',
+  rotateCredential: 'providers:rotate-managed-credential',
+  validateConnection: 'providers:validate-managed-connection',
+  syncModelCatalog: 'providers:sync-managed-model-catalog',
+  registerExactModel: 'providers:register-exact-model',
+  setConnectionEnabled: 'providers:set-managed-connection-enabled',
+  setModelEnabled: 'providers:set-managed-model-enabled',
+  deleteConnection: 'providers:delete-managed-connection'
 } as const;
-
-export type ViduLiveValidationIpcErrorCode =
-  | 'invalid_request'
-  | 'already_started'
-  | 'connection_not_ready'
-  | 'runtime_authorization_closed'
-  | 'validation_operation_failed';
-
-export interface ViduLiveValidationApprovalDto {
-  readonly confirmLiveNetwork: boolean;
-  readonly confirmCredentialUse: boolean;
-  readonly confirmImageBillableAttempt: boolean;
-  readonly confirmVideoBillableAttempt: boolean;
-}
-
-export interface ViduLiveValidationStatusDto {
-  readonly status: 'not_started' | 'active' | 'passed' | 'failed' | 'blocked';
-  readonly startedAt?: string;
-  readonly updatedAt?: string;
-  readonly stopCode?: string;
-  readonly budget: {
-    readonly image: {
-      readonly claimState: 'available' | 'claimed' | 'not_available';
-      readonly billingFact:
-        | 'not_attempted'
-        | 'attempt_claimed'
-        | 'accepted_or_completed'
-        | 'failed_before_submission'
-        | 'submission_outcome_unknown';
-    };
-    readonly video: {
-      readonly claimState: 'available' | 'claimed' | 'not_available';
-      readonly billingFact:
-        | 'not_attempted'
-        | 'attempt_claimed'
-        | 'accepted_or_completed'
-        | 'failed_before_submission'
-        | 'submission_outcome_unknown';
-    };
-  };
-  readonly events: readonly {
-    readonly sequence: number;
-    readonly stage:
-      | 'readiness'
-      | 'credits_validation'
-      | 'image_submission'
-      | 'image_local_result'
-      | 'video_confirmation'
-      | 'video_submission'
-      | 'video_polling'
-      | 'video_local_result'
-      | 'flow';
-    readonly state: 'claimed' | 'progress' | 'succeeded' | 'failed' | 'blocked';
-    readonly recordedAt: string;
-    readonly errorCode?: string;
-    readonly providerState?: string;
-  }[];
-}
-
-export type ViduLiveValidationIpcResult =
-  | { readonly ok: true; readonly value: ViduLiveValidationStatusDto }
-  | {
-      readonly ok: false;
-      readonly error: {
-        readonly code: ViduLiveValidationIpcErrorCode;
-        readonly message: string;
-      };
-    };
 
 export type ProviderManagementErrorCode =
   | 'adapter_unavailable'
@@ -98,6 +20,29 @@ export type ProviderManagementErrorCode =
   | 'model_already_exists'
   | 'invalid_request'
   | 'provider_operation_failed';
+
+export type ProviderFrameworkErrorCode =
+  | 'invalid_request'
+  | 'package_not_found'
+  | 'template_not_found'
+  | 'connection_not_found'
+  | 'model_not_found'
+  | 'connection_contract_stale'
+  | 'credential_unavailable'
+  | 'credential_invalid'
+  | 'free_validation_unavailable'
+  | 'operation_unavailable'
+  | 'adapter_unavailable'
+  | 'adapter_binding_ambiguous'
+  | 'connection_not_available'
+  | 'catalog_sync_unavailable'
+  | 'manual_registration_unavailable'
+  | 'model_already_exists'
+  | 'model_not_routable'
+  | 'active_operations_present'
+  | 'provider_registry_conflict'
+  | 'audit_store_unavailable'
+  | 'provider_management_failed';
 
 export type ProviderManagementResult =
   | {
@@ -120,6 +65,41 @@ export type ProviderManagementResult =
         readonly message: string;
       };
     };
+
+export type ProviderFrameworkResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: ProviderFrameworkErrorCode;
+        readonly message: string;
+      };
+    };
+
+export interface ProviderTemplateSummaryDto {
+  readonly packageId: string;
+  readonly packageVersion: string;
+  readonly providerName: string;
+  readonly templateId: string;
+  readonly kind: 'official' | 'compatible_custom';
+  readonly displayName: string;
+  readonly baseUrlMode: 'fixed' | 'optional' | 'required';
+  readonly credentialFields: readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly secret: boolean;
+    readonly required: boolean;
+    readonly kind: 'token' | 'access_key' | 'secret_key' | 'string';
+  }[];
+  readonly freeConnectionValidation: boolean;
+  readonly modelDiscoveryKind: 'none' | 'catalog' | 'manual_exact';
+  readonly validationAction: 'available' | 'requires_live_api_approval' | 'unsupported';
+  readonly modelDiscoveryAction:
+    | 'catalog_available'
+    | 'requires_live_api_approval'
+    | 'manual_exact'
+    | 'unsupported';
+}
 
 export type RoutePlanResult =
   | {
@@ -192,6 +172,8 @@ export interface ProviderSummaryDto {
   readonly name: string;
   readonly accessCategory: string;
   readonly identityState: string;
+  readonly packageId?: string;
+  readonly packageVersion?: string;
 }
 
 export interface ProviderConnectionSummaryDto {
@@ -203,6 +185,10 @@ export interface ProviderConnectionSummaryDto {
   readonly credentialState: string;
   readonly endpointConfigured: boolean;
   readonly lastConnectionValidationAt?: string;
+  readonly packageId?: string;
+  readonly packageVersion?: string;
+  readonly templateId?: string;
+  readonly templateKind?: 'official' | 'compatible_custom';
 }
 
 export interface ProviderModelSummaryDto {
@@ -221,6 +207,8 @@ export interface ProviderModelSummaryDto {
   readonly lastSeenAt?: string;
   readonly displayName: string;
   readonly enabled: boolean;
+  readonly profileStatus?: 'declared' | 'verified' | 'restricted' | 'disabled';
+  readonly productFeatures?: readonly string[];
 }
 
 export interface ProviderProtocolBindingSummaryDto {
@@ -317,61 +305,67 @@ export interface ProviderRegistryDto {
 
 export interface ProviderApi {
   getRegistry(): Promise<ProviderIpcResult<ProviderRegistryDto>>;
-  saveCredential(
+  listTemplates(): Promise<ProviderFrameworkResult<readonly ProviderTemplateSummaryDto[]>>;
+  createConnection(input: {
+    readonly packageId: string;
+    readonly templateId: string;
+    readonly name: string;
+    readonly endpoint?: string;
+    readonly credentials: Readonly<Record<string, string>>;
+    readonly explicitLoopbackHttpConsent?: boolean;
+  }): Promise<ProviderFrameworkResult<{
+    readonly providerId: string;
+    readonly connectionId: string;
+    readonly state: 'saved';
+  }>>;
+  rotateCredential(
     connectionId: string,
-    value: string
-  ): Promise<CredentialActionResult>;
-  deleteLocalCredential(connectionId: string): Promise<CredentialActionResult>;
-  getCredentialStatus(connectionId: string): Promise<CredentialStatusResult>;
-  checkCredentialStorage(connectionId: string): Promise<CredentialActionResult>;
-  validateConnection(connectionId: string): Promise<ProviderManagementResult>;
-  syncModelCatalog(connectionId: string): Promise<ProviderManagementResult>;
-  registerManualModel(
+    credentials: Readonly<Record<string, string>>
+  ): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly credentialVersionId: string;
+    readonly previousCredential: 'removed' | 'retained_for_active_operations' | 'absent';
+  }>>;
+  validateConnection(connectionId: string): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly state: 'available' | 'unavailable';
+    readonly observedAt: string;
+  }>>;
+  syncModelCatalog(connectionId: string): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly count: number;
+    readonly catalogRevision: number;
+    readonly observedAt: string;
+  }>>;
+  registerExactModel(
     connectionId: string,
-    name: string,
+    providerModelKey: string,
     displayName: string
-  ): Promise<ProviderManagementResult>;
-  validateCapability(
-    modelId: string,
-    capability: string
-  ): Promise<ProviderManagementResult>;
-  recordUserCapability(
-    modelId: string,
-    capability: string,
-    state: 'user_confirmed' | 'unsupported'
-  ): Promise<ProviderManagementResult>;
-  saveRoutingPreference(
-    purpose: string,
-    modelId: string,
-    priority: number,
-    enabled: boolean
-  ): Promise<ProviderManagementResult>;
-  planRoute(purpose: string): Promise<RoutePlanResult>;
-  createProvider(
-    name: string,
-    accessCategory: 'online' | 'local' | 'lan' | 'custom_remote'
-  ): Promise<ProviderManagementResult>;
-  createConnection(
-    providerId: string,
-    name: string,
-    endpoint: string | null
-  ): Promise<ProviderManagementResult>;
-  updateConnection(
-    connectionId: string,
-    name: string,
-    endpoint: string | null
-  ): Promise<ProviderManagementResult>;
+  ): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly modelId: string;
+    readonly state: 'registered_without_profile';
+  }>>;
   setConnectionEnabled(
     connectionId: string,
     enabled: boolean
-  ): Promise<ProviderManagementResult>;
-  deleteConnection(connectionId: string): Promise<CredentialActionResult>;
+  ): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly state: 'enabled' | 'disabled';
+  }>>;
   setModelEnabled(
     modelId: string,
     enabled: boolean
-  ): Promise<ProviderManagementResult>;
-  getViduLiveValidation(): Promise<ViduLiveValidationIpcResult>;
-  startViduLiveValidation(
-    approval: ViduLiveValidationApprovalDto
-  ): Promise<ViduLiveValidationIpcResult>;
+  ): Promise<ProviderFrameworkResult<{
+    readonly modelId: string;
+    readonly state: 'enabled' | 'disabled';
+  }>>;
+  deleteConnection(
+    connectionId: string,
+    abandonActiveOperations?: boolean
+  ): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly state: 'deleted';
+    readonly retainedCredentialVersions: readonly string[];
+  }>>;
 }

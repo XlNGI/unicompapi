@@ -411,7 +411,9 @@ export class ProviderRegistryController {
             providerId: provider.id,
             name: provider.name,
             accessCategory: provider.accessCategory,
-            identityState: provider.identityState
+            identityState: provider.identityState,
+            packageId: provider.packageId,
+            packageVersion: provider.packageVersion
           })),
           connections: snapshot.connections.map((connection) => ({
             connectionId: connection.id,
@@ -421,7 +423,11 @@ export class ProviderRegistryController {
             identityState: connection.identityState,
             credentialState: connection.credentialState,
             endpointConfigured: connection.endpoint !== undefined,
-            lastConnectionValidationAt: connection.lastConnectionValidationAt
+            lastConnectionValidationAt: connection.lastConnectionValidationAt,
+            packageId: connection.packageId,
+            packageVersion: connection.packageVersion,
+            templateId: connection.templateId,
+            templateKind: connection.templateKind
           })),
           protocolBindings: snapshot.protocolBindings.map((binding) => ({
             protocolBindingId: binding.id,
@@ -433,7 +439,12 @@ export class ProviderRegistryController {
             executionLifecycle: binding.executionLifecycle,
             supportedPurposes: binding.supportedPurposes
           })),
-          models: snapshot.models.map((model) => ({
+          models: snapshot.models.map((model) => {
+            const profile = snapshot.modelProfiles?.find((candidate) =>
+              candidate.profileId === model.activeProfileId &&
+              candidate.modelId === model.id
+            );
+            return {
             modelId: model.id,
             providerId: model.providerId,
             connectionId: model.connectionId,
@@ -448,8 +459,11 @@ export class ProviderRegistryController {
             catalogRevision: model.catalogRevision,
             lastSeenAt: model.lastSeenAt,
             displayName: model.displayName,
-            enabled: model.enabled
-          })),
+            enabled: model.enabled,
+            profileStatus: profile?.status,
+            productFeatures: profile?.features.map((feature) => feature.productFeature)
+            };
+          }),
           capabilities: snapshot.capabilities.map((capability) => ({
             evidenceId: capability.id,
             modelId: capability.modelId,

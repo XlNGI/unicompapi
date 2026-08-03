@@ -165,6 +165,15 @@ export interface ProviderManagementAdapterPort {
   }>;
 }
 
+export interface ProviderManagementTemplateDto extends SafeProviderTemplateDto {
+  readonly validationAction: 'available' | 'requires_live_api_approval' | 'unsupported';
+  readonly modelDiscoveryAction:
+    | 'catalog_available'
+    | 'requires_live_api_approval'
+    | 'manual_exact'
+    | 'unsupported';
+}
+
 export class ProviderManagementAdapterRegistry {
   private readonly ports: ReadonlyMap<string, ProviderManagementAdapterPort>;
 
@@ -252,6 +261,25 @@ export class ProviderManagementAdapterRegistry {
     }
     return matches[0];
   }
+
+  supports(
+    template: ResolvedProviderTemplate,
+    operation: 'validate_connection' | 'discover_models'
+  ): boolean {
+    return template.adapters.some((descriptor) => {
+      if (!descriptor.operations.includes(operation)) return false;
+      const port = this.ports.get(adapterKey({
+        packageId: template.package.packageId,
+        adapterId: descriptor.adapterId,
+        adapterVersion: descriptor.adapterVersion,
+        protocolId: descriptor.protocolId,
+        protocolVersion: descriptor.protocolVersion
+      }));
+      return operation === 'validate_connection'
+        ? Boolean(port?.validateConnection)
+        : Boolean(port?.discoverModels);
+    });
+  }
 }
 
 export interface ProviderCredentialRetentionPort {
@@ -338,8 +366,36 @@ export class ProviderManagementFramework {
       new ProviderConnectionContractService(packages, registry, vault);
   }
 
-  listTemplates(): readonly SafeProviderTemplateDto[] {
-    return this.packages.listSafeTemplates();
+  listTemplates(): readonly ProviderManagementTemplateDto[] {
+    return this.packages.listSafeTemplates().map((template) => {
+      const resolved = this.packages.resolveTemplate(
+        template.packageId,
+        template.templateId
+      );
+      const validationInstalled = this.adapters.supports(
+        resolved,
+        'validate_connection'
+      );
+      const discoveryInstalled = this.adapters.supports(
+        resolved,
+        'discover_models'
+      );
+      return {
+        ...template,
+        validationAction: !template.freeConnectionValidation
+          ? 'unsupported'
+          : validationInstalled
+            ? 'available'
+            : 'requires_live_api_approval',
+        modelDiscoveryAction: template.modelDiscoveryKind === 'manual_exact'
+          ? 'manual_exact'
+          : template.modelDiscoveryKind === 'none'
+            ? 'unsupported'
+            : discoveryInstalled
+              ? 'catalog_available'
+              : 'requires_live_api_approval'
+      };
+    });
   }
 
   async createConnection(input: unknown): Promise<ProviderManagementFrameworkResult<{
