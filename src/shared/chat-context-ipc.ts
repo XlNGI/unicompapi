@@ -8,7 +8,14 @@ export const chatContextIpcChannels = {
   restoreConversation: 'chat-context:restore-conversation',
   deleteConversation: 'chat-context:delete-conversation',
   addUserMessage: 'chat-context:add-user-message',
-  requestAssistantResponse: 'chat-context:request-assistant-response',
+  copyLegacyConversation: 'chat-context:copy-legacy-conversation',
+  createResponseDraft: 'chat-context:create-response-draft',
+  replaceResponseContexts: 'chat-context:replace-response-contexts',
+  listResponseCandidates: 'chat-context:list-response-candidates',
+  prepareResponseSubmission: 'chat-context:prepare-response-submission',
+  submitResponse: 'chat-context:submit-response',
+  getResponseExecution: 'chat-context:get-response-execution',
+  replayResponseEvents: 'chat-context:replay-response-events',
   cancelAssistantResponse: 'chat-context:cancel-assistant-response',
   createContextDraft: 'chat-context:create-context-draft',
   getContextDraftPreview: 'chat-context:get-context-draft-preview',
@@ -33,6 +40,17 @@ export type ChatContextIpcErrorCode =
   | 'conversation_not_saved'
   | 'conversation_deleted'
   | 'conversation_not_active'
+  | 'legacy_conversation_read_only'
+  | 'response_draft_not_found'
+  | 'response_execution_not_found'
+  | 'candidate_not_found'
+  | 'candidate_unavailable'
+  | 'route_selection_invalid'
+  | 'route_selection_expired'
+  | 'route_selection_consumed'
+  | 'stale_route_selection'
+  | 'confirmation_required'
+  | 'runtime_not_allowed'
   | 'draft_not_found'
   | 'context_not_found'
   | 'message_not_found'
@@ -91,6 +109,8 @@ export interface ConversationDto {
   readonly projectId: string | null;
   readonly title: string;
   readonly status: 'active' | 'archived' | 'deleted';
+  readonly storageScope: 'current_project' | 'legacy_project' | 'legacy_unbound';
+  readonly readOnly: boolean;
   readonly messages: readonly MessageDto[];
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -198,6 +218,152 @@ export interface AddUserMessageRequest extends ConversationRevisionRequest {
   readonly content: string;
 }
 
+export interface ConversationResponseDraftDto {
+  readonly responseDraftId: string;
+  readonly revision: number;
+  readonly projectId: string;
+  readonly conversationId: string;
+  readonly conversationRevision: number;
+  readonly userMessageId: string;
+  readonly userMessageRevision: number;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
+  readonly contextSelections: readonly {
+    readonly contextId: string;
+    readonly contextRevision: number;
+    readonly includeInPrompt: boolean;
+  }[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ConversationResponseCandidateDto {
+  readonly schemaVersion: 1;
+  readonly candidateId: string;
+  readonly providerName: string;
+  readonly connectionName: string;
+  readonly modelName: string;
+  readonly parameterSchema: {
+    readonly schemaVersion: 2;
+    readonly schemaId: string;
+    readonly revision: number;
+    readonly productFeature: string;
+    readonly fields: readonly {
+      readonly fieldId: string;
+      readonly labelId: string;
+      readonly groupId?: string;
+      readonly order: number;
+      readonly valueType: string;
+      readonly exposure: string;
+      readonly defaultPolicy: string;
+      readonly required: boolean;
+      readonly options?: readonly (string | number | boolean)[];
+      readonly minimum?: number;
+      readonly maximum?: number;
+      readonly step?: number;
+      readonly unitId?: string;
+    }[];
+  };
+  readonly usageSchema: {
+    readonly schemaVersion: 1;
+    readonly schemaId: string;
+    readonly revision: number;
+  };
+  readonly cost: {
+    readonly state: 'known' | 'unknown' | 'not_applicable';
+    readonly summary?: string;
+  };
+  readonly available: boolean;
+  readonly unavailableReasons: readonly string[];
+}
+
+export interface ConversationResponsePreparationDto {
+  readonly schemaVersion: 1;
+  readonly routeSelectionToken: string;
+  readonly expiresAt: string;
+  readonly confirmation: {
+    readonly schemaVersion: 1;
+    readonly confirmationId: string;
+    readonly productFeature: string;
+    readonly providerName: string;
+    readonly connectionName: string;
+    readonly modelName: string;
+    readonly recipientName: string;
+    readonly outboundScope: 'external_service' | 'local_network' | 'local_device' | 'unknown';
+    readonly contentCategories: readonly string[];
+    readonly parameterFieldCount: number;
+    readonly materialCount: number;
+    readonly contextCount: number;
+    readonly cost: {
+      readonly state: 'known' | 'unknown' | 'not_applicable';
+      readonly summary?: string;
+    };
+  };
+}
+
+export interface ConversationResponseExecutionDto {
+  readonly responseExecutionId: string;
+  readonly conversationId: string;
+  readonly userMessageId: string;
+  readonly assistantMessageId: string;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
+  readonly state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  readonly streamSequence: number;
+  readonly content: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ConversationResponseStreamEventDto {
+  readonly schemaVersion: 1;
+  readonly responseExecutionId: string;
+  readonly conversationId: string;
+  readonly assistantMessageId: string;
+  readonly sequence: number;
+  readonly type: 'execution_created' | 'stream_started' | 'content_delta' |
+    'cancel_requested' | 'stream_completed' | 'stream_failed' |
+    'stream_cancelled' | 'stream_interrupted' | 'stream_resumed';
+  readonly contentDelta?: string;
+  readonly safeCode?: string;
+  readonly interruptionReason?: 'provider_disconnected' | 'transport_interrupted' | 'application_shutdown';
+  readonly occurredAt: string;
+}
+
+export interface CreateResponseDraftRequest extends ConversationRevisionRequest {
+  readonly userMessageId: string;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
+}
+
+export interface ResponseDraftRevisionRequest {
+  readonly responseDraftId: string;
+  readonly expectedRevision: number;
+}
+
+export interface ReplaceResponseContextsRequest extends ResponseDraftRevisionRequest {
+  readonly selections: readonly {
+    readonly contextId: string;
+    readonly contextRevision: number;
+    readonly includeInPrompt: boolean;
+  }[];
+}
+
+export interface PrepareResponseSubmissionRequest extends ResponseDraftRevisionRequest {
+  readonly candidateId: string;
+}
+
+export interface SubmitResponseRequest extends ResponseDraftRevisionRequest {
+  readonly routeSelectionToken: string;
+  readonly confirmationId: string;
+  readonly confirmed: boolean;
+}
+
+export interface ResponseExecutionRequest {
+  readonly responseExecutionId: string;
+}
+
+export interface ReplayResponseEventsRequest extends ResponseExecutionRequest {
+  readonly afterSequence: number;
+}
+
 export interface CancelAssistantResponseRequest
   extends ConversationRevisionRequest {
   readonly messageId: string;
@@ -297,6 +463,112 @@ export const chatContextRequestParsers = {
       conversationId: controlledId(record.conversationId, 'conversationId'),
       expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
       content: boundedText(record.content, 'content', 1_000_000, false)
+    };
+  },
+  createResponseDraft(value: unknown): CreateResponseDraftRequest {
+    const record = exactRecord(value, [
+      'conversationId',
+      'expectedRevision',
+      'userMessageId',
+      'productFeature'
+    ]);
+    if (record.productFeature !== 'text_chat' && record.productFeature !== 'text_reasoning') {
+      throw new TypeError('productFeature is invalid');
+    }
+    return {
+      conversationId: controlledId(record.conversationId, 'conversationId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      userMessageId: controlledId(record.userMessageId, 'userMessageId'),
+      productFeature: record.productFeature
+    };
+  },
+  responseDraftRevision(value: unknown): ResponseDraftRevisionRequest {
+    const record = exactRecord(value, ['responseDraftId', 'expectedRevision']);
+    return {
+      responseDraftId: controlledId(record.responseDraftId, 'responseDraftId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision')
+    };
+  },
+  replaceResponseContexts(value: unknown): ReplaceResponseContextsRequest {
+    const record = exactRecord(value, [
+      'responseDraftId',
+      'expectedRevision',
+      'selections'
+    ]);
+    if (!Array.isArray(record.selections) || record.selections.length > 100) {
+      throw new TypeError('selections are invalid');
+    }
+    const selections = record.selections.map((selection) => {
+      const item = exactRecord(selection, [
+        'contextId',
+        'contextRevision',
+        'includeInPrompt'
+      ]);
+      return {
+        contextId: controlledId(item.contextId, 'contextId'),
+        contextRevision: positiveRevision(item.contextRevision, 'contextRevision'),
+        includeInPrompt: booleanValue(item.includeInPrompt, 'includeInPrompt')
+      };
+    });
+    if (new Set(selections.map((selection) => selection.contextId)).size !== selections.length) {
+      throw new TypeError('selections contain duplicate contexts');
+    }
+    return {
+      responseDraftId: controlledId(record.responseDraftId, 'responseDraftId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      selections
+    };
+  },
+  prepareResponseSubmission(value: unknown): PrepareResponseSubmissionRequest {
+    const record = exactRecord(value, [
+      'responseDraftId',
+      'expectedRevision',
+      'candidateId'
+    ]);
+    return {
+      responseDraftId: controlledId(record.responseDraftId, 'responseDraftId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      candidateId: controlledId(record.candidateId, 'candidateId')
+    };
+  },
+  submitResponse(value: unknown): SubmitResponseRequest {
+    const record = exactRecord(value, [
+      'responseDraftId',
+      'expectedRevision',
+      'routeSelectionToken',
+      'confirmationId',
+      'confirmed'
+    ]);
+    return {
+      responseDraftId: controlledId(record.responseDraftId, 'responseDraftId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      routeSelectionToken: boundedText(
+        record.routeSelectionToken,
+        'routeSelectionToken',
+        512,
+        false
+      ),
+      confirmationId: controlledId(record.confirmationId, 'confirmationId'),
+      confirmed: booleanValue(record.confirmed, 'confirmed')
+    };
+  },
+  responseExecution(value: unknown): ResponseExecutionRequest {
+    const record = exactRecord(value, ['responseExecutionId']);
+    return {
+      responseExecutionId: controlledId(
+        record.responseExecutionId,
+        'responseExecutionId'
+      )
+    };
+  },
+  replayResponseEvents(value: unknown): ReplayResponseEventsRequest {
+    const record = exactRecord(value, ['responseExecutionId', 'afterSequence']);
+    return {
+      responseExecutionId: controlledId(
+        record.responseExecutionId,
+        'responseExecutionId'
+      ),
+      afterSequence: revision(record.afterSequence, 'afterSequence')
     };
   },
   cancelAssistantResponse(value: unknown): CancelAssistantResponseRequest {
@@ -448,10 +720,47 @@ export interface ChatContextApi {
     expectedRevision: number,
     content: string
   ): Promise<ChatContextIpcResult<ConversationDto>>;
-  requestAssistantResponse(
-    conversationId: string,
-    expectedRevision: number
+  copyLegacyConversation(
+    conversationId: string
   ): Promise<ChatContextIpcResult<ConversationDto>>;
+  createResponseDraft(
+    conversationId: string,
+    expectedRevision: number,
+    userMessageId: string,
+    productFeature: 'text_chat' | 'text_reasoning'
+  ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>>;
+  replaceResponseContexts(
+    responseDraftId: string,
+    expectedRevision: number,
+    selections: readonly {
+      readonly contextId: string;
+      readonly contextRevision: number;
+      readonly includeInPrompt: boolean;
+    }[]
+  ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>>;
+  listResponseCandidates(
+    responseDraftId: string,
+    expectedRevision: number
+  ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>>;
+  prepareResponseSubmission(
+    responseDraftId: string,
+    expectedRevision: number,
+    candidateId: string
+  ): Promise<ChatContextIpcResult<ConversationResponsePreparationDto>>;
+  submitResponse(
+    responseDraftId: string,
+    expectedRevision: number,
+    routeSelectionToken: string,
+    confirmationId: string,
+    confirmed: true
+  ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
+  getResponseExecution(
+    responseExecutionId: string
+  ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
+  replayResponseEvents(
+    responseExecutionId: string,
+    afterSequence: number
+  ): Promise<ChatContextIpcResult<readonly ConversationResponseStreamEventDto[]>>;
   cancelAssistantResponse(
     conversationId: string,
     messageId: string,

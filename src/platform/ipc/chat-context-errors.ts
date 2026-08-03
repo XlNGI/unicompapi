@@ -12,9 +12,17 @@ import type {
 import {
   ConversationRepositoryDataError,
   ConversationRevisionConflictError,
+  ConversationResponseDraftRepositoryDataError,
+  ConversationResponseDraftRevisionConflictError,
+  ConversationResponseExecutionRepositoryDataError,
   ProjectContextRepositoryDataError,
-  ProjectContextRevisionConflictError
+  ProjectContextRevisionConflictError,
+  ProjectContextSnapshotError
 } from '../repositories';
+import {
+  ConversationResponseExecutionLifecycleError,
+  FeatureSubmissionError
+} from '../providers';
 
 export function chatContextFailure<T>(
   error: unknown,
@@ -48,6 +56,30 @@ export function chatContextFailure<T>(
       error.actualRevision ?? undefined
     );
   }
+  if (error instanceof ConversationResponseDraftRevisionConflictError) {
+    return failure(
+      'revision_conflict',
+      'Conversation response draft revision has changed',
+      error.actualRevision ?? undefined
+    );
+  }
+  if (error instanceof FeatureSubmissionError) {
+    const code = error.code === 'subject_invalid'
+      ? 'invalid_request'
+      : error.code;
+    return failure(code, error.message);
+  }
+  if (error instanceof ProjectContextSnapshotError) {
+    const code = error.code === 'context_not_found' ||
+      error.code === 'context_revision_not_found' ||
+      error.code === 'context_deleted'
+      ? 'context_not_found'
+      : 'invalid_request';
+    return failure(code, error.message);
+  }
+  if (error instanceof ConversationResponseExecutionLifecycleError) {
+    return failure('response_execution_not_found', 'The response execution does not exist');
+  }
   if (error instanceof DomainError) {
     return failure(
       error.code === 'invalid_state_transition'
@@ -60,7 +92,9 @@ export function chatContextFailure<T>(
   }
   if (
     error instanceof ConversationRepositoryDataError ||
-    error instanceof ProjectContextRepositoryDataError
+    error instanceof ProjectContextRepositoryDataError ||
+    error instanceof ConversationResponseDraftRepositoryDataError ||
+    error instanceof ConversationResponseExecutionRepositoryDataError
   ) {
     return failure('storage_error', 'Local data could not be read or saved');
   }

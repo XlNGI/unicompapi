@@ -55,7 +55,8 @@ test('A2 pages do not branch on the renderer platform or claim fake work', () =>
       `${name} must rely on shared DTOs instead of platform branches`
     );
   }
-  assert.match(sources.chat, /不会生成或伪造 AI 回复/);
+  assert.match(sources.chat, /运行授权关闭/);
+  assert.match(sources.chat, /当前没有已登记的文本候选/);
   assert.match(sources.image, /不会伪造任务或结果/);
   assert.match(sources.video, /不会伪造进度或结果/);
 });

@@ -68,7 +68,9 @@ const providerManagement = new ProviderManagementFramework(
 );
 const projectSessionRegistry = new StorageProjectSessionRegistry();
 const chatContextLifecycle = registerChatContextIpcHandlers({
-  getSession: () => projectSessionRegistry.get()
+  getSession: () => projectSessionRegistry.get(),
+  providerRegistry: viduComposition.registry,
+  providerPackages
 });
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,

@@ -17,7 +17,8 @@ import {
 } from '../../src/domain';
 import {
   createChatContextRuntime,
-  JsonConversationRepository,
+  JsonProjectConversationRepository,
+  NodeProjectStorage,
   type StorageProjectSession
 } from '../../src/platform';
 
@@ -66,7 +67,7 @@ async function fixture() {
     })()
   });
   return {
-    userData,
+    projectA,
     conversations: runtime.conversations,
     contexts: runtime.projectContexts,
     conversationIds,
@@ -129,8 +130,9 @@ describe('ProjectContextController', () => {
     const value = await fixture();
     const first = await createConversationWithMessage(value, 'first message');
     const second = await createConversationWithMessage(value, 'second message');
-    const repository = new JsonConversationRepository(
-      path.join(value.userData, 'conversations.json')
+    const repository = new JsonProjectConversationRepository(
+      new NodeProjectStorage(value.projectA),
+      toProjectId('project-a')
     );
     const streaming = new ConversationStreamingService(
       repository,

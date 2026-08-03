@@ -422,10 +422,61 @@ const chatContexts: ChatContextApi = {
       expectedRevision,
       content
     }),
-  requestAssistantResponse: (conversationId, expectedRevision) =>
-    ipcRenderer.invoke(chatContextIpcChannels.requestAssistantResponse, {
+  copyLegacyConversation: (conversationId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.copyLegacyConversation, {
+      conversationId
+    }),
+  createResponseDraft: (
+    conversationId,
+    expectedRevision,
+    userMessageId,
+    productFeature
+  ) =>
+    ipcRenderer.invoke(chatContextIpcChannels.createResponseDraft, {
       conversationId,
+      expectedRevision,
+      userMessageId,
+      productFeature
+    }),
+  replaceResponseContexts: (responseDraftId, expectedRevision, selections) =>
+    ipcRenderer.invoke(chatContextIpcChannels.replaceResponseContexts, {
+      responseDraftId,
+      expectedRevision,
+      selections
+    }),
+  listResponseCandidates: (responseDraftId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.listResponseCandidates, {
+      responseDraftId,
       expectedRevision
+    }),
+  prepareResponseSubmission: (responseDraftId, expectedRevision, candidateId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.prepareResponseSubmission, {
+      responseDraftId,
+      expectedRevision,
+      candidateId
+    }),
+  submitResponse: (
+    responseDraftId,
+    expectedRevision,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  ) =>
+    ipcRenderer.invoke(chatContextIpcChannels.submitResponse, {
+      responseDraftId,
+      expectedRevision,
+      routeSelectionToken,
+      confirmationId,
+      confirmed
+    }),
+  getResponseExecution: (responseExecutionId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getResponseExecution, {
+      responseExecutionId
+    }),
+  replayResponseEvents: (responseExecutionId, afterSequence) =>
+    ipcRenderer.invoke(chatContextIpcChannels.replayResponseEvents, {
+      responseExecutionId,
+      afterSequence
     }),
   cancelAssistantResponse: (conversationId, messageId, expectedRevision) =>
     ipcRenderer.invoke(chatContextIpcChannels.cancelAssistantResponse, {

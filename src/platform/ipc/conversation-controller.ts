@@ -23,6 +23,9 @@ export interface ConversationControllerDependencies {
   readonly service: ConversationApplicationService;
   readonly streaming: ConversationStreamingService;
   getSession(): StorageProjectSession | undefined;
+  readonly projectRequired?: boolean;
+  readonly storageScope?: ConversationDto['storageScope'];
+  readonly readOnly?: boolean;
   onError?(error: unknown): void;
 }
 
@@ -34,15 +37,21 @@ export class ConversationController {
   create(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.createConversation(request);
-      const session = input.bindToCurrentProject
+      const session = input.bindToCurrentProject || this.dependencies.projectRequired
         ? this.dependencies.getSession()
         : undefined;
-      if (input.bindToCurrentProject && !session) {
+      if ((input.bindToCurrentProject || this.dependencies.projectRequired) && !session) {
         return failure('project_not_open', 'A project must be open to bind a conversation');
+      }
+      if (this.dependencies.projectRequired && !input.bindToCurrentProject) {
+        return failure(
+          'invalid_request',
+          'New conversations must belong to the current project'
+        );
       }
       return {
         ok: true,
-        value: toConversationDto(await this.dependencies.service.create({
+        value: this.toDto(await this.dependencies.service.create({
           title: input.title,
           projectId: session?.projectId ?? null
         }))
@@ -55,7 +64,7 @@ export class ConversationController {
       const input = chatContextRequestParsers.conversationId(request);
       return {
         ok: true,
-        value: toConversationDto(
+        value: this.toDto(
           await this.dependencies.service.get(toConversationId(input.conversationId))
         )
       };
@@ -69,7 +78,7 @@ export class ConversationController {
       if (input.includeArchived) statuses.push('archived');
       if (input.includeDeleted) statuses.push('deleted');
       const conversations = await this.dependencies.service.list({ statuses });
-      return { ok: true, value: conversations.map(toConversationDto) };
+      return { ok: true, value: conversations.map((conversation) => this.toDto(conversation)) };
     });
   }
 
@@ -110,22 +119,27 @@ export class ConversationController {
   }
 
   rename(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.executeMutation(request, 'rename');
   }
 
   archive(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.executeMutation(request, 'archive');
   }
 
   restore(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.executeMutation(request, 'restore');
   }
 
   delete(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.executeMutation(request, 'delete');
   }
 
   addUserMessage(request: unknown): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.execute(async () => {
       const input = chatContextRequestParsers.addUserMessage(request);
       const conversation = await this.dependencies.service.addUserMessage({
@@ -133,7 +147,7 @@ export class ConversationController {
         expectedRevision: input.expectedRevision,
         content: input.content
       });
-      return { ok: true, value: toConversationDto(conversation) };
+      return { ok: true, value: this.toDto(conversation) };
     });
   }
 
@@ -162,6 +176,7 @@ export class ConversationController {
   cancelAssistantResponse(
     request: unknown
   ): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
     return this.execute(async () => {
       const input = chatContextRequestParsers.cancelAssistantResponse(request);
       const conversation = await this.dependencies.streaming.cancel({
@@ -169,7 +184,7 @@ export class ConversationController {
         messageId: toMessageId(input.messageId),
         expectedRevision: input.expectedRevision
       });
-      return { ok: true, value: toConversationDto(conversation) };
+      return { ok: true, value: this.toDto(conversation) };
     });
   }
 
@@ -189,14 +204,14 @@ export class ConversationController {
           expectedRevision: input.expectedRevision,
           title: input.title
         });
-        return { ok: true, value: toConversationDto(conversation) };
+        return { ok: true, value: this.toDto(conversation) };
       }
       const input = chatContextRequestParsers.conversationRevision(request);
       const conversation = await this.dependencies.service[operation]({
         conversationId: toConversationId(input.conversationId),
         expectedRevision: input.expectedRevision
       });
-      return { ok: true, value: toConversationDto(conversation) };
+      return { ok: true, value: this.toDto(conversation) };
     });
   }
 
@@ -217,15 +232,36 @@ export class ConversationController {
     );
     return current;
   }
+
+  private toDto(conversation: Conversation): ConversationDto {
+    return toConversationDto(
+      conversation,
+      this.dependencies.storageScope ?? 'current_project',
+      this.dependencies.readOnly ?? false
+    );
+  }
+
+  private readOnlyFailure<T>(): Promise<ChatContextIpcResult<T>> {
+    return Promise.resolve(failure(
+      'legacy_conversation_read_only',
+      'Legacy conversations are read-only and must be copied into the current project'
+    ));
+  }
 }
 
-export function toConversationDto(conversation: Conversation): ConversationDto {
+export function toConversationDto(
+  conversation: Conversation,
+  storageScope: ConversationDto['storageScope'] = 'current_project',
+  readOnly = false
+): ConversationDto {
   return {
     conversationId: conversation.id,
     revision: conversation.revision,
     projectId: conversation.projectId,
     title: conversation.title,
     status: conversation.status,
+    storageScope,
+    readOnly,
     messages: conversation.messages.map(toMessageDto),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,

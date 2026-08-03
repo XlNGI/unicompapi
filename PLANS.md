@@ -1126,3 +1126,13 @@ Electron 组合 DeepSeek、Volcengine、Kling、NewAPI、Vidu 五个精确 Packa
     docs/active/多服务商功能路由-M5-供应商管理UI接线记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第二支 `feature/ui-conversation-context-wiring`，只接通对话、项目上下文、候选选择令牌和文本提交/流式端口；不得把对话页改成图片或视频直接生成入口，不得访问真实服务商、真实凭证、收费调用或启动阶段 10。
+
+M5 第二支 `feature/ui-conversation-context-wiring` 已从 `develop@82ca9c4` 建立，实现提交为 `4e55567`。该支把对话页接到项目范围 Conversation、不可变 ProjectContext 快照、文本候选选择令牌、外发确认、文本提交、流式事件重放、取消和恢复读取端口；应用级旧对话保持只读，可将符合条件的已完成纯文本消息以完整副本单次原子导入当前项目，原记录不变。
+
+候选只由精确 Package/Profile、Feature Contract、ParameterSchema 和 RuntimeAccessPolicy 生成；renderer 不传 projectId、内部 RouteSnapshot、Package/Adapter、Endpoint、凭证、Prompt、路径、Hash 或远端 operation，不按服务商名、模型名、协议或 Usage 路径分支。对话页没有图片/视频生成入口，只有显式勾选并读取固定 revision 的 ProjectContext 才进入本次文本外发快照。
+
+完整门禁为 Node 179 项与 Vitest 563 项，共 742 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、282 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。浏览器 `1440x900` 可见检查无横向溢出、裁切、重叠或控制台告警；Windows 生产 Electron 隔离烟测在 `1080x720` 新增 4 个进程、4/4 响应、1 个可见窗口，正常关闭后残留 0，隔离目录已移入回收站。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0；macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M5-对话与上下文UI接线记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第三支 `feature/ui-image-feature-wiring`；快速生图固定为纯文生图，不接收参考图或其他参考素材，只消费已合并安全 DTO 与提交端口，不访问真实服务商、真实凭证、收费调用或阶段 10。

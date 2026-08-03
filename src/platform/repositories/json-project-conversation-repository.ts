@@ -53,14 +53,34 @@ export class JsonProjectConversationRepository
         'A newly created project conversation must have revision 0'
       );
     }
+    await this.insert(validated);
+  }
+
+  async createImportedSnapshot(conversation: Conversation): Promise<void> {
+    const validated = parseConversation(conversation);
+    assertConversationBelongsToProject(validated, this.projectId);
+    if (
+      validated.status !== 'active' ||
+      validated.messages.some(
+        (message) => message.state !== 'completed' || message.attachments.length > 0
+      )
+    ) {
+      throw new ConversationRepositoryDataError(
+        'An imported project conversation may contain only completed text messages'
+      );
+    }
+    await this.insert(validated);
+  }
+
+  private async insert(conversation: Conversation): Promise<void> {
     await this.storage.mutateJsonAtomically(
       projectStoragePaths.entities.conversations,
       (current) => {
         const document = this.parseOrEmpty(current);
-        const existing = document.conversations.find((item) => item.id === validated.id);
+        const existing = document.conversations.find((item) => item.id === conversation.id);
         if (existing) {
           throw new ConversationRevisionConflictError(
-            validated.id,
+            conversation.id,
             null,
             existing.revision
           );
@@ -69,7 +89,7 @@ export class JsonProjectConversationRepository
           schemaVersion: 1,
           revision: document.revision + 1,
           updatedAt: toIsoTimestamp(this.now()),
-          conversations: [...document.conversations, validated]
+          conversations: [...document.conversations, conversation]
         } satisfies ConversationDocumentV1;
       },
       { backup: true }
