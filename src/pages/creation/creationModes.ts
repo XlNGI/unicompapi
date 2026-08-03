@@ -5,7 +5,7 @@ export const imageCreationModes = [
     label: '快速生图',
     description: '以最少配置开始图片创作。',
     emptyTitle: '还没有快速生图草稿',
-    emptyDescription: '可先创建项目内本地草稿；保存后可选择一张参考图并检查真实提交条件。',
+    emptyDescription: '可先创建项目内本地草稿；快速生图只接收文字需求，保存草稿不会创建任务。',
     icon: '快'
   },
   {
@@ -53,7 +53,7 @@ export const videoCreationModes = [
     label: '快速视频',
     description: '以最少配置开始视频创作。',
     emptyTitle: '还没有快速视频草稿',
-    emptyDescription: '可先创建项目内本地草稿；选择素材不会自动上传或生成。',
+    emptyDescription: '可先创建项目内本地草稿；快速视频只接收文字需求，保存草稿不会创建任务。',
     icon: '快'
   },
   {

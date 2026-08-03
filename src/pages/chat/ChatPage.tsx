@@ -475,7 +475,7 @@ export function ChatPage() {
             <span>新对话名称</span>
             <input maxLength={200} onChange={(event) => setNewTitle(event.target.value)} placeholder="例如：品牌短片构思" value={newTitle} />
           </label>
-          <Button disabled={!session || busy || !newTitle.trim()} type="submit">创建项目对话</Button>
+          <Button disabled={!session || busy || !newTitle.trim()} type="submit" variant="secondary">创建项目对话</Button>
         </form>
         {!session ? <p className="uc-chat-page__notice">打开项目后才能创建新对话。</p> : null}
         {loading ? (

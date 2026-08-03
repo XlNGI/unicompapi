@@ -945,6 +945,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
           <Button
             disabled={!currentDraft || !hasLocalTitleChange || !title.trim() || busy}
             onClick={() => void commitTitle()}
+            variant="secondary"
           >
             保存草稿
           </Button>

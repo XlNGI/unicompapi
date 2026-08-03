@@ -412,7 +412,7 @@ export function ProvidersPage() {
         <EmptyState busy description="正在读取本地服务商配置。" icon="载" role="status" title="正在读取" />
       ) : registry.connections.length === 0 ? (
         <EmptyState
-          action={<Button disabled={!providersApi} onClick={() => openCreate('official')}>添加连接</Button>}
+          action={<Button disabled={!providersApi} onClick={() => openCreate('official')} variant="secondary">添加连接</Button>}
           description="当前没有服务连接。"
           icon="模"
           title="还没有服务连接"

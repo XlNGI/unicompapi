@@ -265,6 +265,7 @@ export function ImageWorkbenchPage({
               busy
             }
             onClick={() => void saveDraft()}
+            variant="secondary"
           >
             <LuSave aria-hidden="true" />
             保存本地草稿
