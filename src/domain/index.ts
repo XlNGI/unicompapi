@@ -10,6 +10,7 @@ export * from './entities/prompt';
 export * from './entities/provider';
 export * from './entities/provider-package';
 export * from './entities/provider-catalog';
+export * from './entities/runtime-authorization';
 export * from './entities/provider-operation';
 export * from './entities/settings';
 export * from './entities/task';
