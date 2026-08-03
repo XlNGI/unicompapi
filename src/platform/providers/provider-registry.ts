@@ -109,6 +109,27 @@ export class JsonProviderRegistryStore {
     return (await this.readDisk()) ?? emptySnapshot();
   }
 
+  async loadBackup(): Promise<ProviderRegistrySnapshot | undefined> {
+    return this.readDiskAt(`${this.registryPath}.bak`);
+  }
+
+  async restoreBackup(): Promise<boolean> {
+    return sharedFileWriteCoordinator.runExclusive(this.registryPath, async () => {
+      const backup = await this.readDiskAt(`${this.registryPath}.bak`);
+      if (!backup) return false;
+      const current = await this.readDisk();
+      const restored = {
+        ...backup,
+        registryRevision: Math.max(
+          registryRevision(backup),
+          current ? registryRevision(current) : 0
+        ) + 1
+      };
+      await writeJsonAtomically(this.registryPath, restored);
+      return true;
+    });
+  }
+
   async save(snapshot: ProviderRegistrySnapshot): Promise<void> {
     const validated = parseSnapshot(snapshot);
     const expectedRevision = registryRevision(validated);
@@ -155,8 +176,14 @@ export class JsonProviderRegistryStore {
   }
 
   private async readDisk(): Promise<ProviderRegistrySnapshot | undefined> {
+    return this.readDiskAt(this.registryPath);
+  }
+
+  private async readDiskAt(
+    targetPath: string
+  ): Promise<ProviderRegistrySnapshot | undefined> {
     try {
-      return parseSnapshot(JSON.parse(await readFile(this.registryPath, 'utf8')));
+      return parseSnapshot(JSON.parse(await readFile(targetPath, 'utf8')));
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') return undefined;
       throw error;
@@ -168,25 +195,31 @@ export class JsonProviderRegistryStore {
     current: ProviderRegistrySnapshot | undefined
   ): Promise<void> {
     if (current) assertCapabilityHistoryPreserved(current, snapshot);
-
-    const parent = path.dirname(this.registryPath);
-    const temporary = path.join(
-      parent,
-      `.${path.basename(this.registryPath)}.${randomUUID()}.tmp`
-    );
-    await mkdir(parent, { recursive: true });
-    try {
-      const handle = await open(temporary, 'wx');
-      try {
-        await handle.writeFile(`${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporary, this.registryPath);
-    } finally {
-      await rm(temporary, { force: true });
+    if (current) {
+      await writeJsonAtomically(`${this.registryPath}.bak`, current);
     }
+    await writeJsonAtomically(this.registryPath, snapshot);
+  }
+}
+
+async function writeJsonAtomically(targetPath: string, value: unknown): Promise<void> {
+  const parent = path.dirname(targetPath);
+  const temporary = path.join(
+    parent,
+    `.${path.basename(targetPath)}.${randomUUID()}.tmp`
+  );
+  await mkdir(parent, { recursive: true });
+  try {
+    const handle = await open(temporary, 'wx');
+    try {
+      await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, targetPath);
+  } finally {
+    await rm(temporary, { force: true });
   }
 }
 

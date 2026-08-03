@@ -64,7 +64,13 @@ export const projectStoragePaths = {
       'journals/submission-intents.json'
     )
   },
+  migrations: {
+    providerContracts: toProjectRelativePath(
+      'migrations/provider-contracts-v1.json'
+    )
+  },
   journalsDirectory: toProjectRelativePath('journals'),
+  migrationsDirectory: toProjectRelativePath('migrations'),
   index: toProjectRelativePath('index/file-index.json'),
   filesDirectory: toProjectRelativePath('files'),
   temporaryDirectory: toProjectRelativePath('tmp')
