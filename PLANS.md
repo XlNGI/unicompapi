@@ -967,3 +967,11 @@ M2 第五支 `feature/provider-feature-contracts` 已从 `develop@30347b6` 建�
     docs/active/多服务商功能路由-M2-功能与参数合同记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/project-conversation-context-snapshots`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M2 第六支 `feature/project-conversation-context-snapshots` 已从 `develop@f8c469b` 建立，实现提交为 `1f0c04e`。该支新增项目所属新会话与项目级会话 JSON 仓储；新增 ConversationResponseDraft 的显式文本 ProductFeature、conversation/message revision、上下文选择及独立项目级原子仓储；新增固定 ProjectContext revision、SHA-256 contentHash、勾选状态和实际外发内容快照。旧 `projectId=null` 会话不自动归属，查看但未勾选的上下文不外发，快速页禁止消费上下文；旧选择不会漂移到新 revision，hash 篡改、重复、跨项目、删除和缺失 revision 均拒绝。
+
+第六支完整门禁为 Node 179 项与 Vitest 430 项，共 609 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、237 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-项目会话与上下文快照记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-invocation-usage-contracts`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
