@@ -1116,3 +1116,13 @@ M4 `feature/provider-backend-integration-acceptance` 已从 `develop@cd6e24f` �
     docs/active/多服务商功能路由-M4-后台集成验收记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。M4 合并后从最新 `develop` 创建 M5 第一支 `feature/ui-provider-management-wiring`，只接通官方/自定义入口、凭证、验证、模型发现和启停，并只消费已合并安全 DTO 与管理端口；不得访问真实服务商、读取真实凭证、产生收费调用或启动阶段 10。
+
+M5 第一支 `feature/ui-provider-management-wiring` 已从 `develop@957e710` 建立，实现提交为 `8d845a9`。该支把 Provider IPC、preload 和供应商页面统一接到 `ProviderManagementFramework`：页面由 Package Template 驱动官方/兼容连接、Base URL 模式和结构化 CredentialSchema 字段，提供连接创建、凭证轮换、验证、目录同步、精确模型登记、连接/模型启停和本地软删除；renderer 不读取或回显凭证，不按服务商名、模型名、协议或 Usage 路径分支。
+
+Electron 组合 DeepSeek、Volcengine、Kling、NewAPI、Vidu 五个精确 Package，但在线管理 Adapter Registry 明确为空；验证与目录同步安全投影为等待真实 API 专项批准并在 UI 禁用。Registry DTO 增加 Package/Template ownership、活动 Profile 状态和 ProductFeature 安全投影。Vidu 流程 8 收费验证启动入口已从 renderer、preload 和 Provider IPC 公共面移除，历史内部关闭控制器不重新授权。
+
+完整门禁为 Node 179 项与 Vitest 562 项，共 741 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、280 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。浏览器可见检查覆盖 `1440x900` 与 Electron 最小窗口 `1080x720`，无横向溢出或元素重叠；Windows 生产 Electron 隔离烟测新增 4 个进程、4/4 响应、1 个可见窗口，正常关闭后残留 0，隔离目录已移入回收站。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0；macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M5-供应商管理UI接线记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M5 第二支 `feature/ui-conversation-context-wiring`，只接通对话、项目上下文、候选选择令牌和文本提交/流式端口；不得把对话页改成图片或视频直接生成入口，不得访问真实服务商、真实凭证、收费调用或启动阶段 10。
