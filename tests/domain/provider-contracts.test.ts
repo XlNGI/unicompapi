@@ -101,4 +101,35 @@ describe('provider domain contracts', () => {
     expect(binding.mediaKind).toBe('image');
     expect(routing.enabled).toBe(false);
   });
+
+  it('requires complete package and connection ownership contracts', () => {
+    expect(() =>
+      createProvider({
+        id: toProviderId('provider-incomplete-package'),
+        name: 'Incomplete provider',
+        packageId: 'fixture-package',
+        accessCategory: 'online',
+        identityState: 'unverified',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    ).toThrow('ownership must be complete');
+
+    expect(() =>
+      createProviderConnection({
+        id: toConnectionId('connection-incomplete-package'),
+        providerId: toProviderId('provider-package'),
+        name: 'Incomplete connection',
+        packageId: 'fixture-package',
+        packageVersion: '1.0.0',
+        templateId: 'fixture-template',
+        templateKind: 'official',
+        state: 'saved',
+        identityState: 'unverified',
+        credentialState: 'not_configured',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    ).toThrow('binding must be complete');
+  });
 });

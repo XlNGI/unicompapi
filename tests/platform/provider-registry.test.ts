@@ -416,6 +416,61 @@ describe('JsonProviderRegistryStore', () => {
     ).rejects.toThrow('revision is duplicated');
   });
 
+  it('rejects a package-owned connection whose provider ownership differs', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
+    roots.push(root);
+    const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const snapshot = await store.load();
+    const provider = snapshot.providers[0];
+    const connection = snapshot.connections[0];
+    if (!provider || !connection) throw new Error('frozen provider missing');
+
+    await expect(
+      store.save({
+        ...snapshot,
+        providers: [
+          {
+            ...provider,
+            packageId: 'fixture-package',
+            packageVersion: '1.0.0'
+          }
+        ],
+        connections: [
+          {
+            ...connection,
+            packageId: 'different-package',
+            packageVersion: '1.0.0',
+            templateId: 'fixture-template',
+            templateKind: 'official',
+            credentialSchemaId: 'fixture-credential',
+            credentialSchemaVersion: 1,
+            credentialVersionId: 'credential-version-fixture',
+            connectionPolicyId: 'connection-policy-fixture',
+            connectionPolicyRevision: 1,
+            discoveryPolicyId: 'discovery-policy-fixture',
+            discoveryPolicyRevision: 1,
+            endpointPolicyId: 'endpoint-policy-fixture',
+            endpointPolicyRevision: 1,
+            connectionConfigVersionId: 'connection-config-fixture',
+            connectionRevision: 1,
+            adapterBindings: [
+              {
+                adapterId: 'adapter-fixture',
+                adapterVersion: '1',
+                protocolId: 'protocol.fixture',
+                protocolVersion: '1'
+              }
+            ]
+          }
+        ],
+        protocolBindings: [],
+        models: [],
+        capabilities: [],
+        routingPreferences: []
+      })
+    ).rejects.toThrow('invalid references');
+  });
+
   it('rejects models that reference an unknown connection', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);

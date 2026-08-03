@@ -12,6 +12,10 @@ import type {
   VideoMaterialKind,
   VideoWorkspaceMode
 } from './video-workspace';
+import type {
+  ProviderConnectionAdapterBinding,
+  ProviderTemplateKind
+} from './provider-package';
 
 export const providerAccessCategories = [
   'online',
@@ -220,6 +224,8 @@ export interface Provider {
   readonly schemaVersion: 1;
   readonly id: ProviderId;
   readonly name: string;
+  readonly packageId?: string;
+  readonly packageVersion?: string;
   readonly accessCategory: ProviderAccessCategory;
   readonly identityState: ProviderIdentityState;
   readonly createdAt: IsoTimestamp;
@@ -232,6 +238,22 @@ export interface ProviderConnection {
   readonly providerId: ProviderId;
   readonly name: string;
   readonly endpoint?: string;
+  readonly packageId?: string;
+  readonly packageVersion?: string;
+  readonly templateId?: string;
+  readonly templateKind?: ProviderTemplateKind;
+  readonly credentialSchemaId?: string;
+  readonly credentialSchemaVersion?: number;
+  readonly credentialVersionId?: string;
+  readonly connectionPolicyId?: string;
+  readonly connectionPolicyRevision?: number;
+  readonly discoveryPolicyId?: string;
+  readonly discoveryPolicyRevision?: number;
+  readonly endpointPolicyId?: string;
+  readonly endpointPolicyRevision?: number;
+  readonly connectionConfigVersionId?: string;
+  readonly connectionRevision?: number;
+  readonly adapterBindings?: readonly ProviderConnectionAdapterBinding[];
   readonly state: ConnectionState;
   readonly identityState: ProviderIdentityState;
   readonly credentialState: CredentialState;
@@ -284,16 +306,27 @@ export interface RoutingPreference {
 }
 
 export function createProvider(input: Omit<Provider, 'schemaVersion'>): Provider {
+  const packageId = optionalStableContractId(input.packageId, 'provider.packageId');
+  const packageVersion = optionalContractVersion(
+    input.packageVersion,
+    'provider.packageVersion'
+  );
+  if ((packageId === undefined) !== (packageVersion === undefined)) {
+    throw new TypeError('provider package ownership must be complete');
+  }
   return {
     ...input,
     schemaVersion: 1,
-    name: requireNonBlank(input.name, 'provider.name')
+    name: requireNonBlank(input.name, 'provider.name'),
+    packageId,
+    packageVersion
   };
 }
 
 export function createProviderConnection(
   input: Omit<ProviderConnection, 'schemaVersion'>
 ): ProviderConnection {
+  validateConnectionPackageBinding(input);
   return {
     ...input,
     schemaVersion: 1,
@@ -306,8 +339,98 @@ export function createProviderConnection(
           input.credentialReference,
           'connection.credentialReference'
         )
+      : undefined,
+    adapterBindings: input.adapterBindings
+      ? input.adapterBindings.map((binding) => ({ ...binding }))
       : undefined
   };
+}
+
+function validateConnectionPackageBinding(
+  input: Omit<ProviderConnection, 'schemaVersion'>
+): void {
+  const fields = [
+    input.packageId,
+    input.packageVersion,
+    input.templateId,
+    input.templateKind,
+    input.credentialSchemaId,
+    input.credentialSchemaVersion,
+    input.credentialVersionId,
+    input.connectionPolicyId,
+    input.connectionPolicyRevision,
+    input.discoveryPolicyId,
+    input.discoveryPolicyRevision,
+    input.endpointPolicyId,
+    input.endpointPolicyRevision,
+    input.connectionConfigVersionId,
+    input.connectionRevision,
+    input.adapterBindings
+  ];
+  const present = fields.filter((value) => value !== undefined).length;
+  if (present === 0) return;
+  if (present !== fields.length || !input.adapterBindings?.length) {
+    throw new TypeError('connection package binding must be complete');
+  }
+  for (const [value, field] of [
+    [input.packageId, 'connection.packageId'],
+    [input.templateId, 'connection.templateId'],
+    [input.credentialSchemaId, 'connection.credentialSchemaId'],
+    [input.credentialVersionId, 'connection.credentialVersionId'],
+    [input.connectionPolicyId, 'connection.connectionPolicyId'],
+    [input.discoveryPolicyId, 'connection.discoveryPolicyId'],
+    [input.endpointPolicyId, 'connection.endpointPolicyId'],
+    [input.connectionConfigVersionId, 'connection.connectionConfigVersionId']
+  ] as const) {
+    optionalStableContractId(value, field);
+  }
+  optionalContractVersion(input.packageVersion, 'connection.packageVersion');
+  for (const [value, field] of [
+    [input.credentialSchemaVersion, 'connection.credentialSchemaVersion'],
+    [input.connectionPolicyRevision, 'connection.connectionPolicyRevision'],
+    [input.discoveryPolicyRevision, 'connection.discoveryPolicyRevision'],
+    [input.endpointPolicyRevision, 'connection.endpointPolicyRevision'],
+    [input.connectionRevision, 'connection.connectionRevision']
+  ] as const) {
+    if (!Number.isSafeInteger(value) || Number(value) < 1) {
+      throw new TypeError(`${field} must be a positive integer`);
+    }
+  }
+  const adapterKeys = input.adapterBindings.map((binding) => {
+    optionalStableContractId(binding.adapterId, 'connection.adapterId');
+    optionalContractVersion(binding.adapterVersion, 'connection.adapterVersion');
+    optionalStableContractId(binding.protocolId, 'connection.protocolId');
+    optionalContractVersion(binding.protocolVersion, 'connection.protocolVersion');
+    return `${binding.adapterId}@${binding.adapterVersion}`;
+  });
+  if (new Set(adapterKeys).size !== adapterKeys.length) {
+    throw new TypeError('connection adapter bindings must be unique');
+  }
+}
+
+function optionalStableContractId(
+  value: string | undefined,
+  field: string
+): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = requireNonBlank(value, field);
+  if (
+    normalized.length > 200 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)
+  ) {
+    throw new TypeError(`${field} is invalid`);
+  }
+  return normalized;
+}
+
+function optionalContractVersion(
+  value: string | undefined,
+  field: string
+): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = requireNonBlank(value, field);
+  if (normalized.length > 200) throw new TypeError(`${field} is invalid`);
+  return normalized;
 }
 
 export function createProviderModel(

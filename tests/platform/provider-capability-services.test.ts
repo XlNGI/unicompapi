@@ -24,90 +24,35 @@ afterEach(async () => {
 });
 
 describe('ProviderCapabilityController', () => {
-  it('creates custom providers and manages connection and model enabled states', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-provider-service-'));
-    roots.push(root);
-    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+  it('closes legacy arbitrary provider, endpoint, and JSON connection creation', async () => {
+    const { registry, connectionId } = await fixtureRegistry();
     const controller = new ProviderCapabilityController(registry);
+    const before = await registry.load();
 
-    const providerResult = await controller.createProvider({
-      name: 'Custom compatible fixture',
-      accessCategory: 'custom_remote'
-    });
-    expect(providerResult).toMatchObject({
-      ok: true,
-      value: { state: 'provider_created' }
-    });
-    if (!providerResult.ok || !providerResult.value.providerId) {
-      throw new Error('provider missing');
-    }
-    const connectionResult = await controller.createConnection({
-      providerId: providerResult.value.providerId,
-      name: 'Fixture connection',
-      endpoint: null
-    });
-    expect(connectionResult).toMatchObject({
-      ok: true,
-      value: { state: 'unconfigured' }
-    });
-    if (!connectionResult.ok || !connectionResult.value.connectionId) {
-      throw new Error('connection missing');
-    }
-    expect(
+    for (const result of [
+      await controller.createProvider({
+        name: 'Arbitrary provider',
+        accessCategory: 'custom_remote'
+      }),
+      await controller.createConnection({
+        providerId: before.providers[0].id,
+        name: 'Arbitrary REST',
+        endpoint: 'https://arbitrary.invalid',
+        protocol: 'auto',
+        body: { unknown: true }
+      }),
       await controller.updateConnection({
-        connectionId: connectionResult.value.connectionId,
-        name: 'Updated fixture connection',
-        endpoint: 'https://fixture.invalid'
+        connectionId,
+        name: 'Arbitrary update',
+        endpoint: 'https://arbitrary.invalid'
       })
-    ).toMatchObject({ ok: true, value: { state: 'saved' } });
-    const modelResult = await controller.registerManualModel({
-      connectionId: connectionResult.value.connectionId,
-      name: 'fixture-model-toggle',
-      displayName: 'Fixture model toggle'
-    });
-    if (!modelResult.ok || !modelResult.value.modelId) {
-      throw new Error('model missing');
+    ]) {
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'adapter_unavailable' }
+      });
     }
-    expect(
-      await controller.setModelEnabled({
-        modelId: modelResult.value.modelId,
-        enabled: true
-      })
-    ).toMatchObject({ ok: true, value: { state: 'enabled' } });
-    expect(
-      (await registry.load()).models.find(
-        (model) => model.id === modelResult.value.modelId
-      )?.enabled
-    ).toBe(true);
-
-    expect(
-      await controller.saveRoutingPreference({
-        purpose: 'fixture_purpose',
-        modelId: modelResult.value.modelId,
-        priority: 0,
-        enabled: true
-      })
-    ).toMatchObject({ ok: true, value: { state: 'routing_saved' } });
-    expect(
-      await controller.setConnectionEnabled({
-        connectionId: connectionResult.value.connectionId,
-        enabled: false
-      })
-    ).toMatchObject({ ok: true, value: { state: 'disabled' } });
-    expect(
-      await controller.setModelEnabled({
-        modelId: modelResult.value.modelId,
-        enabled: true
-      })
-    ).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
-    expect(await controller.planRoute({ purpose: 'fixture_purpose' })).toEqual({
-      ok: true,
-      value: {
-        purpose: 'fixture_purpose',
-        candidates: [],
-        requiresSubmissionConfirmation: true
-      }
-    });
+    expect(await registry.load()).toEqual(before);
   });
 
   it('keeps connection, catalog, and capability validation unavailable without adapters', async () => {

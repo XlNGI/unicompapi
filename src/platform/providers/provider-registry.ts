@@ -14,6 +14,7 @@ import {
   providerIdentityStates,
   providerMediaKinds,
   providerOperationPurposes,
+  providerTemplateKinds,
   toCapabilityEvidenceId,
   toConnectionId,
   toIsoTimestamp,
@@ -25,6 +26,7 @@ import {
   type ModelCapabilityEvidence,
   type Provider,
   type ProviderConnection,
+  type ProviderConnectionAdapterBinding,
   type ProviderMediaKind,
   type ProviderModel,
   type ProviderOperationPurpose,
@@ -378,6 +380,18 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   assertUnique(models.map((item) => item.id), 'model');
   assertUnique(capabilities.map((item) => item.id), 'capability evidence');
   assertUnique(routingPreferences.map((item) => item.id), 'routing preference');
+  assertUnique(
+    connections.flatMap((item) =>
+      item.connectionConfigVersionId ? [item.connectionConfigVersionId] : []
+    ),
+    'connection config version'
+  );
+  assertUnique(
+    connections.flatMap((item) =>
+      item.credentialVersionId ? [item.credentialVersionId] : []
+    ),
+    'credential version'
+  );
 
   const providersById = new Map(providers.map((item) => [item.id, item]));
   const connectionsById = new Map(connections.map((item) => [item.id, item]));
@@ -386,7 +400,15 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   const capabilitiesById = new Map(capabilities.map((item) => [item.id, item]));
 
   if (
-    connections.some((item) => !providersById.has(item.providerId)) ||
+    connections.some((item) => {
+      const provider = providersById.get(item.providerId);
+      return (
+        !provider ||
+        (item.packageId !== undefined &&
+          (provider.packageId !== item.packageId ||
+            provider.packageVersion !== item.packageVersion))
+      );
+    }) ||
     protocolBindings.some((item) => {
       const connection = connectionsById.get(item.connectionId);
       return (
@@ -437,10 +459,17 @@ function parseProvider(value: unknown): Provider {
   requireVersionAndName(item);
   requireOneOf(item.accessCategory, providerAccessCategories);
   requireOneOf(item.identityState, providerIdentityStates);
+  const packageId = optionalStableString(item.packageId);
+  const packageVersion = optionalVersionString(item.packageVersion);
+  if ((packageId === undefined) !== (packageVersion === undefined)) {
+    throw new TypeError('Provider package ownership is incomplete');
+  }
   return {
     schemaVersion: 1,
     id: toProviderId(String(item.id)),
     name: String(item.name),
+    packageId,
+    packageVersion,
     accessCategory: item.accessCategory as Provider['accessCategory'],
     identityState: item.identityState as Provider['identityState'],
     createdAt: toIsoTimestamp(String(item.createdAt)),
@@ -454,12 +483,14 @@ function parseConnection(value: unknown): ProviderConnection {
   requireOneOf(item.state, connectionStates);
   requireOneOf(item.identityState, providerIdentityStates);
   requireOneOf(item.credentialState, credentialStates);
+  const packageFields = parseConnectionPackageFields(item);
   return {
     schemaVersion: 1,
     id: toConnectionId(String(item.id)),
     providerId: toProviderId(String(item.providerId)),
     name: String(item.name),
     endpoint: optionalString(item.endpoint),
+    ...packageFields,
     state: item.state as ProviderConnection['state'],
     identityState: item.identityState as ProviderConnection['identityState'],
     credentialState: item.credentialState as ProviderConnection['credentialState'],
@@ -469,6 +500,85 @@ function parseConnection(value: unknown): ProviderConnection {
     ),
     createdAt: toIsoTimestamp(String(item.createdAt)),
     updatedAt: toIsoTimestamp(String(item.updatedAt))
+  };
+}
+
+function parseConnectionPackageFields(
+  item: Record<string, unknown>
+): Partial<ProviderConnection> {
+  const fieldNames = [
+    'packageId',
+    'packageVersion',
+    'templateId',
+    'templateKind',
+    'credentialSchemaId',
+    'credentialSchemaVersion',
+    'credentialVersionId',
+    'connectionPolicyId',
+    'connectionPolicyRevision',
+    'discoveryPolicyId',
+    'discoveryPolicyRevision',
+    'endpointPolicyId',
+    'endpointPolicyRevision',
+    'connectionConfigVersionId',
+    'connectionRevision',
+    'adapterBindings'
+  ] as const;
+  const present = fieldNames.filter((field) => item[field] !== undefined);
+  if (present.length === 0) return {};
+  if (present.length !== fieldNames.length) {
+    throw new TypeError('Provider connection package binding is incomplete');
+  }
+  requireOneOf(item.templateKind, providerTemplateKinds);
+  if (!Array.isArray(item.adapterBindings) || item.adapterBindings.length === 0) {
+    throw new TypeError('Provider connection adapter bindings are invalid');
+  }
+  const adapterBindings = item.adapterBindings.map(parseConnectionAdapterBinding);
+  assertUnique(
+    adapterBindings.map(
+      (binding) => `${binding.adapterId}@${binding.adapterVersion}`
+    ),
+    'connection adapter binding'
+  );
+  return {
+    packageId: requireStableString(item.packageId),
+    packageVersion: requireVersionString(item.packageVersion),
+    templateId: requireStableString(item.templateId),
+    templateKind: item.templateKind as ProviderConnection['templateKind'],
+    credentialSchemaId: requireStableString(item.credentialSchemaId),
+    credentialSchemaVersion: requirePositiveIntegerValue(
+      item.credentialSchemaVersion
+    ),
+    credentialVersionId: requireStableString(item.credentialVersionId),
+    connectionPolicyId: requireStableString(item.connectionPolicyId),
+    connectionPolicyRevision: requirePositiveIntegerValue(
+      item.connectionPolicyRevision
+    ),
+    discoveryPolicyId: requireStableString(item.discoveryPolicyId),
+    discoveryPolicyRevision: requirePositiveIntegerValue(
+      item.discoveryPolicyRevision
+    ),
+    endpointPolicyId: requireStableString(item.endpointPolicyId),
+    endpointPolicyRevision: requirePositiveIntegerValue(
+      item.endpointPolicyRevision
+    ),
+    connectionConfigVersionId: requireStableString(
+      item.connectionConfigVersionId
+    ),
+    connectionRevision: requirePositiveIntegerValue(item.connectionRevision),
+    adapterBindings
+  };
+}
+
+function parseConnectionAdapterBinding(
+  value: unknown
+): ProviderConnectionAdapterBinding {
+  const item = requireRecord(value);
+  return {
+    adapterId: requireStableString(item.adapterId),
+    adapterVersion: requireVersionString(item.adapterVersion),
+    protocolId: requireStableString(item.protocolId),
+    protocolVersion: requireVersionString(item.protocolVersion)
   };
 }
 
@@ -884,6 +994,40 @@ function requireNonBlankString(value: unknown): string {
     throw new TypeError('Provider registry string is invalid');
   }
   return value;
+}
+
+function requireStableString(value: unknown): string {
+  const normalized = requireNonBlankString(value);
+  if (
+    normalized.length > 200 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)
+  ) {
+    throw new TypeError('Provider registry identifier is invalid');
+  }
+  return normalized;
+}
+
+function optionalStableString(value: unknown): string | undefined {
+  return value === undefined ? undefined : requireStableString(value);
+}
+
+function requireVersionString(value: unknown): string {
+  const normalized = requireNonBlankString(value);
+  if (normalized.length > 200) {
+    throw new TypeError('Provider registry version is invalid');
+  }
+  return normalized;
+}
+
+function optionalVersionString(value: unknown): string | undefined {
+  return value === undefined ? undefined : requireVersionString(value);
+}
+
+function requirePositiveIntegerValue(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new TypeError('Provider registry revision is invalid');
+  }
+  return Number(value);
 }
 
 function optionalString(value: unknown): string | undefined {
