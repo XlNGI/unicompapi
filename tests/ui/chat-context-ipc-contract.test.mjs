@@ -17,7 +17,14 @@ const operations = [
   'restoreConversation',
   'deleteConversation',
   'addUserMessage',
-  'requestAssistantResponse',
+  'copyLegacyConversation',
+  'createResponseDraft',
+  'replaceResponseContexts',
+  'listResponseCandidates',
+  'prepareResponseSubmission',
+  'submitResponse',
+  'getResponseExecution',
+  'replayResponseEvents',
   'cancelAssistantResponse',
   'createContextDraft',
   'getContextDraftPreview',
@@ -53,6 +60,9 @@ test('keeps renderer chat contracts free of protected platform facts', () => {
     'remoteOperationId',
     'apiKey',
     'endpoint',
+    'contentHash',
+    'routeSnapshot',
+    'outboundTextSnapshot',
     'stack'
   ]) {
     assert.doesNotMatch(sharedSource, new RegExp(forbidden, 'i'));

@@ -1,6 +1,8 @@
 import { app, ipcMain } from 'electron';
 import {
   createChatContextRuntime,
+  type JsonProviderRegistryStore,
+  type ProviderPackageRegistry,
   type StorageProjectSession
 } from '../../src/platform';
 import { chatContextIpcChannels } from '../../src/shared/chat-context-ipc';
@@ -11,10 +13,14 @@ export interface ChatContextIpcLifecycle {
 
 export function registerChatContextIpcHandlers(options: {
   getSession(): StorageProjectSession | undefined;
+  readonly providerRegistry: JsonProviderRegistryStore;
+  readonly providerPackages: ProviderPackageRegistry;
 }): ChatContextIpcLifecycle {
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
-    getSession: options.getSession
+    getSession: options.getSession,
+    providerRegistry: options.providerRegistry,
+    providerPackages: options.providerPackages
   });
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;
@@ -46,9 +52,29 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.addUserMessage, (_event, request: unknown) =>
     conversations.addUserMessage(request)
   );
-  ipcMain.handle(
-    chatContextIpcChannels.requestAssistantResponse,
-    (_event, request: unknown) => conversations.requestAssistantResponse(request)
+  ipcMain.handle(chatContextIpcChannels.copyLegacyConversation, (_event, request: unknown) =>
+    conversations.copyLegacyConversation(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.createResponseDraft, (_event, request: unknown) =>
+    runtime.responses.createDraft(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.replaceResponseContexts, (_event, request: unknown) =>
+    runtime.responses.replaceContexts(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.listResponseCandidates, (_event, request: unknown) =>
+    runtime.responses.listCandidates(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.prepareResponseSubmission, (_event, request: unknown) =>
+    runtime.responses.prepareSubmission(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.submitResponse, (_event, request: unknown) =>
+    runtime.responses.submit(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getResponseExecution, (_event, request: unknown) =>
+    runtime.responses.getExecution(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.replayResponseEvents, (_event, request: unknown) =>
+    runtime.responses.replayEvents(request)
   );
   ipcMain.handle(
     chatContextIpcChannels.cancelAssistantResponse,

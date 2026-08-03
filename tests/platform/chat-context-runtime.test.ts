@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 describe('chat-context composition runtime', () => {
-  it('keeps conversations application-scoped and contexts project-scoped', async () => {
+  it('keeps new conversations, response drafts and contexts project-scoped', async () => {
     const userData = await mkdtemp(path.join(os.tmpdir(), 'unicomp-runtime-user-'));
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'unicomp-runtime-project-'));
     roots.push(userData, projectRoot);
@@ -72,7 +72,7 @@ describe('chat-context composition runtime', () => {
     await runtime.waitForMutations();
 
     const conversationDocument = JSON.parse(
-      await readFile(path.join(userData, 'conversations.json'), 'utf8')
+      await readFile(path.join(projectRoot, 'entities', 'conversations.json'), 'utf8')
     );
     const contextDocument = JSON.parse(
       await readFile(
