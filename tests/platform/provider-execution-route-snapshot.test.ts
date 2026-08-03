@@ -41,6 +41,7 @@ function routeSnapshotFixture() {
     endpointPolicyRevision: 2,
     credentialVersionId: 'credential-version:4',
     modelId: toModelId('model-route-contract'),
+    providerModelKey: 'deepseek-v4-pro',
     modelDisplayName: 'DeepSeek Chat',
     modelRevision: 5,
     profileId: 'profile.deepseek-chat',
