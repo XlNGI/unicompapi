@@ -1041,3 +1041,14 @@ M3 第二支 `feature/provider-invocation-read-model` 已从 `develop@0eec911` �
     docs/active/多服务商功能路由-M3-调用读模型记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第三支 `feature/deepseek-chat-adapter`；该支必须依据官方合同证据、精确协议映射和合成 transport 完成文本提交、流式响应、失败、中断、恢复与 UsageSchema 测试，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
+
+M3 第三支 `feature/deepseek-chat-adapter` 已从 `develop@e284644` 建立，实现提交为 `eff72e5`。该支新增版本化 DeepSeek Package、官方固定 HTTPS Origin、结构化 API Key CredentialSchema、精确 Adapter/Protocol/Model Definition、普通文本与推理 ParameterSchema、六项 token UsageSchema、`GET /models` 管理适配器、`POST /chat/completions` 流式文本适配器和安全 Runtime。
+
+普通文本固定关闭 thinking，只接受可选 `max_tokens`、`temperature` 或 `top_p` 且禁止同时发送两种采样字段；推理固定开启 thinking，只接受可选 `max_tokens` 与 `reasoning_effort=low|high|max`。所有请求固定流式并请求最终 usage，不发送 tools、user ID、response format、未知 JSON 或隐私标识。SSE 只接受 data-only event，`reasoning_content` 仅验证后丢弃，远端响应 ID 只做流内一致性校验；非 stop finish reason、HTTP/协议/流错误均明确失败且不自动重试或切换服务商。取消保存 `not_reported`，应用退出中断保存 `unknown_outcome`，畸形 usage 保存 `invalid_response`，恢复只允许本地重放并要求用户显式创建新 attempt。
+
+第三支完整门禁为 Node 179 项与 Vitest 485 项，共 664 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、259 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁、差异检查和 9 个范围内文件敏感信息扫描全部通过。该支未修改 Electron、preload 或 UI，不触发新增可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。官方证据与工程记录见：
+
+    docs/active/多服务商功能路由-M3-DeepSeek官方合同证据.md
+    docs/active/多服务商功能路由-M3-DeepSeek文本适配器记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第四支 `feature/volcengine-doubao-vision-adapter`；该支必须依据火山引擎官方合同证据、精确视觉参数/输入/结果/Usage 映射和合成 transport 完成，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
