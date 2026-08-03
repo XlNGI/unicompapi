@@ -999,3 +999,13 @@ M2 第九支 `feature/provider-text-streaming-contracts` 已从 `develop@8ceeb67
     docs/active/多服务商功能路由-M2-文本流式合同记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-public-candidates-orchestration`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M2 第十支 `feature/provider-public-candidates-orchestration` 已从 `develop@d5ea43e` 建立，实现提交为 `466fc7f`。该支新增显式 Draft/ConversationResponseDraft 候选主体、安全公开候选 DTO 与稳定排序；候选查询不签发令牌、不自动选择，renderer 不接收 Profile/Evidence、adapter/protocol、endpoint、凭证、远端 ID 或下载 URL。prepare 使用短期随机 routeSelectionToken，绑定主体 revision、参数、素材、Context、外发文本、接收方、费用、Route、Schema、Runtime Policy 与候选可用事实的规范化 SHA-256 指纹；提交时全量重算，篡改、过期、消费或任一事实变化均在 HTTP 前失败。
+
+第十支同时新增 ProjectMetadataUnitOfWork 上的 SubmissionIntent 原子接受单元，一次保存 RouteSnapshot、媒体 Task/Execution 或 ConversationResponseExecution、ProviderInvocationAttempt/Event 和幂等键；随后与应用级 RuntimeAuthorizationLedger 协调 claim。claim 失败明确写入 `authorization_not_claimed + failed_before_submission`；请求字节前失败释放 claim，字节开始后异常进入 `unknown_outcome` 且禁止自动重试；相同 idempotency key 不产生第二次提交。`submitDraft` 与 `submitConversationResponse` 保持领域分离，并新增未 claim、可释放 claim、未知结果和已接受 operation 的恢复决策。
+
+第十支完整门禁为 Node 179 项与 Vitest 459 项，共 638 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、252 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-候选与提交编排记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-contracts-data-migration`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
