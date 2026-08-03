@@ -3,11 +3,16 @@ import type {
   ProxyMode,
   StructuredCredentialRecord
 } from '../../../domain';
+import { isIP } from 'node:net';
 import {
   DOUBAO_VISION_ADAPTER_ID,
   DOUBAO_VISION_ADAPTER_VERSION,
   DOUBAO_VISION_PROTOCOL_ID,
   DOUBAO_VISION_PROTOCOL_VERSION,
+  SEEDANCE_VIDEO_ADAPTER_ID,
+  SEEDANCE_VIDEO_ADAPTER_VERSION,
+  SEEDANCE_VIDEO_PROTOCOL_ID,
+  SEEDANCE_VIDEO_PROTOCOL_VERSION,
   VOLCENGINE_CREDENTIAL_SCHEMA_ID,
   VOLCENGINE_ENDPOINT_POLICY_ID,
   VOLCENGINE_OFFICIAL_BASE_URL,
@@ -24,6 +29,7 @@ export const volcengineRuntimeErrorCodes = [
   'authentication_failed',
   'permission_denied',
   'model_not_found',
+  'operation_not_found',
   'invalid_parameters',
   'rate_limited',
   'provider_unavailable',
@@ -66,8 +72,29 @@ export class VolcengineTransportFailure extends Error {
   }
 }
 
+interface VolcengineAdapterIdentity {
+  readonly adapterId: string;
+  readonly adapterVersion: string;
+  readonly protocolId: string;
+  readonly protocolVersion: string;
+}
+
+const visionIdentity: VolcengineAdapterIdentity = {
+  adapterId: DOUBAO_VISION_ADAPTER_ID,
+  adapterVersion: DOUBAO_VISION_ADAPTER_VERSION,
+  protocolId: DOUBAO_VISION_PROTOCOL_ID,
+  protocolVersion: DOUBAO_VISION_PROTOCOL_VERSION
+};
+
+const seedanceIdentity: VolcengineAdapterIdentity = {
+  adapterId: SEEDANCE_VIDEO_ADAPTER_ID,
+  adapterVersion: SEEDANCE_VIDEO_ADAPTER_VERSION,
+  protocolId: SEEDANCE_VIDEO_PROTOCOL_ID,
+  protocolVersion: SEEDANCE_VIDEO_PROTOCOL_VERSION
+};
+
 export interface VolcengineHttpTransportRequest {
-  readonly method: 'POST';
+  readonly method: 'GET' | 'POST' | 'DELETE';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: Uint8Array;
@@ -97,8 +124,13 @@ export interface VolcengineSafeLogEvent {
     | 'request_completed'
     | 'request_failed'
     | 'runtime_disposed';
-  readonly operation?: 'vision_chat';
-  readonly method?: 'POST';
+  readonly operation?:
+    | 'vision_chat'
+    | 'video_submit'
+    | 'video_query'
+    | 'video_cancel'
+    | 'video_result';
+  readonly method?: 'GET' | 'POST' | 'DELETE';
   readonly status?: number;
   readonly errorCode?: VolcengineRuntimeErrorCode;
   readonly elapsedMs?: number;
@@ -131,27 +163,115 @@ export class VolcengineSharedRuntime {
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
   }): Promise<Uint8Array> {
-    validateOfficialConnection(input.connection, this.baseUrl);
-    const maximumRequestBytes =
-      this.options.defaultMaxRequestBytes ?? 64 * 1024 * 1024;
-    const maximumResponseBytes =
-      this.options.defaultMaxResponseBytes ?? 4 * 1024 * 1024;
-    if (
-      input.body.byteLength < 1 ||
-      input.body.byteLength > maximumRequestBytes
-    ) {
-      throw new VolcengineRuntimeError('request_too_large', 'not_retryable');
-    }
-    const response = await this.request({
+    const response = await this.requestOfficialApi({
       connection: input.connection,
       credentials: input.credentials,
+      identity: visionIdentity,
+      operation: 'vision_chat',
+      method: 'POST',
+      path: '/chat/completions',
       body: input.body,
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
-      maximumRequestBytes,
-      maximumResponseBytes
+      maximumRequestBytes:
+        this.options.defaultMaxRequestBytes ?? 64 * 1024 * 1024,
+      maximumResponseBytes:
+        this.options.defaultMaxResponseBytes ?? 4 * 1024 * 1024,
+      responseKind: 'json'
     });
     return Uint8Array.from(response.body);
+  }
+
+  async requestVideoTaskCreate(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly body: Uint8Array;
+    readonly signal?: AbortSignal;
+    readonly beforeRequestStarted?: () => Promise<void>;
+  }): Promise<Uint8Array> {
+    const response = await this.requestOfficialApi({
+      connection: input.connection,
+      credentials: input.credentials,
+      identity: seedanceIdentity,
+      operation: 'video_submit',
+      method: 'POST',
+      path: '/contents/generations/tasks',
+      body: input.body,
+      signal: input.signal,
+      beforeRequestStarted: input.beforeRequestStarted,
+      maximumRequestBytes: 64 * 1024 * 1024,
+      maximumResponseBytes: 2 * 1024 * 1024,
+      responseKind: 'json'
+    });
+    return Uint8Array.from(response.body);
+  }
+
+  async requestVideoTaskQuery(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly providerOperationId: string;
+    readonly signal?: AbortSignal;
+    readonly beforeRequestStarted?: () => Promise<void>;
+  }): Promise<Uint8Array> {
+    const response = await this.requestOfficialApi({
+      connection: input.connection,
+      credentials: input.credentials,
+      identity: seedanceIdentity,
+      operation: 'video_query',
+      method: 'GET',
+      path: videoTaskPath(input.providerOperationId),
+      signal: input.signal,
+      beforeRequestStarted: input.beforeRequestStarted,
+      maximumRequestBytes: 1,
+      maximumResponseBytes: 4 * 1024 * 1024,
+      responseKind: 'json'
+    });
+    return Uint8Array.from(response.body);
+  }
+
+  async requestVideoTaskDelete(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly providerOperationId: string;
+    readonly signal?: AbortSignal;
+    readonly beforeRequestStarted?: () => Promise<void>;
+  }): Promise<void> {
+    const response = await this.requestOfficialApi({
+      connection: input.connection,
+      credentials: input.credentials,
+      identity: seedanceIdentity,
+      operation: 'video_cancel',
+      method: 'DELETE',
+      path: videoTaskPath(input.providerOperationId),
+      signal: input.signal,
+      beforeRequestStarted: input.beforeRequestStarted,
+      maximumRequestBytes: 1,
+      maximumResponseBytes: 1_024,
+      responseKind: 'empty'
+    });
+    if (response.body.byteLength !== 0) {
+      throw new VolcengineRuntimeError('invalid_response', 'not_retryable');
+    }
+  }
+
+  async downloadVideoResult(input: {
+    readonly url: string;
+    readonly signal?: AbortSignal;
+    readonly maximumResponseBytes?: number;
+  }): Promise<{ readonly body: Uint8Array; readonly contentType?: string }> {
+    const url = parseResultUrl(input.url);
+    const response = await this.requestWithoutCredential({
+      operation: 'video_result',
+      method: 'GET',
+      url,
+      signal: input.signal,
+      maximumResponseBytes: input.maximumResponseBytes ?? 512 * 1024 * 1024,
+      accept: 'video/*'
+    });
+    return {
+      body: Uint8Array.from(response.body),
+      contentType: normalizedContentType(response.headers)
+    };
   }
 
   dispose(): void {
@@ -165,14 +285,19 @@ export class VolcengineSharedRuntime {
     return this.active.size;
   }
 
-  private async request(input: {
+  private async requestOfficialApi(input: {
     readonly connection: ProviderConnection;
     readonly credentials: StructuredCredentialRecord;
-    readonly body: Uint8Array;
+    readonly identity: VolcengineAdapterIdentity;
+    readonly operation: Exclude<VolcengineSafeLogEvent['operation'], 'video_result' | undefined>;
+    readonly method: 'GET' | 'POST' | 'DELETE';
+    readonly path: string;
+    readonly body?: Uint8Array;
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly maximumRequestBytes: number;
     readonly maximumResponseBytes: number;
+    readonly responseKind: 'json' | 'empty';
   }): Promise<VolcengineHttpTransportResponse> {
     if (this.disposed) {
       throw new VolcengineRuntimeError(
@@ -180,7 +305,21 @@ export class VolcengineSharedRuntime {
         'not_retryable'
       );
     }
+    validateOfficialConnection(input.connection, this.baseUrl, input.identity);
     const credential = parseCredential(input.credentials);
+    if (
+      !Number.isSafeInteger(input.maximumRequestBytes) ||
+      input.maximumRequestBytes < 1 ||
+      !Number.isSafeInteger(input.maximumResponseBytes) ||
+      input.maximumResponseBytes < 1 ||
+      (input.body && (
+        input.body.byteLength < 1 ||
+        input.body.byteLength > input.maximumRequestBytes
+      ))
+    ) {
+      throw new VolcengineRuntimeError('request_too_large', 'not_retryable');
+    }
+    const url = resolveOfficialPath(this.baseUrl, input.path);
     const timeoutMs = this.options.defaultTimeoutMs ?? 120_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
       throw new VolcengineRuntimeError('invalid_request', 'not_retryable');
@@ -201,18 +340,19 @@ export class VolcengineSharedRuntime {
       await input.beforeRequestStarted?.();
       this.log({
         event: 'request_started',
-        operation: 'vision_chat',
-        method: 'POST'
+        operation: input.operation,
+        method: input.method
       });
+      const headers: Record<string, string> = {
+        accept: 'application/json',
+        authorization: `Bearer ${credential}`
+      };
+      if (input.body) headers['content-type'] = 'application/json';
       const response = await this.options.transport.send({
-        method: 'POST',
-        url: resolveChatPath(this.baseUrl).toString(),
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${credential}`,
-          'content-type': 'application/json'
-        },
-        body: Uint8Array.from(input.body),
+        method: input.method,
+        url: url.toString(),
+        headers,
+        body: input.body ? Uint8Array.from(input.body) : new Uint8Array(),
         signal: controller.signal,
         timeoutMs,
         maxRequestBytes: input.maximumRequestBytes,
@@ -228,16 +368,20 @@ export class VolcengineSharedRuntime {
         );
       }
       if (response.status < 200 || response.status >= 300) {
-        throw mapHttpStatus(response.status, response.headers);
+        throw mapHttpStatus(
+          response.status,
+          response.headers,
+          input.operation.startsWith('video_')
+        );
       }
-      requireJsonContentType(response.headers);
       if (response.body.byteLength > input.maximumResponseBytes) {
         throw new VolcengineRuntimeError('response_too_large', 'not_retryable');
       }
+      if (input.responseKind === 'json') requireJsonContentType(response.headers);
       this.log({
         event: 'request_completed',
-        operation: 'vision_chat',
-        method: 'POST',
+        operation: input.operation,
+        method: input.method,
         status: response.status,
         elapsedMs: Math.max(0, this.now() - startedAt)
       });
@@ -250,8 +394,92 @@ export class VolcengineSharedRuntime {
       const mapped = mapRuntimeFailure(error, controller.signal, timedOut);
       this.log({
         event: 'request_failed',
-        operation: 'vision_chat',
-        method: 'POST',
+        operation: input.operation,
+        method: input.method,
+        errorCode: mapped.code,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+      throw mapped;
+    } finally {
+      clearTimeout(timeout);
+      removeExternalAbort();
+      this.active.delete(controller);
+    }
+  }
+
+  private async requestWithoutCredential(input: {
+    readonly operation: 'video_result';
+    readonly method: 'GET';
+    readonly url: URL;
+    readonly signal?: AbortSignal;
+    readonly maximumResponseBytes: number;
+    readonly accept: 'video/*';
+  }): Promise<VolcengineHttpTransportResponse> {
+    if (this.disposed) {
+      throw new VolcengineRuntimeError('runtime_shutting_down', 'not_retryable');
+    }
+    if (
+      !Number.isSafeInteger(input.maximumResponseBytes) ||
+      input.maximumResponseBytes < 1
+    ) {
+      throw new VolcengineRuntimeError('invalid_request', 'not_retryable');
+    }
+    const timeoutMs = this.options.defaultTimeoutMs ?? 120_000;
+    const controller = new AbortController();
+    const removeExternalAbort = linkAbort(input.signal, controller);
+    this.active.add(controller);
+    let timedOut = false;
+    const startedAt = this.now();
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    try {
+      this.log({
+        event: 'request_started',
+        operation: input.operation,
+        method: input.method
+      });
+      const response = await this.options.transport.send({
+        method: input.method,
+        url: input.url.toString(),
+        headers: { accept: input.accept },
+        body: new Uint8Array(),
+        signal: controller.signal,
+        timeoutMs,
+        maxRequestBytes: 1,
+        maxResponseBytes: input.maximumResponseBytes,
+        proxy: this.options.proxy?.() ?? { kind: 'system_default' },
+        redirect: 'manual'
+      });
+      validateDeclaredResponseSize(response.headers, input.maximumResponseBytes);
+      if (response.status >= 300 && response.status < 400) {
+        throw new VolcengineRuntimeError('redirect_not_allowed', 'not_retryable');
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw mapHttpStatus(response.status, response.headers, true);
+      }
+      if (response.body.byteLength > input.maximumResponseBytes) {
+        throw new VolcengineRuntimeError('response_too_large', 'not_retryable');
+      }
+      this.log({
+        event: 'request_completed',
+        operation: input.operation,
+        method: input.method,
+        status: response.status,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+      return {
+        status: response.status,
+        headers: normalizeHeaders(response.headers),
+        body: Uint8Array.from(response.body)
+      };
+    } catch (error) {
+      const mapped = mapRuntimeFailure(error, controller.signal, timedOut);
+      this.log({
+        event: 'request_failed',
+        operation: input.operation,
+        method: input.method,
         errorCode: mapped.code,
         elapsedMs: Math.max(0, this.now() - startedAt)
       });
@@ -297,14 +525,15 @@ function parseCredential(record: StructuredCredentialRecord): string {
 
 function validateOfficialConnection(
   connection: ProviderConnection,
-  baseUrl: URL
+  baseUrl: URL,
+  identity: VolcengineAdapterIdentity
 ): void {
   const binding = connection.adapterBindings?.find(
     (item) =>
-      item.adapterId === DOUBAO_VISION_ADAPTER_ID &&
-      item.adapterVersion === DOUBAO_VISION_ADAPTER_VERSION &&
-      item.protocolId === DOUBAO_VISION_PROTOCOL_ID &&
-      item.protocolVersion === DOUBAO_VISION_PROTOCOL_VERSION
+      item.adapterId === identity.adapterId &&
+      item.adapterVersion === identity.adapterVersion &&
+      item.protocolId === identity.protocolId &&
+      item.protocolVersion === identity.protocolVersion
   );
   if (
     connection.packageId !== VOLCENGINE_PROVIDER_PACKAGE_ID ||
@@ -351,8 +580,50 @@ function parseBaseUrl(value: string): URL {
   return result;
 }
 
-function resolveChatPath(baseUrl: URL): URL {
-  return new URL(`${trimTrailingSlash(baseUrl.pathname)}/chat/completions`, baseUrl.origin);
+function resolveOfficialPath(baseUrl: URL, path: string): URL {
+  if (!path.startsWith('/') || path.includes('..') || /[?#]/u.test(path)) {
+    throw new VolcengineRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  const url = new URL(`${trimTrailingSlash(baseUrl.pathname)}${path}`, baseUrl.origin);
+  if (url.origin !== baseUrl.origin) {
+    throw new VolcengineRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  return url;
+}
+
+function videoTaskPath(providerOperationId: string): string {
+  if (
+    providerOperationId.length < 1 ||
+    providerOperationId.length > 512 ||
+    !/^[A-Za-z0-9._-]+$/u.test(providerOperationId)
+  ) {
+    throw new VolcengineRuntimeError('invalid_request', 'not_retryable');
+  }
+  return `/contents/generations/tasks/${providerOperationId}`;
+}
+
+function parseResultUrl(value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new VolcengineRuntimeError('invalid_response', 'not_retryable');
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    isIP(hostname) !== 0 ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    !hostname.includes('.')
+  ) {
+    throw new VolcengineRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  return url;
 }
 
 function trimTrailingSlash(value: string): string {
@@ -385,7 +656,8 @@ function validateDeclaredResponseSize(
 
 function mapHttpStatus(
   status: number,
-  headers: Readonly<Record<string, string>>
+  headers: Readonly<Record<string, string>>,
+  videoOperation = false
 ): VolcengineRuntimeError {
   switch (status) {
     case 400:
@@ -398,13 +670,18 @@ function mapHttpStatus(
     case 403:
       return new VolcengineRuntimeError('permission_denied', 'not_retryable');
     case 404:
-      return new VolcengineRuntimeError('model_not_found', 'not_retryable');
+    case 410:
+      return new VolcengineRuntimeError(
+        videoOperation ? 'operation_not_found' : 'model_not_found',
+        'not_retryable'
+      );
     case 408:
     case 504:
       return new VolcengineRuntimeError('timeout', 'retryable');
     case 413:
       return new VolcengineRuntimeError('request_too_large', 'not_retryable');
     case 422:
+    case 409:
       return new VolcengineRuntimeError('invalid_parameters', 'not_retryable');
     case 429:
       return new VolcengineRuntimeError(
@@ -473,6 +750,16 @@ function normalizeHeaders(
   );
 }
 
+function normalizedContentType(
+  headers: Readonly<Record<string, string>>
+): string | undefined {
+  const value = headerValue(headers, 'content-type')
+    ?.split(';', 1)[0]
+    ?.trim()
+    .toLowerCase();
+  return value || undefined;
+}
+
 function headerValue(
   headers: Readonly<Record<string, string>>,
   name: string
@@ -507,6 +794,7 @@ function messageForCode(code: VolcengineRuntimeErrorCode): string {
     authentication_failed: 'Volcengine authentication failed',
     permission_denied: 'Volcengine denied the request',
     model_not_found: 'The configured Volcengine Endpoint/Model ID was not found',
+    operation_not_found: 'The Volcengine operation was not found',
     invalid_parameters: 'Volcengine rejected the request parameters',
     rate_limited: 'Volcengine rate limited the request',
     provider_unavailable: 'Volcengine is unavailable',
