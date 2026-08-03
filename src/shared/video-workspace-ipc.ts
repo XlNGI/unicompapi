@@ -75,6 +75,16 @@ export interface VideoWorkspacePromptDto {
 export interface VideoWorkspaceContextDto {
   readonly kind: 'project_asset' | 'project_context' | 'saved_conversation';
   readonly referenceId: string;
+  readonly contextRevision?: number;
+  readonly includeInPrompt?: boolean;
+}
+
+export interface VideoWorkspaceFeatureSelectionDto {
+  readonly productFeature: 'text_to_video' | 'image_to_video';
+  readonly candidateId?: string;
+  readonly parameterSchemaId?: string;
+  readonly parameterSchemaRevision?: number;
+  readonly parameterValues: Readonly<Record<string, VideoWorkspaceParameterValueDto>>;
 }
 
 export interface VideoWorkspaceModelDto {
@@ -111,6 +121,7 @@ export interface VideoWorkspaceMaterialSelectionDto {
 
 export type VideoWorkspaceMaterialTargetDto =
   | { readonly kind: 'quick_reference' }
+  | { readonly kind: 'image_source' }
   | { readonly kind: 'slot'; readonly slotId: string };
 
 interface VideoWorkspaceMaterialAssetDtoBase {
@@ -193,6 +204,7 @@ interface VideoWorkspaceDraftDtoBase {
       };
   readonly prompt: VideoWorkspacePromptDto;
   readonly contextReferences: readonly VideoWorkspaceContextDto[];
+  readonly featureSelection?: VideoWorkspaceFeatureSelectionDto;
   readonly generation: VideoWorkspaceGenerationDto;
   readonly createdAt: string;
   readonly updatedAt: string;

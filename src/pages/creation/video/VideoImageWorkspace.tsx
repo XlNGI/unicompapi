@@ -1,303 +1,115 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { LuImagePlus, LuTrash2 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
-import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
-import type {
-  VideoExecutionDto,
-  VideoPreflightDto,
-  VideoTaskCreatedDto,
-  VideoWorkRegisteredDto
-} from '../../../shared/video-submission-ipc';
 import type {
   VideoWorkspaceDraftDto,
   VideoWorkspaceMaterialAssetDto,
   VideoWorkspaceMaterialPreviewDto,
-  VideoWorkspaceMaterialSlotDto,
-  VideoWorkspaceStaleReasonDto
+  VideoWorkspaceMaterialSelectionDto
 } from '../../../shared/video-workspace-ipc';
-import {
-  allVideoConfirmationsAccepted,
-  emptyVideoConfirmations,
-  VideoGenerationModelFields,
-  videoSubmissionErrorMessages,
-  VideoSubmissionConfirmations
-} from './VideoGenerationControls';
+import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
+import { VideoFeatureSubmissionPanel } from './VideoFeatureSubmissionPanel';
 
 type ImageVideoDraftDto = Extract<
   VideoWorkspaceDraftDto,
   { readonly mode: 'image_to_video' }
 >;
 
+const imageSourceTarget = { kind: 'image_source' } as const;
+
 interface VideoImageWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: ImageVideoDraftDto;
-  readonly registry?: ProviderRegistryDto;
   readonly onDraftChange: (draft: ImageVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: ImageVideoDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
 
-const artifactStateLabels = {
-  not_created: '尚未生成',
-  current: '当前有效',
-  stale: '旧内容已过期'
-} as const;
-
-const staleReasonLabels: Record<VideoWorkspaceStaleReasonDto, string> = {
-  prompt_changed: '提示词已变化',
-  materials_changed: '素材已变化',
-  context_changed: '上下文已变化',
-  shot_plan_changed: '镜头方案已变化',
-  requirements_changed: '变化要求已变化',
-  model_changed: '模型已变化',
-  parameters_changed: '参数已变化'
-};
-
-const queryableExecutionStates = [
-  'queued',
-  'processing',
-  'cancel_requested',
-  'cancellation_unknown'
-] as const;
-
 export function VideoImageWorkspace({
   dirty,
   draft,
-  registry,
   onDraftChange,
   onDraftPersisted,
   onMessage
 }: VideoImageWorkspaceProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
-  const videoSubmissions = window.unicomp?.videoSubmissions;
-  const [materials, setMaterials] = useState<
-    Readonly<Record<string, VideoWorkspaceMaterialAssetDto>>
-  >({});
-  const [previews, setPreviews] = useState<
-    Readonly<Record<string, VideoWorkspaceMaterialPreviewDto>>
-  >({});
-  const [preflight, setPreflight] = useState<VideoPreflightDto>();
-  const [confirmations, setConfirmations] = useState(emptyVideoConfirmations);
-  const [task, setTask] = useState<VideoTaskCreatedDto>();
-  const [execution, setExecution] = useState<VideoExecutionDto>();
-  const [registered, setRegistered] = useState<VideoWorkRegisteredDto>();
+  const [material, setMaterial] = useState<VideoWorkspaceMaterialAssetDto>();
+  const [preview, setPreview] = useState<VideoWorkspaceMaterialPreviewDto>();
   const [busy, setBusy] = useState(false);
-  const pollingAttempts = useRef(0);
-  const selectedCandidate = preflight?.candidates.find(
-    (candidate) => candidate.modelId === draft.generation.model?.modelId
+  const legacySelections = useMemo(
+    () => draft.imageToVideo.materials?.slots.flatMap(
+      (slot) => slot.selection ? [slot.selection] : []
+    ) ?? [],
+    [draft.imageToVideo.materials]
   );
-  const selectedEvidence = registry?.capabilities.find(
-    (capability) =>
-      capability.evidenceId ===
-      draft.generation.model?.capabilityEvidenceId
+  const unsupportedContexts = draft.contextReferences.filter(
+    (reference) =>
+      reference.kind !== 'project_context' ||
+      reference.contextRevision === undefined ||
+      reference.includeInPrompt === undefined
   );
-  const imageSchema = selectedEvidence?.videoGenerationSchema?.modes.find(
-    (mode) => mode.mode === 'image_to_video'
-  );
-  const materialKey = useMemo(
-    () =>
-      JSON.stringify(
-        draft.imageToVideo.materials?.slots.map((slot) => ({
-          id: slot.id,
-          assetId: slot.selection?.assetId
-        })) ?? []
-      ),
-    [draft.imageToVideo.materials?.slots]
-  );
-  const blockers = [
-    ...(preflight?.blockers ?? []),
-    ...(selectedCandidate?.blockers ?? [])
-  ].filter((blocker, index, items) => items.indexOf(blocker) === index);
+  const blockedReason = draft.featureSelection?.productFeature !== 'image_to_video'
+    ? '当前草稿没有固定为图生视频，请重新保存草稿。'
+    : draft.imageToVideo.materials
+      ? '此旧草稿仍含动态素材槽位，请先明确迁移或移除。'
+      : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
+        ? '图生视频必须选择恰好一张受控图片。'
+        : unsupportedContexts.length > 0
+          ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+          : undefined;
 
   useEffect(() => {
     let active = true;
-    setMaterials({});
-    setPreviews({});
-    const slots = draft.imageToVideo.materials?.slots ?? [];
-    if (!videoWorkspaces || slots.every((slot) => !slot.selection)) return;
-
-    async function loadMaterials() {
-      const loaded = await Promise.all(
-        slots
-          .filter((slot) => slot.selection)
-          .map(async (slot) => {
-            const target = { kind: 'slot' as const, slotId: slot.id };
-            const [materialResult, previewResult] = await Promise.all([
-              videoWorkspaces!.getMaterial(draft.draftId, target),
-              videoWorkspaces!.createMaterialPreview(draft.draftId, target)
-            ]);
-            return {
-              slotId: slot.id,
-              material: materialResult.ok ? materialResult.value : undefined,
-              preview: previewResult.ok ? previewResult.value : undefined
-            };
-          })
-      );
+    setMaterial(undefined);
+    setPreview(undefined);
+    if (!videoWorkspaces || !draft.imageToVideo.source) return;
+    void Promise.all([
+      videoWorkspaces.getMaterial(draft.draftId, imageSourceTarget),
+      videoWorkspaces.createMaterialPreview(draft.draftId, imageSourceTarget)
+    ]).then(([materialResult, previewResult]) => {
       if (!active) return;
-      setMaterials(
-        Object.fromEntries(
-          loaded.flatMap((item) =>
-            item.material ? [[item.slotId, item.material]] : []
-          )
-        )
-      );
-      setPreviews(
-        Object.fromEntries(
-          loaded.flatMap((item) =>
-            item.preview ? [[item.slotId, item.preview]] : []
-          )
-        )
-      );
-      if (loaded.some((item) => !item.material || !item.preview)) {
-        onMessage('部分已选素材当前不可读取或预览，请重新选择。');
-      }
-    }
-
-    void loadMaterials().catch(() => {
-      if (active) onMessage('已选素材读取失败，请重新选择。');
+      if (materialResult.ok) setMaterial(materialResult.value);
+      if (previewResult.ok) setPreview(previewResult.value);
+    }).catch(() => {
+      if (active) onMessage('项目图片读取失败，请重新选择。');
     });
     return () => {
       active = false;
     };
-  }, [draft.draftId, materialKey, onMessage, videoWorkspaces]);
-
-  useEffect(() => {
-    setPreflight(undefined);
-    setConfirmations(emptyVideoConfirmations);
-    setTask(undefined);
-    setExecution(undefined);
-    setRegistered(undefined);
-    pollingAttempts.current = 0;
-  }, [draft.updatedAt]);
-
-  useEffect(() => {
-    let active = true;
-    if (!videoSubmissions) return;
-    void videoSubmissions.recoverExecutions(draft.draftId).then((result) => {
-      if (!active || !result.ok || result.value.length === 0) return;
-      pollingAttempts.current = 0;
-      setExecution(result.value[result.value.length - 1]);
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, [draft.draftId, videoSubmissions]);
-
-  useEffect(() => {
-    if (
-      !videoSubmissions ||
-      !execution ||
-      !queryableExecutionStates.includes(
-        execution.state as (typeof queryableExecutionStates)[number]
-      ) ||
-      pollingAttempts.current >= 120
-    ) {
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      pollingAttempts.current += 1;
-      void videoSubmissions.refreshExecution(execution.executionId)
-        .then((result) => {
-          if (result.ok) {
-            setExecution(result.value);
-            onMessage(`已刷新真实远端状态：${result.value.state}。`);
-          }
-        })
-        .catch(() => undefined);
-    }, pollingDelayMs(pollingAttempts.current));
-    return () => window.clearTimeout(timeout);
-  }, [execution, onMessage, videoSubmissions]);
+  }, [
+    draft.draftId,
+    draft.imageToVideo.source?.assetId,
+    onMessage,
+    videoWorkspaces
+  ]);
 
   function changeDraft(next: ImageVideoDraftDto) {
-    setPreflight(undefined);
-    setConfirmations(emptyVideoConfirmations);
-    setTask(undefined);
-    setExecution(undefined);
-    onDraftChange({ ...next, state: 'editing' });
-  }
-
-  function changeOriginalInput(value: string) {
-    changeDraft({
-      ...draft,
-      prompt: {
-        ...draft.prompt,
-        originalInput: value,
-        finalPrompt:
-          draft.prompt.systemSupplements.length === 0
-            ? value
-            : draft.prompt.finalPrompt
-      }
+    onDraftChange({
+      ...next,
+      state: 'editing',
+      generation: emptyGeneration()
     });
   }
 
-  function changeModel(selection: {
-    readonly model?: ImageVideoDraftDto['generation']['model'];
-    readonly parameters?: ImageVideoDraftDto['generation']['parameters'];
-  }) {
-    const evidence = registry?.capabilities.find(
-      (capability) =>
-        capability.evidenceId === selection.model?.capabilityEvidenceId
-    );
-    const schema = evidence?.videoGenerationSchema?.modes.find(
-      (mode) => mode.mode === 'image_to_video'
-    );
-    const previousSlots = new Map(
-      draft.imageToVideo.materials?.slots.map((slot) => [slot.id, slot]) ?? []
-    );
-    const slots =
-      schema?.mode === 'image_to_video'
-        ? schema.materialSlots.map((slot, index) => {
-            const previous = previousSlots.get(slot.id);
-            const selectionStillValid =
-              previous?.role === slot.role &&
-              previous.selection &&
-              slot.acceptedMediaKinds.includes(previous.selection.mediaKind);
-            return {
-              ...slot,
-              selection: selectionStillValid
-                ? previous.selection
-                : index === 0 &&
-                    draft.imageToVideo.source?.mediaKind === 'image' &&
-                    slot.acceptedMediaKinds.includes('image')
-                  ? draft.imageToVideo.source
-                  : undefined
-            };
-          })
-        : undefined;
-    changeDraft({
-      ...draft,
-      generation: {
-        ...draft.generation,
-        model: selection.model,
-        parameters: selection.parameters
-      },
-      imageToVideo: {
-        ...draft.imageToVideo,
-        materials:
-          selection.model && slots
-            ? {
-                capabilityEvidenceId:
-                  selection.model.capabilityEvidenceId,
-                slots
-              }
-            : undefined
-      }
-    });
+  function changePrompt(field: 'originalInput' | 'finalPrompt', value: string) {
+    const prompt = field === 'originalInput' && draft.prompt.systemSupplements.length === 0
+      ? { ...draft.prompt, originalInput: value, finalPrompt: value }
+      : { ...draft.prompt, [field]: value };
+    changeDraft({ ...draft, prompt });
   }
 
-  async function selectMaterial(
-    slot: VideoWorkspaceMaterialSlotDto,
-    mediaKind: 'image' | 'video'
-  ) {
+  async function selectImage() {
     if (!videoWorkspaces || dirty || busy) return;
     setBusy(true);
     onMessage('');
     try {
-      const target = { kind: 'slot' as const, slotId: slot.id };
       const result = await videoWorkspaces.selectMaterial(
         draft.draftId,
-        target,
-        mediaKind
+        imageSourceTarget,
+        'image'
       );
       if (!result.ok) {
         onMessage(result.error.message);
@@ -305,682 +117,275 @@ export function VideoImageWorkspace({
       }
       if (result.value.cancelled || !result.value.draft) return;
       onDraftPersisted(result.value.draft as ImageVideoDraftDto);
-      if (result.value.material) {
-        setMaterials((items) => ({
-          ...items,
-          [slot.id]: result.value.material!
-        }));
-      }
-      const previewResult = await videoWorkspaces.createMaterialPreview(
-        draft.draftId,
-        target
-      );
-      setPreviews((items) => {
-        const next = { ...items };
-        if (previewResult.ok) next[slot.id] = previewResult.value;
-        else delete next[slot.id];
-        return next;
-      });
-      onMessage(
-        previewResult.ok
-          ? '素材已绑定到当前动态槽位；没有上传、识图、增强或创建任务。'
-          : `素材已登记，但预览不可用：${previewResult.error.message}`
-      );
+      setMaterial(result.value.material);
+      setPreview(undefined);
+      onMessage('图片已完成本地校验并登记到草稿；请保存草稿后选择服务。');
     } catch {
-      onMessage('选择槽位素材失败，请重试。');
+      onMessage('选择本地图片失败，请重试。');
     } finally {
       setBusy(false);
     }
   }
 
-  async function clearMaterial(slotId: string) {
-    if (!videoWorkspaces || dirty || busy) return;
+  async function clearImage() {
+    if (!videoWorkspaces || dirty || busy || !draft.imageToVideo.source) return;
     setBusy(true);
     onMessage('');
     try {
-      const result = await videoWorkspaces.clearMaterial(draft.draftId, {
-        kind: 'slot',
-        slotId
-      });
+      const result = await videoWorkspaces.clearMaterial(
+        draft.draftId,
+        imageSourceTarget
+      );
       if (!result.ok) {
         onMessage(result.error.message);
         return;
       }
       onDraftPersisted(result.value as ImageVideoDraftDto);
-      setMaterials((items) => {
-        const next = { ...items };
-        delete next[slotId];
-        return next;
-      });
-      setPreviews((items) => {
-        const next = { ...items };
-        delete next[slotId];
-        return next;
-      });
-      onMessage('素材已从当前槽位移除；历史素材登记没有被删除。');
+      setMaterial(undefined);
+      setPreview(undefined);
+      onMessage('当前图片已从草稿解除选择；原始文件未删除。');
     } catch {
-      onMessage('移除槽位素材失败，请重试。');
+      onMessage('清除图片失败，请重试。');
     } finally {
       setBusy(false);
     }
   }
 
-  function changeRequirements(
-    key: 'mustKeep' | 'allowedChanges' | 'prohibited',
-    values: readonly string[]
-  ) {
+  function migrateLegacyMaterials() {
+    const candidates = [
+      ...(draft.imageToVideo.source ? [draft.imageToVideo.source] : []),
+      ...legacySelections
+    ];
+    const unique = uniqueSelections(candidates);
+    const source = unique.length === 1 && unique[0].mediaKind === 'image'
+      ? unique[0]
+      : undefined;
     changeDraft({
       ...draft,
+      featureSelection: {
+        productFeature: 'image_to_video',
+        parameterValues: {}
+      },
       imageToVideo: {
         ...draft.imageToVideo,
-        [key]: values
+        source,
+        materials: undefined
       }
     });
+    onMessage(source
+      ? '旧素材已明确迁移为唯一图片输入；请保存草稿后重新选择服务。'
+      : '旧素材槽位已明确移除；请重新选择一张图片并保存草稿。');
   }
 
-  function changeMotion(
-    key:
-      | 'subjectAction'
-      | 'cameraMovement'
-      | 'pace'
-      | 'depthOfField',
-    value: string
-  ) {
+  function removeUnsupportedContexts() {
     changeDraft({
       ...draft,
-      imageToVideo: {
-        ...draft.imageToVideo,
-        [key]: value
-      }
+      contextReferences: draft.contextReferences.filter(
+        (reference) =>
+          reference.kind === 'project_context' &&
+          reference.contextRevision !== undefined &&
+          reference.includeInPrompt !== undefined
+      )
     });
+    onMessage('不受支持或未固定版本的旧上下文已移除；请保存后重新选择服务。');
   }
-
-  async function checkSubmission() {
-    if (!videoSubmissions || dirty || busy) return;
-    setBusy(true);
-    onMessage('');
-    try {
-      const result = await videoSubmissions.preflight(draft.draftId);
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setPreflight(result.value);
-      setConfirmations(emptyVideoConfirmations);
-      setTask(undefined);
-      setExecution(undefined);
-      onMessage(
-        result.value.blockers.length
-          ? '检查完成：当前存在阻断项，没有创建任务。'
-          : '检查完成：请核对候选模型阻断项和全部提交事实。'
-      );
-    } catch {
-      onMessage('提交条件检查失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createTask() {
-    if (
-      !videoSubmissions ||
-      task ||
-      execution ||
-      !preflight ||
-      !selectedCandidate ||
-      blockers.length ||
-      !allVideoConfirmationsAccepted(confirmations) ||
-      busy
-    ) {
-      return;
-    }
-    setBusy(true);
-    onMessage('');
-    try {
-      const result = await videoSubmissions.createTask(
-        draft.draftId,
-        preflight.draftUpdatedAt,
-        selectedCandidate.modelId,
-        confirmations
-      );
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setTask(result.value);
-      setExecution(undefined);
-      onMessage('视频任务已创建；尚未创建执行记录，也没有调用远端。');
-    } catch {
-      onMessage('创建视频任务失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createExecution() {
-    if (!videoSubmissions || !task || execution || busy) return;
-    setBusy(true);
-    onMessage('');
-    try {
-      const result = await videoSubmissions.createExecution(task.taskId);
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setExecution(result.value);
-      onMessage('本地执行记录已创建；尚未调用远端视频服务。');
-    } catch {
-      onMessage('创建执行记录失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function invokeExecution() {
-    if (!videoSubmissions || !execution || execution.state !== 'created' || busy)
-      return;
-    setBusy(true);
-    onMessage('');
-    try {
-      const result = await videoSubmissions.invokeExecution(
-        execution.executionId
-      );
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setExecution(result.value);
-      pollingAttempts.current = 0;
-      onMessage(`远端调用已返回真实状态：${result.value.state}。`);
-    } catch {
-      onMessage('提交视频生成失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function refreshExecution() {
-    if (!videoSubmissions || !execution || busy) return;
-    setBusy(true);
-    try {
-      const result = await videoSubmissions.refreshExecution(execution.executionId);
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setExecution(result.value);
-      onMessage(`已刷新真实远端状态：${result.value.state}。`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function cancelExecution() {
-    if (!videoSubmissions || !execution || busy) return;
-    setBusy(true);
-    try {
-      const result = await videoSubmissions.cancelExecution(execution.executionId);
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setExecution(result.value);
-      onMessage(`取消请求已返回真实状态：${result.value.state}。`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function receiveResult() {
-    if (!videoSubmissions || !execution || execution.state !== 'remote_completed' || busy)
-      return;
-    setBusy(true);
-    try {
-      const result = await videoSubmissions.receiveResult(execution.executionId);
-      if (!result.ok) {
-        onMessage(videoSubmissionErrorMessages[result.error.code]);
-        return;
-      }
-      setRegistered(result.value);
-      setExecution((current) => current ? { ...current, state: 'completed' } : current);
-      onMessage(`已校验并登记 ${result.value.works.length} 个视频 Work。`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const materialCount =
-    draft.imageToVideo.materials?.slots.filter((slot) => slot.selection)
-      .length ?? 0;
-  const requiredSlotCount =
-    draft.imageToVideo.materials?.slots.filter((slot) => slot.required)
-      .length ?? 0;
 
   return (
     <>
-      <div className="uc-image-professional__workspace uc-video-image__workspace">
-        <div className="uc-video-image__main">
-          <div className="uc-video-image__work-grid">
-            <Card className="uc-image-workbench__panel uc-video-image__materials">
-              <PanelHeading
-                description="槽位、角色、数量、必填状态和媒体类型只来自能力 Schema。"
-                number="1"
-                title="动态素材槽位"
-              />
-              <dl className="uc-image-workbench__capability-list">
-                <Fact
-                  label="图片 Work 来源"
-                  value={draft.imageToVideo.source
-                    ? `已登记 Asset ${draft.imageToVideo.source.assetId}`
-                    : '无'}
-                />
-                <Fact
-                  label="当前模式能力"
-                  value={
-                    imageSchema?.mode === 'image_to_video'
-                      ? '已读取真实 Schema'
-                      : '等待模型能力事实'
-                  }
-                />
-                <Fact
-                  label="动态槽位"
-                  value={
-                    draft.imageToVideo.materials
-                      ? `${draft.imageToVideo.materials.slots.length} 个；${requiredSlotCount} 个必需`
-                      : '尚未建立'
-                  }
-                />
-              </dl>
-              {draft.imageToVideo.materials?.slots.length ? (
-                <div className="uc-image-professional__contexts">
-                  {draft.imageToVideo.materials.slots.map((slot) => (
-                    <MaterialSlot
-                      busy={busy}
-                      dirty={dirty}
-                      key={slot.id}
-                      material={materials[slot.id]}
-                      onClear={() => void clearMaterial(slot.id)}
-                      onSelect={(mediaKind) =>
-                        void selectMaterial(slot, mediaKind)
-                      }
-                      preview={previews[slot.id]}
-                      slot={slot}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  description="选择具有图生视频模式 Schema 的模型后，页面才会建立真实素材槽位。"
-                  icon="材"
-                  readOnly
-                  title="尚无动态素材槽位"
-                />
-              )}
-              <div className="uc-image-quick__result-actions">
-                <Button disabled variant="secondary">
-                  识别图片（缺少独立端口）
-                </Button>
-              </div>
-              <p className="uc-image-quick__hint">
-                选择素材只进行本地登记与预览，不会自动识图、增强提示词或生成视频。
-              </p>
-              {dirty ? (
-                <p className="uc-image-quick__hint" role="status">
-                  请先保存本地草稿，再选择素材或检查提交条件。
-                </p>
-              ) : null}
-            </Card>
-
-            <Card className="uc-image-workbench__panel uc-video-image__requirements">
-              <PanelHeading
-                description="每行一项；离开输入框后写入当前本地草稿。"
-                number="2"
-                title="内容保持与变化要求"
-              />
-              <div className="uc-video-image__requirements-grid">
-                <RequirementField
-                  label="必须保持"
-                  onChange={(values) =>
-                    changeRequirements('mustKeep', values)
-                  }
-                  values={draft.imageToVideo.mustKeep}
-                />
-                <RequirementField
-                  label="允许变化"
-                  onChange={(values) =>
-                    changeRequirements('allowedChanges', values)
-                  }
-                  values={draft.imageToVideo.allowedChanges}
-                />
-                <RequirementField
-                  label="必须避免"
-                  onChange={(values) =>
-                    changeRequirements('prohibited', values)
-                  }
-                  values={draft.imageToVideo.prohibited}
-                />
-              </div>
-            </Card>
-
-            <Card className="uc-image-workbench__panel uc-video-image__motion">
-              <PanelHeading
-                description="这些内容由用户明确填写，不根据图片自动推断。"
-                number="3"
-                title="动作与镜头设计"
-              />
-              <label className="uc-image-quick__field">
-                <span>用户原始输入</span>
-                <textarea
-                  onChange={(event) =>
-                    changeOriginalInput(event.target.value)
-                  }
-                  placeholder="描述希望图片如何运动，以及视频整体氛围"
-                  rows={5}
-                  value={draft.prompt.originalInput}
-                />
-              </label>
-              <div className="uc-video-image__motion-grid">
-                <TextField
-                  label="主体动作"
-                  onChange={(value) => changeMotion('subjectAction', value)}
-                  value={draft.imageToVideo.subjectAction}
-                />
-                <TextField
-                  label="运镜"
-                  onChange={(value) => changeMotion('cameraMovement', value)}
-                  value={draft.imageToVideo.cameraMovement}
-                />
-                <TextField
-                  label="节奏"
-                  onChange={(value) => changeMotion('pace', value)}
-                  value={draft.imageToVideo.pace}
-                />
-                <TextField
-                  label="景深"
-                  onChange={(value) => changeMotion('depthOfField', value)}
-                  value={draft.imageToVideo.depthOfField}
-                />
-              </div>
-            </Card>
-
-            <Card className="uc-image-workbench__panel uc-video-image__prompt">
-              <PanelHeading
-                description="三层内容分别展示和保存；旧增强状态不会被静默覆盖。"
-                number="4"
-                title="提示词三层"
-              />
-              <dl className="uc-image-workbench__capability-list">
-                <Fact
-                  label="提示词增强状态"
-                  value={describeArtifact(draft.generation.enhancement)}
-                />
-                <Fact
-                  label="草稿预检状态"
-                  value={describeArtifact(draft.generation.preflight)}
-                />
-              </dl>
-              <div className="uc-image-professional__prompt-columns">
-                <section>
-                  <StatusPill tone="info">用户原始输入</StatusPill>
-                  <p>{draft.prompt.originalInput || '尚未填写动作描述。'}</p>
-                </section>
-                <section>
-                  <StatusPill tone="neutral">系统补充内容</StatusPill>
-                  {draft.prompt.systemSupplements.length ? (
-                    <ul>
-                      {draft.prompt.systemSupplements.map(
-                        (supplement, index) => (
-                          <li key={`${supplement.source}-${index}`}>
-                            <small>{supplement.source}</small>
-                            <span>{supplement.content}</span>
-                          </li>
-                        )
-                      )}
-                    </ul>
-                  ) : (
-                    <p>没有真实增强结果；系统不会编造补充内容。</p>
-                  )}
-                </section>
-                <section>
-                  <StatusPill tone="success">最终提交提示词</StatusPill>
-                  <textarea
-                    aria-label="最终提交提示词"
-                    onChange={(event) =>
-                      changeDraft({
-                        ...draft,
-                        prompt: {
-                          ...draft.prompt,
-                          finalPrompt: event.target.value
-                        }
-                      })
-                    }
-                    rows={8}
-                    value={draft.prompt.finalPrompt}
-                  />
-                </section>
-              </div>
-              <Button disabled variant="secondary">
-                增强提示词（缺少真实端口）
+      <div className="uc-image-workbench__workspace uc-image-professional__workspace">
+        <Card className="uc-image-workbench__panel uc-image-quick__composer">
+          <header className="uc-image-workbench__panel-heading">
+            <span aria-hidden="true">1</span>
+            <div>
+              <h2>唯一图片与项目上下文</h2>
+              <p>图生视频只接收一张已完成本地校验的图片，可显式选择固定上下文。</p>
+            </div>
+          </header>
+          <section className="uc-image-quick__reference">
+            <div>
+              <strong>图片输入</strong>
+              <span>
+                {material
+                  ? `${material.name} · ${material.width} × ${material.height}`
+                  : draft.imageToVideo.source
+                    ? '图片记录待读取'
+                    : '尚未选择图片'}
+              </span>
+            </div>
+            <div className="uc-image-quick__result-actions">
+              <Button
+                disabled={!videoWorkspaces || dirty || busy}
+                onClick={() => void selectImage()}
+                variant="secondary"
+              >
+                <LuImagePlus aria-hidden="true" />
+                {draft.imageToVideo.source ? '更换图片' : '选择图片'}
               </Button>
-            </Card>
-          </div>
-        </div>
-
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-image__submit">
-          <PanelHeading
-            description="模型、参数、费用、外发和提交边界只来自本机真实 DTO。"
-            number="5"
-            title="动态能力、确认与提交"
-          />
-          <VideoGenerationModelFields
-            mode="image_to_video"
-            model={draft.generation.model}
-            onChange={changeModel}
-            parameters={draft.generation.parameters}
-            registry={registry}
-          />
-          <Button
-            disabled={!videoSubmissions || dirty || busy}
-            onClick={() => void checkSubmission()}
-            variant="secondary"
-          >
-            检查提交条件
-          </Button>
-          {preflight ? (
-            <>
-              <StatusPill tone={blockers.length ? 'warning' : 'success'}>
-                {blockers.length ? '当前无法提交' : '提交条件已通过'}
-              </StatusPill>
-              {blockers.length ? (
-                <ul className="uc-image-quick__blockers">
-                  {blockers.map((blocker) => (
-                    <li key={blocker}>
-                      {videoSubmissionErrorMessages[blocker]}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </>
-          ) : null}
-          {selectedCandidate ? (
-            <VideoSubmissionConfirmations
-              candidate={selectedCandidate}
-              confirmations={confirmations}
-              finalPrompt={draft.prompt.finalPrompt}
-              materialSummary={`${materialCount} 个受控槽位素材`}
-              onChange={setConfirmations}
-            />
-          ) : null}
-          <div className="uc-image-quick__result-actions">
-            <Button
-              disabled={
-                !selectedCandidate ||
-                blockers.length > 0 ||
-                !allVideoConfirmationsAccepted(confirmations) ||
-                Boolean(task) ||
-                Boolean(execution) ||
-                busy
-              }
-              onClick={() => void createTask()}
-            >
-              创建视频任务
-            </Button>
-            <Button
-              disabled={!task || Boolean(execution) || busy}
-              onClick={() => void createExecution()}
-              variant="secondary"
-            >
-              创建执行记录
-            </Button>
-            <Button
-              disabled={!execution || execution.state !== 'created' || busy}
-              onClick={() => void invokeExecution()}
-            >
-              提交视频生成
-            </Button>
-            <Button
-              disabled={
-                !execution ||
-                !queryableExecutionStates.includes(
-                  execution.state as (typeof queryableExecutionStates)[number]
-                ) ||
-                busy
-              }
-              onClick={() => void refreshExecution()}
-              variant="secondary"
-            >
-              刷新状态
-            </Button>
-            <Button
-              disabled={!execution || !['queued', 'processing'].includes(execution.state) || busy}
-              onClick={() => void cancelExecution()}
-              variant="secondary"
-            >
-              取消生成
-            </Button>
-            <Button
-              disabled={!execution || execution.state !== 'remote_completed' || busy}
-              onClick={() => void receiveResult()}
-            >
-              校验并登记结果
-            </Button>
-          </div>
-          {task ? (
-            <p className="uc-image-quick__hint" role="status">
-              本地任务已创建
-              {execution
-                ? `；执行 #${execution.attempt}：${execution.state}`
-                : '；尚未创建执行记录'}
-            </p>
-          ) : null}
-          {registered ? (
-            <p className="uc-image-quick__hint" role="status">
-              已登记视频作品：{registered.works.map((work) => work.name).join('、')}
-            </p>
-          ) : null}
-          <section className="uc-video-image__handoff">
-            <strong>结果与基础编辑边界</strong>
-            <p>
-              只有视频结果正式下载、校验并登记为 Work 后才能进入基础编辑；远端完成状态本身不代表本地作品已完成。
-            </p>
-            <Button disabled variant="secondary">
-              进入基础编辑（等待正式 Work 与阶段 7）
-            </Button>
+              <Button
+                disabled={!draft.imageToVideo.source || dirty || busy}
+                onClick={() => void clearImage()}
+                title="清除图片"
+                variant="ghost"
+              >
+                <LuTrash2 aria-hidden="true" />
+              </Button>
+            </div>
           </section>
+          {preview?.mediaKind === 'image' ? (
+            <div className="uc-image-quick__preview">
+              <img alt={`图生视频输入：${material?.name ?? '本地图片'}`} src={preview.url} />
+            </div>
+          ) : null}
+          {draft.imageToVideo.materials ? (
+            <div className="uc-image-quick__preflight" role="status">
+              <strong>发现旧动态素材槽位</strong>
+              <span>
+                {legacySelections.length === 1 && legacySelections[0].mediaKind === 'image'
+                  ? '可以把唯一图片显式迁移为图生视频输入。'
+                  : '不能无损迁移为单图输入；继续会明确移除旧槽位，请随后重新选图。'}
+              </span>
+              <Button onClick={migrateLegacyMaterials} variant="secondary">
+                明确迁移旧素材
+              </Button>
+            </div>
+          ) : null}
+          <WorkspaceContextSelector
+            disabled={dirty}
+            onChange={(contextReferences) => changeDraft({
+              ...draft,
+              contextReferences
+            })}
+            onMessage={onMessage}
+            projectContextsOnly
+            references={draft.contextReferences}
+          />
+          {unsupportedContexts.length > 0 ? (
+            <div className="uc-image-quick__preflight" role="status">
+              <strong>发现旧上下文</strong>
+              <span>图生视频只接受固定 revision 的项目上下文。</span>
+              <Button onClick={removeUnsupportedContexts} variant="secondary">
+                <LuTrash2 aria-hidden="true" />
+                明确移除旧上下文
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card className="uc-image-workbench__panel uc-image-workbench__canvas">
+          <header className="uc-image-workbench__panel-heading">
+            <span aria-hidden="true">2</span>
+            <div>
+              <h2>运动描述与约束</h2>
+              <p>最终提示词与保持、允许、禁止项共同保存在当前草稿。</p>
+            </div>
+          </header>
+          <label className="uc-image-quick__field">
+            <span>原始需求</span>
+            <textarea
+              maxLength={3000}
+              onChange={(event) => changePrompt('originalInput', event.target.value)}
+              rows={5}
+              value={draft.prompt.originalInput}
+            />
+          </label>
+          <label className="uc-image-quick__field">
+            <span>最终提示词</span>
+            <textarea
+              maxLength={5000}
+              onChange={(event) => changePrompt('finalPrompt', event.target.value)}
+              rows={7}
+              value={draft.prompt.finalPrompt}
+            />
+          </label>
+          <div className="uc-image-quick__parameters">
+            <TextField
+              label="主体动作"
+              onChange={(subjectAction) => changeDraft({
+                ...draft,
+                imageToVideo: { ...draft.imageToVideo, subjectAction }
+              })}
+              value={draft.imageToVideo.subjectAction}
+            />
+            <TextField
+              label="镜头运动"
+              onChange={(cameraMovement) => changeDraft({
+                ...draft,
+                imageToVideo: { ...draft.imageToVideo, cameraMovement }
+              })}
+              value={draft.imageToVideo.cameraMovement}
+            />
+            <TextField
+              label="节奏"
+              onChange={(pace) => changeDraft({
+                ...draft,
+                imageToVideo: { ...draft.imageToVideo, pace }
+              })}
+              value={draft.imageToVideo.pace}
+            />
+            <TextField
+              label="景深"
+              onChange={(depthOfField) => changeDraft({
+                ...draft,
+                imageToVideo: { ...draft.imageToVideo, depthOfField }
+              })}
+              value={draft.imageToVideo.depthOfField}
+            />
+          </div>
+          <ListField
+            label="必须保持"
+            onChange={(mustKeep) => changeDraft({
+              ...draft,
+              imageToVideo: { ...draft.imageToVideo, mustKeep }
+            })}
+            value={draft.imageToVideo.mustKeep}
+          />
+          <ListField
+            label="允许变化"
+            onChange={(allowedChanges) => changeDraft({
+              ...draft,
+              imageToVideo: { ...draft.imageToVideo, allowedChanges }
+            })}
+            value={draft.imageToVideo.allowedChanges}
+          />
+          <ListField
+            label="禁止变化"
+            onChange={(prohibited) => changeDraft({
+              ...draft,
+              imageToVideo: { ...draft.imageToVideo, prohibited }
+            })}
+            value={draft.imageToVideo.prohibited}
+          />
+          <EmptyState
+            description="结果必须经过本地文件校验后才会登记为作品。"
+            icon="视"
+            readOnly
+            title="尚无真实生成结果"
+          />
+        </Card>
+
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+          <header className="uc-image-workbench__panel-heading">
+            <span aria-hidden="true">3</span>
+            <div>
+              <h2>服务、参数与确认</h2>
+              <p>候选只基于已保存的单图图生视频草稿事实。</p>
+            </div>
+          </header>
+          <VideoFeatureSubmissionPanel
+            blockedReason={blockedReason}
+            dirty={dirty}
+            draft={draft}
+            onDraftChange={(next) => onDraftChange(next as ImageVideoDraftDto)}
+            onMessage={onMessage}
+          />
         </Card>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone={blockers.length === 0 && preflight ? 'success' : 'warning'}>
-          {blockers.length === 0 && preflight ? '等待明确确认' : '真实能力状态'}
-        </StatusPill>
-        <p>
-          图片识别和提示词增强仍无真实端口；视频提交、查询、取消和结果登记只在注册表、凭证与能力门禁全部通过后可用。
-        </p>
+        <StatusPill tone="warning">在线运行未授权</StatusPill>
+        <p>候选、参数、图片、上下文和外发确认相互独立。</p>
       </Card>
     </>
-  );
-}
-
-function pollingDelayMs(attempt: number): number {
-  const backoff = Math.min(30_000, 2_000 * 2 ** Math.floor(attempt / 5));
-  return Math.round(backoff * (0.85 + Math.random() * 0.3));
-}
-
-function describeArtifact(artifact: {
-  readonly state: keyof typeof artifactStateLabels;
-  readonly staleReasons: readonly VideoWorkspaceStaleReasonDto[];
-}) {
-  if (artifact.state !== 'stale' || artifact.staleReasons.length === 0) {
-    return artifactStateLabels[artifact.state];
-  }
-  return `${artifactStateLabels.stale}：${artifact.staleReasons
-    .map((reason) => staleReasonLabels[reason])
-    .join('、')}`;
-}
-
-function PanelHeading({
-  description,
-  number,
-  title
-}: {
-  readonly description: string;
-  readonly number: string;
-  readonly title: string;
-}) {
-  return (
-    <header className="uc-image-workbench__panel-heading">
-      <span aria-hidden="true">{number}</span>
-      <div>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </div>
-    </header>
-  );
-}
-
-function Fact({
-  label,
-  value
-}: {
-  readonly label: string;
-  readonly value: string;
-}) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function RequirementField({
-  label,
-  values,
-  onChange
-}: {
-  readonly label: string;
-  readonly values: readonly string[];
-  readonly onChange: (values: readonly string[]) => void;
-}) {
-  const initialValue = values.join('\n');
-  return (
-    <label className="uc-image-quick__field">
-      <span>{label}</span>
-      <textarea
-        defaultValue={initialValue}
-        key={initialValue}
-        onBlur={(event) => {
-          const next = event.target.value
-            .split(/\r?\n/)
-            .map((value) => value.trim())
-            .filter(Boolean);
-          if (JSON.stringify(next) !== JSON.stringify(values)) onChange(next);
-        }}
-        placeholder="每行填写一项"
-        rows={5}
-      />
-    </label>
   );
 }
 
@@ -996,91 +401,44 @@ function TextField({
   return (
     <label className="uc-image-quick__field">
       <span>{label}</span>
+      <input onChange={(event) => onChange(event.target.value)} type="text" value={value} />
+    </label>
+  );
+}
+
+function ListField({
+  label,
+  value,
+  onChange
+}: {
+  readonly label: string;
+  readonly value: readonly string[];
+  readonly onChange: (value: readonly string[]) => void;
+}) {
+  return (
+    <label className="uc-image-quick__field">
+      <span>{label}</span>
       <input
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
+        onChange={(event) => onChange(
+          event.target.value.split(',').map((item) => item.trim()).filter(Boolean)
+        )}
+        placeholder="使用逗号分隔"
+        type="text"
+        value={value.join(', ')}
       />
     </label>
   );
 }
 
-function MaterialSlot({
-  busy,
-  dirty,
-  material,
-  preview,
-  slot,
-  onClear,
-  onSelect
-}: {
-  readonly busy: boolean;
-  readonly dirty: boolean;
-  readonly material?: VideoWorkspaceMaterialAssetDto;
-  readonly preview?: VideoWorkspaceMaterialPreviewDto;
-  readonly slot: VideoWorkspaceMaterialSlotDto;
-  readonly onClear: () => void;
-  readonly onSelect: (mediaKind: 'image' | 'video') => void;
-}) {
-  return (
-    <section className="uc-image-professional__context">
-      <div>
-        <strong>
-          {slot.role} {slot.required ? '（必需）' : '（可选）'}
-        </strong>
-        <span>
-          接受：
-          {slot.acceptedMediaKinds
-            .map((kind) => (kind === 'image' ? '图片' : '视频'))
-            .join('、')}
-        </span>
-        <span>
-          {material
-            ? `${material.name} · ${material.width} × ${material.height}`
-            : '尚未选择素材'}
-        </span>
-      </div>
-      {preview?.mediaKind === 'image' ? (
-        <figure className="uc-image-quick__preview">
-          <img alt={`槽位素材：${material?.name ?? slot.role}`} src={preview.url} />
-          <figcaption>受控本地图片预览。</figcaption>
-        </figure>
-      ) : preview?.mediaKind === 'video' ? (
-        <figure className="uc-image-quick__preview">
-          <video controls preload="metadata" src={preview.url}>
-            当前环境不支持视频预览。
-          </video>
-          <figcaption>受控本地视频预览。</figcaption>
-        </figure>
-      ) : null}
-      <div className="uc-image-quick__result-actions">
-        {slot.acceptedMediaKinds.includes('image') ? (
-          <Button
-            disabled={dirty || busy}
-            onClick={() => onSelect('image')}
-            variant="secondary"
-          >
-            选择图片
-          </Button>
-        ) : null}
-        {slot.acceptedMediaKinds.includes('video') ? (
-          <Button
-            disabled={dirty || busy}
-            onClick={() => onSelect('video')}
-            variant="secondary"
-          >
-            选择视频
-          </Button>
-        ) : null}
-        {slot.selection ? (
-          <Button
-            disabled={dirty || busy}
-            onClick={onClear}
-            variant="secondary"
-          >
-            移除素材
-          </Button>
-        ) : null}
-      </div>
-    </section>
-  );
+function uniqueSelections(
+  selections: readonly VideoWorkspaceMaterialSelectionDto[]
+): readonly VideoWorkspaceMaterialSelectionDto[] {
+  return [...new Map(selections.map((selection) => [selection.assetId, selection])).values()];
+}
+
+function emptyGeneration(): ImageVideoDraftDto['generation'] {
+  return {
+    enhancement: { state: 'not_created', staleReasons: [] },
+    preflight: { state: 'not_created', staleReasons: [] }
+  };
 }

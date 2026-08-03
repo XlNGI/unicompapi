@@ -8,6 +8,7 @@ import {
   ControlledLocalMediaController,
   ImageLocalMediaController,
   ImageFeatureController,
+  VideoFeatureController,
   ImageSubmissionController,
   ImageWorkspaceController,
   ImageWorkspaceMutationCoordinator,
@@ -16,6 +17,7 @@ import {
   JsonProviderRegistryStore,
   JsonAssetRepository,
   JsonImageWorkspaceRepository,
+  JsonVideoWorkspaceRepository,
   JsonProjectContextRepository,
   LocalMediaHandleRegistry,
   NodeProjectStorage,
@@ -33,12 +35,14 @@ import {
   type ProviderUsageSchemaResolverPort,
   type StorageProjectSession,
   ProjectImageFeatureSubjectResolver,
+  ProjectVideoFeatureSubjectResolver,
   ProviderFeatureCandidateService,
   ProviderFeatureContractRegistry,
   ProviderPackageRegistry,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
   createImageProviderFeatureContracts,
+  createVideoProviderFeatureContracts,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
@@ -50,6 +54,7 @@ import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc'
 import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
 import { imageFeatureIpcChannels } from '../../src/shared/image-feature-ipc';
 import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
+import { videoFeatureIpcChannels } from '../../src/shared/video-feature-ipc';
 import { videoSubmissionIpcChannels } from '../../src/shared/video-submission-ipc';
 import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
 import type { ElectronViduComposition } from './vidu-composition';
@@ -183,6 +188,63 @@ export function registerStorageIpcHandlers(options: {
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
   });
+  const videoFeatureContracts = new ProviderFeatureContractRegistry(
+    createVideoProviderFeatureContracts()
+  );
+  let videoFeatureRuntime: {
+    readonly projectId: string;
+    readonly rootDirectory: string;
+    readonly value: {
+      readonly drafts: JsonVideoWorkspaceRepository;
+      readonly candidates: ProviderFeatureCandidateService;
+    };
+  } | undefined;
+  const getVideoFeatureRuntime = (session: StorageProjectSession) => {
+    if (
+      videoFeatureRuntime?.projectId === session.projectId &&
+      videoFeatureRuntime.rootDirectory === session.rootDirectory
+    ) {
+      return videoFeatureRuntime.value;
+    }
+    const storage = new NodeProjectStorage(session.rootDirectory);
+    const drafts = new JsonVideoWorkspaceRepository(storage, session.projectId);
+    const contexts = new JsonProjectContextRepository(storage, session.projectId);
+    const assets = new JsonAssetRepository(storage, session.projectId);
+    const candidates = new ProviderFeatureCandidateService(
+      new ProjectVideoFeatureSubjectResolver(
+        session.projectId,
+        drafts,
+        contexts,
+        assets
+      ),
+      new RegistryFeatureCandidateSource(
+        providerRegistry,
+        providerPackages,
+        videoFeatureContracts,
+        {
+          async checkAccess() {
+            return {
+              allowed: false,
+              operation: 'submit' as const,
+              reason: 'no_matching_policy' as const
+            };
+          }
+        }
+      ),
+      new RouteSelectionTokenVault()
+    );
+    videoFeatureRuntime = {
+      projectId: session.projectId,
+      rootDirectory: session.rootDirectory,
+      value: { drafts, candidates }
+    };
+    return videoFeatureRuntime.value;
+  };
+  const videoFeatures = new VideoFeatureController({
+    getSession: () => sessionRegistry.get(),
+    getRuntime: getVideoFeatureRuntime,
+    mutations: videoMutations
+  });
   const videoEditors = new VideoEditorController({
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
@@ -272,12 +334,14 @@ export function registerStorageIpcHandlers(options: {
         imageWorkspaces.waitForMutations(),
         imageFeatures.waitForOperations(),
         videoWorkspaces.waitForMutations(),
+        videoFeatures.waitForOperations(),
         videoEditors.waitForMutations(),
         ...(options.additionalSessionChangeGuards ?? []).map((guard) => guard())
       ]);
     },
     afterSessionChange: async () => {
       imageFeatureRuntime = undefined;
+      videoFeatureRuntime = undefined;
       await videoExports.recoverExports();
     },
     catalog
@@ -407,6 +471,18 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(videoWorkspaceIpcChannels.list, () => videoWorkspaces.list());
   ipcMain.handle(videoWorkspaceIpcChannels.derive, (_event, request: unknown) =>
     videoWorkspaces.derive(request)
+  );
+  ipcMain.handle(
+    videoFeatureIpcChannels.listCandidates,
+    (_event, request: unknown) => videoFeatures.listCandidates(request)
+  );
+  ipcMain.handle(
+    videoFeatureIpcChannels.prepareSubmission,
+    (_event, request: unknown) => videoFeatures.prepareSubmission(request)
+  );
+  ipcMain.handle(
+    videoFeatureIpcChannels.submitDraft,
+    (_event, request: unknown) => videoFeatures.submitDraft(request)
   );
   ipcMain.handle(
     videoWorkspaceIpcChannels.createFromImageWork,
@@ -557,7 +633,8 @@ export function registerStorageIpcHandlers(options: {
       await Promise.all([
         videoExports.interruptActiveExports('application_shutdown'),
         previewAdapter.dispose?.(),
-        imageFeatures.waitForOperations()
+        imageFeatures.waitForOperations(),
+        videoFeatures.waitForOperations()
       ]);
       await videoExports.waitForExports();
       mediaHandles.clear();

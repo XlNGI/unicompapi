@@ -380,6 +380,9 @@ function parseTarget(value: unknown): VideoWorkspaceMaterialTargetDto {
   if (value.kind === 'quick_reference' && Object.keys(value).length === 1) {
     return { kind: 'quick_reference' };
   }
+  if (value.kind === 'image_source' && Object.keys(value).length === 1) {
+    return { kind: 'image_source' };
+  }
   if (
     value.kind === 'slot' &&
     typeof value.slotId === 'string' &&
@@ -418,6 +421,22 @@ function resolveTarget(
       );
     }
     return { role: 'reference', selection: draft.quick.reference };
+  }
+
+  if (target.kind === 'image_source') {
+    if (draft.mode !== 'image_to_video') {
+      throw mediaError(
+        'material_target_mismatch',
+        'The image source target belongs only to image-to-video drafts'
+      );
+    }
+    if (requestedKind && requestedKind !== 'image') {
+      throw mediaError(
+        'material_type_mismatch',
+        'Image-to-video requires exactly one image source'
+      );
+    }
+    return { role: 'image_to_video_source', selection: draft.imageToVideo.source };
   }
 
   if (draft.mode === 'quick_video') {
@@ -464,6 +483,16 @@ function attachSelection(
         quick: { reference: selection },
         updatedAt
       }
+    : target.kind === 'image_source'
+      ? {
+          ...draft,
+          state: 'editing' as const,
+          imageToVideo: {
+            ...(draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo,
+            source: selection
+          },
+          updatedAt
+        }
     : replaceSlotSelection(draft, target.slotId, selection, updatedAt);
   return applyVideoWorkspaceChangeStaleness(
     draft,
@@ -484,12 +513,29 @@ function clearSelection(
         quick: {},
         updatedAt
       }
+    : target.kind === 'image_source'
+      ? {
+          ...draft,
+          state: 'editing' as const,
+          imageToVideo: withoutImageSource(
+            (draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo
+          ),
+          updatedAt
+        }
     : replaceSlotSelection(draft, target.slotId, undefined, updatedAt);
   return applyVideoWorkspaceChangeStaleness(
     draft,
     createVideoWorkspaceDraft(candidate as VideoWorkspaceDraft),
     updatedAt
   );
+}
+
+function withoutImageSource(
+  workspace: Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>['imageToVideo']
+) {
+  const { source, ...rest } = workspace;
+  void source;
+  return rest;
 }
 
 function replaceSlotSelection(
