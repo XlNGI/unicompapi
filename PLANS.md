@@ -959,3 +959,11 @@ M2 第四支 `feature/provider-runtime-authorization-contracts` 已从 `develop@
     docs/active/多服务商功能路由-M2-运行授权合同记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-feature-contracts`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M2 第五支 `feature/provider-feature-contracts` 已从 `develop@30347b6` 建立，实现提交为 `e60d1d6`。该支冻结九类 ProductFeature 与显式内部用途映射，新增版本化 ParameterSchema V2、字段 exposure/defaultPolicy、`required_only | full` 投影和统一参数校验；快速生图/视频固定纯文本输入，专业参考图生图与图生视频固定恰好一张受控图片，未知 feature、可选字段猜默认、内部字段和任意参数透传均被拒绝。
+
+第五支完整门禁为 Node 179 项与 Vitest 424 项，共 603 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、232 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-功能与参数合同记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/project-conversation-context-snapshots`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
