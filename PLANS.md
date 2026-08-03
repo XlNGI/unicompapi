@@ -930,4 +930,14 @@ M2 第一支完整门禁为 Node 179 项与 Vitest 396 项，共 575 项通过�
 
     docs/active/多服务商功能路由-M2-Vidu运行授权关闭记录.md
 
-本支自验收为 `passed`，允许非快进合并 `develop`；合并后停止。M2 第二支 `feature/provider-package-connection-contracts` 未获批准，不自动启动。后台契约与适配器必须先于 UI；真实 API、凭证验证和收费测试必须另立专项批准。
+M2 第一支自验收为 `passed`，随后已通过 `975ef82` 非快进合并并推送 `develop`；功能分支本地与远程继续保留。
+
+项目负责人于 2026-08-03 最新授权 Codex 按既定顺序连续托管完成阶段 10 之前的 M2—M6，不再要求每支之间手工确认；仍必须保持一支一验收、一支一推送、一支一非快进合并并保留分支。该授权不启动阶段 10，不包含 macOS 实机与媒体工具链、真实服务商 HTTP、真实凭证读取/验证或收费调用；关机设定已取消，任务未完成期间保持唤醒。
+
+M2 第二支 `feature/provider-package-connection-contracts` 已从 `develop@975ef82` 建立，实现提交为 `44e2ce1`。该支新增 `official | compatible_custom` Package/Template/Adapter 精确归属、版本化 CredentialSchema 与 EndpointPolicy、安全模板 DTO、结构化加密凭证、package-owned Provider/Connection 字段及补偿式原子连接保存；关闭旧任意 Provider/Connection 创建和 endpoint 修改入口，拒绝任意 REST 字段、协议猜测与未知 JSON 透传。
+
+M2 第二支完整门禁为 Node 179 项与 Vitest 405 项，共 584 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、227 文件平台审计、交接校验、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁、差异检查和生产敏感信息扫描全部通过。该支未修改 Electron、preload 或 UI，因此不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-Package与连接合同记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-registry-atomic-catalog`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
