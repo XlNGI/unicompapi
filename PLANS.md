@@ -983,3 +983,11 @@ M2 第七支 `feature/provider-invocation-usage-contracts` 已从 `develop@ea4b9
     docs/active/多服务商功能路由-M2-调用与用量合同记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-execution-route-snapshot`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。
+
+M2 第八支 `feature/provider-execution-route-snapshot` 已从 `develop@6708072` 建立，实现提交为 `6537d27`。该支新增不可变 ProviderExecutionRouteSnapshot，固定 package/adapter/provider/connection/config/endpoint policy/credential version/model/Profile/Binding/ProductFeature/Parameter/Result/Usage Schema/constraint/runtime policy/claim 的精确版本；新增项目级原子仓储和 submit/query/cancel/receiveResult 四类快照分发框架。快照不保存 Base URL、endpoint URL、API Key、Token、Authorization Header 或明文凭证；适配器仅按提交时 `adapterKey + adapterVersion` 精确选择，缺失版本或操作时停止，不读取当前默认路由或尝试回退。
+
+第八支完整门禁为 Node 179 项与 Vitest 445 项，共 624 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、245 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。工程记录见：
+
+    docs/active/多服务商功能路由-M2-执行路由快照记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 `feature/provider-text-streaming-contracts`；后台契约与适配器必须先于 UI，真实 API、凭证验证和收费测试必须另立专项批准。

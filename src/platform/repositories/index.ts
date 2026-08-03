@@ -7,6 +7,7 @@ export * from './project-context-snapshot';
 export * from './json-provider-invocation-repository';
 export * from './json-provider-usage-repository';
 export * from './json-local-result-observation-repository';
+export * from './json-provider-execution-route-snapshot-repository';
 export * from './json-provider-operation-repository';
 export * from './json-file-index-repository';
 export * from './repository-data-error';
