@@ -1052,3 +1052,14 @@ M3 第三支 `feature/deepseek-chat-adapter` 已从 `develop@e284644` 建立，�
     docs/active/多服务商功能路由-M3-DeepSeek文本适配器记录.md
 
 本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第四支 `feature/volcengine-doubao-vision-adapter`；该支必须依据火山引擎官方合同证据、精确视觉参数/输入/结果/Usage 映射和合成 transport 完成，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
+
+M3 第四支 `feature/volcengine-doubao-vision-adapter` 已从 `develop@678642a` 建立，实现提交为 `2ee9b3e`。该支新增版本化 Volcengine Ark Package、结构化 API Key CredentialSchema、固定官方 HTTPS EndpointPolicy、无免费验证的 `manual_exact` Endpoint/Model 登记模板，以及只承载 `image_understanding`、`image_to_prompt` 的豆包视觉 Adapter/Profile 工厂；Package 不发布固定模型名，能力只来自用户登记的精确 Endpoint/Model ID 与受控 Profile，不按名称猜测。
+
+视觉请求只接受主进程提供的单张受控图片字节与 MIME/尺寸事实，严格复检小于 10,000,000 字节、宽高、像素、比例和本地支持格式后生成 Base64 data URI。Chat 请求固定 `stream=false`、`thinking=disabled` 和四分类 strict JSON Schema，只开放可选 `detail`、`max_tokens`，不发送任意 URL、tools、user ID、未知 JSON 或采样参数。图片转提示词由应用层固定函数从结构化观察生成可编辑草稿，不把不确定项改写成事实。远端响应 ID、实际模型名、审核标签和原始响应不公开；审核命中、非 stop、服务端 fallback、畸形结构和未知 Usage 均失败关闭，取消与退出中断分别记录 `not_reported`、`unknown_outcome`，恢复必须显式新建 attempt，任何失败不自动重试或切换服务商。
+
+第四支完整门禁为 Node 179 项与 Vitest 495 项，共 674 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、263 文件平台审计、50 项交接校验、27 个权威资源、恢复审计和差异检查全部通过。该支未修改 Electron、preload 或 UI，不触发新增可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。官方证据与工程记录见：
+
+    docs/active/多服务商功能路由-M3-豆包视觉官方合同证据.md
+    docs/active/多服务商功能路由-M3-豆包视觉适配器记录.md
+
+本支自验收为 `passed`，允许非快进合并 `develop`。合并后从最新 `develop` 创建 M3 第五支 `feature/volcengine-seedance-video-adapter`；该支必须依据火山引擎官方合同证据、精确异步提交/查询/取消/结果/Usage 映射和合成 transport 完成，不启动真实 API、凭证验证、收费测试、macOS 实机或阶段 10。
