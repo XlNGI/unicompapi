@@ -2,6 +2,7 @@ export * from './application-paths';
 export * from './file-write-coordinator';
 export * from './json-document';
 export * from './project-metadata-unit-of-work';
+export * from './project-submission-acceptance';
 export * from './project-index';
 export * from './project-paths';
 export * from './path-security';

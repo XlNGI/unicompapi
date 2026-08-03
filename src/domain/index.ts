@@ -19,6 +19,7 @@ export * from './entities/provider-operation';
 export * from './entities/provider-invocation';
 export * from './entities/provider-usage';
 export * from './entities/provider-execution-route';
+export * from './entities/provider-submission';
 export * from './entities/settings';
 export * from './entities/task';
 export * from './entities/video-workspace';
