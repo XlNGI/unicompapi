@@ -21,6 +21,10 @@ import type {
 } from '../entities/conversation';
 import type { ConversationResponseDraftV1 } from '../entities/conversation-response';
 import type {
+  ConversationResponseExecutionV1,
+  ConversationResponseStreamEventV1
+} from '../entities/conversation-response-execution';
+import type {
   ProviderInvocationAttemptV1,
   ProviderInvocationEventV1
 } from '../entities/provider-invocation';
@@ -44,6 +48,8 @@ import type {
   CapabilityEvidenceId,
   ConnectionId,
   ConversationResponseDraftId,
+  ConversationResponseExecutionId,
+  ConversationResponseStreamEventId,
   DraftId,
   ExecutionId,
   FileReferenceId,
@@ -89,6 +95,23 @@ export interface ConversationResponseDraftRepository {
   list(conversationId?: ConversationId): Promise<readonly ConversationResponseDraftV1[]>;
   create(draft: ConversationResponseDraftV1): Promise<void>;
   save(draft: ConversationResponseDraftV1, expectedRevision: number): Promise<void>;
+}
+
+export interface ConversationResponseExecutionRepository {
+  readonly projectId: ProjectId;
+  get(id: ConversationResponseExecutionId): Promise<ConversationResponseExecutionV1 | undefined>;
+  list(conversationId?: ConversationId): Promise<readonly ConversationResponseExecutionV1[]>;
+  listEvents(
+    executionId: ConversationResponseExecutionId
+  ): Promise<readonly ConversationResponseStreamEventV1[]>;
+  getEvent(
+    id: ConversationResponseStreamEventId
+  ): Promise<ConversationResponseStreamEventV1 | undefined>;
+  create(
+    execution: ConversationResponseExecutionV1,
+    initialEvent: ConversationResponseStreamEventV1
+  ): Promise<void>;
+  appendEvent(event: ConversationResponseStreamEventV1): Promise<void>;
 }
 
 export interface ProviderInvocationRepository {
