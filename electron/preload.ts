@@ -398,6 +398,11 @@ const videoEditors: VideoEditorApi = {
       draftId,
       clipId
     }),
+  createCompositionPreview: (draftId, expectedRevision) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.createCompositionPreview, {
+      draftId,
+      expectedRevision
+    }),
   requestPreviewArtifact: (draftId, clipId, kind) =>
     ipcRenderer.invoke(videoEditorIpcChannels.requestPreviewArtifact, {
       draftId,

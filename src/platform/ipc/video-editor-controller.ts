@@ -52,6 +52,7 @@ export interface VideoEditorControllerDependencies {
   createClipId?(): string;
   createTextId?(): string;
   now?(): string;
+  compositionPreview?: 'available' | 'unavailable';
   mutations?: VideoWorkspaceMutationCoordinator;
   createRepository?(
     session: StorageProjectSession
@@ -252,7 +253,7 @@ export class VideoEditorController {
       readonly minimumDurationUs: number;
       readonly maximumDurationUs: number;
     }[];
-    readonly compositionPreview: 'unavailable';
+    readonly compositionPreview: 'available' | 'unavailable';
   }> {
     return {
       ok: true,
@@ -262,7 +263,7 @@ export class VideoEditorController {
           minimumDurationUs: minimumVideoTransitionDurationUs,
           maximumDurationUs: maximumVideoTransitionDurationUs
         })),
-        compositionPreview: 'unavailable'
+        compositionPreview: this.dependencies.compositionPreview ?? 'unavailable'
       }
     };
   }

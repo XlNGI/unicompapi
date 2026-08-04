@@ -53,6 +53,7 @@ test('exposes controlled B2 source, relink and preview-cache operations', () => 
     'prepareRelink',
     'confirmRelink',
     'createSourcePreview',
+    'createCompositionPreview',
     'requestPreviewArtifact',
     'clearPreviewCache'
   ]) {
@@ -71,6 +72,7 @@ test('exposes controlled B2 source, relink and preview-cache operations', () => 
   assert.match(sharedSource, /managed_project_copy/);
   assert.match(sharedSource, /managed_work/);
   assert.match(sharedSource, /adapter_unavailable/);
+  assert.match(sharedSource, /compositionPreview: 'available' \| 'unavailable'/);
   assert.match(sharedSource, /acceptMismatch/);
   assert.match(domainSource, /set_clip_source/);
 });

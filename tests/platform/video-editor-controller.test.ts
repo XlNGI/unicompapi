@@ -116,6 +116,17 @@ describe('VideoEditorController', () => {
       }
     });
   });
+
+  it('publishes composition preview only when the platform adapter is installed', () => {
+    const controller = new VideoEditorController({
+      getSession: () => undefined,
+      compositionPreview: 'available'
+    });
+    expect(controller.getCapabilities()).toMatchObject({
+      ok: true,
+      value: { compositionPreview: 'available' }
+    });
+  });
   it('requires an active project and validates source intent', async () => {
     const withoutProject = new VideoEditorController({
       getSession: () => undefined

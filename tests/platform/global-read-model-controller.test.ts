@@ -9,6 +9,7 @@ import {
   toIsoTimestamp,
   toProjectId,
   toTaskId,
+  toVideoExportPlanId,
   toWorkId,
   type Execution,
   type FileReference,
@@ -261,12 +262,95 @@ describe('GlobalReadModelController', () => {
       }
     });
   });
+
+  it('projects mixed routes, partial usage, ignores conversation calls, and marks local work not applicable', async () => {
+    const root = await createRoot('unicomp-read-model-projection-');
+    const projectId = await createValidProject(root);
+    const storage = new NodeProjectStorage(root);
+    await new JsonTaskRepository(storage, projectId).save({
+      schemaVersion: 1,
+      id: toTaskId('task-local-edit'),
+      projectId,
+      sourceDraftId: toDraftId('draft-local-edit'),
+      submission: {
+        kind: 'video_editing',
+        confirmedAt: t0,
+        videoEditing: {
+          exportPlanId: toVideoExportPlanId('plan-local-edit'),
+          draftRevision: 1,
+          title: '本地编辑'
+        }
+      },
+      executionIds: [],
+      createdAt: t0
+    });
+    const catalog = new ProjectCatalogService(
+      new InMemoryProjectCatalogStore(),
+      () => t1
+    );
+    await catalog.remember({
+      projectId,
+      projectName: 'Read model project',
+      rootDirectory: root
+    });
+    const first = callRecord('attempt-route-a', '1');
+    const second = callRecord('attempt-route-b', '0', 'credit', {
+      providerId: 'provider-b',
+      connectionId: 'connection-b',
+      modelId: 'model-b',
+      providerName: 'Provider B',
+      connectionName: 'Connection B',
+      modelName: 'Model B',
+      usageAvailability: 'not_reported',
+      usageFacts: []
+    });
+    const conversation = callRecord('attempt-conversation', '99', 'credit', {
+      subjectKind: 'conversation',
+      taskId: undefined,
+      executionId: undefined
+    });
+    const controller = new GlobalReadModelController(catalog, {
+      async listCallRecords() {
+        return {
+          ok: true,
+          value: {
+            items: [first, second, conversation],
+            total: 3,
+            offset: 0,
+            limit: 200,
+            issues: []
+          }
+        };
+      }
+    });
+
+    const tasks = await controller.listTasks();
+    if (!tasks.ok) throw new Error(tasks.error.message);
+    expect(tasks.value.items).toContainEqual(expect.objectContaining({
+      taskId: 'task-read-model',
+      routeSummary: { state: 'mixed' },
+      usageSummary: expect.objectContaining({
+        availability: 'reported_partial',
+        facts: [{ metricId: 'credits', quantity: '1', unit: 'credit' }]
+      })
+    }));
+    expect(tasks.value.items).toContainEqual(expect.objectContaining({
+      taskId: 'task-local-edit',
+      usageSummary: expect.objectContaining({ availability: 'not_applicable' })
+    }));
+    await expect(controller.getTaskDetails({ taskId: 'task-read-model' }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: { callRecords: [{ taskId: 'task-read-model' }, { taskId: 'task-read-model' }] }
+      });
+  });
 });
 
 function callRecord(
   invocationAttemptId: string,
   quantity: string,
-  unit = 'credit'
+  unit = 'credit',
+  overrides: Partial<StorageCallRecordSummaryDto> = {}
 ): StorageCallRecordSummaryDto {
   return {
     invocationAttemptId,
@@ -294,6 +378,7 @@ function callRecord(
       source: 'provider'
     }],
     localResultCount: 1,
-    resultRegistrationState: 'registered'
+    resultRegistrationState: 'registered',
+    ...overrides
   };
 }

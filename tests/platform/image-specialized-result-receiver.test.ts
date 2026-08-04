@@ -11,6 +11,7 @@ import {
 import {
   ImageSpecializedResultReceiver,
   ImageSpecializedResultReceiverError,
+  ImageSpecializedSubmissionCoordinator,
   ImageWorkspaceMutationCoordinator,
   JsonImageWorkspaceRepository,
   NodeProjectStorage
@@ -28,6 +29,75 @@ afterEach(async () => {
 });
 
 describe('ImageSpecializedResultReceiver', () => {
+  it('persists a trusted completed submission result in the same main-process flow', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-result-flow-'));
+    roots.push(root);
+    const repository = new JsonImageWorkspaceRepository(
+      new NodeProjectStorage(root),
+      projectId
+    );
+    const draft = createEmptyImageWorkspaceDraft({
+      id: toDraftId('draft-specialized-flow'),
+      projectId,
+      mode: 'image_understanding',
+      createdAt: t0
+    });
+    await repository.save(draft);
+    const coordinator = new ImageSpecializedSubmissionCoordinator(
+      {
+        async submit() {
+          return {
+            submission: {
+              schemaVersion: 1,
+              submissionIntentId: 'intent-specialized-flow',
+              status: 'completed',
+              retryAllowed: false
+            },
+            result: {
+              schemaVersion: 1,
+              productFeature: 'image_understanding',
+              observations: {
+                visibleFacts: [{ id: 'remote', content: '蓝色玻璃杯' }],
+                modelInferences: [],
+                uncertainties: [],
+                unrecognized: []
+              }
+            }
+          };
+        }
+      },
+      new ImageSpecializedResultReceiver(
+        repository,
+        new ImageWorkspaceMutationCoordinator(),
+        () => t1
+      )
+    );
+
+    await expect(coordinator.submit({
+      subject: {
+        kind: 'draft',
+        draftId: draft.id,
+        draftRevision: Date.parse(draft.updatedAt)
+      },
+      routeSelectionToken: 'trusted-route-token',
+      confirmation: {
+        schemaVersion: 1,
+        confirmationId: 'confirmation-specialized-flow',
+        confirmed: true
+      },
+      draftId: draft.id,
+      expectedDraftUpdatedAt: draft.updatedAt
+    })).resolves.toMatchObject({ status: 'completed' });
+    await expect(repository.get(draft.id)).resolves.toMatchObject({
+      understanding: {
+        analysisState: 'current',
+        observations: {
+          visibleFacts: [{ id: 'visible-fact-1', content: '蓝色玻璃杯' }]
+        }
+      }
+    });
+  });
+
   it('normalizes and persists structured observations without exposing result writes to IPC', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-result-'));
     roots.push(root);

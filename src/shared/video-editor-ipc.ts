@@ -16,6 +16,7 @@ export const videoEditorIpcChannels = {
   selectCoverImage: 'video-editor:select-cover-image',
   attachCoverWork: 'video-editor:attach-cover-work',
   createSourcePreview: 'video-editor:create-source-preview',
+  createCompositionPreview: 'video-editor:create-composition-preview',
   requestPreviewArtifact: 'video-editor:request-preview-artifact',
   clearPreviewCache: 'video-editor:clear-preview-cache',
   preflightExport: 'video-editor:preflight-export',
@@ -350,6 +351,14 @@ export interface VideoEditorSourcePreviewDto {
   readonly kind: 'original';
 }
 
+export interface VideoEditorCompositionPreviewDto {
+  readonly draftRevision: number;
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mimeType: 'video/webm';
+  readonly kind: 'composition';
+}
+
 export type VideoEditorPreviewArtifactKindDto =
   | 'proxy_video'
   | 'thumbnail_strip'
@@ -453,7 +462,7 @@ export interface VideoEditorApi {
       readonly minimumDurationUs: number;
       readonly maximumDurationUs: number;
     }[];
-    readonly compositionPreview: 'unavailable';
+    readonly compositionPreview: 'available' | 'unavailable';
   }>>;
   create(
     sourceIntent?: VideoEditorSourceIntentDto,
@@ -526,6 +535,10 @@ export interface VideoEditorApi {
     draftId: string,
     clipId: string
   ): Promise<VideoEditorIpcResult<VideoEditorSourcePreviewDto>>;
+  createCompositionPreview(
+    draftId: string,
+    expectedRevision: number
+  ): Promise<VideoEditorIpcResult<VideoEditorCompositionPreviewDto>>;
   requestPreviewArtifact(
     draftId: string,
     clipId: string,

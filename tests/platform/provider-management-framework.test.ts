@@ -267,6 +267,32 @@ describe('provider management framework', () => {
     expect((await fixture.registry.load()).currentConnectionId).toBeNull();
   });
 
+  it('allows only one concurrent activation for the same registry revision', async () => {
+    const fixture = await frameworkFixture();
+    const first = await createConnection(fixture);
+    const second = await createConnection(fixture);
+    if (!first.ok || !second.ok) throw new Error('connection creation failed');
+    const revision = (await fixture.registry.load()).registryRevision;
+
+    const outcomes = await Promise.all([
+      fixture.framework.activateConnection({
+        connectionId: first.value.connectionId,
+        expectedRegistryRevision: revision
+      }),
+      fixture.framework.activateConnection({
+        connectionId: second.value.connectionId,
+        expectedRegistryRevision: revision
+      })
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.ok)).toHaveLength(1);
+    expect(outcomes.filter((outcome) => !outcome.ok)).toMatchObject([
+      { error: { code: 'provider_registry_conflict' } }
+    ]);
+    const current = (await fixture.registry.load()).currentConnectionId;
+    expect([first.value.connectionId, second.value.connectionId]).toContain(current);
+  });
+
   it('synchronizes exact catalog keys without inferring capabilities and marks disappeared models missing', async () => {
     const fixture = await frameworkFixture();
     const created = await createAndValidate(fixture);
@@ -595,6 +621,11 @@ describe('provider management framework', () => {
     };
     const fixture = await frameworkFixture({ retention });
     const created = await createAndValidate(fixture);
+    const beforeActivation = await fixture.registry.load();
+    await fixture.framework.activateConnection({
+      connectionId: created.connectionId,
+      expectedRegistryRevision: beforeActivation.registryRevision
+    });
     fixture.catalog.entries = [{ providerModelKey: 'model.history', displayName: 'History' }];
     await fixture.framework.syncModelCatalog({ connectionId: created.connectionId });
     const before = await fixture.registry.load();
@@ -623,6 +654,7 @@ describe('provider management framework', () => {
       value: { state: 'deleted', remoteRevocation: 'not_attempted' }
     });
     const after = await fixture.registry.load();
+    expect(after.currentConnectionId).toBeNull();
     expect(after.providers.find((provider) =>
       provider.id === beforeConnection.providerId
     )).toBeDefined();

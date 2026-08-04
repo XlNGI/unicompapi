@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { access, mkdir, stat, statfs } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, mkdir, rm, stat, statfs } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import {
@@ -29,6 +29,7 @@ import {
 import type {
   VideoEditorExportPreflightDto,
   VideoEditorExportTaskDto,
+  VideoEditorCompositionPreviewDto,
   VideoEditorIpcErrorCode,
   VideoEditorIpcResult
 } from '../../shared/video-editor-ipc';
@@ -55,6 +56,8 @@ import type {
   MediaEngineAdapter,
   MediaEngineCompositionExportPlan
 } from '../videos';
+import { NodeVideoEditorPreviewCache } from '../videos';
+import type { LocalMediaHandleRegistry } from './controlled-local-media';
 import type { StorageProjectSession } from './storage-ipc-controller';
 
 const activeExportStates = new Set([
@@ -71,6 +74,7 @@ const activeExportStates = new Set([
 export interface VideoExportControllerDependencies {
   getSession(): StorageProjectSession | undefined;
   getAdapter(): MediaEngineAdapter | undefined;
+  readonly handles?: LocalMediaHandleRegistry;
   now?(): string;
   createId?(): string;
   onError?(error: unknown): void;
@@ -118,6 +122,71 @@ export class VideoExportController {
       const draft = await requireDraft(context, parsed.draftId, parsed.expectedRevision);
       const checked = await this.preflight(context, draft);
       return checked.dto;
+    });
+  }
+
+  async createCompositionPreview(
+    request: unknown
+  ): Promise<VideoEditorIpcResult<VideoEditorCompositionPreviewDto>> {
+    return this.execute(async () => {
+      const parsed = parseDraftRequest(request);
+      const context = this.context();
+      const draft = await requireDraft(context, parsed.draftId, parsed.expectedRevision);
+      const checked = await this.preflight(context, draft);
+      if (!checked.dto.ready) {
+        throw exportError('export_preflight_failed', checked.dto.reasons.join('; '));
+      }
+      const adapter = requireAdapter(this.dependencies.getAdapter());
+      if (!this.dependencies.handles) {
+        throw exportError('preview_unavailable', 'The controlled preview protocol is unavailable');
+      }
+      const createdAt = this.now();
+      const plan = buildFrozenPlan({
+        draft,
+        taskId: toTaskId(this.id('video-preview-task')),
+        planId: toVideoExportPlanId(this.id('video-preview-plan')),
+        checked,
+        createdAt
+      });
+      const resolved = await verifyFrozenInputs(context, plan, adapter);
+      const cache = new NodeVideoEditorPreviewCache(context.session.rootDirectory);
+      await cache.ensure();
+      const cacheKey = createHash('sha256').update(JSON.stringify({
+        draftId: draft.id,
+        draftRevision: draft.revision,
+        adapter: checked.capabilities?.descriptor,
+        engineVersion: checked.capabilities?.version
+      })).digest('hex');
+      const outputPath = cache.resolve(cacheKey, 'webm');
+      const renderPlan = toMediaEnginePlan(
+        plan,
+        { id: toExecutionId(`video-preview-${cacheKey}`) },
+        resolved,
+        outputPath
+      );
+      let verified = await adapter.verifyOutput(outputPath);
+      if (verified.status !== 'verified') {
+        await rm(outputPath, { force: true });
+        const rendered = await adapter.export(renderPlan);
+        if (rendered.status !== 'completed') {
+          throw exportError('preview_unavailable', 'The composition preview could not be rendered');
+        }
+        verified = await adapter.verifyOutput(outputPath);
+      }
+      if (
+        verified.status !== 'verified' ||
+        verified.width !== renderPlan.composition.canvas.width ||
+        verified.height !== renderPlan.composition.canvas.height ||
+        Math.abs(verified.durationUs - expectedPlanDurationUs(plan)) > 500_000
+      ) {
+        throw exportError('preview_unavailable', 'The composition preview failed verification');
+      }
+      return {
+        draftRevision: draft.revision,
+        ...this.dependencies.handles.create(outputPath, 'video/webm'),
+        mimeType: 'video/webm',
+        kind: 'composition'
+      };
     });
   }
 
@@ -946,7 +1015,7 @@ function buildFrozenPlan(input: {
 
 function toMediaEnginePlan(
   plan: VideoExportPlan,
-  execution: Execution,
+  execution: Pick<Execution, 'id'>,
   resolved: Map<string, VerifiedInput>,
   outputPath: string
 ): MediaEngineCompositionExportPlan {

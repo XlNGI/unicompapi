@@ -7,6 +7,8 @@ import {
   ProviderInvocationReadModelController,
   ControlledLocalMediaController,
   ImageLocalMediaController,
+  ImageSpecializedResultReceiver,
+  ImageSpecializedSubmissionCoordinator,
   ImageFeatureController,
   VideoFeatureController,
   ImageSubmissionController,
@@ -44,6 +46,8 @@ import {
   createImageProviderFeatureContracts,
   createVideoProviderFeatureContracts,
   type ConnectionOutboundAuthorizationPort,
+  type ImageFeatureControllerRuntime,
+  type ImageSpecializedSubmissionPort,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
@@ -75,6 +79,7 @@ export function registerStorageIpcHandlers(options: {
   readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
   readonly providerPackages?: ProviderPackageRegistry;
   readonly connectionAuthorizations?: ConnectionOutboundAuthorizationPort;
+  readonly imageSpecializedSubmission?: ImageSpecializedSubmissionPort;
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -122,10 +127,7 @@ export function registerStorageIpcHandlers(options: {
   let imageFeatureRuntime: {
     readonly projectId: string;
     readonly rootDirectory: string;
-    readonly value: {
-      readonly drafts: JsonImageWorkspaceRepository;
-      readonly candidates: ProviderFeatureCandidateService;
-    };
+    readonly value: ImageFeatureControllerRuntime;
   } | undefined;
   const getImageFeatureRuntime = (session: StorageProjectSession) => {
     if (
@@ -164,10 +166,20 @@ export function registerStorageIpcHandlers(options: {
       undefined,
       options.connectionAuthorizations
     );
+    const coordinator = options.imageSpecializedSubmission
+      ? new ImageSpecializedSubmissionCoordinator(
+          options.imageSpecializedSubmission,
+          new ImageSpecializedResultReceiver(drafts, imageMutations)
+        )
+      : undefined;
+    const submit = coordinator
+      ? (input: Parameters<ImageSpecializedSubmissionCoordinator['submit']>[0]) =>
+          coordinator.submit(input)
+      : undefined;
     imageFeatureRuntime = {
       projectId: session.projectId,
       rootDirectory: session.rootDirectory,
-      value: { drafts, candidates }
+      value: { drafts, candidates, ...(submit ? { submit } : {}) }
     };
     return imageFeatureRuntime.value;
   };
@@ -253,11 +265,12 @@ export function registerStorageIpcHandlers(options: {
     getRuntime: getVideoFeatureRuntime,
     mutations: videoMutations
   });
+  const mediaEngine = createFfmpegMediaEngineAdapterFromEnvironment();
   const videoEditors = new VideoEditorController({
     getSession: () => sessionRegistry.get(),
-    mutations: videoMutations
+    mutations: videoMutations,
+    compositionPreview: mediaEngine ? 'available' : 'unavailable'
   });
-  const mediaEngine = createFfmpegMediaEngineAdapterFromEnvironment();
   const previewAdapter = mediaEngine ?? createDevelopmentVideoEditorPreviewAdapter();
   const videoEditorMedia = new VideoEditorMediaController({
     getSession: () => sessionRegistry.get(),
@@ -292,6 +305,7 @@ export function registerStorageIpcHandlers(options: {
   const videoExports = new VideoExportController({
     getSession: () => sessionRegistry.get(),
     getAdapter: () => mediaEngine,
+    handles: mediaHandles,
     onActiveCountChanged: options.onActiveExportCountChanged
   });
   const videoReferenceMedia = new VideoReferenceMediaController({
@@ -573,6 +587,10 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(
     videoEditorIpcChannels.createSourcePreview,
     (_event, request: unknown) => videoEditorMedia.createSourcePreview(request)
+  );
+  ipcMain.handle(
+    videoEditorIpcChannels.createCompositionPreview,
+    (_event, request: unknown) => videoExports.createCompositionPreview(request)
   );
   ipcMain.handle(
     videoEditorIpcChannels.requestPreviewArtifact,

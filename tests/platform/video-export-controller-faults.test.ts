@@ -22,6 +22,7 @@ import {
   JsonVideoEditDraftRepository,
   JsonVideoExportPlanRepository,
   JsonWorkRepository,
+  LocalMediaHandleRegistry,
   NodeProjectStorage,
   VideoExportController,
   type MediaEngineAdapter,
@@ -206,9 +207,11 @@ async function fixture(
   }, t0);
   await new JsonVideoEditDraftRepository(storage, projectId).save(draft);
   let sequence = 0;
+  const handles = new LocalMediaHandleRegistry();
   const controller = new VideoExportController({
     getSession: () => ({ projectId, projectName: 'Fault project', rootDirectory: projectRoot }),
     getAdapter: () => adapter,
+    handles,
     now: () => '2026-07-27T02:01:00.000Z',
     createId: () => `fault-${++sequence}`,
     onActiveCountChanged
@@ -225,6 +228,28 @@ async function fixture(
 }
 
 describe('VideoExportController fault handling', () => {
+  it('renders a verified composition preview without creating a task', async () => {
+    const adapter = new ControlledExportAdapter();
+    adapter.mode = 'succeed';
+    const test = await fixture(adapter);
+
+    const preview = await test.controller.createCompositionPreview({
+      draftId: test.draft.id,
+      expectedRevision: test.draft.revision
+    });
+
+    expect(preview).toMatchObject({
+      ok: true,
+      value: {
+        draftRevision: test.draft.revision,
+        kind: 'composition',
+        mimeType: 'video/webm'
+      }
+    });
+    await expect(new JsonTaskRepository(test.storage, test.projectId)
+      .list(test.projectId)).resolves.toEqual([]);
+  });
+
   it('freezes fail-on-conflict without changing the requested output name', async () => {
     const adapter = new ControlledExportAdapter();
     const test = await fixture(adapter);

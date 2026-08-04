@@ -27,6 +27,8 @@ export interface ImageFeatureControllerRuntime {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
+    readonly draftId: string;
+    readonly expectedDraftUpdatedAt: string;
   }): Promise<ImageFeatureSubmissionDto>;
 }
 
@@ -100,6 +102,8 @@ export class ImageFeatureController {
         value: await resolved.runtime.submit({
           subject: resolved.subject,
           routeSelectionToken: input.routeSelectionToken,
+          draftId: input.draftId,
+          expectedDraftUpdatedAt: input.draftUpdatedAt,
           confirmation: confirmation ?? {
             schemaVersion: 1,
             confirmationId: validated.tokenRecord.confirmation.confirmationId,
