@@ -21,6 +21,7 @@ import '../../styles/pages.css';
 type DetailTab = 'models' | 'connection' | 'credential';
 
 const emptyRegistry: ProviderRegistryDto = {
+  currentConnectionId: null,
   providers: [],
   connections: [],
   protocolBindings: [],

@@ -60,7 +60,8 @@ describe('ProviderCredentialController', () => {
       updatedAt: timestamp
     });
     await registry.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: [],
@@ -143,7 +144,8 @@ describe('ProviderCredentialController', () => {
     });
     await vault.save('credential-replace-old', 'old-fixture-value');
     await registry.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: [],
@@ -203,7 +205,8 @@ describe('ProviderCredentialController', () => {
     });
     await vault.save('credential-rollback-old', 'old-fixture-value');
     await registry.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: [],
@@ -302,7 +305,8 @@ describe('ProviderCredentialController', () => {
     });
     await vault.save('credential-delete-fixture', 'fixture-value');
     await registry.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: [binding],

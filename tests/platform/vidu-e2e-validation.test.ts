@@ -680,7 +680,8 @@ async function createProtocolFixture(
   );
   const registry = new JsonProviderRegistryStore(path.join(root, 'providers.json'));
   await registry.save({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: connection.id,
     providers: [provider],
     connections: [connection],
     protocolBindings: bindings,

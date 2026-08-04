@@ -246,6 +246,12 @@ export class ProviderInvocationReadModelController {
       projectId: entry.projectId,
       projectName: entry.projectName,
       subjectKind: readModel.subject.kind,
+      ...(readModel.subject.kind === 'media'
+        ? {
+            taskId: readModel.subject.taskId,
+            executionId: readModel.subject.executionId
+          }
+        : {}),
       productFeature: route.productFeature,
       providerId: route.providerId,
       connectionId: route.connectionId,
@@ -266,6 +272,7 @@ export class ProviderInvocationReadModelController {
         ? { retryOfInvocationAttemptId: readModel.retryOfInvocationAttemptId }
         : {}),
       usageAvailability: readModel.usage.availability,
+      usageFacts: readModel.usage.facts.map((fact) => ({ ...fact })),
       localResultCount: readModel.localResults.length,
       resultRegistrationState: registration.state
     };

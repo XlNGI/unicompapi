@@ -234,6 +234,34 @@ describe('video editor draft contracts', () => {
     );
   });
 
+  it('keeps fade and dissolve distinct and enforces the advertised duration bounds', () => {
+    const inserted = insert(insert(emptyDraft()), clip('clip-2'), 1);
+    const current = inserted.videoTrack[0]!;
+    expect(isVideoEditDraft({
+      ...inserted,
+      videoTrack: [
+        { ...current, transitionToNext: { kind: 'fade', durationUs: 100_000 } },
+        inserted.videoTrack[1]!
+      ]
+    })).toBe(true);
+    expect(isVideoEditDraft({
+      ...inserted,
+      videoTrack: [
+        { ...current, transitionToNext: { kind: 'dissolve', durationUs: 5_000_000 } },
+        inserted.videoTrack[1]!
+      ]
+    })).toBe(true);
+    for (const durationUs of [99_999, 5_000_001]) {
+      expect(isVideoEditDraft({
+        ...inserted,
+        videoTrack: [
+          { ...current, transitionToNext: { kind: 'fade', durationUs } },
+          inserted.videoTrack[1]!
+        ]
+      })).toBe(false);
+    }
+  });
+
   it('keeps text, music and cover inside the current timeline', () => {
     const inserted = insert(emptyDraft());
     const text: TextOverlay = {

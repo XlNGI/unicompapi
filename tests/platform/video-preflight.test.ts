@@ -144,7 +144,8 @@ function createRegistry(options: {
     updatedAt: now
   });
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: connection.id,
     providers: [provider],
     connections: [connection],
     protocolBindings: [binding],

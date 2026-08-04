@@ -89,6 +89,21 @@ export interface ParameterFieldSchemaV2 {
   readonly step?: number;
   readonly unitId?: string;
   readonly secret?: boolean;
+  readonly display?: {
+    readonly label?: string;
+    readonly description?: string;
+    readonly groupLabel?: string;
+    readonly note?: string;
+    readonly optionLabels?: readonly {
+      readonly value: ParameterScalar;
+      readonly label: string;
+    }[];
+    readonly visibleWhen?: {
+      readonly fieldId: string;
+      readonly operator: 'equals' | 'not_equals';
+      readonly value: ParameterScalar;
+    };
+  };
 }
 
 export interface ParameterSchemaV2 {
@@ -191,6 +206,20 @@ export function validateParameterSchemaV2(
   const fields = schema.fields.map(validateParameterField);
   assertUnique(fields.map((field) => field.fieldId), 'parameter field ID');
   assertUnique(fields.map((field) => String(field.order)), 'parameter field order');
+  const fieldsById = new Map(fields.map((field) => [field.fieldId, field]));
+  for (const field of fields) {
+    const condition = field.display?.visibleWhen;
+    if (!condition) continue;
+    const source = fieldsById.get(condition.fieldId);
+    if (!source || source.fieldId === field.fieldId ||
+      !['user_required', 'user_optional'].includes(source.exposure)) {
+      throw new ProductFeatureContractError(
+        'invalid_schema',
+        'Parameter display condition references an unavailable field'
+      );
+    }
+    validateParameterValue(source, condition.value);
+  }
   return { ...schema, fields };
 }
 
@@ -364,7 +393,78 @@ function validateParameterField(field: ParameterFieldSchemaV2): ParameterFieldSc
     throw new ProductFeatureContractError('invalid_schema', 'Parameter range is inverted');
   }
   if (field.unitId !== undefined) requireStableId(field.unitId, 'parameter unit ID');
-  return { ...field };
+  return {
+    ...field,
+    ...(field.display ? { display: validateParameterDisplay(field) } : {})
+  };
+}
+
+function validateParameterDisplay(
+  field: ParameterFieldSchemaV2
+): NonNullable<ParameterFieldSchemaV2['display']> {
+  const display = field.display;
+  if (!display || Object.keys(display).some((key) => ![
+    'label', 'description', 'groupLabel', 'note', 'optionLabels', 'visibleWhen'
+  ].includes(key))) {
+    throw new ProductFeatureContractError('invalid_schema', 'Parameter display metadata is invalid');
+  }
+  const optionLabels = display.optionLabels?.map((option) => {
+    if (!isPlainRecord(option) ||
+      Object.keys(option).some((key) => !['value', 'label'].includes(key)) ||
+      !field.options?.some((value) => Object.is(value, option.value))) {
+      throw new ProductFeatureContractError(
+        'invalid_schema',
+        'Parameter option display metadata is invalid'
+      );
+    }
+    return { value: option.value as ParameterScalar, label: displayText(option.label, 80) };
+  });
+  if (optionLabels &&
+    new Set(optionLabels.map((option) => JSON.stringify(option.value))).size !== optionLabels.length) {
+    throw new ProductFeatureContractError(
+      'invalid_schema',
+      'Parameter option display metadata must be unique'
+    );
+  }
+  let visibleWhen: NonNullable<ParameterFieldSchemaV2['display']>['visibleWhen'];
+  if (display.visibleWhen !== undefined) {
+    const condition = display.visibleWhen;
+    if (!isPlainRecord(condition) ||
+      Object.keys(condition).some((key) => !['fieldId', 'operator', 'value'].includes(key)) ||
+      !['equals', 'not_equals'].includes(String(condition.operator)) ||
+      !['string', 'number', 'boolean'].includes(typeof condition.value)) {
+      throw new ProductFeatureContractError(
+        'invalid_schema',
+        'Parameter display condition is invalid'
+      );
+    }
+    requireStableId(condition.fieldId, 'parameter display condition field ID');
+    visibleWhen = {
+      fieldId: condition.fieldId,
+      operator: condition.operator as 'equals' | 'not_equals',
+      value: condition.value as ParameterScalar
+    };
+  }
+  return {
+    ...(display.label === undefined ? {} : { label: displayText(display.label, 80) }),
+    ...(display.description === undefined
+      ? {}
+      : { description: displayText(display.description, 500) }),
+    ...(display.groupLabel === undefined
+      ? {}
+      : { groupLabel: displayText(display.groupLabel, 80) }),
+    ...(display.note === undefined ? {} : { note: displayText(display.note, 200) }),
+    ...(optionLabels ? { optionLabels } : {}),
+    ...(visibleWhen ? { visibleWhen } : {})
+  };
+}
+
+function displayText(value: unknown, maximumLength: number): string {
+  if (typeof value !== 'string' || value.trim().length === 0 ||
+    value.length > maximumLength || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new ProductFeatureContractError('invalid_schema', 'Parameter display text is invalid');
+  }
+  return value.trim();
 }
 
 function validateParameterValue(field: ParameterFieldSchemaV2, value: unknown): void {

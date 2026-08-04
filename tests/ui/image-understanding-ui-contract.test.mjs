@@ -74,7 +74,10 @@ test('image understanding transitions only through derived image drafts', () => 
     assert.match(understandingSource, new RegExp(`deriveDraft\\('${mode}'\\)`));
   }
 
-  assert.match(understandingSource, /\.derive\(draft\.draftId, targetMode\)/);
+  assert.match(
+    understandingSource,
+    /\.deriveFromResult\([\s\S]*draft\.draftId,[\s\S]*analysis\.resultRevision,[\s\S]*targetMode/
+  );
   assert.match(appSource, /activeSubItemId === 'image-understanding'/);
   assert.match(understandingSource, /没有创建或提交任务/);
 });

@@ -14,10 +14,10 @@ import {
   type Conversation,
   type ConversationId,
   type ConversationRepository,
+  type ConversationSelectionProjectContextDraftV1,
   type Message,
   type MessageId,
   type ProjectContextDraftId,
-  type ProjectContextDraftV1,
   type ProjectContextFragmentId,
   type ProjectContextId,
   type ProjectContextMessageFragmentV1,
@@ -90,7 +90,7 @@ export interface ProjectContextCandidateDto {
   readonly projectId: ProjectId;
   readonly revision: number;
   readonly status: 'active';
-  readonly sourceKind: 'conversation_selection';
+  readonly sourceKind: 'conversation_selection' | 'image_analysis';
   readonly sourceStatus: ProjectContextSourceStatus;
   readonly labels: readonly string[];
   readonly contentPreview: string;
@@ -104,10 +104,12 @@ export interface ProjectContextDetailDto {
   readonly revision: number;
   readonly isCurrent: boolean;
   readonly status: 'active' | 'deleted';
-  readonly sourceKind: 'conversation_selection';
+  readonly sourceKind: 'conversation_selection' | 'image_analysis';
   readonly sourceStatus: ProjectContextSourceStatus;
-  readonly sourceConversationId: ConversationId;
-  readonly sourceFragments: readonly ProjectContextFragmentDto[];
+  readonly sourceConversationId?: ConversationId;
+  readonly sourceFragments?: readonly ProjectContextFragmentDto[];
+  readonly sourceImageDraftId?: string;
+  readonly sourceImageResultRevision?: number;
   readonly labels: readonly string[];
   readonly contentSnapshot: string;
   readonly registeredAt: string;
@@ -146,7 +148,7 @@ export class ProjectContextRegistryService {
     readonly draftId: ProjectContextDraftId;
   }): Promise<ProjectContextDraftPreviewDto> {
     this.assertProject(input.projectId);
-    return toDraftPreviewDto(await this.requireDraft(input.draftId));
+    return toDraftPreviewDto(await this.requireConversationDraft(input.draftId));
   }
 
   async addMessageFragment(input: {
@@ -158,7 +160,7 @@ export class ProjectContextRegistryService {
     readonly endUtf16: number;
   }): Promise<ProjectContextDraftPreviewDto> {
     this.assertProject(input.projectId);
-    const draft = await this.requireDraft(input.draftId);
+    const draft = await this.requireConversationDraft(input.draftId);
     const conversation = await this.requireSavedConversation(draft.conversationId);
     this.assertConversationAvailable(conversation);
     const message = requireMessage(conversation, input.messageId);
@@ -202,7 +204,7 @@ export class ProjectContextRegistryService {
     readonly fragmentId: ProjectContextFragmentId;
   }): Promise<ProjectContextDraftPreviewDto> {
     this.assertProject(input.projectId);
-    const draft = await this.requireDraft(input.draftId);
+    const draft = await this.requireConversationDraft(input.draftId);
     const updated = removeProjectContextDraftFragment(
       draft,
       input.fragmentId,
@@ -219,7 +221,7 @@ export class ProjectContextRegistryService {
     readonly labels: readonly string[];
   }): Promise<ProjectContextDraftPreviewDto> {
     this.assertProject(input.projectId);
-    const draft = await this.requireDraft(input.draftId);
+    const draft = await this.requireConversationDraft(input.draftId);
     const updated = replaceProjectContextDraftLabels(
       draft,
       input.labels,
@@ -242,7 +244,7 @@ export class ProjectContextRegistryService {
         'Project context registration requires explicit confirmation'
       );
     }
-    const draft = await this.requireDraft(input.draftId);
+    const draft = await this.requireConversationDraft(input.draftId);
     const conversation = await this.requireSavedConversation(draft.conversationId);
     this.assertConversationAvailable(conversation);
     verifyDraftSources(draft.fragments, conversation);
@@ -402,11 +404,11 @@ export class ProjectContextRegistryService {
     }
   }
 
-  private async requireDraft(
+  private async requireConversationDraft(
     draftId: ProjectContextDraftId
-  ) {
+  ): Promise<ConversationSelectionProjectContextDraftV1> {
     const draft = await this.contextRepository.getDraft(draftId);
-    if (!draft) {
+    if (!draft || draft.sourceKind !== 'conversation_selection') {
       throw new ProjectContextApplicationError(
         'draft_not_found',
         'Project context draft does not exist'
@@ -439,6 +441,9 @@ export class ProjectContextRegistryService {
   private async resolveSourceStatus(
     version: ProjectContextVersionV1
   ): Promise<ProjectContextSourceStatus> {
+    if (version.sourceKind === 'image_analysis') {
+      return version.sourceStatus;
+    }
     const conversation = await this.conversationRepository.get(
       version.sourceConversationId
     );
@@ -517,7 +522,7 @@ function verifyDraftSources(
 }
 
 function toDraftPreviewDto(
-  draft: ProjectContextDraftV1
+  draft: ConversationSelectionProjectContextDraftV1
 ): ProjectContextDraftPreviewDto {
   return {
     draftId: draft.id,
@@ -590,8 +595,15 @@ function toContextDetailDto(
     status: version.status,
     sourceKind: version.sourceKind,
     sourceStatus: version.sourceStatus,
-    sourceConversationId: version.sourceConversationId,
-    sourceFragments: version.sourceFragments.map(toFragmentDto),
+    ...(version.sourceKind === 'conversation_selection'
+      ? {
+          sourceConversationId: version.sourceConversationId,
+          sourceFragments: version.sourceFragments.map(toFragmentDto)
+        }
+      : {
+          sourceImageDraftId: version.sourceImageDraftId,
+          sourceImageResultRevision: version.sourceImageResultRevision
+        }),
     labels: version.labels,
     contentSnapshot: version.contentSnapshot,
     registeredAt: version.registeredAt,

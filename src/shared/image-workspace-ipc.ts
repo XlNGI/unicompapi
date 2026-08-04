@@ -4,6 +4,11 @@ export const imageWorkspaceIpcChannels = {
   update: 'image-workspace:update',
   list: 'image-workspace:list',
   derive: 'image-workspace:derive',
+  deriveFromResult: 'image-workspace:derive-from-result',
+  addUnderstandingRevision: 'image-workspace:add-understanding-revision',
+  revisePrompt: 'image-workspace:revise-prompt',
+  registerResultContext: 'image-workspace:register-result-context',
+  setEditingMask: 'image-workspace:set-editing-mask',
   selectInput: 'image-workspace:select-input',
   clearInput: 'image-workspace:clear-input',
   getInput: 'image-workspace:get-input',
@@ -26,6 +31,8 @@ export type ImageWorkspaceIpcErrorCode =
   | 'invalid_request'
   | 'draft_not_found'
   | 'draft_conflict'
+  | 'result_revision_changed'
+  | 'result_not_available'
   | 'input_not_found'
   | 'image_unreadable'
   | 'unsupported_image'
@@ -170,9 +177,11 @@ export type ImageWorkspaceDraftDto = ImageWorkspaceDraftDtoBase &
         readonly mode: 'image_understanding';
         readonly understanding: {
           readonly analysisState: 'not_analyzed' | 'current' | 'stale';
+          readonly resultRevision: number;
           readonly observations: ImageWorkspaceObservationSetDto;
           readonly userRevisions: readonly {
             readonly id: string;
+            readonly revision: number;
             readonly targetObservationId?: string;
             readonly content: string;
             readonly createdAt: string;
@@ -188,9 +197,11 @@ export type ImageWorkspaceDraftDto = ImageWorkspaceDraftDtoBase &
           readonly lineage?: {
             readonly parentDraftId?: string;
             readonly parentAssetId: string;
+            readonly parentAssetRevision: number;
             readonly parentWorkId?: string;
           };
           readonly maskAssetId?: string;
+          readonly maskAssetRevision?: number;
           readonly mustKeep: readonly string[];
           readonly mustChange: readonly string[];
           readonly prohibited: readonly string[];
@@ -202,6 +213,8 @@ export type ImageWorkspaceDraftDto = ImageWorkspaceDraftDtoBase &
         readonly mode: 'image_to_prompt';
         readonly imageToPrompt: {
           readonly analysisState: 'not_analyzed' | 'current' | 'stale';
+          readonly resultRevision: number;
+          readonly promptRevision: number;
           readonly purpose: string;
           readonly requirements: readonly string[];
           readonly observations: ImageWorkspaceObservationSetDto;
@@ -234,6 +247,38 @@ export interface ImageWorkspaceApi {
     sourceDraftId: string,
     targetMode: ImageWorkspaceDtoMode
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
+  deriveFromResult(
+    sourceDraftId: string,
+    expectedDraftUpdatedAt: string,
+    expectedResultRevision: number,
+    targetMode: ImageWorkspaceDtoMode
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
+  addUnderstandingRevision(input: {
+    readonly draftId: string;
+    readonly expectedDraftUpdatedAt: string;
+    readonly targetObservationId?: string;
+    readonly content: string;
+  }): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
+  revisePrompt(input: {
+    readonly draftId: string;
+    readonly expectedDraftUpdatedAt: string;
+    readonly expectedPromptRevision: number;
+    readonly finalPrompt: string;
+  }): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
+  registerResultContext(input: {
+    readonly draftId: string;
+    readonly expectedDraftUpdatedAt: string;
+    readonly expectedResultRevision: number;
+    readonly labels: readonly string[];
+  }): Promise<ImageWorkspaceIpcResult<{
+    readonly contextId: string;
+    readonly revision: number;
+  }>>;
+  setEditingMask(input: {
+    readonly draftId: string;
+    readonly expectedDraftUpdatedAt: string;
+    readonly maskAssetId?: string;
+  }): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
   selectInput(
     draftId: string
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;

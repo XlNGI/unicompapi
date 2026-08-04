@@ -218,26 +218,36 @@ export function ImageUnderstandingWorkspace({
     }
   }
 
-  function addRevision() {
+  async function addRevision() {
     const content = revisionContent.trim();
-    if (!content || analysis.analysisState === 'not_analyzed') return;
-    changeDraft({
-      ...draft,
-      understanding: {
-        ...analysis,
-        userRevisions: [
-          ...analysis.userRevisions,
-          {
-            id: `revision-${crypto.randomUUID()}`,
-            targetObservationId: revisionTargetId || undefined,
-            content,
-            createdAt: new Date().toISOString()
-          }
-        ]
+    if (
+      !imageWorkspaces ||
+      !content ||
+      dirty ||
+      busy ||
+      analysis.analysisState === 'not_analyzed'
+    ) return;
+    setBusy(true);
+    try {
+      const result = await imageWorkspaces.addUnderstandingRevision({
+        draftId: draft.draftId,
+        expectedDraftUpdatedAt: draft.updatedAt,
+        targetObservationId: revisionTargetId || undefined,
+        content
+      });
+      if (!result.ok) {
+        onMessage(result.error.message);
+        return;
       }
-    });
-    setRevisionTargetId('');
-    setRevisionContent('');
+      onDraftPersisted(result.value as UnderstandingDraftDto);
+      setRevisionTargetId('');
+      setRevisionContent('');
+      onMessage('用户修订已独立保存，模型原始结果未被覆盖。');
+    } catch {
+      onMessage('保存修订失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deriveDraft(targetMode: UnderstandingTargetMode) {
@@ -245,7 +255,12 @@ export function ImageUnderstandingWorkspace({
     setBusy(true);
     onMessage('');
     try {
-      const result = await imageWorkspaces.derive(draft.draftId, targetMode);
+      const result = await imageWorkspaces.deriveFromResult(
+        draft.draftId,
+        draft.updatedAt,
+        analysis.resultRevision,
+        targetMode
+      );
       if (!result.ok) {
         onMessage(result.error.message);
         return;
@@ -557,7 +572,7 @@ export function ImageUnderstandingWorkspace({
               analysis.analysisState === 'not_analyzed' ||
               !revisionContent.trim()
             }
-            onClick={addRevision}
+            onClick={() => void addRevision()}
             variant="secondary"
           >
             <LuSave aria-hidden="true" />

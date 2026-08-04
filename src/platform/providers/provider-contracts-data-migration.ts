@@ -118,13 +118,23 @@ export interface LegacyConversationReadModelV1 {
   readonly automaticProjectAssignment: false;
 }
 
-export interface LegacyProjectContextReadModelV1 {
+interface LegacyProjectContextReadModelBaseV1 {
   readonly schemaVersion: 1;
   readonly projectContextId: ProjectContextV1['id'];
   readonly currentRevision: number;
-  readonly sourceConversationId: Conversation['id'];
   readonly disposition: 'preserved_project_context';
 }
+
+export type LegacyProjectContextReadModelV1 =
+  | LegacyProjectContextReadModelBaseV1 & {
+      readonly sourceKind: 'conversation_selection';
+      readonly sourceConversationId: Conversation['id'];
+    }
+  | LegacyProjectContextReadModelBaseV1 & {
+      readonly sourceKind: 'image_analysis';
+      readonly sourceImageDraftId: string;
+      readonly sourceImageResultRevision: number;
+    };
 
 export interface ProviderContractsMigrationRunV1 {
   readonly schemaVersion: 1;
@@ -361,13 +371,27 @@ function buildMigrationRun(
       : 'project_owned' as const,
     automaticProjectAssignment: false as const
   }));
-  const projectContexts = source.projectContexts.map((context) => ({
-    schemaVersion: 1 as const,
-    projectContextId: context.id,
-    currentRevision: context.currentRevision,
-    sourceConversationId: context.versions[0].sourceConversationId,
-    disposition: 'preserved_project_context' as const
-  }));
+  const projectContexts = source.projectContexts.map((context) => {
+    const sourceVersion = context.versions[0];
+    const base = {
+      schemaVersion: 1 as const,
+      projectContextId: context.id,
+      currentRevision: context.currentRevision,
+      disposition: 'preserved_project_context' as const
+    };
+    return sourceVersion.sourceKind === 'conversation_selection'
+      ? {
+          ...base,
+          sourceKind: sourceVersion.sourceKind,
+          sourceConversationId: sourceVersion.sourceConversationId
+        }
+      : {
+          ...base,
+          sourceKind: sourceVersion.sourceKind,
+          sourceImageDraftId: sourceVersion.sourceImageDraftId,
+          sourceImageResultRevision: sourceVersion.sourceImageResultRevision
+        };
+  });
   const hasBlocks = draftDecisions.some((item) => item.blockers.length > 0) ||
     callRecords.some((item) => item.recoverability === 'unrecoverable');
   return {

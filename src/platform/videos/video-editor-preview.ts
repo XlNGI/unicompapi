@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   CanvasTransform,
+  BasicTransition,
   MediaIdentitySnapshot,
   Rational,
   SourceAudioSettings,
@@ -30,6 +31,7 @@ export interface VideoEditorPreviewPlan {
   readonly speed: Rational;
   readonly transform: CanvasTransform;
   readonly sourceAudio: SourceAudioSettings;
+  readonly transitionToNext: BasicTransition;
 }
 
 export interface VideoEditorPreviewAdapterDescriptor {
@@ -121,6 +123,7 @@ export function createVideoEditorPreviewCacheKey(input: {
       speed: input.plan.speed,
       transform: input.plan.transform,
       sourceAudio: input.plan.sourceAudio,
+      transitionToNext: input.plan.transitionToNext,
       kind: input.kind,
       adapter: input.adapter
     }))

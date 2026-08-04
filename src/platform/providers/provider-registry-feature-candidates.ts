@@ -70,9 +70,12 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
 
   async list(subject: ResolvedFeatureSubjectV1): Promise<readonly ResolvedFeatureCandidateV1[]> {
     const snapshot = await this.registry.load();
+    if (!snapshot.currentConnectionId) return [];
     const candidates: ResolvedFeatureCandidateV1[] = [];
 
-    for (const model of snapshot.models) {
+    for (const model of snapshot.models.filter((candidate) =>
+      candidate.connectionId === snapshot.currentConnectionId
+    )) {
       const provider = snapshot.providers.find((item) => item.id === model.providerId);
       const connection = snapshot.connections.find((item) => item.id === model.connectionId);
       const profile = snapshot.modelProfiles?.find((item) =>

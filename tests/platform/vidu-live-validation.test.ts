@@ -439,7 +439,8 @@ async function createApplicationFixture(validationSucceeds = true) {
   const registry = new JsonProviderRegistryStore(path.join(root, 'providers.json'));
   const frozen = createFrozenViduRegistryRecords();
   await registry.save({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: null,
     ...frozen,
     connections: frozen.connections.map((connection) => ({
       ...connection,

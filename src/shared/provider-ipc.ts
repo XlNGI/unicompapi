@@ -4,6 +4,7 @@ export const providerIpcChannels = {
   createConnection: 'providers:create-managed-connection',
   rotateCredential: 'providers:rotate-managed-credential',
   validateConnection: 'providers:validate-managed-connection',
+  activateConnection: 'providers:activate-managed-connection',
   syncModelCatalog: 'providers:sync-managed-model-catalog',
   registerExactModel: 'providers:register-exact-model',
   setConnectionEnabled: 'providers:set-managed-connection-enabled',
@@ -295,6 +296,7 @@ export interface ProviderRoutingSummaryDto {
 
 export interface ProviderRegistryDto {
   readonly registryRevision?: number;
+  readonly currentConnectionId: string | null;
   readonly providers: readonly ProviderSummaryDto[];
   readonly connections: readonly ProviderConnectionSummaryDto[];
   readonly protocolBindings: readonly ProviderProtocolBindingSummaryDto[];
@@ -330,6 +332,15 @@ export interface ProviderApi {
     readonly connectionId: string;
     readonly state: 'available' | 'unavailable';
     readonly observedAt: string;
+  }>>;
+  activateConnection(
+    connectionId: string,
+    expectedRegistryRevision: number
+  ): Promise<ProviderFrameworkResult<{
+    readonly connectionId: string;
+    readonly state: 'active';
+    readonly observedAt: string;
+    readonly registryRevision: number;
   }>>;
   syncModelCatalog(connectionId: string): Promise<ProviderFrameworkResult<{
     readonly connectionId: string;

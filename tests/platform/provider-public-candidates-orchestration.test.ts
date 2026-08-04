@@ -36,6 +36,7 @@ import {
 } from '../../src/domain';
 import {
   FeatureSubmissionError,
+  JsonConnectionOutboundAuthorizationStore,
   JsonRuntimeAuthorizationLedgerStore,
   NodeProjectStorage,
   ProjectMetadataUnitOfWork,
@@ -53,7 +54,8 @@ import {
   type ProviderSubmissionOrchestrationIdFactory,
   type ResolvedFeatureCandidateV1,
   type ResolvedFeatureSubjectV1,
-  type SubmissionArtifactFactoryPort
+  type SubmissionArtifactFactoryPort,
+  type ConnectionOutboundAuthorizationPort
 } from '../../src/platform';
 
 const roots: string[] = [];
@@ -192,6 +194,7 @@ function candidateService(input: {
   readonly getCandidates?: () => readonly ResolvedFeatureCandidateV1[];
   readonly now?: () => string;
   readonly lifetimeMs?: number;
+  readonly authorizations?: ConnectionOutboundAuthorizationPort;
 } = {}) {
   const resolver: FeatureSubjectResolverPort = {
     async resolve() {
@@ -208,7 +211,8 @@ function candidateService(input: {
     source,
     new RouteSelectionTokenVault(),
     input.now ?? (() => t0),
-    input.lifetimeMs ?? 60_000
+    input.lifetimeMs ?? 60_000,
+    input.authorizations
   );
 }
 
@@ -386,6 +390,102 @@ describe('provider public feature candidates', () => {
         confirmationId: expiring.confirmation.confirmationId
       }
     })).rejects.toMatchObject({ code: 'route_selection_expired' });
+  });
+
+  it('remembers outbound consent only for the exact connection revision and scope', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-outbound-consent-'));
+    roots.push(root);
+    let clock = t0 as string;
+    let connectionRevision = 2;
+    let recipientName = 'Provider public API';
+    const authorizations = new JsonConnectionOutboundAuthorizationStore(
+      path.join(root, 'authorizations.json'),
+      60_000
+    );
+    const service = candidateService({
+      now: () => clock,
+      authorizations,
+      getCandidates: () => [candidate('text_to_image', {
+        recipientName,
+        routeTemplate: {
+          ...candidate().routeTemplate,
+          connectionRevision
+        }
+      })]
+    });
+
+    const first = await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    });
+    expect(first.requiresConfirmation).toBe(true);
+    await expect(service.validatePreparedSubmission({
+      subject: imageSubject,
+      routeSelectionToken: first.routeSelectionToken
+    })).rejects.toMatchObject({ code: 'confirmation_required' });
+    await service.validatePreparedSubmission({
+      subject: imageSubject,
+      routeSelectionToken: first.routeSelectionToken,
+      confirmation: {
+        schemaVersion: 1,
+        confirmationId: first.confirmation.confirmationId,
+        confirmed: true
+      }
+    });
+
+    const repeated = await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    });
+    expect(repeated.requiresConfirmation).toBe(false);
+    await expect(service.validatePreparedSubmission({
+      subject: imageSubject,
+      routeSelectionToken: repeated.routeSelectionToken
+    })).resolves.toBeDefined();
+
+    recipientName = 'Provider relay API';
+    expect((await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    })).requiresConfirmation).toBe(true);
+    recipientName = 'Provider public API';
+
+    connectionRevision = 3;
+    expect((await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    })).requiresConfirmation).toBe(true);
+
+    connectionRevision = 2;
+    clock = t2;
+    expect((await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    })).requiresConfirmation).toBe(true);
+
+    const revisions = await Promise.all([
+      authorizations.authorize({
+        connectionId: 'connection-public',
+        connectionRevision: 2,
+        recipientName,
+        scope: 'external_service',
+        confirmedAt: t2
+      }),
+      authorizations.authorize({
+        connectionId: 'connection-public',
+        connectionRevision: 2,
+        recipientName,
+        scope: 'external_service',
+        confirmedAt: t2
+      })
+    ]);
+    expect(revisions.map((item) => item.authorizationRevision).sort()).toEqual([2, 3]);
+
+    clock = t0;
+    expect((await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    })).requiresConfirmation).toBe(true);
   });
 });
 

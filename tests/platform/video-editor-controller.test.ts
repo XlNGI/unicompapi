@@ -103,6 +103,19 @@ async function createFixture() {
 }
 
 describe('VideoEditorController', () => {
+  it('publishes honest transition capabilities without claiming composition preview', async () => {
+    const fixture = await createFixture();
+    expect(fixture.controller.getCapabilities()).toEqual({
+      ok: true,
+      value: {
+        transitions: [
+          { kind: 'fade', minimumDurationUs: 100_000, maximumDurationUs: 5_000_000 },
+          { kind: 'dissolve', minimumDurationUs: 100_000, maximumDurationUs: 5_000_000 }
+        ],
+        compositionPreview: 'unavailable'
+      }
+    });
+  });
   it('requires an active project and validates source intent', async () => {
     const withoutProject = new VideoEditorController({
       getSession: () => undefined

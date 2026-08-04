@@ -26,6 +26,10 @@ import {
   type SubmissionPreparationV1,
   type SubmissionUserConfirmationV1
 } from '../../domain';
+import {
+  noConnectionOutboundAuthorization,
+  type ConnectionOutboundAuthorizationPort
+} from './connection-outbound-authorization';
 
 export interface FeatureSubjectMaterialReferenceV1 {
   readonly kind: 'asset' | 'file_reference';
@@ -100,6 +104,7 @@ export interface PreparedRouteSelectionRecordV1 {
   readonly confirmation: SubmissionConfirmationDtoV1;
   readonly issuedAt: IsoTimestamp;
   readonly expiresAt: IsoTimestamp;
+  readonly authorizationRevision?: number;
   readonly consumedAt?: IsoTimestamp;
 }
 
@@ -170,7 +175,9 @@ export class ProviderFeatureCandidateService {
     private readonly candidates: FeatureCandidateSourcePort,
     private readonly tokens: RouteSelectionTokenVault,
     private readonly now: () => string = () => new Date().toISOString(),
-    private readonly tokenLifetimeMs = 5 * 60 * 1000
+    private readonly tokenLifetimeMs = 5 * 60 * 1000,
+    private readonly authorizations: ConnectionOutboundAuthorizationPort =
+      noConnectionOutboundAuthorization
   ) {
     if (!Number.isSafeInteger(tokenLifetimeMs) || tokenLifetimeMs < 1_000) {
       throw new TypeError('Route selection token lifetime is invalid');
@@ -217,6 +224,13 @@ export class ProviderFeatureCandidateService {
       cost: resolved.candidate.cost
     });
     const bindingHash = bindingFingerprint(resolved.subject, resolved.candidate, confirmation);
+    const authorization = await this.authorizations.check({
+      connectionId: resolved.candidate.routeTemplate.connectionId,
+      connectionRevision: resolved.candidate.routeTemplate.connectionRevision,
+      recipientName: resolved.candidate.recipientName,
+      scope: resolved.candidate.outboundScope,
+      now
+    });
     const issued = this.tokens.issue({
       nonce: `nonce-${randomUUID()}`,
       idempotencyKey: `submission-${randomUUID()}`,
@@ -226,12 +240,14 @@ export class ProviderFeatureCandidateService {
       bindingHash,
       confirmation,
       issuedAt: now,
-      expiresAt
+      expiresAt,
+      authorizationRevision: authorization.authorizationRevision
     });
     return parseSubmissionPreparation({
       schemaVersion: 1,
       routeSelectionToken: issued.token,
       expiresAt,
+      requiresConfirmation: !authorization.authorized,
       confirmation
     });
   }
@@ -239,7 +255,7 @@ export class ProviderFeatureCandidateService {
   async validatePreparedSubmission(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
-    readonly confirmation: SubmissionUserConfirmationV1;
+    readonly confirmation?: SubmissionUserConfirmationV1;
     readonly allowConsumed?: boolean;
   }): Promise<{
     readonly tokenRecord: PreparedRouteSelectionRecordV1;
@@ -260,13 +276,6 @@ export class ProviderFeatureCandidateService {
         'The route selection token has already been consumed'
       );
     }
-    const confirmation = parseSubmissionUserConfirmation(input.confirmation);
-    if (confirmation.confirmationId !== tokenRecord.confirmation.confirmationId) {
-      throw new FeatureSubmissionError(
-        'confirmation_required',
-        'The exact prepared outbound confirmation is required'
-      );
-    }
     const resolved = await this.resolveBinding(input.subject, tokenRecord.candidateId);
     const currentHash = bindingFingerprint(
       resolved.subject,
@@ -282,6 +291,38 @@ export class ProviderFeatureCandidateService {
         'stale_route_selection',
         'The draft, route, policy, parameters, media, context or cost facts changed'
       );
+    }
+    const authorization = tokenRecord.authorizationRevision === undefined
+      ? { authorized: false as const }
+      : await this.authorizations.check({
+          connectionId: resolved.candidate.routeTemplate.connectionId,
+          connectionRevision: resolved.candidate.routeTemplate.connectionRevision,
+          recipientName: resolved.candidate.recipientName,
+          scope: resolved.candidate.outboundScope,
+          expectedAuthorizationRevision: tokenRecord.authorizationRevision,
+          now
+        });
+    if (!authorization.authorized) {
+      if (!input.confirmation) {
+        throw new FeatureSubmissionError(
+          'confirmation_required',
+          'The exact prepared outbound confirmation is required'
+        );
+      }
+      const confirmation = parseSubmissionUserConfirmation(input.confirmation);
+      if (confirmation.confirmationId !== tokenRecord.confirmation.confirmationId) {
+        throw new FeatureSubmissionError(
+          'confirmation_required',
+          'The exact prepared outbound confirmation is required'
+        );
+      }
+      await this.authorizations.authorize({
+        connectionId: resolved.candidate.routeTemplate.connectionId,
+        connectionRevision: resolved.candidate.routeTemplate.connectionRevision,
+        recipientName: resolved.candidate.recipientName,
+        scope: resolved.candidate.outboundScope,
+        confirmedAt: now
+      });
     }
     return { tokenRecord, ...resolved };
   }

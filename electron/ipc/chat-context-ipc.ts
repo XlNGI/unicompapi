@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron';
 import {
   createChatContextRuntime,
   type JsonProviderRegistryStore,
+  type ConnectionOutboundAuthorizationPort,
   type ProviderPackageRegistry,
   type StorageProjectSession
 } from '../../src/platform';
@@ -15,12 +16,14 @@ export function registerChatContextIpcHandlers(options: {
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
+  readonly connectionAuthorizations?: ConnectionOutboundAuthorizationPort;
 }): ChatContextIpcLifecycle {
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
     getSession: options.getSession,
     providerRegistry: options.providerRegistry,
-    providerPackages: options.providerPackages
+    providerPackages: options.providerPackages,
+    connectionAuthorizations: options.connectionAuthorizations
   });
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;

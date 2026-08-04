@@ -89,6 +89,11 @@ const providers: ProviderApi = {
     }),
   validateConnection: (connectionId) =>
     ipcRenderer.invoke(providerIpcChannels.validateConnection, { connectionId }),
+  activateConnection: (connectionId, expectedRegistryRevision) =>
+    ipcRenderer.invoke(providerIpcChannels.activateConnection, {
+      connectionId,
+      expectedRegistryRevision
+    }),
   syncModelCatalog: (connectionId) =>
     ipcRenderer.invoke(providerIpcChannels.syncModelCatalog, { connectionId }),
   registerExactModel: (connectionId, providerModelKey, displayName) =>
@@ -125,6 +130,25 @@ const imageWorkspaces: ImageWorkspaceApi = {
       sourceDraftId,
       targetMode
     }),
+  deriveFromResult: (
+    sourceDraftId,
+    expectedDraftUpdatedAt,
+    expectedResultRevision,
+    targetMode
+  ) => ipcRenderer.invoke(imageWorkspaceIpcChannels.deriveFromResult, {
+    sourceDraftId,
+    expectedDraftUpdatedAt,
+    expectedResultRevision,
+    targetMode
+  }),
+  addUnderstandingRevision: (input) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.addUnderstandingRevision, input),
+  revisePrompt: (input) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.revisePrompt, input),
+  registerResultContext: (input) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.registerResultContext, input),
+  setEditingMask: (input) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.setEditingMask, input),
   selectInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.selectInput, { draftId }),
   clearInput: (draftId) =>
@@ -286,6 +310,7 @@ const videoSubmissions: VideoSubmissionApi = {
 };
 
 const videoEditors: VideoEditorApi = {
+  getCapabilities: () => ipcRenderer.invoke(videoEditorIpcChannels.getCapabilities),
   create: (sourceIntent, title) =>
     ipcRenderer.invoke(videoEditorIpcChannels.create, { sourceIntent, title }),
   get: (draftId) =>

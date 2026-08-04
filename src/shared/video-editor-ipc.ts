@@ -1,4 +1,5 @@
 export const videoEditorIpcChannels = {
+  getCapabilities: 'video-editor:get-capabilities',
   create: 'video-editor:create',
   get: 'video-editor:get',
   list: 'video-editor:list',
@@ -342,6 +343,7 @@ export interface VideoEditorRelinkPreparationDto {
 }
 
 export interface VideoEditorSourcePreviewDto {
+  readonly draftRevision: number;
   readonly url: string;
   readonly expiresAt: string;
   readonly mimeType: 'video/mp4' | 'video/quicktime';
@@ -355,6 +357,7 @@ export type VideoEditorPreviewArtifactKindDto =
 
 export interface VideoEditorPreviewArtifactDto {
   readonly kind: VideoEditorPreviewArtifactKindDto;
+  readonly draftRevision: number;
   readonly url: string;
   readonly expiresAt: string;
   readonly mimeType: string;
@@ -444,6 +447,14 @@ export type VideoEditorUpdateDto =
     };
 
 export interface VideoEditorApi {
+  getCapabilities(): Promise<VideoEditorIpcResult<{
+    readonly transitions: readonly {
+      readonly kind: 'fade' | 'dissolve';
+      readonly minimumDurationUs: number;
+      readonly maximumDurationUs: number;
+    }[];
+    readonly compositionPreview: 'unavailable';
+  }>>;
   create(
     sourceIntent?: VideoEditorSourceIntentDto,
     title?: string

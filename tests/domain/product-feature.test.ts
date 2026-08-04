@@ -115,6 +115,73 @@ describe('ProductFeature and ParameterSchema V2 contracts', () => {
     })).toThrow('adapter-derived');
   });
 
+  it('validates optional display metadata without exposing internal controls', () => {
+    const displayed = validateParameterSchemaV2({
+      ...schema,
+      revision: 2,
+      fields: schema.fields.map((field) => field.fieldId === 'aspect_ratio'
+        ? {
+            ...field,
+            display: {
+              label: '画面比例',
+              description: '决定生成图片的宽高关系。',
+              groupLabel: '画面',
+              note: '不选择时使用服务商默认值。',
+              optionLabels: [
+                { value: '1:1', label: '方形' },
+                { value: '16:9', label: '宽屏' }
+              ],
+              visibleWhen: {
+                fieldId: 'prompt',
+                operator: 'not_equals' as const,
+                value: ''
+              }
+            }
+          }
+        : field)
+    });
+    expect(projectParameterSchema(displayed, 'full')).toMatchObject({
+      revision: 2,
+      fields: [
+        { fieldId: 'prompt' },
+        { fieldId: 'aspect_ratio', display: { label: '画面比例' } }
+      ]
+    });
+    expect(projectParameterSchema(displayed, 'full').fields).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ fieldId: 'model_internal' })])
+    );
+    expect(() => validateParameterSchemaV2({
+      ...schema,
+      fields: schema.fields.map((field) => field.fieldId === 'aspect_ratio'
+        ? { ...field, display: { description: 'x'.repeat(501) } }
+        : field)
+    })).toThrow('display text');
+    expect(() => validateParameterSchemaV2({
+      ...schema,
+      fields: schema.fields.map((field) => field.fieldId === 'aspect_ratio'
+        ? {
+            ...field,
+            display: { optionLabels: [{ value: '4:3', label: '旧电视' }] }
+          }
+        : field)
+    })).toThrow('option display');
+    expect(() => validateParameterSchemaV2({
+      ...schema,
+      fields: schema.fields.map((field) => field.fieldId === 'aspect_ratio'
+        ? {
+            ...field,
+            display: {
+              visibleWhen: {
+                fieldId: 'model_internal',
+                operator: 'equals' as const,
+                value: 'hidden'
+              }
+            }
+          }
+        : field)
+    })).toThrow('unavailable field');
+  });
+
   it('enforces pure-text quick image and quick video boundaries', () => {
     expect(() => validateProductFeatureRequest({
       productFeature: 'text_to_image',

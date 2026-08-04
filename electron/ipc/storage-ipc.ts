@@ -43,6 +43,7 @@ import {
   RouteSelectionTokenVault,
   createImageProviderFeatureContracts,
   createVideoProviderFeatureContracts,
+  type ConnectionOutboundAuthorizationPort,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
@@ -73,6 +74,7 @@ export function registerStorageIpcHandlers(options: {
   readonly vidu?: ElectronViduComposition;
   readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
   readonly providerPackages?: ProviderPackageRegistry;
+  readonly connectionAuthorizations?: ConnectionOutboundAuthorizationPort;
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -157,7 +159,10 @@ export function registerStorageIpcHandlers(options: {
           }
         }
       ),
-      new RouteSelectionTokenVault()
+      new RouteSelectionTokenVault(),
+      undefined,
+      undefined,
+      options.connectionAuthorizations
     );
     imageFeatureRuntime = {
       projectId: session.projectId,
@@ -231,7 +236,10 @@ export function registerStorageIpcHandlers(options: {
           }
         }
       ),
-      new RouteSelectionTokenVault()
+      new RouteSelectionTokenVault(),
+      undefined,
+      undefined,
+      options.connectionAuthorizations
     );
     videoFeatureRuntime = {
       projectId: session.projectId,
@@ -315,11 +323,11 @@ export function registerStorageIpcHandlers(options: {
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
-  const readModels = new GlobalReadModelController(catalog);
   const callReadModels = new ProviderInvocationReadModelController(
     catalog,
     options.providerUsageSchemas
   );
+  const readModels = new GlobalReadModelController(catalog, callReadModels);
   const localMedia = new ControlledLocalMediaController({
     catalog,
     handles: mediaHandles,
@@ -412,6 +420,26 @@ export function registerStorageIpcHandlers(options: {
     imageWorkspaces.derive(request)
   );
   ipcMain.handle(
+    imageWorkspaceIpcChannels.deriveFromResult,
+    (_event, request: unknown) => imageWorkspaces.deriveFromResult(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.addUnderstandingRevision,
+    (_event, request: unknown) => imageWorkspaces.addUnderstandingRevision(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.revisePrompt,
+    (_event, request: unknown) => imageWorkspaces.revisePrompt(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.registerResultContext,
+    (_event, request: unknown) => imageWorkspaces.registerResultContext(request)
+  );
+  ipcMain.handle(
+    imageWorkspaceIpcChannels.setEditingMask,
+    (_event, request: unknown) => imageWorkspaces.setEditingMask(request)
+  );
+  ipcMain.handle(
     imageWorkspaceIpcChannels.selectInput,
     (_event, request: unknown) => imageLocalMedia.selectInput(request)
   );
@@ -487,6 +515,9 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(
     videoWorkspaceIpcChannels.createFromImageWork,
     (_event, request: unknown) => videoWorkspaces.createFromImageWork(request)
+  );
+  ipcMain.handle(videoEditorIpcChannels.getCapabilities, () =>
+    videoEditors.getCapabilities()
   );
   ipcMain.handle(videoEditorIpcChannels.create, (_event, request: unknown) =>
     videoEditors.create(request)

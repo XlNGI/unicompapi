@@ -57,6 +57,21 @@ export interface VideoFeatureParameterFieldDto {
   readonly maximum?: number;
   readonly step?: number;
   readonly unitId?: string;
+  readonly display?: {
+    readonly label?: string;
+    readonly description?: string;
+    readonly groupLabel?: string;
+    readonly note?: string;
+    readonly optionLabels?: readonly {
+      readonly value: string | number | boolean;
+      readonly label: string;
+    }[];
+    readonly visibleWhen?: {
+      readonly fieldId: string;
+      readonly operator: 'equals' | 'not_equals';
+      readonly value: string | number | boolean;
+    };
+  };
 }
 
 export interface VideoFeatureCandidateDto {
@@ -89,6 +104,7 @@ export interface VideoFeaturePreparationDto {
   readonly schemaVersion: 1;
   readonly routeSelectionToken: string;
   readonly expiresAt: string;
+  readonly requiresConfirmation: boolean;
   readonly confirmation: {
     readonly schemaVersion: 1;
     readonly confirmationId: string;

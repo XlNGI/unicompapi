@@ -481,7 +481,8 @@ async function registryFixture() {
     updatedAt: t0
   });
   await store.save({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: null,
     providers: [provider],
     connections: [connection],
     protocolBindings: [binding],

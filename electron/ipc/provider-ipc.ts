@@ -27,6 +27,9 @@ export function registerProviderIpcHandlers(options: {
   ipcMain.handle(providerIpcChannels.validateConnection, (_event, input) =>
     options.management.validateConnection(input)
   );
+  ipcMain.handle(providerIpcChannels.activateConnection, (_event, input) =>
+    options.management.activateConnection(input)
+  );
   ipcMain.handle(providerIpcChannels.syncModelCatalog, (_event, input) =>
     options.management.syncModelCatalog(input)
   );

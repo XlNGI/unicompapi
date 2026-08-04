@@ -13,6 +13,8 @@ import type { IsoTimestamp } from '../timestamps';
 
 export const videoEditDraftKind = 'video_basic_edit' as const;
 export const videoEditHistoryLimit = 100;
+export const minimumVideoTransitionDurationUs = 100_000;
+export const maximumVideoTransitionDurationUs = 5_000_000;
 
 export type VideoEditSourceIntent =
   | { readonly kind: 'blank' }
@@ -1194,7 +1196,9 @@ function isBasicTransition(value: unknown): value is BasicTransition {
     ((exact(value, ['kind']) && value.kind === 'none') ||
       (exact(value, ['kind', 'durationUs']) &&
         (value.kind === 'fade' || value.kind === 'dissolve') &&
-        isPositiveInteger(value.durationUs)));
+        isPositiveInteger(value.durationUs) &&
+        value.durationUs >= minimumVideoTransitionDurationUs &&
+        value.durationUs <= maximumVideoTransitionDurationUs));
 }
 
 function isRemovedVideoClip(value: unknown): boolean {

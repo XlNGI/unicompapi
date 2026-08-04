@@ -76,16 +76,15 @@ export class VideoFeatureController {
   ): Promise<VideoFeatureIpcResult<VideoFeatureSubmissionDto>> {
     return this.execute(async () => {
       const input = parseSubmitRequest(request);
-      if (!input.confirmed) {
-        return failure('confirmation_required', 'Explicit confirmation is required');
-      }
       const resolved = await this.requireDraft(input);
-      const confirmation = {
-        schemaVersion: 1 as const,
-        confirmationId: input.confirmationId,
-        confirmed: true as const
-      };
-      await resolved.runtime.candidates.validatePreparedSubmission({
+      const confirmation = input.confirmed
+        ? {
+            schemaVersion: 1 as const,
+            confirmationId: input.confirmationId,
+            confirmed: true as const
+          }
+        : undefined;
+      const validated = await resolved.runtime.candidates.validatePreparedSubmission({
         subject: resolved.subject,
         routeSelectionToken: input.routeSelectionToken,
         confirmation
@@ -101,7 +100,11 @@ export class VideoFeatureController {
         value: await resolved.runtime.submit({
           subject: resolved.subject,
           routeSelectionToken: input.routeSelectionToken,
-          confirmation
+          confirmation: confirmation ?? {
+            schemaVersion: 1,
+            confirmationId: validated.tokenRecord.confirmation.confirmationId,
+            confirmed: true
+          }
         })
       };
     });

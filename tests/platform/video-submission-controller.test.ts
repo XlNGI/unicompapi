@@ -161,7 +161,8 @@ async function createFixture(options: {
     updatedAt: t0
   });
   await registry.save({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: connection.id,
     providers: [provider],
     connections: [connection],
     protocolBindings: [binding],

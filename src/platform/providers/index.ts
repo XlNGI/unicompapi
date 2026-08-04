@@ -13,6 +13,7 @@ export * from './project-conversation-response';
 export * from './project-image-feature';
 export * from './project-video-feature';
 export * from './provider-feature-candidates';
+export * from './connection-outbound-authorization';
 export * from './provider-registry-feature-candidates';
 export * from './provider-submission-orchestrator';
 export * from './provider-submission-dispatch-bridge';

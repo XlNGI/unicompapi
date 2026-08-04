@@ -17,6 +17,7 @@ import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
 import {
   deepSeekProviderPackageDescriptor,
   JsonProviderManagementAuditStore,
+  JsonConnectionOutboundAuthorizationStore,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   normalizeTrustedExternalUrl,
@@ -66,15 +67,20 @@ const providerManagement = new ProviderManagementFramework(
     path.join(app.getPath('userData'), 'provider-management-audit.json')
   )
 );
+const connectionAuthorizations = new JsonConnectionOutboundAuthorizationStore(
+  path.join(app.getPath('userData'), 'connection-outbound-authorizations.json')
+);
 const projectSessionRegistry = new StorageProjectSessionRegistry();
 const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get(),
   providerRegistry: viduComposition.registry,
-  providerPackages
+  providerPackages,
+  connectionAuthorizations
 });
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,
   providerPackages,
+  connectionAuthorizations,
   additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
   vidu: viduComposition,
   onActiveExportCountChanged: (count) => {

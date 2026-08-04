@@ -102,7 +102,8 @@ describe('JsonProviderRegistryStore', () => {
     });
 
     await store.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: [binding],
@@ -137,7 +138,8 @@ describe('JsonProviderRegistryStore', () => {
     const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
 
     const snapshot = await store.load();
-    expect(snapshot.schemaVersion).toBe(2);
+    expect(snapshot.schemaVersion).toBe(3);
+    expect(snapshot.currentConnectionId).toBeNull();
     expect(snapshot.protocolBindings).toHaveLength(3);
     expect(
       snapshot.protocolBindings.map((binding) => ({
@@ -186,6 +188,25 @@ describe('JsonProviderRegistryStore', () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/price|cost|duration|resolution/i);
   });
 
+  it('migrates schema v2 with no implicit current connection', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-v2-'));
+    roots.push(root);
+    const registryPath = path.join(root, 'registry.json');
+    const snapshot = await new JsonProviderRegistryStore(registryPath).load();
+    const legacy: Record<string, unknown> = { ...snapshot };
+    delete legacy.currentConnectionId;
+    await writeFile(registryPath, JSON.stringify({
+      ...legacy,
+      schemaVersion: 2
+    }), 'utf8');
+
+    const migrated = await new JsonProviderRegistryStore(registryPath).load();
+    expect(migrated).toMatchObject({
+      schemaVersion: 3,
+      currentConnectionId: null
+    });
+  });
+
   it('adds missing frozen Vidu records to an existing v2 registry without changing user records', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
@@ -211,7 +232,8 @@ describe('JsonProviderRegistryStore', () => {
       updatedAt: timestamp
     });
     await store.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: [],
@@ -361,7 +383,8 @@ describe('JsonProviderRegistryStore', () => {
 
     const migrated = await new JsonProviderRegistryStore(registryPath).load();
     expect(migrated).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       models: [{
         id: 'model-legacy',
         providerModelKey: 'legacy-model',
@@ -478,7 +501,8 @@ describe('JsonProviderRegistryStore', () => {
 
     await expect(
       store.save({
-        schemaVersion: 2,
+        schemaVersion: 3,
+        currentConnectionId: null,
         providers: [],
         connections: [],
         protocolBindings: [

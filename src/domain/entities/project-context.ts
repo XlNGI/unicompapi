@@ -1,12 +1,14 @@
 import { InvariantViolationError } from '../errors';
 import {
   toConversationId,
+  toDraftId,
   toMessageId,
   toProjectContextDraftId,
   toProjectContextFragmentId,
   toProjectContextId,
   toProjectId,
   type ConversationId,
+  type DraftId,
   type MessageId,
   type ProjectContextDraftId,
   type ProjectContextFragmentId,
@@ -58,7 +60,7 @@ export interface ProjectContextMessageFragmentV1 {
   readonly contentSnapshot: string;
 }
 
-export interface ProjectContextDraftV1 {
+export interface ConversationSelectionProjectContextDraftV1 {
   readonly schemaVersion: 1;
   readonly id: ProjectContextDraftId;
   readonly revision: number;
@@ -72,31 +74,63 @@ export interface ProjectContextDraftV1 {
   readonly updatedAt: IsoTimestamp;
 }
 
+export interface ImageAnalysisProjectContextDraftV1 {
+  readonly schemaVersion: 1;
+  readonly id: ProjectContextDraftId;
+  readonly revision: number;
+  readonly projectId: ProjectId;
+  readonly sourceKindSchemaVersion: 1;
+  readonly sourceKind: 'image_analysis';
+  readonly sourceImageDraftId: DraftId;
+  readonly sourceImageResultRevision: number;
+  readonly labels: readonly string[];
+  readonly contentSnapshot: string;
+  readonly createdAt: IsoTimestamp;
+  readonly updatedAt: IsoTimestamp;
+}
+
+export type ProjectContextDraftV1 =
+  | ConversationSelectionProjectContextDraftV1
+  | ImageAnalysisProjectContextDraftV1;
+
 interface ProjectContextVersionBaseV1 {
   readonly schemaVersion: 1;
   readonly revision: number;
   readonly status: ProjectContextStatus;
   readonly sourceKindSchemaVersion: 1;
-  readonly sourceKind: 'conversation_selection';
   readonly sourceStatus: ProjectContextSourceStatus;
-  readonly sourceConversationId: ConversationId;
-  readonly sourceFragments: readonly ProjectContextMessageFragmentV1[];
   readonly labels: readonly string[];
   readonly contentSnapshot: string;
   readonly registeredAt: IsoTimestamp;
   readonly createdAt: IsoTimestamp;
 }
 
-export interface ActiveProjectContextVersionV1
-  extends ProjectContextVersionBaseV1 {
-  readonly status: 'active';
+interface ConversationSelectionProjectContextSourceV1 {
+  readonly sourceKind: 'conversation_selection';
+  readonly sourceConversationId: ConversationId;
+  readonly sourceFragments: readonly ProjectContextMessageFragmentV1[];
 }
 
-export interface DeletedProjectContextVersionV1
-  extends ProjectContextVersionBaseV1 {
-  readonly status: 'deleted';
-  readonly deletedAt: IsoTimestamp;
+interface ImageAnalysisProjectContextSourceV1 {
+  readonly sourceKind: 'image_analysis';
+  readonly sourceImageDraftId: DraftId;
+  readonly sourceImageResultRevision: number;
 }
+
+type ProjectContextVersionSourceV1 =
+  | ConversationSelectionProjectContextSourceV1
+  | ImageAnalysisProjectContextSourceV1;
+
+export type ActiveProjectContextVersionV1 =
+  ProjectContextVersionBaseV1 &
+  ProjectContextVersionSourceV1 & { readonly status: 'active' };
+
+export type DeletedProjectContextVersionV1 =
+  ProjectContextVersionBaseV1 &
+  ProjectContextVersionSourceV1 & {
+    readonly status: 'deleted';
+    readonly deletedAt: IsoTimestamp;
+  };
 
 export type ProjectContextVersionV1 =
   | ActiveProjectContextVersionV1
@@ -130,18 +164,29 @@ export interface CreateProjectContextFragmentInput {
   readonly contentSnapshot: string;
 }
 
-const draftKeys = [
+const draftBaseKeys = [
   'schemaVersion',
   'id',
   'revision',
   'projectId',
   'sourceKindSchemaVersion',
   'sourceKind',
-  'conversationId',
   'labels',
-  'fragments',
   'createdAt',
   'updatedAt'
+] as const;
+
+const conversationDraftKeys = [
+  ...draftBaseKeys,
+  'conversationId',
+  'fragments'
+] as const;
+
+const imageAnalysisDraftKeys = [
+  ...draftBaseKeys,
+  'sourceImageDraftId',
+  'sourceImageResultRevision',
+  'contentSnapshot'
 ] as const;
 
 const contextKeys = [
@@ -162,17 +207,27 @@ const versionBaseKeys = [
   'sourceKindSchemaVersion',
   'sourceKind',
   'sourceStatus',
-  'sourceConversationId',
-  'sourceFragments',
   'labels',
   'contentSnapshot',
   'registeredAt',
   'createdAt'
 ] as const;
 
+const conversationVersionKeys = [
+  ...versionBaseKeys,
+  'sourceConversationId',
+  'sourceFragments'
+] as const;
+
+const imageAnalysisVersionKeys = [
+  ...versionBaseKeys,
+  'sourceImageDraftId',
+  'sourceImageResultRevision'
+] as const;
+
 export function createProjectContextDraft(
   input: CreateProjectContextDraftInput
-): ProjectContextDraftV1 {
+): ConversationSelectionProjectContextDraftV1 {
   return parseProjectContextDraft({
     schemaVersion: 1,
     id: input.id,
@@ -185,14 +240,39 @@ export function createProjectContextDraft(
     fragments: [],
     createdAt: input.createdAt,
     updatedAt: input.createdAt
-  });
+  }) as ConversationSelectionProjectContextDraftV1;
+}
+
+export function createImageAnalysisProjectContextDraft(input: {
+  readonly id: ProjectContextDraftId;
+  readonly projectId: ProjectId;
+  readonly sourceImageDraftId: DraftId;
+  readonly sourceImageResultRevision: number;
+  readonly contentSnapshot: string;
+  readonly labels?: readonly string[];
+  readonly createdAt: IsoTimestamp;
+}): ImageAnalysisProjectContextDraftV1 {
+  return parseProjectContextDraft({
+    schemaVersion: 1,
+    id: input.id,
+    revision: 0,
+    projectId: input.projectId,
+    sourceKindSchemaVersion: 1,
+    sourceKind: 'image_analysis',
+    sourceImageDraftId: input.sourceImageDraftId,
+    sourceImageResultRevision: input.sourceImageResultRevision,
+    labels: input.labels ?? [],
+    contentSnapshot: input.contentSnapshot,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt
+  }) as ImageAnalysisProjectContextDraftV1;
 }
 
 export function addProjectContextDraftFragment(
-  draft: ProjectContextDraftV1,
+  draft: ConversationSelectionProjectContextDraftV1,
   input: CreateProjectContextFragmentInput,
   updatedAt: IsoTimestamp
-): ProjectContextDraftV1 {
+): ConversationSelectionProjectContextDraftV1 {
   if (input.conversationId !== draft.conversationId) {
     throw new InvariantViolationError(
       'project context draft cannot contain multiple conversations'
@@ -211,14 +291,14 @@ export function addProjectContextDraftFragment(
     revision: draft.revision + 1,
     fragments: [...draft.fragments, fragment],
     updatedAt
-  });
+  }) as ConversationSelectionProjectContextDraftV1;
 }
 
 export function removeProjectContextDraftFragment(
-  draft: ProjectContextDraftV1,
+  draft: ConversationSelectionProjectContextDraftV1,
   fragmentId: ProjectContextFragmentId,
   updatedAt: IsoTimestamp
-): ProjectContextDraftV1 {
+): ConversationSelectionProjectContextDraftV1 {
   if (!draft.fragments.some((fragment) => fragment.id === fragmentId)) {
     throw new InvariantViolationError(`project context fragment ${fragmentId} does not exist`);
   }
@@ -230,20 +310,20 @@ export function removeProjectContextDraftFragment(
     revision: draft.revision + 1,
     fragments,
     updatedAt
-  });
+  }) as ConversationSelectionProjectContextDraftV1;
 }
 
-export function replaceProjectContextDraftLabels(
-  draft: ProjectContextDraftV1,
+export function replaceProjectContextDraftLabels<TDraft extends ProjectContextDraftV1>(
+  draft: TDraft,
   labels: readonly string[],
   updatedAt: IsoTimestamp
-): ProjectContextDraftV1 {
+): TDraft {
   return parseProjectContextDraft({
     ...draft,
     revision: draft.revision + 1,
     labels,
     updatedAt
-  });
+  }) as TDraft;
 }
 
 export function registerProjectContextDraft(
@@ -251,21 +331,33 @@ export function registerProjectContextDraft(
   contextId: ProjectContextId,
   registeredAt: IsoTimestamp
 ): ProjectContextV1 {
-  if (draft.fragments.length === 0) {
+  if (draft.sourceKind === 'conversation_selection' && draft.fragments.length === 0) {
     throw new InvariantViolationError(
       'project context draft must contain at least one message fragment'
     );
   }
-  const contentSnapshot = createProjectContextContentSnapshot(draft.fragments);
+  const contentSnapshot = draft.sourceKind === 'conversation_selection'
+    ? createProjectContextContentSnapshot(draft.fragments)
+    : draft.contentSnapshot;
+  const source: ProjectContextVersionSourceV1 =
+    draft.sourceKind === 'conversation_selection'
+      ? {
+          sourceKind: draft.sourceKind,
+          sourceConversationId: draft.conversationId,
+          sourceFragments: draft.fragments
+        }
+      : {
+          sourceKind: draft.sourceKind,
+          sourceImageDraftId: draft.sourceImageDraftId,
+          sourceImageResultRevision: draft.sourceImageResultRevision
+        };
   const version: ActiveProjectContextVersionV1 = {
     schemaVersion: 1,
     revision: 1,
     status: 'active',
     sourceKindSchemaVersion: 1,
-    sourceKind: 'conversation_selection',
     sourceStatus: 'available',
-    sourceConversationId: draft.conversationId,
-    sourceFragments: draft.fragments,
+    ...source,
     labels: draft.labels,
     contentSnapshot,
     registeredAt,
@@ -375,29 +467,65 @@ export function normalizeProjectContextSelection(value: string): string {
 }
 
 export function parseProjectContextDraft(value: unknown): ProjectContextDraftV1 {
-  const record = exactRecord(value, draftKeys, 'project context draft');
-  requireVersionOne(record.schemaVersion, 'draft.schemaVersion');
+  const initial = record(value, 'project context draft');
+  const sourceKind = oneOf(
+    initial.sourceKind,
+    ['conversation_selection', 'image_analysis'] as const,
+    'draft.sourceKind'
+  );
+  const item = exactRecord(
+    value,
+    sourceKind === 'conversation_selection'
+      ? conversationDraftKeys
+      : imageAnalysisDraftKeys,
+    'project context draft'
+  );
+  requireVersionOne(item.schemaVersion, 'draft.schemaVersion');
   requireVersionOne(
-    record.sourceKindSchemaVersion,
+    item.sourceKindSchemaVersion,
     'draft.sourceKindSchemaVersion'
   );
-  if (record.sourceKind !== 'conversation_selection') {
-    throw new TypeError('draft.sourceKind is unsupported');
+  const id = toProjectContextDraftId(nonBlank(item.id, 'draft.id'));
+  const revision = nonNegativeInteger(item.revision, 'draft.revision');
+  const projectId = toProjectId(nonBlank(item.projectId, 'draft.projectId'));
+  const labels = parseProjectContextLabels(item.labels);
+  const createdAt = toIsoTimestamp(string(item.createdAt, 'draft.createdAt'));
+  const updatedAt = toIsoTimestamp(string(item.updatedAt, 'draft.updatedAt'));
+  assertTimestampNotBefore(updatedAt, createdAt, 'draft.updatedAt');
+
+  if (sourceKind === 'image_analysis') {
+    return {
+      schemaVersion: 1,
+      id,
+      revision,
+      projectId,
+      sourceKindSchemaVersion: 1,
+      sourceKind,
+      sourceImageDraftId: toDraftId(
+        nonBlank(item.sourceImageDraftId, 'draft.sourceImageDraftId')
+      ),
+      sourceImageResultRevision: positiveInteger(
+        item.sourceImageResultRevision,
+        'draft.sourceImageResultRevision'
+      ),
+      labels,
+      contentSnapshot: normalizeProjectContextSelection(
+        string(item.contentSnapshot, 'draft.contentSnapshot')
+      ),
+      createdAt,
+      updatedAt
+    };
   }
-  const id = toProjectContextDraftId(nonBlank(record.id, 'draft.id'));
-  const revision = nonNegativeInteger(record.revision, 'draft.revision');
-  const projectId = toProjectId(nonBlank(record.projectId, 'draft.projectId'));
   const conversationId = toConversationId(
-    nonBlank(record.conversationId, 'draft.conversationId')
+    nonBlank(item.conversationId, 'draft.conversationId')
   );
-  const labels = parseProjectContextLabels(record.labels);
-  if (!Array.isArray(record.fragments)) {
+  if (!Array.isArray(item.fragments)) {
     throw new TypeError('draft.fragments must be an array');
   }
   const fragmentIds = new Set<string>();
   const orders = new Set<number>();
-  const fragments = record.fragments.map((item) => {
-    const fragment = parseProjectContextFragment(item);
+  const fragments = item.fragments.map((value) => {
+    const fragment = parseProjectContextFragment(value);
     if (fragment.conversationId !== conversationId) {
       throw new TypeError('draft cannot contain fragments from another conversation');
     }
@@ -413,9 +541,6 @@ export function parseProjectContextDraft(value: unknown): ProjectContextDraftV1 
       throw new TypeError('draft fragment orders must be contiguous');
     }
   });
-  const createdAt = toIsoTimestamp(string(record.createdAt, 'draft.createdAt'));
-  const updatedAt = toIsoTimestamp(string(record.updatedAt, 'draft.updatedAt'));
-  assertTimestampNotBefore(updatedAt, createdAt, 'draft.updatedAt');
   return {
     schemaVersion: 1,
     id,
@@ -462,20 +587,12 @@ export function parseProjectContext(value: unknown): ProjectContextV1 {
   if (versions.some((version) => version.registeredAt !== registeredAt)) {
     throw new TypeError('context registeredAt must remain immutable');
   }
-  const sourceConversationId = versions[0].sourceConversationId;
-  if (versions.some((version) => version.sourceConversationId !== sourceConversationId)) {
-    throw new TypeError('context source conversation must remain immutable');
-  }
-  const sourceFragments = JSON.stringify(versions[0].sourceFragments);
-  if (
-    versions.some(
-      (version) =>
-        version.sourceKindSchemaVersion !== 1 ||
-        version.sourceKind !== 'conversation_selection' ||
-        JSON.stringify(version.sourceFragments) !== sourceFragments
-    )
-  ) {
-    throw new TypeError('context source selection must remain immutable');
+  const sourceIdentity = projectContextSourceIdentity(versions[0]);
+  if (versions.some((version) =>
+    version.sourceKindSchemaVersion !== 1 ||
+    projectContextSourceIdentity(version) !== sourceIdentity
+  )) {
+    throw new TypeError('context source identity must remain immutable');
   }
   versions.forEach((version, index) => {
     if (version.status !== 'deleted') return;
@@ -516,11 +633,19 @@ export function parseProjectContextVersion(
     projectContextStatuses,
     'context version status'
   );
+  const sourceKind = oneOf(
+    initial.sourceKind,
+    ['conversation_selection', 'image_analysis'] as const,
+    'context version sourceKind'
+  );
+  const sourceKeys = sourceKind === 'conversation_selection'
+    ? conversationVersionKeys
+    : imageAnalysisVersionKeys;
   const item = exactRecord(
     value,
     status === 'deleted'
-      ? [...versionBaseKeys, 'deletedAt']
-      : versionBaseKeys,
+      ? [...sourceKeys, 'deletedAt']
+      : sourceKeys,
     'project context version'
   );
   requireVersionOne(item.schemaVersion, 'context version schemaVersion');
@@ -528,30 +653,12 @@ export function parseProjectContextVersion(
     item.sourceKindSchemaVersion,
     'context version sourceKindSchemaVersion'
   );
-  if (item.sourceKind !== 'conversation_selection') {
-    throw new TypeError('context version sourceKind is unsupported');
-  }
   const revision = positiveInteger(item.revision, 'context version revision');
   const sourceStatus = oneOf(
     item.sourceStatus,
     projectContextSourceStatuses,
     'context version sourceStatus'
   );
-  const sourceConversationId = toConversationId(
-    nonBlank(item.sourceConversationId, 'context version sourceConversationId')
-  );
-  if (!Array.isArray(item.sourceFragments) || item.sourceFragments.length === 0) {
-    throw new TypeError('context version sourceFragments cannot be empty');
-  }
-  const sourceFragments = item.sourceFragments.map(parseProjectContextFragment);
-  sourceFragments.forEach((fragment, index) => {
-    if (
-      fragment.conversationId !== sourceConversationId ||
-      fragment.selectionOrder !== index
-    ) {
-      throw new TypeError('context version source fragments are inconsistent');
-    }
-  });
   const labels = parseProjectContextLabels(item.labels);
   const contentSnapshot = normalizeProjectContextSelection(
     string(item.contentSnapshot, 'context version contentSnapshot')
@@ -563,28 +670,44 @@ export function parseProjectContextVersion(
     string(item.createdAt, 'context version createdAt')
   );
   assertTimestampNotBefore(createdAt, registeredAt, 'context version createdAt');
-  const base = {
+  const source: ProjectContextVersionSourceV1 =
+    sourceKind === 'conversation_selection'
+      ? parseConversationVersionSource(item)
+      : {
+          sourceKind,
+          sourceImageDraftId: toDraftId(
+            nonBlank(
+              item.sourceImageDraftId,
+              'context version sourceImageDraftId'
+            )
+          ),
+          sourceImageResultRevision: positiveInteger(
+            item.sourceImageResultRevision,
+            'context version sourceImageResultRevision'
+          )
+        };
+  const base: ProjectContextVersionBaseV1 & ProjectContextVersionSourceV1 = {
     schemaVersion: 1 as const,
     revision,
     status,
     sourceKindSchemaVersion: 1 as const,
-    sourceKind: 'conversation_selection' as const,
     sourceStatus,
-    sourceConversationId,
-    sourceFragments,
+    ...source,
     labels,
     contentSnapshot,
     registeredAt,
     createdAt
   };
-  if (status === 'active') return { ...base, status };
+  if (status === 'active') {
+    return { ...base, status } as ActiveProjectContextVersionV1;
+  }
   const deletedAt = toIsoTimestamp(
     string(item.deletedAt, 'context version deletedAt')
   );
   if (deletedAt !== createdAt) {
     throw new TypeError('deleted context version timestamps are inconsistent');
   }
-  return { ...base, status, deletedAt };
+  return { ...base, status, deletedAt } as DeletedProjectContextVersionV1;
 }
 
 export function parseProjectContextFragment(
@@ -628,6 +751,45 @@ export function parseProjectContextFragment(
       string(item.contentSnapshot, 'fragment.contentSnapshot')
     )
   };
+}
+
+function parseConversationVersionSource(
+  item: Record<string, unknown>
+): ConversationSelectionProjectContextSourceV1 {
+  const sourceConversationId = toConversationId(
+    nonBlank(item.sourceConversationId, 'context version sourceConversationId')
+  );
+  if (!Array.isArray(item.sourceFragments) || item.sourceFragments.length === 0) {
+    throw new TypeError('context version sourceFragments cannot be empty');
+  }
+  const sourceFragments = item.sourceFragments.map(parseProjectContextFragment);
+  sourceFragments.forEach((fragment, index) => {
+    if (
+      fragment.conversationId !== sourceConversationId ||
+      fragment.selectionOrder !== index
+    ) {
+      throw new TypeError('context version source fragments are inconsistent');
+    }
+  });
+  return {
+    sourceKind: 'conversation_selection',
+    sourceConversationId,
+    sourceFragments
+  };
+}
+
+function projectContextSourceIdentity(version: ProjectContextVersionV1): string {
+  return version.sourceKind === 'conversation_selection'
+    ? JSON.stringify({
+        sourceKind: version.sourceKind,
+        sourceConversationId: version.sourceConversationId,
+        sourceFragments: version.sourceFragments
+      })
+    : JSON.stringify({
+        sourceKind: version.sourceKind,
+        sourceImageDraftId: version.sourceImageDraftId,
+        sourceImageResultRevision: version.sourceImageResultRevision
+      });
 }
 
 export function parseProjectContextLabels(value: unknown): readonly string[] {

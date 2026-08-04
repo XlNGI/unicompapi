@@ -5,6 +5,8 @@ import {
   copyVideoEditDraft,
   createEmptyVideoEditDraft,
   isVideoEditCommand,
+  maximumVideoTransitionDurationUs,
+  minimumVideoTransitionDurationUs,
   redoVideoEditCommand,
   toAssetId,
   toDraftId,
@@ -242,6 +244,27 @@ export class VideoEditorController {
         };
       }
     );
+  }
+
+  getCapabilities(): VideoEditorIpcResult<{
+    readonly transitions: readonly {
+      readonly kind: 'fade' | 'dissolve';
+      readonly minimumDurationUs: number;
+      readonly maximumDurationUs: number;
+    }[];
+    readonly compositionPreview: 'unavailable';
+  }> {
+    return {
+      ok: true,
+      value: {
+        transitions: (['fade', 'dissolve'] as const).map((kind) => ({
+          kind,
+          minimumDurationUs: minimumVideoTransitionDurationUs,
+          maximumDurationUs: maximumVideoTransitionDurationUs
+        })),
+        compositionPreview: 'unavailable'
+      }
+    };
   }
 
   setBackgroundMusicFromMedia(input: {

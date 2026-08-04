@@ -184,9 +184,6 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.submitResponse(request);
-      if (!input.confirmed) {
-        return failure('explicit_confirmation_required', 'Explicit confirmation is required');
-      }
       const runtime = this.requireRuntime();
       const draft = await this.requireDraft(
         runtime,
@@ -194,12 +191,14 @@ export class ConversationResponseController {
         input.expectedRevision
       );
       if (!draft.ok) return draft;
-      const confirmation = {
-        schemaVersion: 1 as const,
-        confirmationId: input.confirmationId,
-        confirmed: true as const
-      };
-      await runtime.candidates.validatePreparedSubmission({
+      const confirmation = input.confirmed
+        ? {
+            schemaVersion: 1 as const,
+            confirmationId: input.confirmationId,
+            confirmed: true as const
+          }
+        : undefined;
+      const validated = await runtime.candidates.validatePreparedSubmission({
         subject: subject(draft.value),
         routeSelectionToken: input.routeSelectionToken,
         confirmation
@@ -215,7 +214,11 @@ export class ConversationResponseController {
         value: toResponseExecutionDto(await runtime.submit({
           subject: subject(draft.value),
           routeSelectionToken: input.routeSelectionToken,
-          confirmation
+          confirmation: confirmation ?? {
+            schemaVersion: 1,
+            confirmationId: validated.tokenRecord.confirmation.confirmationId,
+            confirmed: true
+          }
         }))
       };
     });

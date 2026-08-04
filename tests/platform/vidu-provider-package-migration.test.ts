@@ -123,7 +123,8 @@ describe('Vidu Provider Package migration', () => {
       updatedAt: timestamp
     });
     await store.save({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      currentConnectionId: null,
       providers: [provider],
       connections: [connection],
       protocolBindings: frozen.protocolBindings,

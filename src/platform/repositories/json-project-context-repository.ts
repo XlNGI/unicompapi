@@ -528,12 +528,19 @@ function assertContextMatchesDraft(
   draft: ProjectContextDraftV1
 ): void {
   const version = context.versions[0];
+  const sourceMatches = draft.sourceKind === 'conversation_selection'
+    ? version.sourceKind === 'conversation_selection' &&
+      version.sourceConversationId === draft.conversationId &&
+      stableJson(version.sourceFragments) === stableJson(draft.fragments) &&
+      version.contentSnapshot === createProjectContextContentSnapshot(draft.fragments)
+    : version.sourceKind === 'image_analysis' &&
+      version.sourceImageDraftId === draft.sourceImageDraftId &&
+      version.sourceImageResultRevision === draft.sourceImageResultRevision &&
+      version.contentSnapshot === draft.contentSnapshot;
   if (
     context.projectId !== draft.projectId ||
-    version.sourceConversationId !== draft.conversationId ||
-    stableJson(version.sourceFragments) !== stableJson(draft.fragments) ||
     stableJson(version.labels) !== stableJson(draft.labels) ||
-    version.contentSnapshot !== createProjectContextContentSnapshot(draft.fragments)
+    !sourceMatches
   ) {
     throw dataError('registered project context does not match its draft');
   }

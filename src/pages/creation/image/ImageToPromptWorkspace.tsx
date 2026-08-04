@@ -224,7 +224,12 @@ export function ImageToPromptWorkspace({
     setBusy(true);
     onMessage('');
     try {
-      const result = await imageWorkspaces.derive(draft.draftId, targetMode);
+      const result = await imageWorkspaces.deriveFromResult(
+        draft.draftId,
+        draft.updatedAt,
+        analysis.resultRevision,
+        targetMode
+      );
       if (!result.ok) {
         onMessage(result.error.message);
         return;

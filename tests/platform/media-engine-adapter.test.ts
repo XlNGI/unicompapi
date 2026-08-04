@@ -119,6 +119,16 @@ describe('media engine adapter contracts', () => {
     expect(args).toContain(plan.source.sourcePath);
   });
 
+  it('maps fade and dissolve to distinct FFmpeg transition semantics', () => {
+    const fade = buildExportArguments(compositionPlan('fade'), 'C:\\media\\fade.part.webm');
+    const dissolve = buildExportArguments(
+      compositionPlan('dissolve'),
+      'C:\\media\\dissolve.part.webm'
+    );
+    expect(fade.join(' ')).toContain('xfade=transition=fade:');
+    expect(dissolve.join(' ')).toContain('xfade=transition=dissolve:');
+  });
+
   it('does not enable the engine when either controlled binary path is absent', () => {
     expect(
       createFfmpegMediaEngineAdapterFromEnvironment({
@@ -141,6 +151,53 @@ describe('media engine adapter contracts', () => {
     });
   });
 });
+
+function compositionPlan(
+  kind: 'fade' | 'dissolve'
+): MediaEngineExportPlan {
+  const transform = {
+    scalePermille: 1000,
+    positionXPermille: 0,
+    positionYPermille: 0,
+    rotationMilliDegrees: 0,
+    flipX: false,
+    flipY: false,
+    crop: null
+  };
+  const clip = (sourcePath: string, transitionToNext: {
+    readonly kind: 'none' | 'fade' | 'dissolve';
+    readonly durationUs?: number;
+  }) => ({
+    source: { sourcePath },
+    sourceRange: { inUs: 0, outUs: 2_000_000 },
+    speed: { numerator: 1, denominator: 1 },
+    transform,
+    sourceAudio: { muted: false, volumePermille: 1000 },
+    transitionToNext: transitionToNext.kind === 'none'
+      ? { kind: 'none' as const }
+      : { kind: transitionToNext.kind, durationUs: transitionToNext.durationUs! },
+    hasAudio: true
+  });
+  return {
+    jobId: `composition-${kind}`,
+    outputPath: `C:\\media\\${kind}.webm`,
+    composition: {
+      clips: [
+        clip('C:\\media\\one.mp4', { kind, durationUs: 500_000 }),
+        clip('C:\\media\\two.mp4', { kind: 'none' })
+      ],
+      canvas: {
+        width: 1280,
+        height: 720,
+        transformPolicy: 'fit',
+        background: { kind: 'solid', color: '#000000' }
+      },
+      textTrack: []
+    },
+    videoCodec: 'libvpx-vp9',
+    audioCodec: 'libopus'
+  };
+}
 
 describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () => {
   it('probes and exports a real WebM artifact, then verifies it independently', async () => {

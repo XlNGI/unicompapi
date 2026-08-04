@@ -109,6 +109,7 @@ describe('image workspace contracts', () => {
       },
       understanding: {
         analysisState: 'current',
+        resultRevision: 1,
         observations: {
           visibleFacts: [{ id: 'fact-1', content: 'A red cup is visible' }],
           modelInferences: [{ id: 'inference-1', content: 'Possibly ceramic' }],
@@ -118,6 +119,7 @@ describe('image workspace contracts', () => {
         userRevisions: [
           {
             id: 'revision-1',
+            revision: 1,
             targetObservationId: 'inference-1',
             content: 'The cup is known to be metal',
             createdAt: t1
@@ -170,7 +172,8 @@ describe('image workspace contracts', () => {
     }
     expect(derived.editing.lineage).toEqual({
       parentDraftId: source.id,
-      parentAssetId: toAssetId('asset-source')
+      parentAssetId: toAssetId('asset-source'),
+      parentAssetRevision: 1
     });
     expect('taskId' in derived).toBe(false);
   });
@@ -206,6 +209,8 @@ describe('image workspace contracts', () => {
       ...base,
       imageToPrompt: {
         analysisState: 'current',
+        resultRevision: 1,
+        promptRevision: 1,
         purpose: 'product listing',
         requirements: ['Keep visible facts'],
         observations: {
@@ -244,6 +249,8 @@ describe('image workspace contracts', () => {
       imageToPrompt: {
         ...base.imageToPrompt,
         analysisState: 'current',
+        resultRevision: 1,
+        promptRevision: 1,
         purpose: 'listing',
         requirements: ['Keep facts'],
         analyzedAt: t0

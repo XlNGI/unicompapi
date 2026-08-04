@@ -204,6 +204,69 @@ describe('provider management framework', () => {
     expect(fixture.calls.validation).toBe(1);
   });
 
+  it('activates exactly one live-validated connection and rejects stale or invalid switches', async () => {
+    const fixture = await frameworkFixture();
+    const first = await createConnection(fixture);
+    const second = await createConnection(fixture);
+    if (!first.ok || !second.ok) throw new Error('connection creation failed');
+
+    let snapshot = await fixture.registry.load();
+    const activated = await fixture.framework.activateConnection({
+      connectionId: first.value.connectionId,
+      expectedRegistryRevision: snapshot.registryRevision
+    });
+    expect(activated).toMatchObject({ ok: true, value: { state: 'active' } });
+    snapshot = await fixture.registry.load();
+    expect(snapshot.currentConnectionId).toBe(first.value.connectionId);
+
+    await expect(fixture.framework.activateConnection({
+      connectionId: second.value.connectionId,
+      expectedRegistryRevision: (snapshot.registryRevision ?? 1) - 1
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'provider_registry_conflict' }
+    });
+    expect((await fixture.registry.load()).currentConnectionId).toBe(
+      first.value.connectionId
+    );
+
+    fixture.validation.state = 'unavailable';
+    fixture.validation.identityState = 'verification_failed';
+    fixture.validation.credentialState = 'invalid';
+    snapshot = await fixture.registry.load();
+    await expect(fixture.framework.activateConnection({
+      connectionId: second.value.connectionId,
+      expectedRegistryRevision: snapshot.registryRevision
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'connection_not_available' }
+    });
+    expect((await fixture.registry.load()).currentConnectionId).toBe(
+      first.value.connectionId
+    );
+  });
+
+  it('does not silently activate a disabled connection', async () => {
+    const fixture = await frameworkFixture();
+    const created = await createConnection(fixture);
+    if (!created.ok) throw new Error('connection creation failed');
+    await fixture.framework.setConnectionEnabled({
+      connectionId: created.value.connectionId,
+      enabled: false
+    });
+    const snapshot = await fixture.registry.load();
+
+    await expect(fixture.framework.activateConnection({
+      connectionId: created.value.connectionId,
+      expectedRegistryRevision: snapshot.registryRevision
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'connection_not_available' }
+    });
+    expect(fixture.calls.validation).toBe(0);
+    expect((await fixture.registry.load()).currentConnectionId).toBeNull();
+  });
+
   it('synchronizes exact catalog keys without inferring capabilities and marks disappeared models missing', async () => {
     const fixture = await frameworkFixture();
     const created = await createAndValidate(fixture);
@@ -628,6 +691,11 @@ interface Fixture {
   readonly audit: JsonProviderManagementAuditStore;
   readonly vaultPath: string;
   readonly calls: { validation: number; discovery: number };
+  readonly validation: {
+    state: 'available' | 'unavailable';
+    identityState: 'verified' | 'verification_failed';
+    credentialState: 'valid' | 'invalid' | 'verification_unavailable';
+  };
   readonly catalog: { entries: { providerModelKey: string; displayName: string }[] };
 }
 
@@ -641,6 +709,11 @@ async function frameworkFixture(
   const vault = new SecureCredentialVault(vaultPath, protector());
   const audit = new JsonProviderManagementAuditStore(path.join(root, 'provider-audit.json'));
   const calls = { validation: 0, discovery: 0 };
+  const validation: Fixture['validation'] = {
+    state: 'available',
+    identityState: 'verified',
+    credentialState: 'valid'
+  };
   const catalog: Fixture['catalog'] = { entries: [] };
   const adapter: ProviderManagementAdapterPort = {
     identity: {
@@ -657,9 +730,7 @@ async function frameworkFixture(
         values: { api_key: expect.stringMatching(/^fixture-/) }
       });
       return {
-        state: 'available',
-        identityState: 'verified',
-        credentialState: 'valid',
+        ...validation,
         observedAt: t1,
         safeCode: 'synthetic_validation_passed'
       };
@@ -678,6 +749,7 @@ async function frameworkFixture(
     audit,
     vaultPath,
     calls,
+    validation,
     catalog,
     framework: new ProviderManagementFramework(
       packages,

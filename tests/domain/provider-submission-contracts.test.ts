@@ -82,6 +82,7 @@ describe('provider public submission contracts', () => {
       schemaVersion: 1,
       routeSelectionToken: 'plain-token',
       expiresAt: t1,
+      requiresConfirmation: true,
       confirmation: {}
     })).toThrow('route selection token');
 

@@ -149,6 +149,7 @@ export interface ImageObservationSet {
 
 export interface ImageUnderstandingRevision {
   readonly id: string;
+  readonly revision: number;
   readonly targetObservationId?: string;
   readonly content: string;
   readonly createdAt: IsoTimestamp;
@@ -161,6 +162,7 @@ export interface ImageGenerationWorkspace {
 
 export interface ImageUnderstandingWorkspace {
   readonly analysisState: ImageAnalysisState;
+  readonly resultRevision: number;
   readonly observations: ImageObservationSet;
   readonly userRevisions: readonly ImageUnderstandingRevision[];
   readonly saveScope: ImageUnderstandingSaveScope;
@@ -171,12 +173,14 @@ export interface ImageUnderstandingWorkspace {
 export interface ImageEditingLineage {
   readonly parentDraftId?: DraftId;
   readonly parentAssetId: AssetId;
+  readonly parentAssetRevision: number;
   readonly parentWorkId?: WorkId;
 }
 
 export interface ImageEditingWorkspace {
   readonly lineage?: ImageEditingLineage;
   readonly maskAssetId?: AssetId;
+  readonly maskAssetRevision?: number;
   readonly mustKeep: readonly string[];
   readonly mustChange: readonly string[];
   readonly prohibited: readonly string[];
@@ -186,6 +190,8 @@ export interface ImageEditingWorkspace {
 
 export interface ImageToPromptWorkspace {
   readonly analysisState: ImageAnalysisState;
+  readonly resultRevision: number;
+  readonly promptRevision: number;
   readonly purpose: string;
   readonly requirements: readonly string[];
   readonly observations: ImageObservationSet;
@@ -304,6 +310,7 @@ export function createEmptyImageWorkspaceDraft<
         mode: input.mode,
         understanding: {
           analysisState: 'not_analyzed',
+          resultRevision: 0,
           observations: emptyObservations(),
           userRevisions: [],
           saveScope: 'draft_only',
@@ -326,6 +333,8 @@ export function createEmptyImageWorkspaceDraft<
         mode: input.mode,
         imageToPrompt: {
           analysisState: 'not_analyzed',
+          resultRevision: 0,
+          promptRevision: 0,
           purpose: '',
           requirements: [],
           observations: emptyObservations(),
@@ -394,13 +403,133 @@ export function deriveImageWorkspaceDraft(input: {
         ...shared.editing,
         lineage: {
           parentDraftId: input.source.id,
-          parentAssetId: sourceInput.assetId
+          parentAssetId: sourceInput.assetId,
+          parentAssetRevision: 1
         }
       }
     };
   }
 
   return shared;
+}
+
+export function applyImageStructuredResult(
+  draft: ImageUnderstandingWorkspaceDraft,
+  input: {
+    readonly observations: ImageObservationSet;
+    readonly analyzedAt: IsoTimestamp;
+  }
+): ImageUnderstandingWorkspaceDraft;
+export function applyImageStructuredResult(
+  draft: ImageToPromptWorkspaceDraft,
+  input: {
+    readonly observations: ImageObservationSet;
+    readonly analyzedAt: IsoTimestamp;
+    readonly finalPrompt: string;
+    readonly systemSupplements: PromptSnapshot['systemSupplements'];
+  }
+): ImageToPromptWorkspaceDraft;
+export function applyImageStructuredResult(
+  draft: ImageUnderstandingWorkspaceDraft | ImageToPromptWorkspaceDraft,
+  input: {
+    readonly observations: ImageObservationSet;
+    readonly analyzedAt: IsoTimestamp;
+    readonly finalPrompt?: string;
+    readonly systemSupplements?: PromptSnapshot['systemSupplements'];
+  }
+): ImageUnderstandingWorkspaceDraft | ImageToPromptWorkspaceDraft {
+  if (!isObservationSet(input.observations)) {
+    throw new TypeError('image structured result observations are invalid');
+  }
+
+  if (draft.mode === 'image_understanding') {
+    return createImageWorkspaceDraft({
+      ...draft,
+      state: 'saved',
+      updatedAt: input.analyzedAt,
+      understanding: {
+        ...draft.understanding,
+        analysisState: 'current',
+        resultRevision: draft.understanding.resultRevision + 1,
+        observations: input.observations,
+        staleReasons: [],
+        analyzedAt: input.analyzedAt
+      }
+    });
+  }
+
+  if (!input.finalPrompt?.trim()) {
+    throw new TypeError('image-to-prompt result requires a final prompt');
+  }
+  return createImageWorkspaceDraft({
+    ...draft,
+    state: 'saved',
+    updatedAt: input.analyzedAt,
+    prompt: {
+      ...draft.prompt,
+      systemSupplements: input.systemSupplements ?? [],
+      finalPrompt: input.finalPrompt
+    },
+    imageToPrompt: {
+      ...draft.imageToPrompt,
+      analysisState: 'current',
+      resultRevision: draft.imageToPrompt.resultRevision + 1,
+      promptRevision: draft.imageToPrompt.promptRevision + 1,
+      observations: input.observations,
+      staleReasons: [],
+      analyzedAt: input.analyzedAt
+    }
+  });
+}
+
+export function addImageUnderstandingRevision(
+  draft: ImageUnderstandingWorkspaceDraft,
+  input: {
+    readonly id: string;
+    readonly targetObservationId?: string;
+    readonly content: string;
+    readonly createdAt: IsoTimestamp;
+  }
+): ImageUnderstandingWorkspaceDraft {
+  if (
+    input.targetObservationId !== undefined &&
+    !getObservationIds(draft.understanding.observations).has(input.targetObservationId)
+  ) {
+    throw new TypeError('image understanding revision target is unavailable');
+  }
+  return createImageWorkspaceDraft({
+    ...draft,
+    updatedAt: input.createdAt,
+    understanding: {
+      ...draft.understanding,
+      userRevisions: [
+        ...draft.understanding.userRevisions,
+        {
+          ...input,
+          revision: draft.understanding.userRevisions.length + 1
+        }
+      ]
+    }
+  });
+}
+
+export function reviseImageToPrompt(
+  draft: ImageToPromptWorkspaceDraft,
+  finalPrompt: string,
+  updatedAt: IsoTimestamp
+): ImageToPromptWorkspaceDraft {
+  if (draft.imageToPrompt.resultRevision < 1 || !finalPrompt.trim()) {
+    throw new TypeError('image-to-prompt revision requires a saved result');
+  }
+  return createImageWorkspaceDraft({
+    ...draft,
+    updatedAt,
+    prompt: { ...draft.prompt, finalPrompt },
+    imageToPrompt: {
+      ...draft.imageToPrompt,
+      promptRevision: draft.imageToPrompt.promptRevision + 1
+    }
+  });
 }
 
 export function markImageAnalysisStale(
@@ -775,6 +904,7 @@ function isUnderstandingWorkspace(
 
   if (!hasOnlyKeys(value, [
     'analysisState',
+    'resultRevision',
     'observations',
     'userRevisions',
     'saveScope',
@@ -787,6 +917,7 @@ function isUnderstandingWorkspace(
   const observationIds = getObservationIds(value.observations);
   return (
     isOneOf(value.analysisState, imageAnalysisStates) &&
+    isNonNegativeInteger(value.resultRevision) &&
     Array.isArray(value.userRevisions) &&
     value.userRevisions.every(isUnderstandingRevision) &&
     hasUniqueIds(value.userRevisions) &&
@@ -794,6 +925,9 @@ function isUnderstandingWorkspace(
       (revision) =>
         revision.targetObservationId === undefined ||
         observationIds.has(revision.targetObservationId)
+    ) &&
+    value.userRevisions.every(
+      (revision, index) => revision.revision === index + 1
     ) &&
     isOneOf(value.saveScope, imageUnderstandingSaveScopes) &&
     isStaleReasons(value.staleReasons) &&
@@ -819,6 +953,7 @@ function isEditingWorkspace(
     !hasOnlyKeys(value, [
       'lineage',
       'maskAssetId',
+      'maskAssetRevision',
       'mustKeep',
       'mustChange',
       'prohibited',
@@ -827,6 +962,10 @@ function isEditingWorkspace(
     ]) ||
     (value.lineage !== undefined && !isEditingLineage(value.lineage)) ||
     (value.maskAssetId !== undefined && !isNonBlankString(value.maskAssetId)) ||
+    (value.maskAssetRevision !== undefined &&
+      !isPositiveInteger(value.maskAssetRevision)) ||
+    ((value.maskAssetId === undefined) !==
+      (value.maskAssetRevision === undefined)) ||
     !isStringArray(value.mustKeep) ||
     !isStringArray(value.mustChange) ||
     !isStringArray(value.prohibited) ||
@@ -859,6 +998,8 @@ function isImageToPromptWorkspace(
     isRecord(value) &&
     hasOnlyKeys(value, [
       'analysisState',
+      'resultRevision',
+      'promptRevision',
       'purpose',
       'requirements',
       'observations',
@@ -866,6 +1007,9 @@ function isImageToPromptWorkspace(
       'analyzedAt'
     ]) &&
     isOneOf(value.analysisState, imageAnalysisStates) &&
+    isNonNegativeInteger(value.resultRevision) &&
+    isNonNegativeInteger(value.promptRevision) &&
+    value.promptRevision >= value.resultRevision &&
     typeof value.purpose === 'string' &&
     isStringArray(value.requirements) &&
     isObservationSet(value.observations) &&
@@ -909,9 +1053,15 @@ function hasAnalysisStateConsistency(
 function isEditingLineage(value: unknown): boolean {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ['parentDraftId', 'parentAssetId', 'parentWorkId']) &&
+    hasOnlyKeys(value, [
+      'parentDraftId',
+      'parentAssetId',
+      'parentAssetRevision',
+      'parentWorkId'
+    ]) &&
     (value.parentDraftId === undefined || isNonBlankString(value.parentDraftId)) &&
     isNonBlankString(value.parentAssetId) &&
+    isPositiveInteger(value.parentAssetRevision) &&
     (value.parentWorkId === undefined || isNonBlankString(value.parentWorkId))
   );
 }
@@ -976,11 +1126,13 @@ function isUnderstandingRevision(value: unknown): boolean {
     isRecord(value) &&
     hasOnlyKeys(value, [
       'id',
+      'revision',
       'targetObservationId',
       'content',
       'createdAt'
     ]) &&
     isNonBlankString(value.id) &&
+    isPositiveInteger(value.revision) &&
     (value.targetObservationId === undefined ||
       isNonBlankString(value.targetObservationId)) &&
     isNonBlankString(value.content) &&
@@ -1117,6 +1269,14 @@ function isUnitNumber(value: unknown): value is number {
 
 function isPositiveUnitNumber(value: unknown): value is number {
   return isUnitNumber(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 function isOneOf<const TValue extends string>(

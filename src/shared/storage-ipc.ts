@@ -103,9 +103,32 @@ export interface StorageTaskSummaryDto {
   readonly latestExecutionState?: string;
   readonly latestExecutionUpdatedAt?: string;
   readonly retryability?: 'retryable' | 'not_retryable' | 'unknown';
+  readonly routeSummary: {
+    readonly state: 'single' | 'mixed' | 'unavailable';
+    readonly providerName?: string;
+    readonly connectionName?: string;
+    readonly modelName?: string;
+  };
+  readonly usageSummary: {
+    readonly availability:
+      | 'reported_complete'
+      | 'reported_partial'
+      | 'not_reported'
+      | 'invalid_response'
+      | 'unknown_outcome'
+      | 'not_applicable'
+      | 'not_collected_legacy';
+    readonly display: string;
+    readonly facts: readonly {
+      readonly metricId: string;
+      readonly quantity: string;
+      readonly unit: string;
+    }[];
+  };
 }
 
 export interface StorageTaskDetailsDto extends StorageTaskSummaryDto {
+  readonly callRecords: readonly StorageCallRecordSummaryDto[];
   readonly sourceDraftId: string;
   readonly originalInput: string;
   readonly finalPrompt: string;
@@ -129,6 +152,8 @@ export interface StorageCallRecordSummaryDto {
   readonly projectId: string;
   readonly projectName: string;
   readonly subjectKind: 'media' | 'conversation';
+  readonly taskId?: string;
+  readonly executionId?: string;
   readonly productFeature: string;
   readonly providerId: string;
   readonly connectionId: string;
@@ -143,6 +168,7 @@ export interface StorageCallRecordSummaryDto {
   readonly durationMs?: string;
   readonly retryOfInvocationAttemptId?: string;
   readonly usageAvailability: string;
+  readonly usageFacts: readonly StorageCallUsageFactDto[];
   readonly localResultCount: number;
   readonly resultRegistrationState: 'registered' | 'not_registered' | 'not_applicable';
 }

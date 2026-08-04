@@ -759,8 +759,9 @@ export function buildCompositionExportArguments(
       combinedDurationUs += durations[index];
     } else {
       const duration = transition.durationUs;
+      const videoTransition = transition.kind === 'dissolve' ? 'dissolve' : 'fade';
       filters.push(
-        `[${videoLabel}][v${index}]xfade=transition=fade:` +
+        `[${videoLabel}][v${index}]xfade=transition=${videoTransition}:` +
         `duration=${formatSeconds(duration)}:` +
         `offset=${formatSeconds(combinedDurationUs - duration)}[${nextVideo}]`
       );

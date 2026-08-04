@@ -25,6 +25,7 @@ import {
   NodeProjectStorage,
   ProjectCatalogService
 } from '../../src/platform';
+import type { StorageCallRecordSummaryDto } from '../../src/shared/storage-ipc';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-07-22T00:00:00.000Z');
@@ -133,7 +134,26 @@ describe('GlobalReadModelController', () => {
       projectName: 'Unavailable project',
       rootDirectory: missingRoot
     });
-    const controller = new GlobalReadModelController(catalog);
+    const callRecords: readonly StorageCallRecordSummaryDto[] = [
+      callRecord('attempt-read-model-1', '1.25'),
+      callRecord('attempt-read-model-2', '2.25'),
+      callRecord('attempt-read-model-3', '4', 'token')
+    ];
+    const controller = new GlobalReadModelController(catalog, {
+      async listCallRecords(request) {
+        const input = request as { readonly offset: number; readonly limit: number };
+        return {
+          ok: true,
+          value: {
+            items: callRecords.slice(input.offset, input.offset + input.limit),
+            total: callRecords.length,
+            offset: input.offset,
+            limit: input.limit,
+            issues: []
+          }
+        };
+      }
+    });
 
     const tasks = await controller.listTasks();
     const works = await controller.listWorks();
@@ -152,7 +172,20 @@ describe('GlobalReadModelController', () => {
             taskId: 'task-read-model',
             projectName: 'Read model project',
             latestExecutionState: 'completed',
-            executionCount: 1
+            executionCount: 1,
+            routeSummary: {
+              state: 'single',
+              providerName: 'Provider A',
+              connectionName: 'Connection A',
+              modelName: 'Model A'
+            },
+            usageSummary: {
+              availability: 'reported_complete',
+              facts: [
+                { metricId: 'credits', quantity: '3.5', unit: 'credit' },
+                { metricId: 'credits', quantity: '4', unit: 'token' }
+              ]
+            }
           }
         ],
         issues: [{ projectId: 'project-unavailable', reason: 'unavailable' }]
@@ -172,7 +205,15 @@ describe('GlobalReadModelController', () => {
     });
     expect(taskDetails).toMatchObject({
       ok: true,
-      value: { originalInput: 'Original prompt', finalPrompt: 'Final prompt' }
+      value: {
+        originalInput: 'Original prompt',
+        finalPrompt: 'Final prompt',
+        callRecords: [
+          { invocationAttemptId: 'attempt-read-model-1' },
+          { invocationAttemptId: 'attempt-read-model-2' },
+          { invocationAttemptId: 'attempt-read-model-3' }
+        ]
+      }
     });
     expect(workDetails).toMatchObject({
       ok: true,
@@ -221,3 +262,38 @@ describe('GlobalReadModelController', () => {
     });
   });
 });
+
+function callRecord(
+  invocationAttemptId: string,
+  quantity: string,
+  unit = 'credit'
+): StorageCallRecordSummaryDto {
+  return {
+    invocationAttemptId,
+    projectId: 'project-read-model',
+    projectName: 'Read model project',
+    subjectKind: 'media',
+    taskId: 'task-read-model',
+    executionId: 'execution-read-model',
+    productFeature: 'text_to_image',
+    providerId: 'provider-a',
+    connectionId: 'connection-a',
+    modelId: 'model-a',
+    providerName: 'Provider A',
+    connectionName: 'Connection A',
+    modelName: 'Model A',
+    displayNameAvailability: 'snapshotted',
+    state: 'completed',
+    createdAt: t0,
+    updatedAt: t1,
+    usageAvailability: 'reported_complete',
+    usageFacts: [{
+      metricId: 'credits',
+      quantity,
+      unit,
+      source: 'provider'
+    }],
+    localResultCount: 1,
+    resultRegistrationState: 'registered'
+  };
+}

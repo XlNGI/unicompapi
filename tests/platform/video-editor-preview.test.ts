@@ -49,7 +49,8 @@ function plan(): VideoEditorPreviewPlan {
       flipY: false,
       crop: null
     },
-    sourceAudio: { muted: false, volumePermille: 1000 }
+    sourceAudio: { muted: false, volumePermille: 1000 },
+    transitionToNext: { kind: 'none' }
   };
 }
 

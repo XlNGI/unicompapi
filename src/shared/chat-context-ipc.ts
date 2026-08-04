@@ -161,7 +161,7 @@ export interface ProjectContextCandidateDto {
   readonly projectId: string;
   readonly revision: number;
   readonly status: 'active';
-  readonly sourceKind: 'conversation_selection';
+  readonly sourceKind: 'conversation_selection' | 'image_analysis';
   readonly sourceStatus: 'available' | 'source_deleted' | 'source_unavailable';
   readonly labels: readonly string[];
   readonly contentPreview: string;
@@ -175,10 +175,12 @@ export interface ProjectContextDetailDto {
   readonly revision: number;
   readonly isCurrent: boolean;
   readonly status: 'active' | 'deleted';
-  readonly sourceKind: 'conversation_selection';
+  readonly sourceKind: 'conversation_selection' | 'image_analysis';
   readonly sourceStatus: 'available' | 'source_deleted' | 'source_unavailable';
-  readonly sourceConversationId: string;
-  readonly sourceFragments: readonly ProjectContextFragmentDto[];
+  readonly sourceConversationId?: string;
+  readonly sourceFragments?: readonly ProjectContextFragmentDto[];
+  readonly sourceImageDraftId?: string;
+  readonly sourceImageResultRevision?: number;
   readonly labels: readonly string[];
   readonly contentSnapshot: string;
   readonly registeredAt: string;
@@ -261,6 +263,21 @@ export interface ConversationResponseCandidateDto {
       readonly maximum?: number;
       readonly step?: number;
       readonly unitId?: string;
+      readonly display?: {
+        readonly label?: string;
+        readonly description?: string;
+        readonly groupLabel?: string;
+        readonly note?: string;
+        readonly optionLabels?: readonly {
+          readonly value: string | number | boolean;
+          readonly label: string;
+        }[];
+        readonly visibleWhen?: {
+          readonly fieldId: string;
+          readonly operator: 'equals' | 'not_equals';
+          readonly value: string | number | boolean;
+        };
+      };
     }[];
   };
   readonly usageSchema: {
@@ -280,6 +297,7 @@ export interface ConversationResponsePreparationDto {
   readonly schemaVersion: 1;
   readonly routeSelectionToken: string;
   readonly expiresAt: string;
+  readonly requiresConfirmation: boolean;
   readonly confirmation: {
     readonly schemaVersion: 1;
     readonly confirmationId: string;

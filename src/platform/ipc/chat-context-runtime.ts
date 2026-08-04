@@ -58,6 +58,7 @@ import {
   RouteSelectionTokenVault,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
+  type ConnectionOutboundAuthorizationPort,
   type JsonProviderRegistryStore
 } from '../providers';
 import { JsonProviderRegistryStore as ProviderRegistryStore } from '../providers';
@@ -74,6 +75,7 @@ export interface ChatContextRuntimeDependencies {
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry?: JsonProviderRegistryStore;
   readonly providerPackages?: ProviderPackageRegistry;
+  readonly connectionAuthorizations?: ConnectionOutboundAuthorizationPort;
   now?: () => string;
   conversationIds?: ConversationIdFactory;
   projectContextIds?: ProjectContextIdFactory;
@@ -222,7 +224,9 @@ export function createChatContextRuntime(
         }
       ),
       new RouteSelectionTokenVault(),
-      now
+      now,
+      undefined,
+      dependencies.connectionAuthorizations
     );
     const responseLifecycle = new ConversationResponseExecutionLifecycle(
       responseExecutions,

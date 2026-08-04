@@ -49,8 +49,9 @@ import { sharedFileWriteCoordinator } from '../storage';
 import { createFrozenViduRegistryRecords } from './vidu-protocol-catalog';
 
 export interface ProviderRegistrySnapshot {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly registryRevision?: number;
+  readonly currentConnectionId: ProviderConnection['id'] | null;
   readonly providers: readonly Provider[];
   readonly connections: readonly ProviderConnection[];
   readonly protocolBindings: readonly ProviderProtocolBinding[];
@@ -407,6 +408,7 @@ export class ProviderRegistryController {
         ok: true,
         value: {
           registryRevision: registryRevision(snapshot),
+          currentConnectionId: snapshot.currentConnectionId,
           providers: snapshot.providers.map((provider) => ({
             providerId: provider.id,
             name: provider.name,
@@ -502,8 +504,9 @@ export class ProviderRegistryController {
 function emptySnapshot(): ProviderRegistrySnapshot {
   const vidu = createFrozenViduRegistryRecords();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     registryRevision: 1,
+    currentConnectionId: null,
     providers: vidu.providers,
     connections: vidu.connections,
     protocolBindings: vidu.protocolBindings,
@@ -516,7 +519,15 @@ function emptySnapshot(): ProviderRegistrySnapshot {
 }
 
 export function migrateProviderRegistrySnapshot(value: unknown): unknown {
-  if (!isRecord(value) || value.schemaVersion !== 1) return value;
+  if (!isRecord(value)) return value;
+  if (value.schemaVersion === 2) {
+    return {
+      ...value,
+      schemaVersion: 3,
+      currentConnectionId: null
+    };
+  }
+  if (value.schemaVersion !== 1) return value;
   if (
     !Array.isArray(value.providers) ||
     !Array.isArray(value.connections) ||
@@ -582,8 +593,9 @@ export function migrateProviderRegistrySnapshot(value: unknown): unknown {
   });
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     registryRevision: 1,
+    currentConnectionId: null,
     providers,
     connections,
     protocolBindings,
@@ -599,7 +611,7 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   const migrated = migrateProviderRegistrySnapshot(value);
   if (
     !isRecord(migrated) ||
-    migrated.schemaVersion !== 2 ||
+    migrated.schemaVersion !== 3 ||
     !Array.isArray(migrated.providers) ||
     !Array.isArray(migrated.connections) ||
     !Array.isArray(migrated.protocolBindings) ||
@@ -623,6 +635,9 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
     ? migrated.modelProfiles.map(parseModelProfile)
     : [];
   const revision = parseRegistryRevision(migrated.registryRevision);
+  const requestedCurrentConnectionId = migrated.currentConnectionId === null
+    ? null
+    : toConnectionId(requireNonBlankString(migrated.currentConnectionId));
 
   assertUnique(providers.map((item) => item.id), 'provider');
   assertUnique(connections.map((item) => item.id), 'connection');
@@ -749,9 +764,20 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
   }
   validateCapabilityHistory(capabilities, capabilitiesById);
 
+  const currentConnection = requestedCurrentConnectionId
+    ? connectionsById.get(requestedCurrentConnectionId)
+    : undefined;
+  const currentConnectionId = currentConnection &&
+      currentConnection.state === 'available' &&
+      currentConnection.identityState === 'verified' &&
+      currentConnection.credentialState === 'valid'
+    ? currentConnection.id
+    : null;
+
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     registryRevision: revision,
+    currentConnectionId,
     providers,
     connections,
     protocolBindings,

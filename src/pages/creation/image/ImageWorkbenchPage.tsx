@@ -29,6 +29,8 @@ const workspaceErrorMessages: Record<ImageWorkspaceIpcErrorCode, string> = {
   invalid_request: '当前草稿数据无效，请刷新页面后重试。',
   draft_not_found: '草稿已不存在，请刷新页面后重试。',
   draft_conflict: '草稿已在其他位置更新，请刷新页面后重试。',
+  result_revision_changed: '结果版本已变化，请刷新后重试。',
+  result_not_available: '当前没有可用的结构化结果。',
   input_not_found: '当前草稿没有可用的图片输入。',
   image_unreadable: '所选图片无法读取或未通过本地校验。',
   unsupported_image: '所选文件不是当前可安全读取的本地图片。',

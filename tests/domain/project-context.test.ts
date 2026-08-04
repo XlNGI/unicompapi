@@ -4,6 +4,7 @@ import {
   addProjectContextDraftFragment,
   createProjectContextContentSnapshot,
   createProjectContextDraft,
+  createImageAnalysisProjectContextDraft,
   deleteProjectContext,
   getCurrentProjectContextVersion,
   getProjectContextRevision,
@@ -12,6 +13,7 @@ import {
   removeProjectContextDraftFragment,
   replaceProjectContextDraftLabels,
   toConversationId,
+  toDraftId,
   toIsoTimestamp,
   toMessageId,
   toProjectContextDraftId,
@@ -119,6 +121,43 @@ describe('project context drafts', () => {
 });
 
 describe('registered project context history', () => {
+  it('registers an immutable image result revision in the canonical context history', () => {
+    const imageDraft = createImageAnalysisProjectContextDraft({
+      id: toProjectContextDraftId('image-context-draft-domain'),
+      projectId,
+      sourceImageDraftId: toDraftId('image-draft-domain'),
+      sourceImageResultRevision: 2,
+      contentSnapshot: 'Visible facts\n- A snow mountain',
+      labels: ['image'],
+      createdAt: t0
+    });
+    const context = registerProjectContextDraft(
+      imageDraft,
+      toProjectContextId('image-context-domain'),
+      t1
+    );
+    expect(getCurrentProjectContextVersion(context)).toMatchObject({
+      sourceKind: 'image_analysis',
+      sourceImageDraftId: 'image-draft-domain',
+      sourceImageResultRevision: 2,
+      contentSnapshot: 'Visible facts\n- A snow mountain'
+    });
+    expect(() => parseProjectContext({
+      ...context,
+      versions: [{
+        ...context.versions[0],
+        sourceImageResultRevision: 3
+      }]
+    })).not.toThrow();
+    const updated = updateProjectContextContent(context, 'edited context', [], t2);
+    expect(() => parseProjectContext({
+      ...updated,
+      versions: [
+        updated.versions[0],
+        { ...updated.versions[1], sourceImageResultRevision: 3 }
+      ]
+    })).toThrow('source identity must remain immutable');
+  });
   it('appends immutable revisions for updates, source status and tombstone deletion', () => {
     const registered = registerProjectContextDraft(
       addFragment(),
@@ -183,19 +222,23 @@ describe('registered project context history', () => {
       [],
       t3
     );
+    const updatedVersion = updated.versions[1];
+    if (updatedVersion.sourceKind !== 'conversation_selection') {
+      throw new Error('unexpected source kind');
+    }
     expect(() => parseProjectContext({
       ...updated,
       versions: [
         updated.versions[0],
         {
-          ...updated.versions[1],
+          ...updatedVersion,
           sourceFragments: [{
-            ...updated.versions[1].sourceFragments[0],
+            ...updatedVersion.sourceFragments[0],
             contentSnapshot: '篡改来源'
           }]
         }
       ]
-    })).toThrow('source selection must remain immutable');
+    })).toThrow('source identity must remain immutable');
 
     const deleted = deleteProjectContext(updated, t4);
     expect(() => parseProjectContext({

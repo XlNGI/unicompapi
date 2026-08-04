@@ -95,6 +95,7 @@ export interface SubmissionPreparationV1 {
   readonly schemaVersion: 1;
   readonly routeSelectionToken: string;
   readonly expiresAt: IsoTimestamp;
+  readonly requiresConfirmation: boolean;
   readonly confirmation: SubmissionConfirmationDtoV1;
 }
 
@@ -239,16 +240,23 @@ export function parseFeatureCandidateDto(value: unknown): FeatureCandidateDtoV1 
 export function parseSubmissionPreparation(value: unknown): SubmissionPreparationV1 {
   const item = exactRecord(
     value,
-    ['schemaVersion', 'routeSelectionToken', 'expiresAt', 'confirmation'],
+    [
+      'schemaVersion',
+      'routeSelectionToken',
+      'expiresAt',
+      'requiresConfirmation',
+      'confirmation'
+    ],
     'submission preparation'
   );
-  if (item.schemaVersion !== 1) {
+  if (item.schemaVersion !== 1 || typeof item.requiresConfirmation !== 'boolean') {
     throw new InvariantViolationError('submission preparation is invalid');
   }
   return {
     schemaVersion: 1,
     routeSelectionToken: routeSelectionToken(item.routeSelectionToken),
     expiresAt: toIsoTimestamp(String(item.expiresAt)),
+    requiresConfirmation: item.requiresConfirmation,
     confirmation: parseSubmissionConfirmationDto(item.confirmation)
   };
 }

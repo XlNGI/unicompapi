@@ -302,7 +302,8 @@ async function createFixture(): Promise<{
     updatedAt: timestamp
   });
   await registry.save({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: null,
     providers: [provider],
     connections: [connection],
     protocolBindings: [],
@@ -368,7 +369,8 @@ async function createPackageFixture(): Promise<{
     updatedAt: timestamp
   });
   await registry.save({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    currentConnectionId: null,
     providers: [provider],
     connections: [connection],
     protocolBindings: [binding],

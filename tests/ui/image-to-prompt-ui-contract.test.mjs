@@ -79,7 +79,10 @@ test('image to prompt uses controlled input, preflight and derived drafts only',
     assert.match(source, new RegExp(text));
   }
 
-  assert.match(promptSource, /\.derive\(draft\.draftId, targetMode\)/);
+  assert.match(
+    promptSource,
+    /\.deriveFromResult\([\s\S]*draft\.draftId,[\s\S]*analysis\.resultRevision,[\s\S]*targetMode/
+  );
   assert.match(promptSource, /deriveDraft\('professional_image'\)/);
   assert.match(promptSource, /deriveDraft\('image_editing'\)/);
   assert.match(workbenchSource, /ImageToPromptWorkspace/);

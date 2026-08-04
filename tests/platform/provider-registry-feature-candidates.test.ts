@@ -52,8 +52,7 @@ describe('registry-backed feature candidates', () => {
     const fixture = await candidateFixture();
     const values = await fixture.service.listFeatureCandidates(subject);
 
-    expect(values).toHaveLength(2);
-    expect(values).toEqual(expect.arrayContaining([
+    expect(values).toEqual([
       expect.objectContaining({
         providerName: 'Official Fixture',
         connectionName: 'Official connection',
@@ -63,13 +62,8 @@ describe('registry-backed feature candidates', () => {
         parameterSchema: expect.objectContaining({
           fields: [expect.objectContaining({ fieldId: 'quality' })]
         })
-      }),
-      expect.objectContaining({
-        providerName: 'Compatible Fixture',
-        available: false,
-        unavailableReasons: ['runtime_not_allowed']
       })
-    ]));
+    ]);
     expect(JSON.stringify(values)).not.toMatch(
       /adapter|endpoint|credential|providerModelKey|profileId|protocolBinding|runtimePolicy/i
     );
@@ -282,6 +276,7 @@ async function candidateFixture() {
   await registry.mutate((snapshot) => ({
     snapshot: {
       ...snapshot,
+      currentConnectionId: toConnectionId('connection-candidate-official'),
       providers: [
         ...snapshot.providers,
         provider('official', 'Official Fixture'),

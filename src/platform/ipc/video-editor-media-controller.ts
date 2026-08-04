@@ -498,6 +498,7 @@ export class VideoEditorMediaController {
       );
       const mimeType = videoMimeType(resolved.clip.source.identity.container);
       return {
+        draftRevision: resolved.draft.revision,
         ...this.dependencies.handles.create(target, mimeType),
         mimeType,
         kind: 'original'
@@ -526,7 +527,8 @@ export class VideoEditorMediaController {
         sourceRange: resolved.clip.sourceRange,
         speed: resolved.clip.speed,
         transform: resolved.clip.transform,
-        sourceAudio: resolved.clip.sourceAudio
+        sourceAudio: resolved.clip.sourceAudio,
+        transitionToNext: resolved.clip.transitionToNext
       };
       const cache = new NodeVideoEditorPreviewCache(context.session.rootDirectory);
       const result = await this.previewAdapter.requestArtifact({
@@ -547,6 +549,7 @@ export class VideoEditorMediaController {
       );
       return {
         kind: result.artifact.kind,
+        draftRevision: resolved.draft.revision,
         ...handle,
         mimeType: result.artifact.mimeType
       };

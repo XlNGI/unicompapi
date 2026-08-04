@@ -401,7 +401,7 @@ function attachInput(
           mode: draft.mode,
           editing: {
             ...draft.editing,
-            lineage: { parentAssetId: asset.id }
+            lineage: { parentAssetId: asset.id, parentAssetRevision: 1 }
           }
         }
       : shared as ImageWorkspaceDraft

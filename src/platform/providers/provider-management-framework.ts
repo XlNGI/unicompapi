@@ -36,6 +36,7 @@ export const providerManagementActions = [
   'connection_created',
   'credential_rotated',
   'connection_validated',
+  'connection_activated',
   'catalog_synced',
   'model_registered_exact',
   'connection_enabled',
@@ -566,6 +567,13 @@ export class ProviderManagementFramework {
         return {
           snapshot: {
             ...latest,
+            currentConnectionId: parsed.state === 'available' &&
+                parsed.identityState === 'verified' &&
+                parsed.credentialState === 'valid'
+              ? latest.currentConnectionId
+              : latest.currentConnectionId === current.id
+                ? null
+                : latest.currentConnectionId,
             connections: latest.connections.map((connection) =>
               connection.id === current.id
                 ? {
@@ -592,6 +600,123 @@ export class ProviderManagementFramework {
       return {
         ok: true,
         value: { connectionId, state: parsed.state, observedAt: parsed.observedAt }
+      };
+    } catch (error) {
+      return frameworkFailure(error);
+    }
+  }
+
+  async activateConnection(input: unknown): Promise<ProviderManagementFrameworkResult<{
+    readonly connectionId: string;
+    readonly state: 'active';
+    readonly observedAt: IsoTimestamp;
+    readonly registryRevision: number;
+  }>> {
+    try {
+      const request = parseActivateConnectionRequest(input);
+      const snapshot = await this.registry.load();
+      if ((snapshot.registryRevision ?? 1) !== request.expectedRegistryRevision) {
+        throw new ProviderManagementFrameworkError(
+          'provider_registry_conflict',
+          'The provider registry changed before connection activation'
+        );
+      }
+      const resolved = resolveOwnedConnection(snapshot, this.packages, request.connectionId);
+      if (resolved.connection.state === 'disabled' || resolved.connection.state === 'deleted') {
+        throw new ProviderManagementFrameworkError(
+          'connection_not_available',
+          'A disabled or deleted provider connection cannot be activated'
+        );
+      }
+      if (!resolved.template.template.freeConnectionValidation) {
+        throw new ProviderManagementFrameworkError(
+          'free_validation_unavailable',
+          'This provider template has no approved free validation operation'
+        );
+      }
+      const adapter = this.adapters.resolve(
+        resolved.connection,
+        resolved.template,
+        'validate_connection'
+      );
+      const parsed = parseValidationObservation(await useStructuredCredential(
+        this.vault,
+        resolved.connection,
+        resolved.template.credentialSchema,
+        (credentials) => adapter.port.validateConnection!({
+          connection: resolved.connection,
+          endpoint: resolved.connection.endpoint,
+          credentials
+        })
+      ));
+      const activated = await this.registry.mutate((latest) => {
+        if ((latest.registryRevision ?? 1) !== request.expectedRegistryRevision) {
+          throw new ProviderManagementFrameworkError(
+            'provider_registry_conflict',
+            'The provider registry changed during connection activation'
+          );
+        }
+        const current = requireUnchangedConnection(
+          latest,
+          resolved.connection,
+          this.packages
+        );
+        const available = parsed.state === 'available' &&
+          parsed.identityState === 'verified' &&
+          parsed.credentialState === 'valid';
+        return {
+          snapshot: {
+            ...latest,
+            currentConnectionId: available
+              ? current.id
+              : latest.currentConnectionId === current.id
+                ? null
+                : latest.currentConnectionId,
+            connections: latest.connections.map((connection) =>
+              connection.id === current.id
+                ? {
+                    ...connection,
+                    state: parsed.state,
+                    identityState: parsed.identityState,
+                    credentialState: parsed.credentialState,
+                    lastConnectionValidationAt: parsed.observedAt,
+                    updatedAt: parsed.observedAt
+                  }
+                : connection
+            )
+          },
+          result: available
+        };
+      });
+      if (!activated) {
+        await this.record({
+          action: 'connection_activated',
+          outcome: 'denied',
+          providerId: resolved.connection.providerId,
+          connectionId: resolved.connection.id,
+          safeCode: parsed.safeCode ?? 'connection_not_available'
+        }, parsed.observedAt);
+        throw new ProviderManagementFrameworkError(
+          'connection_not_available',
+          'The provider connection did not pass live validation'
+        );
+      }
+      const registryRevision = request.expectedRegistryRevision + 1;
+      await this.record({
+        action: 'connection_activated',
+        outcome: 'succeeded',
+        providerId: resolved.connection.providerId,
+        connectionId: resolved.connection.id,
+        safeCode: 'active'
+      }, parsed.observedAt);
+      return {
+        ok: true,
+        value: {
+          connectionId: resolved.connection.id,
+          state: 'active',
+          observedAt: parsed.observedAt,
+          registryRevision
+        }
       };
     } catch (error) {
       return frameworkFailure(error);
@@ -1409,6 +1534,24 @@ function parseEnabledRequest(
     throw invalidRequest();
   }
   return { id: requireId(value[idField]), enabled: value.enabled };
+}
+
+function parseActivateConnectionRequest(value: unknown): {
+  readonly connectionId: string;
+  readonly expectedRegistryRevision: number;
+} {
+  if (!isRecord(value) ||
+    !Number.isSafeInteger(value.expectedRegistryRevision) ||
+    Number(value.expectedRegistryRevision) < 1 ||
+    Object.keys(value).some((key) =>
+      !['connectionId', 'expectedRegistryRevision'].includes(key)
+    )) {
+    throw invalidRequest();
+  }
+  return {
+    connectionId: requireId(value.connectionId),
+    expectedRegistryRevision: Number(value.expectedRegistryRevision)
+  };
 }
 
 function parseDeleteConnectionRequest(value: unknown): {
