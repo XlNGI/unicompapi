@@ -6,6 +6,7 @@ const source = await readFile('src/pages/creation/video/VideoImageWorkspace.tsx'
 const panel = await readFile('src/pages/creation/video/VideoFeatureSubmissionPanel.tsx', 'utf8');
 const shell = await readFile('src/pages/creation/video/VideoWorkbenchPage.tsx', 'utf8');
 const page = await readFile('src/pages/creation/video/ImageToVideoPage.tsx', 'utf8');
+const styles = await readFile('src/styles/pages.css', 'utf8');
 const bundle = `${source}\n${panel}\n${shell}`;
 
 test('image-to-video uses exactly one controlled image source', () => {
@@ -59,4 +60,22 @@ test('image-to-video uses the unified feature panel and opens derived drafts', (
   assert.match(page, /preferredDraftId=\{preferredDraftId\}/);
   assert.match(shell, /drafts\.find\(\(draft\) => draft\.draftId === selectedDraftId\)/);
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
+});
+
+test('image-to-video gives legacy drafts an explicit feature repair action', () => {
+  assert.match(source, /requiresFeatureRepair/);
+  assert.match(source, /repairFeatureSelection/);
+  assert.match(source, /productFeature: 'image_to_video'/);
+  assert.match(source, /blockedRecovery=\{requiresFeatureRepair/);
+  assert.match(panel, /blockedRecovery\.onClick/);
+});
+
+test('image-to-video keeps a bounded main column and submission sidebar', () => {
+  for (const className of ['uc-video-image__workspace', 'uc-video-image__main', 'uc-video-image__submit']) {
+    assert.match(source, new RegExp(className));
+    assert.match(styles, new RegExp(`\\.${className}`));
+  }
+  assert.doesNotMatch(source, /uc-image-professional__workspace|uc-image-quick__composer/);
+  assert.match(styles, /@container \(min-width: 1181px\)[\s\S]*\.uc-video-image__main[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /@container \(max-width: 900px\)/);
 });

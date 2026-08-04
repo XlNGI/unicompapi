@@ -107,7 +107,7 @@ export function VideoQuickWorkspace({
               maxLength={1000}
               onChange={(event) => changePrompt(event.target.value)}
               placeholder="例如：海边日出时，一辆复古列车沿悬崖缓慢驶过"
-              rows={7}
+              rows={4}
               value={draft.prompt.originalInput}
             />
             <small>{draft.prompt.originalInput.length} / 1000</small>

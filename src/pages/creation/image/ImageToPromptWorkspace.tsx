@@ -23,6 +23,7 @@ import {
   ImageSubmissionConfirmations
 } from './ImageGenerationControls';
 import { ImageRegionFields } from './ImageRegionFields';
+import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 
 type ImageToPromptDraftDto = Extract<
   ImageWorkspaceDraftDto,
@@ -362,6 +363,14 @@ export function ImageToPromptWorkspace({
               <p>模型、接收方和费用只来自真实能力预检。</p>
             </div>
           </header>
+          <ImageFeatureSubmissionPanel
+            dirty={dirty}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onDraftPersisted={onDraftPersisted}
+            onMessage={onMessage}
+          />
+          <div className="uc-image-specialized__legacy-submission">
           <Button
             disabled={
               !imageSubmissions ||
@@ -424,6 +433,7 @@ export function ImageToPromptWorkspace({
           <p className="uc-image-quick__hint">
             当前没有真实图片转提示词适配器；不会创建任务、上传图片或伪造草稿。
           </p>
+          </div>
         </Card>
         </div>
 

@@ -58,6 +58,19 @@ function taskState(state?: string) {
   };
 }
 
+function routeLabels(task: StorageTaskSummaryDto) {
+  if (task.routeSummary.state === 'mixed') {
+    return { channel: '多个渠道', model: '多个模型' };
+  }
+  if (task.routeSummary.state === 'single') {
+    return {
+      channel: task.routeSummary.connectionName ?? task.routeSummary.providerName ?? '渠道未记录',
+      model: task.routeSummary.modelName ?? '模型未记录'
+    };
+  }
+  return { channel: '渠道未记录', model: '模型未记录' };
+}
+
 export function TasksPage({ onNavigate }: TasksPageProps) {
   const [view, setView] = useState<'tasks' | 'calls'>('tasks');
   const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>([]);
@@ -254,6 +267,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
             ) : (
               filteredTasks.map((task) => {
                 const state = taskState(task.latestExecutionState);
+                const route = routeLabels(task);
                 return (
                   <button
                     aria-pressed={selectedTaskId === task.taskId}
@@ -268,6 +282,11 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
                     </span>
                     <StatusPill tone={state.tone}>{state.label}</StatusPill>
                     <small>{new Date(task.createdAt).toLocaleString('zh-CN')}</small>
+                    <span className="uc-task-center__task-summary">
+                      <small title={route.channel}><b>渠道</b>{route.channel}</small>
+                      <small title={route.model}><b>模型</b>{route.model}</small>
+                      <small title={task.usageSummary.display}><b>总消耗</b>{task.usageSummary.display}</small>
+                    </span>
                     <small>{task.executionCount} 次执行</small>
                   </button>
                 );
@@ -305,6 +324,7 @@ function TaskDetails({
   onNavigate?: TasksPageProps['onNavigate'];
 }) {
   const state = taskState(details.latestExecutionState);
+  const route = routeLabels(details);
   const retryability = details.retryability === 'retryable'
     ? '可重试'
     : details.retryability === 'not_retryable'
@@ -326,6 +346,29 @@ function TaskDetails({
         <div><dt>执行次数</dt><dd>{details.executionCount}</dd></div>
         <div><dt>恢复能力</dt><dd>{retryability}</dd></div>
       </dl>
+      <dl className="uc-task-center__facts">
+        <div><dt>实际渠道</dt><dd>{route.channel}</dd></div>
+        <div><dt>实际模型</dt><dd>{route.model}</dd></div>
+        <div><dt>实际总消耗</dt><dd>{details.usageSummary.display}</dd></div>
+      </dl>
+      {details.callRecords.length > 0 && (
+        <section className="uc-task-center__call-section" aria-labelledby="task-call-records-title">
+          <h3 id="task-call-records-title">本任务调用记录</h3>
+          <div className="uc-task-center__result-list">
+            {details.callRecords.map((call) => (
+              <article key={call.invocationAttemptId}>
+                <strong>{call.connectionName ?? call.providerName ?? '渠道未记录'}</strong>
+                <small>{call.modelName ?? '模型未记录'} · {call.state}</small>
+                <small>
+                  {call.usageFacts.length
+                    ? call.usageFacts.map((fact) => `${fact.quantity} ${fact.unit}`).join(' · ')
+                    : '上游未报告消耗'}
+                </small>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="uc-task-center__prompt">
         <h3>原始输入</h3>
         <p>{details.originalInput}</p>

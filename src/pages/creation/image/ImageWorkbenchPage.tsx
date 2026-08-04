@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LuFilePlus2,
   LuImagePlus,
@@ -35,7 +35,7 @@ const workspaceErrorMessages: Record<ImageWorkspaceIpcErrorCode, string> = {
   image_unreadable: '所选图片无法读取或未通过本地校验。',
   unsupported_image: '所选文件不是当前可安全读取的本地图片。',
   preview_unavailable: '图片已移动、变化或不可读取，暂时无法预览。',
-  workspace_storage_error: '本地草稿保存失败，请检查项目目录后重试。'
+  workspace_storage_error: '本地草稿保存失败，或旧草稿读取失败；请先备份项目，再检查兼容性和目录权限。'
 };
 
 const draftStateLabels: Record<ImageWorkspaceDraftDto['state'], string> = {
@@ -84,11 +84,21 @@ export function ImageWorkbenchPage({
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
   const currentDraft = drafts[drafts.length - 1];
+  const latestDraftRef = useRef(currentDraft);
+  latestDraftRef.current = currentDraft;
   const isQuickImage = mode.workspaceMode === 'quick_image';
   const isGenerationImage =
     isQuickImage ||
     mode.workspaceMode === 'professional_image';
   const presentation = modePresentation[mode.workspaceMode];
+
+  useEffect(() => {
+    if (!isQuickImage || currentDraft?.mode !== 'quick_image' || !dirty || busy) return;
+    const timeout = window.setTimeout(() => {
+      void saveDraft(currentDraft, true);
+    }, 450);
+    return () => window.clearTimeout(timeout);
+  }, [busy, currentDraft, dirty, isQuickImage]);
 
   useEffect(() => {
     let active = true;
@@ -125,9 +135,20 @@ export function ImageWorkbenchPage({
           setMessage(workspaceErrorMessages[draftResult.error.code]);
           return;
         }
-        setDrafts(
-          draftResult.value.filter((draft) => draft.mode === mode.workspaceMode)
+        const modeDrafts = draftResult.value.filter(
+          (draft) => draft.mode === mode.workspaceMode
         );
+        if (isQuickImage && modeDrafts.length === 0) {
+          const created = await imageWorkspaces.create('quick_image');
+          if (!active) return;
+          if (!created.ok) {
+            setMessage(workspaceErrorMessages[created.error.code]);
+            return;
+          }
+          setDrafts([created.value]);
+        } else {
+          setDrafts(modeDrafts);
+        }
 
         if (providers) {
           const registryResult = await providers
@@ -152,7 +173,7 @@ export function ImageWorkbenchPage({
     return () => {
       active = false;
     };
-  }, [imageWorkspaces, mode.workspaceMode, providers, storage]);
+  }, [imageWorkspaces, isQuickImage, mode.workspaceMode, providers, storage]);
 
   async function createDraft() {
     if (!imageWorkspaces || !session || busy) return;
@@ -174,18 +195,21 @@ export function ImageWorkbenchPage({
     }
   }
 
-  async function saveDraft() {
-    if (!imageWorkspaces || !currentDraft || busy) return;
+  async function saveDraft(
+    draftToSave = currentDraft,
+    automatic = false
+  ) {
+    if (!imageWorkspaces || !draftToSave || busy) return;
     setBusy(true);
-    setMessage('');
+    if (!automatic) setMessage('');
     try {
       const result = await imageWorkspaces.update({
-        ...currentDraft,
+        ...draftToSave,
         state:
-          (currentDraft.mode === 'image_understanding' &&
-            currentDraft.understanding.analysisState === 'stale') ||
-          (currentDraft.mode === 'image_to_prompt' &&
-            currentDraft.imageToPrompt.analysisState === 'stale')
+          (draftToSave.mode === 'image_understanding' &&
+            draftToSave.understanding.analysisState === 'stale') ||
+          (draftToSave.mode === 'image_to_prompt' &&
+            draftToSave.imageToPrompt.analysisState === 'stale')
             ? 'stale'
             : 'saved'
       });
@@ -193,13 +217,18 @@ export function ImageWorkbenchPage({
         setMessage(workspaceErrorMessages[result.error.code]);
         return;
       }
+      if (latestDraftRef.current !== draftToSave) return;
       setDrafts((items) =>
         items.map((draft) =>
           draft.draftId === result.value.draftId ? result.value : draft
         )
       );
       setDirty(false);
-      setMessage('草稿已保存到当前项目；没有创建或提交任务。');
+      setMessage(
+        automatic
+          ? '文字需求已自动保存。'
+          : '草稿已保存到当前项目；没有创建或提交任务。'
+      );
     } catch {
       setMessage('保存本地草稿失败，请重试。');
     } finally {

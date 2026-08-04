@@ -51,8 +51,9 @@ export function VideoImageWorkspace({
       reference.contextRevision === undefined ||
       reference.includeInPrompt === undefined
   );
-  const blockedReason = draft.featureSelection?.productFeature !== 'image_to_video'
-    ? '当前草稿没有固定为图生视频，请重新保存草稿。'
+  const requiresFeatureRepair = draft.featureSelection?.productFeature !== 'image_to_video';
+  const blockedReason = requiresFeatureRepair
+    ? '这是旧版草稿，尚未明确固定为图生视频。请先修复草稿类型，再保存草稿。'
     : draft.imageToVideo.materials
       ? '此旧草稿仍含动态素材槽位，请先明确迁移或移除。'
       : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
@@ -99,6 +100,17 @@ export function VideoImageWorkspace({
       ? { ...draft.prompt, originalInput: value, finalPrompt: value }
       : { ...draft.prompt, [field]: value };
     changeDraft({ ...draft, prompt });
+  }
+
+  function repairFeatureSelection() {
+    changeDraft({
+      ...draft,
+      featureSelection: {
+        productFeature: 'image_to_video',
+        parameterValues: {}
+      }
+    });
+    onMessage('已修复为图生视频草稿；请保存本地草稿后选择模型。');
   }
 
   async function selectImage() {
@@ -192,8 +204,9 @@ export function VideoImageWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-image-professional__workspace">
-        <Card className="uc-image-workbench__panel uc-image-quick__composer">
+      <div className="uc-image-workbench__workspace uc-video-image__workspace">
+        <div className="uc-video-image__main">
+        <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -362,8 +375,9 @@ export function VideoImageWorkspace({
             title="尚无真实生成结果"
           />
         </Card>
+        </div>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-image__submit">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
             <div>
@@ -373,6 +387,10 @@ export function VideoImageWorkspace({
           </header>
           <VideoFeatureSubmissionPanel
             blockedReason={blockedReason}
+            blockedRecovery={requiresFeatureRepair ? {
+              label: '修复为图生视频草稿',
+              onClick: repairFeatureSelection
+            } : undefined}
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as ImageVideoDraftDto)}

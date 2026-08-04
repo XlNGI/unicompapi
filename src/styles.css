@@ -526,7 +526,7 @@ button {
   font-size: 26px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1279px) {
   .title-bar {
     grid-template-columns: 136px minmax(0, 1fr) auto;
   }
@@ -569,6 +569,57 @@ button {
   .nav-sublist {
     margin-left: 14px;
     padding-left: 6px;
+  }
+}
+
+@media (max-width: 900px) {
+  .title-bar {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+  }
+
+  .title-bar__brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .title-bar__brand-name,
+  .nav-item__content > span:not(.nav-item__icon),
+  .nav-item-indicator,
+  .nav-subitem > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .title-bar__project {
+    max-width: min(210px, 32vw);
+  }
+
+  .app-body {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding-inline: 8px;
+  }
+
+  .nav-item,
+  .nav-subitem {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .nav-item__content {
+    justify-content: center;
+  }
+
+  .nav-sublist {
+    margin-left: 0;
+    border-left: 0;
+    padding-left: 0;
   }
 }
 

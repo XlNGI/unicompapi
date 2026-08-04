@@ -14,6 +14,7 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
+const pageStyles = await readFile('src/styles/pages.css', 'utf8');
 const source = `${quickSource}\n${featurePanelSource}`;
 
 test('quick image is pure text-to-image with no material or context entry', () => {
@@ -45,7 +46,23 @@ test('legacy quick drafts can only derive into professional creation', () => {
   assert.match(quickSource, /旧草稿需要迁移/);
   assert.match(quickSource, /\.derive\([\s\S]*'professional_image'/);
   assert.match(quickSource, /blockedReason=\{legacyReason\}/);
+  assert.match(featurePanelSource, /blockedReason && !isQuick/);
   assert.doesNotMatch(quickSource, /clearInput\(|selectInput\(/);
+});
+
+test('quick image keeps separate complete cards without a broken accent frame', () => {
+  assert.match(quickSource, /rows=\{4\}/);
+  assert.match(pageStyles, /\.uc-image-quick__workspace[\s\S]*gap: var\(--uc-space-3\)/);
+  assert.doesNotMatch(pageStyles, /border-bottom-color: transparent/);
+  assert.match(pageStyles, /@container \(min-width: 1181px\)[\s\S]*"composer stage"[\s\S]*"inspector stage"/);
+  assert.match(
+    pageStyles,
+    /data-mode="quick_image"\] \.uc-image-workbench__header[\s\S]*width: min\(100%, 1080px\)/
+  );
+  assert.match(
+    pageStyles,
+    /@container \(min-width: 1181px\)[\s\S]*data-mode="quick_image"\] \.uc-image-workbench__workspace[\s\S]*grid-template-columns: minmax\(0, 1\.15fr\) minmax\(380px, 0\.85fr\)/
+  );
 });
 
 test('quick image uses the safe feature DTO and one business submission action', () => {
@@ -53,10 +70,10 @@ test('quick image uses the safe feature DTO and one business submission action',
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));
   }
-  assert.match(featurePanelSource, /parameterSchema\.fields\.map/);
-  assert.match(featurePanelSource, /服务商 \/ 连接 \/ 模型/);
+  assert.match(featurePanelSource, /生成模型/);
+  assert.match(featurePanelSource, /isQuick/);
   assert.match(featurePanelSource, /确认本次外发/);
-  assert.match(featurePanelSource, /确认并提交/);
+  assert.match(featurePanelSource, /确认并\$\{imageActionLabel/);
   assert.doesNotMatch(featurePanelSource, /defaultParameterValues|ImageGenerationModelFields/);
   assert.doesNotMatch(
     source,
@@ -92,4 +109,18 @@ test('workbench does not pass the old provider registry into quick image', () =>
   const end = workbenchSource.indexOf('/>', start);
   const invocation = workbenchSource.slice(start, end);
   assert.doesNotMatch(invocation, /registry=|onVideoDraftCreated/);
+});
+
+test('quick image auto-saves text before model selection without overwriting newer edits', () => {
+  assert.match(workbenchSource, /isQuickImage[\s\S]*setTimeout/);
+  assert.match(workbenchSource, /saveDraft\(currentDraft, true\)/);
+  assert.match(workbenchSource, /latestDraftRef\.current !== draftToSave/);
+});
+
+test('quick image prepares its local draft so the model selector is not hidden behind engineering setup', () => {
+  assert.match(
+    workbenchSource,
+    /isQuickImage && modeDrafts\.length === 0[\s\S]*imageWorkspaces\.create\('quick_image'\)/
+  );
+  assert.match(featurePanelSource, /<span>生成模型<\/span>/);
 });

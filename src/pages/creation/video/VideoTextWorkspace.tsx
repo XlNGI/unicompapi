@@ -34,8 +34,9 @@ export function VideoTextWorkspace({
       reference.contextRevision === undefined ||
       reference.includeInPrompt === undefined
   );
-  const blockedReason = draft.featureSelection?.productFeature !== 'text_to_video'
-    ? '当前草稿没有固定为文生视频，请重新保存草稿。'
+  const requiresFeatureRepair = draft.featureSelection?.productFeature !== 'text_to_video';
+  const blockedReason = requiresFeatureRepair
+    ? '这是旧版草稿，尚未明确固定为文生视频。请先修复草稿类型，再保存草稿。'
     : draft.textToVideo.materials
       ? '此旧草稿含素材槽位；文生视频必须移除全部素材后才能提交。'
       : unsupportedContexts.length > 0
@@ -55,6 +56,17 @@ export function VideoTextWorkspace({
       ? { ...draft.prompt, originalInput: value, finalPrompt: value }
       : { ...draft.prompt, [field]: value };
     changeDraft({ ...draft, prompt });
+  }
+
+  function repairFeatureSelection() {
+    changeDraft({
+      ...draft,
+      featureSelection: {
+        productFeature: 'text_to_video',
+        parameterValues: {}
+      }
+    });
+    onMessage('已修复为文生视频草稿；请保存本地草稿后选择模型。');
   }
 
   function addShot() {
@@ -118,8 +130,9 @@ export function VideoTextWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-image-professional__workspace">
-        <Card className="uc-image-workbench__panel uc-image-quick__composer">
+      <div className="uc-image-workbench__workspace uc-video-text__workspace">
+        <div className="uc-video-text__main">
+        <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -241,8 +254,9 @@ export function VideoTextWorkspace({
             title="尚无真实生成结果"
           />
         </Card>
+        </div>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
             <div>
@@ -252,6 +266,10 @@ export function VideoTextWorkspace({
           </header>
           <VideoFeatureSubmissionPanel
             blockedReason={blockedReason}
+            blockedRecovery={requiresFeatureRepair ? {
+              label: '修复为文生视频草稿',
+              onClick: repairFeatureSelection
+            } : undefined}
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as TextVideoDraftDto)}

@@ -47,4 +47,12 @@ test('A1 keeps controls accessible and layout responsive', () => {
   assert.match(styles, /\.uc-settings__workspace/);
   assert.match(styles, /@media \(max-width: 1500px\)/);
   assert.match(styles, /@media \(max-width: 1180px\)/);
+  assert.match(styles, /@container \(max-width: 760px\)/);
+});
+
+test('opening or reloading settings does not overwrite the active theme', () => {
+  assert.match(page, /acceptSnapshot\(next: SettingsSnapshotDto, applySnapshotTheme = false\)/);
+  assert.match(page, /theme: preferenceRef\.current/);
+  assert.match(page, /if \(applySnapshotTheme\) setPreference\(next\.values\.general\.theme\)/);
+  assert.equal(page.match(/acceptSnapshot\(result\.value, true\)/g)?.length, 2);
 });

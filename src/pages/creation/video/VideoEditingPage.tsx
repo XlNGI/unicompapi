@@ -14,6 +14,7 @@ import type {
   VideoEditorCanvasDto,
   VideoEditorBackgroundMusicDto,
   VideoEditorClipDto,
+  VideoEditorCompositionPreviewDto,
   VideoEditorCoverDto,
   VideoEditorDraftDto,
   VideoEditorExportPreflightDto,
@@ -51,7 +52,7 @@ const errorMessages: Partial<Record<VideoEditorIpcErrorCode, string>> = {
   relink_token_invalid: '重新定位确认已经失效，请重新选择文件。',
   relink_mismatch_confirmation_required: '候选文件与原文件不同，需要明确确认。',
   relink_candidate_too_short: '候选视频太短，无法覆盖当前片段的裁剪范围。',
-  preview_unavailable: '原片预览不可用，请先恢复源文件。',
+  preview_unavailable: '预览不可用，请检查源文件和本地媒体引擎。',
   adapter_unavailable: '当前未检测到经批准的本地媒体引擎，请检查本机工具链。',
   export_preflight_failed: '导出预检未通过，请按原因修复后重新检查。',
   export_not_found: '导出任务已不存在，请前往任务中心核对。',
@@ -120,6 +121,10 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
     Readonly<Record<string, VideoEditorSourceStatusDto>>
   >({});
   const [preview, setPreview] = useState<VideoEditorSourcePreviewDto>();
+  const [compositionPreview, setCompositionPreview] =
+    useState<VideoEditorCompositionPreviewDto>();
+  const [compositionPreviewCapability, setCompositionPreviewCapability] =
+    useState<'available' | 'unavailable'>('unavailable');
   const [playheadUs, setPlayheadUs] = useState(0);
   const [title, setTitle] = useState('');
   const [mediaTab, setMediaTab] = useState<MediaTab>('timeline');
@@ -160,9 +165,10 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
         return;
       }
 
-      const [listResult, worksResult] = await Promise.all([
+      const [listResult, worksResult, capabilitiesResult] = await Promise.all([
         videoEditors.list(),
-        storage.listWorks()
+        storage.listWorks(),
+        videoEditors.getCapabilities()
       ]);
       if (!active) return;
       setLoading(false);
@@ -179,6 +185,11 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
         setImageWorks(projectWorks.filter((work) => work.mediaKind === 'image'));
         setSelectedWorkId(works[0]?.workId ?? '');
       }
+      setCompositionPreviewCapability(
+        capabilitiesResult.ok
+          ? capabilitiesResult.value.compositionPreview
+          : 'unavailable'
+      );
       const sorted = sortDrafts(listResult.value);
       setDrafts(sorted);
       acceptDraft(sorted[0]);
@@ -299,6 +310,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
     setTitle(draft?.title ?? '');
     setSaveState('saved');
     setPreview(undefined);
+    setCompositionPreview(undefined);
     setExportPreflight(undefined);
     setExportConfirmed(false);
     const nextClipId =
@@ -628,9 +640,39 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
         return;
       }
       setPreview(result.value);
+      setCompositionPreview(undefined);
       setMessage('已创建经过重新校验的短期原片预览。');
     } catch {
       setMessage('加载原片预览失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadCompositionPreview() {
+    if (
+      !videoEditors ||
+      !currentDraft ||
+      currentDraft.videoTrack.length === 0 ||
+      compositionPreviewCapability !== 'available' ||
+      operationBlocked
+    ) return;
+    setBusy(true);
+    setMessage('正在生成当前时间线的本地合成预览…');
+    try {
+      const result = await videoEditors.createCompositionPreview(
+        currentDraft.draftId,
+        currentDraft.revision
+      );
+      if (!result.ok) {
+        handleError(result.error);
+        return;
+      }
+      setCompositionPreview(result.value);
+      setPreview(undefined);
+      setMessage('合成预览已就绪，画面反映当前草稿的片段、转场、文字与音频。');
+    } catch {
+      setMessage('生成合成预览失败，请检查本地媒体引擎后重试。');
     } finally {
       setBusy(false);
     }
@@ -1048,20 +1090,20 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
               }
               title="预览舞台"
             />
-            {preview ? (
+            {compositionPreview || preview ? (
               <video
                 className="uc-video-editor__video"
                 controls
-                key={preview.url}
+                key={(compositionPreview ?? preview)?.url}
                 onLoadedMetadata={() => {
-                  if (videoRef.current && selectedClip) {
+                  if (!compositionPreview && videoRef.current && selectedClip) {
                     videoRef.current.currentTime =
                       selectedClip.sourceRange.inUs / 1_000_000;
                   }
                 }}
-                onTimeUpdate={syncPlayheadFromPreview}
+                onTimeUpdate={compositionPreview ? undefined : syncPlayheadFromPreview}
                 ref={videoRef}
-                src={preview.url}
+                src={(compositionPreview ?? preview)?.url}
               />
             ) : (
               <EmptyState
@@ -1077,11 +1119,22 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
             )}
             <div className="uc-video-editor__transport">
               <Button
+                disabled={
+                  !currentDraft ||
+                  currentDraft.videoTrack.length === 0 ||
+                  operationBlocked ||
+                  compositionPreviewCapability !== 'available'
+                }
+                onClick={() => void loadCompositionPreview()}
+              >
+                生成合成预览
+              </Button>
+              <Button
                 disabled={!selectedClip || busy}
                 onClick={() => void loadPreview()}
                 variant="secondary"
               >
-                加载原片预览
+                查看原片
               </Button>
               <Button
                 disabled={!selectedClip || busy}
@@ -1091,7 +1144,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
                 检查预览代理
               </Button>
               <span>
-                {formatTime(playheadUs)} / {formatTime(totalDurationUs)}
+                {compositionPreview ? '合成预览' : '原片预览'} · {formatTime(playheadUs)} / {formatTime(totalDurationUs)}
               </span>
             </div>
           </Card>

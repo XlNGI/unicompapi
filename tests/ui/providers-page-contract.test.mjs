@@ -8,8 +8,8 @@ test('provider page is driven by registry and package templates', () => {
   assert.match(source, /providersApi\.getRegistry\(\)/);
   assert.match(source, /providersApi\.listTemplates\(\)/);
   assert.match(source, /item\.kind === kind/);
-  assert.match(source, /createTemplate\.packageId/);
-  assert.match(source, /createTemplate\.templateId/);
+  assert.match(source, /template\.packageId/);
+  assert.match(source, /template\.templateId/);
   assert.match(source, /createTemplate\?\.baseUrlMode !== 'fixed'/);
   assert.doesNotMatch(
     source,
@@ -54,6 +54,12 @@ test('online validation and discovery stay disabled pending explicit approval', 
   assert.match(source, /selectedTemplate\?\.modelDiscoveryAction !== 'catalog_available'/);
   assert.match(source, /validationAction === 'requires_live_api_approval'/);
   assert.match(source, /modelDiscoveryAction === 'requires_live_api_approval'/);
+  assert.match(source, /等待验证授权/);
+  assert.match(source, /验证并连接/);
+  assert.match(source, /保存并验证/);
+  assert.match(source, /仅保存连接/);
+  assert.match(source, /template\.validationAction !== 'available'/);
+  assert.match(source, /template\.modelDiscoveryAction === 'catalog_available'/);
   assert.doesNotMatch(
     source,
     /getViduLiveValidation|startViduLiveValidation|confirmImageBillableAttempt|confirmVideoBillableAttempt/

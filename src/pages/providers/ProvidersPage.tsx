@@ -196,22 +196,22 @@ export function ProvidersPage() {
     action: () => Promise<ProviderFrameworkResult<T>>,
     successMessage: string,
     preferredConnectionId?: string
-  ): Promise<boolean> {
-    if (busy) return false;
+  ): Promise<T | undefined> {
+    if (busy) return undefined;
     setBusy(true);
     setMessage('');
     try {
       const result = await action();
       if (!result.ok) {
         setMessage(describeError(result.error.code));
-        return false;
+        return undefined;
       }
       setMessage(successMessage);
       await refreshRegistry(preferredConnectionId);
-      return true;
+      return result.value;
     } catch {
       setMessage('操作失败，请重试');
-      return false;
+      return undefined;
     } finally {
       setBusy(false);
     }
@@ -229,19 +229,41 @@ export function ProvidersPage() {
   async function handleCreateConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!providersApi || !createTemplate || !connectionName.trim()) return;
+    const template = createTemplate;
     const created = await runAction(
       () => providersApi.createConnection({
-        packageId: createTemplate.packageId,
-        templateId: createTemplate.templateId,
+        packageId: template.packageId,
+        templateId: template.templateId,
         name: connectionName.trim(),
         ...(endpoint.trim() ? { endpoint: endpoint.trim() } : {}),
         credentials: newCredentials
       }),
-      '连接和凭证已安全保存，尚未发起在线验证'
+      template.validationAction === 'available'
+        ? '连接和凭证已安全保存，正在准备验证'
+        : '连接和凭证已安全保存，状态为待验证；未发起联网请求'
     );
-    if (created) {
-      setAddingConnection(false);
-      setNewCredentials({});
+    if (!created) return;
+    setAddingConnection(false);
+    setNewCredentials({});
+    await refreshRegistry(created.connectionId);
+    if (template.validationAction !== 'available') return;
+
+    const latest = await providersApi.getRegistry();
+    if (!latest.ok || latest.value.registryRevision === undefined) {
+      setMessage('连接已保存，但无法读取最新状态，请刷新后重试验证');
+      return;
+    }
+    const activated = await runAction(
+      () => providersApi.activateConnection(created.connectionId, latest.value.registryRevision as number),
+      '连接已验证并设为当前使用',
+      created.connectionId
+    );
+    if (activated && template.modelDiscoveryAction === 'catalog_available') {
+      await runAction(
+        () => providersApi.syncModelCatalog(created.connectionId),
+        '连接已验证并设为当前使用，模型目录已同步',
+        created.connectionId
+      );
     }
   }
 
@@ -402,8 +424,15 @@ export function ProvidersPage() {
                 </label>
               ))}
             </div>
+            <p className="uc-provider-page__muted">
+              {createTemplate?.validationAction === 'available'
+                ? '保存后将立即联网验证；成功后设为当前连接，并在支持时同步模型目录。'
+                : '当前模板仅保存本机配置，不会联网；保存后状态为待验证。'}
+            </p>
             <Button disabled={busy || !createTemplate || !connectionName.trim()} type="submit">
-              {busy ? '正在保存…' : '保存连接'}
+              {busy
+                ? createTemplate?.validationAction === 'available' ? '正在保存并验证…' : '正在保存…'
+                : createTemplate?.validationAction === 'available' ? '保存并验证' : '仅保存连接'}
             </Button>
           </form>
         </Card>
@@ -449,6 +478,9 @@ export function ProvidersPage() {
                     <span className="uc-provider-page__connection-icon" aria-hidden="true">{(provider?.name ?? connection.name).slice(0, 1)}</span>
                     <span>
                       <strong>{connection.name}</strong>
+                      {registry.currentConnectionId === connection.connectionId && (
+                        <StatusPill tone="success">当前使用</StatusPill>
+                      )}
                       <small>{provider?.name ?? '未知服务商'}</small>
                       <StatusPill tone={toneForState(connection.state)}>{connectionLabels[connection.state] ?? '未知'}</StatusPill>
                     </span>
@@ -470,6 +502,34 @@ export function ProvidersPage() {
                     <p>{selectedProvider?.name ?? selectedTemplate?.providerName ?? '未知服务商'}</p>
                   </div>
                   <div className="uc-provider-page__header-actions">
+                    {registry.currentConnectionId === selectedConnection.connectionId ? (
+                      <StatusPill tone="success">当前使用</StatusPill>
+                    ) : (
+                      <Button
+                        disabled={
+                          busy ||
+                          registry.registryRevision === undefined ||
+                          selectedTemplate?.validationAction !== 'available' ||
+                          ['deleted', 'disabled'].includes(selectedConnection.state)
+                        }
+                        title={selectedTemplate?.validationAction === 'requires_live_api_approval'
+                          ? '等待真实 API 专项批准后才能验证并设为当前连接'
+                          : undefined}
+                        onClick={() => providersApi && registry.registryRevision !== undefined && void runAction(
+                          () => providersApi.activateConnection(
+                            selectedConnection.connectionId,
+                            registry.registryRevision as number
+                          ),
+                          '连接已验证并设为当前使用',
+                          selectedConnection.connectionId
+                        )}
+                      >
+                        <LuShieldCheck aria-hidden="true" />
+                        {selectedTemplate?.validationAction === 'requires_live_api_approval'
+                          ? '等待验证授权'
+                          : '验证并连接'}
+                      </Button>
+                    )}
                     <StatusPill tone={toneForState(selectedConnection.state)}>{connectionLabels[selectedConnection.state] ?? '未知'}</StatusPill>
                     {selectedConnection.state !== 'deleted' && (
                       <Button

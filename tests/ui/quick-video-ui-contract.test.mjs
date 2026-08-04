@@ -19,6 +19,8 @@ test('quick video migrates legacy drafts explicitly without silently clearing th
   assert.match(quick, /\.derive\(draft\.draftId, targetMode\)/);
   assert.match(quick, /'image_to_video'/);
   assert.match(quick, /'text_to_video'/);
+  assert.match(quick, /rows=\{4\}/);
+  assert.match(panel, /blockedReason && !isQuick/);
   assert.doesNotMatch(quick, /quick:\s*\{\}/);
 });
 
@@ -36,4 +38,10 @@ test('quick video reports the blocked runtime and never invents a result', () =>
   assert.match(quick, /尚无真实生成结果/);
   assert.match(panel, /runtime_not_allowed/);
   assert.doesNotMatch(bundle, /默认 1 个结果|16:9|1080p|24fps|Runway|Sora/);
+});
+
+test('quick video auto-saves text before model selection without overwriting newer edits', () => {
+  assert.match(shell, /currentDraft\?\.mode !== 'quick_video'[\s\S]*setTimeout/);
+  assert.match(shell, /saveDraft\(currentDraft, true\)/);
+  assert.match(shell, /latestDraftRef\.current !== draftToSave/);
 });

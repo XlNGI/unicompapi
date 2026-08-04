@@ -64,6 +64,10 @@ interface EntityCollection<TEntity> {
   readonly entities: readonly TEntity[];
 }
 
+type EntityNormalizer = (
+  value: Record<string, unknown>
+) => Record<string, unknown>;
+
 class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends string> {
   constructor(
     private readonly storage: ProjectStorageAdapter,
@@ -71,7 +75,8 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
     private readonly scopeId: TScopeId | undefined,
     private readonly getScopeId: (entity: TEntity) => TScopeId,
     private readonly validateEntity: EntityValidator,
-    private readonly exclusiveScope = true
+    private readonly exclusiveScope = true,
+    private readonly normalizeEntity?: EntityNormalizer
   ) {}
 
   async get<TId extends string>(id: TId): Promise<TEntity | undefined> {
@@ -144,11 +149,23 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
     }
 
     const ids = new Set<string>();
+    const entities: TEntity[] = [];
 
-    for (const entity of value.entities) {
+    for (const storedEntity of value.entities) {
       if (
-        !isRecord(entity) ||
-        entity.schemaVersion !== 1 ||
+        !isRecord(storedEntity) ||
+        storedEntity.schemaVersion !== 1 ||
+        typeof storedEntity.id !== 'string' ||
+        storedEntity.id.trim().length === 0
+      ) {
+        throw new RepositoryDataError(
+          this.path,
+          'contains an invalid project-scoped entity'
+        );
+      }
+
+      const entity = this.normalizeEntity?.(storedEntity) ?? storedEntity;
+      if (
         typeof entity.id !== 'string' ||
         entity.id.trim().length === 0 ||
         !this.validateEntity(entity)
@@ -179,12 +196,13 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
       }
 
       ids.add(entity.id);
+      entities.push(typedEntity);
     }
 
     return {
       schemaVersion: 2,
       revision: value.schemaVersion === 1 ? 0 : Number(value.revision),
-      entities: value.entities as readonly TEntity[]
+      entities
     };
   }
 
@@ -285,7 +303,9 @@ export class JsonImageWorkspaceRepository
       projectStoragePaths.entities.imageWorkspaceDrafts,
       projectId,
       (draft) => draft.projectId,
-      isImageWorkspaceEntity
+      isImageWorkspaceEntity,
+      true,
+      normalizeLegacyImageWorkspaceEntity
     );
   }
 
@@ -300,6 +320,52 @@ export class JsonImageWorkspaceRepository
   save(draft: ImageWorkspaceDraft) {
     return this.collection.save(draft);
   }
+}
+
+function normalizeLegacyImageWorkspaceEntity(
+  value: Record<string, unknown>
+): Record<string, unknown> {
+  if (value.schemaVersion !== 1) return value;
+
+  if (value.mode === 'image_understanding' && isRecord(value.understanding)) {
+    return value.understanding.resultRevision === undefined
+      ? {
+          ...value,
+          understanding: { ...value.understanding, resultRevision: 0 }
+        }
+      : value;
+  }
+
+  if (value.mode === 'image_to_prompt' && isRecord(value.imageToPrompt)) {
+    return value.imageToPrompt.resultRevision === undefined ||
+      value.imageToPrompt.promptRevision === undefined
+      ? {
+          ...value,
+          imageToPrompt: {
+            ...value.imageToPrompt,
+            resultRevision: value.imageToPrompt.resultRevision ?? 0,
+            promptRevision: value.imageToPrompt.promptRevision ?? 0
+          }
+        }
+      : value;
+  }
+
+  if (
+    value.mode === 'image_editing' &&
+    isRecord(value.editing) &&
+    isRecord(value.editing.lineage) &&
+    value.editing.lineage.parentAssetRevision === undefined
+  ) {
+    return {
+      ...value,
+      editing: {
+        ...value.editing,
+        lineage: { ...value.editing.lineage, parentAssetRevision: 1 }
+      }
+    };
+  }
+
+  return value;
 }
 
 export class JsonVideoWorkspaceRepository

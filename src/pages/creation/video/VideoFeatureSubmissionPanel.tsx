@@ -17,6 +17,10 @@ interface VideoFeatureSubmissionPanelProps {
   readonly dirty: boolean;
   readonly draft: VideoWorkspaceDraftDto;
   readonly blockedReason?: string;
+  readonly blockedRecovery?: {
+    readonly label: string;
+    readonly onClick: () => void;
+  };
   readonly onDraftChange: (draft: VideoWorkspaceDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
@@ -58,6 +62,7 @@ export function VideoFeatureSubmissionPanel({
   dirty,
   draft,
   blockedReason,
+  blockedRecovery,
   onDraftChange,
   onMessage
 }: VideoFeatureSubmissionPanelProps) {
@@ -76,6 +81,15 @@ export function VideoFeatureSubmissionPanel({
   const selectedCandidate = candidates.find(
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
+  const isQuick = draft.mode === 'quick_video';
+  const parameterFields = (selectedCandidate?.parameterSchema.fields ?? []).filter((field) => {
+    const condition = field.display?.visibleWhen;
+    if (!condition) return true;
+    const matches = featureSelection.parameterValues[condition.fieldId] === condition.value;
+    return condition.operator === 'equals' ? matches : !matches;
+  });
+  const requiredParameters = parameterFields.filter((field) => field.required);
+  const optionalParameters = parameterFields.filter((field) => !field.required);
 
   useEffect(() => {
     let active = true;
@@ -205,9 +219,9 @@ export function VideoFeatureSubmissionPanel({
   }
 
   return (
-    <div className="uc-image-feature-panel">
+    <div className="uc-image-feature-panel" data-quick={isQuick || undefined}>
       <label className="uc-image-quick__field">
-        <span>服务商 / 连接 / 模型</span>
+        <span>生成模型</span>
         <select
           disabled={!api || dirty || loadState !== 'loaded' || candidates.length === 0}
           onChange={(event) => changeCandidate(event.target.value)}
@@ -216,7 +230,7 @@ export function VideoFeatureSubmissionPanel({
           <option value="">请选择服务候选</option>
           {candidates.map((candidate) => (
             <option key={candidate.candidateId} value={candidate.candidateId}>
-              {candidate.providerName} / {candidate.connectionName} / {candidate.modelName}
+              {candidate.modelName}
               {candidate.available ? '' : '（不可用）'}
             </option>
           ))}
@@ -233,16 +247,15 @@ export function VideoFeatureSubmissionPanel({
 
       {selectedCandidate ? (
         <>
-          <div className="uc-image-feature-panel__facts">
+          {!isQuick && <div className="uc-image-feature-panel__facts">
             <span>
-              <strong>参数合同</strong>
-              {selectedCandidate.parameterSchema.schemaId} · revision {selectedCandidate.parameterSchema.revision}
+              <strong>动态参数</strong>
+              {parameterFields.length} 项 · 随模型能力加载
             </span>
-            <span><strong>费用</strong>{costLabel(selectedCandidate.cost)}</span>
             <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
               {selectedCandidate.available ? '可准备' : '当前不可用'}
             </StatusPill>
-          </div>
+          </div>}
           {!selectedCandidate.available ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>
@@ -251,10 +264,10 @@ export function VideoFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          <div className="uc-image-quick__parameters">
-            {selectedCandidate.parameterSchema.fields.length === 0 ? (
+          {!isQuick && <div className="uc-image-quick__parameters">
+            {parameterFields.length === 0 ? (
               <p className="uc-image-quick__hint">当前表面没有需要用户填写的参数。</p>
-            ) : selectedCandidate.parameterSchema.fields.map((field) => (
+            ) : requiredParameters.map((field) => (
               <ParameterField
                 field={field}
                 key={field.fieldId}
@@ -262,14 +275,34 @@ export function VideoFeatureSubmissionPanel({
                 value={featureSelection.parameterValues[field.fieldId]}
               />
             ))}
-          </div>
+            {optionalParameters.length > 0 && (
+              <details className="uc-dynamic-parameters__optional">
+                <summary>可选参数（{optionalParameters.length}）</summary>
+                <div className="uc-dynamic-parameters__grid">
+                  {optionalParameters.map((field) => (
+                    <ParameterField
+                      field={field}
+                      key={field.fieldId}
+                      onChange={(value) => changeParameter(field.fieldId, value)}
+                      value={featureSelection.parameterValues[field.fieldId]}
+                    />
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>}
         </>
       ) : null}
 
-      {blockedReason ? (
+      {blockedReason && !isQuick ? (
         <div className="uc-image-quick__preflight" role="status">
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>
+          {blockedRecovery ? (
+            <Button onClick={blockedRecovery.onClick} variant="secondary">
+              {blockedRecovery.label}
+            </Button>
+          ) : null}
         </div>
       ) : dirty || draft.state !== 'saved' ? (
         <p className="uc-image-quick__hint" role="status">
@@ -311,7 +344,7 @@ export function VideoFeatureSubmissionPanel({
         onClick={() => void (preparation ? submit() : prepare())}
       >
         {preparation ? <LuSend aria-hidden="true" /> : <LuShieldCheck aria-hidden="true" />}
-        {busy ? '处理中' : preparation ? '确认并提交' : '准备生成'}
+        {busy ? '处理中' : preparation ? '确认并生成' : '生成视频'}
       </Button>
     </div>
   );
@@ -326,7 +359,7 @@ function ParameterField({
   readonly value: VideoWorkspaceParameterValueDto | undefined;
   readonly onChange: (value: VideoWorkspaceParameterValueDto | undefined) => void;
 }) {
-  const label = `${field.labelId}${field.required ? '（必填）' : ''}`;
+  const label = `${field.display?.label ?? field.labelId}${field.required ? '（必填）' : ''}`;
   if (field.valueType === 'boolean') {
     return (
       <label className="uc-image-quick__checkbox">
@@ -335,14 +368,15 @@ function ParameterField({
           onChange={(event) => onChange(event.target.checked)}
           type="checkbox"
         />
-        <span>{label}</span>
+        <span title={parameterHelp(field)}>{label}</span>
+        <ParameterHelp field={field} />
       </label>
     );
   }
   if (field.valueType === 'enum') {
     return (
       <label className="uc-image-quick__field">
-        <span>{label}</span>
+        <span title={parameterHelp(field)}>{label}</span>
         <select
           onChange={(event) => {
             const option = field.options?.find((item) => String(item) === event.target.value);
@@ -352,16 +386,17 @@ function ParameterField({
         >
           <option value="">请选择</option>
           {field.options?.map((option) => (
-            <option key={String(option)} value={String(option)}>{String(option)}</option>
+            <option key={String(option)} value={String(option)}>{optionLabel(field, option)}</option>
           ))}
         </select>
+        <ParameterHelp field={field} />
       </label>
     );
   }
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
       <label className="uc-image-quick__field">
-        <span>{label}</span>
+        <span title={parameterHelp(field)}>{label}</span>
         <input
           max={field.maximum}
           min={field.minimum}
@@ -372,13 +407,14 @@ function ParameterField({
           type="number"
           value={typeof value === 'number' ? value : ''}
         />
+        <ParameterHelp field={field} />
       </label>
     );
   }
   if (field.valueType === 'string_array' || field.valueType === 'number_array') {
     return (
       <label className="uc-image-quick__field">
-        <span>{label}</span>
+        <span title={parameterHelp(field)}>{label}</span>
         <input
           onChange={(event) => {
             const items = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
@@ -392,6 +428,7 @@ function ParameterField({
           type="text"
           value={Array.isArray(value) ? value.join(', ') : ''}
         />
+        <ParameterHelp field={field} />
       </label>
     );
   }
@@ -401,19 +438,21 @@ function ParameterField({
   if (field.valueType === 'media_slot') {
     return (
       <label className="uc-image-quick__field">
-        <span>{label}</span>
+        <span title={parameterHelp(field)}>{label}</span>
         <input disabled readOnly value="由当前草稿的受控图片提供" />
+        <ParameterHelp field={field} />
       </label>
     );
   }
   return (
     <label className="uc-image-quick__field">
-      <span>{label}</span>
+      <span title={parameterHelp(field)}>{label}</span>
       <input
         onChange={(event) => onChange(event.target.value || undefined)}
         type="text"
         value={typeof value === 'string' ? value : ''}
       />
+      <ParameterHelp field={field} />
     </label>
   );
 }
@@ -435,7 +474,7 @@ function ObjectParameterField({
   }, [value]);
   return (
     <label className="uc-image-quick__field">
-      <span>{field.labelId}{field.required ? '（必填）' : ''}</span>
+      <span title={parameterHelp(field)}>{field.display?.label ?? field.labelId}{field.required ? '（必填）' : ''}</span>
       <textarea
         aria-invalid={invalid}
         onBlur={() => {
@@ -460,8 +499,25 @@ function ObjectParameterField({
         value={text}
       />
       {invalid ? <small role="alert">请输入有效的 JSON 对象。</small> : null}
+      <ParameterHelp field={field} />
     </label>
   );
+}
+
+function ParameterHelp({ field }: { readonly field: VideoFeatureParameterFieldDto }) {
+  const help = parameterHelp(field);
+  return help ? <small className="uc-dynamic-parameters__help">{help}</small> : null;
+}
+
+function parameterHelp(field: VideoFeatureParameterFieldDto): string {
+  const range = field.minimum !== undefined || field.maximum !== undefined
+    ? `范围 ${field.minimum ?? '不限'}–${field.maximum ?? '不限'}${field.unitId ? ` ${field.unitId}` : ''}`
+    : field.unitId ? `单位 ${field.unitId}` : '';
+  return [field.display?.description, field.display?.note, range].filter(Boolean).join(' · ');
+}
+
+function optionLabel(field: VideoFeatureParameterFieldDto, value: string | number | boolean) {
+  return field.display?.optionLabels?.find((option) => option.value === value)?.label ?? String(value);
 }
 
 function resetGeneration(): VideoWorkspaceDraftDto['generation'] {

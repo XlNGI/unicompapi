@@ -140,7 +140,9 @@ const categories: readonly SettingsCategoryItem[] = [
 
 export function SettingsPage() {
   const settings = window.unicomp?.settings;
-  const { setPreference } = useTheme();
+  const { preference, setPreference } = useTheme();
+  const preferenceRef = useRef(preference);
+  preferenceRef.current = preference;
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('general');
   const [query, setQuery] = useState('');
   const [snapshot, setSnapshot] = useState<SettingsSnapshotDto>();
@@ -217,10 +219,19 @@ export function SettingsPage() {
     };
   }, [settings]);
 
-  function acceptSnapshot(next: SettingsSnapshotDto) {
+  function acceptSnapshot(next: SettingsSnapshotDto, applySnapshotTheme = false) {
+    const nextValues = applySnapshotTheme
+      ? next.values
+      : {
+          ...next.values,
+          general: {
+            ...next.values.general,
+            theme: preferenceRef.current
+          }
+        };
     setSnapshot(next);
-    setValues(next.values);
-    setPreference(next.values.general.theme);
+    setValues(nextValues);
+    if (applySnapshotTheme) setPreference(next.values.general.theme);
     setSaveState('saved');
     setMessage(snapshotSourceMessage(next));
   }
@@ -237,7 +248,7 @@ export function SettingsPage() {
         setMessage(settingsErrorMessage(result.error.code));
         return;
       }
-      acceptSnapshot(result.value);
+      acceptSnapshot(result.value, true);
     } catch {
       setSaveState('failed');
       setMessage('保存失败；页面中的待保存值仍保留，可以重试。');
@@ -420,7 +431,7 @@ export function SettingsPage() {
         setMessage(settingsErrorMessage(result.error.code));
         return;
       }
-      acceptSnapshot(result.value);
+      acceptSnapshot(result.value, true);
       await refreshSystemStatus();
       await refreshMaintenanceStatus();
       setMessage(operationCopy.success);

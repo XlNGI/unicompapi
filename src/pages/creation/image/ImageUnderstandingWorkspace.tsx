@@ -26,6 +26,7 @@ import {
   ImageSubmissionConfirmations
 } from './ImageGenerationControls';
 import { ImageRegionFields } from './ImageRegionFields';
+import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 
 type UnderstandingDraftDto = Extract<
   ImageWorkspaceDraftDto,
@@ -407,6 +408,14 @@ export function ImageUnderstandingWorkspace({
               <p>模型和外发范围只来自真实能力预检。</p>
             </div>
           </header>
+          <ImageFeatureSubmissionPanel
+            dirty={dirty}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onDraftPersisted={onDraftPersisted}
+            onMessage={onMessage}
+          />
+          <div className="uc-image-specialized__legacy-submission">
           <Button
             disabled={!imageSubmissions || !draft.input || dirty || busy}
             onClick={() => void checkRecognition()}
@@ -465,6 +474,7 @@ export function ImageUnderstandingWorkspace({
           <p className="uc-image-quick__hint">
             当前没有真实图片识别适配器；不会创建任务、上传图片或伪造结果。
           </p>
+          </div>
         </Card>
         </div>
 

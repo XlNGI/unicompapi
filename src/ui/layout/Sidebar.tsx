@@ -94,6 +94,7 @@ export function Sidebar({
                 aria-current={isActive && !hasSubItems ? 'page' : undefined}
                 aria-expanded={hasSubItems ? isMenuOpen : undefined}
                 aria-haspopup={hasSubItems ? 'menu' : undefined}
+                title={item.label}
                 onClick={() => {
                   if (hasSubItems) {
                     setOpenMenuId(isMenuOpen ? undefined : item.id);
@@ -141,6 +142,7 @@ export function Sidebar({
                         }
                         aria-current={isSubItemActive ? 'page' : undefined}
                         key={subItem.id}
+                        title={subItem.label}
                         onClick={() =>
                           onSecondaryNavigate(item.id, subItem.id)
                         }

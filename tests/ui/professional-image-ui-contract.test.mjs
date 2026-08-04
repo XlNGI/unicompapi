@@ -54,7 +54,9 @@ test('professional image preserves prompt layers and dynamic safe parameters', (
   }
   assert.match(professionalSource, /systemSupplements/);
   assert.match(professionalSource, /finalPrompt/);
-  assert.match(featurePanelSource, /parameterSchema\.fields\.map/);
+  assert.match(featurePanelSource, /parameterSchema\.fields/);
+  assert.match(featurePanelSource, /display\?\.label/);
+  assert.match(featurePanelSource, /可选参数/);
   assert.doesNotMatch(featurePanelSource, /ProviderRegistry|CapabilityEvidence/);
 });
 

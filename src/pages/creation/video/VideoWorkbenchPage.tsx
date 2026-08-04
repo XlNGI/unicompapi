@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -65,6 +65,16 @@ export function VideoWorkbenchPage({
   const currentDraft =
     drafts.find((draft) => draft.draftId === selectedDraftId) ??
     drafts[drafts.length - 1];
+  const latestDraftRef = useRef(currentDraft);
+  latestDraftRef.current = currentDraft;
+
+  useEffect(() => {
+    if (currentDraft?.mode !== 'quick_video' || !dirty || busy) return;
+    const timeout = window.setTimeout(() => {
+      void saveDraft(currentDraft, true);
+    }, 450);
+    return () => window.clearTimeout(timeout);
+  }, [busy, currentDraft, dirty]);
 
   useEffect(() => {
     let active = true;
@@ -152,26 +162,34 @@ export function VideoWorkbenchPage({
     }
   }
 
-  async function saveDraft() {
-    if (!videoWorkspaces || !currentDraft || busy) return;
+  async function saveDraft(
+    draftToSave = currentDraft,
+    automatic = false
+  ) {
+    if (!videoWorkspaces || !draftToSave || busy) return;
     setBusy(true);
-    setMessage('');
+    if (!automatic) setMessage('');
     try {
       const result = await videoWorkspaces.update({
-        ...currentDraft,
-        state: currentDraft.state === 'stale' ? 'stale' : 'saved'
+        ...draftToSave,
+        state: draftToSave.state === 'stale' ? 'stale' : 'saved'
       });
       if (!result.ok) {
         setMessage(workspaceErrorMessages[result.error.code]);
         return;
       }
+      if (latestDraftRef.current !== draftToSave) return;
       setDrafts((items) =>
         items.map((draft) =>
           draft.draftId === result.value.draftId ? result.value : draft
         )
       );
       setDirty(false);
-      setMessage('视频草稿已保存到当前项目；没有创建或提交任务。');
+      setMessage(
+        automatic
+          ? '文字需求已自动保存。'
+          : '视频草稿已保存到当前项目；没有创建或提交任务。'
+      );
     } catch {
       setMessage('保存本地视频草稿失败，请重试。');
     } finally {
@@ -199,6 +217,7 @@ export function VideoWorkbenchPage({
   return (
     <section
       className="uc-image-workbench uc-video-workbench"
+      data-mode={workspaceMode}
       aria-labelledby={`${mode.id}-title`}
     >
       <header className="uc-image-workbench__header">

@@ -16,6 +16,7 @@ test('A2 consumes every controlled B2 source and preview operation', () => {
     'prepareRelink',
     'confirmRelink',
     'createSourcePreview',
+    'createCompositionPreview',
     'requestPreviewArtifact',
     'clearPreviewCache'
   ]) {
@@ -67,4 +68,6 @@ test('A2 has responsive selected, preview, playhead and inspector styling', () =
     assert.match(editorSource, new RegExp(className));
     assert.match(stylesSource, new RegExp(`\\.${className}`));
   }
+  assert.match(stylesSource, /@container \(max-width: 1060px\)/);
+  assert.equal(stylesSource.match(/\.uc-video-editor__workspace/g)?.length, 3);
 });

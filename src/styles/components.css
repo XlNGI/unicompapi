@@ -79,9 +79,9 @@
   display: grid;
   justify-items: start;
   gap: var(--uc-space-3);
-  min-height: 220px;
+  min-height: 132px;
   align-content: center;
-  padding: var(--uc-space-8);
+  padding: var(--uc-space-5);
 }
 
 .uc-empty-state__icon {
@@ -144,7 +144,7 @@
 }
 
 .uc-state-preview__grid .uc-empty-state {
-  min-height: 260px;
+  min-height: 160px;
 }
 
 .uc-state-preview__announcement {

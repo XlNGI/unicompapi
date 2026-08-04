@@ -28,6 +28,7 @@ import {
   type EditingImageDraftDto
 } from './ImageGenerationControls';
 import { ImageRegionFields } from './ImageRegionFields';
+import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 import { useImageSubmissionFlow } from './useImageSubmissionFlow';
 
 type EditingTargetMode = 'professional_image' | 'image_to_prompt';
@@ -364,6 +365,14 @@ export function ImageEditingWorkspace({
               <p>模型和参数只来自本机注册表中的真实能力事实。</p>
             </div>
           </header>
+          <ImageFeatureSubmissionPanel
+            dirty={dirty}
+            draft={draft}
+            onDraftChange={onDraftChange}
+            onDraftPersisted={onDraftPersisted}
+            onMessage={onMessage}
+          />
+          <div className="uc-image-specialized__legacy-submission">
           <ImageEditingModelFields
             draft={draft}
             onDraftChange={changeDraft}
@@ -455,6 +464,7 @@ export function ImageEditingWorkspace({
           <p className="uc-image-quick__hint">
             图片编辑只在能力、凭证和提交确认全部通过后执行；原图永远不会被覆盖。
           </p>
+          </div>
         </Card>
       </div>
 

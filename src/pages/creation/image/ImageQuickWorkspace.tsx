@@ -89,7 +89,7 @@ export function ImageQuickWorkspace({
               maxLength={1000}
               onChange={(event) => changePrompt(event.target.value)}
               placeholder="例如：雪山日落下的露营海报"
-              rows={7}
+              rows={4}
               value={draft.prompt.originalInput}
             />
             <small>{draft.prompt.originalInput.length} / 1000</small>
