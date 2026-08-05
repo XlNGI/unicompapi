@@ -202,6 +202,11 @@ export function ProviderManageView({
                     {selectedConnection.state === 'disabled' ? '启用' : '停用'}
                   </Button>
                 )}
+                {selectedConnection.state !== 'deleted' && (
+                  <Button disabled={busy} onClick={onDeleteConnection} variant="ghost">
+                    <LuTrash2 aria-hidden="true" /> 删除
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -292,11 +297,6 @@ export function ProviderManageView({
                   <div><dt>接口地址</dt><dd>{selectedConnection.endpointConfigured ? '已配置并隐藏' : '使用模板固定地址'}</dd></div>
                   <div><dt>最近验证</dt><dd>{selectedConnection.lastConnectionValidationAt ? new Date(selectedConnection.lastConnectionValidationAt).toLocaleString('zh-CN') : '无记录'}</dd></div>
                 </dl>
-                {selectedConnection.state !== 'deleted' && (
-                  <Button disabled={busy} onClick={onDeleteConnection} variant="ghost">
-                    <LuTrash2 aria-hidden="true" /> 删除本地连接
-                  </Button>
-                )}
               </section>
             )}
 

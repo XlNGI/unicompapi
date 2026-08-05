@@ -284,7 +284,7 @@ export function ProvidersPage() {
         setMessage(describeError(result.error.code));
         return;
       }
-      setMessage('本地连接已删除；历史调用与作品记录已保留');
+      setMessage('本地连接已删除');
       await refreshRegistry();
     } catch {
       setMessage('删除连接失败，请重试');
