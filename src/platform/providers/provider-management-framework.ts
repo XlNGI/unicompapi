@@ -1186,7 +1186,7 @@ export class ProviderManagementFramework {
         const modelIds = new Set(
           latest.models
             .filter((model) => model.connectionId === current.id)
-            .map((model) => model.id)
+            .map((model) => String(model.id))
         );
         const remainingConnections = latest.connections.filter(
           (connection) => connection.id !== current.id
