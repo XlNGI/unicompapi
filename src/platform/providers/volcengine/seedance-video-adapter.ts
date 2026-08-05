@@ -23,6 +23,10 @@ import type {
   ProviderAsyncOperationStatus,
   ProviderCancelOutcome
 } from '../provider-execution-lifecycle';
+import type {
+  ProviderConnectionValidationResultV1,
+  ProviderManagementAdapterPort
+} from '../provider-management-framework';
 import {
   VideoResultPortError,
   type VideoRemoteCompletionFact,
@@ -34,6 +38,8 @@ import {
   SEEDANCE_TEXT_TO_VIDEO_CONSTRAINT_SET_ID,
   SEEDANCE_VIDEO_ADAPTER_ID,
   SEEDANCE_VIDEO_ADAPTER_VERSION,
+  SEEDANCE_VIDEO_PROTOCOL_ID,
+  SEEDANCE_VIDEO_PROTOCOL_VERSION,
   SEEDANCE_VIDEO_RESULT_SCHEMA_ID,
   SEEDANCE_VIDEO_USAGE_SCHEMA_ID,
   VOLCENGINE_ENDPOINT_POLICY_ID,
@@ -154,6 +160,52 @@ interface ParsedSeedanceTask {
     | 'expired';
   readonly videoUrl?: string;
   readonly usage?: readonly UsageFactV1[];
+}
+
+export class VolcengineManagementAdapter implements ProviderManagementAdapterPort {
+  readonly identity = {
+    packageId: VOLCENGINE_PROVIDER_PACKAGE_ID,
+    adapterId: SEEDANCE_VIDEO_ADAPTER_ID,
+    adapterVersion: SEEDANCE_VIDEO_ADAPTER_VERSION,
+    protocolId: SEEDANCE_VIDEO_PROTOCOL_ID,
+    protocolVersion: SEEDANCE_VIDEO_PROTOCOL_VERSION
+  } as const;
+
+  constructor(
+    private readonly runtime: VolcengineSharedRuntime,
+    private readonly now: () => IsoTimestamp = () =>
+      toIsoTimestamp(new Date().toISOString())
+  ) {}
+
+  async validateConnection(input: {
+    readonly connection: ProviderConnection;
+    readonly endpoint?: string;
+    readonly credentials: StructuredCredentialRecord;
+  }): Promise<ProviderConnectionValidationResultV1> {
+    try {
+      await this.runtime.requestConnectivityProbe(input);
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: this.now()
+      };
+    } catch (error) {
+      const authenticationFailed =
+        error instanceof VolcengineRuntimeError &&
+        error.code === 'authentication_failed';
+      return {
+        state: 'unavailable',
+        identityState: 'verification_failed',
+        credentialState: authenticationFailed
+          ? 'invalid'
+          : 'verification_unavailable',
+        observedAt: this.now(),
+        safeCode:
+          error instanceof VolcengineRuntimeError ? error.code : 'unknown'
+      };
+    }
+  }
 }
 
 export class SeedanceVideoAdapter

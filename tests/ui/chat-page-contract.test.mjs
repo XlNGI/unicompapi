@@ -25,7 +25,9 @@ test('chat page uses project conversations and the explicit text response workfl
   }
   assert.match(source, /运行授权关闭/);
   assert.match(source, /runtime_not_allowed/);
-  assert.match(source, /selectedCandidateId === candidate\.candidateId/);
+  assert.match(source, /选择模型/);
+  assert.match(source, /aria-label="选择文本模型"/);
+  assert.match(source, /请选择模型/);
   assert.match(source, /disabled=\{!candidate\.available\}/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
 });

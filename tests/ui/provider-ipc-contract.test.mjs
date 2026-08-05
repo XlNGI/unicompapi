@@ -23,6 +23,7 @@ const managementActions = [
   'registerExactModel',
   'setConnectionEnabled',
   'setModelEnabled',
+  'deleteModel',
   'deleteConnection'
 ];
 
@@ -92,14 +93,18 @@ test('management adapter composition registers the evidence-backed probes', () =
   for (const adapter of [
     'DeepSeekManagementAdapter',
     'NewApiManagementAdapter',
-    'KlingManagementAdapter'
+    'KlingManagementAdapter',
+    'VolcengineManagementAdapter',
+    'ViduManagementAdapter'
   ]) {
     assert.match(managementAdapters, new RegExp(`new ${adapter}\\(`));
   }
   for (const transport of [
     'ElectronDeepSeekHttpTransport',
     'ElectronNewApiHttpTransport',
-    'ElectronKlingHttpTransport'
+    'ElectronKlingHttpTransport',
+    'ElectronVolcengineHttpTransport',
+    'ElectronViduHttpTransport'
   ]) {
     assert.match(managementAdapters, new RegExp(`class ${transport}`));
   }

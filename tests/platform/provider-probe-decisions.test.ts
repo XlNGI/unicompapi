@@ -39,12 +39,12 @@ describe('provider probe decisions (PR3 contract)', () => {
       modelDiscoveryAction: 'manual_exact'
     });
     expect(byTemplate.get('volcengine-ark-official')).toMatchObject({
-      validationAction: 'unsupported',
+      validationAction: 'available',
       modelDiscoveryAction: 'manual_exact'
     });
     expect(byTemplate.get('vidu-official')).toMatchObject({
-      validationAction: 'unsupported',
-      modelDiscoveryAction: 'unsupported'
+      validationAction: 'available',
+      modelDiscoveryAction: 'manual_exact'
     });
     expect(byTemplate.get('unicompapi-official')).toMatchObject({
       kind: 'official',
@@ -117,30 +117,45 @@ describe('provider probe decisions (PR3 contract)', () => {
     }
   });
 
-  it('saves Volcengine and Vidu connections deferred without any adapter call', async () => {
+  it('runs Volcengine and Vidu connectivity probes during save without model discovery', async () => {
     const fixture = await decisionsFixture();
+    const volcProgress: string[] = [];
     const volcengine = await fixture.framework.addConnection({
       packageId: 'provider-package-volcengine',
       templateId: 'volcengine-ark-official',
-      name: 'Volcengine deferred',
+      name: 'Volcengine connectivity',
       credentials: { api_key: 'decisions-ark-key' }
-    });
+    }, (step) => volcProgress.push(step));
     expect(volcengine).toMatchObject({
       ok: true,
-      value: { state: 'saved', validated: false, catalog: 'skipped' }
+      value: {
+        state: 'available',
+        validated: true,
+        catalog: 'skipped'
+      }
     });
+    expect(volcProgress).toEqual(['validating', 'saving']);
+    expect(fixture.volcengineValidationCalls).toBe(1);
 
+    const viduProgress: string[] = [];
     const vidu = await fixture.framework.addConnection({
       packageId: viduProviderPackageDescriptor.packageId,
       templateId: 'vidu-official',
-      name: 'Vidu deferred',
+      name: 'Vidu connectivity',
       credentials: { token: 'decisions-vidu-token' }
-    });
+    }, (step) => viduProgress.push(step));
     expect(vidu).toMatchObject({
       ok: true,
-      value: { state: 'saved', validated: false, catalog: 'skipped' }
+      value: {
+        state: 'available',
+        validated: true,
+        catalog: 'skipped'
+      }
     });
+    expect(viduProgress).toEqual(['validating', 'saving']);
+    expect(fixture.viduValidationCalls).toBe(1);
     expect(fixture.klingValidationCalls).toBe(0);
+    expect((await fixture.registry.load()).connections).toHaveLength(2);
   });
 });
 
@@ -157,10 +172,13 @@ async function decisionsFixture() {
   ]);
   const state = {
     klingValidationCalls: 0,
+    volcengineValidationCalls: 0,
+    viduValidationCalls: 0,
     unicompapiValidationCalls: 0,
     unicompapiCatalogCalls: 0,
     unicompapiLastEndpoint: undefined as string | undefined
   };
+  const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
   const klingProbe: ProviderManagementAdapterPort = {
     identity: {
       packageId: 'provider-package-kling',
@@ -171,6 +189,42 @@ async function decisionsFixture() {
     },
     async validateConnection() {
       state.klingValidationCalls += 1;
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: t1
+      };
+    }
+  };
+  const volcengineProbe: ProviderManagementAdapterPort = {
+    identity: {
+      packageId: 'provider-package-volcengine',
+      adapterId: 'volcengine.seedance-video',
+      adapterVersion: '2026-08-03',
+      protocolId: 'volcengine.ark.contents-generations-video',
+      protocolVersion: '2026-08-03'
+    },
+    async validateConnection() {
+      state.volcengineValidationCalls += 1;
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: t1
+      };
+    }
+  };
+  const viduProbe: ProviderManagementAdapterPort = {
+    identity: {
+      packageId: viduProviderPackageDescriptor.packageId,
+      adapterId: 'vidu_reference_video_v2',
+      adapterVersion: '2026-08-03',
+      protocolId: 'vidu.ent.v2.reference2video',
+      protocolVersion: '2'
+    },
+    async validateConnection() {
+      state.viduValidationCalls += 1;
       return {
         state: 'available',
         identityState: 'verified',
@@ -207,14 +261,22 @@ async function decisionsFixture() {
   };
   return {
     get klingValidationCalls() { return state.klingValidationCalls; },
+    get volcengineValidationCalls() { return state.volcengineValidationCalls; },
+    get viduValidationCalls() { return state.viduValidationCalls; },
     get unicompapiValidationCalls() { return state.unicompapiValidationCalls; },
     get unicompapiCatalogCalls() { return state.unicompapiCatalogCalls; },
     get unicompapiLastEndpoint() { return state.unicompapiLastEndpoint; },
+    registry,
     framework: new ProviderManagementFramework(
       packages,
-      new JsonProviderRegistryStore(path.join(root, 'registry.json')),
+      registry,
       new SecureCredentialVault(path.join(root, 'credentials.json'), protector()),
-      new ProviderManagementAdapterRegistry(packages, [klingProbe, unicompapiProbe]),
+      new ProviderManagementAdapterRegistry(packages, [
+        klingProbe,
+        volcengineProbe,
+        viduProbe,
+        unicompapiProbe
+      ]),
       new JsonProviderManagementAuditStore(path.join(root, 'audit.json')),
       { now: () => t1 }
     )

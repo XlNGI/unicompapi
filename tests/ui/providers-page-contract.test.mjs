@@ -37,6 +37,9 @@ test('gallery shows only adapted templates as cards with a request-adapter entry
   assert.match(gallery, /求适配/);
   assert.match(gallery, /已连接/);
   assert.match(gallery, /未连接/);
+  assert.match(gallery, /保存时验证/);
+  assert.doesNotMatch(gallery, /保存后待验证/);
+  assert.match(gallery, /validationAction !== 'available'/);
 });
 
 test('provider page exposes the controlled framework mutations', () => {
@@ -48,6 +51,7 @@ test('provider page exposes the controlled framework mutations', () => {
     'registerExactModel',
     'setConnectionEnabled',
     'setModelEnabled',
+    'deleteModel',
     'deleteConnection'
   ]) {
     assert.match(source, new RegExp(`providersApi\\.${action}`));
@@ -92,6 +96,8 @@ test('online validation and discovery stay gated on adapter availability', () =>
 test('model controls use exact registration and verified profile projections', () => {
   assert.match(manage, /selectedConnection\.state === 'available'/);
   assert.match(source, /providersApi\.registerExactModel/);
+  assert.match(source, /providersApi\.deleteModel/);
+  assert.match(manage, /onDeleteModel/);
   assert.match(manage, /selectedModel\.profileStatus/);
   assert.match(manage, /selectedModel\.productFeatures/);
   assert.doesNotMatch(source, /capability\.capability|protocolId ===|providerId === ['"]/);

@@ -12,6 +12,7 @@ export * from './conversation-response-streaming';
 export * from './project-conversation-response';
 export * from './project-image-feature';
 export * from './project-video-feature';
+export * from './project-text-feature';
 export * from './provider-feature-candidates';
 export * from './provider-registry-feature-candidates';
 export * from './provider-submission-orchestrator';

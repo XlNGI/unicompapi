@@ -119,7 +119,9 @@ const providers: ProviderApi = {
       abandonActiveOperations
     }),
   setModelEnabled: (modelId, enabled) =>
-    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled })
+    ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled }),
+  deleteModel: (modelId) =>
+    ipcRenderer.invoke(providerIpcChannels.deleteModel, { modelId })
 };
 
 const imageWorkspaces: ImageWorkspaceApi = {

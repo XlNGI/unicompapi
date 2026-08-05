@@ -3142,6 +3142,22 @@
   padding: 0;
 }
 
+.uc-chat-page__model-select {
+  display: grid;
+  gap: var(--uc-space-2);
+}
+
+.uc-chat-page__model-select select {
+  width: 100%;
+  min-height: 2.5rem;
+}
+
+.uc-chat-page__model-hint {
+  margin: 0;
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-sm);
+}
+
 .uc-chat-page__candidate-list legend {
   margin-bottom: var(--uc-space-2);
   color: var(--uc-color-text-secondary);
@@ -3635,7 +3651,7 @@
 
 .uc-provider-page__model {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 0.8fr) auto auto;
+  grid-template-columns: minmax(150px, 1.4fr) minmax(90px, 0.7fr) auto auto;
   align-items: center;
   gap: var(--uc-space-3);
   width: 100%;

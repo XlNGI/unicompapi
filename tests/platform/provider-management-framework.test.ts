@@ -3,11 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createModelCapabilityEvidence,
   createProvider,
   createProviderConnection,
   createProviderModel,
   createProviderProtocolBinding,
   createRoutingPreference,
+  toCapabilityEvidenceId,
   toConnectionId,
   toIsoTimestamp,
   toModelId,
@@ -23,6 +25,7 @@ import {
   ProviderManagementFramework,
   ProviderModelCatalogService,
   ProviderPackageRegistry,
+  ProviderRegistryController,
   SecureCredentialVault,
   UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
   unicompapiProviderPackageDescriptor,
@@ -381,6 +384,103 @@ describe('provider management framework', () => {
       ok: false,
       error: { code: 'catalog_sync_unavailable' }
     });
+  });
+
+  it('hard-deletes a model without capability history and retires history-bearing models', async () => {
+    const fixture = await frameworkFixture();
+    const created = await createAndValidate(fixture);
+    const registered = await fixture.framework.registerExactModel({
+      connectionId: created.connectionId,
+      providerModelKey: 'delete-me-001',
+      displayName: 'Delete Me'
+    });
+    if (!registered.ok) throw new Error('exact model registration failed');
+    const before = await fixture.registry.load();
+    const model = before.models.find((candidate) =>
+      candidate.id === registered.value.modelId
+    );
+    if (!model) throw new Error('registered model missing');
+    await fixture.registry.mutate((current) => ({
+      snapshot: {
+        ...current,
+        routingPreferences: [
+          ...current.routingPreferences,
+          createRoutingPreference({
+            id: toRoutingPreferenceId('preference-delete-me'),
+            purpose: 'text_execution',
+            modelId: model.id,
+            priority: 0,
+            enabled: true,
+            updatedAt: t0
+          })
+        ]
+      },
+      result: undefined
+    }));
+
+    await expect(fixture.framework.deleteModel({
+      modelId: model.id
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { modelId: model.id, state: 'deleted' }
+    });
+    const afterHardDelete = await fixture.registry.load();
+    expect(afterHardDelete.models.find((candidate) => candidate.id === model.id))
+      .toBeUndefined();
+    expect(afterHardDelete.routingPreferences.find((preference) =>
+      preference.modelId === model.id
+    )).toBeUndefined();
+
+    fixture.catalog.entries = [{ providerModelKey: 'history.model', displayName: 'History' }];
+    await fixture.framework.syncModelCatalog({ connectionId: created.connectionId });
+    const withCatalog = await fixture.registry.load();
+    const historyModel = withCatalog.models.find((candidate) =>
+      candidate.connectionId === created.connectionId &&
+      candidate.providerModelKey === 'history.model'
+    );
+    if (!historyModel) throw new Error('history model missing after catalog sync');
+    await fixture.registry.mutate((current) => ({
+      snapshot: {
+        ...current,
+        capabilities: [
+          ...current.capabilities,
+          createModelCapabilityEvidence({
+            id: toCapabilityEvidenceId('capability-history-model'),
+            modelId: historyModel.id,
+            revision: 1,
+            capability: 'image_generation',
+            state: 'declared_supported',
+            source: 'provider_declared',
+            recordedAt: t0
+          })
+        ]
+      },
+      result: undefined
+    }));
+
+    await expect(fixture.framework.deleteModel({
+      modelId: historyModel.id
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { modelId: historyModel.id, state: 'deleted' }
+    });
+    const afterRetire = await fixture.registry.load();
+    expect(afterRetire.models.find((candidate) => candidate.id === historyModel.id))
+      .toMatchObject({
+        catalogState: 'retired',
+        enabled: false
+      });
+    expect(afterRetire.capabilities.find((evidence) =>
+      evidence.modelId === historyModel.id
+    )).toBeDefined();
+
+    const controller = new ProviderRegistryController(fixture.registry);
+    const dto = await controller.getRegistry();
+    expect(dto).toMatchObject({ ok: true });
+    if (!dto.ok) throw new Error('registry dto unavailable');
+    expect(dto.value.models.find((candidate) =>
+      candidate.modelId === historyModel.id
+    )).toBeUndefined();
   });
 
   it('rotates structured credentials, retains active versions, and clears validation without exposing values', async () => {
@@ -764,6 +864,36 @@ describe('provider management framework', () => {
       ok: true,
       value: { state: 'registered_without_profile' }
     });
+    const beforeEnable = await registry.load();
+    const model = beforeEnable.models.find((candidate) =>
+      candidate.connectionId === added.value.connectionId &&
+      candidate.providerModelKey === 'gpt-4o-manual'
+    );
+    if (!model) throw new Error('registered unicompapi model missing');
+    expect(model.activeProfileId).toBeUndefined();
+    await expect(framework.setModelEnabled({
+      modelId: model.id,
+      enabled: true
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'enabled' }
+    });
+    const afterEnable = await registry.load();
+    const enabled = afterEnable.models.find((candidate) => candidate.id === model.id);
+    expect(enabled?.enabled).toBe(true);
+    expect(enabled?.activeProfileId).toBeTruthy();
+    const profile = afterEnable.modelProfiles?.find((candidate) =>
+      candidate.profileId === enabled?.activeProfileId
+    );
+    expect(profile).toMatchObject({
+      status: 'verified',
+      adapterKey: 'newapi.chat',
+      packageId: unicompapiProviderPackageDescriptor.packageId
+    });
+    expect(profile?.features.map((feature) => feature.productFeature).sort()).toEqual([
+      'text_chat',
+      'text_reasoning'
+    ]);
   });
 });
 

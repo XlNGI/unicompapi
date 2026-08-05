@@ -546,22 +546,43 @@ export function ChatPage() {
 
         {responseDraft ? (
           <section className="uc-chat-page__route" aria-labelledby="chat-route-title">
-            <div className="uc-chat-page__panel-heading"><h2 id="chat-route-title">文本候选</h2><StatusPill>{responseDraft.productFeature === 'text_reasoning' ? '推理' : '普通对话'}</StatusPill></div>
-            {responseCandidates.length === 0 ? <EmptyState description="请先在模型与服务商页完成连接、模型 Profile 与运行专项批准。" icon="模" readOnly title="没有文本候选" /> : (
-              <fieldset className="uc-chat-page__candidate-list" disabled={busy}>
-                <legend>服务商 / 连接 / 模型</legend>
-                {responseCandidates.map((candidate) => (
-                  <label key={candidate.candidateId}>
-                    <input checked={selectedCandidateId === candidate.candidateId} disabled={!candidate.available} name="chat-candidate" onChange={() => { setSelectedCandidateId(candidate.candidateId); setPreparation(undefined); setOutboundConfirmed(false); }} type="radio" />
-                    <span><strong>{candidate.providerName} · {candidate.connectionName}</strong><b>{candidate.modelName}</b><small>{candidate.available ? '可准备提交' : candidate.unavailableReasons.map((reason) => unavailableLabels[reason] ?? reason).join('、')}</small></span>
-                  </label>
-                ))}
-              </fieldset>
+            <div className="uc-chat-page__panel-heading"><h2 id="chat-route-title">选择模型</h2><StatusPill>{responseDraft.productFeature === 'text_reasoning' ? '推理' : '普通对话'}</StatusPill></div>
+            {responseCandidates.length === 0 ? <EmptyState description="请先到「模型与服务商」添加连接并启用模型。若模型早已启用但仍不可选，请先停用再启用一次以挂上文本能力。" icon="模" readOnly title="没有可选模型" /> : (
+              <label className="uc-chat-page__model-select">
+                <span>服务商 / 连接 / 模型</span>
+                <select
+                  aria-label="选择文本模型"
+                  disabled={busy}
+                  onChange={(event) => {
+                    const next = event.target.value || undefined;
+                    setSelectedCandidateId(next);
+                    setPreparation(undefined);
+                    setOutboundConfirmed(false);
+                  }}
+                  value={selectedCandidateId ?? ''}
+                >
+                  <option value="">请选择模型</option>
+                  {responseCandidates.map((candidate) => (
+                    <option
+                      disabled={!candidate.available}
+                      key={candidate.candidateId}
+                      value={candidate.candidateId}
+                    >
+                      {candidate.providerName} · {candidate.connectionName} · {candidate.modelName}
+                      {candidate.available
+                        ? ''
+                        : `（${candidate.unavailableReasons.map((reason) => unavailableLabels[reason] ?? reason).join('、')}）`}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
             {selectedCandidate ? <Card className="uc-chat-page__schema"><small>参数 Schema · revision {selectedCandidate.parameterSchema.revision}</small><p>{selectedCandidate.parameterSchema.fields.length === 0 ? '本次不需要用户参数，采用服务商默认值。' : selectedCandidate.parameterSchema.fields.map((field) => field.labelId).join('、')}</p></Card> : null}
             <Button disabled={!selectedCandidate?.available || busy} onClick={() => void prepareResponse()} variant="secondary">检查外发</Button>
             {preparation ? <Card className="uc-chat-page__confirmation"><strong>{preparation.confirmation.providerName} · {preparation.confirmation.connectionName} · {preparation.confirmation.modelName}</strong><dl><div><dt>接收方</dt><dd>{preparation.confirmation.recipientName}</dd></div><div><dt>内容类别</dt><dd>{preparation.confirmation.contentCategories.join('、')}</dd></div><div><dt>上下文</dt><dd>{preparation.confirmation.contextCount} 项</dd></div><div><dt>费用事实</dt><dd>{preparation.confirmation.cost.summary ?? (preparation.confirmation.cost.state === 'unknown' ? '未知' : '不适用')}</dd></div></dl><label className="uc-chat-page__check"><input checked={outboundConfirmed} onChange={(event) => setOutboundConfirmed(event.target.checked)} type="checkbox" />我确认本次接收方、内容范围、上下文和费用事实</label><Button disabled={!outboundConfirmed || busy} onClick={() => void submitResponse()}>确认并请求文本回复</Button></Card> : null}
           </section>
+        ) : selected && selected.status === 'active' && !selected.readOnly ? (
+          <p className="uc-chat-page__model-hint">保存用户消息后，将在此选择服务商 / 连接 / 模型。</p>
         ) : null}
         <p className="uc-chat-page__message" aria-live="polite">{notice}</p>
       </section>

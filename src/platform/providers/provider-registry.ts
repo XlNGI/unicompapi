@@ -282,7 +282,10 @@ export class ProviderRegistryController {
             supportedPurposes: binding.supportedPurposes
           })),
           models: snapshot.models
-            .filter((model) => liveConnectionIds.has(String(model.connectionId)))
+            .filter((model) =>
+              liveConnectionIds.has(String(model.connectionId)) &&
+              (model.catalogState ?? 'present') !== 'retired'
+            )
             .map((model) => {
             const profile = snapshot.modelProfiles?.find((candidate) =>
               candidate.profileId === model.activeProfileId &&
@@ -326,7 +329,8 @@ export class ProviderRegistryController {
             .filter((preference) =>
               snapshot.models.some((model) =>
                 model.id === preference.modelId &&
-                liveConnectionIds.has(String(model.connectionId))
+                liveConnectionIds.has(String(model.connectionId)) &&
+                (model.catalogState ?? 'present') !== 'retired'
               )
             )
             .map((preference) => ({

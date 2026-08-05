@@ -93,7 +93,13 @@ describe('Volcengine Seedance official contracts', () => {
       SEEDANCE_VIDEO_ADAPTER_VERSION,
       SEEDANCE_VIDEO_PROTOCOL_ID,
       SEEDANCE_VIDEO_PROTOCOL_VERSION
-    ).operations).toEqual(['submit', 'query', 'cancel', 'receive_result']);
+    ).operations).toEqual([
+      'validate_connection',
+      'submit',
+      'query',
+      'cancel',
+      'receive_result'
+    ]);
 
     expect(modelContract.definition.providerModelKey).toBe(exactModelId);
     expect(modelContract.definition.definitionId).not.toContain(exactModelId);
