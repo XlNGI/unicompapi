@@ -19,7 +19,6 @@ import {
   type VideoDynamicParameterValue
 } from '../../src/domain';
 import {
-  createFrozenViduRegistryRecords,
   SecureCredentialVault,
   ViduBoundedPoller,
   ViduReferenceVideoV2Adapter,
@@ -33,8 +32,10 @@ import {
   type ProviderAsyncOperationPort,
   type ViduHttpTransport,
   type ViduHttpTransportRequest,
-  type ViduHttpTransportResponse
+  type ViduHttpTransportResponse,
+  type ViduVideoOperationContext
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const timestamp = toIsoTimestamp('2026-07-29T00:00:00.000Z');
@@ -257,7 +258,7 @@ async function createFixture(options: { readonly now?: () => number } = {}) {
     reversibleProtector()
   );
   await vault.save('credential-vidu-video', 'synthetic-token');
-  const frozen = createFrozenViduRegistryRecords();
+  const frozen = createUserViduRegistryRecords();
   const binding = frozen.protocolBindings[0];
   const model = frozen.models.find((candidate) =>
     candidate.providerModelKey === 'viduq3-drama'
@@ -276,12 +277,18 @@ async function createFixture(options: { readonly now?: () => number } = {}) {
   });
   const transport = new FixtureTransport();
   const materials = new FixtureMaterialPort();
+  const operationContexts = new Map<string, ViduVideoOperationContext>();
   const dependencies = {
     runtime: new ViduSharedRuntime({ credentialVault: vault, transport }),
     connections: { get: async () => connection },
     materials,
-    binding,
-    connectionId: connection.id,
+    operationContext: {
+      remember: (taskId: string, context: ViduVideoOperationContext) => {
+        operationContexts.set(taskId, context);
+      },
+      resolve: async (taskId: string) =>
+        operationContexts.get(taskId) ?? { connectionId: connection.id, binding }
+    },
     now: options.now
   };
   return {

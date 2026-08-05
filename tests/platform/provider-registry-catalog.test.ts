@@ -39,8 +39,7 @@ describe('Provider registry revision and catalog contracts', () => {
     const registryPath = path.join(root, 'registry.json');
     const first = new JsonProviderRegistryStore(registryPath);
     const second = new JsonProviderRegistryStore(registryPath);
-    const initial = await first.load();
-    await first.save(initial);
+    await first.save(createCasSeedSnapshot());
 
     const firstView = await first.load();
     const staleView = await second.load();
@@ -71,7 +70,7 @@ describe('Provider registry revision and catalog contracts', () => {
     const registryPath = path.join(root, 'registry.json');
     const first = new JsonProviderRegistryStore(registryPath);
     const second = new JsonProviderRegistryStore(registryPath);
-    await first.save(await first.load());
+    await first.save(createCasSeedSnapshot());
     const modelId = (await first.load()).models[0]!.id;
 
     await Promise.all([
@@ -275,6 +274,63 @@ describe('Provider registry revision and catalog contracts', () => {
     });
   });
 });
+
+function createCasSeedSnapshot() {
+  const provider = createProvider({
+    id: toProviderId('provider-cas'),
+    name: 'CAS provider',
+    accessCategory: 'custom_remote',
+    identityState: 'unverified',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const connection = createProviderConnection({
+    id: toConnectionId('connection-cas'),
+    providerId: provider.id,
+    name: 'CAS connection',
+    state: 'saved',
+    identityState: 'unverified',
+    credentialState: 'not_configured',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const binding = createProviderProtocolBinding({
+    id: toProtocolBindingId('protocol-cas'),
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'cas.media.v1',
+    protocolVersion: '1',
+    mediaKind: 'video',
+    adapterKind: 'cas_adapter',
+    authScheme: 'unknown',
+    executionLifecycle: 'asynchronous_polling',
+    supportedPurposes: ['reference_to_video', 'reference_to_image'],
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const model = createProviderModel({
+    id: toModelId('model-cas'),
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolBindingId: binding.id,
+    providerModelKey: 'cas-model',
+    mediaKind: 'video',
+    revision: 1,
+    displayName: 'CAS model',
+    enabled: false,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  return {
+    schemaVersion: 2 as const,
+    providers: [provider],
+    connections: [connection],
+    protocolBindings: [binding],
+    models: [model],
+    capabilities: [],
+    routingPreferences: []
+  };
+}
 
 async function createFixture(): Promise<{
   readonly registry: JsonProviderRegistryStore;

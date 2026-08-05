@@ -49,13 +49,15 @@ import {
   VideoSubmissionController,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
-  createFrozenViduRegistryRecords,
   type ControlledImageMaterial,
   type ControlledImageMaterialPort,
   type CredentialProtector,
   type ProviderProtocolSubmitRequest,
-  type ViduSafeLogEvent
+  type ViduSafeLogEvent,
+  type ViduVideoOperationContext,
+  type ViduVideoOperationContextPort
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 import {
   SyntheticViduService,
   binaryResponse,
@@ -257,8 +259,10 @@ describe('Vidu local synthetic service validation', () => {
     const restarted = fixture.providerPackage.createVideoAdapter({
       connections: { get: async () => fixture.connection },
       materials: fixture.materials,
-      binding: fixture.videoBinding,
-      connectionId: fixture.connection.id,
+      operationContext: staticVideoContext(
+        fixture.connection.id,
+        fixture.videoBinding
+      ),
       now: () => clock.value
     });
     await expect(restarted.listResults('synthetic-video-task')).resolves.toEqual([
@@ -578,7 +582,7 @@ async function createProtocolFixture(
     reversibleProtector()
   );
   await vault.save('credential-vidu-synthetic', validToken);
-  const frozen = createFrozenViduRegistryRecords();
+  const frozen = createUserViduRegistryRecords();
   const provider = createProvider({
     ...frozen.providers[0],
     identityState: 'verified',
@@ -726,8 +730,7 @@ async function createProtocolFixture(
   const videoAdapter = providerPackage.createVideoAdapter({
     connections,
     materials,
-    binding: videoBinding,
-    connectionId: connection.id,
+    operationContext: staticVideoContext(connection.id, videoBinding),
     now: () => clock.value
   });
   const imageRouter = new ImageOperationRouter(registry, {
@@ -937,6 +940,20 @@ function routerVideoPort(router: VideoOperationRouter) {
       }
       return result.value;
     }
+  };
+}
+
+function staticVideoContext(
+  connectionId: string,
+  binding: ProviderProtocolBinding
+): ViduVideoOperationContextPort {
+  const remembered = new Map<string, ViduVideoOperationContext>();
+  return {
+    remember: (taskId: string, context: ViduVideoOperationContext) => {
+      remembered.set(taskId, context);
+    },
+    resolve: async (taskId: string) =>
+      remembered.get(taskId) ?? { connectionId, binding }
   };
 }
 

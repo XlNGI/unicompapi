@@ -15,8 +15,10 @@ import {
   type ViduImageV1AdapterOptions
 } from './vidu-image-adapters';
 import type { ControlledImageMaterialPort } from './controlled-image-material';
-import { ViduReferenceVideoV2Adapter } from './vidu-video-adapter';
-import type { ProviderProtocolBinding } from '../../../domain';
+import {
+  ViduReferenceVideoV2Adapter,
+  type ViduVideoOperationContextPort
+} from './vidu-video-adapter';
 import {
   VIDU_PROVIDER_PACKAGE_ID,
   viduProviderPackageDescriptor
@@ -104,16 +106,14 @@ export class ViduProviderPackage {
   createVideoAdapter(options: {
     readonly connections: ViduConnectionPort;
     readonly materials: ControlledImageMaterialPort;
-    readonly binding: ProviderProtocolBinding;
-    readonly connectionId: string;
+    readonly operationContext: ViduVideoOperationContextPort;
     readonly now?: () => number;
   }) {
     return new ViduReferenceVideoV2Adapter({
       runtime: this.runtime,
       connections: options.connections,
       materials: options.materials,
-      binding: options.binding,
-      connectionId: options.connectionId,
+      operationContext: options.operationContext,
       now: options.now
     });
   }

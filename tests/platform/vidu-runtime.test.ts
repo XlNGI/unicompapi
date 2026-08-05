@@ -8,7 +8,6 @@ import {
   type ProxyMode
 } from '../../src/domain';
 import {
-  createFrozenViduRegistryRecords,
   SecureCredentialVault,
   ViduProviderPackage,
   ViduSharedRuntime,
@@ -19,6 +18,7 @@ import {
   type ViduHttpTransportResponse,
   type ViduSafeLogEvent
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const token = 'synthetic-token-that-must-never-be-logged';
@@ -282,7 +282,7 @@ async function createFixture() {
   );
   const credentialReference = 'credential-vidu-runtime';
   await vault.save(credentialReference, token);
-  const frozen = createFrozenViduRegistryRecords();
+  const frozen = createUserViduRegistryRecords();
   const connection = createProviderConnection({
     ...frozen.connections[0],
     endpoint: 'https://api.vidu.cn',

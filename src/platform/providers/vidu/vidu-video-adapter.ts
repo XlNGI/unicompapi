@@ -33,12 +33,21 @@ const maximumRequestBytes = 20 * 1024 * 1024;
 const maximumResultBytes = 512 * 1024 * 1024;
 const resultUrlLifetimeMs = 24 * 60 * 60 * 1_000;
 
+export interface ViduVideoOperationContext {
+  readonly connectionId: string;
+  readonly binding: ProviderProtocolBinding;
+}
+
+export interface ViduVideoOperationContextPort {
+  remember(taskId: string, context: ViduVideoOperationContext): void;
+  resolve(taskId: string): Promise<ViduVideoOperationContext | undefined>;
+}
+
 export interface ViduReferenceVideoV2Dependencies {
   readonly runtime: ViduSharedRuntime;
   readonly connections: ViduConnectionPort;
   readonly materials: ControlledImageMaterialPort;
-  readonly binding: ProviderProtocolBinding;
-  readonly connectionId: string;
+  readonly operationContext: ViduVideoOperationContextPort;
   readonly now?: () => number;
 }
 
@@ -54,9 +63,7 @@ export class ViduReferenceVideoV2Adapter
   implements ProviderProtocolSubmitPort, ProviderAsyncOperationPort, VideoResultPort {
   private readonly results = new Map<string, ViduVideoResultSnapshot>();
 
-  constructor(private readonly dependencies: ViduReferenceVideoV2Dependencies) {
-    validateConfiguredBinding(dependencies.binding, dependencies.connectionId);
-  }
+  constructor(private readonly dependencies: ViduReferenceVideoV2Dependencies) {}
 
   async submit(
     request: ProviderProtocolSubmitRequest,
@@ -64,7 +71,7 @@ export class ViduReferenceVideoV2Adapter
   ): Promise<ProviderSubmitOutcome> {
     let requestSent = false;
     try {
-      validateSubmitRequest(request, this.dependencies.binding);
+      validateSubmitRequest(request);
       const video = request.task.submission.video!;
       const material = await this.dependencies.materials.resolve({
         projectId: request.task.projectId,
@@ -98,9 +105,14 @@ export class ViduReferenceVideoV2Adapter
           requestSent = true;
         }
       });
+      const providerOperationId = parseTaskId(response.body);
+      this.dependencies.operationContext.remember(providerOperationId, {
+        connectionId: request.model.connectionId,
+        binding: request.binding
+      });
       return {
         kind: 'accepted_async',
-        providerOperationId: parseTaskId(response.body),
+        providerOperationId,
         state: 'queued'
       };
     } catch (error) {
@@ -240,10 +252,18 @@ export class ViduReferenceVideoV2Adapter
     taskId: string,
     action: 'creations' | 'cancel'
   ) {
-    const connection = await this.requireConnection(this.dependencies.connectionId);
+    const context = await this.dependencies.operationContext.resolve(taskId);
+    if (!context) {
+      throw new ViduVideoAdapterError(
+        'The Vidu video operation context is unavailable',
+        'unknown'
+      );
+    }
+    assertViduVideoBinding(context.binding, context.connectionId);
+    const connection = await this.requireConnection(context.connectionId);
     return this.dependencies.runtime.request({
       connection,
-      binding: this.dependencies.binding,
+      binding: context.binding,
       method,
       path: `/ent/v2/tasks/${taskId}/${action}`,
       ...(method === 'POST'
@@ -344,7 +364,7 @@ class ViduVideoAdapterError extends Error {
   }
 }
 
-function validateConfiguredBinding(
+function assertViduVideoBinding(
   binding: ProviderProtocolBinding,
   connectionId: string
 ): void {
@@ -356,20 +376,21 @@ function validateConfiguredBinding(
     binding.executionLifecycle !== 'asynchronous_polling' ||
     binding.connectionId !== connectionId
   ) {
-    throw new TypeError('Vidu video protocol binding is invalid');
+    throw new ViduVideoAdapterError(
+      'The Vidu video protocol binding is invalid',
+      'not_retryable'
+    );
   }
 }
 
 function validateSubmitRequest(
-  request: ProviderProtocolSubmitRequest,
-  configuredBinding: ProviderProtocolBinding
+  request: ProviderProtocolSubmitRequest
 ): void {
   const video = request.task.submission.video;
   const assetIds = request.task.submission.assetIds;
   if (
     request.execution.taskId !== request.task.id ||
     request.execution.state !== 'submitting' ||
-    request.binding.id !== configuredBinding.id ||
     request.model.mediaKind !== 'video' ||
     request.binding.mediaKind !== 'video' ||
     request.binding.protocolId !== 'vidu.ent.v2.reference2video' ||

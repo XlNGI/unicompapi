@@ -64,7 +64,10 @@ import {
 import { readViduImmediateImageResult } from './vidu-image-result-port';
 import type { ControlledImageMaterialPort } from './controlled-image-material';
 import type { ViduSharedRuntime } from './vidu-shared-runtime';
-import { ViduReferenceVideoV2Adapter } from './vidu-video-adapter';
+import {
+  ViduReferenceVideoV2Adapter,
+  type ViduVideoOperationContext as ViduAdapterOperationContext
+} from './vidu-video-adapter';
 
 export interface ViduRouteRegistryPort {
   load(): Promise<ProviderRegistrySnapshot>;
@@ -594,12 +597,24 @@ export class ViduVideoRouteAdapter {
   private legacyAdapter(
     resolved: ResolvedViduExecutionRoute
   ): ViduReferenceVideoV2Adapter {
+    const remembered = new Map<string, ViduAdapterOperationContext>();
     return new ViduReferenceVideoV2Adapter({
       runtime: this.dependencies.runtime,
       connections: fixedConnection(resolved.connection),
       materials: this.dependencies.materials,
-      binding: resolved.binding,
-      connectionId: resolved.connection.id
+      operationContext: {
+        remember: (taskId, context) => {
+          remembered.set(taskId, context);
+        },
+        resolve: async (taskId) =>
+          remembered.get(taskId) ??
+          (this.contexts.has(taskId)
+            ? {
+                connectionId: resolved.connection.id,
+                binding: resolved.binding
+              }
+            : undefined)
+      }
     });
   }
 

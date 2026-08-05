@@ -19,7 +19,7 @@ import {
   type ProviderModel,
   type ProviderOperationPurpose,
   type ProviderProtocolBinding
-} from '../../domain';
+} from '../../src/domain';
 import {
   VIDU_CREDENTIAL_SCHEMA_ID,
   VIDU_ENDPOINT_POLICY_ID,
@@ -40,12 +40,12 @@ import {
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
   createViduModelContract,
   frozenViduModelKeys
-} from './vidu/vidu-contracts';
+} from '../../src/platform';
 
-export const VIDU_PROVIDER_ID = toProviderId('provider-vidu');
-export const VIDU_CONNECTION_ID = toConnectionId('connection-vidu-default');
+export const VIDU_USER_PROVIDER_ID = toProviderId('provider-vidu');
+export const VIDU_USER_CONNECTION_ID = toConnectionId('connection-vidu-default');
 
-export const VIDU_PROTOCOL_BINDING_IDS = {
+export const VIDU_USER_PROTOCOL_BINDING_IDS = {
   referenceVideoV2: toProtocolBindingId(
     'protocol-binding-vidu-reference-video-v2'
   ),
@@ -55,7 +55,7 @@ export const VIDU_PROTOCOL_BINDING_IDS = {
   )
 } as const;
 
-export interface FrozenViduRegistryRecords {
+export interface ViduUserRegistryRecords {
   readonly providers: readonly Provider[];
   readonly connections: readonly ProviderConnection[];
   readonly protocolBindings: readonly ProviderProtocolBinding[];
@@ -68,9 +68,9 @@ export interface FrozenViduRegistryRecords {
 
 const catalogTimestamp = toIsoTimestamp('2026-07-28T00:00:00.000Z');
 
-export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
+export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
   const provider = createProvider({
-    id: VIDU_PROVIDER_ID,
+    id: VIDU_USER_PROVIDER_ID,
     name: 'Vidu',
     packageId: VIDU_PROVIDER_PACKAGE_ID,
     packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
@@ -80,7 +80,7 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
     updatedAt: catalogTimestamp
   });
   const connection = createProviderConnection({
-    id: VIDU_CONNECTION_ID,
+    id: VIDU_USER_CONNECTION_ID,
     providerId: provider.id,
     name: 'Vidu official connection',
     endpoint: 'https://api.vidu.cn',
@@ -127,7 +127,7 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
   });
   const protocolBindings = [
     createProviderProtocolBinding({
-      id: VIDU_PROTOCOL_BINDING_IDS.referenceVideoV2,
+      id: VIDU_USER_PROTOCOL_BINDING_IDS.referenceVideoV2,
       providerId: provider.id,
       connectionId: connection.id,
       protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
@@ -142,7 +142,7 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
       updatedAt: catalogTimestamp
     }),
     createProviderProtocolBinding({
-      id: VIDU_PROTOCOL_BINDING_IDS.imageV1,
+      id: VIDU_USER_PROTOCOL_BINDING_IDS.imageV1,
       providerId: provider.id,
       connectionId: connection.id,
       protocolId: VIDU_IMAGE_V1_PROTOCOL_ID,
@@ -157,7 +157,7 @@ export function createFrozenViduRegistryRecords(): FrozenViduRegistryRecords {
       updatedAt: catalogTimestamp
     }),
     createProviderProtocolBinding({
-      id: VIDU_PROTOCOL_BINDING_IDS.geminiImageV2,
+      id: VIDU_USER_PROTOCOL_BINDING_IDS.geminiImageV2,
       providerId: provider.id,
       connectionId: connection.id,
       protocolId: VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
