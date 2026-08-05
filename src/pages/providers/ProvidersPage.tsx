@@ -27,18 +27,21 @@ const emptyRegistry: ProviderRegistryDto = {
 type ProviderPageView = 'gallery' | 'manage';
 
 function describeValidationSafeCode(safeCode: string): string {
+  const normalized = safeCode.replace(/^(?:newapi|deepseek|kling|volcengine|vidu)\./u, '');
   const labels: Record<string, string> = {
     authentication_failed: '凭证无效或已过期',
     endpoint_not_allowed: '接口地址不被允许',
     network: '网络连接失败',
+    network_error: '网络连接失败',
     timeout: '连接超时',
     proxy_unavailable: '代理不可用',
     response_too_large: '远程响应过大',
     invalid_response: '远程响应格式无效',
     protocol_mismatch: '协议不匹配',
+    operation_failed: '远程验证失败',
     unavailable: '远程服务不可用'
   };
-  return labels[safeCode] ?? safeCode;
+  return labels[normalized] ?? labels[safeCode] ?? safeCode;
 }
 
 const addProgressLabels: Record<string, string> = {
@@ -164,6 +167,12 @@ export function ProvidersPage() {
     setNewCredentials({});
     setMessage('');
     setAddingConnection(true);
+    setView('gallery');
+  }
+
+  function leaveAddConnection() {
+    setAddingConnection(false);
+    setMessage('');
   }
 
   function openManageForTemplate(templateKey: string) {
@@ -209,6 +218,7 @@ export function ProvidersPage() {
             );
             if (allowUnavailableSave) continue;
             setMessage('连接未保存');
+            leaveAddConnection();
             return;
           }
           setMessage(describeError(result.error.code));
@@ -298,8 +308,8 @@ export function ProvidersPage() {
         </div>
         <div className="uc-provider-page__header-actions">
           <div className="uc-provider-page__view-switch" aria-label="页面视图">
-            <button aria-pressed={view === 'gallery'} onClick={() => setView('gallery')} type="button">供应商画廊</button>
-            <button aria-pressed={view === 'manage' && !addingConnection} onClick={() => { setAddingConnection(false); setView('manage'); }} type="button">连接管理</button>
+            <button aria-pressed={view === 'gallery' && !addingConnection} onClick={() => { leaveAddConnection(); setView('gallery'); }} type="button">供应商画廊</button>
+            <button aria-pressed={view === 'manage' && !addingConnection} onClick={() => { leaveAddConnection(); setView('manage'); }} type="button">连接管理</button>
           </div>
           <Button aria-label="刷新服务商状态" disabled={!providersApi || busy} onClick={() => void refreshRegistry()} variant="ghost">
             <LuRefreshCw aria-hidden="true" /> 刷新
@@ -323,7 +333,7 @@ export function ProvidersPage() {
                 <h2>添加服务连接</h2>
                 <p>{createTemplate.providerName} · {createTemplate.displayName}</p>
               </div>
-              <Button disabled={busy} onClick={() => setAddingConnection(false)} variant="ghost">取消</Button>
+              <Button onClick={leaveAddConnection} variant="ghost">返回画廊</Button>
             </div>
             <div className="uc-provider-page__form-grid">
               <div className="uc-provider-page__form-template">

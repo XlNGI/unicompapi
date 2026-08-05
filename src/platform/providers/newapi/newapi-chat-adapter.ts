@@ -204,7 +204,7 @@ export class NewApiManagementAdapter implements ProviderManagementAdapterPort {
         observedAt: this.now()
       };
     } catch (error) {
-      const code = runtimeSafeCode(error);
+      const code = safeCodeForError(error);
       return {
         state: 'unavailable',
         identityState: 'verification_failed',
@@ -758,26 +758,29 @@ function parseModelCatalog(body: Uint8Array): readonly ProviderCatalogEntryV1[] 
   } catch {
     throw invalidStream('NewApi model catalog is invalid');
   }
-  const item = exactRecord(value, ['object', 'data'], [], 'NewApi model catalog');
-  if (item.object !== 'list' || !Array.isArray(item.data) || item.data.length > 1000) {
+  // OpenAI-compatible gateways (including New API / UniCompAPI) may add
+  // extension fields such as `success` or `supported_endpoint_types`.
+  // Require the OpenAI list shape, but ignore unknown keys.
+  if (!isRecord(value) || value.object !== 'list' || !Array.isArray(value.data) || value.data.length > 1000) {
     throw invalidStream('NewApi model catalog metadata is invalid');
   }
-  const entries = item.data.map((value) => {
-    const model = exactRecord(
-      value,
-      ['id', 'object', 'created', 'owned_by'],
-      [],
-      'NewAPI model catalog entry'
-    );
-    const id = safeString(model.id, 'NewApi model ID', 256);
+  const entries = value.data.map((entry) => {
+    if (!isRecord(entry)) {
+      throw invalidStream('NewAPI model catalog entry must be an object');
+    }
+    const id = safeString(entry.id, 'NewApi model ID', 256);
+    if (entry.object !== undefined && entry.object !== 'model') {
+      throw invalidStream('NewAPI model catalog entry type is invalid');
+    }
     if (
-      model.object !== 'model' ||
-      !Number.isSafeInteger(model.created) ||
-      Number(model.created) < 0
+      entry.created !== undefined &&
+      (!Number.isSafeInteger(entry.created) || Number(entry.created) < 0)
     ) {
       throw invalidStream('NewAPI model catalog entry metadata is invalid');
     }
-    safeString(model.owned_by, 'NewApi model owner', 160);
+    if (entry.owned_by !== undefined) {
+      safeString(entry.owned_by, 'NewApi model owner', 160);
+    }
     return { providerModelKey: id, displayName: id };
   });
   if (new Set(entries.map((entry) => entry.providerModelKey)).size !== entries.length) {

@@ -197,6 +197,42 @@ describe('NewAPI management and runtime safety', () => {
     });
   });
 
+  it('accepts New API style catalog extensions without failing validation', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({
+      success: true,
+      object: 'list',
+      data: [
+        {
+          id: 'gpt-4o',
+          object: 'model',
+          created: 1,
+          owned_by: 'openai',
+          supported_endpoint_types: ['openai']
+        },
+        {
+          id: 'claude-sonnet',
+          object: 'model',
+          created: 2,
+          owned_by: 'anthropic',
+          supported_endpoint_types: ['anthropic', 'openai']
+        }
+      ]
+    }));
+    const management = new NewApiManagementAdapter(fixture.runtime, {
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
+    });
+    const result = await management.validateConnection({
+      connection: unicompapiConnection('saved', 'saved'),
+      credentials: unicompapiCredential()
+    });
+    expect(result).toMatchObject({
+      state: 'available',
+      identityState: 'verified',
+      credentialState: 'valid'
+    });
+    expect(result.safeCode).toBeUndefined();
+  });
+
   it('accepts UniCompAPI official identity for the shared OpenAI-compatible runtime', async () => {
     const fixture = runtimeFixture(async () => jsonResponse({
       object: 'list',
