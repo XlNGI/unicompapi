@@ -5,6 +5,7 @@ import {
 } from '../src/shared/storage-ipc';
 import {
   providerIpcChannels,
+  type ProviderAddConnectionStep,
   type ProviderApi
 } from '../src/shared/provider-ipc';
 import {
@@ -82,6 +83,15 @@ const providers: ProviderApi = {
   listTemplates: () => ipcRenderer.invoke(providerIpcChannels.listTemplates),
   createConnection: (input) =>
     ipcRenderer.invoke(providerIpcChannels.createConnection, input),
+  addConnection: (input) =>
+    ipcRenderer.invoke(providerIpcChannels.addConnection, input),
+  onAddConnectionProgress: (listener) => {
+    const wrapped = (_event: unknown, step: ProviderAddConnectionStep) => listener(step);
+    ipcRenderer.on(providerIpcChannels.addConnectionProgress, wrapped);
+    return () => {
+      ipcRenderer.removeListener(providerIpcChannels.addConnectionProgress, wrapped);
+    };
+  },
   rotateCredential: (connectionId, credentials) =>
     ipcRenderer.invoke(providerIpcChannels.rotateCredential, {
       connectionId,

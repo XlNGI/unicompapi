@@ -303,7 +303,7 @@ describe('provider management framework', () => {
     expect(await fixture.registry.load()).toEqual(before);
   });
 
-  it('permits exact manual registration only on a manual template and never creates a profile', async () => {
+  it('permits exact manual registration on any available connection and never creates a profile', async () => {
     const fixture = await frameworkFixture();
     const manual = await fixture.framework.createConnection({
       packageId: 'management.fixture',
@@ -340,14 +340,30 @@ describe('provider management framework', () => {
     )).toEqual([]);
 
     const official = await createAndValidate(fixture);
-    await expect(fixture.framework.registerExactModel({
+    const onCatalog = await fixture.framework.registerExactModel({
       connectionId: official.connectionId,
-      providerModelKey: 'must-not-register',
-      displayName: 'Must not register'
-    })).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'manual_registration_unavailable' }
+      providerModelKey: 'catalog-extra-001',
+      displayName: 'Catalog Extra 001'
     });
+    expect(onCatalog).toMatchObject({
+      ok: true,
+      value: { state: 'registered_without_profile' }
+    });
+    const afterOfficial = await fixture.registry.load();
+    const officialModels = afterOfficial.models.filter((model) =>
+      model.connectionId === official.connectionId
+    );
+    expect(officialModels).toEqual([
+      expect.objectContaining({
+        providerModelKey: 'catalog-extra-001',
+        enabled: false,
+        activeProfileId: undefined
+      })
+    ]);
+    const officialModelIds = new Set<string>(officialModels.map((model) => model.id));
+    expect(afterOfficial.modelProfiles?.filter((profile) =>
+      officialModelIds.has(profile.modelId)
+    )).toEqual([]);
     await expect(fixture.framework.syncModelCatalog({
       connectionId: manual.value.connectionId
     })).resolves.toMatchObject({

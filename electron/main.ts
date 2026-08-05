@@ -28,6 +28,7 @@ import {
   volcengineProviderPackageDescriptor
 } from '../src/platform';
 import { ElectronViduComposition } from './ipc/vidu-composition';
+import { createLiveProviderManagementAdapters } from './ipc/management-adapters';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -61,7 +62,12 @@ const providerManagement = new ProviderManagementFramework(
   providerPackages,
   viduComposition.registry,
   viduComposition.credentialVault,
-  new ProviderManagementAdapterRegistry(providerPackages, []),
+  new ProviderManagementAdapterRegistry(
+    providerPackages,
+    createLiveProviderManagementAdapters({
+      getProxyMode: () => settingsLifecycle.getProxyMode()
+    })
+  ),
   new JsonProviderManagementAuditStore(
     path.join(app.getPath('userData'), 'provider-management-audit.json')
   )

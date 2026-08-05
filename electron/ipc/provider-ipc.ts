@@ -21,6 +21,13 @@ export function registerProviderIpcHandlers(options: {
   ipcMain.handle(providerIpcChannels.createConnection, (_event, input) =>
     options.management.createConnection(input)
   );
+  ipcMain.handle(providerIpcChannels.addConnection, (event, input) =>
+    options.management.addConnection(input, (step) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(providerIpcChannels.addConnectionProgress, step);
+      }
+    })
+  );
   ipcMain.handle(providerIpcChannels.rotateCredential, (_event, input) =>
     options.management.rotateCredential(input)
   );

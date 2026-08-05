@@ -2,6 +2,8 @@ export const providerIpcChannels = {
   getRegistry: 'providers:get-registry',
   listTemplates: 'providers:list-templates',
   createConnection: 'providers:create-managed-connection',
+  addConnection: 'providers:add-managed-connection',
+  addConnectionProgress: 'providers:add-managed-connection-progress',
   rotateCredential: 'providers:rotate-managed-credential',
   validateConnection: 'providers:validate-managed-connection',
   syncModelCatalog: 'providers:sync-managed-model-catalog',
@@ -10,6 +12,8 @@ export const providerIpcChannels = {
   setModelEnabled: 'providers:set-managed-model-enabled',
   deleteConnection: 'providers:delete-managed-connection'
 } as const;
+
+export type ProviderAddConnectionStep = 'validating' | 'saving' | 'syncing';
 
 export type ProviderManagementErrorCode =
   | 'adapter_unavailable'
@@ -30,6 +34,7 @@ export type ProviderFrameworkErrorCode =
   | 'connection_contract_stale'
   | 'credential_unavailable'
   | 'credential_invalid'
+  | 'connection_validation_failed'
   | 'free_validation_unavailable'
   | 'operation_unavailable'
   | 'adapter_unavailable'
@@ -318,6 +323,26 @@ export interface ProviderApi {
     readonly connectionId: string;
     readonly state: 'saved';
   }>>;
+  addConnection(input: {
+    readonly packageId: string;
+    readonly templateId: string;
+    readonly name: string;
+    readonly endpoint?: string;
+    readonly credentials: Readonly<Record<string, string>>;
+    readonly explicitLoopbackHttpConsent?: boolean;
+    readonly allowUnavailableSave?: boolean;
+  }): Promise<ProviderFrameworkResult<{
+    readonly providerId: string;
+    readonly connectionId: string;
+    readonly state: 'available' | 'unavailable' | 'saved';
+    readonly validated: boolean;
+    readonly catalog: 'synced' | 'skipped' | 'failed';
+    readonly catalogCount?: number;
+    readonly catalogWarning?: string;
+  }>>;
+  onAddConnectionProgress(
+    listener: (step: ProviderAddConnectionStep) => void
+  ): () => void;
   rotateCredential(
     connectionId: string,
     credentials: Readonly<Record<string, string>>
