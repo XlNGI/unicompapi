@@ -262,13 +262,27 @@ export class ProviderManagementAdapterRegistry {
         binding.protocolVersion === descriptor.protocolVersion
       )
     );
-    if (matches.length !== 1) {
+    if (matches.length === 0) {
       throw new ProviderManagementFrameworkError(
-        'adapter_binding_ambiguous',
-        'An exact single adapter binding is required for manual model registration'
+        'operation_unavailable',
+        'The provider package does not support manual model registration'
       );
     }
-    return matches[0];
+    if (matches.length === 1) return matches[0];
+    // Multi-adapter packages (chat/image/video) should register models against
+    // the catalog/management adapter, not require a single binding overall.
+    const discoverers = matches.filter((descriptor) =>
+      descriptor.operations.includes('discover_models')
+    );
+    if (discoverers.length === 1) return discoverers[0];
+    const validators = matches.filter((descriptor) =>
+      descriptor.operations.includes('validate_connection')
+    );
+    if (validators.length === 1) return validators[0];
+    throw new ProviderManagementFrameworkError(
+      'adapter_binding_ambiguous',
+      'An exact single adapter binding is required for manual model registration'
+    );
   }
 
   supports(
