@@ -105,7 +105,20 @@ export class JsonProviderRegistryStore {
   constructor(private readonly registryPath: string) {}
 
   async load(): Promise<ProviderRegistrySnapshot> {
-    return (await this.readDisk()) ?? emptySnapshot();
+    return sharedFileWriteCoordinator.runExclusive(this.registryPath, async () => {
+      const current = await this.readDisk();
+      const base = current ?? emptySnapshot();
+      const purged = purgeSoftDeletedRegistryRecords(base);
+      if (purged === base) return base;
+      const next = parseSnapshot({
+        ...purged,
+        registryRevision: current
+          ? registryRevision(current) + 1
+          : registryRevision(base)
+      });
+      await this.write(next, current);
+      return next;
+    });
   }
 
   async loadBackup(): Promise<ProviderRegistrySnapshot | undefined> {
@@ -221,11 +234,20 @@ export class ProviderRegistryController {
   async getRegistry(): Promise<ProviderIpcResult<ProviderRegistryDto>> {
     try {
       const snapshot = await this.store.load();
+      const liveConnections = snapshot.connections.filter(
+        (connection) => connection.state !== 'deleted'
+      );
+      const liveConnectionIds = new Set(
+        liveConnections.map((connection) => String(connection.id))
+      );
+      const liveProviders = snapshot.providers.filter((provider) =>
+        liveConnections.some((connection) => connection.providerId === provider.id)
+      );
       return {
         ok: true,
         value: {
           registryRevision: registryRevision(snapshot),
-          providers: snapshot.providers.map((provider) => ({
+          providers: liveProviders.map((provider) => ({
             providerId: provider.id,
             name: provider.name,
             accessCategory: provider.accessCategory,
@@ -233,7 +255,7 @@ export class ProviderRegistryController {
             packageId: provider.packageId,
             packageVersion: provider.packageVersion
           })),
-          connections: snapshot.connections.map((connection) => ({
+          connections: liveConnections.map((connection) => ({
             connectionId: connection.id,
             providerId: connection.providerId,
             name: connection.name,
@@ -247,7 +269,9 @@ export class ProviderRegistryController {
             templateId: connection.templateId,
             templateKind: connection.templateKind
           })),
-          protocolBindings: snapshot.protocolBindings.map((binding) => ({
+          protocolBindings: snapshot.protocolBindings
+            .filter((binding) => liveConnectionIds.has(String(binding.connectionId)))
+            .map((binding) => ({
             protocolBindingId: binding.id,
             providerId: binding.providerId,
             connectionId: binding.connectionId,
@@ -257,7 +281,9 @@ export class ProviderRegistryController {
             executionLifecycle: binding.executionLifecycle,
             supportedPurposes: binding.supportedPurposes
           })),
-          models: snapshot.models.map((model) => {
+          models: snapshot.models
+            .filter((model) => liveConnectionIds.has(String(model.connectionId)))
+            .map((model) => {
             const profile = snapshot.modelProfiles?.find((candidate) =>
               candidate.profileId === model.activeProfileId &&
               candidate.modelId === model.id
@@ -296,7 +322,14 @@ export class ProviderRegistryController {
             observedAt: capability.observedAt,
             recordedAt: capability.recordedAt
           })),
-          routingPreferences: snapshot.routingPreferences.map((preference) => ({
+          routingPreferences: snapshot.routingPreferences
+            .filter((preference) =>
+              snapshot.models.some((model) =>
+                model.id === preference.modelId &&
+                liveConnectionIds.has(String(model.connectionId))
+              )
+            )
+            .map((preference) => ({
             preferenceId: preference.id,
             purpose: preference.purpose,
             modelId: preference.modelId,
@@ -330,6 +363,61 @@ function emptySnapshot(): ProviderRegistrySnapshot {
     modelDefinitions: [],
     modelProfiles: []
   };
+}
+
+function purgeSoftDeletedRegistryRecords(
+  snapshot: ProviderRegistrySnapshot
+): ProviderRegistrySnapshot {
+  const purgeableConnectionIds = new Set(
+    snapshot.connections
+      .filter((connection) =>
+        connection.state === 'deleted' &&
+        !connectionHasCapabilityHistory(snapshot, connection.id)
+      )
+      .map((connection) => String(connection.id))
+  );
+  if (purgeableConnectionIds.size === 0) return snapshot;
+  const remainingConnections = snapshot.connections.filter(
+    (connection) => !purgeableConnectionIds.has(String(connection.id))
+  );
+  const deletedModelIds = new Set(
+    snapshot.models
+      .filter((model) => purgeableConnectionIds.has(String(model.connectionId)))
+      .map((model) => String(model.id))
+  );
+  return {
+    ...snapshot,
+    providers: snapshot.providers.filter((provider) =>
+      remainingConnections.some((connection) => connection.providerId === provider.id)
+    ),
+    connections: remainingConnections,
+    protocolBindings: snapshot.protocolBindings.filter(
+      (binding) => !purgeableConnectionIds.has(String(binding.connectionId))
+    ),
+    models: snapshot.models.filter(
+      (model) => !purgeableConnectionIds.has(String(model.connectionId))
+    ),
+    modelProfiles: (snapshot.modelProfiles ?? []).filter(
+      (profile) => !deletedModelIds.has(String(profile.modelId))
+    ),
+    routingPreferences: snapshot.routingPreferences.filter(
+      (preference) => !deletedModelIds.has(String(preference.modelId))
+    )
+  };
+}
+
+function connectionHasCapabilityHistory(
+  snapshot: ProviderRegistrySnapshot,
+  connectionId: ProviderConnection['id'] | string
+): boolean {
+  const modelIds = new Set(
+    snapshot.models
+      .filter((model) => String(model.connectionId) === String(connectionId))
+      .map((model) => String(model.id))
+  );
+  return snapshot.capabilities.some((evidence) =>
+    modelIds.has(String(evidence.modelId))
+  );
 }
 
 export function migrateProviderRegistrySnapshot(value: unknown): unknown {

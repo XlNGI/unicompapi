@@ -236,7 +236,7 @@ describe('ProviderCredentialController', () => {
     ]);
   });
 
-  it('soft-deletes a connection while preserving historical model facts', async () => {
+  it('deletes a connection and lets registry load purge the soft-deleted tomb', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-provider-credential-'));
     roots.push(root);
     const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
@@ -317,14 +317,10 @@ describe('ProviderCredentialController', () => {
         value: { state: 'deleted', remoteRevocation: 'not_attempted' }
       });
     const snapshot = await registry.load();
-    expect(snapshot.connections[0]).toMatchObject({
-      state: 'deleted',
-      credentialState: 'deleted'
-    });
-    expect(snapshot.connections[0].endpoint).toBeUndefined();
-    expect(snapshot.models).toHaveLength(1);
-    expect(snapshot.models[0].enabled).toBe(false);
-    expect(snapshot.routingPreferences[0].enabled).toBe(false);
+    expect(snapshot.connections).toEqual([]);
+    expect(snapshot.providers).toEqual([]);
+    expect(snapshot.models).toEqual([]);
+    expect(snapshot.protocolBindings).toEqual([]);
     expect(await vault.status('credential-delete-fixture')).toBe('not_configured');
   });
 });

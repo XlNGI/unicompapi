@@ -1188,6 +1188,44 @@ export class ProviderManagementFramework {
             .filter((model) => model.connectionId === current.id)
             .map((model) => String(model.id))
         );
+        const hasCapabilityHistory = latest.capabilities.some((evidence) =>
+          modelIds.has(String(evidence.modelId))
+        );
+        // Capability evidence is immutable and requires model/connection refs,
+        // so history-bearing connections stay as hidden tombs; others are purged.
+        if (hasCapabilityHistory) {
+          return {
+            snapshot: {
+              ...latest,
+              connections: latest.connections.map((connection) =>
+                connection.id === current.id
+                  ? {
+                      ...connection,
+                      endpoint: undefined,
+                      credentialReference: undefined,
+                      credentialState: 'deleted' as const,
+                      state: 'deleted' as const,
+                      identityState: 'unverified' as const,
+                      lastConnectionValidationAt: undefined,
+                      connectionRevision: (connection.connectionRevision ?? 0) + 1,
+                      updatedAt: now
+                    }
+                  : connection
+              ),
+              models: latest.models.map((model) =>
+                modelIds.has(String(model.id)) && model.enabled
+                  ? { ...model, enabled: false, revision: model.revision + 1, updatedAt: now }
+                  : model
+              ),
+              routingPreferences: latest.routingPreferences.map((preference) =>
+                modelIds.has(String(preference.modelId)) && preference.enabled
+                  ? { ...preference, enabled: false, updatedAt: now }
+                  : preference
+              )
+            },
+            result: undefined
+          };
+        }
         const remainingConnections = latest.connections.filter(
           (connection) => connection.id !== current.id
         );
@@ -1206,10 +1244,10 @@ export class ProviderManagementFramework {
             ),
             models: latest.models.filter((model) => model.connectionId !== current.id),
             modelProfiles: (latest.modelProfiles ?? []).filter(
-              (profile) => !modelIds.has(profile.modelId)
+              (profile) => !modelIds.has(String(profile.modelId))
             ),
             routingPreferences: latest.routingPreferences.filter(
-              (preference) => !modelIds.has(preference.modelId)
+              (preference) => !modelIds.has(String(preference.modelId))
             )
           },
           result: undefined

@@ -73,7 +73,6 @@ export function ProvidersPage() {
   const [activeTab, setActiveTab] = useState<DetailTab>('models');
   const [connectionFilter, setConnectionFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [showDeleted, setShowDeleted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -402,7 +401,6 @@ export function ProvidersPage() {
           onSelectConnection={setSelectedConnectionId}
           onSelectModel={setSelectedModelId}
           onSelectTab={setActiveTab}
-          onShowDeletedChange={setShowDeleted}
           providersApi={providersApi}
           registry={registry}
           replacementCredentials={replacementCredentials}
@@ -410,7 +408,6 @@ export function ProvidersPage() {
           search={search}
           selectedConnectionId={selectedConnectionId}
           selectedModelId={selectedModelId}
-          showDeleted={showDeleted}
           templates={templates}
         />
       )}
