@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { toIsoTimestamp, type CredentialProtector } from '../../src/domain';
+import { toIsoTimestamp, type ProviderPackageDescriptor } from '../../src/domain';
 import {
   JsonProviderManagementAuditStore,
   JsonProviderRegistryStore,
@@ -10,9 +10,9 @@ import {
   ProviderManagementFramework,
   ProviderPackageRegistry,
   SecureCredentialVault,
+  type CredentialProtector,
   type ProviderConnectionValidationResultV1,
-  type ProviderManagementAdapterPort,
-  type ProviderPackageDescriptor
+  type ProviderManagementAdapterPort
 } from '../../src/platform';
 
 const t1 = toIsoTimestamp('2026-08-05T00:00:00.000Z');
@@ -438,9 +438,9 @@ function endpointPolicy(
 function protector(): CredentialProtector {
   return {
     isAvailable: () => true,
-    protect: (value) =>
+    protect: (value: string) =>
       Buffer.from([...Buffer.from(value)].map((byte) => byte ^ 0x5a)),
-    unprotect: (value) =>
+    unprotect: (value: Buffer) =>
       Buffer.from([...value].map((byte) => byte ^ 0x5a)).toString('utf8')
   };
 }

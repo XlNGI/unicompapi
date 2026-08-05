@@ -2,19 +2,41 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const source = await readFile('src/pages/providers/ProvidersPage.tsx', 'utf8');
+const shell = await readFile('src/pages/providers/ProvidersPage.tsx', 'utf8');
+const gallery = await readFile('src/pages/providers/ProviderGalleryView.tsx', 'utf8');
+const manage = await readFile('src/pages/providers/ProviderManageView.tsx', 'utf8');
+const source = [shell, gallery, manage].join('\n');
 
 test('provider page is driven by registry and package templates', () => {
-  assert.match(source, /providersApi\.getRegistry\(\)/);
-  assert.match(source, /providersApi\.listTemplates\(\)/);
-  assert.match(source, /item\.kind === kind/);
-  assert.match(source, /createTemplate\.packageId/);
-  assert.match(source, /createTemplate\.templateId/);
-  assert.match(source, /createTemplate\?\.baseUrlMode !== 'fixed'/);
+  assert.match(shell, /providersApi\.getRegistry\(\)/);
+  assert.match(shell, /providersApi\.listTemplates\(\)/);
+  assert.match(shell, /templateKeyOf/);
+  assert.match(shell, /createTemplate\.packageId/);
+  assert.match(shell, /createTemplate\.templateId/);
+  assert.match(shell, /createTemplate\.baseUrlMode !== 'fixed'/);
   assert.doesNotMatch(
     source,
     /OpenAI|Anthropic|Google AI|Midjourney|Stable Diffusion|DeepSeek|Vidu|Kling|Volcengine/
   );
+});
+
+test('provider page splits into gallery and manage views under one first-level page', () => {
+  assert.match(shell, /ProviderGalleryView/);
+  assert.match(shell, /ProviderManageView/);
+  assert.match(shell, /setView\('gallery'\)/);
+  assert.match(shell, /setView\('manage'\)/);
+  assert.doesNotMatch(shell, /createBrowserRouter|react-router/);
+});
+
+test('gallery shows only adapted templates as cards with a request-adapter entry', () => {
+  assert.match(gallery, /templates\.map/);
+  assert.match(gallery, /template\.providerName/);
+  assert.match(gallery, /connection\.state !== 'deleted'/);
+  assert.match(gallery, /onAddConnection/);
+  assert.match(gallery, /onRequestAdapter/);
+  assert.match(gallery, /求适配/);
+  assert.match(gallery, /已连接/);
+  assert.match(gallery, /未连接/);
 });
 
 test('provider page exposes the controlled framework mutations', () => {
@@ -37,18 +59,18 @@ test('provider page exposes the controlled framework mutations', () => {
 });
 
 test('connection creation runs the orchestrated validate-save-discover pipeline', () => {
-  assert.match(source, /providersApi\.onAddConnectionProgress/);
-  assert.match(source, /allowUnavailableSave/);
-  assert.match(source, /connection_validation_failed/);
+  assert.match(shell, /providersApi\.onAddConnectionProgress/);
+  assert.match(shell, /allowUnavailableSave/);
+  assert.match(shell, /connection_validation_failed/);
   assert.match(source, /window\.confirm/);
 });
 
 test('credential fields are structured, write-only and cleared after writes', () => {
-  assert.match(source, /createTemplate\?\.credentialFields\.map/);
-  assert.match(source, /selectedTemplate\.credentialFields\.map/);
+  assert.match(shell, /createTemplate\.credentialFields\.map/);
+  assert.match(manage, /selectedTemplate\.credentialFields\.map/);
   assert.match(source, /type=\{field\.secret \? 'password' : 'text'\}/);
-  assert.match(source, /credentials: newCredentials/);
-  assert.match(source, /setNewCredentials\(\{\}\)/);
+  assert.match(shell, /credentials: newCredentials/);
+  assert.match(shell, /setNewCredentials\(\{\}\)/);
   assert.match(source, /setReplacementCredentials\(\{\}\)/);
   assert.doesNotMatch(
     source,
@@ -56,11 +78,11 @@ test('credential fields are structured, write-only and cleared after writes', ()
   );
 });
 
-test('online validation and discovery stay disabled pending explicit approval', () => {
-  assert.match(source, /selectedTemplate\?\.validationAction !== 'available'/);
-  assert.match(source, /selectedTemplate\?\.modelDiscoveryAction !== 'catalog_available'/);
-  assert.match(source, /validationAction === 'requires_live_api_approval'/);
-  assert.match(source, /modelDiscoveryAction === 'requires_live_api_approval'/);
+test('online validation and discovery stay gated on adapter availability', () => {
+  assert.match(manage, /selectedTemplate\?\.validationAction !== 'available'/);
+  assert.match(manage, /selectedTemplate\?\.modelDiscoveryAction !== 'catalog_available'/);
+  assert.match(manage, /validationAction === 'requires_live_api_approval'/);
+  assert.match(manage, /modelDiscoveryAction === 'requires_live_api_approval'/);
   assert.doesNotMatch(
     source,
     /getViduLiveValidation|startViduLiveValidation|confirmImageBillableAttempt|confirmVideoBillableAttempt/
@@ -68,9 +90,16 @@ test('online validation and discovery stay disabled pending explicit approval', 
 });
 
 test('model controls use exact registration and verified profile projections', () => {
-  assert.match(source, /selectedConnection\.state === 'available'/);
+  assert.match(manage, /selectedConnection\.state === 'available'/);
   assert.match(source, /providersApi\.registerExactModel/);
-  assert.match(source, /selectedModel\.profileStatus/);
-  assert.match(source, /selectedModel\.productFeatures/);
+  assert.match(manage, /selectedModel\.profileStatus/);
+  assert.match(manage, /selectedModel\.productFeatures/);
   assert.doesNotMatch(source, /capability\.capability|protocolId ===|providerId === ['"]/);
+});
+
+test('deleted connections are hidden by default behind an explicit toggle', () => {
+  assert.match(shell, /useState\(false\)/);
+  assert.match(manage, /showDeleted/);
+  assert.match(manage, /!showDeleted && connection\.state === 'deleted'/);
+  assert.match(manage, /显示已删除/);
 });
