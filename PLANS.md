@@ -1200,3 +1200,6 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
 执行记录：
 
 - 2026-08-05：PR 1 `feature/provider-connection-orchestration` 启动。
+- 2026-08-05：PR 1 实现完成，实现提交 `9e68629`。保存连接改为主进程自动编排（瞬态草稿探针验证 → 落库 → 目录类模板自动同步），验证失败零落盘并可确认后强制保存为不可用；NewAPI 与 DeepSeek 既有管理适配器完成生产装配（Electron `net.fetch` 传输层）；手动登记对所有已验证连接开放。门禁为 Node 195 项与 Vitest 588 项，共 783 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接校验、恢复审计、差异检查全部通过；Windows Electron 烟测窗口正常、优雅关闭、残留 0、日志为空。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。工程记录见：
+
+    docs/active/服务商画廊与连接编排-PR1-连接编排管线记录.md
