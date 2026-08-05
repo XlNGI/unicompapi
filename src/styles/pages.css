@@ -3619,6 +3619,20 @@
   background: var(--uc-color-surface-panel);
 }
 
+.uc-provider-page__manual-model-copy {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--uc-space-1);
+}
+
+.uc-provider-page__manual-model-copy strong {
+  font-size: var(--uc-font-size-body);
+}
+
+.uc-provider-page__manual-model-copy small {
+  color: var(--uc-color-text-secondary);
+}
+
 .uc-provider-page__model {
   display: grid;
   grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 0.8fr) auto auto;

@@ -250,14 +250,24 @@ export function ProviderManageView({
 
                 {selectedConnection.state === 'available' && (
                   <form className="uc-provider-page__inline-form" onSubmit={onRegisterModel}>
-                    <label>精确模型标识<input maxLength={500} onChange={(event) => onModelKeyChange(event.target.value)} required value={modelKey} /></label>
-                    <label>显示名称<input maxLength={200} onChange={(event) => onModelDisplayNameChange(event.target.value)} required value={modelDisplayName} /></label>
-                    <Button disabled={busy || !modelKey.trim() || !modelDisplayName.trim()} type="submit">登记</Button>
+                    <div className="uc-provider-page__manual-model-copy">
+                      <strong>手动登记模型</strong>
+                      <small>目录同步失败或没有自动列出时，可填写远端模型标识直接登记。</small>
+                    </div>
+                    <label>精确模型标识<input maxLength={500} onChange={(event) => onModelKeyChange(event.target.value)} placeholder="例如 gpt-4o" required value={modelKey} /></label>
+                    <label>显示名称<input maxLength={200} onChange={(event) => onModelDisplayNameChange(event.target.value)} placeholder="界面显示名" required value={modelDisplayName} /></label>
+                    <Button disabled={busy || !modelKey.trim() || !modelDisplayName.trim()} type="submit">登记模型</Button>
                   </form>
                 )}
 
                 {connectionModels.length === 0 ? (
-                  <EmptyState description="当前连接没有已登记模型。" icon="型" title="模型目录为空" />
+                  <EmptyState
+                    description={selectedConnection.state === 'available'
+                      ? '自动目录为空时可在上方手动登记精确模型标识。'
+                      : '当前连接没有已登记模型。'}
+                    icon="型"
+                    title="模型目录为空"
+                  />
                 ) : (
                   <div className="uc-provider-page__model-list">
                     {connectionModels.map((model) => (

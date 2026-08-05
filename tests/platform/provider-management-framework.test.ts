@@ -24,6 +24,8 @@ import {
   ProviderModelCatalogService,
   ProviderPackageRegistry,
   SecureCredentialVault,
+  UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
+  unicompapiProviderPackageDescriptor,
   type CredentialProtector,
   type ProviderCredentialRetentionPort,
   type ProviderManagementAdapterPort
@@ -707,6 +709,61 @@ describe('provider management framework', () => {
     expect(after.providers.find((item) => item.id === provider.id)).toBeUndefined();
     expect(after.models.find((item) => item.id === model.id)).toBeUndefined();
     expect(await fixture.vault.status('credential-legacy-ts')).toBe('not_configured');
+  });
+
+  it('registers exact models for multi-adapter OpenAI-compatible packages', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'uc-multi-adapter-register-'));
+    roots.push(root);
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const vault = new SecureCredentialVault(path.join(root, 'credentials.json'), protector());
+    const adapter: ProviderManagementAdapterPort = {
+      identity: {
+        packageId: unicompapiProviderPackageDescriptor.packageId,
+        adapterId: 'newapi.chat',
+        adapterVersion: '2026-08-03',
+        protocolId: 'newapi.openai.chat-completions',
+        protocolVersion: '2026-08-03'
+      },
+      async validateConnection() {
+        return {
+          state: 'available',
+          identityState: 'verified',
+          credentialState: 'valid',
+          observedAt: t1
+        };
+      },
+      async discoverModels() {
+        throw new Error('catalog unavailable');
+      }
+    };
+    const framework = new ProviderManagementFramework(
+      packages,
+      registry,
+      vault,
+      new ProviderManagementAdapterRegistry(packages, [adapter]),
+      new JsonProviderManagementAuditStore(path.join(root, 'audit.json')),
+      { now: () => t2 }
+    );
+    const added = await framework.addConnection({
+      packageId: unicompapiProviderPackageDescriptor.packageId,
+      templateId: UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
+      name: 'UniCompAPI without catalog',
+      credentials: { api_key: 'fixture-unicompapi-key' }
+    });
+    expect(added).toMatchObject({
+      ok: true,
+      value: { state: 'available', catalog: 'failed' }
+    });
+    if (!added.ok) throw new Error('unicompapi connection creation failed');
+    await expect(framework.registerExactModel({
+      connectionId: added.value.connectionId,
+      providerModelKey: 'gpt-4o-manual',
+      displayName: 'GPT-4o Manual'
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'registered_without_profile' }
+    });
   });
 });
 
