@@ -3,12 +3,18 @@ import {
   DeepSeekManagementAdapter,
   DeepSeekSharedRuntime,
   DeepSeekTransportFailure,
+  KlingManagementAdapter,
+  KlingSharedRuntime,
+  KlingTransportFailure,
   NewApiManagementAdapter,
   NewApiSharedRuntime,
   NewApiTransportFailure,
   type DeepSeekHttpTransport,
   type DeepSeekHttpTransportRequest,
   type DeepSeekHttpTransportResponse,
+  type KlingHttpTransport,
+  type KlingHttpTransportRequest,
+  type KlingHttpTransportResponse,
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
   type NewApiHttpTransportResponse,
@@ -31,9 +37,14 @@ export function createLiveProviderManagementAdapters(options: {
     transport: new ElectronNewApiHttpTransport(),
     proxy: () => activeProxy
   });
+  const klingRuntime = new KlingSharedRuntime({
+    transport: new ElectronKlingHttpTransport(),
+    proxy: () => activeProxy
+  });
   return [
     new DeepSeekManagementAdapter(deepSeekRuntime),
-    new NewApiManagementAdapter(newApiRuntime)
+    new NewApiManagementAdapter(newApiRuntime),
+    new KlingManagementAdapter(klingRuntime)
   ];
 }
 
@@ -93,6 +104,36 @@ class ElectronNewApiHttpTransport implements NewApiHttpTransport {
       }
       if (error instanceof NewApiTransportFailure) throw error;
       throw new NewApiTransportFailure('network');
+    }
+  }
+}
+
+class ElectronKlingHttpTransport implements KlingHttpTransport {
+  async send(request: KlingHttpTransportRequest): Promise<KlingHttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(
+        response,
+        request.maxResponseBytes,
+        () => new KlingTransportFailure('response_too_large')
+      );
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new KlingTransportFailure('cancelled');
+      }
+      if (error instanceof KlingTransportFailure) throw error;
+      throw new KlingTransportFailure('network');
     }
   }
 }

@@ -12,7 +12,7 @@ import {
 export const KLING_PROVIDER_PACKAGE_ID = 'provider-package-kling';
 export const KLING_PROVIDER_PACKAGE_VERSION = '1.0.0';
 export const KLING_OFFICIAL_TEMPLATE_ID = 'kling-official';
-export const KLING_CREDENTIAL_SCHEMA_ID = 'credential.kling.api-key';
+export const KLING_CREDENTIAL_SCHEMA_ID = 'credential.kling.ak-sk';
 export const KLING_ENDPOINT_POLICY_ID = 'endpoint.kling.official';
 export const KLING_OFFICIAL_BASE_URL = 'https://api-beijing.klingai.com';
 
@@ -69,8 +69,15 @@ export const klingProviderPackageDescriptor: ProviderPackageDescriptor = {
       version: 1,
       fields: [
         {
-          key: 'api_key',
-          label: 'Kling API key',
+          key: 'access_key',
+          label: 'Kling Access Key',
+          secret: true,
+          required: true,
+          kind: 'token'
+        },
+        {
+          key: 'secret_key',
+          label: 'Kling Secret Key',
           secret: true,
           required: true,
           kind: 'token'
@@ -101,7 +108,7 @@ export const klingProviderPackageDescriptor: ProviderPackageDescriptor = {
       adapterVersion: KLING_VIDEO_ADAPTER_VERSION,
       protocolId: KLING_VIDEO_PROTOCOL_ID,
       protocolVersion: KLING_VIDEO_PROTOCOL_VERSION,
-      operations: ['submit', 'query', 'cancel', 'receive_result']
+      operations: ['validate_connection', 'submit', 'query', 'cancel', 'receive_result']
     }
   ],
   templates: [
@@ -124,7 +131,7 @@ export const klingProviderPackageDescriptor: ProviderPackageDescriptor = {
           adapterVersion: KLING_VIDEO_ADAPTER_VERSION
         }
       ],
-      freeConnectionValidation: false,
+      freeConnectionValidation: true,
       modelDiscoveryKind: 'manual_exact'
     }
   ]
