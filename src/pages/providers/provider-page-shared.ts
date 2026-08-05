@@ -51,7 +51,7 @@ export function describeError(code: string): string {
     catalog_sync_unavailable: '此连接不支持目录同步',
     manual_registration_unavailable: '此连接不支持精确手工登记',
     connection_not_available: '连接验证通过后才能管理模型',
-    model_not_routable: '只有精确 Profile 已验证的当前模型才能启用',
+    model_not_routable: '连接可用且模型仍在目录中时才能启用',
     active_operations_present: '仍有调用使用此连接',
     credential_invalid: '凭证字段不完整或格式无效',
     provider_registry_conflict: '注册表已变化，请刷新后重试',

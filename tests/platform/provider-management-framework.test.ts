@@ -420,7 +420,7 @@ describe('provider management framework', () => {
     );
   });
 
-  it('enables only a present model with a verified exact profile and cascades connection disable', async () => {
+  it('enables a present catalog model on an available connection without requiring a profile', async () => {
     const fixture = await frameworkFixture();
     const created = await createAndValidate(fixture);
     fixture.catalog.entries = [{ providerModelKey: 'model.routable', displayName: 'Routable' }];
@@ -434,10 +434,11 @@ describe('provider management framework', () => {
     await expect(fixture.framework.setModelEnabled({
       modelId: model.id,
       enabled: true
-    })).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'model_not_routable' }
-    });
+    })).resolves.toMatchObject({ ok: true, value: { state: 'enabled' } });
+    await expect(fixture.framework.setModelEnabled({
+      modelId: model.id,
+      enabled: false
+    })).resolves.toMatchObject({ ok: true, value: { state: 'disabled' } });
 
     const catalog = new ProviderModelCatalogService(fixture.registry);
     await catalog.registerDefinition({
@@ -470,7 +471,7 @@ describe('provider management framework', () => {
         ...current,
         modelProfiles: current.modelProfiles!.map((candidate) =>
           candidate.profileId === profile.profileId
-            ? { ...candidate, status: 'verified' as const }
+            ? { ...candidate, status: 'declared' as const }
             : candidate
         ),
         routingPreferences: [createRoutingPreference({
@@ -487,11 +488,30 @@ describe('provider management framework', () => {
     await expect(fixture.framework.setModelEnabled({
       modelId: model.id,
       enabled: true
-    })).resolves.toMatchObject({ ok: true, value: { state: 'enabled' } });
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'model_not_routable' }
+    });
+    await fixture.registry.mutate((current) => ({
+      snapshot: {
+        ...current,
+        modelProfiles: current.modelProfiles!.map((candidate) =>
+          candidate.profileId === profile.profileId
+            ? { ...candidate, status: 'verified' as const }
+            : candidate
+        )
+      },
+      result: undefined
+    }));
     await expect(fixture.framework.setModelEnabled({
       modelId: model.id,
-      enabled: false
-    })).resolves.toMatchObject({ ok: true, value: { state: 'disabled' } });
+      enabled: true
+    })).resolves.toMatchObject({ ok: true, value: { state: 'enabled' } });
+    snapshot = await fixture.registry.load();
+    expect(snapshot.routingPreferences.find((preference) =>
+      preference.modelId === model.id
+    )?.enabled).toBe(true);
+    await fixture.framework.setModelEnabled({ modelId: model.id, enabled: false });
     snapshot = await fixture.registry.load();
     expect(snapshot.routingPreferences.find((preference) =>
       preference.modelId === model.id
@@ -550,7 +570,7 @@ describe('provider management framework', () => {
     )?.enabled).toBe(unregisteredViduModel.enabled);
   });
 
-  it('blocks deletion with active operations, then explicitly abandons and soft-deletes without history loss', async () => {
+  it('blocks deletion with active operations, then explicitly abandons and hard-deletes the connection', async () => {
     const activeVersions: string[] = [];
     const abandoned: string[][] = [];
     const retention: ProviderCredentialRetentionPort = {
@@ -592,20 +612,16 @@ describe('provider management framework', () => {
     const after = await fixture.registry.load();
     expect(after.providers.find((provider) =>
       provider.id === beforeConnection.providerId
-    )).toBeDefined();
+    )).toBeUndefined();
     expect(after.connections.find((connection) =>
       connection.id === created.connectionId
-    )).toMatchObject({
-      state: 'deleted',
-      credentialState: 'deleted',
-      credentialReference: undefined,
-      endpoint: undefined
-    });
-    const afterModels = after.models.filter((model) =>
+    )).toBeUndefined();
+    expect(after.models.filter((model) =>
       model.connectionId === created.connectionId
-    );
-    expect(afterModels).toHaveLength(1);
-    expect(afterModels[0].providerModelKey).toBe('model.history');
+    )).toHaveLength(0);
+    expect(after.protocolBindings.filter((binding) =>
+      binding.connectionId === created.connectionId
+    )).toHaveLength(0);
     expect(abandoned).toEqual([[beforeConnection.credentialVersionId]]);
     expect(await fixture.vault.status(beforeConnection.credentialReference!))
       .toBe('not_configured');

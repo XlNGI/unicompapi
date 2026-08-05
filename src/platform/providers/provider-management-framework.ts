@@ -1169,6 +1169,14 @@ export class ProviderManagementFramework {
         });
       }
       const credentialReference = resolved.connection.credentialReference;
+      const packageId = resolved.connection.packageId;
+      if (packageId) {
+        await this.runtimeAuthorization?.syncConnectionPolicy({
+          providerPackageId: packageId,
+          connectionId: resolved.connection.id,
+          allowed: false
+        }).catch(() => undefined);
+      }
       await this.registry.mutate((latest) => {
         const current = requireUnchangedConnection(
           latest,
@@ -1180,33 +1188,28 @@ export class ProviderManagementFramework {
             .filter((model) => model.connectionId === current.id)
             .map((model) => model.id)
         );
+        const remainingConnections = latest.connections.filter(
+          (connection) => connection.id !== current.id
+        );
+        const providerStillUsed = remainingConnections.some(
+          (connection) => connection.providerId === current.providerId
+        );
         return {
           snapshot: {
             ...latest,
-            connections: latest.connections.map((connection) =>
-              connection.id === current.id
-                ? {
-                    ...connection,
-                    endpoint: undefined,
-                    credentialReference: undefined,
-                    credentialState: 'deleted' as const,
-                    state: 'deleted' as const,
-                    identityState: 'unverified' as const,
-                    lastConnectionValidationAt: undefined,
-                    connectionRevision: (connection.connectionRevision ?? 0) + 1,
-                    updatedAt: now
-                  }
-                : connection
+            providers: providerStillUsed
+              ? latest.providers
+              : latest.providers.filter((provider) => provider.id !== current.providerId),
+            connections: remainingConnections,
+            protocolBindings: latest.protocolBindings.filter(
+              (binding) => binding.connectionId !== current.id
             ),
-            models: latest.models.map((model) =>
-              modelIds.has(model.id) && model.enabled
-                ? { ...model, enabled: false, revision: model.revision + 1, updatedAt: now }
-                : model
+            models: latest.models.filter((model) => model.connectionId !== current.id),
+            modelProfiles: (latest.modelProfiles ?? []).filter(
+              (profile) => !modelIds.has(profile.modelId)
             ),
-            routingPreferences: latest.routingPreferences.map((preference) =>
-              modelIds.has(preference.modelId) && preference.enabled
-                ? { ...preference, enabled: false, updatedAt: now }
-                : preference
+            routingPreferences: latest.routingPreferences.filter(
+              (preference) => !modelIds.has(preference.modelId)
             )
           },
           result: undefined
@@ -1222,7 +1225,6 @@ export class ProviderManagementFramework {
           ? 'active_operations_abandoned'
           : 'local_only'
       }, now);
-      await this.syncRuntimePolicy(resolved.connection.id);
       return {
         ok: true,
         value: {
@@ -1553,11 +1555,6 @@ function assertModelRoutableForEnable(
   const connection = snapshot.connections.find((candidate) =>
     candidate.id === model.connectionId
   );
-  const profile = snapshot.modelProfiles?.find((candidate) =>
-    candidate.profileId === model.activeProfileId &&
-    candidate.modelId === model.id &&
-    candidate.modelRevision <= model.revision
-  );
   const binding = snapshot.protocolBindings.find((candidate) =>
     candidate.id === model.protocolBindingId &&
     candidate.connectionId === model.connectionId
@@ -1566,12 +1563,28 @@ function assertModelRoutableForEnable(
     !connection || connection.state !== 'available' ||
     connection.credentialState !== 'valid' || connection.identityState !== 'verified' ||
     (model.catalogState ?? 'present') !== 'present' ||
-    !profile || profile.status !== 'verified' || !binding
+    !binding
   ) {
     throw new ProviderManagementFrameworkError(
       'model_not_routable',
-      'Only a present model with an exact verified profile can be enabled'
+      'Only a present model on an available connection can be enabled'
     );
+  }
+  // Catalog-synced models may not have a verified profile yet; still allow the
+  // user to mark them enabled for local selection. If a profile is already
+  // attached, it must remain verified.
+  if (model.activeProfileId) {
+    const profile = snapshot.modelProfiles?.find((candidate) =>
+      candidate.profileId === model.activeProfileId &&
+      candidate.modelId === model.id &&
+      candidate.modelRevision <= model.revision
+    );
+    if (!profile || profile.status !== 'verified') {
+      throw new ProviderManagementFrameworkError(
+        'model_not_routable',
+        'Only a present model with an exact verified profile can be enabled'
+      );
+    }
   }
 }
 
