@@ -3,8 +3,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createProvider,
+  createProviderConnection,
+  createProviderModel,
+  createProviderProtocolBinding,
   createRoutingPreference,
+  toConnectionId,
   toIsoTimestamp,
+  toModelId,
+  toProtocolBindingId,
+  toProviderId,
   toRoutingPreferenceId,
   type ProviderPackageDescriptor
 } from '../../src/domain';
@@ -625,6 +633,80 @@ describe('provider management framework', () => {
     expect(abandoned).toEqual([[beforeConnection.credentialVersionId]]);
     expect(await fixture.vault.status(beforeConnection.credentialReference!))
       .toBe('not_configured');
+  });
+
+  it('hard-deletes legacy connections that have no package ownership', async () => {
+    const fixture = await frameworkFixture();
+    const provider = createProvider({
+      id: toProviderId('provider-legacy-ts'),
+      name: 'ts',
+      accessCategory: 'custom_remote',
+      identityState: 'unverified',
+      createdAt: t0,
+      updatedAt: t0
+    });
+    const connection = createProviderConnection({
+      id: toConnectionId('connection-legacy-ts'),
+      providerId: provider.id,
+      name: 'ts',
+      state: 'unavailable',
+      identityState: 'verification_failed',
+      credentialState: 'verification_unavailable',
+      credentialReference: 'credential-legacy-ts',
+      createdAt: t0,
+      updatedAt: t0
+    });
+    const binding = createProviderProtocolBinding({
+      id: toProtocolBindingId('protocol-legacy-ts'),
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolId: 'fixture.unclassified',
+      protocolVersion: '1',
+      mediaKind: 'unknown',
+      adapterKind: 'unavailable',
+      authScheme: 'unknown',
+      executionLifecycle: 'unknown',
+      supportedPurposes: [],
+      createdAt: t0,
+      updatedAt: t0
+    });
+    const model = createProviderModel({
+      id: toModelId('model-legacy-ts'),
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolBindingId: binding.id,
+      providerModelKey: 'viduq2-pro',
+      mediaKind: 'unknown',
+      revision: 1,
+      displayName: 'viduq2-pro',
+      enabled: false,
+      createdAt: t0,
+      updatedAt: t0
+    });
+    await fixture.vault.save('credential-legacy-ts', 'legacy-secret');
+    await fixture.registry.mutate((current) => ({
+      snapshot: {
+        ...current,
+        providers: [...current.providers, provider],
+        connections: [...current.connections, connection],
+        protocolBindings: [...current.protocolBindings, binding],
+        models: [...current.models, model]
+      },
+      result: undefined
+    }));
+
+    await expect(fixture.framework.deleteConnection({
+      connectionId: connection.id,
+      confirmLocalDeletion: true
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'deleted', remoteRevocation: 'not_attempted' }
+    });
+    const after = await fixture.registry.load();
+    expect(after.connections.find((item) => item.id === connection.id)).toBeUndefined();
+    expect(after.providers.find((item) => item.id === provider.id)).toBeUndefined();
+    expect(after.models.find((item) => item.id === model.id)).toBeUndefined();
+    expect(await fixture.vault.status('credential-legacy-ts')).toBe('not_configured');
   });
 });
 
