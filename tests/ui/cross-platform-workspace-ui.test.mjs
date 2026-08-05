@@ -20,6 +20,11 @@ const sources = Object.fromEntries(
     ])
   )
 );
+sources.providers += '\n' + (await Promise.all([
+  'src/pages/providers/ProviderGalleryView.tsx',
+  'src/pages/providers/ProviderManageView.tsx',
+  'src/pages/providers/provider-page-shared.ts'
+].map((path) => readFile(path, 'utf8')))).join('\n');
 
 test('the desktop layout owns the only main landmark', () => {
   assert.match(sources.layout, /<main className="workspace" id="main-content"/);

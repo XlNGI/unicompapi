@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const providers = await readFile('src/pages/providers/ProvidersPage.tsx', 'utf8');
+const providerManage = await readFile('src/pages/providers/ProviderManageView.tsx', 'utf8');
 const chat = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const imageShell = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
@@ -16,8 +16,8 @@ const modes = await readFile('src/pages/creation/creationModes.ts', 'utf8');
 
 test('secondary setup actions do not compete with the provider and chat main actions', () => {
   assert.match(
-    providers,
-    /action=\{<Button disabled=\{!providersApi\} onClick=\{\(\) => openCreate\('official'\)\} variant="secondary">/
+    providerManage,
+    /action=\{<Button disabled=\{!providersApi\} onClick=\{onGoGallery\} variant="secondary">/
   );
   assert.match(
     chat,
