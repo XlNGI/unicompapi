@@ -9,6 +9,7 @@ import {
   NewApiManagementAdapter,
   NewApiSharedRuntime,
   NewApiTransportFailure,
+  UNICOMPAPI_PROVIDER_PACKAGE_ID,
   type DeepSeekHttpTransport,
   type DeepSeekHttpTransportRequest,
   type DeepSeekHttpTransportResponse,
@@ -44,6 +45,9 @@ export function createLiveProviderManagementAdapters(options: {
   return [
     new DeepSeekManagementAdapter(deepSeekRuntime),
     new NewApiManagementAdapter(newApiRuntime),
+    new NewApiManagementAdapter(newApiRuntime, {
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
+    }),
     new KlingManagementAdapter(klingRuntime)
   ];
 }
