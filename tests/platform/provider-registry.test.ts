@@ -186,7 +186,7 @@ describe('JsonProviderRegistryStore', () => {
     expect(JSON.stringify(reloaded)).not.toContain('connection-vidu-default');
   });
 
-  it('keeps existing user Vidu records untouched without re-seeding missing rows', async () => {
+  it('purges soft-deleted connection tombs without capability history on load', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
     const registryPath = path.join(root, 'registry.json');
@@ -203,17 +203,20 @@ describe('JsonProviderRegistryStore', () => {
       providers: vidu.providers,
       connections: [tombstoneConnection],
       protocolBindings: vidu.protocolBindings.slice(0, 1),
-      models: vidu.models.slice(0, 5),
-      capabilities: vidu.capabilities.slice(0, 5),
+      models: vidu.models.slice(0, 5).map((model) => ({
+        ...model,
+        capabilityEvidenceId: undefined
+      })),
+      capabilities: [],
       routingPreferences: []
     });
 
     const snapshot = await new JsonProviderRegistryStore(registryPath).load();
-    expect(snapshot.providers).toEqual(vidu.providers);
-    expect(snapshot.connections).toEqual([tombstoneConnection]);
-    expect(snapshot.protocolBindings).toHaveLength(1);
-    expect(snapshot.models).toHaveLength(5);
-    expect(snapshot.capabilities).toHaveLength(5);
+    expect(snapshot.connections).toEqual([]);
+    expect(snapshot.providers).toEqual([]);
+    expect(snapshot.protocolBindings).toEqual([]);
+    expect(snapshot.models).toEqual([]);
+    expect(snapshot.capabilities).toEqual([]);
   });
 
   it('rejects removal or mutation of persisted capability history', async () => {

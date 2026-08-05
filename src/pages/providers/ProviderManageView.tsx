@@ -35,8 +35,6 @@ export interface ProviderManageViewProps {
   readonly onConnectionFilterChange: (value: string) => void;
   readonly search: string;
   readonly onSearchChange: (value: string) => void;
-  readonly showDeleted: boolean;
-  readonly onShowDeletedChange: (value: boolean) => void;
   readonly modelKey: string;
   readonly onModelKeyChange: (value: string) => void;
   readonly modelDisplayName: string;
@@ -70,8 +68,6 @@ export function ProviderManageView({
   onConnectionFilterChange,
   search,
   onSearchChange,
-  showDeleted,
-  onShowDeletedChange,
   modelKey,
   onModelKeyChange,
   modelDisplayName,
@@ -110,26 +106,24 @@ export function ProviderManageView({
   const visibleConnections = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('zh-CN');
     return registry.connections.filter((connection) => {
-      if (!showDeleted && connection.state === 'deleted') return false;
+      if (connection.state === 'deleted') return false;
       const provider = registry.providers.find((item) => item.providerId === connection.providerId);
       const matchesFilter = connectionFilter === 'all' ||
         (connectionFilter === 'problem'
           ? ['unavailable', 'unconfigured', 'saved'].includes(connection.state)
-          : connectionFilter === 'deleted'
-            ? connection.state === 'deleted'
-            : connection.state === connectionFilter);
+          : connection.state === connectionFilter);
       const matchesSearch = !term || connection.name.toLocaleLowerCase('zh-CN').includes(term) ||
         provider?.name.toLocaleLowerCase('zh-CN').includes(term);
       return matchesFilter && matchesSearch;
     });
-  }, [connectionFilter, registry.connections, registry.providers, search, showDeleted]);
+  }, [connectionFilter, registry.connections, registry.providers, search]);
 
   const availableCount = registry.connections.filter((item) => item.state === 'available').length;
   const problemCount = registry.connections.filter(
     (item) => ['unavailable', 'unconfigured', 'saved'].includes(item.state)
   ).length;
 
-  if (registry.connections.length === 0) {
+  if (registry.connections.every((connection) => connection.state === 'deleted')) {
     return (
       <EmptyState
         action={<Button disabled={!providersApi} onClick={onGoGallery} variant="secondary">去画廊添加</Button>}
@@ -157,14 +151,6 @@ export function ProviderManageView({
             <button aria-pressed={connectionFilter === value} key={value} onClick={() => onConnectionFilterChange(value)} type="button">{label}</button>
           ))}
         </div>
-        <label className="uc-provider-page__show-deleted">
-          <input
-            checked={showDeleted}
-            onChange={(event) => onShowDeletedChange(event.target.checked)}
-            type="checkbox"
-          />
-          显示已删除
-        </label>
         <div className="uc-provider-page__connection-list">
           {visibleConnections.length === 0 ? (
             <p className="uc-provider-page__muted">当前筛选下没有连接。</p>

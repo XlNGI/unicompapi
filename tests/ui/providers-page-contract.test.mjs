@@ -97,9 +97,8 @@ test('model controls use exact registration and verified profile projections', (
   assert.doesNotMatch(source, /capability\.capability|protocolId ===|providerId === ['"]/);
 });
 
-test('deleted connections are hidden by default behind an explicit toggle', () => {
-  assert.match(shell, /useState\(false\)/);
-  assert.match(manage, /showDeleted/);
-  assert.match(manage, /!showDeleted && connection\.state === 'deleted'/);
-  assert.match(manage, /显示已删除/);
+test('deleted connections are never listed in the manage view', () => {
+  assert.doesNotMatch(manage, /显示已删除/);
+  assert.doesNotMatch(manage, /showDeleted/);
+  assert.match(manage, /connection\.state === 'deleted'/);
 });

@@ -4551,15 +4551,6 @@
   box-shadow: var(--uc-shadow-1);
 }
 
-.uc-provider-page__show-deleted {
-  display: flex;
-  align-items: center;
-  gap: var(--uc-space-2);
-  font-size: var(--uc-font-size-caption);
-  color: var(--uc-color-text-secondary);
-  cursor: pointer;
-}
-
 .uc-provider-page__form-template {
   display: grid;
   gap: var(--uc-space-1);
