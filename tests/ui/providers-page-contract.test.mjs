@@ -19,7 +19,7 @@ test('provider page is driven by registry and package templates', () => {
 
 test('provider page exposes the controlled framework mutations', () => {
   for (const action of [
-    'createConnection',
+    'addConnection',
     'rotateCredential',
     'validateConnection',
     'syncModelCatalog',
@@ -32,8 +32,15 @@ test('provider page exposes the controlled framework mutations', () => {
   }
   assert.doesNotMatch(
     source,
-    /createProvider|updateConnection|registerManualModel|validateCapability|saveRoutingPreference/
+    /providersApi\.createConnection|createProvider|updateConnection|registerManualModel|validateCapability|saveRoutingPreference/
   );
+});
+
+test('connection creation runs the orchestrated validate-save-discover pipeline', () => {
+  assert.match(source, /providersApi\.onAddConnectionProgress/);
+  assert.match(source, /allowUnavailableSave/);
+  assert.match(source, /connection_validation_failed/);
+  assert.match(source, /window\.confirm/);
 });
 
 test('credential fields are structured, write-only and cleared after writes', () => {
@@ -61,7 +68,7 @@ test('online validation and discovery stay disabled pending explicit approval', 
 });
 
 test('model controls use exact registration and verified profile projections', () => {
-  assert.match(source, /modelDiscoveryAction === 'manual_exact'/);
+  assert.match(source, /selectedConnection\.state === 'available'/);
   assert.match(source, /providersApi\.registerExactModel/);
   assert.match(source, /selectedModel\.profileStatus/);
   assert.match(source, /selectedModel\.productFeatures/);

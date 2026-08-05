@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  createProviderConnection,
   createProviderModel,
   createProviderProtocolBinding,
+  toConnectionId,
   toIsoTimestamp,
   toModelId,
   toProtocolBindingId,
+  toProviderId,
   type CredentialSchema,
   type IsoTimestamp,
   type ProviderAdapterDescriptor,
@@ -147,6 +150,12 @@ export interface ProviderCatalogEntryV1 {
   readonly providerModelKey: string;
   readonly displayName: string;
 }
+
+export type ProviderAddConnectionStep = 'validating' | 'saving' | 'syncing';
+
+export type ProviderAddConnectionProgress = (
+  step: ProviderAddConnectionStep
+) => void;
 
 export interface ProviderManagementAdapterPort {
   readonly identity: ProviderManagementAdapterIdentityV1;
@@ -307,6 +316,7 @@ export type ProviderManagementFrameworkErrorCode =
   | 'connection_contract_stale'
   | 'credential_unavailable'
   | 'credential_invalid'
+  | 'connection_validation_failed'
   | 'free_validation_unavailable'
   | 'operation_unavailable'
   | 'adapter_unavailable'
@@ -404,38 +414,228 @@ export class ProviderManagementFramework {
     readonly state: 'saved';
   }>> {
     try {
-      const request = parseCreateConnectionRequest(input);
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const result = await this.connectionService.saveConnection(request);
-        if (result.ok) {
-          await this.record({
-            action: 'connection_created',
-            outcome: 'succeeded',
-            providerId: result.value.providerId,
-            connectionId: result.value.connectionId
-          });
-          return {
-            ok: true,
-            value: {
-              providerId: result.value.providerId,
-              connectionId: result.value.connectionId,
-              state: 'saved'
-            }
-          };
-        }
-        if (result.error.code !== 'connection_save_failed' || attempt === 2) {
-          await this.record({
-            action: 'connection_created',
-            outcome: result.error.code === 'invalid_request' ? 'denied' : 'failed',
-            safeCode: result.error.code
-          });
-          return frameworkFailure(mapConnectionError(result));
-        }
-      }
-      return frameworkFailureCode('provider_management_failed');
+      parseCreateConnectionRequest(input);
+      const saved = await this.persistConnection(input);
+      if (!saved.ok) return saved;
+      return { ok: true, value: { ...saved.value, state: 'saved' as const } };
     } catch (error) {
       return frameworkFailure(error);
     }
+  }
+
+  async addConnection(input: unknown, progress?: ProviderAddConnectionProgress): Promise<
+    ProviderManagementFrameworkResult<{
+      readonly providerId: string;
+      readonly connectionId: string;
+      readonly state: 'available' | 'unavailable' | 'saved';
+      readonly validated: boolean;
+      readonly catalog: 'synced' | 'skipped' | 'failed';
+      readonly catalogCount?: number;
+      readonly catalogWarning?: string;
+    }>
+  > {
+    try {
+      const request = parseAddConnectionRequest(input);
+      const resolved = this.packages.resolveTemplate(
+        request.packageId,
+        request.templateId
+      );
+      const probeAvailable = resolved.template.freeConnectionValidation &&
+        this.adapters.supports(resolved, 'validate_connection');
+      if (!probeAvailable) {
+        const saved = await this.persistConnection(request.save);
+        if (!saved.ok) return saved;
+        return {
+          ok: true,
+          value: {
+            ...saved.value,
+            state: 'saved' as const,
+            validated: false,
+            catalog: 'skipped' as const
+          }
+        };
+      }
+      const endpoint = this.packages.resolveEndpoint(
+        resolved,
+        request.endpoint,
+        request.explicitLoopbackHttpConsent
+      );
+      const credentials = validateCredentialRecord(
+        resolved.credentialSchema,
+        request.credentials
+      );
+      const draft = this.createDraftConnection(resolved, endpoint);
+      const adapter = this.adapters.resolve(draft, resolved, 'validate_connection');
+      progress?.('validating');
+      const parsed = parseValidationObservation(await adapter.port.validateConnection!({
+        connection: draft,
+        endpoint,
+        credentials
+      }));
+      if (parsed.state === 'unavailable' && !request.allowUnavailableSave) {
+        await this.record({
+          action: 'connection_validated',
+          outcome: 'failed',
+          safeCode: parsed.safeCode ?? parsed.state
+        }, parsed.observedAt);
+        return {
+          ok: false,
+          error: {
+            code: 'connection_validation_failed',
+            message: parsed.safeCode ?? 'unavailable'
+          }
+        };
+      }
+      progress?.('saving');
+      const saved = await this.persistConnection(request.save);
+      if (!saved.ok) return saved;
+      await this.applyValidationObservation(
+        saved.value.connectionId,
+        saved.value.providerId,
+        parsed
+      );
+      let catalog: 'synced' | 'skipped' | 'failed' = 'skipped';
+      let catalogCount: number | undefined;
+      let catalogWarning: string | undefined;
+      if (
+        parsed.state === 'available' &&
+        resolved.template.modelDiscoveryKind === 'catalog'
+      ) {
+        progress?.('syncing');
+        const synced = await this.syncModelCatalog({
+          connectionId: saved.value.connectionId
+        });
+        if (synced.ok) {
+          catalog = 'synced';
+          catalogCount = synced.value.count;
+        } else {
+          catalog = 'failed';
+          catalogWarning = synced.error.code;
+        }
+      }
+      return {
+        ok: true,
+        value: {
+          ...saved.value,
+          state: parsed.state,
+          validated: true,
+          catalog,
+          ...(catalogCount === undefined ? {} : { catalogCount }),
+          ...(catalogWarning === undefined ? {} : { catalogWarning })
+        }
+      };
+    } catch (error) {
+      return frameworkFailure(error);
+    }
+  }
+
+  private async persistConnection(input: unknown): Promise<ProviderManagementFrameworkResult<{
+    readonly providerId: string;
+    readonly connectionId: string;
+  }>> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await this.connectionService.saveConnection(input);
+      if (result.ok) {
+        await this.record({
+          action: 'connection_created',
+          outcome: 'succeeded',
+          providerId: result.value.providerId,
+          connectionId: result.value.connectionId
+        });
+        return {
+          ok: true,
+          value: {
+            providerId: result.value.providerId,
+            connectionId: result.value.connectionId
+          }
+        };
+      }
+      if (result.error.code !== 'connection_save_failed' || attempt === 2) {
+        await this.record({
+          action: 'connection_created',
+          outcome: result.error.code === 'invalid_request' ? 'denied' : 'failed',
+          safeCode: result.error.code
+        });
+        return frameworkFailure(mapConnectionError(result));
+      }
+    }
+    return frameworkFailureCode('provider_management_failed');
+  }
+
+  private async applyValidationObservation(
+    connectionId: string,
+    providerId: string,
+    parsed: ProviderConnectionValidationResultV1
+  ): Promise<void> {
+    const snapshot = await this.registry.load();
+    const owned = resolveOwnedConnection(snapshot, this.packages, connectionId);
+    await this.registry.mutate((latest) => {
+      const current = requireUnchangedConnection(latest, owned.connection, this.packages);
+      return {
+        snapshot: {
+          ...latest,
+          connections: latest.connections.map((connection) =>
+            connection.id === current.id
+              ? {
+                  ...connection,
+                  state: parsed.state,
+                  identityState: parsed.identityState,
+                  credentialState: parsed.credentialState,
+                  lastConnectionValidationAt: parsed.observedAt,
+                  updatedAt: parsed.observedAt
+                }
+              : connection
+          )
+        },
+        result: undefined
+      };
+    });
+    await this.record({
+      action: 'connection_validated',
+      outcome: 'succeeded',
+      providerId,
+      connectionId,
+      safeCode: parsed.safeCode ?? parsed.state
+    }, parsed.observedAt);
+  }
+
+  private createDraftConnection(
+    resolved: ResolvedProviderTemplate,
+    endpoint: string | undefined
+  ): ProviderConnection {
+    const now = this.now();
+    return createProviderConnection({
+      id: toConnectionId(`connection-draft-${randomUUID()}`),
+      providerId: toProviderId(`provider-draft-${randomUUID()}`),
+      name: 'draft-connection',
+      endpoint,
+      packageId: resolved.package.packageId,
+      packageVersion: resolved.package.packageVersion,
+      templateId: resolved.template.templateId,
+      templateKind: resolved.template.kind,
+      credentialSchemaId: resolved.credentialSchema.schemaId,
+      credentialSchemaVersion: resolved.credentialSchema.version,
+      credentialVersionId: `credential-version-draft-${randomUUID()}`,
+      connectionPolicyId: resolved.template.connectionPolicyId,
+      connectionPolicyRevision: resolved.template.connectionPolicyRevision,
+      discoveryPolicyId: resolved.template.discoveryPolicyId,
+      discoveryPolicyRevision: resolved.template.discoveryPolicyRevision,
+      endpointPolicyId: resolved.endpointPolicy.policyId,
+      endpointPolicyRevision: resolved.endpointPolicy.revision,
+      connectionConfigVersionId: `connection-config-draft-${randomUUID()}`,
+      connectionRevision: 1,
+      adapterBindings: resolved.adapters.map((adapter) => ({
+        adapterId: adapter.adapterId,
+        adapterVersion: adapter.adapterVersion,
+        protocolId: adapter.protocolId,
+        protocolVersion: adapter.protocolVersion
+      })),
+      state: 'saved',
+      identityState: 'unverified',
+      credentialState: 'saved',
+      createdAt: now,
+      updatedAt: now
+    });
   }
 
   async rotateCredential(input: unknown): Promise<ProviderManagementFrameworkResult<{
@@ -704,12 +904,6 @@ export class ProviderManagementFramework {
           this.packages,
           request.connectionId
         );
-        if (resolved.template.template.modelDiscoveryKind !== 'manual_exact') {
-          throw new ProviderManagementFrameworkError(
-            'manual_registration_unavailable',
-            'This provider template does not permit exact manual model registration'
-          );
-        }
         requireAvailableConnection(resolved.connection);
         if (snapshot.models.some((candidate) =>
           candidate.connectionId === resolved.connection.id &&
@@ -1366,6 +1560,72 @@ function parseCreateConnectionRequest(value: unknown): unknown {
   return value;
 }
 
+function parseAddConnectionRequest(value: unknown): {
+  readonly save: Record<string, unknown>;
+  readonly packageId: string;
+  readonly templateId: string;
+  readonly endpoint?: string;
+  readonly credentials: Readonly<Record<string, string>>;
+  readonly explicitLoopbackHttpConsent: boolean;
+  readonly allowUnavailableSave: boolean;
+} {
+  if (!isRecord(value)) throw invalidRequest();
+  const allowed = new Set([
+    'packageId',
+    'templateId',
+    'name',
+    'endpoint',
+    'credentials',
+    'explicitLoopbackHttpConsent',
+    'allowUnavailableSave'
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw invalidRequest();
+  if (
+    value.allowUnavailableSave !== undefined &&
+    typeof value.allowUnavailableSave !== 'boolean'
+  ) {
+    throw invalidRequest();
+  }
+  if (
+    value.explicitLoopbackHttpConsent !== undefined &&
+    typeof value.explicitLoopbackHttpConsent !== 'boolean'
+  ) {
+    throw invalidRequest();
+  }
+  if (
+    value.endpoint !== undefined &&
+    (typeof value.endpoint !== 'string' || value.endpoint.length > 2_048)
+  ) {
+    throw invalidRequest();
+  }
+  if (!isRecord(value.credentials)) throw invalidRequest();
+  const credentials: Record<string, string> = {};
+  for (const [key, fieldValue] of Object.entries(value.credentials)) {
+    if (typeof fieldValue !== 'string') throw invalidRequest();
+    credentials[key] = fieldValue;
+  }
+  const save: Record<string, unknown> = {};
+  for (const key of [
+    'packageId',
+    'templateId',
+    'name',
+    'endpoint',
+    'credentials',
+    'explicitLoopbackHttpConsent'
+  ]) {
+    if (value[key] !== undefined) save[key] = value[key];
+  }
+  return {
+    save,
+    packageId: requireId(value.packageId),
+    templateId: requireId(value.templateId),
+    endpoint: value.endpoint,
+    credentials,
+    explicitLoopbackHttpConsent: value.explicitLoopbackHttpConsent === true,
+    allowUnavailableSave: value.allowUnavailableSave === true
+  };
+}
+
 function parseRotateCredentialRequest(value: unknown): {
   readonly connectionId: string;
   readonly credentials: Readonly<Record<string, string>>;
@@ -1485,6 +1745,7 @@ function frameworkFailureCode<T>(
     connection_contract_stale: 'The provider connection contract is unavailable',
     credential_unavailable: 'The provider credential is unavailable',
     credential_invalid: 'The provider credential is invalid',
+    connection_validation_failed: 'The remote provider validation failed',
     free_validation_unavailable: 'No approved free connection validation is available',
     operation_unavailable: 'The provider management operation is unavailable',
     adapter_unavailable: 'The exact provider management adapter is unavailable',

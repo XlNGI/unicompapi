@@ -74,6 +74,7 @@ function describeError(code: string): string {
   const labels: Record<string, string> = {
     adapter_unavailable: '在线管理适配器尚未获得专项批准',
     free_validation_unavailable: '此连接没有获批的免费验证操作',
+    connection_validation_failed: '远程连通性验证未通过',
     catalog_sync_unavailable: '此连接不支持目录同步',
     manual_registration_unavailable: '此连接不支持精确手工登记',
     connection_not_available: '连接验证通过后才能管理模型',
@@ -85,6 +86,40 @@ function describeError(code: string): string {
   };
   if (code.endsWith('_not_found')) return '目标记录不存在，请刷新后重试';
   return labels[code] ?? '操作失败，请重试';
+}
+
+function describeValidationSafeCode(safeCode: string): string {
+  const labels: Record<string, string> = {
+    authentication_failed: '凭证无效或已过期',
+    endpoint_not_allowed: '接口地址不被允许',
+    network: '网络连接失败',
+    timeout: '连接超时',
+    proxy_unavailable: '代理不可用',
+    response_too_large: '远程响应过大',
+    invalid_response: '远程响应格式无效',
+    protocol_mismatch: '协议不匹配',
+    unavailable: '远程服务不可用'
+  };
+  return labels[safeCode] ?? safeCode;
+}
+
+const addProgressLabels: Record<string, string> = {
+  validating: '正在测试远程连通性…',
+  saving: '正在保存连接与凭证…',
+  syncing: '正在获取模型目录…'
+};
+
+function describeAddOutcome(value: {
+  readonly validated: boolean;
+  readonly state: string;
+  readonly catalog: 'synced' | 'skipped' | 'failed';
+  readonly catalogCount?: number;
+}): string {
+  if (!value.validated) return '连接和凭证已安全保存，尚未发起在线验证';
+  if (value.state === 'unavailable') return '连接已保存为不可用状态；可修正凭证后重新验证';
+  if (value.catalog === 'synced') return `连接已验证并保存；已同步 ${value.catalogCount ?? 0} 个模型`;
+  if (value.catalog === 'failed') return '连接已验证并保存；模型目录获取失败，可稍后在管理页重试';
+  return '连接已验证并保存';
 }
 
 export function ProvidersPage() {
@@ -227,20 +262,50 @@ export function ProvidersPage() {
 
   async function handleCreateConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!providersApi || !createTemplate || !connectionName.trim()) return;
-    const created = await runAction(
-      () => providersApi.createConnection({
-        packageId: createTemplate.packageId,
-        templateId: createTemplate.templateId,
-        name: connectionName.trim(),
-        ...(endpoint.trim() ? { endpoint: endpoint.trim() } : {}),
-        credentials: newCredentials
-      }),
-      '连接和凭证已安全保存，尚未发起在线验证'
-    );
-    if (created) {
-      setAddingConnection(false);
-      setNewCredentials({});
+    if (!providersApi || !createTemplate || !connectionName.trim() || busy) return;
+    const input = {
+      packageId: createTemplate.packageId,
+      templateId: createTemplate.templateId,
+      name: connectionName.trim(),
+      ...(endpoint.trim() ? { endpoint: endpoint.trim() } : {}),
+      credentials: newCredentials
+    };
+    setBusy(true);
+    try {
+      let allowUnavailableSave = false;
+      for (;;) {
+        setMessage('');
+        const unsubscribe = providersApi.onAddConnectionProgress((step) => {
+          setMessage(addProgressLabels[step] ?? '正在处理…');
+        });
+        let result;
+        try {
+          result = await providersApi.addConnection({ ...input, allowUnavailableSave });
+        } finally {
+          unsubscribe();
+        }
+        if (!result.ok) {
+          if (result.error.code === 'connection_validation_failed' && !allowUnavailableSave) {
+            allowUnavailableSave = window.confirm(
+              `远程连通性验证未通过（${describeValidationSafeCode(result.error.message)}）。\n仍要将此连接保存为「不可用」状态吗？`
+            );
+            if (allowUnavailableSave) continue;
+            setMessage('连接未保存');
+            return;
+          }
+          setMessage(describeError(result.error.code));
+          return;
+        }
+        setMessage(describeAddOutcome(result.value));
+        await refreshRegistry(result.value.connectionId);
+        setAddingConnection(false);
+        setNewCredentials({});
+        return;
+      }
+    } catch {
+      setMessage('操作失败，请重试');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -341,7 +406,7 @@ export function ProvidersPage() {
       <Card className="uc-provider-page__notice">
         <LuShieldCheck aria-hidden="true" />
         <strong>本机安全存储</strong>
-        <span>凭证不回显；在线验证与目录同步当前等待独立真实 API 批准。</span>
+        <span>凭证不回显；保存连接时将自动测试远程连通性，通过后自动获取可用模型目录。</span>
       </Card>
 
       {message && <p className="uc-provider-page__message" role="status">{message}</p>}
@@ -524,7 +589,7 @@ export function ProvidersPage() {
                       </div>
                     </div>
 
-                    {selectedTemplate?.modelDiscoveryAction === 'manual_exact' && (
+                    {selectedConnection.state === 'available' && (
                       <form className="uc-provider-page__inline-form" onSubmit={handleRegisterModel}>
                         <label>精确模型标识<input maxLength={500} onChange={(event) => setModelKey(event.target.value)} required value={modelKey} /></label>
                         <label>显示名称<input maxLength={200} onChange={(event) => setModelDisplayName(event.target.value)} required value={modelDisplayName} /></label>

@@ -15,6 +15,7 @@ const registryProjection = contract.slice(
 const managementActions = [
   'listTemplates',
   'createConnection',
+  'addConnection',
   'rotateCredential',
   'validateConnection',
   'syncModelCatalog',
@@ -74,12 +75,14 @@ test('Vidu billable validation is absent from the renderer and IPC public surfac
   }
 });
 
-test('desktop composition keeps live provider management transport uninstalled', () => {
-  assert.match(
+test('desktop composition installs live provider management adapters in the main process', () => {
+  assert.match(main, /createLiveProviderManagementAdapters/);
+  assert.doesNotMatch(
     main,
     /new ProviderManagementAdapterRegistry\(providerPackages, \[\]\)/
   );
   assert.match(handlers, /management\.listTemplates\(\)/);
   assert.match(handlers, /management\.createConnection\(input\)/);
+  assert.match(handlers, /management\.addConnection\(input/);
   assert.doesNotMatch(handlers, /fetch\(|net\.fetch|https?\./);
 });
