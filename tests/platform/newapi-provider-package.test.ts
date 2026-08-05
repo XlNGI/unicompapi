@@ -52,6 +52,13 @@ import {
   NEWAPI_VIDEO_ADAPTER_ID,
   NEWAPI_VIDEO_RESULT_SCHEMA_ID,
   NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+  UNICOMPAPI_CREDENTIAL_SCHEMA_ID,
+  UNICOMPAPI_ENDPOINT_POLICY_ID,
+  UNICOMPAPI_OFFICIAL_BASE_URL,
+  UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
+  UNICOMPAPI_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+  unicompapiProviderPackageDescriptor,
   type ControlledNewApiImageV1,
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
@@ -187,6 +194,30 @@ describe('NewAPI management and runtime safety', () => {
       method: 'GET',
       url: 'https://gateway.example.test/v1/models',
       headers: { authorization: 'Bearer synthetic-secret' }
+    });
+  });
+
+  it('accepts UniCompAPI official identity for the shared OpenAI-compatible runtime', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({
+      object: 'list',
+      data: [{ id: 'unicompapi-chat', object: 'model', created: 1, owned_by: 'unicompapi' }]
+    }));
+    const management = new NewApiManagementAdapter(fixture.runtime, {
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
+    });
+    const result = await management.validateConnection({
+      connection: unicompapiConnection('saved', 'saved'),
+      credentials: unicompapiCredential()
+    });
+    expect(result).toMatchObject({
+      state: 'available',
+      identityState: 'verified',
+      credentialState: 'valid'
+    });
+    expect(fixture.requests[0]).toMatchObject({
+      method: 'GET',
+      url: `${UNICOMPAPI_OFFICIAL_BASE_URL}/models`,
+      headers: { authorization: 'Bearer unicompapi-secret' }
     });
   });
 
@@ -718,11 +749,59 @@ function connection(
   });
 }
 
+function unicompapiConnection(
+  state: ProviderConnection['state'] = 'available',
+  credentialState: ProviderConnection['credentialState'] = 'valid'
+): ProviderConnection {
+  const timestamp = toIsoTimestamp('2026-08-03T00:00:00.000Z');
+  return createProviderConnection({
+    id: toConnectionId('connection-unicompapi'),
+    providerId: toProviderId('provider-unicompapi'),
+    name: 'UniCompAPI official',
+    endpoint: UNICOMPAPI_OFFICIAL_BASE_URL,
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+    templateId: UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
+    templateKind: 'official',
+    credentialSchemaId: UNICOMPAPI_CREDENTIAL_SCHEMA_ID,
+    credentialSchemaVersion: 1,
+    credentialVersionId: 'credential-version-unicompapi-1',
+    connectionPolicyId: 'connection.unicompapi.official',
+    connectionPolicyRevision: 1,
+    discoveryPolicyId: 'discovery.unicompapi.models',
+    discoveryPolicyRevision: 1,
+    endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID,
+    endpointPolicyRevision: 1,
+    connectionConfigVersionId: 'connection-config-unicompapi-1',
+    connectionRevision: 1,
+    adapterBindings: unicompapiProviderPackageDescriptor.adapters.map((adapter) => ({
+      adapterId: adapter.adapterId,
+      adapterVersion: adapter.adapterVersion,
+      protocolId: adapter.protocolId,
+      protocolVersion: adapter.protocolVersion
+    })),
+    state,
+    identityState: state === 'available' ? 'verified' : 'unverified',
+    credentialState,
+    credentialReference: 'credential-reference-unicompapi',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+}
+
 function credential(): StructuredCredentialRecord {
   return {
     schemaId: NEWAPI_CREDENTIAL_SCHEMA_ID,
     schemaVersion: 1,
     values: { api_key: 'synthetic-secret' }
+  };
+}
+
+function unicompapiCredential(): StructuredCredentialRecord {
+  return {
+    schemaId: UNICOMPAPI_CREDENTIAL_SCHEMA_ID,
+    schemaVersion: 1,
+    values: { api_key: 'unicompapi-secret' }
   };
 }
 

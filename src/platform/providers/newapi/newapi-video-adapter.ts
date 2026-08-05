@@ -31,10 +31,8 @@ import {
   type VideoResultPort
 } from '../../videos/video-result-port';
 import {
-  NEWAPI_ENDPOINT_POLICY_ID,
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
-  NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID,
   NEWAPI_VIDEO_ADAPTER_ID,
@@ -42,6 +40,10 @@ import {
   NEWAPI_VIDEO_USAGE_SCHEMA_ID,
   newApiVideoUsageSchema
 } from './newapi-contracts';
+import {
+  isOpenAiCompatibleEndpointPolicyId,
+  isOpenAiCompatiblePackageId
+} from './openai-compatible-identity';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 
 const maximumImageBytes = 50_000_000;
@@ -548,11 +550,11 @@ function validateRoute(value: unknown): ValidatedNewApiRoute {
       ? NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID
       : undefined;
   if (
-    route.packageId !== NEWAPI_PROVIDER_PACKAGE_ID ||
+    !isOpenAiCompatiblePackageId(route.packageId) ||
     route.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
     route.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID ||
     route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
-    route.endpointPolicyId !== NEWAPI_ENDPOINT_POLICY_ID ||
+    !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||
     route.endpointPolicyRevision !== 1 ||
     route.resultSchemaId !== NEWAPI_VIDEO_RESULT_SCHEMA_ID ||
     route.resultSchemaRevision !== 1 ||

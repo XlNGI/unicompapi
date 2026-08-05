@@ -22,15 +22,17 @@ import {
 } from '../../../domain';
 import {
   NEWAPI_ADAPTER_VERSION,
-  NEWAPI_ENDPOINT_POLICY_ID,
   NEWAPI_IMAGE_ADAPTER_ID,
   NEWAPI_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_RESULT_SCHEMA_ID,
   NEWAPI_IMAGE_USAGE_SCHEMA_ID,
-  NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   newApiImageUsageSchema
 } from './newapi-contracts';
+import {
+  isOpenAiCompatibleEndpointPolicyId,
+  isOpenAiCompatiblePackageId
+} from './openai-compatible-identity';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 
 const maximumResultBytes = 128 * 1024 * 1024;
@@ -332,11 +334,11 @@ export function mapNewApiImageUsage(value: unknown): readonly UsageFactV1[] {
 function validateRoute(value: unknown) {
   const route = parseProviderExecutionRouteSnapshot(value);
   if (
-    route.packageId !== NEWAPI_PROVIDER_PACKAGE_ID ||
+    !isOpenAiCompatiblePackageId(route.packageId) ||
     route.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
     route.adapterKey !== NEWAPI_IMAGE_ADAPTER_ID ||
     route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
-    route.endpointPolicyId !== NEWAPI_ENDPOINT_POLICY_ID ||
+    !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||
     route.endpointPolicyRevision !== 1 ||
     route.productFeature !== 'text_to_image' ||
     route.internalPurpose !== 'image_generation' ||

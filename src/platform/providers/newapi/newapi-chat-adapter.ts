@@ -27,7 +27,6 @@ import {
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_CHAT_PROTOCOL_ID,
-  NEWAPI_ENDPOINT_POLICY_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_PROTOCOL_VERSION,
@@ -36,6 +35,10 @@ import {
   NEWAPI_TEXT_CONSTRAINT_SET_ID,
   newApiChatUsageSchema
 } from './newapi-contracts';
+import {
+  isOpenAiCompatibleEndpointPolicyId,
+  isOpenAiCompatiblePackageId
+} from './openai-compatible-identity';
 import {
   NewApiRuntimeError,
   type NewApiEventStreamSession,
@@ -786,11 +789,11 @@ function parseModelCatalog(body: Uint8Array): readonly ProviderCatalogEntryV1[] 
 function validateRoute(value: unknown) {
   const route = parseProviderExecutionRouteSnapshot(value);
   if (
-    route.packageId !== NEWAPI_PROVIDER_PACKAGE_ID ||
+    !isOpenAiCompatiblePackageId(route.packageId) ||
     route.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
     route.adapterKey !== NEWAPI_CHAT_ADAPTER_ID ||
     route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
-    route.endpointPolicyId !== NEWAPI_ENDPOINT_POLICY_ID ||
+    !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||
     route.endpointPolicyRevision !== 1 ||
     (route.productFeature !== 'text_chat' && route.productFeature !== 'text_reasoning') ||
     route.internalPurpose !== 'text_execution' ||
