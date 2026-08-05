@@ -120,7 +120,7 @@ export const newApiVideoUsageSchema: UsageSchemaV1 = createUsageSchema({
 export const newApiProviderPackageDescriptor: ProviderPackageDescriptor = {
   packageId: NEWAPI_PROVIDER_PACKAGE_ID,
   packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
-  displayName: 'NewAPI Compatible',
+  displayName: 'OpenAI Compatible',
   credentialSchemas: [
     {
       schemaId: NEWAPI_CREDENTIAL_SCHEMA_ID,
@@ -179,7 +179,7 @@ export const newApiProviderPackageDescriptor: ProviderPackageDescriptor = {
     {
       templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID,
       kind: 'compatible_custom',
-      displayName: 'NewAPI Compatible',
+      displayName: 'OpenAI Compatible Endpoint',
       baseUrlMode: 'required',
       credentialSchemaId: NEWAPI_CREDENTIAL_SCHEMA_ID,
       credentialSchemaVersion: 1,
