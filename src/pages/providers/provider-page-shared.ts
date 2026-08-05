@@ -53,6 +53,7 @@ export function describeError(code: string): string {
     connection_not_available: '连接验证通过后才能管理模型',
     model_not_routable: '连接可用且模型仍在目录中时才能启用',
     active_operations_present: '仍有调用使用此连接',
+    connection_contract_stale: '这是旧版遗留连接，请删除后重新添加',
     credential_invalid: '凭证字段不完整或格式无效',
     provider_registry_conflict: '注册表已变化，请刷新后重试',
     invalid_request: '当前输入或状态不允许执行此操作'

@@ -1150,9 +1150,17 @@ export class ProviderManagementFramework {
     try {
       const request = parseDeleteConnectionRequest(input);
       const snapshot = await this.registry.load();
-      const resolved = resolveOwnedConnection(snapshot, this.packages, request.connectionId);
+      const connection = snapshot.connections.find(
+        (candidate) => candidate.id === request.connectionId
+      );
+      if (!connection) {
+        throw new ProviderManagementFrameworkError(
+          'connection_not_found',
+          'The provider connection was not found'
+        );
+      }
       const activeVersions = await this.credentialRetention.listActiveCredentialVersions(
-        resolved.connection.id
+        connection.id
       );
       if (activeVersions.length > 0 && !request.abandonActiveOperations) {
         throw new ProviderManagementFrameworkError(
@@ -1163,26 +1171,22 @@ export class ProviderManagementFramework {
       const now = this.now();
       if (activeVersions.length > 0) {
         await this.credentialRetention.markCredentialUnavailable({
-          connectionId: resolved.connection.id,
+          connectionId: connection.id,
           credentialVersionIds: activeVersions,
           occurredAt: now
         });
       }
-      const credentialReference = resolved.connection.credentialReference;
-      const packageId = resolved.connection.packageId;
+      const credentialReference = connection.credentialReference;
+      const packageId = connection.packageId;
       if (packageId) {
         await this.runtimeAuthorization?.syncConnectionPolicy({
           providerPackageId: packageId,
-          connectionId: resolved.connection.id,
+          connectionId: connection.id,
           allowed: false
         }).catch(() => undefined);
       }
       await this.registry.mutate((latest) => {
-        const current = requireUnchangedConnection(
-          latest,
-          resolved.connection,
-          this.packages
-        );
+        const current = requirePresentConnection(latest, connection);
         const modelIds = new Set(
           latest.models
             .filter((model) => model.connectionId === current.id)
@@ -1197,20 +1201,20 @@ export class ProviderManagementFramework {
           return {
             snapshot: {
               ...latest,
-              connections: latest.connections.map((connection) =>
-                connection.id === current.id
+              connections: latest.connections.map((item) =>
+                item.id === current.id
                   ? {
-                      ...connection,
+                      ...item,
                       endpoint: undefined,
                       credentialReference: undefined,
                       credentialState: 'deleted' as const,
                       state: 'deleted' as const,
                       identityState: 'unverified' as const,
                       lastConnectionValidationAt: undefined,
-                      connectionRevision: (connection.connectionRevision ?? 0) + 1,
+                      connectionRevision: (item.connectionRevision ?? 0) + 1,
                       updatedAt: now
                     }
-                  : connection
+                  : item
               ),
               models: latest.models.map((model) =>
                 modelIds.has(String(model.id)) && model.enabled
@@ -1227,10 +1231,10 @@ export class ProviderManagementFramework {
           };
         }
         const remainingConnections = latest.connections.filter(
-          (connection) => connection.id !== current.id
+          (item) => item.id !== current.id
         );
         const providerStillUsed = remainingConnections.some(
-          (connection) => connection.providerId === current.providerId
+          (item) => item.providerId === current.providerId
         );
         return {
           snapshot: {
@@ -1257,8 +1261,8 @@ export class ProviderManagementFramework {
       await this.record({
         action: 'connection_deleted',
         outcome: 'succeeded',
-        providerId: resolved.connection.providerId,
-        connectionId: resolved.connection.id,
+        providerId: connection.providerId,
+        connectionId: connection.id,
         safeCode: activeVersions.length > 0
           ? 'active_operations_abandoned'
           : 'local_only'
@@ -1266,7 +1270,7 @@ export class ProviderManagementFramework {
       return {
         ok: true,
         value: {
-          connectionId: resolved.connection.id,
+          connectionId: connection.id,
           state: 'deleted',
           remoteRevocation: 'not_attempted'
         }
@@ -1351,6 +1355,30 @@ function requireUnchangedConnection(
   packages: ProviderPackageRegistry
 ): ProviderConnection {
   const current = resolveOwnedConnection(snapshot, packages, expected.id).connection;
+  if (
+    current.connectionConfigVersionId !== expected.connectionConfigVersionId ||
+    current.connectionRevision !== expected.connectionRevision ||
+    current.credentialVersionId !== expected.credentialVersionId
+  ) {
+    throw new ProviderManagementFrameworkError(
+      'provider_registry_conflict',
+      'The provider connection changed during the management operation'
+    );
+  }
+  return current;
+}
+
+function requirePresentConnection(
+  snapshot: ProviderRegistrySnapshot,
+  expected: ProviderConnection
+): ProviderConnection {
+  const current = snapshot.connections.find((candidate) => candidate.id === expected.id);
+  if (!current) {
+    throw new ProviderManagementFrameworkError(
+      'connection_not_found',
+      'The provider connection was not found'
+    );
+  }
   if (
     current.connectionConfigVersionId !== expected.connectionConfigVersionId ||
     current.connectionRevision !== expected.connectionRevision ||
