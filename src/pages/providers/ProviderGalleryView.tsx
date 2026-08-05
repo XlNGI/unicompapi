@@ -28,9 +28,9 @@ function discoveryLabel(template: ProviderTemplateSummaryDto): string {
 }
 
 function validationLabel(template: ProviderTemplateSummaryDto): string {
-  return template.freeConnectionValidation && template.validationAction === 'available'
-    ? '保存时自动验证'
-    : '保存后待验证';
+  if (template.validationAction === 'available') return '保存时验证';
+  if (template.validationAction === 'requires_live_api_approval') return '验证探针待批准';
+  return '暂无免费验证';
 }
 
 export function ProviderGalleryView({
@@ -71,7 +71,15 @@ export function ProviderGalleryView({
               <span>{validationLabel(template)}</span>
             </div>
             <div className="uc-provider-gallery__actions">
-              <Button disabled={busy} onClick={() => onAddConnection(templateKey)}>
+              <Button
+                disabled={busy || template.validationAction !== 'available'}
+                onClick={() => onAddConnection(templateKey)}
+                title={
+                  template.validationAction === 'available'
+                    ? undefined
+                    : '该供应商尚无获批的免费验证探针，不能添加连接'
+                }
+              >
                 <LuCirclePlus aria-hidden="true" /> 添加连接
               </Button>
               {liveConnections.length > 0 && (

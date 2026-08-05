@@ -1,7 +1,8 @@
 import type {
   ProviderConnection,
   ProviderProtocolBinding,
-  ProxyMode
+  ProxyMode,
+  StructuredCredentialRecord
 } from '../../../domain';
 import { isIP } from 'node:net';
 import {
@@ -19,6 +20,17 @@ import type {
   ControlledProviderTransportRequest,
   ControlledProviderTransportResponse
 } from '../controlled-provider-transport';
+import {
+  VIDU_CREDENTIAL_SCHEMA_ID,
+  VIDU_ENDPOINT_POLICY_ID,
+  VIDU_OFFICIAL_TEMPLATE_ID,
+  VIDU_PROVIDER_PACKAGE_ID,
+  VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
+  VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
+  VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION
+} from './vidu-contracts';
 
 export type ViduHttpTransportRequest =
   ControlledProviderTransportRequest<'GET' | 'POST'>;
@@ -73,7 +85,7 @@ export interface ViduResultDownloadResponse {
 }
 
 export interface ViduSharedRuntimeOptions {
-  readonly credentialVault: SecureCredentialVault;
+  readonly credentialVault?: SecureCredentialVault;
   readonly transport: ViduHttpTransport;
   readonly baseUrl?: string;
   readonly proxy?: () => ProxyMode;
@@ -178,6 +190,86 @@ export class ViduSharedRuntime {
         event: 'request_failed',
         method: input.method,
         protocolId: input.binding?.protocolId ?? 'vidu.connection',
+        errorCode: mapped.code,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+      throw mapped;
+    } finally {
+      clearTimeout(timeout);
+      removeExternalAbort();
+      this.active.delete(controller);
+    }
+  }
+
+  /**
+   * Save-time connectivity probe: GET /ent/v2/credits with plaintext token.
+   * Does not create image/video generation requests.
+   */
+  async requestCreditsProbe(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.disposed) {
+      throw new ViduRuntimeError('runtime_shutting_down', 'not_retryable');
+    }
+    validateManagementConnection(input.connection, this.baseUrl);
+    const token = parseTokenCredential(input.credentials);
+    const timeoutMs = this.options.defaultTimeoutMs ?? 30_000;
+    const maxResponseBytes = 256 * 1024;
+    const controller = new AbortController();
+    const removeExternalAbort = linkAbort(input.signal, controller);
+    this.active.add(controller);
+    const startedAt = this.now();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    this.log({
+      event: 'request_started',
+      method: 'GET',
+      protocolId: 'vidu.connection'
+    });
+    try {
+      const response = await this.options.transport.send({
+        method: 'GET',
+        url: new URL('/ent/v2/credits', this.baseUrl.origin).toString(),
+        headers: {
+          accept: 'application/json',
+          authorization: `Token ${token}`
+        },
+        signal: controller.signal,
+        timeoutMs,
+        maxResponseBytes,
+        proxy: this.options.proxy?.() ?? { kind: 'system_default' },
+        redirect: 'manual',
+        dnsRebindingProtection: 'required'
+      });
+      validateResponseSize(response, maxResponseBytes);
+      if (response.status >= 300 && response.status < 400) {
+        throw new ViduRuntimeError('redirect_not_allowed', 'not_retryable');
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw mapHttpStatus(response.status, response.headers);
+      }
+      this.log({
+        event: 'request_completed',
+        method: 'GET',
+        protocolId: 'vidu.connection',
+        status: response.status,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+    } catch (error) {
+      const mapped = mapRuntimeFailure(
+        error,
+        controller.signal.aborted,
+        timedOut
+      );
+      this.log({
+        event: 'request_failed',
+        method: 'GET',
+        protocolId: 'vidu.connection',
         errorCode: mapped.code,
         elapsedMs: Math.max(0, this.now() - startedAt)
       });
@@ -345,6 +437,9 @@ export class ViduSharedRuntime {
     operation: (credential: string | undefined) => Promise<T>
   ): Promise<T> {
     if (input.authScheme === 'none') return operation(undefined);
+    if (!this.options.credentialVault) {
+      throw new ViduRuntimeError('credential_unavailable', 'not_retryable');
+    }
     try {
       return await this.options.credentialVault.useValue(
         input.connection.credentialReference!,
@@ -428,6 +523,67 @@ function validateConnection(connection: ProviderConnection, baseUrl: URL): void 
       throw new ViduRuntimeError('endpoint_not_allowed', 'not_retryable');
     }
   }
+}
+
+function validateManagementConnection(
+  connection: ProviderConnection,
+  baseUrl: URL
+): void {
+  const binding = connection.adapterBindings?.find(
+    (item) =>
+      item.adapterId === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID &&
+      item.adapterVersion === VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION &&
+      item.protocolId === VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID &&
+      item.protocolVersion === VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION
+  );
+  if (
+    connection.packageId !== VIDU_PROVIDER_PACKAGE_ID ||
+    connection.packageVersion !== VIDU_PROVIDER_PACKAGE_VERSION ||
+    connection.templateId !== VIDU_OFFICIAL_TEMPLATE_ID ||
+    connection.credentialSchemaId !== VIDU_CREDENTIAL_SCHEMA_ID ||
+    connection.credentialSchemaVersion !== 1 ||
+    connection.endpointPolicyId !== VIDU_ENDPOINT_POLICY_ID ||
+    connection.endpointPolicyRevision !== 1 ||
+    connection.state === 'disabled' ||
+    connection.state === 'deleted' ||
+    !binding
+  ) {
+    throw new ViduRuntimeError('protocol_mismatch', 'not_retryable');
+  }
+  if (!connection.endpoint) {
+    throw new ViduRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  let endpoint: URL;
+  try {
+    endpoint = new URL(connection.endpoint);
+  } catch {
+    throw new ViduRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  if (endpoint.protocol !== 'https:') {
+    throw new ViduRuntimeError('insecure_transport', 'not_retryable');
+  }
+  if (endpoint.origin !== baseUrl.origin) {
+    throw new ViduRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+}
+
+function parseTokenCredential(record: StructuredCredentialRecord): string {
+  if (
+    record.schemaId !== VIDU_CREDENTIAL_SCHEMA_ID ||
+    record.schemaVersion !== 1 ||
+    typeof record.values !== 'object' ||
+    record.values === null ||
+    Array.isArray(record.values) ||
+    Object.keys(record.values).length !== 1 ||
+    typeof record.values.token !== 'string'
+  ) {
+    throw new ViduRuntimeError('credential_unavailable', 'not_retryable');
+  }
+  const value = record.values.token.trim();
+  if (value.length < 1 || value.length > 4096 || /[\r\n]/u.test(value)) {
+    throw new ViduRuntimeError('credential_unavailable', 'not_retryable');
+  }
+  return value;
 }
 
 function validateProtocol(

@@ -293,6 +293,22 @@ export function ProvidersPage() {
     }
   }
 
+  async function handleDeleteModel(modelId: string) {
+    if (!providersApi || busy) return;
+    const model = registry.models.find((item) => item.modelId === modelId);
+    if (!model) return;
+    const confirmed = window.confirm(`确认删除模型「${model.displayName}」？`);
+    if (!confirmed) return;
+    const deleted = await runAction(
+      () => providersApi.deleteModel(modelId),
+      '模型已删除',
+      model.connectionId
+    );
+    if (deleted && selectedModelId === modelId) {
+      setSelectedModelId('');
+    }
+  }
+
   return (
     <section className="uc-provider-page" aria-labelledby="providers-page-title">
       <header className="uc-provider-page__header">
@@ -389,6 +405,7 @@ export function ProvidersPage() {
           modelKey={modelKey}
           onConnectionFilterChange={setConnectionFilter}
           onDeleteConnection={() => void handleDeleteConnection()}
+          onDeleteModel={(modelId) => void handleDeleteModel(modelId)}
           onGoGallery={() => setView('gallery')}
           onModelDisplayNameChange={setModelDisplayName}
           onModelKeyChange={setModelKey}

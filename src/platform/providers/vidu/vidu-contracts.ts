@@ -146,7 +146,7 @@ export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {
       adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
       protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
       protocolVersion: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
-      operations: ['submit', 'query', 'cancel', 'receive_result']
+      operations: ['validate_connection', 'submit', 'query', 'cancel', 'receive_result']
     }
   ],
   templates: [
@@ -177,8 +177,8 @@ export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {
           adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION
         }
       ],
-      freeConnectionValidation: false,
-      modelDiscoveryKind: 'none'
+      freeConnectionValidation: true,
+      modelDiscoveryKind: 'manual_exact'
     }
   ]
 };

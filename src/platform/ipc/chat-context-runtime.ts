@@ -42,11 +42,7 @@ import { ProjectContextController } from './project-context-controller';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import {
   ConversationResponseExecutionLifecycle,
-  DEEPSEEK_CONSTRAINT_SET_ID,
-  DEEPSEEK_RESULT_SCHEMA_ID,
-  deepSeekChatParameterSchema,
-  deepSeekReasoningParameterSchema,
-  deepSeekUsageSchema,
+  createTextProviderFeatureContracts,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
@@ -57,6 +53,7 @@ import {
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
   type ProviderCandidateRuntimeAuthorizationPort,
+  unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type JsonProviderRegistryStore
@@ -128,27 +125,11 @@ export function createChatContextRuntime(
     volcengineProviderPackageDescriptor,
     klingProviderPackageDescriptor,
     newApiProviderPackageDescriptor,
+    unicompapiProviderPackageDescriptor,
     viduProviderPackageDescriptor
   ]);
   const contracts = new ProviderFeatureContractRegistry([
-    {
-      parameterSchema: deepSeekChatParameterSchema,
-      resultSchemaId: DEEPSEEK_RESULT_SCHEMA_ID,
-      resultSchemaRevision: 1,
-      usageSchema: deepSeekUsageSchema,
-      constraintSetId: DEEPSEEK_CONSTRAINT_SET_ID,
-      constraintSetRevision: 1,
-      featureMappingVersion: 1
-    },
-    {
-      parameterSchema: deepSeekReasoningParameterSchema,
-      resultSchemaId: DEEPSEEK_RESULT_SCHEMA_ID,
-      resultSchemaRevision: 1,
-      usageSchema: deepSeekUsageSchema,
-      constraintSetId: DEEPSEEK_CONSTRAINT_SET_ID,
-      constraintSetRevision: 1,
-      featureMappingVersion: 1
-    }
+    ...createTextProviderFeatureContracts()
   ]);
   type ProjectRuntime = {
     readonly projectId: string;

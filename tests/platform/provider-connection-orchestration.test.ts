@@ -174,27 +174,24 @@ describe('provider connection orchestration', () => {
     });
   });
 
-  it('falls back to a plain save when the template has no approved free validation', async () => {
+  it('rejects add when the template has no approved free validation', async () => {
     const fixture = await orchestrationFixture();
     const progress: string[] = [];
     const result = await fixture.framework.addConnection({
       packageId: 'orchestration.fixture',
       templateId: 'fixture-official-no-free',
-      name: 'Deferred official',
+      name: 'Deferred official removed',
       credentials: { api_key: 'fixture-deferred-secret' }
     }, (step) => progress.push(step));
 
     expect(result).toMatchObject({
-      ok: true,
-      value: {
-        state: 'saved',
-        validated: false,
-        catalog: 'skipped'
-      }
+      ok: false,
+      error: { code: 'free_validation_unavailable' }
     });
     expect(progress).toEqual([]);
     expect(fixture.calls.validation).toBe(0);
     expect(fixture.calls.discovery).toBe(0);
+    expect((await fixture.registry.load()).connections).toHaveLength(0);
   });
 
   it('keeps the validated connection when catalog synchronization fails', async () => {

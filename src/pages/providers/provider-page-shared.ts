@@ -46,7 +46,7 @@ export function toneForState(state: string): 'neutral' | 'info' | 'success' | 'w
 export function describeError(code: string): string {
   const labels: Record<string, string> = {
     adapter_unavailable: '在线管理适配器尚未获得专项批准',
-    free_validation_unavailable: '此连接没有获批的免费验证操作',
+    free_validation_unavailable: '此供应商没有获批的免费验证，不能在保存时探测连通性',
     connection_validation_failed: '远程连通性验证未通过',
     catalog_sync_unavailable: '此连接不支持目录同步',
     adapter_binding_ambiguous: '当前连接适配器绑定不明确，无法登记模型',

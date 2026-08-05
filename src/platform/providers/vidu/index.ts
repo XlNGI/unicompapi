@@ -2,6 +2,7 @@ export * from './vidu-runtime-errors';
 export * from './vidu-contracts';
 export * from './vidu-route-adapters';
 export * from './vidu-shared-runtime';
+export * from './vidu-management-adapter';
 export * from './vidu-provider-package';
 export * from './controlled-image-material';
 export * from './vidu-image-adapters';

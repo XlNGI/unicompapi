@@ -12,15 +12,29 @@ import {
   toProviderId,
   type CredentialSchema,
   type IsoTimestamp,
+  type ModelFeatureProfile,
   type ProviderAdapterDescriptor,
   type ProviderConnection,
   type ProviderModel,
+  type ProviderModelDefinition,
   type ProviderProtocolBinding,
   type SafeProviderTemplateDto,
   type StructuredCredentialRecord
 } from '../../domain';
 import { sharedFileWriteCoordinator } from '../storage';
 import type { SecureCredentialVault } from './credential-vault';
+import {
+  DEEPSEEK_CHAT_ADAPTER_ID,
+  DEEPSEEK_CHAT_PROTOCOL_ID,
+  DEEPSEEK_PROVIDER_PACKAGE_ID,
+  deepSeekModelDefinitions
+} from './deepseek/deepseek-contracts';
+import {
+  createOpenAiCompatibleDefaultTextDefinition,
+  NEWAPI_CHAT_ADAPTER_ID,
+  NEWAPI_CHAT_PROTOCOL_ID
+} from './newapi/newapi-contracts';
+import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
 import {
   ProviderConnectionContractService,
   type ProviderConnectionContractResult
@@ -45,6 +59,7 @@ export const providerManagementActions = [
   'connection_disabled',
   'model_enabled',
   'model_disabled',
+  'model_deleted',
   'connection_deleted'
 ] as const;
 export type ProviderManagementAction = (typeof providerManagementActions)[number];
@@ -482,17 +497,10 @@ export class ProviderManagementFramework {
       const probeAvailable = resolved.template.freeConnectionValidation &&
         this.adapters.supports(resolved, 'validate_connection');
       if (!probeAvailable) {
-        const saved = await this.persistConnection(request.save);
-        if (!saved.ok) return saved;
-        return {
-          ok: true,
-          value: {
-            ...saved.value,
-            state: 'saved' as const,
-            validated: false,
-            catalog: 'skipped' as const
-          }
-        };
+        throw new ProviderManagementFrameworkError(
+          'free_validation_unavailable',
+          'This provider template has no approved free validation operation for save-time probing'
+        );
       }
       const endpoint = this.packages.resolveEndpoint(
         resolved,
@@ -1114,25 +1122,32 @@ export class ProviderManagementFramework {
             'The provider model does not belong to its package-owned connection'
           );
         }
-        if (request.enabled) assertModelRoutableForEnable(snapshot, model);
-        const updated = model.enabled === request.enabled
-          ? model
+        let workingSnapshot = snapshot;
+        let currentModel = model;
+        if (request.enabled && !currentModel.activeProfileId) {
+          const attached = tryAttachDefaultTextChatProfile(workingSnapshot, currentModel, now);
+          workingSnapshot = attached.snapshot;
+          currentModel = attached.model;
+        }
+        if (request.enabled) assertModelRoutableForEnable(workingSnapshot, currentModel);
+        const updated = currentModel.enabled === request.enabled
+          ? currentModel
           : {
-              ...model,
+              ...currentModel,
               enabled: request.enabled,
-              revision: model.revision + 1,
+              revision: currentModel.revision + 1,
               updatedAt: now
             };
         return {
           snapshot: {
-            ...snapshot,
-            models: snapshot.models.map((candidate) =>
-              candidate.id === model.id ? updated : candidate
+            ...workingSnapshot,
+            models: workingSnapshot.models.map((candidate) =>
+              candidate.id === currentModel.id ? updated : candidate
             ),
             routingPreferences: request.enabled
-              ? snapshot.routingPreferences
-              : snapshot.routingPreferences.map((preference) =>
-                  preference.modelId === model.id && preference.enabled
+              ? workingSnapshot.routingPreferences
+              : workingSnapshot.routingPreferences.map((preference) =>
+                  preference.modelId === currentModel.id && preference.enabled
                     ? { ...preference, enabled: false, updatedAt: now }
                     : preference
                 )
@@ -1150,6 +1165,83 @@ export class ProviderManagementFramework {
       return {
         ok: true,
         value: { modelId: result.id, state: request.enabled ? 'enabled' : 'disabled' }
+      };
+    } catch (error) {
+      return frameworkFailure(error);
+    }
+  }
+
+  async deleteModel(input: unknown): Promise<ProviderManagementFrameworkResult<{
+    readonly modelId: string;
+    readonly state: 'deleted';
+  }>> {
+    try {
+      const modelId = parseIdRequest(input, 'modelId');
+      const now = this.now();
+      const result = await this.registry.mutate((snapshot) => {
+        const model = snapshot.models.find((candidate) => candidate.id === modelId);
+        if (!model) {
+          throw new ProviderManagementFrameworkError(
+            'model_not_found',
+            'The provider model was not found'
+          );
+        }
+        if ((model.catalogState ?? 'present') === 'retired') {
+          return { snapshot, result: model };
+        }
+        const hasCapabilityHistory = snapshot.capabilities.some(
+          (evidence) => evidence.modelId === model.id
+        );
+        // Capability evidence is immutable and requires the model ref,
+        // so history-bearing models stay as hidden retired tombs.
+        if (hasCapabilityHistory) {
+          return {
+            snapshot: {
+              ...snapshot,
+              models: snapshot.models.map((candidate) =>
+                candidate.id === model.id
+                  ? {
+                      ...candidate,
+                      enabled: false,
+                      catalogState: 'retired' as const,
+                      revision: candidate.revision + 1,
+                      updatedAt: now
+                    }
+                  : candidate
+              ),
+              routingPreferences: snapshot.routingPreferences.map((preference) =>
+                preference.modelId === model.id && preference.enabled
+                  ? { ...preference, enabled: false, updatedAt: now }
+                  : preference
+              )
+            },
+            result: model
+          };
+        }
+        return {
+          snapshot: {
+            ...snapshot,
+            models: snapshot.models.filter((candidate) => candidate.id !== model.id),
+            modelProfiles: (snapshot.modelProfiles ?? []).filter(
+              (profile) => profile.modelId !== model.id
+            ),
+            routingPreferences: snapshot.routingPreferences.filter(
+              (preference) => preference.modelId !== model.id
+            )
+          },
+          result: model
+        };
+      });
+      await this.record({
+        action: 'model_deleted',
+        outcome: 'succeeded',
+        providerId: result.providerId,
+        connectionId: result.connectionId,
+        modelId: result.id
+      }, now);
+      return {
+        ok: true,
+        value: { modelId: result.id, state: 'deleted' }
       };
     } catch (error) {
       return frameworkFailure(error);
@@ -1574,6 +1666,16 @@ function mergeCatalogModels(
         updatedAt: observedAt
       });
     }
+    if (current.catalogState === 'retired') {
+      return {
+        ...current,
+        protocolBindingId: binding.id,
+        catalogRevision,
+        lastSeenAt: observedAt,
+        revision: current.revision + 1,
+        updatedAt: observedAt
+      };
+    }
     return {
       ...current,
       protocolBindingId: binding.id,
@@ -1666,6 +1768,116 @@ function assertModelRoutableForEnable(
       );
     }
   }
+}
+
+function tryAttachDefaultTextChatProfile(
+  snapshot: ProviderRegistrySnapshot,
+  model: ProviderModel,
+  now: IsoTimestamp
+): {
+  readonly snapshot: ProviderRegistrySnapshot;
+  readonly model: ProviderModel;
+} {
+  if (model.activeProfileId) return { snapshot, model };
+  const provider = snapshot.providers.find((candidate) => candidate.id === model.providerId);
+  const connection = snapshot.connections.find((candidate) => candidate.id === model.connectionId);
+  const binding = snapshot.protocolBindings.find((candidate) =>
+    candidate.id === model.protocolBindingId &&
+    candidate.connectionId === model.connectionId
+  );
+  if (!provider?.packageId || !provider.packageVersion || !connection || !binding) {
+    return { snapshot, model };
+  }
+  const definition = resolveDefaultTextChatDefinition({
+    packageId: provider.packageId,
+    packageVersion: provider.packageVersion,
+    providerModelKey: model.providerModelKey,
+    binding
+  });
+  if (!definition) return { snapshot, model };
+  const template = definition.profileTemplates[0];
+  if (!template) return { snapshot, model };
+  if (
+    binding.adapterKind !== template.adapterKey ||
+    binding.protocolId !== template.protocolDefinitionId
+  ) {
+    return { snapshot, model };
+  }
+  const definitions = snapshot.modelDefinitions ?? [];
+  const nextDefinitions = definitions.some(
+    (candidate) => candidate.definitionId === definition.definitionId
+  )
+    ? definitions
+    : [...definitions, definition];
+  const nextModelRevision = model.revision + 1;
+  const profile: ModelFeatureProfile = {
+    schemaVersion: 1,
+    profileId: `profile-${randomUUID()}`,
+    revision: Math.max(
+      1,
+      ...(snapshot.modelProfiles ?? [])
+        .filter((candidate) => candidate.modelId === model.id)
+        .map((candidate) => candidate.revision + 1)
+    ),
+    packageId: definition.packageId,
+    sourceTemplateId: template.templateId,
+    adapterKey: template.adapterKey,
+    modelId: model.id,
+    modelRevision: nextModelRevision,
+    protocolBindingId: model.protocolBindingId,
+    status: 'verified',
+    features: template.features,
+    evidenceIds: snapshot.capabilities
+      .filter((candidate) => candidate.modelId === model.id)
+      .map((candidate) => candidate.id),
+    recordedAt: now
+  };
+  const updatedModel: ProviderModel = {
+    ...model,
+    activeProfileId: profile.profileId,
+    revision: nextModelRevision,
+    updatedAt: now
+  };
+  return {
+    snapshot: {
+      ...snapshot,
+      modelDefinitions: nextDefinitions,
+      models: snapshot.models.map((candidate) =>
+        candidate.id === model.id ? updatedModel : candidate
+      ),
+      modelProfiles: [...(snapshot.modelProfiles ?? []), profile]
+    },
+    model: updatedModel
+  };
+}
+
+function resolveDefaultTextChatDefinition(input: {
+  readonly packageId: string;
+  readonly packageVersion: string;
+  readonly providerModelKey: string;
+  readonly binding: ProviderProtocolBinding;
+}): ProviderModelDefinition | undefined {
+  if (
+    input.packageId === DEEPSEEK_PROVIDER_PACKAGE_ID &&
+    input.binding.adapterKind === DEEPSEEK_CHAT_ADAPTER_ID &&
+    input.binding.protocolId === DEEPSEEK_CHAT_PROTOCOL_ID
+  ) {
+    return deepSeekModelDefinitions.find(
+      (definition) => definition.providerModelKey === input.providerModelKey
+    );
+  }
+  if (
+    isOpenAiCompatiblePackageId(input.packageId) &&
+    input.binding.adapterKind === NEWAPI_CHAT_ADAPTER_ID &&
+    input.binding.protocolId === NEWAPI_CHAT_PROTOCOL_ID
+  ) {
+    return createOpenAiCompatibleDefaultTextDefinition({
+      packageId: input.packageId,
+      packageVersion: input.packageVersion,
+      providerModelKey: input.providerModelKey
+    });
+  }
+  return undefined;
 }
 
 function parseCreateConnectionRequest(value: unknown): unknown {

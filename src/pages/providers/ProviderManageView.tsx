@@ -49,6 +49,7 @@ export interface ProviderManageViewProps {
   ) => Promise<boolean>;
   readonly onRegisterModel: (event: FormEvent<HTMLFormElement>) => void;
   readonly onRotateCredential: (event: FormEvent<HTMLFormElement>) => void;
+  readonly onDeleteModel: (modelId: string) => void;
   readonly onDeleteConnection: () => void;
   readonly onGoGallery: () => void;
 }
@@ -78,6 +79,7 @@ export function ProviderManageView({
   runAction,
   onRegisterModel,
   onRotateCredential,
+  onDeleteModel,
   onDeleteConnection,
   onGoGallery
 }: ProviderManageViewProps) {
@@ -291,6 +293,14 @@ export function ProviderManageView({
                           />
                           <span aria-hidden="true" />
                         </label>
+                        <Button
+                          aria-label={`删除模型 ${model.displayName}`}
+                          disabled={busy || selectedConnection.state === 'deleted'}
+                          onClick={() => onDeleteModel(model.modelId)}
+                          variant="ghost"
+                        >
+                          <LuTrash2 aria-hidden="true" /> 删除
+                        </Button>
                       </div>
                     ))}
                   </div>

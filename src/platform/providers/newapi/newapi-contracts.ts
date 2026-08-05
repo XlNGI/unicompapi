@@ -39,6 +39,10 @@ export const NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID =
   'constraints.newapi.text-to-video';
 export const NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID =
   'constraints.newapi.image-to-video.single-image';
+export const NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
+  'parameters.newapi.text_chat.default';
+export const NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID =
+  'parameters.newapi.text_reasoning.default';
 
 export interface NewApiNumericRangeDeclarationV1 {
   readonly minimum?: number;
@@ -94,6 +98,82 @@ export const newApiChatUsageSchema: UsageSchemaV1 = createUsageSchema({
     tokenMetric('cached_tokens', false)
   ]
 });
+
+/** Required-only text schemas: no user-adjustable fields; provider defaults apply. */
+export const newApiDefaultTextChatParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_chat',
+  fields: []
+};
+
+export const newApiDefaultTextReasoningParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_reasoning',
+  fields: []
+};
+
+/**
+ * Exact Model Definition for OpenAI-compatible chat bindings.
+ * Does not infer image/video; only attaches package-approved text features.
+ */
+export function createOpenAiCompatibleDefaultTextDefinition(input: {
+  readonly packageId: string;
+  readonly packageVersion: string;
+  readonly providerModelKey: string;
+}): ProviderModelDefinition {
+  const providerModelKey = requireProviderModelKey(input.providerModelKey);
+  if (
+    input.packageId !== NEWAPI_PROVIDER_PACKAGE_ID &&
+    input.packageId !== 'provider-package-unicompapi'
+  ) {
+    throw new TypeError('OpenAI-compatible text definitions require a known package id');
+  }
+  const suffix = createHash('sha256')
+    .update(canonicalJson({
+      packageId: input.packageId,
+      packageVersion: input.packageVersion,
+      providerModelKey
+    }))
+    .digest('hex')
+    .slice(0, 16);
+  return {
+    schemaVersion: 1,
+    definitionId: `definition.openai-compatible.text.${suffix}`,
+    packageId: input.packageId,
+    packageVersion: input.packageVersion,
+    providerModelKey,
+    profileTemplates: [
+      {
+        templateId: `profile-template.openai-compatible.text.${suffix}`,
+        adapterKey: NEWAPI_CHAT_ADAPTER_ID,
+        protocolDefinitionId: NEWAPI_CHAT_PROTOCOL_ID,
+        sourceDocumentRevision: NEWAPI_SOURCE_DOCUMENT_REVISION,
+        features: [
+          {
+            productFeature: 'text_chat',
+            internalPurpose: 'text_execution',
+            parameterSchemaId: NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+            resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
+            usageSchemaId: NEWAPI_CHAT_USAGE_SCHEMA_ID,
+            constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID
+          },
+          {
+            productFeature: 'text_reasoning',
+            internalPurpose: 'text_execution',
+            parameterSchemaId: NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+            resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
+            usageSchemaId: NEWAPI_CHAT_USAGE_SCHEMA_ID,
+            constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID
+          }
+        ]
+      }
+    ]
+  };
+}
 
 export const newApiImageUsageSchema: UsageSchemaV1 = createUsageSchema({
   id: toUsageSchemaId(NEWAPI_IMAGE_USAGE_SCHEMA_ID),
