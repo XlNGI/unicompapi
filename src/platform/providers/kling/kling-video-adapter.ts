@@ -23,6 +23,10 @@ import type {
   ProviderAsyncOperationStatus,
   ProviderCancelOutcome
 } from '../provider-execution-lifecycle';
+import type {
+  ProviderConnectionValidationResultV1,
+  ProviderManagementAdapterPort
+} from '../provider-management-framework';
 import {
   VideoResultPortError,
   type VideoRemoteCompletionFact,
@@ -37,6 +41,8 @@ import {
   KLING_TEXT_TO_VIDEO_CONSTRAINT_SET_ID,
   KLING_VIDEO_ADAPTER_ID,
   KLING_VIDEO_ADAPTER_VERSION,
+  KLING_VIDEO_PROTOCOL_ID,
+  KLING_VIDEO_PROTOCOL_VERSION,
   KLING_VIDEO_RESULT_SCHEMA_ID,
   KLING_VIDEO_USAGE_SCHEMA_ID,
   klingVideoUsageSchema
@@ -131,6 +137,67 @@ interface ParsedKlingTask {
   readonly createTime: number;
   readonly videoUrl?: string;
   readonly usage?: readonly UsageFactV1[];
+}
+
+export class KlingManagementAdapter implements ProviderManagementAdapterPort {
+  readonly identity = {
+    packageId: KLING_PROVIDER_PACKAGE_ID,
+    adapterId: KLING_VIDEO_ADAPTER_ID,
+    adapterVersion: KLING_VIDEO_ADAPTER_VERSION,
+    protocolId: KLING_VIDEO_PROTOCOL_ID,
+    protocolVersion: KLING_VIDEO_PROTOCOL_VERSION
+  } as const;
+
+  constructor(
+    private readonly runtime: KlingSharedRuntime,
+    private readonly now: () => IsoTimestamp = () =>
+      toIsoTimestamp(new Date().toISOString())
+  ) {}
+
+  async validateConnection(input: {
+    readonly connection: ProviderConnection;
+    readonly endpoint?: string;
+    readonly credentials: StructuredCredentialRecord;
+  }): Promise<ProviderConnectionValidationResultV1> {
+    try {
+      const body = await this.runtime.requestAccountCosts(input);
+      parseAccountCostsEnvelope(body);
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: this.now()
+      };
+    } catch (error) {
+      const businessCode = accountCostsBusinessCode(error);
+      const authenticationFailed =
+        (error instanceof KlingRuntimeError &&
+          error.code === 'authentication_failed') ||
+        businessCode === 1000 ||
+        businessCode === 1001 ||
+        businessCode === 1002;
+      const adapterCode = error instanceof KlingVideoAdapterError
+        ? error.safeCode
+        : undefined;
+      return {
+        state: 'unavailable',
+        identityState: 'verification_failed',
+        credentialState: authenticationFailed
+          ? 'invalid'
+          : businessCode !== undefined
+            ? 'valid'
+            : 'verification_unavailable',
+        observedAt: this.now(),
+        safeCode: authenticationFailed
+          ? 'authentication_failed'
+          : businessCode !== undefined
+            ? 'account_unavailable'
+            : error instanceof KlingRuntimeError
+              ? error.code
+              : adapterCode ?? 'unknown'
+      };
+    }
+  }
 }
 
 export class KlingVideoAdapter
@@ -1127,6 +1194,49 @@ function usageFact(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+class KlingAccountCostsError extends Error {
+  constructor(
+    readonly businessCode: number | undefined,
+    message: string
+  ) {
+    super(message);
+    this.name = 'KlingAccountCostsError';
+  }
+}
+
+function parseAccountCostsEnvelope(body: Uint8Array): void {
+  const envelope = exactResponseRecord(
+    parseJsonObject(body, 'Kling account costs response'),
+    ['code'],
+    ['message', 'request_id', 'data'],
+    'Kling account costs response'
+  );
+  if (!Number.isSafeInteger(envelope.code)) {
+    throw invalidResponse('Kling account costs response code is invalid');
+  }
+  if (envelope.message !== undefined) {
+    optionalRemoteText(envelope.message, 'account costs message');
+  }
+  if (envelope.request_id !== undefined) {
+    requireRemoteText(envelope.request_id, 'account costs request ID');
+  }
+  if (envelope.data !== undefined && !isRecord(envelope.data)) {
+    throw invalidResponse('Kling account costs response data is invalid');
+  }
+  if (envelope.code !== 0) {
+    throw new KlingAccountCostsError(
+      Number(envelope.code),
+      `Kling account costs rejected with business code ${Number(envelope.code)}`
+    );
+  }
+}
+
+function accountCostsBusinessCode(error: unknown): number | undefined {
+  return error instanceof KlingAccountCostsError
+    ? error.businessCode
+    : undefined;
 }
 
 class KlingVideoAdapterError extends Error {

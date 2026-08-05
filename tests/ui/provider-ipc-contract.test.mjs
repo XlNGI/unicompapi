@@ -6,6 +6,7 @@ const preload = await readFile('electron/preload.ts', 'utf8');
 const contract = await readFile('src/shared/provider-ipc.ts', 'utf8');
 const handlers = await readFile('electron/ipc/provider-ipc.ts', 'utf8');
 const main = await readFile('electron/main.ts', 'utf8');
+const managementAdapters = await readFile('electron/ipc/management-adapters.ts', 'utf8');
 
 const registryProjection = contract.slice(
   contract.indexOf('export interface ProviderSummaryDto'),
@@ -85,4 +86,22 @@ test('desktop composition installs live provider management adapters in the main
   assert.match(handlers, /management\.createConnection\(input\)/);
   assert.match(handlers, /management\.addConnection\(input/);
   assert.doesNotMatch(handlers, /fetch\(|net\.fetch|https?\./);
+});
+
+test('management adapter composition registers the evidence-backed probes', () => {
+  for (const adapter of [
+    'DeepSeekManagementAdapter',
+    'NewApiManagementAdapter',
+    'KlingManagementAdapter'
+  ]) {
+    assert.match(managementAdapters, new RegExp(`new ${adapter}\\(`));
+  }
+  for (const transport of [
+    'ElectronDeepSeekHttpTransport',
+    'ElectronNewApiHttpTransport',
+    'ElectronKlingHttpTransport'
+  ]) {
+    assert.match(managementAdapters, new RegExp(`class ${transport}`));
+  }
+  assert.doesNotMatch(managementAdapters, /api[_-]?key\s*[:=]\s*['"][^'"]+['"]/i);
 });

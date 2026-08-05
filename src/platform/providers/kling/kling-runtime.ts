@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { isIP } from 'node:net';
 import type {
   ProviderConnection,
@@ -96,7 +97,7 @@ export interface KlingSafeLogEvent {
     | 'request_completed'
     | 'request_failed'
     | 'runtime_disposed';
-  readonly operation?: 'video_submit' | 'video_query' | 'video_result';
+  readonly operation?: 'video_submit' | 'video_query' | 'video_result' | 'account_costs';
   readonly method?: 'GET' | 'POST';
   readonly status?: number;
   readonly errorCode?: KlingRuntimeErrorCode;
@@ -170,6 +171,39 @@ export class KlingSharedRuntime {
     return Uint8Array.from(response.body);
   }
 
+  async requestAccountCosts(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly signal?: AbortSignal;
+  }): Promise<Uint8Array> {
+    if (this.disposed) {
+      throw new KlingRuntimeError('runtime_shutting_down', 'not_retryable');
+    }
+    validateManagementConnection(input.connection, this.baseUrl);
+    const credential = parseCredential(input.credentials);
+    validateBounds(undefined, 1, 256 * 1024);
+    const endMs = this.now();
+    const startMs = Math.max(0, endMs - 24 * 60 * 60 * 1_000);
+    const url = new URL('/v1/account/costs', this.baseUrl.origin);
+    url.searchParams.set('start_time', String(startMs));
+    url.searchParams.set('end_time', String(endMs));
+    const response = await this.send({
+      operation: 'account_costs',
+      method: 'GET',
+      url,
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${mintKlingApiToken(credential, endMs)}`
+      },
+      signal: input.signal,
+      maximumRequestBytes: 1,
+      maximumResponseBytes: 256 * 1024,
+      requireJson: true,
+      notFoundKind: 'operation'
+    });
+    return Uint8Array.from(response.body);
+  }
+
   async downloadVideoResult(input: {
     readonly url: string;
     readonly signal?: AbortSignal;
@@ -222,7 +256,7 @@ export class KlingSharedRuntime {
       url: input.url,
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${credential}`,
+        authorization: `Bearer ${mintKlingApiToken(credential, this.now())}`,
         ...(input.body ? { 'content-type': 'application/json' } : {})
       },
       body: input.body,
@@ -358,21 +392,57 @@ export class KlingSharedRuntime {
   }
 }
 
-function parseCredential(record: StructuredCredentialRecord): string {
+export interface KlingCredentialPair {
+  readonly accessKey: string;
+  readonly secretKey: string;
+}
+
+function parseCredential(record: StructuredCredentialRecord): KlingCredentialPair {
   if (
     record.schemaId !== KLING_CREDENTIAL_SCHEMA_ID ||
     record.schemaVersion !== 1 ||
     !isRecord(record.values) ||
-    Object.keys(record.values).length !== 1 ||
-    typeof record.values.api_key !== 'string'
+    Object.keys(record.values).length !== 2 ||
+    typeof record.values.access_key !== 'string' ||
+    typeof record.values.secret_key !== 'string'
   ) {
     throw new KlingRuntimeError('credential_unavailable', 'not_retryable');
   }
-  const value = record.values.api_key.trim();
-  if (value.length < 1 || value.length > 4_096 || /[\r\n]/u.test(value)) {
+  const accessKey = record.values.access_key.trim();
+  const secretKey = record.values.secret_key.trim();
+  if (
+    accessKey.length < 1 ||
+    accessKey.length > 1_024 ||
+    secretKey.length < 1 ||
+    secretKey.length > 4_096 ||
+    /[\r\n]/u.test(accessKey) ||
+    /[\r\n]/u.test(secretKey)
+  ) {
     throw new KlingRuntimeError('credential_unavailable', 'not_retryable');
   }
-  return value;
+  return { accessKey, secretKey };
+}
+
+export function mintKlingApiToken(
+  credential: KlingCredentialPair,
+  nowMs: number
+): string {
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new KlingRuntimeError('invalid_request', 'not_retryable');
+  }
+  const nowSeconds = Math.floor(nowMs / 1_000);
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+  const header = encode({ alg: 'HS256', typ: 'JWT' });
+  const payload = encode({
+    iss: credential.accessKey,
+    exp: nowSeconds + 1_800,
+    nbf: nowSeconds - 5
+  });
+  const signature = createHmac('sha256', credential.secretKey)
+    .update(`${header}.${payload}`)
+    .digest('base64url');
+  return `${header}.${payload}.${signature}`;
 }
 
 function validateOfficialConnection(
@@ -402,6 +472,40 @@ function validateOfficialConnection(
   }
   const endpoint = parseBaseUrl(connection.endpoint ?? '');
   if (endpoint.origin !== baseUrl.origin || endpoint.pathname !== baseUrl.pathname) {
+    throw new KlingRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+}
+
+function validateManagementConnection(
+  connection: ProviderConnection,
+  baseUrl: URL
+): void {
+  const binding = connection.adapterBindings?.find(
+    (item) =>
+      item.adapterId === KLING_VIDEO_ADAPTER_ID &&
+      item.adapterVersion === KLING_VIDEO_ADAPTER_VERSION &&
+      item.protocolId === KLING_VIDEO_PROTOCOL_ID &&
+      item.protocolVersion === KLING_VIDEO_PROTOCOL_VERSION
+  );
+  if (
+    connection.packageId !== KLING_PROVIDER_PACKAGE_ID ||
+    connection.packageVersion !== KLING_PROVIDER_PACKAGE_VERSION ||
+    connection.templateId !== KLING_OFFICIAL_TEMPLATE_ID ||
+    connection.credentialSchemaId !== KLING_CREDENTIAL_SCHEMA_ID ||
+    connection.credentialSchemaVersion !== 1 ||
+    connection.endpointPolicyId !== KLING_ENDPOINT_POLICY_ID ||
+    connection.endpointPolicyRevision !== 1 ||
+    connection.state === 'disabled' ||
+    connection.state === 'deleted' ||
+    !binding
+  ) {
+    throw new KlingRuntimeError('protocol_mismatch', 'not_retryable');
+  }
+  if (!connection.endpoint) {
+    throw new KlingRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  const endpoint = parseBaseUrl(connection.endpoint);
+  if (endpoint.origin !== baseUrl.origin) {
     throw new KlingRuntimeError('endpoint_not_allowed', 'not_retryable');
   }
 }

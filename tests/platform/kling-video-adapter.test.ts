@@ -59,7 +59,7 @@ const exactModelKey = 'kling-3.0-turbo-synthetic';
 const credential: StructuredCredentialRecord = {
   schemaId: KLING_CREDENTIAL_SCHEMA_ID,
   schemaVersion: 1,
-  values: { api_key: 'unit-test-kling-key' }
+  values: { access_key: 'unit-test-kling-ak', secret_key: 'unit-test-kling-sk' }
 };
 const modelContract = createKlingVideoModelContract(exactModelKey, {
   textToVideo: {
@@ -84,7 +84,13 @@ describe('Kling official contracts', () => {
       KLING_VIDEO_ADAPTER_VERSION,
       KLING_VIDEO_PROTOCOL_ID,
       KLING_VIDEO_PROTOCOL_VERSION
-    ).operations).toEqual(['submit', 'query', 'cancel', 'receive_result']);
+    ).operations).toEqual([
+      'validate_connection',
+      'submit',
+      'query',
+      'cancel',
+      'receive_result'
+    ]);
     expect(registry.resolveTemplate(
       KLING_PROVIDER_PACKAGE_ID,
       KLING_OFFICIAL_TEMPLATE_ID
@@ -432,7 +438,7 @@ describe('Kling video adapter', () => {
     });
     expect(fixture.transport.requests.at(-1)?.headers.authorization).toBeUndefined();
     expect(JSON.stringify(fixture.logs)).not.toMatch(
-      /protected-results|signature=private|unit-test-kling-key|kling-3\.0/
+      /protected-results|signature=private|unit-test-kling-ak|unit-test-kling-sk|kling-3\.0/
     );
 
     const expired = videoFixture();

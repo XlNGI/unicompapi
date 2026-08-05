@@ -1207,3 +1207,7 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
 - 2026-08-05：PR 2 `feature/provider-gallery-ui` 实现完成。模型与服务商页改为画廊首屏 + 管理视图双视图：`ProvidersPage` 拆为壳组件与 `ProviderGalleryView`、`ProviderManageView`、`provider-page-shared`；画廊按模板动态渲染卡片（状态角标、能力标签、验证标签）与求适配卡，无写死供应商名；添加连接表单由卡片触发、模板预选固定、保存走 PR 1 编排管线；管理视图默认隐藏已删除墓碑并提供显式开关。一并提交 PR 1 遗留的编排测试导入修正（原修复未提交，`develop` 上 typecheck 必挂）。门禁为 Node 195 项与 Vitest 588 项，共 783 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接校验、恢复审计、差异检查全部通过；窗口档 640/768/1024/1280/1600 画廊列数 1/2/2/3/5、零新增横向溢出，深浅主题 × 双视图截图核验干净；生产 Electron 烟测 4/4 响应、优雅关闭、残留 0、日志为空。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。工程记录见：
 
     docs/active/服务商画廊与连接编排-PR2-服务商画廊UI记录.md
+
+- 2026-08-05：PR 3 `feature/provider-management-probes-expansion` 实现完成。可灵管理探针落地：凭证模式由单一 `api_key` 升级为 AccessKey + SecretKey 双字段（`credential.kling.ak-sk`），主进程内 HMAC-SHA256 即时铸造 JWT（`iss`/`exp`/`nbf`），新增官方免费账户探针 `GET /v1/account/costs` 与 `KlingManagementAdapter` 错误映射（1000/1001/1002 与 HTTP 401 → 凭证无效；1102 → 凭证有效但账户不可用），并完成生产装配（`ElectronKlingHttpTransport`）；火山引擎 ARK 定案保持 `deferred`（控制面 `ListFoundationModels` 需 AK/SK HMAC，与模板 API Key 不兼容，推理端点无免费模型列表）；Vidu `deferred` 策略钉住（预算已用尽，验证不得触发生成接口）。新增 `kling-management-probe`（9 项）与 `provider-probe-decisions`（3 项决策钉住）测试，IPC 合同测试补管理适配器组合断言。门禁为 Node 200 项与 Vitest 601 项，共 801 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、平台审计、交接校验、恢复审计、差异检查全部通过；生产 Electron 烟测 4/4 响应、优雅关闭退出码 0、残留 0、日志为空。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。工程记录见：
+
+    docs/active/服务商画廊与连接编排-PR3-管理探针扩展记录.md
