@@ -204,7 +204,7 @@ export function ImageUnderstandingWorkspace({
         return;
       }
       setPreflight(result.value);
-      setSelectedModelId(result.value.candidates[0]?.modelId ?? '');
+      setSelectedModelId('');
       setConfirmations(emptyImageConfirmations);
       onMessage(
         result.value.blockers.length
@@ -416,17 +416,19 @@ export function ImageUnderstandingWorkspace({
           ) : null}
           {preflight?.candidates.length ? (
             <label className="uc-image-quick__field">
-              <span>图片识别模型</span>
+              <span>选择模型</span>
               <select
+                aria-label="选择模型"
                 onChange={(event) => {
                   setSelectedModelId(event.target.value);
                   setConfirmations(emptyImageConfirmations);
                 }}
                 value={selectedModelId}
               >
+                <option value="">请选择模型</option>
                 {preflight.candidates.map((candidate) => (
                   <option key={candidate.modelId} value={candidate.modelId}>
-                    {candidate.modelName}
+                    {candidate.recipientName} · {candidate.modelName}
                   </option>
                 ))}
               </select>

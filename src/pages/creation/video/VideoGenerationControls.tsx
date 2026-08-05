@@ -133,8 +133,9 @@ export function VideoGenerationModelFields({
   return (
     <>
       <label className="uc-image-quick__field">
-        <span>视频生成模型</span>
+        <span>选择模型</span>
         <select
+          aria-label="选择模型"
           disabled={modelOptions.length === 0}
           onChange={(event) => changeModel(event.target.value)}
           value={model?.modelId ?? ''}
@@ -146,7 +147,7 @@ export function VideoGenerationModelFields({
               key={option.modelId}
               value={option.modelId}
             >
-              {option.modelName}
+              {option.label}
               {option.reason ? `（${option.reason}）` : ''}
             </option>
           ))}
@@ -236,6 +237,7 @@ export function VideoSubmissionConfirmations({
 interface VideoModelOption {
   readonly modelId: string;
   readonly modelName: string;
+  readonly label: string;
   readonly evidence?: ProviderCapabilitySummaryDto;
   readonly reason?: string;
 }
@@ -283,6 +285,9 @@ function getVideoModelOptions(
       const connection = registry.connections.find(
         (item) => item.connectionId === model.connectionId
       );
+      const provider = registry.providers.find(
+        (item) => item.providerId === model.providerId
+      );
       const modeSchema = evidence?.videoGenerationSchema?.modes.find(
         (item) => item.mode === mode
       );
@@ -306,6 +311,7 @@ function getVideoModelOptions(
       return {
         modelId: model.modelId,
         modelName: model.displayName,
+        label: `${provider?.name ?? '服务商'} · ${connection?.name ?? '连接'} · ${model.displayName}`,
         evidence,
         reason
       };

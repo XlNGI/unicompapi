@@ -178,8 +178,9 @@ function ImageModelFields({
   return (
     <>
       <label className="uc-image-quick__field">
-        <span>{label}</span>
+        <span>{label || '选择模型'}</span>
         <select
+          aria-label="选择模型"
           disabled={modelOptions.length === 0}
           onChange={(event) => changeModel(event.target.value)}
           value={model?.modelId ?? ''}
@@ -191,7 +192,7 @@ function ImageModelFields({
               key={option.modelId}
               value={option.modelId}
             >
-              {option.modelName}
+              {option.label}
               {option.reason ? `（${option.reason}）` : ''}
             </option>
           ))}
@@ -272,6 +273,7 @@ export function ImageSubmissionConfirmations({
 interface GenerationModelOption {
   readonly modelId: string;
   readonly modelName: string;
+  readonly label: string;
   readonly evidence?: ProviderCapabilitySummaryDto;
   readonly reason?: string;
 }
@@ -314,6 +316,9 @@ function getModelOptions(
       const connection = registry.connections.find(
         (item) => item.connectionId === model.connectionId
       );
+      const provider = registry.providers.find(
+        (item) => item.providerId === model.providerId
+      );
       const reason = !model.enabled
         ? '模型已停用'
         : !routeModelIds.has(model.modelId)
@@ -332,6 +337,7 @@ function getModelOptions(
       return {
         modelId: model.modelId,
         modelName: model.displayName,
+        label: `${provider?.name ?? '服务商'} · ${connection?.name ?? '连接'} · ${model.displayName}`,
         evidence,
         reason
       };

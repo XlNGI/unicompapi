@@ -6,7 +6,11 @@ import {
   parseSubmissionPreparation,
   parseSubmissionUserConfirmation,
   projectParameterSchema,
+  toConversationId,
+  toConversationResponseDraftId,
   toIsoTimestamp,
+  toMessageId,
+  toProjectId,
   validateParameterSchemaV2,
   validateParameterValues,
   validateProductFeatureRequest,
@@ -181,6 +185,45 @@ export class ProviderFeatureCandidateService {
     subject: FeatureCandidateSubjectV1
   ): Promise<readonly FeatureCandidateDtoV1[]> {
     const resolvedSubject = await this.resolveSubject(subject);
+    const values = await this.candidates.list(resolvedSubject);
+    return values
+      .map((candidate) => this.toDto(resolvedSubject, candidate))
+      .sort((left, right) =>
+        left.providerName.localeCompare(right.providerName) ||
+        left.connectionName.localeCompare(right.connectionName) ||
+        left.modelName.localeCompare(right.modelName) ||
+        left.candidateId.localeCompare(right.candidateId)
+      );
+  }
+
+  /**
+   * Lists text-model candidates for a product feature without requiring a
+   * persisted response draft. Used by the chat UI before the first send.
+   */
+  async listCatalogForFeature(input: {
+    readonly projectId: string;
+    readonly productFeature: 'text_chat' | 'text_reasoning';
+  }): Promise<readonly FeatureCandidateDtoV1[]> {
+    const resolvedSubject: ResolvedFeatureSubjectV1 = {
+      projectId: toProjectId(input.projectId),
+      subject: {
+        kind: 'conversation_response_draft',
+        conversationId: toConversationId('conversation-catalog-preview'),
+        conversationRevision: 1,
+        responseDraftId: toConversationResponseDraftId('response-draft-catalog-preview'),
+        responseDraftRevision: 1,
+        userMessageId: toMessageId('message-catalog-preview')
+      },
+      productFeature: input.productFeature,
+      surface: 'conversation',
+      imageCount: 0,
+      videoCount: 0,
+      contextCount: 0,
+      parameterValues: {},
+      outboundTextSnapshot: '',
+      materialReferences: [],
+      contextContentHashes: []
+    };
     const values = await this.candidates.list(resolvedSubject);
     return values
       .map((candidate) => this.toDto(resolvedSubject, candidate))

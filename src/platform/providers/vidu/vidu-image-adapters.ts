@@ -32,16 +32,29 @@ export interface ViduImageV1AdapterOptions {
   readonly base64Encoding?: 'raw' | 'data_url';
 }
 
+/** Frozen Image2 JSON contract: Bearer + images[{image_url}] data URLs. */
+export const VIDU_IMAGE_V1_VERIFIED_OPTIONS: Required<ViduImageV1AdapterOptions> = {
+  imageInputShape: 'image_url_object_array',
+  base64Encoding: 'data_url'
+};
+
 export interface ViduAdapterRequestControl {
   readonly beforeRequestStarted?: () => Promise<void>;
   readonly signal?: AbortSignal;
 }
 
 export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
+  private readonly options: Required<ViduImageV1AdapterOptions>;
+
   constructor(
     private readonly dependencies: ViduImageAdapterDependencies,
-    private readonly options: ViduImageV1AdapterOptions = {}
-  ) {}
+    options: ViduImageV1AdapterOptions = VIDU_IMAGE_V1_VERIFIED_OPTIONS
+  ) {
+    this.options = {
+      imageInputShape: options.imageInputShape ?? VIDU_IMAGE_V1_VERIFIED_OPTIONS.imageInputShape,
+      base64Encoding: options.base64Encoding ?? VIDU_IMAGE_V1_VERIFIED_OPTIONS.base64Encoding
+    };
+  }
 
   async submit(
     request: ProviderProtocolSubmitRequest,
@@ -51,9 +64,9 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
     let requestStarted = false;
     try {
       validateCommonRequest(request, 'vidu.ent.v1.images', 'vidu_image_v1');
-      if (request.binding.authScheme !== 'token') {
+      if (request.binding.authScheme !== 'bearer') {
         return failedBeforeSubmission(
-          'The Image V1 authorization scheme has not been verified',
+          'The Image V1 authorization scheme must be bearer',
           'not_retryable'
         );
       }
@@ -102,7 +115,7 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
           : '/ent/v1/images/generations',
         body: serialized,
         contentType: 'application/json',
-        authScheme: 'token',
+        authScheme: 'bearer',
         maxRequestBytes: maximumRequestBytes,
         maxResponseBytes: 2 * 1024 * 1024,
         signal: control.signal,
@@ -122,12 +135,6 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
   }
 
   private encodeImageInput(material: ControlledImageMaterial): readonly unknown[] {
-    if (!this.options.imageInputShape || !this.options.base64Encoding) {
-      throw new ViduImageAdapterError(
-        'The Image V1 input representation has not been verified',
-        'not_retryable'
-      );
-    }
     const value = this.options.base64Encoding === 'data_url'
       ? `data:${material.mimeType};base64,${material.base64}`
       : material.base64;

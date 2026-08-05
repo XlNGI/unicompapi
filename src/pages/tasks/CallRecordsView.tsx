@@ -431,6 +431,14 @@ function CallDetails({
               <article key={`${result.observedAt}:${index}`}>
                 <strong>{mediaLabel(result.mediaKind)} · {result.outputCount} 个结果</strong>
                 <small>{localResultFacts(result)}</small>
+                {result.resultImageUrl ? (
+                  <p className="uc-task-center__result-url">
+                    <strong>图片 URL</strong>
+                    <a href={result.resultImageUrl} rel="noreferrer" target="_blank">
+                      {result.resultImageUrl}
+                    </a>
+                  </p>
+                ) : null}
                 <small>{validationLabel(result.validationState)} · {formatTimestamp(result.observedAt)}</small>
               </article>
             ))}

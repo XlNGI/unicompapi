@@ -16,7 +16,6 @@ import {
   ProjectCatalogService,
   JsonProviderRegistryStore,
   JsonAssetRepository,
-  JsonImageWorkspaceRepository,
   JsonVideoWorkspaceRepository,
   JsonProjectContextRepository,
   LocalMediaHandleRegistry,
@@ -34,15 +33,16 @@ import {
   createDevelopmentVideoEditorPreviewAdapter,
   type ProviderUsageSchemaResolverPort,
   type StorageProjectSession,
-  ProjectImageFeatureSubjectResolver,
   ProjectVideoFeatureSubjectResolver,
   ProviderFeatureCandidateService,
   ProviderFeatureContractRegistry,
   ProviderPackageRegistry,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
+  createImageFeatureControllerRuntime,
+  type ImageFeatureControllerRuntime,
   type ProviderCandidateRuntimeAuthorizationPort,
-  createImageProviderFeatureContracts,
+  type RuntimeAuthorizationOrchestrationPort,
   createVideoProviderFeatureContracts,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
@@ -74,7 +74,8 @@ export function registerStorageIpcHandlers(options: {
   readonly vidu?: ElectronViduComposition;
   readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
   readonly providerPackages?: ProviderPackageRegistry;
-  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort;
+  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort &
+    Partial<RuntimeAuthorizationOrchestrationPort>;
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -116,16 +117,10 @@ export function registerStorageIpcHandlers(options: {
     getSession: () => sessionRegistry.get(),
     mutations: imageMutations
   });
-  const imageFeatureContracts = new ProviderFeatureContractRegistry(
-    createImageProviderFeatureContracts()
-  );
   let imageFeatureRuntime: {
     readonly projectId: string;
     readonly rootDirectory: string;
-    readonly value: {
-      readonly drafts: JsonImageWorkspaceRepository;
-      readonly candidates: ProviderFeatureCandidateService;
-    };
+    readonly value: ImageFeatureControllerRuntime;
   } | undefined;
   const getImageFeatureRuntime = (session: StorageProjectSession) => {
     if (
@@ -134,31 +129,32 @@ export function registerStorageIpcHandlers(options: {
     ) {
       return imageFeatureRuntime.value;
     }
-    const storage = new NodeProjectStorage(session.rootDirectory);
-    const drafts = new JsonImageWorkspaceRepository(storage, session.projectId);
-    const contexts = new JsonProjectContextRepository(storage, session.projectId);
-    const assets = new JsonAssetRepository(storage, session.projectId);
-    const candidates = new ProviderFeatureCandidateService(
-      new ProjectImageFeatureSubjectResolver(
-        session.projectId,
-        drafts,
-        contexts,
-        assets
-      ),
-      new RegistryFeatureCandidateSource(
-        providerRegistry,
-        providerPackages,
-        imageFeatureContracts,
-        options.runtimeAuthorization ?? denyRuntimeAuthorization
-      ),
-      new RouteSelectionTokenVault()
-    );
+    const authorization = options.runtimeAuthorization ?? denyRuntimeAuthorization;
+    const value = createImageFeatureControllerRuntime({
+      session,
+      providerRegistry,
+      providerPackages,
+      runtimeAuthorization: authorization,
+      submissionAuthorization: hasSubmissionAuthorization(authorization)
+        ? authorization
+        : undefined,
+      ...(options.vidu
+        ? {
+            imageSubmission: {
+              viduPackage: options.vidu.providerPackage,
+              credentialVault: options.vidu.credentialVault
+            },
+            resultReceiver: providerOperations?.imageResultReceiver
+          }
+        : {}),
+      mutations: imageMutations
+    });
     imageFeatureRuntime = {
       projectId: session.projectId,
       rootDirectory: session.rootDirectory,
-      value: { drafts, candidates }
+      value
     };
-    return imageFeatureRuntime.value;
+    return value;
   };
   const imageFeatures = new ImageFeatureController({
     getSession: () => sessionRegistry.get(),
@@ -445,6 +441,10 @@ export function registerStorageIpcHandlers(options: {
     imageFeatureIpcChannels.submitDraft,
     (_event, request: unknown) => imageFeatures.submitDraft(request)
   );
+  ipcMain.handle(
+    imageFeatureIpcChannels.generateQuickImage,
+    (_event, request: unknown) => imageFeatures.generateQuickImage(request)
+  );
   ipcMain.handle(videoWorkspaceIpcChannels.create, (_event, request: unknown) =>
     videoWorkspaces.create(request)
   );
@@ -637,3 +637,16 @@ const denyRuntimeAuthorization: ProviderCandidateRuntimeAuthorizationPort = {
     };
   }
 };
+
+function hasSubmissionAuthorization(
+  value: ProviderCandidateRuntimeAuthorizationPort &
+    Partial<RuntimeAuthorizationOrchestrationPort>
+): value is ProviderCandidateRuntimeAuthorizationPort &
+  RuntimeAuthorizationOrchestrationPort {
+  return (
+    typeof value.claimSubmission === 'function' &&
+    typeof value.markRequestStarted === 'function' &&
+    typeof value.releaseBeforeRequest === 'function' &&
+    typeof value.recordOutcome === 'function'
+  );
+}

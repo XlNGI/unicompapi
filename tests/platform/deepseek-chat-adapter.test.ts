@@ -425,15 +425,23 @@ describe('DeepSeek runtime and usage safety', () => {
     expect(transport.requests).toHaveLength(statuses.length);
   });
 
-  it('accepts only the versioned usage whitelist and rejects inconsistent or unknown metrics', () => {
+  it('maps versioned usage metrics, rejects inconsistent totals, and ignores unknown usage keys', () => {
     expect(mapDeepSeekUsage({
       completion_tokens: 10,
       prompt_tokens: 20,
       prompt_cache_hit_tokens: 12,
       prompt_cache_miss_tokens: 8,
       total_tokens: 30,
-      completion_tokens_details: { reasoning_tokens: 4 }
-    })).toHaveLength(6);
+      completion_tokens_details: { reasoning_tokens: 4, audio_tokens: 1 },
+      prompt_tokens_details: { cached_tokens: 12 }
+    })).toEqual([
+      { metricId: 'completion_tokens', quantity: '10', unit: 'token', source: 'provider_body' },
+      { metricId: 'prompt_tokens', quantity: '20', unit: 'token', source: 'provider_body' },
+      { metricId: 'total_tokens', quantity: '30', unit: 'token', source: 'provider_body' },
+      { metricId: 'prompt_cache_hit_tokens', quantity: '12', unit: 'token', source: 'provider_body' },
+      { metricId: 'prompt_cache_miss_tokens', quantity: '8', unit: 'token', source: 'provider_body' },
+      { metricId: 'reasoning_tokens', quantity: '4', unit: 'token', source: 'provider_body' }
+    ]);
     expect(() => mapDeepSeekUsage({
       completion_tokens: 10,
       prompt_tokens: 20,
@@ -441,10 +449,38 @@ describe('DeepSeek runtime and usage safety', () => {
     })).toThrow('inconsistent');
     expect(() => mapDeepSeekUsage({
       completion_tokens: 10,
-      prompt_tokens: 20,
-      total_tokens: 30,
-      billed_dollars: 'forbidden'
+      prompt_tokens: 20
     })).toThrow('unsupported fields');
+  });
+
+  it('completes when trailing SSE chunks use nullable content or keep-alive comments', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([
+      chunk({ delta: { role: 'assistant', content: '你好！我是 DeepSeek' } }),
+      ': keep-alive',
+      chunk({ delta: { content: null, reasoning_content: null }, finishReason: 'stop' }),
+      usageChunk({
+        completion_tokens: 8,
+        prompt_tokens: 12,
+        total_tokens: 20,
+        prompt_cache_hit_tokens: 0,
+        prompt_cache_miss_tokens: 12
+      }),
+      '[DONE]'
+    ]));
+    const handle = await fixture.adapter.submit({
+      routeSnapshot: routeSnapshot('text_chat'),
+      request: dispatchRequest({})
+    });
+    await expect(handle.completion).resolves.toMatchObject({
+      state: 'completed',
+      finishReason: 'stop'
+    });
+    expect(fixture.lifecycle.events).toEqual([
+      'start:response-execution-deepseek',
+      'content:你好！我是 DeepSeek',
+      'complete:response-execution-deepseek'
+    ]);
   });
 });
 
@@ -672,7 +708,11 @@ function jsonResponse(
 
 function streamResponse(dataEvents: readonly string[]): DeepSeekHttpTransportResponse {
   const payload = new TextEncoder().encode(
-    dataEvents.map((data) => `data: ${data}\r\n\r\n`).join('')
+    dataEvents.map((data) =>
+      data.startsWith(':') || data.startsWith('data:')
+        ? `${data}\r\n\r\n`
+        : `data: ${data}\r\n\r\n`
+    ).join('')
   );
   return {
     status: 200,

@@ -319,6 +319,9 @@ export class NewApiChatAdapter {
     } catch (error) {
       removeExternalAbort();
       session?.close();
+      await this.lifecycle
+        .fail(request.responseExecutionId, safeCodeForError(error))
+        .catch(() => undefined);
       throw error;
     }
     if (!session) {
@@ -717,11 +720,14 @@ function parseStreamChunk(data: string): {
   }
   const choice = exactRecord(
     item.choices[0],
-    ['delta', 'finish_reason', 'index', 'logprobs'],
-    [],
+    ['delta', 'finish_reason', 'index'],
+    ['logprobs'],
     'NewApi stream choice'
   );
-  if (choice.index !== 0 || choice.logprobs !== null) {
+  if (
+    choice.index !== 0 ||
+    (choice.logprobs !== undefined && choice.logprobs !== null)
+  ) {
     throw invalidStream('NewApi stream choice is unsupported');
   }
   const delta = exactRecord(
@@ -733,12 +739,8 @@ function parseStreamChunk(data: string): {
   if (delta.role !== undefined && delta.role !== 'assistant') {
     throw invalidStream('NewApi stream role is invalid');
   }
-  const contentDelta = delta.content === undefined
-    ? undefined
-    : safeDelta(delta.content, 'NewApi content delta');
-  if (delta.reasoning_content !== undefined) {
-    safeDelta(delta.reasoning_content, 'NewApi reasoning delta');
-  }
+  const contentDelta = optionalDeltaText(delta.content, 'NewApi content delta');
+  optionalDeltaText(delta.reasoning_content, 'NewApi reasoning delta');
   const finishReason = choice.finish_reason === null
     ? undefined
     : parseFinishReason(choice.finish_reason);
@@ -1014,6 +1016,11 @@ function safeDelta(value: unknown, label: string): string {
     throw invalidStream(`${label} is invalid`);
   }
   return value;
+}
+
+function optionalDeltaText(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return safeDelta(value, label);
 }
 
 function nonNegativeInteger(value: unknown, label: string): number {

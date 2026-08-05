@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
+import {
+  DynamicParameterForm,
+  toDynamicParameterFields,
+  type DynamicParameterValue
+} from '../../components/DynamicParameterForm';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
 import type {
@@ -9,13 +14,13 @@ import type {
   ConversationResponseCandidateDto,
   ConversationResponseDraftDto,
   ConversationResponseExecutionDto,
-  ConversationResponsePreparationDto,
   MessageDto,
   ProjectContextCandidateDto,
   ProjectContextDetailDto,
   ProjectContextDraftPreviewDto
 } from '../../shared/chat-context-ipc';
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
+import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
 import '../../styles/pages.css';
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
@@ -27,7 +32,7 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   conversation_deleted: '已删除的对话不能继续操作。',
   conversation_not_active: '请先恢复已归档对话。',
   legacy_conversation_read_only: '旧应用级对话保持只读，请在当前项目新建对话。',
-  response_draft_not_found: '本次回复草稿已失效，请重新保存消息。',
+  response_draft_not_found: '本次回复草稿已失效，请重新发送。',
   response_execution_not_found: '本次文本执行记录不存在。',
   candidate_not_found: '所选服务商、连接或模型候选已不存在。',
   candidate_unavailable: '所选候选当前不可用于文本回复。',
@@ -69,6 +74,16 @@ const unavailableLabels: Record<string, string> = {
   schema_unsupported: '参数 Schema 不可解释'
 };
 
+function mapExecutionStateToMessageState(
+  state: ConversationResponseExecutionDto['state']
+): MessageDto['state'] {
+  if (state === 'streaming') return 'streaming';
+  if (state === 'pending') return 'pending';
+  if (state === 'completed') return 'completed';
+  if (state === 'cancelled') return 'cancelled';
+  return 'failed';
+}
+
 export function ChatPage() {
   const chat = window.unicomp?.chatContexts;
   const storage = window.unicomp?.storage;
@@ -82,8 +97,11 @@ export function ChatPage() {
   const [responseDraft, setResponseDraft] = useState<ConversationResponseDraftDto>();
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
-  const [preparation, setPreparation] = useState<ConversationResponsePreparationDto>();
-  const [outboundConfirmed, setOutboundConfirmed] = useState(false);
+  const [parameterValues, setParameterValues] = useState<
+    Readonly<Record<string, DynamicParameterValue | undefined>>
+  >({});
+  const [lockedSchemaKey, setLockedSchemaKey] = useState<string>();
+  const [paramsOpen, setParamsOpen] = useState(false);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [contextDraft, setContextDraft] = useState<ProjectContextDraftPreviewDto>();
   const [contextLabels, setContextLabels] = useState('');
@@ -94,6 +112,7 @@ export function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
 
   const selected = useMemo(
     () => conversations.find((conversation) => conversation.conversationId === selectedId),
@@ -105,14 +124,37 @@ export function ChatPage() {
   const completedMessages = selected?.messages.filter(
     (message) => message.state === 'completed'
   ) ?? [];
+  const displayMessages = useMemo(() => {
+    if (!selected) return [];
+    return selected.messages.map((message) => {
+      if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
+        return message;
+      }
+      const state = mapExecutionStateToMessageState(responseExecution.state);
+      return {
+        ...message,
+        state,
+        content: responseExecution.content || message.content
+      };
+    });
+  }, [selected, responseExecution]);
+  const modelOptions = responseCandidates.map((candidate) => ({
+    id: candidate.candidateId,
+    label: `${candidate.providerName} · ${candidate.connectionName} · ${candidate.modelName}`,
+    available: candidate.available,
+    unavailableReasons: candidate.unavailableReasons
+  }));
+  const canCompose = Boolean(
+    selected && !selected.readOnly && selected.status === 'active' && session
+  );
 
   useEffect(() => {
     let active = true;
-    async function load() {
-      setLoading(true);
+    async function load(options?: { readonly quiet?: boolean }) {
+      if (!options?.quiet) setLoading(true);
       if (!chat || !storage) {
         setNotice('当前运行环境未连接桌面对话能力。');
-        setLoading(false);
+        if (!options?.quiet) setLoading(false);
         return;
       }
       try {
@@ -125,22 +167,35 @@ export function ChatPage() {
         else setNotice('读取当前项目失败，请重试。');
         if (conversationResult.ok) {
           setConversations(conversationResult.value);
-          setSelectedId(conversationResult.value[0]?.conversationId);
+          setSelectedId((current) =>
+            current && conversationResult.value.some((item) => item.conversationId === current)
+              ? current
+              : conversationResult.value[0]?.conversationId
+          );
         } else {
           setNotice(errorMessages[conversationResult.error.code]);
         }
         if (sessionResult.ok && sessionResult.value) {
           const contexts = await chat.listProjectContextCandidates();
           if (active && contexts.ok) setRegisteredContexts(contexts.value);
+        } else if (active) {
+          setRegisteredContexts([]);
         }
       } catch {
         if (active) setNotice('读取本地对话失败，请重试。');
       } finally {
-        if (active) setLoading(false);
+        if (active && !options?.quiet) setLoading(false);
       }
     }
     void load();
-    return () => { active = false; };
+    const refresh = () => { void load({ quiet: true }); };
+    window.addEventListener('focus', refresh);
+    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
+    };
   }, [chat, storage]);
 
   useEffect(() => {
@@ -148,8 +203,46 @@ export function ChatPage() {
     setContextDraft(undefined);
     setContextLabels('');
     setContextConfirmed(false);
-    clearResponseSelection();
+    clearResponseDraftState();
   }, [selected?.conversationId, selected?.title]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCandidates() {
+      if (!chat || !session || !selected || selected.readOnly || selected.status !== 'active') {
+        setResponseCandidates([]);
+        return;
+      }
+      setCandidatesLoading(true);
+      try {
+        const result = await chat.listTextCandidates(responseFeature);
+        if (!active) return;
+        if (!result.ok) {
+          setResponseCandidates([]);
+          setNotice(errorMessages[result.error.code]);
+          return;
+        }
+        setResponseCandidates(result.value);
+        setSelectedCandidateId((current) =>
+          current && result.value.some((item) => item.candidateId === current)
+            ? current
+            : undefined
+        );
+        if (result.value.length === 0) {
+          setNotice('当前没有已登记的文本候选，请到「模型与服务商」页完成连接和模型配置。');
+        }
+      } catch {
+        if (active) {
+          setResponseCandidates([]);
+          setNotice('读取文本模型候选失败，请重试。');
+        }
+      } finally {
+        if (active) setCandidatesLoading(false);
+      }
+    }
+    void loadCandidates();
+    return () => { active = false; };
+  }, [chat, session, selected?.conversationId, selected?.readOnly, selected?.status, responseFeature]);
 
   useEffect(() => {
     if (!chat || !responseExecution || !['pending', 'streaming'].includes(responseExecution.state)) {
@@ -157,19 +250,61 @@ export function ChatPage() {
     }
     const timer = window.setInterval(() => {
       void chat.getResponseExecution(responseExecution.responseExecutionId).then((result) => {
-        if (result.ok) setResponseExecution(result.value);
+        if (!result.ok) return;
+        setResponseExecution(result.value);
+        if (!['pending', 'streaming'].includes(result.value.state) && selectedId) {
+          void chat.getConversation(selectedId).then((conversation) => {
+            if (conversation.ok) replaceConversation(conversation.value);
+          });
+        }
       });
-    }, 750);
+      if (selectedId) {
+        void chat.getConversation(selectedId).then((result) => {
+          if (result.ok) replaceConversation(result.value);
+        });
+      }
+    }, 500);
     return () => window.clearInterval(timer);
-  }, [chat, responseExecution?.responseExecutionId, responseExecution?.state]);
+  }, [chat, responseExecution?.responseExecutionId, responseExecution?.state, selectedId]);
 
-  function clearResponseSelection() {
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!input.trim()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [input]);
+
+  function clearResponseDraftState() {
     setResponseDraft(undefined);
-    setResponseCandidates([]);
-    setSelectedCandidateId(undefined);
-    setPreparation(undefined);
-    setOutboundConfirmed(false);
     setResponseExecution(undefined);
+  }
+
+  function changeCandidate(next: string) {
+    const candidate = responseCandidates.find((item) => item.candidateId === next);
+    const schemaKey = candidate
+      ? `${candidate.parameterSchema.schemaId}@${candidate.parameterSchema.revision}`
+      : undefined;
+    setSelectedCandidateId(next || undefined);
+    if (schemaKey !== lockedSchemaKey) {
+      setParameterValues({});
+      setLockedSchemaKey(schemaKey);
+    }
+    if (!next) setParamsOpen(false);
+  }
+
+  function confirmLeaveUnsentInput(): boolean {
+    if (!input.trim()) return true;
+    return window.confirm('当前输入尚未发送，确定离开并丢弃吗？');
+  }
+
+  function selectConversation(conversationId: string) {
+    if (conversationId === selectedId) return;
+    if (!confirmLeaveUnsentInput()) return;
+    setInput('');
+    setSelectedId(conversationId);
   }
 
   function replaceConversation(conversation: ConversationDto) {
@@ -251,13 +386,25 @@ export function ChatPage() {
     }
   }
 
-  async function saveMessageAndBuildResponseDraft() {
-    if (!chat || !selected || selected.readOnly || selected.status !== 'active' || !input.trim() || busy) return;
+  async function sendMessage() {
+    if (
+      !chat ||
+      !selected ||
+      selected.readOnly ||
+      selected.status !== 'active' ||
+      !input.trim() ||
+      !selectedCandidateId ||
+      !selectedCandidate?.available ||
+      busy
+    ) {
+      return;
+    }
     setBusy(true);
     setNotice('');
-    clearResponseSelection();
+    clearResponseDraftState();
+    const content = input.trim();
     try {
-      const saved = await chat.addUserMessage(selected.conversationId, selected.revision, input.trim());
+      const saved = await chat.addUserMessage(selected.conversationId, selected.revision, content);
       if (!saved.ok) {
         setNotice(errorMessages[saved.error.code]);
         return;
@@ -266,7 +413,7 @@ export function ChatPage() {
       setInput('');
       const userMessage = [...saved.value.messages].reverse().find((message) => message.role === 'user');
       if (!userMessage) {
-        setNotice('消息已保存，但未能建立回复草稿。');
+        setNotice('消息已写入，但未能建立回复草稿。');
         return;
       }
       const created = await chat.createResponseDraft(
@@ -276,7 +423,7 @@ export function ChatPage() {
         responseFeature
       );
       if (!created.ok) {
-        setNotice(`消息已保存；${errorMessages[created.error.code]}`);
+        setNotice(errorMessages[created.error.code]);
         return;
       }
       let draft = created.value;
@@ -286,83 +433,49 @@ export function ChatPage() {
           draft.revision,
           includedContextIds.flatMap((contextId) => {
             const context = viewedContexts[contextId];
-            return context ? [{
-              contextId,
-              contextRevision: context.revision,
-              includeInPrompt: true
-            }] : [];
+            return context
+              ? [{
+                  contextId,
+                  contextRevision: context.revision,
+                  includeInPrompt: true
+                }]
+              : [];
           })
         );
         if (!replaced.ok) {
           setResponseDraft(draft);
-          setNotice(`消息已保存；${errorMessages[replaced.error.code]}`);
+          setNotice(errorMessages[replaced.error.code]);
           return;
         }
         draft = replaced.value;
       }
       setResponseDraft(draft);
-      const candidates = await chat.listResponseCandidates(draft.responseDraftId, draft.revision);
-      if (!candidates.ok) {
-        setNotice(`消息已保存；${errorMessages[candidates.error.code]}`);
-        return;
-      }
-      setResponseCandidates(candidates.value);
-      setNotice(candidates.value.length === 0
-        ? '消息已保存；当前没有已登记的文本候选，请到“模型与服务商”页完成连接和模型配置。'
-        : '消息已保存；请选择服务商、连接和文本模型。');
-    } catch {
-      setNotice('保存消息或读取文本候选失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function prepareResponse() {
-    if (!chat || !responseDraft || !selectedCandidateId || busy) return;
-    setBusy(true);
-    setNotice('');
-    try {
-      const result = await chat.prepareResponseSubmission(
-        responseDraft.responseDraftId,
-        responseDraft.revision,
+      const prepared = await chat.prepareResponseSubmission(
+        draft.responseDraftId,
+        draft.revision,
         selectedCandidateId
       );
-      if (!result.ok) {
-        setNotice(errorMessages[result.error.code]);
+      if (!prepared.ok) {
+        setNotice(errorMessages[prepared.error.code] ?? prepared.error.message);
         return;
       }
-      setPreparation(result.value);
-      setOutboundConfirmed(false);
-      setNotice('请核对本次外发接收方、内容类别、上下文数量和费用事实。');
-    } catch {
-      setNotice('准备文本提交失败，请重试。');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function submitResponse() {
-    if (!chat || !responseDraft || !preparation || !outboundConfirmed || busy) return;
-    setBusy(true);
-    setNotice('');
-    try {
-      const result = await chat.submitResponse(
-        responseDraft.responseDraftId,
-        responseDraft.revision,
-        preparation.routeSelectionToken,
-        preparation.confirmation.confirmationId,
+      const submitted = await chat.submitResponse(
+        draft.responseDraftId,
+        draft.revision,
+        prepared.value.routeSelectionToken,
+        prepared.value.confirmation.confirmationId,
         true
       );
-      if (!result.ok) {
-        setNotice(errorMessages[result.error.code]);
+      if (!submitted.ok) {
+        setNotice(errorMessages[submitted.error.code] ?? submitted.error.message);
         return;
       }
-      setResponseExecution(result.value);
-      setPreparation(undefined);
-      setOutboundConfirmed(false);
-      setNotice('文本请求已受控提交。');
+      setResponseExecution(submitted.value);
+      setNotice('已发送，正在接收回复。');
+      const refreshed = await chat.getConversation(selected.conversationId);
+      if (refreshed.ok) replaceConversation(refreshed.value);
     } catch {
-      setNotice('文本提交状态未知，请查看任务中心调用记录，不会自动重试。');
+      setNotice('发送失败，请重试。若状态未知，请查看任务中心调用记录。');
     } finally {
       setBusy(false);
     }
@@ -485,7 +598,7 @@ export function ChatPage() {
         ) : (
           <div className="uc-chat-page__history-list">
             {conversations.map((conversation) => (
-              <button aria-current={conversation.conversationId === selectedId ? 'true' : undefined} className="uc-chat-page__history-item" key={conversation.conversationId} onClick={() => setSelectedId(conversation.conversationId)} type="button">
+              <button aria-current={conversation.conversationId === selectedId ? 'true' : undefined} className="uc-chat-page__history-item" key={conversation.conversationId} onClick={() => selectConversation(conversation.conversationId)} type="button">
                 <strong>{conversation.title}</strong>
                 <span>{conversation.readOnly ? '旧记录 · 只读' : conversation.status === 'archived' ? '已归档' : '当前项目'} · {conversation.messages.length} 条消息</span>
               </button>
@@ -498,92 +611,223 @@ export function ChatPage() {
         <header className="uc-chat-page__header">
           <div>
             <div className="uc-page-skeleton__heading-row">
-              <h1 className="uc-page-skeleton__title" id="chat-page-title">对话</h1>
+              <h1 className="uc-page-skeleton__title" id="chat-page-title">
+                {selected?.title ?? '对话'}
+              </h1>
               <StatusPill tone={selected?.readOnly ? 'warning' : selected?.status === 'active' ? 'info' : 'neutral'}>
                 {selected ? selected.readOnly ? '旧记录只读' : selected.status === 'active' ? '项目级' : '已归档' : '未选择'}
               </StatusPill>
             </div>
-            <p className="uc-page-skeleton__description">问答、分析、整理与项目上下文沉淀。</p>
           </div>
-          <StatusPill tone="warning">运行授权关闭</StatusPill>
+          <div className="uc-chat-page__header-actions">
+            <div className="uc-chat-page__mode" role="group" aria-label="文本功能">
+              <button
+                aria-pressed={responseFeature === 'text_chat'}
+                disabled={!canCompose || busy}
+                onClick={() => setResponseFeature('text_chat')}
+                type="button"
+              >
+                普通对话
+              </button>
+              <button
+                aria-pressed={responseFeature === 'text_reasoning'}
+                disabled={!canCompose || busy}
+                onClick={() => setResponseFeature('text_reasoning')}
+                type="button"
+              >
+                推理
+              </button>
+            </div>
+            <StatusPill tone="warning">运行授权关闭</StatusPill>
+          </div>
         </header>
 
-        {!selected ? (
-          <div className="uc-chat-page__messages"><EmptyState description="请从左侧选择或创建项目对话。" icon="聊" title="尚未选择对话" /></div>
-        ) : (
-          <>
-            <Card className="uc-chat-page__conversation-actions">
-              <label><span>对话名称</span><input disabled={selected.readOnly || selected.status === 'deleted'} maxLength={200} onChange={(event) => setRenameTitle(event.target.value)} value={renameTitle} /></label>
-              <div className="uc-chat-page__actions">
-                {selected.readOnly ? <Button disabled={!session || busy} onClick={() => void copyLegacyConversation()} variant="secondary">复制到当前项目</Button> : null}
-                <Button disabled={selected.readOnly || busy || !renameTitle.trim() || renameTitle.trim() === selected.title} onClick={() => void mutateConversation('rename')} variant="secondary">重命名</Button>
-                {selected.status === 'active' ? <Button disabled={selected.readOnly || busy} onClick={() => void mutateConversation('archive')} variant="secondary">归档</Button> : <Button disabled={selected.readOnly || busy} onClick={() => void mutateConversation('restore')} variant="secondary">恢复</Button>}
-                <Button disabled={selected.readOnly || busy} onClick={() => void mutateConversation('delete')} variant="ghost">删除</Button>
-              </div>
-            </Card>
-            <div className="uc-chat-page__messages" aria-live="polite">
-              {selected.messages.length === 0 ? <EmptyState description="保存第一条用户消息后才会进入历史。" icon="聊" title="还没有对话内容" /> : (
-                <ol className="uc-chat-page__message-list">
-                  {selected.messages.map((item) => (
-                    <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
-                      <div><strong>{item.role === 'user' ? '你' : '助手'}</strong><StatusPill tone={item.state === 'failed' ? 'danger' : item.state === 'completed' ? 'info' : 'neutral'}>{messageStateLabels[item.state]}</StatusPill></div>
-                      <p>{item.content || '尚无内容'}</p>
-                    </li>
-                  ))}
-                </ol>
+        {selected ? (
+          <Card className="uc-chat-page__conversation-actions">
+            <label>
+              <span>对话名称</span>
+              <input
+                disabled={selected.readOnly || selected.status === 'deleted'}
+                maxLength={200}
+                onChange={(event) => setRenameTitle(event.target.value)}
+                value={renameTitle}
+              />
+            </label>
+            <div className="uc-chat-page__actions">
+              {selected.readOnly ? (
+                <Button disabled={!session || busy} onClick={() => void copyLegacyConversation()} variant="secondary">
+                  复制到当前项目
+                </Button>
+              ) : null}
+              <Button
+                disabled={selected.readOnly || busy || !renameTitle.trim() || renameTitle.trim() === selected.title}
+                onClick={() => void mutateConversation('rename')}
+                variant="secondary"
+              >
+                重命名
+              </Button>
+              {selected.status === 'active' ? (
+                <Button disabled={selected.readOnly || busy} onClick={() => void mutateConversation('archive')} variant="secondary">
+                  归档
+                </Button>
+              ) : (
+                <Button disabled={selected.readOnly || busy} onClick={() => void mutateConversation('restore')} variant="secondary">
+                  恢复
+                </Button>
               )}
-              {responseExecution ? <Card className="uc-chat-page__stream"><div><strong>受控文本流</strong><StatusPill tone={responseExecution.state === 'failed' ? 'danger' : responseExecution.state === 'completed' ? 'info' : 'neutral'}>{responseExecution.state}</StatusPill></div><p>{responseExecution.content || '等待首个文本片段'}</p></Card> : null}
+              <Button disabled={selected.readOnly || busy} onClick={() => void mutateConversation('delete')} variant="ghost">
+                删除
+              </Button>
             </div>
-          </>
-        )}
+          </Card>
+        ) : null}
+
+        <div className="uc-chat-page__messages" aria-live="polite">
+          {!selected ? (
+            <EmptyState description="请从左侧选择或创建项目对话。" icon="聊" title="尚未选择对话" />
+          ) : displayMessages.length === 0 ? (
+            <EmptyState description="在下方选择模型并发送第一条消息。" icon="聊" title="还没有对话内容" />
+          ) : (
+            <ol className="uc-chat-page__message-list">
+              {displayMessages.map((item) => (
+                <li
+                  className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`}
+                  key={item.messageId}
+                >
+                  <div>
+                    <strong>{item.role === 'user' ? '你' : '助手'}</strong>
+                    <StatusPill
+                      tone={
+                        item.state === 'failed'
+                          ? 'danger'
+                          : item.state === 'streaming' || item.state === 'pending'
+                            ? 'warning'
+                            : item.state === 'completed'
+                              ? 'info'
+                              : 'neutral'
+                      }
+                    >
+                      {messageStateLabels[item.state]}
+                    </StatusPill>
+                  </div>
+                  <p>
+                    {item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                    {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
 
         <section className="uc-chat-page__composer" aria-labelledby="chat-composer-title">
-          <div className="uc-chat-page__panel-heading"><h2 id="chat-composer-title">用户消息</h2><div className="uc-chat-page__mode" role="group" aria-label="文本功能"><button aria-pressed={responseFeature === 'text_chat'} onClick={() => setResponseFeature('text_chat')} type="button">普通对话</button><button aria-pressed={responseFeature === 'text_reasoning'} onClick={() => setResponseFeature('text_reasoning')} type="button">推理</button></div></div>
-          <textarea aria-label="对话输入" disabled={!selected || selected.readOnly || selected.status !== 'active'} maxLength={8000} onChange={(event) => setInput(event.target.value)} placeholder="输入需要问答、分析或整理的内容" rows={5} value={input} />
-          <div className="uc-chat-page__composer-footer"><Button disabled title="原生附件登记未进入本支范围" variant="secondary">添加附件</Button><span>{input.length} / 8000</span></div>
-          <div className="uc-chat-page__actions"><Button disabled={!input} onClick={() => setInput('')} variant="secondary">清空</Button><Button disabled={!chat || !selected || selected.readOnly || selected.status !== 'active' || !input.trim() || busy} onClick={() => void saveMessageAndBuildResponseDraft()}>保存消息</Button></div>
-        </section>
-
-        {responseDraft ? (
-          <section className="uc-chat-page__route" aria-labelledby="chat-route-title">
-            <div className="uc-chat-page__panel-heading"><h2 id="chat-route-title">选择模型</h2><StatusPill>{responseDraft.productFeature === 'text_reasoning' ? '推理' : '普通对话'}</StatusPill></div>
-            {responseCandidates.length === 0 ? <EmptyState description="请先到「模型与服务商」添加连接并启用模型。若模型早已启用但仍不可选，请先停用再启用一次以挂上文本能力。" icon="模" readOnly title="没有可选模型" /> : (
-              <label className="uc-chat-page__model-select">
-                <span>服务商 / 连接 / 模型</span>
+          <h2 className="uc-visually-hidden" id="chat-composer-title">发送消息</h2>
+          {paramsOpen && selectedCandidate ? (
+            <Card className="uc-chat-page__params-panel">
+              <div className="uc-chat-page__panel-heading">
+                <strong>参数</strong>
+                <Button onClick={() => setParamsOpen(false)} type="button" variant="ghost">
+                  收起
+                </Button>
+              </div>
+              <small>
+                {selectedCandidate.parameterSchema.schemaId} · revision{' '}
+                {selectedCandidate.parameterSchema.revision}
+              </small>
+              <DynamicParameterForm
+                disabled={busy || !canCompose}
+                fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+                onChange={(fieldId, value) => {
+                  setParameterValues((current) => ({ ...current, [fieldId]: value }));
+                }}
+                values={parameterValues}
+              />
+            </Card>
+          ) : null}
+          <textarea
+            aria-label="对话输入"
+            disabled={!canCompose}
+            maxLength={8000}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void sendMessage();
+              }
+            }}
+            placeholder={
+              !selected
+                ? '先选择或创建对话'
+                : selectedCandidate
+                  ? `发送给 ${selectedCandidate.providerName} · ${selectedCandidate.modelName}`
+                  : '先选择模型，再输入内容发送'
+            }
+            rows={3}
+            value={input}
+          />
+          <div className="uc-chat-page__composer-toolbar">
+            <div className="uc-chat-page__composer-tools">
+              <button
+                aria-expanded={paramsOpen}
+                className="uc-chat-page__tool-pill"
+                disabled={!canCompose || !selectedCandidate || busy}
+                onClick={() => setParamsOpen((open) => !open)}
+                type="button"
+              >
+                参数
+              </button>
+              <label className="uc-chat-page__model-tool">
+                <span className="uc-visually-hidden">选择文本模型</span>
                 <select
                   aria-label="选择文本模型"
-                  disabled={busy}
-                  onChange={(event) => {
-                    const next = event.target.value || undefined;
-                    setSelectedCandidateId(next);
-                    setPreparation(undefined);
-                    setOutboundConfirmed(false);
-                  }}
+                  disabled={!canCompose || busy || candidatesLoading}
+                  onChange={(event) => changeCandidate(event.target.value)}
                   value={selectedCandidateId ?? ''}
                 >
-                  <option value="">请选择模型</option>
-                  {responseCandidates.map((candidate) => (
-                    <option
-                      disabled={!candidate.available}
-                      key={candidate.candidateId}
-                      value={candidate.candidateId}
-                    >
-                      {candidate.providerName} · {candidate.connectionName} · {candidate.modelName}
-                      {candidate.available
+                  <option value="">
+                    {candidatesLoading ? '加载模型…' : modelOptions.length === 0 ? '暂无可用模型' : '选择模型'}
+                  </option>
+                  {modelOptions.map((option) => (
+                    <option disabled={!option.available} key={option.id} value={option.id}>
+                      {option.label}
+                      {option.available
                         ? ''
-                        : `（${candidate.unavailableReasons.map((reason) => unavailableLabels[reason] ?? reason).join('、')}）`}
+                        : `（${(option.unavailableReasons ?? [])
+                            .map((reason) => unavailableLabels[reason] ?? reason)
+                            .join('、') || '不可用'}）`}
                     </option>
                   ))}
                 </select>
               </label>
-            )}
-            {selectedCandidate ? <Card className="uc-chat-page__schema"><small>参数 Schema · revision {selectedCandidate.parameterSchema.revision}</small><p>{selectedCandidate.parameterSchema.fields.length === 0 ? '本次不需要用户参数，采用服务商默认值。' : selectedCandidate.parameterSchema.fields.map((field) => field.labelId).join('、')}</p></Card> : null}
-            <Button disabled={!selectedCandidate?.available || busy} onClick={() => void prepareResponse()} variant="secondary">检查外发</Button>
-            {preparation ? <Card className="uc-chat-page__confirmation"><strong>{preparation.confirmation.providerName} · {preparation.confirmation.connectionName} · {preparation.confirmation.modelName}</strong><dl><div><dt>接收方</dt><dd>{preparation.confirmation.recipientName}</dd></div><div><dt>内容类别</dt><dd>{preparation.confirmation.contentCategories.join('、')}</dd></div><div><dt>上下文</dt><dd>{preparation.confirmation.contextCount} 项</dd></div><div><dt>费用事实</dt><dd>{preparation.confirmation.cost.summary ?? (preparation.confirmation.cost.state === 'unknown' ? '未知' : '不适用')}</dd></div></dl><label className="uc-chat-page__check"><input checked={outboundConfirmed} onChange={(event) => setOutboundConfirmed(event.target.checked)} type="checkbox" />我确认本次接收方、内容范围、上下文和费用事实</label><Button disabled={!outboundConfirmed || busy} onClick={() => void submitResponse()}>确认并请求文本回复</Button></Card> : null}
-          </section>
-        ) : selected && selected.status === 'active' && !selected.readOnly ? (
-          <p className="uc-chat-page__model-hint">保存用户消息后，将在此选择服务商 / 连接 / 模型。</p>
-        ) : null}
+            </div>
+            <div className="uc-chat-page__composer-actions">
+              <span className="uc-chat-page__composer-count">{input.length} / 8000</span>
+              <Button disabled title="原生附件登记未进入本支范围" variant="secondary">
+                附件
+              </Button>
+              <Button
+                disabled={
+                  !chat ||
+                  !canCompose ||
+                  !input.trim() ||
+                  !selectedCandidate?.available ||
+                  busy
+                }
+                onClick={() => void sendMessage()}
+              >
+                发送
+              </Button>
+            </div>
+          </div>
+          {!canCompose && session ? (
+            <p className="uc-chat-page__notice">当前对话不可写，请选择或创建可写项目对话。</p>
+          ) : null}
+          {canCompose && modelOptions.length === 0 && !candidatesLoading ? (
+            <p className="uc-chat-page__notice">
+              没有可选模型。请到「模型与服务商」添加连接并启用文本模型。
+            </p>
+          ) : null}
+        </section>
         <p className="uc-chat-page__message" aria-live="polite">{notice}</p>
       </section>
 

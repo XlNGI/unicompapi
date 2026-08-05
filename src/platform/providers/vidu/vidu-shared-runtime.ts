@@ -7,6 +7,7 @@ import type {
 import { isIP } from 'node:net';
 import {
   CredentialNotFoundError,
+  CredentialPayloadKindError,
   CredentialUnreadableError,
   CredentialVaultUnavailableError,
   type SecureCredentialVault
@@ -57,7 +58,7 @@ export interface ViduRuntimeRequest {
   readonly path: string;
   readonly body?: Uint8Array;
   readonly contentType?: 'application/json';
-  readonly authScheme: 'token' | 'none';
+  readonly authScheme: 'token' | 'bearer' | 'none';
   readonly timeoutMs?: number;
   readonly maxRequestBytes?: number;
   readonly maxResponseBytes?: number;
@@ -149,7 +150,9 @@ export class ViduSharedRuntime {
         };
         if (input.contentType) headers['content-type'] = input.contentType;
         if (credential !== undefined) {
-          headers.authorization = `Token ${credential}`;
+          headers.authorization = input.authScheme === 'bearer'
+            ? `Bearer ${credential}`
+            : `Token ${credential}`;
         }
         await input.beforeRequestStarted?.();
         const response = await this.options.transport.send({
@@ -165,7 +168,7 @@ export class ViduSharedRuntime {
           throw new ViduRuntimeError('redirect_not_allowed', 'not_retryable');
         }
         if (response.status < 200 || response.status >= 300) {
-          throw mapHttpStatus(response.status, response.headers);
+          throw mapHttpStatus(response.status, response.headers, response.body);
         }
         this.log({
           event: 'request_completed',
@@ -251,7 +254,7 @@ export class ViduSharedRuntime {
         throw new ViduRuntimeError('redirect_not_allowed', 'not_retryable');
       }
       if (response.status < 200 || response.status >= 300) {
-        throw mapHttpStatus(response.status, response.headers);
+        throw mapHttpStatus(response.status, response.headers, response.body);
       }
       this.log({
         event: 'request_completed',
@@ -326,7 +329,7 @@ export class ViduSharedRuntime {
         throw new ViduRuntimeError('redirect_not_allowed', 'not_retryable');
       }
       if (response.status < 200 || response.status >= 300) {
-        throw mapHttpStatus(response.status, response.headers);
+        throw mapHttpStatus(response.status, response.headers, response.body);
       }
       this.log({
         event: 'request_completed',
@@ -378,10 +381,10 @@ export class ViduSharedRuntime {
   > {
     validateConnection(input.connection, this.baseUrl);
     validateProtocol(input.binding, input.connection, input.path, this.baseUrl);
-    if (input.authScheme === 'token') {
+    if (input.authScheme === 'token' || input.authScheme === 'bearer') {
       if (
         input.binding &&
-        input.binding.authScheme !== 'token'
+        input.binding.authScheme !== input.authScheme
       ) {
         throw new ViduRuntimeError('protocol_mismatch', 'not_retryable');
       }
@@ -440,23 +443,26 @@ export class ViduSharedRuntime {
     if (!this.options.credentialVault) {
       throw new ViduRuntimeError('credential_unavailable', 'not_retryable');
     }
+    const reference = input.connection.credentialReference!;
     try {
-      return await this.options.credentialVault.useValue(
-        input.connection.credentialReference!,
-        operation
+      // Production Vidu tokens are structured_record (same as connection probe).
+      return await this.options.credentialVault.useRecord(
+        reference,
+        async (record) => operation(parseTokenCredential(record))
       );
     } catch (error) {
-      if (
-        error instanceof CredentialNotFoundError ||
-        error instanceof CredentialUnreadableError ||
-        error instanceof CredentialVaultUnavailableError
-      ) {
-        throw new ViduRuntimeError(
-          'credential_unavailable',
-          'not_retryable'
-        );
+      if (error instanceof CredentialPayloadKindError) {
+        // Legacy/test vault entries may still be plain text tokens.
+        try {
+          return await this.options.credentialVault.useValue(
+            reference,
+            operation
+          );
+        } catch (textError) {
+          throw mapCredentialVaultError(textError);
+        }
       }
-      throw error;
+      throw mapCredentialVaultError(error);
     }
   }
 
@@ -685,7 +691,8 @@ function validateResponseSize(
 
 function mapHttpStatus(
   status: number,
-  headers: Readonly<Record<string, string>>
+  headers: Readonly<Record<string, string>>,
+  body?: Uint8Array
 ): ViduRuntimeError {
   if (status === 401) {
     return new ViduRuntimeError('authentication_failed', 'not_retryable');
@@ -703,7 +710,35 @@ function mapHttpStatus(
   if (status >= 500) {
     return new ViduRuntimeError('provider_unavailable', 'retryable');
   }
+  if (status === 400) {
+    const reason = readProviderErrorReason(body);
+    if (reason === 'CreditInsufficient') {
+      return new ViduRuntimeError('credit_insufficient', 'not_retryable');
+    }
+    return new ViduRuntimeError('invalid_request', 'not_retryable');
+  }
   return new ViduRuntimeError('invalid_response', 'not_retryable');
+}
+
+function readProviderErrorReason(body: Uint8Array | undefined): string | undefined {
+  if (!body || body.byteLength < 2 || body.byteLength > 16 * 1024) {
+    return undefined;
+  }
+  try {
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      typeof (value as { reason?: unknown }).reason !== 'string'
+    ) {
+      return undefined;
+    }
+    const reason = (value as { reason: string }).reason.trim();
+    return reason.length > 0 && reason.length <= 128 ? reason : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseRetryAfter(
@@ -714,6 +749,19 @@ function parseRetryAfter(
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds < 0) return undefined;
   return Math.min(seconds * 1000, 60 * 60 * 1000);
+}
+
+function mapCredentialVaultError(error: unknown): never {
+  if (error instanceof ViduRuntimeError) throw error;
+  if (
+    error instanceof CredentialNotFoundError ||
+    error instanceof CredentialUnreadableError ||
+    error instanceof CredentialVaultUnavailableError ||
+    error instanceof CredentialPayloadKindError
+  ) {
+    throw new ViduRuntimeError('credential_unavailable', 'not_retryable');
+  }
+  throw error;
 }
 
 function mapRuntimeFailure(

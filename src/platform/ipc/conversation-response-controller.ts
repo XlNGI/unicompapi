@@ -157,6 +157,22 @@ export class ConversationResponseController {
     });
   }
 
+  listTextCandidates(
+    request: unknown
+  ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.listTextCandidates(request);
+      const runtime = this.requireRuntime();
+      return {
+        ok: true,
+        value: await runtime.candidates.listCatalogForFeature({
+          projectId: runtime.conversations.projectId,
+          productFeature: input.productFeature
+        })
+      };
+    });
+  }
+
   prepareSubmission(
     request: unknown
   ): Promise<ChatContextIpcResult<ConversationResponsePreparationDto>> {

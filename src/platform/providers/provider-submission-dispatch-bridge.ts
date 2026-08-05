@@ -16,6 +16,14 @@ import type {
 export interface ProviderSubmissionAdapterPort {
   readonly packageId: string;
   readonly packageVersion: string;
+  /**
+   * Optional additional package bindings that share the same adapter identity
+   * (e.g. NewAPI and UniCompAPI both use `newapi.chat`).
+   */
+  readonly acceptedPackages?: readonly {
+    readonly packageId: string;
+    readonly packageVersion: string;
+  }[];
   readonly adapterKey: string;
   readonly adapterVersion: string;
   readonly protocolId: string;
@@ -42,13 +50,15 @@ export class ProviderSubmissionDispatchBridge implements SubmissionDispatchPort 
     adapters: readonly ProviderSubmissionAdapterPort[]
   ) {
     for (const adapter of adapters) {
-      packages.resolveAdapter(
-        adapter.packageId,
-        adapter.adapterKey,
-        adapter.adapterVersion,
-        adapter.protocolId,
-        adapter.protocolVersion
-      );
+      for (const binding of packageBindings(adapter)) {
+        packages.resolveAdapter(
+          binding.packageId,
+          adapter.adapterKey,
+          adapter.adapterVersion,
+          adapter.protocolId,
+          adapter.protocolVersion
+        );
+      }
     }
     this.dispatcher = new ProviderExecutionRouteDispatcher(adapters.map(toRouteAdapter));
   }
@@ -73,7 +83,7 @@ export function normalizeProviderSubmitOutcome(
   if (outcome.kind === 'failed_before_submission') {
     return {
       kind: 'failed_before_submission',
-      safeCode: 'adapter.failed_before_submission'
+      safeCode: safeCodeForFailedBeforeSubmission(outcome.message)
     };
   }
   if (outcome.kind === 'submission_outcome_unknown') {
@@ -92,6 +102,50 @@ export function normalizeProviderSubmitOutcome(
   };
 }
 
+function safeCodeForFailedBeforeSubmission(message: string): string {
+  if (message === 'The Vidu credential is unavailable') {
+    return 'vidu.credential_unavailable';
+  }
+  if (message === 'Vidu credits are insufficient') {
+    return 'vidu.credit_insufficient';
+  }
+  if (message === 'The Vidu request is invalid') {
+    return 'vidu.invalid_request';
+  }
+  if (message === 'The Vidu protocol binding does not match the request') {
+    return 'vidu.protocol_mismatch';
+  }
+  if (message === 'The Vidu endpoint is not allowed') {
+    return 'vidu.endpoint_not_allowed';
+  }
+  if (message === 'Vidu authentication failed') {
+    return 'vidu.authentication_failed';
+  }
+  if (message === 'Vidu denied this operation') {
+    return 'vidu.permission_denied';
+  }
+  return 'adapter.failed_before_submission';
+}
+
+function packageBindings(
+  adapter: ProviderSubmissionAdapterPort
+): readonly { readonly packageId: string; readonly packageVersion: string }[] {
+  const primary = {
+    packageId: adapter.packageId,
+    packageVersion: adapter.packageVersion
+  };
+  const extras = adapter.acceptedPackages ?? [];
+  const seen = new Set<string>();
+  const bindings = [];
+  for (const binding of [primary, ...extras]) {
+    const key = `${binding.packageId}@${binding.packageVersion}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    bindings.push(binding);
+  }
+  return bindings;
+}
+
 function toRouteAdapter(
   adapter: ProviderSubmissionAdapterPort
 ): ProviderExecutionRouteAdapter<
@@ -102,14 +156,18 @@ function toRouteAdapter(
   never,
   never
 > {
+  const bindings = packageBindings(adapter);
   return {
     adapterKey: adapter.adapterKey,
     adapterVersion: adapter.adapterVersion,
     operations: ['submit'],
     submit(routeSnapshot, request, beforeRequestStarted) {
       if (
-        routeSnapshot.packageId !== adapter.packageId ||
-        routeSnapshot.packageVersion !== adapter.packageVersion
+        !bindings.some(
+          (binding) =>
+            binding.packageId === routeSnapshot.packageId &&
+            binding.packageVersion === routeSnapshot.packageVersion
+        )
       ) {
         throw new TypeError('Provider submission package binding is stale');
       }

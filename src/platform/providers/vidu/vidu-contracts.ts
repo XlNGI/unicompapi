@@ -79,7 +79,7 @@ export type FrozenViduModelKey = (typeof frozenViduModelKeys)[number];
 export interface ViduModelContractV1 {
   readonly definition: ProviderModelDefinition;
   readonly parameterSchemas: readonly ParameterSchemaV2[];
-  readonly defaultProfileStatus: 'restricted' | 'disabled';
+  readonly defaultProfileStatus: 'verified' | 'restricted' | 'disabled';
 }
 
 export const viduUsageSchema: UsageSchemaV1 = createUsageSchema({
@@ -239,7 +239,7 @@ function imageV1Contract(providerModelKey: 'viduimage-2'): ViduModelContractV1 {
         optionalString('input_fidelity', 70)
       ])
     ],
-    defaultProfileStatus: 'disabled'
+    defaultProfileStatus: 'verified'
   };
 }
 

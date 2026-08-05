@@ -123,9 +123,17 @@ export function ImageWorkbenchPage({
           setMessage(workspaceErrorMessages[draftResult.error.code]);
           return;
         }
-        setDrafts(
-          draftResult.value.filter((draft) => draft.mode === mode.workspaceMode)
+        let modeDrafts = draftResult.value.filter(
+          (draft) => draft.mode === mode.workspaceMode
         );
+        if (mode.workspaceMode === 'quick_image' && modeDrafts.length === 0) {
+          const created = await imageWorkspaces.create('quick_image');
+          if (!active) return;
+          if (created.ok) {
+            modeDrafts = [created.value];
+          }
+        }
+        setDrafts(modeDrafts);
 
         if (providers) {
           const registryResult = await providers
@@ -246,6 +254,7 @@ export function ImageWorkbenchPage({
           <p className="uc-page-skeleton__description">{mode.description}</p>
         </div>
         <div className="uc-image-workbench__header-actions">
+          {isQuickImage ? null : (
           <div className="uc-image-workbench__draft-actions">
           <Button
             disabled={!session || busy}
@@ -271,6 +280,7 @@ export function ImageWorkbenchPage({
             保存本地草稿
           </Button>
           </div>
+          )}
         </div>
       </header>
 
@@ -297,6 +307,7 @@ export function ImageWorkbenchPage({
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToProfessional={onNavigateToProfessional}
         />
@@ -512,9 +523,16 @@ export function ImageWorkbenchPage({
       </Card>
         </>
       )}
-      <p className="uc-image-workbench__message" aria-live="polite">
-        {message}
-      </p>
+      {message ? (
+        <Card className="uc-image-workbench__message-card" role="status">
+          <StatusPill tone="info">状态</StatusPill>
+          <p className="uc-image-workbench__message" aria-live="polite">
+            {message}
+          </p>
+        </Card>
+      ) : (
+        <p className="uc-image-workbench__message" aria-live="polite" />
+      )}
     </section>
   );
 }

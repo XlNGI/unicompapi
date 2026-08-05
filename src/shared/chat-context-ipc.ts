@@ -12,6 +12,7 @@ export const chatContextIpcChannels = {
   createResponseDraft: 'chat-context:create-response-draft',
   replaceResponseContexts: 'chat-context:replace-response-contexts',
   listResponseCandidates: 'chat-context:list-response-candidates',
+  listTextCandidates: 'chat-context:list-text-candidates',
   prepareResponseSubmission: 'chat-context:prepare-response-submission',
   submitResponse: 'chat-context:submit-response',
   getResponseExecution: 'chat-context:get-response-execution',
@@ -346,6 +347,10 @@ export interface ReplaceResponseContextsRequest extends ResponseDraftRevisionReq
   }[];
 }
 
+export interface ListTextCandidatesRequest {
+  readonly productFeature: 'text_chat' | 'text_reasoning';
+}
+
 export interface PrepareResponseSubmissionRequest extends ResponseDraftRevisionRequest {
   readonly candidateId: string;
 }
@@ -518,6 +523,13 @@ export const chatContextRequestParsers = {
       expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
       selections
     };
+  },
+  listTextCandidates(value: unknown): ListTextCandidatesRequest {
+    const record = exactRecord(value, ['productFeature']);
+    if (record.productFeature !== 'text_chat' && record.productFeature !== 'text_reasoning') {
+      throw new TypeError('productFeature is invalid');
+    }
+    return { productFeature: record.productFeature };
   },
   prepareResponseSubmission(value: unknown): PrepareResponseSubmissionRequest {
     const record = exactRecord(value, [
@@ -741,6 +753,9 @@ export interface ChatContextApi {
   listResponseCandidates(
     responseDraftId: string,
     expectedRevision: number
+  ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>>;
+  listTextCandidates(
+    productFeature: 'text_chat' | 'text_reasoning'
   ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>>;
   prepareResponseSubmission(
     responseDraftId: string,

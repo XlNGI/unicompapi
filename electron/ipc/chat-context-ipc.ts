@@ -1,9 +1,13 @@
 import { app, ipcMain } from 'electron';
 import {
   createChatContextRuntime,
+  type DeepSeekSharedRuntime,
   type JsonProviderRegistryStore,
+  type NewApiSharedRuntime,
   type ProviderCandidateRuntimeAuthorizationPort,
   type ProviderPackageRegistry,
+  type RuntimeAuthorizationOrchestrationPort,
+  type SecureCredentialVault,
   type StorageProjectSession
 } from '../../src/platform';
 import { chatContextIpcChannels } from '../../src/shared/chat-context-ipc';
@@ -16,14 +20,21 @@ export function registerChatContextIpcHandlers(options: {
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
-  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort;
+  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort &
+    Partial<RuntimeAuthorizationOrchestrationPort>;
+  readonly textSubmission?: {
+    readonly credentialVault: SecureCredentialVault;
+    readonly deepSeekRuntime: DeepSeekSharedRuntime;
+    readonly newApiRuntime: NewApiSharedRuntime;
+  };
 }): ChatContextIpcLifecycle {
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
     getSession: options.getSession,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
-    runtimeAuthorization: options.runtimeAuthorization
+    runtimeAuthorization: options.runtimeAuthorization,
+    textSubmission: options.textSubmission
   });
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;
@@ -66,6 +77,9 @@ export function registerChatContextIpcHandlers(options: {
   );
   ipcMain.handle(chatContextIpcChannels.listResponseCandidates, (_event, request: unknown) =>
     runtime.responses.listCandidates(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.listTextCandidates, (_event, request: unknown) =>
+    runtime.responses.listTextCandidates(request)
   );
   ipcMain.handle(chatContextIpcChannels.prepareResponseSubmission, (_event, request: unknown) =>
     runtime.responses.prepareSubmission(request)

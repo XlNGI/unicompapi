@@ -63,8 +63,9 @@ export class SyntheticViduService implements ViduHttpTransport {
     request: ViduHttpTransportRequest
   ): Promise<ViduHttpTransportResponse> {
     const url = new URL(request.url);
-    const authorized = request.headers.authorization ===
-      `Token ${this.expectedToken}`;
+    const authorized =
+      request.headers.authorization === `Token ${this.expectedToken}` ||
+      request.headers.authorization === `Bearer ${this.expectedToken}`;
     this.requests.push({
       method: request.method,
       url: request.url,

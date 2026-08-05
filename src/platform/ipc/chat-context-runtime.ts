@@ -41,7 +41,10 @@ import {
 import { ProjectContextController } from './project-context-controller';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import {
+  ConversationResponseArtifactFactory,
   ConversationResponseExecutionLifecycle,
+  createConversationTextDispatchBridge,
+  createConversationTextSubmissionIdFactory,
   createTextProviderFeatureContracts,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
@@ -50,15 +53,23 @@ import {
   ProviderFeatureCandidateService,
   ProviderFeatureContractRegistry,
   ProviderPackageRegistry,
+  ProviderSubmissionOrchestrator,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
+  type ConversationTextSubmissionRuntimes,
   type ProviderCandidateRuntimeAuthorizationPort,
+  type RuntimeAuthorizationOrchestrationPort,
   unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type JsonProviderRegistryStore
 } from '../providers';
 import { JsonProviderRegistryStore as ProviderRegistryStore } from '../providers';
+import {
+  ProjectMetadataUnitOfWork,
+  ProjectSubmissionAcceptanceStore,
+  SubmissionIntentJournal
+} from '../storage';
 import type {
   ChatContextIpcResult,
   ConversationCandidateDto,
@@ -72,7 +83,12 @@ export interface ChatContextRuntimeDependencies {
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry?: JsonProviderRegistryStore;
   readonly providerPackages?: ProviderPackageRegistry;
-  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort;
+  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort &
+    Partial<RuntimeAuthorizationOrchestrationPort>;
+  readonly textSubmission?: Omit<
+    ConversationTextSubmissionRuntimes,
+    'providerRegistry' | 'providerPackages'
+  >;
   now?: () => string;
   conversationIds?: ConversationIdFactory;
   projectContextIds?: ProjectContextIdFactory;
@@ -216,6 +232,70 @@ export function createChatContextRuntime(
       undefined,
       () => toIsoTimestamp(now())
     );
+    const authorization = dependencies.runtimeAuthorization;
+    const textSubmission = dependencies.textSubmission;
+    const canSubmit = Boolean(
+      textSubmission &&
+      authorization &&
+      typeof authorization.claimSubmission === 'function' &&
+      typeof authorization.markRequestStarted === 'function' &&
+      typeof authorization.releaseBeforeRequest === 'function' &&
+      typeof authorization.recordOutcome === 'function'
+    );
+    const responses: ConversationResponseControllerRuntime = {
+      conversations: projectConversations,
+      drafts: responseDrafts,
+      contexts: contextRepository,
+      candidates: candidateService,
+      executions: responseLifecycle
+    };
+    if (canSubmit && textSubmission && authorization) {
+      const acceptances = new ProjectSubmissionAcceptanceStore(
+        new ProjectMetadataUnitOfWork(storage, now)
+      );
+      const journal = new SubmissionIntentJournal(storage, now);
+      const artifacts = new ConversationResponseArtifactFactory({
+        conversations: projectConversations,
+        drafts: responseDrafts,
+        contexts: contextRepository,
+        executions: responseExecutions,
+        nextMessageId: () => conversationIds.nextMessageId(),
+        now
+      });
+      const dispatch = createConversationTextDispatchBridge({
+        ...textSubmission,
+        providerRegistry,
+        providerPackages,
+        lifecycle: responseLifecycle,
+        conversations: projectConversations,
+        now
+      });
+      const orchestrator = new ProviderSubmissionOrchestrator(
+        candidateService,
+        acceptances,
+        authorization as RuntimeAuthorizationOrchestrationPort,
+        journal,
+        artifacts,
+        dispatch,
+        createConversationTextSubmissionIdFactory(),
+        now
+      );
+      responses.submit = async (input) => {
+        const orchestration = await orchestrator.submitConversationResponse(input);
+        const acceptance = (await acceptances.list()).find(
+          (item) => item.intent.id === orchestration.submissionIntentId
+        );
+        if (
+          !acceptance ||
+          acceptance.subjectArtifacts.kind !== 'conversation'
+        ) {
+          throw new Error('Conversation response acceptance artifacts are missing');
+        }
+        return responseLifecycle.readModel(
+          acceptance.subjectArtifacts.responseExecution.id
+        );
+      };
+    }
     cached = {
       projectId: session.projectId,
       rootDirectory: session.rootDirectory,
@@ -229,13 +309,7 @@ export function createChatContextRuntime(
       }),
       conversationRepository: projectConversations,
       contextService,
-      responses: {
-        conversations: projectConversations,
-        drafts: responseDrafts,
-        contexts: contextRepository,
-        candidates: candidateService,
-        executions: responseLifecycle
-      }
+      responses
     };
     runtimes.add(cached);
     return cached;

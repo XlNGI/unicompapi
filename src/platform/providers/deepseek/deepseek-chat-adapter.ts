@@ -281,6 +281,9 @@ export class DeepSeekChatAdapter {
     } catch (error) {
       removeExternalAbort();
       session?.close();
+      await this.lifecycle
+        .fail(request.responseExecutionId, safeCodeForError(error))
+        .catch(() => undefined);
       throw error;
     }
     if (!session) {
@@ -474,22 +477,22 @@ export class DeepSeekChatAdapter {
 }
 
 export function mapDeepSeekUsage(value: unknown): readonly UsageFactV1[] {
-  const usage = exactRecord(
-    value,
-    ['completion_tokens', 'prompt_tokens', 'total_tokens'],
-    [
-      'prompt_cache_hit_tokens',
-      'prompt_cache_miss_tokens',
-      'completion_tokens_details'
-    ],
-    'DeepSeek usage'
-  );
+  if (!isRecord(value)) {
+    throw invalidStream('DeepSeek usage must be an object');
+  }
+  // Validate known metrics; ignore forward-compatible unknown usage keys so a
+  // successful answer is not failed solely by an extended usage envelope.
+  for (const key of ['completion_tokens', 'prompt_tokens', 'total_tokens'] as const) {
+    if (!(key in value)) {
+      throw invalidStream('DeepSeek usage contains unsupported fields');
+    }
+  }
   const completionTokens = nonNegativeInteger(
-    usage.completion_tokens,
+    value.completion_tokens,
     'completion_tokens'
   );
-  const promptTokens = nonNegativeInteger(usage.prompt_tokens, 'prompt_tokens');
-  const totalTokens = nonNegativeInteger(usage.total_tokens, 'total_tokens');
+  const promptTokens = nonNegativeInteger(value.prompt_tokens, 'prompt_tokens');
+  const totalTokens = nonNegativeInteger(value.total_tokens, 'total_tokens');
   if (totalTokens !== promptTokens + completionTokens) {
     throw invalidStream('DeepSeek total token usage is inconsistent');
   }
@@ -499,11 +502,11 @@ export function mapDeepSeekUsage(value: unknown): readonly UsageFactV1[] {
     tokenFact('total_tokens', totalTokens)
   ];
   const cacheHit = optionalNonNegativeInteger(
-    usage.prompt_cache_hit_tokens,
+    value.prompt_cache_hit_tokens,
     'prompt_cache_hit_tokens'
   );
   const cacheMiss = optionalNonNegativeInteger(
-    usage.prompt_cache_miss_tokens,
+    value.prompt_cache_miss_tokens,
     'prompt_cache_miss_tokens'
   );
   if (cacheHit !== undefined) facts.push(tokenFact('prompt_cache_hit_tokens', cacheHit));
@@ -515,15 +518,12 @@ export function mapDeepSeekUsage(value: unknown): readonly UsageFactV1[] {
   ) {
     throw invalidStream('DeepSeek prompt cache token usage is inconsistent');
   }
-  if (usage.completion_tokens_details !== undefined) {
-    const details = exactRecord(
-      usage.completion_tokens_details,
-      [],
-      ['reasoning_tokens'],
-      'DeepSeek completion token details'
-    );
+  if (value.completion_tokens_details !== undefined) {
+    if (!isRecord(value.completion_tokens_details)) {
+      throw invalidStream('DeepSeek completion token details must be an object');
+    }
     const reasoningTokens = optionalNonNegativeInteger(
-      details.reasoning_tokens,
+      value.completion_tokens_details.reasoning_tokens,
       'reasoning_tokens'
     );
     if (reasoningTokens !== undefined) {
@@ -568,9 +568,13 @@ async function consumeDeepSeekStream(
   let contentLength = 0;
 
   const processEvent = async (eventText: string) => {
-    if (eventText.trim().length === 0) return;
+    // Ignore blank events and SSE comment/keep-alive lines (": ...").
+    const dataLines = eventText
+      .split('\n')
+      .filter((line) => line.length > 0 && !line.startsWith(':'));
+    if (dataLines.length === 0) return;
     if (done) throw invalidStream('DeepSeek streamed data after the terminal marker');
-    const data = parseDataOnlyEvent(eventText);
+    const data = parseDataOnlyEvent(dataLines.join('\n'));
     if (data === '[DONE]') {
       if (!terminalReason) {
         throw invalidStream('DeepSeek stream ended before a finish reason');
@@ -679,11 +683,14 @@ function parseStreamChunk(data: string): {
   }
   const choice = exactRecord(
     item.choices[0],
-    ['delta', 'finish_reason', 'index', 'logprobs'],
-    [],
+    ['delta', 'finish_reason', 'index'],
+    ['logprobs'],
     'DeepSeek stream choice'
   );
-  if (choice.index !== 0 || choice.logprobs !== null) {
+  if (
+    choice.index !== 0 ||
+    (choice.logprobs !== undefined && choice.logprobs !== null)
+  ) {
     throw invalidStream('DeepSeek stream choice is unsupported');
   }
   const delta = exactRecord(
@@ -695,12 +702,9 @@ function parseStreamChunk(data: string): {
   if (delta.role !== undefined && delta.role !== 'assistant') {
     throw invalidStream('DeepSeek stream role is invalid');
   }
-  const contentDelta = delta.content === undefined
-    ? undefined
-    : safeDelta(delta.content, 'DeepSeek content delta');
-  if (delta.reasoning_content !== undefined) {
-    safeDelta(delta.reasoning_content, 'DeepSeek reasoning delta');
-  }
+  // Official message/delta content fields are nullable; treat null as absent.
+  const contentDelta = optionalDeltaText(delta.content, 'DeepSeek content delta');
+  optionalDeltaText(delta.reasoning_content, 'DeepSeek reasoning delta');
   const finishReason = choice.finish_reason === null
     ? undefined
     : parseFinishReason(choice.finish_reason);
@@ -978,6 +982,11 @@ function safeDelta(value: unknown, label: string): string {
     throw invalidStream(`${label} is invalid`);
   }
   return value;
+}
+
+function optionalDeltaText(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return safeDelta(value, label);
 }
 
 function nonNegativeInteger(value: unknown, label: string): number {

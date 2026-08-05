@@ -111,6 +111,8 @@ export interface LocalResultObservationV1 {
   readonly width?: number;
   readonly height?: number;
   readonly byteLength?: string;
+  /** Provider-returned image URL; persisted per owner decision for call records. */
+  readonly resultImageUrl?: string;
   readonly validationState: 'pending' | 'valid' | 'invalid';
   readonly observedAt: IsoTimestamp;
 }
@@ -277,7 +279,7 @@ export function parseLocalResultObservation(
       'validationState',
       'observedAt'
     ],
-    ['durationMs', 'width', 'height', 'byteLength'],
+    ['durationMs', 'width', 'height', 'byteLength', 'resultImageUrl'],
     'local result observation'
   );
   if (
@@ -301,6 +303,12 @@ export function parseLocalResultObservation(
   const height = item.height === undefined
     ? undefined
     : positiveInteger(item.height, 'localResult.height');
+  const resultImageUrl = item.resultImageUrl === undefined
+    ? undefined
+    : nonBlank(item.resultImageUrl, 'localResult.resultImageUrl');
+  if (resultImageUrl !== undefined && resultImageUrl.length > 8_192) {
+    throw new InvariantViolationError('localResult.resultImageUrl is too long');
+  }
   return {
     schemaVersion: 1,
     id: toLocalResultObservationId(nonBlank(item.id, 'localResult.id')),
@@ -313,6 +321,7 @@ export function parseLocalResultObservation(
     ...(width !== undefined ? { width } : {}),
     ...(height !== undefined ? { height } : {}),
     ...(byteLength !== undefined ? { byteLength } : {}),
+    ...(resultImageUrl !== undefined ? { resultImageUrl } : {}),
     validationState: item.validationState as LocalResultObservationV1['validationState'],
     observedAt: toIsoTimestamp(String(item.observedAt))
   };

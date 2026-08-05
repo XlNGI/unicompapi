@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 
-test('chat page uses project conversations and the explicit text response workflow', () => {
+test('chat page uses project conversations and composer-first streaming workflow', () => {
   for (const operation of [
     'listConversations',
     'createConversation',
@@ -13,22 +13,31 @@ test('chat page uses project conversations and the explicit text response workfl
     'archiveConversation',
     'restoreConversation',
     'deleteConversation',
+    'listTextCandidates',
     'addUserMessage',
     'createResponseDraft',
     'replaceResponseContexts',
-    'listResponseCandidates',
     'prepareResponseSubmission',
     'submitResponse',
-    'getResponseExecution'
+    'getResponseExecution',
+    'getConversation'
   ]) {
     assert.match(source, new RegExp(`chat\\.${operation}\\(`));
   }
   assert.match(source, /运行授权关闭/);
   assert.match(source, /runtime_not_allowed/);
-  assert.match(source, /选择模型/);
   assert.match(source, /aria-label="选择文本模型"/);
-  assert.match(source, /请选择模型/);
-  assert.match(source, /disabled=\{!candidate\.available\}/);
+  assert.match(source, /uc-chat-page__composer-toolbar/);
+  assert.match(source, /参数/);
+  assert.match(source, /DynamicParameterForm/);
+  assert.match(source, /displayMessages/);
+  assert.match(source, /void sendMessage\(\)/);
+  assert.match(source, /confirmLeaveUnsentInput/);
+  assert.doesNotMatch(source, /首次外发前请核对/);
+  assert.doesNotMatch(source, /确认并发送/);
+  assert.doesNotMatch(source, /受控文本流/);
+  assert.doesNotMatch(source, /保存消息/);
+  assert.doesNotMatch(source, /等待保存消息/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
 });
 

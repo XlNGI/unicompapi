@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
 import { LuSend, LuShieldCheck } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
+import {
+  DynamicParameterForm,
+  toDynamicParameterFields,
+  type DynamicParameterValue
+} from '../../../components/DynamicParameterForm';
+import { ModelSelect } from '../../../components/ModelSelect';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   VideoFeatureCandidateDto,
   VideoFeatureIpcErrorCode,
-  VideoFeatureParameterFieldDto,
   VideoFeaturePreparationDto
 } from '../../../shared/video-feature-ipc';
 import type {
@@ -206,36 +211,33 @@ export function VideoFeatureSubmissionPanel({
 
   return (
     <div className="uc-image-feature-panel">
-      <label className="uc-image-quick__field">
-        <span>服务商 / 连接 / 模型</span>
-        <select
-          disabled={!api || dirty || loadState !== 'loaded' || candidates.length === 0}
-          onChange={(event) => changeCandidate(event.target.value)}
-          value={featureSelection.candidateId ?? ''}
-        >
-          <option value="">请选择服务候选</option>
-          {candidates.map((candidate) => (
-            <option key={candidate.candidateId} value={candidate.candidateId}>
-              {candidate.providerName} / {candidate.connectionName} / {candidate.modelName}
-              {candidate.available ? '' : '（不可用）'}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {loadState === 'loading' ? (
-        <p className="uc-image-quick__hint" role="status">正在读取安全候选。</p>
-      ) : loadState === 'loaded' && candidates.length === 0 ? (
-        <p className="uc-image-quick__hint" role="status">
-          当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。
-        </p>
-      ) : null}
+      <ModelSelect
+        disabled={!api || dirty || loadState !== 'loaded'}
+        emptyDescription={
+          loadState === 'loading'
+            ? '正在读取安全候选。'
+            : dirty || draft.state !== 'saved'
+              ? '请先保存本地草稿，再读取候选或准备生成。'
+              : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
+        }
+        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
+        hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
+        onChange={changeCandidate}
+        options={candidates.map((candidate) => ({
+          id: candidate.candidateId,
+          label: `${candidate.providerName} · ${candidate.connectionName} · ${candidate.modelName}`,
+          available: candidate.available,
+          unavailableReasons: candidate.unavailableReasons
+        }))}
+        reasonLabels={unavailableReasonLabels}
+        value={featureSelection.candidateId ?? ''}
+      />
 
       {selectedCandidate ? (
         <>
           <div className="uc-image-feature-panel__facts">
             <span>
-              <strong>参数合同</strong>
+              <strong>已锁定参数合同</strong>
               {selectedCandidate.parameterSchema.schemaId} · revision {selectedCandidate.parameterSchema.revision}
             </span>
             <span><strong>费用</strong>{costLabel(selectedCandidate.cost)}</span>
@@ -251,18 +253,17 @@ export function VideoFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          <div className="uc-image-quick__parameters">
-            {selectedCandidate.parameterSchema.fields.length === 0 ? (
-              <p className="uc-image-quick__hint">当前表面没有需要用户填写的参数。</p>
-            ) : selectedCandidate.parameterSchema.fields.map((field) => (
-              <ParameterField
-                field={field}
-                key={field.fieldId}
-                onChange={(value) => changeParameter(field.fieldId, value)}
-                value={featureSelection.parameterValues[field.fieldId]}
-              />
-            ))}
-          </div>
+          <DynamicParameterForm
+            disabled={busy || dirty}
+            emptyHint="当前表面没有需要用户填写的参数。"
+            fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+            onChange={(fieldId, value) =>
+              changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
+            }
+            values={featureSelection.parameterValues as Readonly<
+              Record<string, DynamicParameterValue | undefined>
+            >}
+          />
         </>
       ) : null}
 
@@ -315,160 +316,6 @@ export function VideoFeatureSubmissionPanel({
       </Button>
     </div>
   );
-}
-
-function ParameterField({
-  field,
-  value,
-  onChange
-}: {
-  readonly field: VideoFeatureParameterFieldDto;
-  readonly value: VideoWorkspaceParameterValueDto | undefined;
-  readonly onChange: (value: VideoWorkspaceParameterValueDto | undefined) => void;
-}) {
-  const label = `${field.labelId}${field.required ? '（必填）' : ''}`;
-  if (field.valueType === 'boolean') {
-    return (
-      <label className="uc-image-quick__checkbox">
-        <input
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-          type="checkbox"
-        />
-        <span>{label}</span>
-      </label>
-    );
-  }
-  if (field.valueType === 'enum') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <select
-          onChange={(event) => {
-            const option = field.options?.find((item) => String(item) === event.target.value);
-            onChange(option);
-          }}
-          value={value === undefined ? '' : String(value)}
-        >
-          <option value="">请选择</option>
-          {field.options?.map((option) => (
-            <option key={String(option)} value={String(option)}>{String(option)}</option>
-          ))}
-        </select>
-      </label>
-    );
-  }
-  if (field.valueType === 'number' || field.valueType === 'integer') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <input
-          max={field.maximum}
-          min={field.minimum}
-          onChange={(event) => onChange(
-            event.target.value === '' ? undefined : Number(event.target.value)
-          )}
-          step={field.valueType === 'integer' ? 1 : field.step}
-          type="number"
-          value={typeof value === 'number' ? value : ''}
-        />
-      </label>
-    );
-  }
-  if (field.valueType === 'string_array' || field.valueType === 'number_array') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <input
-          onChange={(event) => {
-            const items = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
-            onChange(items.length === 0
-              ? undefined
-              : field.valueType === 'number_array'
-                ? items.map(Number)
-                : items);
-          }}
-          placeholder="使用逗号分隔"
-          type="text"
-          value={Array.isArray(value) ? value.join(', ') : ''}
-        />
-      </label>
-    );
-  }
-  if (field.valueType === 'object') {
-    return <ObjectParameterField field={field} onChange={onChange} value={value} />;
-  }
-  if (field.valueType === 'media_slot') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <input disabled readOnly value="由当前草稿的受控图片提供" />
-      </label>
-    );
-  }
-  return (
-    <label className="uc-image-quick__field">
-      <span>{label}</span>
-      <input
-        onChange={(event) => onChange(event.target.value || undefined)}
-        type="text"
-        value={typeof value === 'string' ? value : ''}
-      />
-    </label>
-  );
-}
-
-function ObjectParameterField({
-  field,
-  value,
-  onChange
-}: {
-  readonly field: VideoFeatureParameterFieldDto;
-  readonly value: VideoWorkspaceParameterValueDto | undefined;
-  readonly onChange: (value: VideoWorkspaceParameterValueDto | undefined) => void;
-}) {
-  const [text, setText] = useState(value === undefined ? '' : JSON.stringify(value));
-  const [invalid, setInvalid] = useState(false);
-  useEffect(() => {
-    setText(value === undefined ? '' : JSON.stringify(value));
-    setInvalid(false);
-  }, [value]);
-  return (
-    <label className="uc-image-quick__field">
-      <span>{field.labelId}{field.required ? '（必填）' : ''}</span>
-      <textarea
-        aria-invalid={invalid}
-        onBlur={() => {
-          if (!text.trim()) {
-            setInvalid(false);
-            onChange(undefined);
-            return;
-          }
-          try {
-            const parsed = JSON.parse(text) as unknown;
-            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-              throw new TypeError('object required');
-            }
-            setInvalid(false);
-            onChange(parsed as VideoWorkspaceParameterValueDto);
-          } catch {
-            setInvalid(true);
-          }
-        }}
-        onChange={(event) => setText(event.target.value)}
-        rows={3}
-        value={text}
-      />
-      {invalid ? <small role="alert">请输入有效的 JSON 对象。</small> : null}
-    </label>
-  );
-}
-
-function resetGeneration(): VideoWorkspaceDraftDto['generation'] {
-  return {
-    enhancement: { state: 'not_created', staleReasons: [] },
-    preflight: { state: 'not_created', staleReasons: [] }
-  };
 }
 
 function costLabel(cost: { readonly state: string; readonly summary?: string }): string {
