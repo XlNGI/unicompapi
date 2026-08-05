@@ -13,6 +13,8 @@ import {
   ProviderManagementFramework,
   ProviderPackageRegistry,
   SecureCredentialVault,
+  UNICOMPAPI_OFFICIAL_BASE_URL,
+  unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type CredentialProtector,
@@ -44,6 +46,15 @@ describe('provider probe decisions (PR3 contract)', () => {
       validationAction: 'unsupported',
       modelDiscoveryAction: 'unsupported'
     });
+    expect(byTemplate.get('unicompapi-official')).toMatchObject({
+      kind: 'official',
+      baseUrlMode: 'fixed',
+      providerName: 'UniCompAPI',
+      validationAction: 'available',
+      modelDiscoveryAction: 'catalog_available',
+      freeConnectionValidation: true,
+      modelDiscoveryKind: 'catalog'
+    });
   });
 
   it('runs the Kling account probe during orchestrated add without catalog sync', async () => {
@@ -69,6 +80,41 @@ describe('provider probe decisions (PR3 contract)', () => {
     });
     expect(progress).toEqual(['validating', 'saving']);
     expect(fixture.klingValidationCalls).toBe(1);
+  });
+
+  it('orchestrates UniCompAPI add with fixed endpoint and catalog sync', async () => {
+    const fixture = await decisionsFixture();
+    const progress: string[] = [];
+    const result = await fixture.framework.addConnection({
+      packageId: unicompapiProviderPackageDescriptor.packageId,
+      templateId: 'unicompapi-official',
+      name: 'UniCompAPI official',
+      credentials: { api_key: 'decisions-unicompapi-key' }
+    }, (step) => progress.push(step));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { state: 'available', validated: true, catalog: 'synced' }
+    });
+    expect(progress).toEqual(['validating', 'saving', 'syncing']);
+    expect(fixture.unicompapiValidationCalls).toBe(1);
+    expect(fixture.unicompapiCatalogCalls).toBe(1);
+    expect(fixture.unicompapiLastEndpoint).toBe(UNICOMPAPI_OFFICIAL_BASE_URL);
+
+    const overridden = await fixture.framework.addConnection({
+      packageId: unicompapiProviderPackageDescriptor.packageId,
+      templateId: 'unicompapi-official',
+      name: 'UniCompAPI override denied',
+      endpoint: 'https://example.com/v1',
+      credentials: { api_key: 'decisions-unicompapi-key' }
+    });
+    expect(overridden).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_request' }
+    });
+    if (!overridden.ok) {
+      expect(overridden.error.message).toMatch(/fixed provider endpoint/i);
+    }
   });
 
   it('saves Volcengine and Vidu connections deferred without any adapter call', async () => {
@@ -106,9 +152,15 @@ async function decisionsFixture() {
     volcengineProviderPackageDescriptor,
     klingProviderPackageDescriptor,
     newApiProviderPackageDescriptor,
+    unicompapiProviderPackageDescriptor,
     viduProviderPackageDescriptor
   ]);
-  const state = { klingValidationCalls: 0 };
+  const state = {
+    klingValidationCalls: 0,
+    unicompapiValidationCalls: 0,
+    unicompapiCatalogCalls: 0,
+    unicompapiLastEndpoint: undefined as string | undefined
+  };
   const klingProbe: ProviderManagementAdapterPort = {
     identity: {
       packageId: 'provider-package-kling',
@@ -127,13 +179,42 @@ async function decisionsFixture() {
       };
     }
   };
+  const unicompapiProbe: ProviderManagementAdapterPort = {
+    identity: {
+      packageId: 'provider-package-unicompapi',
+      adapterId: 'newapi.chat',
+      adapterVersion: '2026-08-03',
+      protocolId: 'newapi.openai.chat-completions',
+      protocolVersion: '2026-08-03'
+    },
+    async validateConnection(input) {
+      state.unicompapiValidationCalls += 1;
+      state.unicompapiLastEndpoint = input.endpoint;
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: t1
+      };
+    },
+    async discoverModels() {
+      state.unicompapiCatalogCalls += 1;
+      return {
+        entries: [{ providerModelKey: 'unicompapi-chat', displayName: 'UniCompAPI Chat' }],
+        observedAt: t1
+      };
+    }
+  };
   return {
     get klingValidationCalls() { return state.klingValidationCalls; },
+    get unicompapiValidationCalls() { return state.unicompapiValidationCalls; },
+    get unicompapiCatalogCalls() { return state.unicompapiCatalogCalls; },
+    get unicompapiLastEndpoint() { return state.unicompapiLastEndpoint; },
     framework: new ProviderManagementFramework(
       packages,
       new JsonProviderRegistryStore(path.join(root, 'registry.json')),
       new SecureCredentialVault(path.join(root, 'credentials.json'), protector()),
-      new ProviderManagementAdapterRegistry(packages, [klingProbe]),
+      new ProviderManagementAdapterRegistry(packages, [klingProbe, unicompapiProbe]),
       new JsonProviderManagementAuditStore(path.join(root, 'audit.json')),
       { now: () => t1 }
     )

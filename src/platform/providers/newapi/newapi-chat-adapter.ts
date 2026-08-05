@@ -19,6 +19,7 @@ import {
 } from '../../../domain';
 import type {
   ProviderCatalogEntryV1,
+  ProviderManagementAdapterIdentityV1,
   ProviderManagementAdapterPort,
   ProviderConnectionValidationResultV1
 } from '../provider-management-framework';
@@ -166,19 +167,25 @@ interface ActiveOperation {
 }
 
 export class NewApiManagementAdapter implements ProviderManagementAdapterPort {
-  readonly identity = {
-    packageId: NEWAPI_PROVIDER_PACKAGE_ID,
-    adapterId: NEWAPI_CHAT_ADAPTER_ID,
-    adapterVersion: NEWAPI_ADAPTER_VERSION,
-    protocolId: NEWAPI_CHAT_PROTOCOL_ID,
-    protocolVersion: NEWAPI_PROTOCOL_VERSION
-  } as const;
+  readonly identity: ProviderManagementAdapterIdentityV1;
+  private readonly now: () => IsoTimestamp;
 
   constructor(
     private readonly runtime: NewApiSharedRuntime,
-    private readonly now: () => IsoTimestamp = () =>
-      toIsoTimestamp(new Date().toISOString())
-  ) {}
+    options: {
+      readonly packageId?: string;
+      readonly now?: () => IsoTimestamp;
+    } = {}
+  ) {
+    this.identity = {
+      packageId: options.packageId ?? NEWAPI_PROVIDER_PACKAGE_ID,
+      adapterId: NEWAPI_CHAT_ADAPTER_ID,
+      adapterVersion: NEWAPI_ADAPTER_VERSION,
+      protocolId: NEWAPI_CHAT_PROTOCOL_ID,
+      protocolVersion: NEWAPI_PROTOCOL_VERSION
+    };
+    this.now = options.now ?? (() => toIsoTimestamp(new Date().toISOString()));
+  }
 
   async validateConnection(input: {
     readonly connection: ProviderConnection;

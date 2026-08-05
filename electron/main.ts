@@ -21,6 +21,7 @@ import {
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   normalizeTrustedExternalUrl,
+  unicompapiProviderPackageDescriptor,
   ProviderManagementAdapterRegistry,
   ProviderManagementFramework,
   ProviderPackageRegistry,
@@ -59,6 +60,7 @@ const providerPackages = new ProviderPackageRegistry([
   volcengineProviderPackageDescriptor,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
+  unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor
 ]);
 const runtimeAuthorizationLedger = new RuntimeAuthorizationLedger(
