@@ -4,23 +4,16 @@ import {
   ImageOperationRouter,
   JsonProviderOperationRepository,
   JsonProviderRegistryStore,
-  JsonViduLiveValidationStore,
   LocalImageResultReceiver,
   LocalVideoResultReceiver,
   NodeProjectStorage,
   ProjectImageMaterialResolver,
   SecureCredentialVault,
   ViduImmediateImageResultPort,
-  ViduLiveValidationApplicationError,
-  ViduLiveValidationApplicationService,
-  ViduLiveValidationCoordinator,
   ViduProviderPackage,
-  ViduRuntimeAuthorizationClosedError,
-  denyViduRuntimeAuthorization,
   ViduTransportFailure,
-  createFrozenViduRegistryRecords,
-  VIDU_PROTOCOL_BINDING_IDS,
   VideoOperationRouter,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   type ImageOperationPorts,
   type ImageSubmissionControllerDependencies,
   type ProviderAsyncOperationPort,
@@ -28,10 +21,12 @@ import {
   type ViduHttpTransport,
   type ViduHttpTransportRequest,
   type ViduHttpTransportResponse,
+  type ViduVideoOperationContext,
+  type ViduVideoOperationContextPort,
   type VideoGenerationSubmitPort,
   type VideoSubmissionControllerDependencies
 } from '../../src/platform';
-import type { ProviderSubmitOutcome, ProxyMode } from '../../src/domain';
+import type { ProviderProtocolBinding, ProxyMode } from '../../src/domain';
 
 export interface ElectronViduCompositionOptions {
   readonly getProxyMode: () => Promise<ProxyMode>;
@@ -41,7 +36,6 @@ export class ElectronViduComposition {
   readonly registry: JsonProviderRegistryStore;
   readonly credentialVault: SecureCredentialVault;
   readonly providerPackage: ViduProviderPackage;
-  readonly liveValidation: ViduLiveValidationApplicationService;
 
   constructor(options: ElectronViduCompositionOptions) {
     const userDataPath = app.getPath('userData');
@@ -61,15 +55,6 @@ export class ElectronViduComposition {
       credentialVault: this.credentialVault,
       transport: new ElectronViduHttpTransport(),
       proxy: () => activeProxy
-    });
-    this.liveValidation = new ViduLiveValidationApplicationService({
-      registry: this.registry,
-      coordinator: new ViduLiveValidationCoordinator(
-        new JsonViduLiveValidationStore(
-          path.join(userDataPath, 'vidu-live-validation.json')
-        )
-      ),
-      connectionValidation: this.providerPackage.connectionValidation
     });
     void options.getProxyMode().then((proxy) => {
       activeProxy = proxy;
@@ -100,12 +85,6 @@ export class ElectronViduComposition {
         return snapshot.connections.find((item) => item.id === connectionId);
       }
     };
-    const frozenBinding = createFrozenViduRegistryRecords().protocolBindings.find(
-      (binding) => binding.id === VIDU_PROTOCOL_BINDING_IDS.referenceVideoV2
-    );
-    if (!frozenBinding) {
-      throw new Error('The frozen Vidu video protocol binding is unavailable');
-    }
     const images = this.providerPackage.createImageAdapters({
       connections,
       materials
@@ -113,8 +92,7 @@ export class ElectronViduComposition {
     const video = this.providerPackage.createVideoAdapter({
       connections,
       materials,
-      binding: frozenBinding,
-      connectionId: frozenBinding.connectionId
+      operationContext: new RegistryVideoOperationContext(this.registry)
     });
     const imageRouter = new ImageOperationRouter(this.registry, {
       vidu_image_v1: images.imageV1,
@@ -125,72 +103,31 @@ export class ElectronViduComposition {
     });
     const imagePort = {
       submit: async (request: Parameters<ImageOperationRouter['submit']>[0]) => {
-        try {
-          denyViduRuntimeAuthorization();
-          await this.liveValidation.beforeSubmission(
-            'image',
-            request.task,
-            request.execution,
-            options.getSession
-          );
-        } catch (error) {
-          return liveValidationFailure(error);
-        }
         const routed = await imageRouter.submit(request);
-        const outcome = routed.ok
+        return routed.ok
           ? routed.value
           : ({
               kind: 'failed_before_submission',
               message: routed.error.message,
               retryability: 'not_retryable'
             } as const);
-        await this.liveValidation.afterSubmission('image', outcome)
-          .catch(() => undefined);
-        return outcome;
       }
     };
     const videoPort: VideoGenerationSubmitPort = {
       submit: async (request) => {
-        try {
-          denyViduRuntimeAuthorization();
-          await this.liveValidation.beforeSubmission(
-            'video',
-            request.task,
-            request.execution,
-            options.getSession
-          );
-        } catch (error) {
-          return liveValidationFailure(error);
-        }
         const routed = await videoRouter.submit(request);
-        const outcome = routed.ok
+        return routed.ok
           ? routed.value
           : ({
               kind: 'failed_before_submission',
               message: routed.error.message,
               retryability: 'not_retryable'
             } as const);
-        await this.liveValidation.afterSubmission('video', outcome)
-          .catch(() => undefined);
-        return outcome;
       }
     };
     const videoAsync: ProviderAsyncOperationPort = {
-      query: async (providerOperationId) => {
-        denyViduRuntimeAuthorization();
-        const status = await video.query(providerOperationId);
-        await this.liveValidation.recordPolling(status).catch(() => undefined);
-        return status;
-      },
-      cancel: async (providerOperationId) => {
-        denyViduRuntimeAuthorization();
-        const outcome = await video.cancel(providerOperationId);
-        if (outcome.state === 'cancelled') {
-          await this.liveValidation.recordPolling({ state: 'cancelled' })
-            .catch(() => undefined);
-        }
-        return outcome;
-      }
+      query: (providerOperationId) => video.query(providerOperationId),
+      cancel: (providerOperationId) => video.cancel(providerOperationId)
     };
     const videoReceiver = new LocalVideoResultReceiver({
       getSession: options.getSession,
@@ -223,35 +160,13 @@ export class ElectronViduComposition {
               operations: new JsonProviderOperationRepository(storage),
               runtime: this.providerPackage.runtime
             })
-          }).receive(executionId).then(async (result) => {
-            if (result.ok) {
-              await this.liveValidation.recordLocalResult(
-                'image',
-                result.value.executionId,
-                result.value.workId,
-                options.getSession
-              ).catch(() => undefined);
-            }
-            return result;
-          });
+          }).receive(executionId);
         }
       },
       video: videoPort,
       videoAsync,
       videoResultReceiver: {
-        receive: async (executionId) => {
-          denyViduRuntimeAuthorization();
-          const result = await videoReceiver.receive(executionId);
-          if (result.ok && result.value.works.length === 1) {
-            await this.liveValidation.recordLocalResult(
-              'video',
-              result.value.executionId,
-              result.value.works[0].workId,
-              options.getSession
-            ).catch(() => undefined);
-          }
-          return result;
-        }
+        receive: (executionId) => videoReceiver.receive(executionId)
       }
     };
   }
@@ -262,17 +177,26 @@ export class ElectronViduComposition {
 
 }
 
-function liveValidationFailure(error: unknown): ProviderSubmitOutcome {
-  const message = error instanceof ViduLiveValidationApplicationError
-    ? error.message
-    : error instanceof ViduRuntimeAuthorizationClosedError
-      ? error.message
-    : 'The approved Vidu live validation gate could not be evaluated';
-  return {
-    kind: 'failed_before_submission',
-    message,
-    retryability: 'not_retryable'
-  };
+class RegistryVideoOperationContext implements ViduVideoOperationContextPort {
+  private readonly remembered = new Map<string, ViduVideoOperationContext>();
+
+  constructor(private readonly registry: JsonProviderRegistryStore) {}
+
+  remember(taskId: string, context: ViduVideoOperationContext): void {
+    this.remembered.set(taskId, context);
+  }
+
+  async resolve(taskId: string): Promise<ViduVideoOperationContext | undefined> {
+    const remembered = this.remembered.get(taskId);
+    if (remembered) return remembered;
+    const snapshot = await this.registry.load();
+    const candidates = snapshot.protocolBindings.filter(
+      (binding) => binding.adapterKind === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
+    );
+    if (candidates.length !== 1) return undefined;
+    const binding: ProviderProtocolBinding = candidates[0];
+    return { connectionId: binding.connectionId, binding };
+  }
 }
 
 class ElectronViduHttpTransport implements ViduHttpTransport {

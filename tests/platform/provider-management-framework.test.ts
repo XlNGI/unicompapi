@@ -20,6 +20,7 @@ import {
   type ProviderCredentialRetentionPort,
   type ProviderManagementAdapterPort
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-08-03T14:00:00.000Z');
@@ -520,10 +521,23 @@ describe('provider management framework', () => {
       preference.modelId === model.id
     )?.enabled).toBe(false);
 
+    const vidu = createUserViduRegistryRecords();
+    await fixture.registry.mutate((current) => ({
+      snapshot: {
+        ...current,
+        providers: [...current.providers, ...vidu.providers],
+        connections: [...current.connections, ...vidu.connections],
+        protocolBindings: [...current.protocolBindings, ...vidu.protocolBindings],
+        models: [...current.models, ...vidu.models],
+        capabilities: [...current.capabilities, ...vidu.capabilities]
+      },
+      result: undefined
+    }));
+    snapshot = await fixture.registry.load();
     const unregisteredViduModel = snapshot.models.find((candidate) =>
       candidate.connectionId === 'connection-vidu-default'
     );
-    if (!unregisteredViduModel) throw new Error('frozen Vidu model fixture missing');
+    if (!unregisteredViduModel) throw new Error('legacy Vidu model fixture missing');
     await expect(fixture.framework.setModelEnabled({
       modelId: unregisteredViduModel.id,
       enabled: false

@@ -17,18 +17,21 @@ import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
 import {
   deepSeekProviderPackageDescriptor,
   JsonProviderManagementAuditStore,
+  JsonRuntimeAuthorizationLedgerStore,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   normalizeTrustedExternalUrl,
   ProviderManagementAdapterRegistry,
   ProviderManagementFramework,
   ProviderPackageRegistry,
+  RuntimeAuthorizationLedger,
   StorageProjectSessionRegistry,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor
 } from '../src/platform';
 import { ElectronViduComposition } from './ipc/vidu-composition';
 import { createLiveProviderManagementAdapters } from './ipc/management-adapters';
+import { LedgerRuntimeAuthorizationSync } from './ipc/runtime-authorization-sync';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -58,6 +61,14 @@ const providerPackages = new ProviderPackageRegistry([
   newApiProviderPackageDescriptor,
   viduProviderPackageDescriptor
 ]);
+const runtimeAuthorizationLedger = new RuntimeAuthorizationLedger(
+  new JsonRuntimeAuthorizationLedgerStore(
+    path.join(app.getPath('userData'), 'runtime-authorization-ledger.json')
+  )
+);
+const runtimeAuthorizationSync = new LedgerRuntimeAuthorizationSync(
+  runtimeAuthorizationLedger
+);
 const providerManagement = new ProviderManagementFramework(
   providerPackages,
   viduComposition.registry,
@@ -70,19 +81,22 @@ const providerManagement = new ProviderManagementFramework(
   ),
   new JsonProviderManagementAuditStore(
     path.join(app.getPath('userData'), 'provider-management-audit.json')
-  )
+  ),
+  { runtimeAuthorization: runtimeAuthorizationSync }
 );
 const projectSessionRegistry = new StorageProjectSessionRegistry();
 const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get(),
   providerRegistry: viduComposition.registry,
-  providerPackages
+  providerPackages,
+  runtimeAuthorization: runtimeAuthorizationLedger
 });
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,
   providerPackages,
   additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
   vidu: viduComposition,
+  runtimeAuthorization: runtimeAuthorizationLedger,
   onActiveExportCountChanged: (count) => {
     powerPolicyRead = powerPolicyRead
       .then(async () => {
@@ -191,7 +205,8 @@ function createMainWindow(): BrowserWindow {
 
 app.whenReady().then(async () => {
   await settingsLifecycle.activate();
-  await viduComposition.registry.ensureFrozenViduCatalog();
+  const registrySnapshot = await viduComposition.registry.load();
+  await runtimeAuthorizationSync.reconcileConnections(registrySnapshot.connections);
   protocol.handle('unicomp-media', async (request) => {
     const url = new URL(request.url);
     const token = url.hostname === 'local' ? url.pathname.slice(1) : '';

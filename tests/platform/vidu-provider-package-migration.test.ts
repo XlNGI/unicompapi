@@ -3,17 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  createProvider,
-  createProviderConnection,
   createProviderExecutionRouteSnapshot,
   toIsoTimestamp,
   toProjectId,
   toProviderExecutionRouteSnapshotId,
   toProviderInvocationAttemptId,
-  type ModelFeatureProfile,
   type ParameterValue,
   type ProviderExecutionRouteSnapshotV1,
-  type ProviderModel,
   type ProviderUsageObservationV1
 } from '../../src/domain';
 import {
@@ -25,18 +21,19 @@ import {
   VIDU_IMAGE_V1_ADAPTER_ID,
   VIDU_IMAGE_V1_ADAPTER_VERSION,
   VIDU_PROVIDER_PACKAGE_ID,
+  VIDU_OFFICIAL_TEMPLATE_ID,
   VIDU_PROVIDER_PACKAGE_VERSION,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   ViduPackagedParameterSchemaResolver,
   ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
-  createFrozenViduRegistryRecords,
   createViduModelContract,
   viduProviderPackageDescriptor,
   type ControlledImageMaterialPort,
   type CredentialProtector
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 import {
   SyntheticViduService,
   isoBmffVideo,
@@ -98,74 +95,55 @@ describe('Vidu Provider Package migration', () => {
     );
   });
 
-  it('idempotently upgrades legacy frozen records without changing runtime facts', async () => {
+  it('keeps migrated user Vidu rows as ordinary records without re-seeding', async () => {
     const root = await makeRoot('vidu-registry-migration-');
     const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
-    const frozen = createFrozenViduRegistryRecords();
-    const provider = createProvider({
-      id: frozen.providers[0].id,
+    const frozen = createUserViduRegistryRecords();
+    const provider = {
+      ...frozen.providers[0],
       name: 'Existing Vidu',
-      accessCategory: 'online',
-      identityState: 'verified',
-      createdAt: timestamp,
+      identityState: 'verified' as const,
       updatedAt: timestamp
-    });
-    const connection = createProviderConnection({
-      id: frozen.connections[0].id,
+    };
+    const connection = {
+      ...frozen.connections[0],
       providerId: provider.id,
       name: 'Existing Vidu connection',
-      endpoint: 'https://api.vidu.cn',
-      state: 'available',
-      identityState: 'verified',
-      credentialState: 'valid',
+      state: 'available' as const,
+      identityState: 'verified' as const,
+      credentialState: 'valid' as const,
       credentialReference: 'existing-vidu-credential-reference',
-      createdAt: timestamp,
       updatedAt: timestamp
-    });
+    };
     await store.save({
       schemaVersion: 2,
       providers: [provider],
       connections: [connection],
-      protocolBindings: frozen.protocolBindings,
-      models: frozen.models,
-      capabilities: frozen.capabilities,
-      routingPreferences: [],
-      modelDefinitions: [],
-      modelProfiles: []
+      protocolBindings: frozen.protocolBindings.slice(0, 1),
+      models: frozen.models.slice(0, 2),
+      capabilities: frozen.capabilities.slice(0, 2),
+      routingPreferences: []
     });
+    const revision = (await store.load()).registryRevision;
 
-    await store.ensureFrozenViduCatalog();
-    const migrated = await store.load();
-    const revision = migrated.registryRevision;
-    await store.ensureFrozenViduCatalog();
-    const repeated = await store.load();
+    const reloaded = await new JsonProviderRegistryStore(
+      path.join(root, 'registry.json')
+    ).load();
 
-    expect(repeated.registryRevision).toBe(revision);
-    expect(repeated.providers[0]).toMatchObject({
+    expect(reloaded.registryRevision).toBe(revision);
+    expect(reloaded.providers[0]).toMatchObject({
       name: 'Existing Vidu',
-      packageId: VIDU_PROVIDER_PACKAGE_ID,
-      packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
       identityState: 'verified'
     });
-    expect(repeated.connections[0]).toMatchObject({
+    expect(reloaded.connections[0]).toMatchObject({
       state: 'available',
       credentialState: 'valid',
       credentialReference: 'existing-vidu-credential-reference',
-      packageId: VIDU_PROVIDER_PACKAGE_ID,
-      connectionRevision: 1
+      templateId: VIDU_OFFICIAL_TEMPLATE_ID
     });
-    expect(repeated.modelDefinitions).toHaveLength(10);
-    expect(repeated.modelProfiles).toHaveLength(10);
-    expect(repeated.models.every((model) => model.activeProfileId)).toBe(true);
-    expect(profileFor(repeated.modelProfiles!, 'viduimage-2', repeated.models).status)
-      .toBe('disabled');
-    expect(profileFor(repeated.modelProfiles!, 'q3-lite', repeated.models).status)
-      .toBe('restricted');
-    expect(profileFor(
-      repeated.modelProfiles!,
-      'viduq3-turbo',
-      repeated.models
-    ).status).toBe('restricted');
+    expect(reloaded.protocolBindings).toHaveLength(1);
+    expect(reloaded.models).toHaveLength(2);
+    expect(reloaded.capabilities).toHaveLength(2);
   });
 });
 
@@ -306,7 +284,23 @@ describe('Vidu RouteSnapshot adapters', () => {
 async function routeFixture() {
   const root = await makeRoot('vidu-route-migration-');
   const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
-  await registry.ensureFrozenViduCatalog();
+  const records = createUserViduRegistryRecords();
+  await registry.save({
+    schemaVersion: 2,
+    providers: records.providers,
+    connections: records.connections,
+    protocolBindings: records.protocolBindings,
+    models: records.models.map((model) => ({
+      ...model,
+      activeProfileId: records.modelProfiles.find(
+        (profile) => profile.modelId === model.id
+      )?.profileId
+    })),
+    capabilities: records.capabilities,
+    routingPreferences: [],
+    modelDefinitions: records.modelDefinitions,
+    modelProfiles: records.modelProfiles
+  });
   const initial = await registry.load();
   const credentialReference = 'credential-vidu-route-synthetic';
   await registry.save({
@@ -468,17 +462,6 @@ function dispatchRequest(
     ...(withAsset ? { assetId: 'asset-vidu-route-input' } : {}),
     parameterValues
   };
-}
-
-function profileFor(
-  profiles: readonly ModelFeatureProfile[],
-  modelKey: string,
-  models: readonly ProviderModel[]
-): ModelFeatureProfile {
-  const model = models.find((candidate) => candidate.providerModelKey === modelKey);
-  const profile = profiles.find((candidate) => candidate.modelId === model?.id);
-  if (!profile) throw new Error('Vidu profile fixture is unavailable');
-  return profile;
 }
 
 function protector(): CredentialProtector {

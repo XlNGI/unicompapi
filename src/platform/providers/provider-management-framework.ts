@@ -351,16 +351,26 @@ export type ProviderManagementFrameworkResult<T> =
       };
     };
 
+export interface ProviderRuntimeAuthorizationSyncPort {
+  syncConnectionPolicy(input: {
+    readonly providerPackageId: string;
+    readonly connectionId: string;
+    readonly allowed: boolean;
+  }): Promise<void>;
+}
+
 export interface ProviderManagementFrameworkOptions {
   readonly now?: () => IsoTimestamp;
   readonly credentialRetention?: ProviderCredentialRetentionPort;
   readonly connectionService?: ProviderConnectionContractService;
+  readonly runtimeAuthorization?: ProviderRuntimeAuthorizationSyncPort;
 }
 
 export class ProviderManagementFramework {
   private readonly now: () => IsoTimestamp;
   private readonly credentialRetention: ProviderCredentialRetentionPort;
   private readonly connectionService: ProviderConnectionContractService;
+  private readonly runtimeAuthorization?: ProviderRuntimeAuthorizationSyncPort;
 
   constructor(
     private readonly packages: ProviderPackageRegistry,
@@ -374,6 +384,21 @@ export class ProviderManagementFramework {
     this.credentialRetention = options.credentialRetention ?? noActiveCredentials;
     this.connectionService = options.connectionService ??
       new ProviderConnectionContractService(packages, registry, vault);
+    this.runtimeAuthorization = options.runtimeAuthorization;
+  }
+
+  private async syncRuntimePolicy(connectionId: string): Promise<void> {
+    if (!this.runtimeAuthorization) return;
+    const snapshot = await this.registry.load();
+    const connection = snapshot.connections.find(
+      (candidate) => candidate.id === connectionId
+    );
+    if (!connection?.packageId) return;
+    await this.runtimeAuthorization.syncConnectionPolicy({
+      providerPackageId: connection.packageId,
+      connectionId: connection.id,
+      allowed: connection.state === 'available'
+    }).catch(() => undefined);
   }
 
   listTemplates(): readonly ProviderManagementTemplateDto[] {
@@ -494,6 +519,7 @@ export class ProviderManagementFramework {
         saved.value.providerId,
         parsed
       );
+      await this.syncRuntimePolicy(saved.value.connectionId);
       let catalog: 'synced' | 'skipped' | 'failed' = 'skipped';
       let catalogCount: number | undefined;
       let catalogWarning: string | undefined;
@@ -789,6 +815,7 @@ export class ProviderManagementFramework {
         connectionId,
         safeCode: parsed.safeCode ?? parsed.state
       }, parsed.observedAt);
+      await this.syncRuntimePolicy(connectionId);
       return {
         ok: true,
         value: { connectionId, state: parsed.state, observedAt: parsed.observedAt }
@@ -1040,6 +1067,7 @@ export class ProviderManagementFramework {
         providerId: result.providerId,
         connectionId: result.connectionId
       }, now);
+      await this.syncRuntimePolicy(result.connectionId);
       return { ok: true, value: { connectionId: result.connectionId, state: result.state } };
     } catch (error) {
       return frameworkFailure(error);
@@ -1194,6 +1222,7 @@ export class ProviderManagementFramework {
           ? 'active_operations_abandoned'
           : 'local_only'
       }, now);
+      await this.syncRuntimePolicy(resolved.connection.id);
       return {
         ok: true,
         value: {

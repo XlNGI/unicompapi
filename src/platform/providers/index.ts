@@ -21,7 +21,6 @@ export * from './provider-contracts-data-migration';
 export * from './provider-management-framework';
 export * from './provider-execution-lifecycle';
 export * from './runtime-authorization-ledger';
-export * from './vidu-protocol-catalog';
 export * from './vidu';
 export * from './deepseek';
 export * from './volcengine';

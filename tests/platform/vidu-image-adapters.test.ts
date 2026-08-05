@@ -20,7 +20,6 @@ import {
   type Task
 } from '../../src/domain';
 import {
-  createFrozenViduRegistryRecords,
   SecureCredentialVault,
   ViduGeminiImageV2Adapter,
   ViduImageV1Adapter,
@@ -33,6 +32,7 @@ import {
   type ViduHttpTransportRequest,
   type ViduHttpTransportResponse
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const timestamp = toIsoTimestamp('2026-07-29T00:00:00.000Z');
@@ -246,7 +246,7 @@ async function createFixture(
     reversibleProtector()
   );
   await vault.save('credential-vidu-image', 'synthetic-token');
-  const frozen = createFrozenViduRegistryRecords();
+  const frozen = createUserViduRegistryRecords();
   const connection = createProviderConnection({
     ...frozen.connections[0],
     endpoint: 'https://api.vidu.cn',

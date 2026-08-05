@@ -21,6 +21,7 @@ import {
   JsonProviderRegistryStore,
   ProviderRegistryController
 } from '../../src/platform';
+import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const timestamp = toIsoTimestamp('2026-07-22T00:00:00.000Z');
@@ -131,66 +132,23 @@ describe('JsonProviderRegistryStore', () => {
     expect(serialized).not.toContain('fixture_image');
   });
 
-  it('loads the frozen Vidu protocol catalog without invented verified facts', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
-    roots.push(root);
-    const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
-
-    const snapshot = await store.load();
-    expect(snapshot.schemaVersion).toBe(2);
-    expect(snapshot.protocolBindings).toHaveLength(3);
-    expect(
-      snapshot.protocolBindings.map((binding) => ({
-        protocolId: binding.protocolId,
-        mediaKind: binding.mediaKind,
-        executionLifecycle: binding.executionLifecycle
-      }))
-    ).toEqual([
-      {
-        protocolId: 'vidu.ent.v2.reference2video',
-        mediaKind: 'video',
-        executionLifecycle: 'asynchronous_polling'
-      },
-      {
-        protocolId: 'vidu.ent.v1.images',
-        mediaKind: 'image',
-        executionLifecycle: 'synchronous_completed'
-      },
-      {
-        protocolId: 'vidu.ent.v2.image.reference2image',
-        mediaKind: 'image',
-        executionLifecycle: 'synchronous_completed'
-      }
-    ]);
-    expect(snapshot.models.map((model) => model.providerModelKey)).toEqual([
-      'viduq3-drama',
-      'viduq3-ad',
-      'viduq3-mix',
-      'viduq3-turbo',
-      'viduq3',
-      'viduimage-2',
-      'q2-fast',
-      'q2-pro',
-      'q3-fast',
-      'q3-lite'
-    ]);
-    expect(snapshot.models.every((model) => !model.enabled)).toBe(true);
-    expect(
-      snapshot.capabilities.every(
-        (evidence) =>
-          evidence.state === 'declared_supported' &&
-          evidence.parameterSchema === undefined &&
-          evidence.videoGenerationSchema === undefined
-      )
-    ).toBe(true);
-    expect(JSON.stringify(snapshot)).not.toMatch(/price|cost|duration|resolution/i);
-  });
-
-  it('adds missing frozen Vidu records to an existing v2 registry without changing user records', async () => {
+  it('starts with an empty registry on fresh install and persists user records only', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
     const registryPath = path.join(root, 'registry.json');
     const store = new JsonProviderRegistryStore(registryPath);
+
+    const empty = await store.load();
+    expect(empty).toMatchObject({
+      schemaVersion: 2,
+      providers: [],
+      connections: [],
+      protocolBindings: [],
+      models: [],
+      capabilities: [],
+      routingPreferences: []
+    });
+
     const provider = createProvider({
       id: toProviderId('provider-custom'),
       name: 'Custom provider',
@@ -200,73 +158,62 @@ describe('JsonProviderRegistryStore', () => {
       updatedAt: timestamp
     });
     const connection = createProviderConnection({
-      id: toConnectionId('connection-custom-deleted'),
+      id: toConnectionId('connection-custom'),
       providerId: provider.id,
-      name: 'Deleted custom connection',
-      state: 'deleted',
+      name: 'Custom connection',
+      endpoint: 'https://private.example.test',
+      state: 'saved',
       identityState: 'unverified',
       credentialState: 'saved',
-      credentialReference: 'credential-reference-must-survive',
+      credentialReference: 'credential-reference-only',
       createdAt: timestamp,
       updatedAt: timestamp
     });
-    await store.save({
-      schemaVersion: 2,
-      providers: [provider],
-      connections: [connection],
-      protocolBindings: [],
-      models: [],
-      capabilities: [],
-      routingPreferences: []
-    });
+    await store.mutate((snapshot) => ({
+      snapshot: {
+        ...snapshot,
+        providers: [provider],
+        connections: [connection]
+      },
+      result: undefined
+    }));
 
-    await store.ensureFrozenViduCatalog();
-
-    const snapshot = await store.load();
-    expect(snapshot.providers[0]).toEqual(provider);
-    expect(snapshot.connections[0]).toEqual(connection);
-    expect(snapshot.providers.some((item) => item.id === 'provider-vidu')).toBe(true);
-    expect(
-      snapshot.connections.some((item) => item.id === 'connection-vidu-default')
-    ).toBe(true);
-    expect(snapshot.protocolBindings).toHaveLength(3);
-    expect(snapshot.models).toHaveLength(10);
-    expect(snapshot.capabilities.length).toBeGreaterThan(10);
+    const reloaded = await new JsonProviderRegistryStore(registryPath).load();
+    expect(reloaded.providers).toEqual([provider]);
+    expect(reloaded.connections).toEqual([connection]);
+    expect(reloaded.protocolBindings).toEqual([]);
+    expect(JSON.stringify(reloaded)).not.toContain('provider-vidu');
+    expect(JSON.stringify(reloaded)).not.toContain('connection-vidu-default');
   });
 
-  it('preserves existing same-id Vidu records and immutable capability history', async () => {
+  it('keeps existing user Vidu records untouched without re-seeding missing rows', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
     const registryPath = path.join(root, 'registry.json');
     const store = new JsonProviderRegistryStore(registryPath);
-    const seeded = await store.load();
-    const viduProvider = seeded.providers[0];
-    const viduConnection = seeded.connections[0];
-    const firstEvidence = seeded.capabilities[0];
-    if (!viduProvider || !viduConnection || !firstEvidence) {
-      throw new Error('frozen Vidu fixture missing');
-    }
-    const existingProvider = { ...viduProvider, name: 'Existing Vidu record' };
-    const deletedConnection = {
-      ...viduConnection,
+    const vidu = createUserViduRegistryRecords();
+    const tombstoneConnection = {
+      ...vidu.connections[0],
       state: 'deleted' as const,
       credentialState: 'saved' as const,
       credentialReference: 'existing-credential-reference'
     };
     await store.save({
-      ...seeded,
-      providers: [existingProvider],
-      connections: [deletedConnection],
+      schemaVersion: 2,
+      providers: vidu.providers,
+      connections: [tombstoneConnection],
+      protocolBindings: vidu.protocolBindings.slice(0, 1),
+      models: vidu.models.slice(0, 5),
+      capabilities: vidu.capabilities.slice(0, 5),
+      routingPreferences: []
     });
 
-    await store.ensureFrozenViduCatalog();
-
-    const snapshot = await store.load();
-    expect(snapshot.providers[0]).toEqual(existingProvider);
-    expect(snapshot.connections[0]).toEqual(deletedConnection);
-    expect(snapshot.capabilities).toEqual(seeded.capabilities);
-    expect(snapshot.capabilities.filter((item) => item.id === firstEvidence.id)).toHaveLength(1);
-    expect(snapshot.models).toHaveLength(10);
+    const snapshot = await new JsonProviderRegistryStore(registryPath).load();
+    expect(snapshot.providers).toEqual(vidu.providers);
+    expect(snapshot.connections).toEqual([tombstoneConnection]);
+    expect(snapshot.protocolBindings).toHaveLength(1);
+    expect(snapshot.models).toHaveLength(5);
+    expect(snapshot.capabilities).toHaveLength(5);
   });
 
   it('rejects removal or mutation of persisted capability history', async () => {
@@ -274,16 +221,70 @@ describe('JsonProviderRegistryStore', () => {
     roots.push(root);
     const registryPath = path.join(root, 'registry.json');
     const store = new JsonProviderRegistryStore(registryPath);
-    const seeded = await store.load();
-    await store.save(seeded);
+    const provider = createProvider({
+      id: toProviderId('provider-history'),
+      name: 'History provider',
+      accessCategory: 'custom_remote',
+      identityState: 'unverified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const connection = createProviderConnection({
+      id: toConnectionId('connection-history'),
+      providerId: provider.id,
+      name: 'History connection',
+      state: 'saved',
+      identityState: 'unverified',
+      credentialState: 'saved',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const model = createProviderModel({
+      id: toModelId('model-history'),
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolBindingId: toProtocolBindingId('protocol-history-image'),
+      providerModelKey: 'history-model',
+      mediaKind: 'image',
+      revision: 1,
+      displayName: 'History model',
+      enabled: true,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const binding = createProviderProtocolBinding({
+      id: toProtocolBindingId('protocol-history-image'),
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolId: 'history.image.v1',
+      protocolVersion: '1',
+      mediaKind: 'image',
+      adapterKind: 'history_adapter',
+      authScheme: 'unknown',
+      executionLifecycle: 'synchronous_completed',
+      supportedPurposes: ['image_generation'],
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const historicalEvidence = createModelCapabilityEvidence({
+      id: toCapabilityEvidenceId('capability-history-orphan'),
+      modelId: model.id,
+      revision: 1,
+      capability: 'image_generation',
+      state: 'declared_supported',
+      source: 'provider_declared',
+      recordedAt: timestamp
+    });
+    await store.save({
+      schemaVersion: 2,
+      providers: [provider],
+      connections: [connection],
+      protocolBindings: [binding],
+      models: [model],
+      capabilities: [historicalEvidence],
+      routingPreferences: []
+    });
     const current = await store.load();
-    const currentEvidenceIds = new Set(
-      current.models.map((model) => model.capabilityEvidenceId)
-    );
-    const historicalEvidence = current.capabilities.find(
-      (evidence) => !currentEvidenceIds.has(evidence.id)
-    );
-    if (!historicalEvidence) throw new Error('historical evidence missing');
 
     await expect(
       store.save({
@@ -380,15 +381,25 @@ describe('JsonProviderRegistryStore', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
     const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const fixture = createBaselineRegistryRecords();
+    await store.save({
+      schemaVersion: 2,
+      providers: [fixture.provider],
+      connections: [fixture.connection],
+      protocolBindings: [fixture.binding],
+      models: [fixture.model],
+      capabilities: [],
+      routingPreferences: []
+    });
     const snapshot = await store.load();
-    const firstModel = snapshot.models[0];
-    if (!firstModel) throw new Error('frozen model missing');
 
     await expect(
       store.save({
         ...snapshot,
         models: snapshot.models.map((model) =>
-          model.id === firstModel.id ? { ...model, mediaKind: 'image' } : model
+          model.id === fixture.model.id
+            ? { ...model, mediaKind: 'video' as const }
+            : model
         )
       })
     ).rejects.toThrow('invalid references');
@@ -398,9 +409,17 @@ describe('JsonProviderRegistryStore', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
     const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const fixture = createBaselineRegistryRecords();
+    await store.save({
+      schemaVersion: 2,
+      providers: [fixture.provider],
+      connections: [fixture.connection],
+      protocolBindings: [fixture.binding],
+      models: [fixture.model],
+      capabilities: [fixture.evidence],
+      routingPreferences: []
+    });
     const snapshot = await store.load();
-    const firstEvidence = snapshot.capabilities[0];
-    if (!firstEvidence) throw new Error('frozen evidence missing');
 
     await expect(
       store.save({
@@ -408,7 +427,7 @@ describe('JsonProviderRegistryStore', () => {
         capabilities: [
           ...snapshot.capabilities,
           {
-            ...firstEvidence,
+            ...fixture.evidence,
             id: toCapabilityEvidenceId('evidence-duplicate-revision')
           }
         ]
@@ -420,10 +439,19 @@ describe('JsonProviderRegistryStore', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);
     const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const fixture = createBaselineRegistryRecords();
+    await store.save({
+      schemaVersion: 2,
+      providers: [fixture.provider],
+      connections: [fixture.connection],
+      protocolBindings: [],
+      models: [],
+      capabilities: [],
+      routingPreferences: []
+    });
     const snapshot = await store.load();
-    const provider = snapshot.providers[0];
-    const connection = snapshot.connections[0];
-    if (!provider || !connection) throw new Error('frozen provider missing');
+    const provider = snapshot.providers[0]!;
+    const connection = snapshot.connections[0]!;
 
     await expect(
       store.save({
@@ -518,3 +546,61 @@ describe('JsonProviderRegistryStore', () => {
     ).rejects.toThrow('invalid references');
   });
 });
+
+function createBaselineRegistryRecords() {
+  const provider = createProvider({
+    id: toProviderId('provider-baseline'),
+    name: 'Baseline provider',
+    accessCategory: 'custom_remote',
+    identityState: 'unverified',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const connection = createProviderConnection({
+    id: toConnectionId('connection-baseline'),
+    providerId: provider.id,
+    name: 'Baseline connection',
+    state: 'saved',
+    identityState: 'unverified',
+    credentialState: 'saved',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const binding = createProviderProtocolBinding({
+    id: toProtocolBindingId('protocol-baseline-image'),
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolId: 'baseline.image.v1',
+    protocolVersion: '1',
+    mediaKind: 'image',
+    adapterKind: 'baseline_adapter',
+    authScheme: 'unknown',
+    executionLifecycle: 'synchronous_completed',
+    supportedPurposes: ['image_generation'],
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const model = createProviderModel({
+    id: toModelId('model-baseline'),
+    providerId: provider.id,
+    connectionId: connection.id,
+    protocolBindingId: binding.id,
+    providerModelKey: 'baseline-model',
+    mediaKind: 'image',
+    revision: 1,
+    displayName: 'Baseline model',
+    enabled: false,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+  const evidence = createModelCapabilityEvidence({
+    id: toCapabilityEvidenceId('capability-baseline-1'),
+    modelId: model.id,
+    revision: 1,
+    capability: 'image_generation',
+    state: 'declared_supported',
+    source: 'provider_declared',
+    recordedAt: timestamp
+  });
+  return { provider, connection, binding, model, evidence };
+}

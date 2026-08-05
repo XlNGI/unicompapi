@@ -46,33 +46,29 @@ test('Electron owns one shared Vidu registry, vault and provider package', () =>
   assert.match(mainSource, /registerStorageIpcHandlers\(\{[\s\S]*vidu: viduComposition/);
   assert.match(providerHandlerSource, /readonly registry: JsonProviderRegistryStore/);
   assert.match(storageHandlerSource, /options\.vidu\?\.registry/);
-  assert.match(
-    compositionSource,
-    /createFrozenViduRegistryRecords\(\)\.protocolBindings\.find\([\s\S]*?VIDU_PROTOCOL_BINDING_IDS\.referenceVideoV2/
-  );
   assert.doesNotMatch(compositionSource, /protocolBindings\[0\]/);
 });
 
-test('all legacy Vidu network paths are hard-blocked', () => {
-  assert.equal(
-    (compositionSource.match(/denyViduRuntimeAuthorization\(\);/g) ?? []).length,
-    5
+test('Vidu runtime access is ledger-gated and no longer hard-blocked or frozen', () => {
+  assert.doesNotMatch(compositionSource, /denyViduRuntimeAuthorization/);
+  assert.doesNotMatch(compositionSource, /liveValidation/);
+  assert.doesNotMatch(mainSource, /ensureFrozenViduCatalog/);
+  assert.match(
+    compositionSource,
+    /operationContext: new RegistryVideoOperationContext\(this\.registry\)/
   );
+  assert.match(mainSource, /new RuntimeAuthorizationLedger\(\s*new JsonRuntimeAuthorizationLedgerStore\(/);
+  assert.match(mainSource, /new LedgerRuntimeAuthorizationSync\(\s*runtimeAuthorizationLedger\s*\)/);
+  assert.match(mainSource, /\{ runtimeAuthorization: runtimeAuthorizationSync \}/);
+  assert.match(mainSource, /reconcileConnections\(registrySnapshot\.connections\)/);
   assert.equal(
-    (
-      compositionSource.match(
-        /denyViduRuntimeAuthorization\(\);[\s\S]*?await this\.liveValidation\.beforeSubmission\([\s\S]*?\);[\s\S]*?const routed = await (?:image|video)Router\.submit\(request\);/g
-      ) ?? []
-    ).length,
+    (mainSource.match(/runtimeAuthorization: runtimeAuthorizationLedger/g) ?? []).length,
     2
   );
-  for (const continuation of [
-    /query: async \(providerOperationId\) => \{\s*denyViduRuntimeAuthorization\(\);/,
-    /cancel: async \(providerOperationId\) => \{\s*denyViduRuntimeAuthorization\(\);/,
-    /videoResultReceiver:[\s\S]*receive: async \(executionId\) => \{\s*denyViduRuntimeAuthorization\(\);/
-  ]) {
-    assert.match(compositionSource, continuation);
-  }
+  assert.match(
+    storageHandlerSource,
+    /readonly runtimeAuthorization\?: ProviderCandidateRuntimeAuthorizationPort/
+  );
 });
 
 test('preload exposes named lifecycle methods without generic Electron access', () => {

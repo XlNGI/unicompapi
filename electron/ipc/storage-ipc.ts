@@ -41,6 +41,7 @@ import {
   ProviderPackageRegistry,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
+  type ProviderCandidateRuntimeAuthorizationPort,
   createImageProviderFeatureContracts,
   createVideoProviderFeatureContracts,
   deepSeekProviderPackageDescriptor,
@@ -73,6 +74,7 @@ export function registerStorageIpcHandlers(options: {
   readonly vidu?: ElectronViduComposition;
   readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
   readonly providerPackages?: ProviderPackageRegistry;
+  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort;
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -147,15 +149,7 @@ export function registerStorageIpcHandlers(options: {
         providerRegistry,
         providerPackages,
         imageFeatureContracts,
-        {
-          async checkAccess() {
-            return {
-              allowed: false,
-              operation: 'submit' as const,
-              reason: 'no_matching_policy' as const
-            };
-          }
-        }
+        options.runtimeAuthorization ?? denyRuntimeAuthorization
       ),
       new RouteSelectionTokenVault()
     );
@@ -221,15 +215,7 @@ export function registerStorageIpcHandlers(options: {
         providerRegistry,
         providerPackages,
         videoFeatureContracts,
-        {
-          async checkAccess() {
-            return {
-              allowed: false,
-              operation: 'submit' as const,
-              reason: 'no_matching_policy' as const
-            };
-          }
-        }
+        options.runtimeAuthorization ?? denyRuntimeAuthorization
       ),
       new RouteSelectionTokenVault()
     );
@@ -641,3 +627,13 @@ export function registerStorageIpcHandlers(options: {
     }
   };
 }
+
+const denyRuntimeAuthorization: ProviderCandidateRuntimeAuthorizationPort = {
+  async checkAccess() {
+    return {
+      allowed: false,
+      operation: 'submit' as const,
+      reason: 'no_matching_policy' as const
+    };
+  }
+};

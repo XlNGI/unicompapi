@@ -7,7 +7,3 @@ export * from './controlled-image-material';
 export * from './vidu-image-adapters';
 export * from './vidu-image-result-port';
 export * from './vidu-video-adapter';
-export * from './vidu-live-validation';
-export * from './vidu-live-validation-service';
-export * from './vidu-live-validation-controller';
-export * from './vidu-runtime-authorization-closure';

@@ -261,7 +261,9 @@ describe('ProviderConnectionContractService', () => {
       ok: false,
       error: { code: 'connection_save_failed' }
     });
-    expect((await registry.load()).providers).toHaveLength(1);
+    const rolledBack = await registry.load();
+    expect(rolledBack.providers).toHaveLength(0);
+    expect(rolledBack.connections).toHaveLength(0);
     const vaultSnapshot = JSON.parse(await readFile(vaultPath, 'utf8')) as {
       entries: unknown[];
     };

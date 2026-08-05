@@ -56,6 +56,7 @@ import {
   ProviderPackageRegistry,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
+  type ProviderCandidateRuntimeAuthorizationPort,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type JsonProviderRegistryStore
@@ -74,6 +75,7 @@ export interface ChatContextRuntimeDependencies {
   getSession(): StorageProjectSession | undefined;
   readonly providerRegistry?: JsonProviderRegistryStore;
   readonly providerPackages?: ProviderPackageRegistry;
+  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort;
   now?: () => string;
   conversationIds?: ConversationIdFactory;
   projectContextIds?: ProjectContextIdFactory;
@@ -211,7 +213,7 @@ export function createChatContextRuntime(
         providerRegistry,
         providerPackages,
         contracts,
-        {
+        dependencies.runtimeAuthorization ?? {
           async checkAccess() {
             return {
               allowed: false,

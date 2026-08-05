@@ -46,7 +46,6 @@ import type {
   ProviderRegistryDto
 } from '../../shared/provider-ipc';
 import { sharedFileWriteCoordinator } from '../storage';
-import { createFrozenViduRegistryRecords } from './vidu-protocol-catalog';
 
 export interface ProviderRegistrySnapshot {
   readonly schemaVersion: 2;
@@ -168,13 +167,6 @@ export class JsonProviderRegistryStore {
     });
   }
 
-  async ensureFrozenViduCatalog(): Promise<void> {
-    const current = await this.load();
-    const next = mergeMissingFrozenViduRecords(current);
-    if (next === current) return;
-    await this.save(next);
-  }
-
   private async readDisk(): Promise<ProviderRegistrySnapshot | undefined> {
     return this.readDiskAt(this.registryPath);
   }
@@ -221,180 +213,6 @@ async function writeJsonAtomically(targetPath: string, value: unknown): Promise<
   } finally {
     await rm(temporary, { force: true });
   }
-}
-
-function mergeMissingFrozenViduRecords(
-  current: ProviderRegistrySnapshot
-): ProviderRegistrySnapshot {
-  const frozen = createFrozenViduRegistryRecords();
-  const frozenProvider = frozen.providers[0];
-  const frozenConnection = frozen.connections[0];
-  const appendedProviders = appendMissingById(current.providers, frozen.providers);
-  const providers = appendedProviders.map((provider) =>
-    provider.id === frozenProvider.id && provider.packageId === undefined
-      ? {
-          ...provider,
-          packageId: frozenProvider.packageId,
-          packageVersion: frozenProvider.packageVersion
-        }
-      : provider
-  );
-  const providerOwned = providers.some(
-    (provider) =>
-      provider.id === frozenProvider.id &&
-      provider.packageId === frozenProvider.packageId &&
-      provider.packageVersion === frozenProvider.packageVersion
-  );
-  const appendedConnections = appendMissingById(
-    current.connections,
-    frozen.connections
-  );
-  const connections = appendedConnections.map((connection) =>
-    providerOwned &&
-    connection.id === frozenConnection.id &&
-    connection.packageId === undefined
-      ? {
-          ...connection,
-          endpoint: connection.endpoint ?? frozenConnection.endpoint,
-          packageId: frozenConnection.packageId,
-          packageVersion: frozenConnection.packageVersion,
-          templateId: frozenConnection.templateId,
-          templateKind: frozenConnection.templateKind,
-          credentialSchemaId: frozenConnection.credentialSchemaId,
-          credentialSchemaVersion: frozenConnection.credentialSchemaVersion,
-          credentialVersionId: frozenConnection.credentialVersionId,
-          connectionPolicyId: frozenConnection.connectionPolicyId,
-          connectionPolicyRevision: frozenConnection.connectionPolicyRevision,
-          discoveryPolicyId: frozenConnection.discoveryPolicyId,
-          discoveryPolicyRevision: frozenConnection.discoveryPolicyRevision,
-          endpointPolicyId: frozenConnection.endpointPolicyId,
-          endpointPolicyRevision: frozenConnection.endpointPolicyRevision,
-          connectionConfigVersionId: frozenConnection.connectionConfigVersionId,
-          connectionRevision: frozenConnection.connectionRevision,
-          adapterBindings: frozenConnection.adapterBindings
-        }
-      : connection
-  );
-  const connectionOwned = connections.some(
-    (connection) =>
-      connection.id === frozenConnection.id &&
-      connection.packageId === frozenConnection.packageId &&
-      connection.packageVersion === frozenConnection.packageVersion
-  );
-  const protocolBindings = appendMissingById(
-    current.protocolBindings,
-    frozen.protocolBindings
-  );
-  const capabilities = appendMissingById(
-    current.capabilities,
-    frozen.capabilities
-  );
-  const appendedModels = appendMissingById(current.models, frozen.models);
-  const frozenModelsById = new Map(
-    frozen.models.map((model) => [model.id, model] as const)
-  );
-  const frozenProfilesByModel = new Map(
-    frozen.modelProfiles.map((profile) => [profile.modelId, profile] as const)
-  );
-  const models = appendedModels.map((model) => {
-    const frozenModel = frozenModelsById.get(model.id);
-    const frozenProfile = frozenProfilesByModel.get(model.id);
-    const binding = protocolBindings.find(
-      (candidate) => candidate.id === model.protocolBindingId
-    );
-    if (
-      !providerOwned ||
-      !connectionOwned ||
-      !frozenModel ||
-      !frozenProfile ||
-      model.activeProfileId !== undefined ||
-      model.providerId !== frozenModel.providerId ||
-      model.connectionId !== frozenModel.connectionId ||
-      model.providerModelKey !== frozenModel.providerModelKey ||
-      binding?.adapterKind !== frozenProfile.adapterKey
-    ) {
-      return model;
-    }
-    return {
-      ...model,
-      activeProfileId: frozenProfile.profileId,
-      revision: model.revision + 1,
-      updatedAt: toIsoTimestamp(frozenProfile.recordedAt)
-    };
-  });
-  const modelDefinitions = providerOwned
-    ? appendMissingByKey(
-        current.modelDefinitions ?? [],
-        frozen.modelDefinitions,
-        (definition) => definition.definitionId
-      )
-    : current.modelDefinitions ?? [];
-  const profileCandidates = connectionOwned
-    ? models.flatMap((model) => {
-        const frozenProfile = frozenProfilesByModel.get(model.id);
-        if (!frozenProfile || model.activeProfileId !== frozenProfile.profileId) {
-          return [];
-        }
-        return [{
-          ...frozenProfile,
-          modelRevision: model.revision,
-          evidenceIds: capabilities
-            .filter((evidence) => evidence.modelId === model.id)
-            .map((evidence) => evidence.id)
-        }];
-      })
-    : [];
-  const modelProfiles = appendMissingByKey(
-    current.modelProfiles ?? [],
-    profileCandidates,
-    (profile) => profile.profileId
-  );
-  if (
-    sameRecordList(providers, current.providers) &&
-    sameRecordList(connections, current.connections) &&
-    protocolBindings === current.protocolBindings &&
-    sameRecordList(models, current.models) &&
-    capabilities === current.capabilities &&
-    modelDefinitions === (current.modelDefinitions ?? []) &&
-    modelProfiles === (current.modelProfiles ?? [])
-  ) {
-    return current;
-  }
-  return {
-    ...current,
-    providers,
-    connections,
-    protocolBindings,
-    models,
-    capabilities,
-    modelDefinitions,
-    modelProfiles
-  };
-}
-
-function appendMissingById<T extends { readonly id: string }>(
-  current: readonly T[],
-  frozen: readonly T[]
-): readonly T[] {
-  const existingIds = new Set(current.map((record) => record.id));
-  const missing = frozen.filter((record) => !existingIds.has(record.id));
-  return missing.length === 0 ? current : [...current, ...missing];
-}
-
-function appendMissingByKey<T>(
-  current: readonly T[],
-  frozen: readonly T[],
-  key: (value: T) => string
-): readonly T[] {
-  const existing = new Set(current.map(key));
-  const missing = frozen.filter((record) => !existing.has(key(record)));
-  return missing.length === 0 ? current : [...current, ...missing];
-}
-
-function sameRecordList<T>(left: readonly T[], right: readonly T[]): boolean {
-  return left.length === right.length && left.every(
-    (item, index) => item === right[index]
-  );
 }
 
 export class ProviderRegistryController {
@@ -500,15 +318,14 @@ export class ProviderRegistryController {
 }
 
 function emptySnapshot(): ProviderRegistrySnapshot {
-  const vidu = createFrozenViduRegistryRecords();
   return {
     schemaVersion: 2,
     registryRevision: 1,
-    providers: vidu.providers,
-    connections: vidu.connections,
-    protocolBindings: vidu.protocolBindings,
-    models: vidu.models,
-    capabilities: vidu.capabilities,
+    providers: [],
+    connections: [],
+    protocolBindings: [],
+    models: [],
+    capabilities: [],
     routingPreferences: [],
     modelDefinitions: [],
     modelProfiles: []
