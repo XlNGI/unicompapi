@@ -8,17 +8,16 @@ import {
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_CHAT_PROTOCOL_ID,
-  NEWAPI_COMPATIBLE_TEMPLATE_ID,
-  NEWAPI_CREDENTIAL_SCHEMA_ID,
-  NEWAPI_ENDPOINT_POLICY_ID,
   NEWAPI_IMAGE_ADAPTER_ID,
   NEWAPI_IMAGE_PROTOCOL_ID,
   NEWAPI_PROTOCOL_VERSION,
-  NEWAPI_PROVIDER_PACKAGE_ID,
-  NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_VIDEO_ADAPTER_ID,
   NEWAPI_VIDEO_PROTOCOL_ID
 } from './newapi-contracts';
+import {
+  isOpenAiCompatibleCredentialSchemaId,
+  matchOpenAiCompatiblePackage
+} from './openai-compatible-identity';
 
 export const newApiRuntimeErrorCodes = [
   'invalid_request',
@@ -507,7 +506,7 @@ async function* boundStream(
 
 function parseCredential(record: StructuredCredentialRecord): string {
   if (
-    record.schemaId !== NEWAPI_CREDENTIAL_SCHEMA_ID ||
+    !isOpenAiCompatibleCredentialSchemaId(record.schemaId) ||
     record.schemaVersion !== 1 ||
     !isRecord(record.values) ||
     Object.keys(record.values).length !== 1 ||
@@ -535,14 +534,9 @@ function validateConnection(
       item.protocolId === protocolId &&
       item.protocolVersion === NEWAPI_PROTOCOL_VERSION
   );
+  const packageIdentity = matchOpenAiCompatiblePackage(connection);
   if (
-    connection.packageId !== NEWAPI_PROVIDER_PACKAGE_ID ||
-    connection.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
-    connection.templateId !== NEWAPI_COMPATIBLE_TEMPLATE_ID ||
-    connection.credentialSchemaId !== NEWAPI_CREDENTIAL_SCHEMA_ID ||
-    connection.credentialSchemaVersion !== 1 ||
-    connection.endpointPolicyId !== NEWAPI_ENDPOINT_POLICY_ID ||
-    connection.endpointPolicyRevision !== 1 ||
+    !packageIdentity ||
     connection.state === 'disabled' ||
     connection.state === 'deleted' ||
     connection.credentialState === 'deleted' ||
