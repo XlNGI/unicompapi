@@ -42,7 +42,9 @@ import {
   frozenViduModelKeys
 } from '../../src/platform';
 
-export const VIDU_USER_PROVIDER_ID = toProviderId('provider-vidu');
+export const VIDU_USER_PROVIDER_ID = toProviderId(
+  'provider-user-created-vidu-regression'
+);
 export const VIDU_USER_CONNECTION_ID = toConnectionId('connection-vidu-default');
 
 export const VIDU_USER_PROTOCOL_BINDING_IDS = {

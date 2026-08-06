@@ -64,6 +64,15 @@ test('quick image uses the safe feature DTO and one business submission action',
   );
 });
 
+test('quick image synchronously blocks duplicate one-shot submissions', () => {
+  const start = featurePanelSource.indexOf('async function generateOneShot()');
+  const end = featurePanelSource.indexOf('\n  return (', start);
+  const oneShot = featurePanelSource.slice(start, end);
+  assert.match(oneShot, /if \(busyRef\.current\) return/);
+  assert.match(oneShot, /busyRef\.current = true;[\s\S]*api\.generateQuickImage\(/);
+  assert.match(oneShot, /finally \{[\s\S]*busyRef\.current = false;/);
+});
+
 test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
   const composerIndex = quickSource.indexOf('uc-image-quick__composer');
   const inspectorIndex = quickSource.indexOf('uc-image-quick__inspector');

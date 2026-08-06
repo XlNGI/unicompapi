@@ -427,7 +427,7 @@ export function ImageFeatureSubmissionPanel({
   }
 
   async function generateOneShot() {
-    if (busy) return;
+    if (busyRef.current) return;
     if (!api) {
       onMessage('当前运行环境未连接桌面图片功能。');
       return;
@@ -455,6 +455,7 @@ export function ImageFeatureSubmissionPanel({
       onMessage('请先填写提示词。');
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     onMessage('正在生成…');
     try {
@@ -528,6 +529,7 @@ export function ImageFeatureSubmissionPanel({
           : '一键生成失败，请重试。'
       );
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }

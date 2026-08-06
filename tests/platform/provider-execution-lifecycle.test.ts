@@ -41,6 +41,50 @@ afterEach(async () => {
 });
 
 describe('provider execution lifecycle', () => {
+  it('projects pre-request failure and unknown outcome onto the persisted execution', async () => {
+    const failedFixture = await createFixture('unrecorded-failed');
+    const failedExecution = createExecution({
+      id: toExecutionId('execution-unrecorded-failed'),
+      taskId: toTaskId('task-unrecorded-failed'),
+      createdAt: t0
+    });
+    await failedFixture.executions.save(failedExecution);
+
+    await expect(
+      lifecycle(failedFixture, 'unused-failed-record').applyUnrecordedSubmitOutcome({
+        executionId: failedExecution.id,
+        outcome: 'failed_before_submission',
+        message: 'The request was rejected before transport'
+      })
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failure: {
+        stage: 'submitting',
+        retryability: 'not_retryable'
+      }
+    });
+    await expect(failedFixture.operations.list()).resolves.toEqual([]);
+
+    const unknownFixture = await createFixture('unrecorded-unknown');
+    const unknownExecution = createExecution({
+      id: toExecutionId('execution-unrecorded-unknown'),
+      taskId: toTaskId('task-unrecorded-unknown'),
+      createdAt: t0
+    });
+    await unknownFixture.executions.save(unknownExecution);
+
+    await expect(
+      lifecycle(unknownFixture, 'unused-unknown-record').applyUnrecordedSubmitOutcome({
+        executionId: unknownExecution.id,
+        outcome: 'submission_outcome_unknown',
+        message: 'The request outcome is unknown'
+      })
+    ).resolves.toMatchObject({
+      state: 'submission_outcome_unknown'
+    });
+    await expect(unknownFixture.operations.list()).resolves.toEqual([]);
+  });
+
   it('persists synchronous result receipts before remote completion and reloads them after restart', async () => {
     const fixture = await createFixture('sync');
     const task = imageTask('task-provider-sync');
