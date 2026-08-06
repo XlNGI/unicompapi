@@ -36,7 +36,6 @@ import {
   JsonProviderRegistryStore,
   JsonWorkRepository,
   LocalImageResultReceiver,
-  LocalVideoResultReceiver,
   NodeProjectStorage,
   ProjectImageMaterialResolver,
   SecureCredentialVault,
@@ -44,9 +43,7 @@ import {
   ViduImmediateImageResultPort,
   ViduProviderPackage,
   ViduTransportFailure,
-  VideoOperationPortError,
   VideoOperationRouter,
-  VideoSubmissionController,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
   type ControlledImageMaterial,
@@ -338,7 +335,7 @@ describe('Vidu local synthetic service validation', () => {
     expect(JSON.stringify(fixture.safeLogs)).not.toContain(validToken);
   });
 
-  it('completes image Work to explicit video draft to verified video Work without exposing provider facts', async () => {
+  it('completes image Work and hands off into an explicit image-to-video draft without the retired submission IPC', async () => {
     const fixture = await createProtocolFixture(undefined, true);
     const storage = new NodeProjectStorage(fixture.root);
     const workflowNow = sequentialClock();
@@ -478,85 +475,22 @@ describe('Vidu local synthetic service validation', () => {
       throw new Error(`Synthetic video draft update failed: ${updatedVideoDraft.error.code}`);
     }
 
-    const videoReceiver = new LocalVideoResultReceiver({
-      getSession: session,
-      mutations: videoMutations,
-      port: fixture.videoAdapter,
-      createFileId: () => 'file-vidu-e2e-video',
-      createWorkId: () => 'work-vidu-e2e-video',
-      now: workflowNow
-    });
-    const videoController = new VideoSubmissionController({
-      getSession: session,
-      providerRegistry: fixture.registry,
-      mutations: videoMutations,
-      operationPort: routerVideoPort(fixture.videoRouter),
-      asyncOperationPort: fixture.videoAdapter,
-      resultReceiver: videoReceiver,
-      createTaskId: () => 'task-vidu-e2e-video',
-      createExecutionId: () => 'execution-vidu-e2e-video',
-      createProviderOperationRecordId: () => 'operation-record-vidu-e2e-video',
-      now: workflowNow
-    });
-    await expect(
-      videoController.preflight({ draftId: updatedVideoDraft.value.draftId })
-    ).resolves.toMatchObject({
-      ok: true,
-      value: {
-        blockers: [],
-        candidates: [{
-          modelId: fixture.videoModel.id,
-          capabilityEvidenceId: fixture.referenceVideoEvidence.id,
-          blockers: []
-        }]
-      }
-    });
-    await expect(
-      videoController.createTask({
-        draftId: updatedVideoDraft.value.draftId,
-        draftUpdatedAt: updatedVideoDraft.value.updatedAt,
-        modelId: fixture.videoModel.id,
-        confirmations: videoConfirmations
-      })
-    ).resolves.toMatchObject({ ok: true });
-    await expect(
-      videoController.createExecution({ taskId: 'task-vidu-e2e-video' })
-    ).resolves.toMatchObject({ ok: true, value: { state: 'created' } });
-    await expect(
-      videoController.invokeExecution({ executionId: 'execution-vidu-e2e-video' })
-    ).resolves.toMatchObject({ ok: true, value: { state: 'queued' } });
-    await expect(
-      videoController.refreshExecution({ executionId: 'execution-vidu-e2e-video' })
-    ).resolves.toMatchObject({
-      ok: true,
-      value: { state: 'remote_completed' }
-    });
-    fixture.service.registerDownload(
-      'https://results.synthetic.invalid/generated.mp4?signature=private',
-      isoBmffVideo(),
-      'video/mp4'
-    );
-    const videoWork = await videoController.receiveResult({
-      executionId: 'execution-vidu-e2e-video'
-    });
-    expect(videoWork).toMatchObject({
-      ok: true,
-      value: {
-        works: [{ workId: 'work-vidu-e2e-video' }]
-      }
-    });
+    // Product video generation now goes through videoFeatures (feature submit +
+    // poll + receive). The retired VideoSubmissionController closed loop is gone.
+    expect(updatedVideoDraft.value.mode).toBe('image_to_video');
+    expect(updatedVideoDraft.value.imageToVideo.materials?.slots[0]?.selection?.assetId)
+      .toBe(source.assetId);
+    expect(source.assetId).not.toBe(imageAssetId);
 
     const works = await new JsonWorkRepository(storage, projectId).list(projectId);
-    expect(works.map((work) => work.mediaKind).sort()).toEqual(['image', 'video']);
+    expect(works.map((work) => work.mediaKind)).toEqual(['image']);
     const rendererFacts = JSON.stringify({
       imageTaskResult,
       imageWork,
       createdVideoDraft,
-      updatedVideoDraft,
-      videoWork
+      updatedVideoDraft
     });
     expect(rendererFacts).not.toContain(validToken);
-    expect(rendererFacts).not.toContain('synthetic-video-task');
     expect(rendererFacts).not.toContain('signature=private');
     expect(rendererFacts).not.toContain(fixture.root);
     expect(rendererFacts).not.toMatch(/[a-f0-9]{64}/);
@@ -922,18 +856,6 @@ function routerImagePort(router: ImageOperationRouter) {
       const result = await router.submit(request);
       if (!result.ok) {
         throw new ImageOperationPortError('not_retryable', result.error.message);
-      }
-      return result.value;
-    }
-  };
-}
-
-function routerVideoPort(router: VideoOperationRouter) {
-  return {
-    submit: async (request: Pick<ProviderProtocolSubmitRequest, 'task' | 'execution'>) => {
-      const result = await router.submit(request);
-      if (!result.ok) {
-        throw new VideoOperationPortError('not_retryable', result.error.message);
       }
       return result.value;
     }

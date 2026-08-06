@@ -8,12 +8,13 @@ import {
 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { EmptyState } from '../../../components/EmptyState';
+import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
+import { ImagePromptEnhancePanel } from './ImagePromptEnhancePanel';
 
 interface ImageProfessionalWorkspaceProps {
   readonly dirty: boolean;
@@ -30,7 +31,8 @@ const supplementSourceLabels: Readonly<Record<string, string>> = {
   structure: '结构补充',
   constraint: '约束补充',
   translation: '翻译补充',
-  model_format: '模型格式'
+  model_format: '模型格式',
+  enhancement: '提示词增强'
 };
 
 export function ImageProfessionalWorkspace({
@@ -44,6 +46,8 @@ export function ImageProfessionalWorkspace({
   const [input, setInput] = useState<ImageWorkspaceInputAssetDto>();
   const [previewUrl, setPreviewUrl] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resultWorkId, setResultWorkId] = useState<string>();
+  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
   const productFeature = draft.featureSelection?.productFeature === 'text_to_image' ||
     draft.featureSelection?.productFeature === 'reference_to_image'
     ? draft.featureSelection.productFeature
@@ -130,17 +134,33 @@ export function ImageProfessionalWorkspace({
     });
   }
 
+  async function ensureSavedDraft(): Promise<GenerationImageDraftDto | undefined> {
+    if (!imageWorkspaces) return undefined;
+    if (!dirty && draft.state === 'saved') return draft;
+    const result = await imageWorkspaces.update({
+      ...draft,
+      state: 'saved'
+    });
+    if (!result.ok) {
+      onMessage(result.error.message);
+      return undefined;
+    }
+    onDraftPersisted(result.value as GenerationImageDraftDto);
+    return result.value as GenerationImageDraftDto;
+  }
+
   async function selectReference() {
     if (
       !imageWorkspaces ||
       productFeature !== 'reference_to_image' ||
-      dirty ||
       busy
     ) return;
     setBusy(true);
     onMessage('');
     try {
-      const result = await imageWorkspaces.selectInput(draft.draftId);
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      const result = await imageWorkspaces.selectInput(saved.draftId);
       if (!result.ok) {
         onMessage(result.error.message);
         return;
@@ -148,7 +168,9 @@ export function ImageProfessionalWorkspace({
       if (result.value.cancelled || !result.value.draft) return;
       onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
-      const preview = await imageWorkspaces.createInputPreview(draft.draftId);
+      const preview = await imageWorkspaces.createInputPreview(
+        result.value.draft.draftId
+      );
       setPreviewUrl(preview.ok ? preview.value.url : '');
       onMessage('图片已复制并登记到当前项目；没有上传、分析或生成。');
     } catch {
@@ -159,11 +181,13 @@ export function ImageProfessionalWorkspace({
   }
 
   async function clearReference() {
-    if (!imageWorkspaces || !draft.input || dirty || busy) return;
+    if (!imageWorkspaces || !draft.input || busy) return;
     setBusy(true);
     onMessage('');
     try {
-      const result = await imageWorkspaces.clearInput(draft.draftId);
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      const result = await imageWorkspaces.clearInput(saved.draftId);
       if (!result.ok) {
         onMessage(result.error.message);
         return;
@@ -250,7 +274,7 @@ export function ImageProfessionalWorkspace({
                 </div>
                 <div className="uc-image-feature-panel__media-actions">
                   <Button
-                    disabled={!imageWorkspaces || dirty || busy}
+                    disabled={!imageWorkspaces || busy}
                     onClick={() => void selectReference()}
                     variant="secondary"
                   >
@@ -258,7 +282,7 @@ export function ImageProfessionalWorkspace({
                     {input ? '替换图片' : '选择图片'}
                   </Button>
                   <Button
-                    disabled={!imageWorkspaces || !draft.input || dirty || busy}
+                    disabled={!imageWorkspaces || !draft.input || busy}
                     onClick={() => void clearReference()}
                     variant="secondary"
                   >
@@ -351,7 +375,37 @@ export function ImageProfessionalWorkspace({
               <small>{draft.prompt.finalPrompt.length} / 2000</small>
             </section>
           </div>
+          <ImagePromptEnhancePanel
+            dirty={dirty}
+            draft={draft}
+            onDraftPersisted={onDraftPersisted}
+            onMessage={onMessage}
+          />
           <div className="uc-image-quick__result-actions">
+            <Button
+              disabled={
+                draft.prompt.systemSupplements.every(
+                  (item) => item.source !== 'enhancement'
+                )
+              }
+              onClick={() => {
+                const enhanced = [...draft.prompt.systemSupplements]
+                  .reverse()
+                  .find((item) => item.source === 'enhancement');
+                if (!enhanced) return;
+                changeDraft({
+                  ...draft,
+                  prompt: {
+                    ...draft.prompt,
+                    finalPrompt: enhanced.content
+                  }
+                });
+                onMessage('已将系统补充中的增强结果合并到最终提示词。');
+              }}
+              variant="secondary"
+            >
+              合并增强到最终提示词
+            </Button>
             <Button
               disabled={draft.prompt.finalPrompt === draft.prompt.originalInput}
               onClick={() => changeDraft({
@@ -364,11 +418,11 @@ export function ImageProfessionalWorkspace({
               恢复原始输入
             </Button>
           </div>
-          <EmptyState
-            description="只有通过安全路由提交并完成本地文件校验后，结果才会登记为作品。"
-            icon="画"
-            readOnly
-            title="尚无真实生成结果"
+          <GenerationResultPreview
+            emptyDescription="只有通过安全路由提交并完成本地文件校验后，结果才会登记为作品。"
+            mediaKind="image"
+            remoteUrls={resultUrls}
+            workId={resultWorkId}
           />
         </Card>
 
@@ -377,7 +431,11 @@ export function ImageProfessionalWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>服务、参数与确认</h2>
-              <p>候选只基于当前生图方式和已保存草稿事实。</p>
+              <p>
+                {productFeature
+                  ? '候选只基于当前生图方式和已保存草稿事实。'
+                  : '请先选择文生图或图生图，再显示可用模型与参数。'}
+              </p>
             </div>
           </header>
           <ImageFeatureSubmissionPanel
@@ -385,7 +443,14 @@ export function ImageProfessionalWorkspace({
             dirty={dirty}
             draft={draft}
             onDraftChange={onDraftChange}
+            onDraftPersisted={onDraftPersisted}
             onMessage={onMessage}
+            onSubmissionComplete={(submission) => {
+              setResultWorkId(submission.workId);
+              setResultUrls(submission.resultImageUrls ?? []);
+            }}
+            requireExplicitFeature
+            showProgressSteps
           />
         </Card>
       </div>

@@ -53,7 +53,7 @@ test('quick image uses the safe feature DTO and one business submission action',
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));
   }
-  assert.match(featurePanelSource, /parameterSchema\.fields\.map/);
+  assert.match(featurePanelSource, /DynamicParameterForm/);
   assert.match(featurePanelSource, /服务商 \/ 连接 \/ 模型/);
   assert.match(featurePanelSource, /确认本次外发/);
   assert.match(featurePanelSource, /确认并提交/);
@@ -76,11 +76,16 @@ test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
   assert.match(quickSource.slice(stageIndex), />3</);
 });
 
-test('quick image keeps unavailable runtime blocked without fake output', () => {
+test('quick image keeps unavailable runtime blocked without fake output', async () => {
+  const previewSource = await readFile(
+    'src/components/GenerationResultPreview.tsx',
+    'utf8'
+  );
   assert.match(featurePanelSource, /runtime_not_allowed/);
   assert.match(featurePanelSource, /在线图片运行尚未获准，没有发出请求/);
-  assert.match(quickSource, /尚无真实生成结果/);
-  assert.match(quickSource, /不会创建请求、费用或假结果/);
+  assert.match(quickSource, /尚无生成结果/);
+  assert.match(quickSource, /GenerationResultPreview/);
+  assert.match(previewSource, /createWorkMediaHandle/);
   assert.doesNotMatch(
     source,
     /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/

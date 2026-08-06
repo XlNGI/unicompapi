@@ -132,6 +132,10 @@ export interface ImageFeatureSubmissionDto {
   readonly resultImageUrls?: readonly string[];
   /** Safe reason when provider completed but local image registration failed. */
   readonly localResultError?: string;
+  /** Safe user-facing feedback for the submission outcome (success or failure). */
+  readonly feedback?: string;
+  /** Safe machine code associated with the feedback, when available. */
+  readonly safeCode?: string;
 }
 
 export interface ImageFeatureGenerateQuickDto {

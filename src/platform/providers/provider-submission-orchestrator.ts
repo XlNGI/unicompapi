@@ -335,7 +335,13 @@ export class ProviderSubmissionOrchestrator {
 
     if (outcome.kind === 'failed_before_submission') {
       if (requestStarted) {
-        return this.recordUnknown(intent, 'adapter.invalid_failed_before_request', undefined);
+        // Request already left the process — keep the adapter's safeCode so the
+        // user still receives concrete remote feedback instead of a blank outcome.
+        return this.recordUnknown(
+          intent,
+          outcome.safeCode || 'adapter.invalid_failed_before_request',
+          undefined
+        );
       }
       return this.recordFailedBeforeRequest(intent, outcome.safeCode);
     }

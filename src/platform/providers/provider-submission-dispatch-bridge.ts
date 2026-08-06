@@ -83,7 +83,10 @@ export function normalizeProviderSubmitOutcome(
   if (outcome.kind === 'failed_before_submission') {
     return {
       kind: 'failed_before_submission',
-      safeCode: safeCodeForFailedBeforeSubmission(outcome.message)
+      safeCode: safeCodeForProviderMessage(
+        outcome.message,
+        'adapter.failed_before_submission'
+      )
     };
   }
   if (outcome.kind === 'submission_outcome_unknown') {
@@ -92,7 +95,10 @@ export function normalizeProviderSubmitOutcome(
       ...(outcome.providerOperationId
         ? { providerOperationId: outcome.providerOperationId }
         : {}),
-      safeCode: 'adapter.submission_outcome_unknown'
+      safeCode: safeCodeForProviderMessage(
+        outcome.message,
+        'adapter.submission_outcome_unknown'
+      )
     };
   }
   return {
@@ -102,7 +108,11 @@ export function normalizeProviderSubmitOutcome(
   };
 }
 
-function safeCodeForFailedBeforeSubmission(message: string): string {
+/** Exact allowlisted provider messages only — never echo free-form upstream text. */
+export function safeCodeForProviderMessage(
+  message: string,
+  fallback: string
+): string {
   if (message === 'The Vidu credential is unavailable') {
     return 'vidu.credential_unavailable';
   }
@@ -124,7 +134,40 @@ function safeCodeForFailedBeforeSubmission(message: string): string {
   if (message === 'Vidu denied this operation') {
     return 'vidu.permission_denied';
   }
-  return 'adapter.failed_before_submission';
+  if (message === 'Vidu rate limited the operation') {
+    return 'vidu.rate_limited';
+  }
+  if (message === 'Vidu is temporarily unavailable') {
+    return 'vidu.provider_unavailable';
+  }
+  if (message === 'The Vidu request timed out') {
+    return 'vidu.timeout';
+  }
+  if (message === 'The Vidu request was cancelled') {
+    return 'vidu.cancelled';
+  }
+  if (message === 'The Vidu response exceeded the allowed size') {
+    return 'vidu.response_too_large';
+  }
+  if (message === 'The Vidu API response redirected unexpectedly') {
+    return 'vidu.redirect_not_allowed';
+  }
+  if (message === 'The Vidu response was invalid') {
+    return 'vidu.invalid_response';
+  }
+  if (message === 'The Vidu network request failed') {
+    return 'vidu.network_error';
+  }
+  if (message === 'The configured proxy could not be used') {
+    return 'vidu.proxy_unavailable';
+  }
+  if (message === 'The Vidu runtime is shutting down') {
+    return 'vidu.runtime_shutting_down';
+  }
+  if (message === 'The synchronous Vidu submission outcome is unknown') {
+    return 'adapter.submission_outcome_unknown';
+  }
+  return fallback;
 }
 
 function packageBindings(

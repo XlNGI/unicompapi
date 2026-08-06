@@ -12,7 +12,6 @@ import {
   ViduImmediateImageResultPort,
   ViduProviderPackage,
   ViduTransportFailure,
-  VideoOperationRouter,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   type ImageOperationPorts,
   type ImageSubmissionControllerDependencies,
@@ -23,10 +22,9 @@ import {
   type ViduHttpTransportResponse,
   type ViduVideoOperationContext,
   type ViduVideoOperationContextPort,
-  type VideoGenerationSubmitPort,
-  type VideoSubmissionControllerDependencies
+  type VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
-import type { ProviderProtocolBinding, ProxyMode } from '../../src/domain';
+import type { ProxyMode } from '../../src/domain';
 
 export interface ElectronViduCompositionOptions {
   readonly getProxyMode: () => Promise<ProxyMode>;
@@ -64,17 +62,22 @@ export class ElectronViduComposition {
   createOperationPorts(options: {
     readonly getSession: () => StorageProjectSession | undefined;
     readonly imageMutations: ImageSubmissionControllerDependencies['mutations'];
-    readonly videoMutations: VideoSubmissionControllerDependencies['mutations'];
+    readonly videoMutations: VideoWorkspaceMutationCoordinator;
   }): {
     readonly image: ImageOperationPorts;
     readonly imageResultReceiver: NonNullable<
       ImageSubmissionControllerDependencies['resultReceiver']
     >;
-    readonly video: VideoGenerationSubmitPort;
     readonly videoAsync: ProviderAsyncOperationPort;
-    readonly videoResultReceiver: NonNullable<
-      VideoSubmissionControllerDependencies['resultReceiver']
-    >;
+    readonly rememberVideoOperation: (
+      taskId: string,
+      context: ViduVideoOperationContext
+    ) => void;
+    readonly videoResultReceiver: {
+      receive(
+        executionId: string
+      ): ReturnType<LocalVideoResultReceiver['receive']>;
+    };
   } {
     const materials = new ProjectImageMaterialResolver({
       getSession: options.getSession
@@ -89,33 +92,21 @@ export class ElectronViduComposition {
       connections,
       materials
     });
+    const videoOperationContext = new RegistryVideoOperationContext(this.registry);
+    // Shared adapter instance for feature-path poll + local result landing only.
+    // Product submit goes through createRouteAdapters / videoFeatures, not this port.
     const video = this.providerPackage.createVideoAdapter({
       connections,
       materials,
-      operationContext: new RegistryVideoOperationContext(this.registry)
+      operationContext: videoOperationContext
     });
     const imageRouter = new ImageOperationRouter(this.registry, {
       vidu_image_v1: images.imageV1,
       vidu_gemini_image_v2: images.geminiImageV2
     });
-    const videoRouter = new VideoOperationRouter(this.registry, {
-      vidu_reference_video_v2: video
-    });
     const imagePort = {
       submit: async (request: Parameters<ImageOperationRouter['submit']>[0]) => {
         const routed = await imageRouter.submit(request);
-        return routed.ok
-          ? routed.value
-          : ({
-              kind: 'failed_before_submission',
-              message: routed.error.message,
-              retryability: 'not_retryable'
-            } as const);
-      }
-    };
-    const videoPort: VideoGenerationSubmitPort = {
-      submit: async (request) => {
-        const routed = await videoRouter.submit(request);
         return routed.ok
           ? routed.value
           : ({
@@ -163,8 +154,10 @@ export class ElectronViduComposition {
           }).receive(executionId);
         }
       },
-      video: videoPort,
       videoAsync,
+      rememberVideoOperation: (taskId, context) => {
+        videoOperationContext.remember(taskId, context);
+      },
       videoResultReceiver: {
         receive: (executionId) => videoReceiver.receive(executionId)
       }
@@ -193,8 +186,8 @@ class RegistryVideoOperationContext implements ViduVideoOperationContextPort {
     const candidates = snapshot.protocolBindings.filter(
       (binding) => binding.adapterKind === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
     );
-    if (candidates.length !== 1) return undefined;
-    const binding: ProviderProtocolBinding = candidates[0];
+    if (candidates.length === 0) return undefined;
+    const binding = candidates[0];
     return { connectionId: binding.connectionId, binding };
   }
 }
@@ -227,40 +220,35 @@ class ElectronViduHttpTransport implements ViduHttpTransport {
 
 async function readBoundedResponse(
   response: Response,
-  maximumBytes: number
+  maxResponseBytes: number
 ): Promise<Uint8Array> {
-  const declared = response.headers.get('content-length');
-  if (declared !== null && Number(declared) > maximumBytes) {
-    await response.body?.cancel();
-    throw new ViduTransportFailure('response_too_large');
-  }
-  if (!response.body) return new Uint8Array();
-  const reader = response.body.getReader();
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      total += result.value.byteLength;
-      if (total > maximumBytes) {
-        await reader.cancel();
-        throw new ViduTransportFailure('response_too_large');
-      }
-      chunks.push(result.value);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxResponseBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ViduTransportFailure('response_too_large');
     }
-  } finally {
-    reader.releaseLock();
+    chunks.push(value);
   }
-  const body = new Uint8Array(total);
+  const merged = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
-    body.set(chunk, offset);
+    merged.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return body;
+  return merged;
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' || /aborted/i.test(error.message))
+  );
 }

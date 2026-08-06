@@ -27,7 +27,7 @@ test('video editor shell consumes only the controlled B1 operations', () => {
   }
   assert.doesNotMatch(
     editorSource,
-    /videoWorkspaces|videoSubmissions|providers|fetch\(|localStorage/
+    /videoWorkspaces|videoSubmissions|videoFeatures|providers|fetch\(|localStorage/
   );
 });
 

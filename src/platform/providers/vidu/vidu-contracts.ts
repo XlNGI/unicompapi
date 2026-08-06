@@ -62,6 +62,8 @@ export const frozenViduVideoModelKeys = [
 ] as const;
 
 export const frozenViduGeminiImageModelKeys = [
+  'viduq2',
+  'viduq1',
   'q2-fast',
   'q2-pro',
   'q3-fast',
@@ -246,6 +248,84 @@ function imageV1Contract(providerModelKey: 'viduimage-2'): ViduModelContractV1 {
 function geminiImageContract(
   providerModelKey: (typeof frozenViduGeminiImageModelKeys)[number]
 ): ViduModelContractV1 {
+  // Official reference2image models: https://platform.vidu.cn/docs/reference-to-image
+  // viduq2 supports text-to-image (0 images), reference-to-image, and image edit.
+  // viduq1 supports reference-to-image only (1–7 images).
+  if (providerModelKey === 'viduq2') {
+    const textSchemaId = `parameters.vidu.gemini-image-v2.text-to-image.${providerModelKey}`;
+    const referenceSchemaId =
+      `parameters.vidu.gemini-image-v2.reference-to-image.${providerModelKey}`;
+    const editSchemaId = `parameters.vidu.gemini-image-v2.image-edit.${providerModelKey}`;
+    const commonFields: readonly ParameterFieldSchemaV2[] = [
+      optionalString('aspect_ratio', 10),
+      optionalString('resolution', 20),
+      optionalInteger('seed', 30, 0, 2_147_483_647)
+    ];
+    return {
+      definition: definition(
+        providerModelKey,
+        VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+        VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
+        VIDU_GEMINI_IMAGE_V2_SOURCE_DOCUMENT_REVISION,
+        [
+          feature(
+            'text_to_image',
+            'image_generation',
+            textSchemaId,
+            VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID
+          ),
+          feature(
+            'reference_to_image',
+            'reference_to_image',
+            referenceSchemaId,
+            VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
+          ),
+          feature(
+            'image_edit',
+            'image_editing',
+            editSchemaId,
+            VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
+          )
+        ]
+      ),
+      parameterSchemas: [
+        schema(textSchemaId, 'text_to_image', commonFields),
+        schema(referenceSchemaId, 'reference_to_image', commonFields),
+        schema(editSchemaId, 'image_edit', commonFields)
+      ],
+      defaultProfileStatus: 'restricted'
+    };
+  }
+
+  if (providerModelKey === 'viduq1') {
+    const schemaId =
+      `parameters.vidu.gemini-image-v2.reference-to-image.${providerModelKey}`;
+    return {
+      definition: definition(
+        providerModelKey,
+        VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+        VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
+        VIDU_GEMINI_IMAGE_V2_SOURCE_DOCUMENT_REVISION,
+        [feature(
+          'reference_to_image',
+          'reference_to_image',
+          schemaId,
+          VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+          VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
+        )]
+      ),
+      parameterSchemas: [schema(schemaId, 'reference_to_image', [
+        optionalString('aspect_ratio', 10),
+        optionalString('resolution', 20),
+        optionalInteger('seed', 30, 0, 2_147_483_647)
+      ])],
+      defaultProfileStatus: 'restricted'
+    };
+  }
+
   const schemaId = `parameters.vidu.gemini-image-v2.reference-to-image.${providerModelKey}`;
   return {
     definition: definition(

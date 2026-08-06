@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LuArrowRight, LuSparkles } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { EmptyState } from '../../../components/EmptyState';
+import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
@@ -154,29 +154,13 @@ export function ImageQuickWorkspace({
               <p>展示服务商返回的图片 URL；任务中心调用记录同步可见。</p>
             </div>
           </header>
-          {resultUrls.length === 0 && !workId ? (
-            <EmptyState
-              description="填写提示词并选择模型后点生成。"
-              icon="画"
-              readOnly
-              title="尚无生成结果"
-            />
-          ) : (
-            <div className="uc-image-quick__result-list">
-              {resultUrls.map((url) => (
-                <article key={url} className="uc-image-quick__result-item">
-                  <strong>图片 URL</strong>
-                  <a href={url} rel="noreferrer" target="_blank">{url}</a>
-                  <img alt="生成结果预览" src={url} />
-                </article>
-              ))}
-              {workId ? (
-                <p className="uc-image-quick__hint" role="status">
-                  本地作品已登记：{workId}
-                </p>
-              ) : null}
-            </div>
-          )}
+          <GenerationResultPreview
+            emptyDescription="填写提示词并选择模型后点生成。"
+            emptyTitle="尚无生成结果"
+            mediaKind="image"
+            remoteUrls={resultUrls}
+            workId={workId}
+          />
           <div className="uc-image-quick__result-actions">
             <Button
               disabled={busy || dirty}

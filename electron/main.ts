@@ -105,6 +105,11 @@ const storageLifecycle = registerStorageIpcHandlers({
   additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
   vidu: viduComposition,
   runtimeAuthorization: runtimeAuthorizationLedger,
+  textSubmission: {
+    credentialVault: viduComposition.credentialVault,
+    deepSeekRuntime: liveProviders.deepSeekRuntime,
+    newApiRuntime: liveProviders.newApiRuntime
+  },
   onActiveExportCountChanged: (count) => {
     powerPolicyRead = powerPolicyRead
       .then(async () => {

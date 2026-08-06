@@ -84,6 +84,16 @@ describe('Vidu Provider Package migration', () => {
         (feature) => feature.productFeature
       )
     ).toEqual(['text_to_image', 'image_edit']);
+    expect(
+      createViduModelContract('viduq2').definition.profileTemplates[0].features.map(
+        (feature) => feature.productFeature
+      )
+    ).toEqual(['text_to_image', 'reference_to_image', 'image_edit']);
+    expect(
+      createViduModelContract('viduq1').definition.profileTemplates[0].features.map(
+        (feature) => feature.productFeature
+      )
+    ).toEqual(['reference_to_image']);
     expect(createViduModelContract('q3-lite')).toMatchObject({
       defaultProfileStatus: 'restricted'
     });

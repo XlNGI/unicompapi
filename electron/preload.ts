@@ -21,6 +21,10 @@ import {
   type ImageFeatureApi
 } from '../src/shared/image-feature-ipc';
 import {
+  imagePromptEnhanceIpcChannels,
+  type ImagePromptEnhanceApi
+} from '../src/shared/image-prompt-enhance-ipc';
+import {
   videoWorkspaceIpcChannels,
   type VideoWorkspaceApi
 } from '../src/shared/video-workspace-ipc';
@@ -28,10 +32,6 @@ import {
   videoFeatureIpcChannels,
   type VideoFeatureApi
 } from '../src/shared/video-feature-ipc';
-import {
-  videoSubmissionIpcChannels,
-  type VideoSubmissionApi
-} from '../src/shared/video-submission-ipc';
 import {
   videoEditorIpcChannels,
   type VideoEditorApi
@@ -204,6 +204,34 @@ const imageFeatures: ImageFeatureApi = {
     })
 };
 
+const imagePromptEnhance: ImagePromptEnhanceApi = {
+  listCandidates: (productFeature) =>
+    ipcRenderer.invoke(imagePromptEnhanceIpcChannels.listCandidates, {
+      productFeature
+    }),
+  prepare: (draftId, draftUpdatedAt, productFeature, candidateId, parameterValues) =>
+    ipcRenderer.invoke(imagePromptEnhanceIpcChannels.prepare, {
+      draftId,
+      draftUpdatedAt,
+      productFeature,
+      candidateId,
+      parameterValues
+    }),
+  submit: (
+    draftId,
+    draftUpdatedAt,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  ) => ipcRenderer.invoke(imagePromptEnhanceIpcChannels.submit, {
+    draftId,
+    draftUpdatedAt,
+    routeSelectionToken,
+    confirmationId,
+    confirmed
+  })
+};
+
 const videoFeatures: VideoFeatureApi = {
   listCandidates: (draftId, draftUpdatedAt) =>
     ipcRenderer.invoke(videoFeatureIpcChannels.listCandidates, {
@@ -268,38 +296,6 @@ const videoWorkspaces: VideoWorkspaceApi = {
   createFromImageWork: (workId) =>
     ipcRenderer.invoke(videoWorkspaceIpcChannels.createFromImageWork, {
       workId
-    })
-};
-
-const videoSubmissions: VideoSubmissionApi = {
-  preflight: (draftId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.preflight, { draftId }),
-  createTask: (draftId, draftUpdatedAt, modelId, confirmations) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.createTask, {
-      draftId,
-      draftUpdatedAt,
-      modelId,
-      confirmations
-    }),
-  createExecution: (taskId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.createExecution, { taskId }),
-  invokeExecution: (executionId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.invokeExecution, {
-      executionId
-    }),
-  refreshExecution: (executionId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.refreshExecution, {
-      executionId
-    }),
-  cancelExecution: (executionId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.cancelExecution, {
-      executionId
-    }),
-  recoverExecutions: (draftId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.recoverExecutions, { draftId }),
-  receiveResult: (executionId) =>
-    ipcRenderer.invoke(videoSubmissionIpcChannels.receiveResult, {
-      executionId
     })
 };
 
@@ -645,9 +641,9 @@ contextBridge.exposeInMainWorld('unicomp', {
   chatContexts,
   imageSubmissions,
   imageFeatures,
+  imagePromptEnhance,
   videoFeatures,
   imageWorkspaces,
-  videoSubmissions,
   videoEditors,
   videoWorkspaces,
   platform: process.platform,

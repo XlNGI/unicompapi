@@ -5,7 +5,8 @@ export const promptSupplementSources = [
   'structure',
   'constraint',
   'translation',
-  'model_format'
+  'model_format',
+  'enhancement'
 ] as const;
 
 export type PromptSupplementSource =

@@ -170,12 +170,13 @@ export function applyPackagedViduCatalogInstall(
     }
 
     const contract = createViduModelContract(providerModelKey);
-    if (
-      !modelDefinitions.some(
-        (definition) => definition.definitionId === contract.definition.definitionId
-      )
-    ) {
+    const existingDefinitionIndex = modelDefinitions.findIndex(
+      (definition) => definition.definitionId === contract.definition.definitionId
+    );
+    if (existingDefinitionIndex < 0) {
       modelDefinitions.push(contract.definition);
+    } else {
+      modelDefinitions[existingDefinitionIndex] = contract.definition;
     }
 
     const template = contract.definition.profileTemplates[0];
@@ -218,6 +219,32 @@ export function applyPackagedViduCatalogInstall(
       models = models.map((candidate) =>
         candidate.id === model!.id ? updated : candidate
       );
+    } else {
+      // Refresh declared features/evidence when packaged contracts expand
+      // (e.g. viduq2 gaining text_to_image) without recreating the profile id.
+      const nextFeatures = template.features;
+      const nextEvidenceIds = capabilities
+        .filter((evidence) => evidence.modelId === model!.id)
+        .map((evidence) => evidence.id);
+      const featuresChanged =
+        JSON.stringify(existingProfile.features) !== JSON.stringify(nextFeatures);
+      const evidenceChanged =
+        JSON.stringify(existingProfile.evidenceIds) !== JSON.stringify(nextEvidenceIds);
+      if (featuresChanged || evidenceChanged) {
+        modelProfiles = modelProfiles.map((profile) =>
+          profile.profileId === existingProfile.profileId
+            ? {
+                ...profile,
+                features: nextFeatures,
+                evidenceIds: nextEvidenceIds,
+                sourceTemplateId: template.templateId,
+                adapterKey: template.adapterKey,
+                protocolBindingId: model!.protocolBindingId,
+                recordedAt: input.now
+              }
+            : profile
+        );
+      }
     }
   }
 
@@ -301,7 +328,7 @@ function ensureProtocolBindings(
         'https://api.vidu.cn/ent/v2/image/reference2image/{providerModelKey}',
       authScheme: 'token',
       executionLifecycle: 'synchronous_completed',
-      supportedPurposes: ['reference_to_image']
+      supportedPurposes: ['reference_to_image', 'image_generation', 'image_editing']
     }
   ];
 
@@ -317,10 +344,16 @@ function ensureProtocolBindings(
         binding.adapterKind === spec.adapterKind
     );
     if (found) {
-      if (found.authScheme !== spec.authScheme) {
+      const purposesMatch =
+        found.supportedPurposes.length === spec.supportedPurposes.length &&
+        spec.supportedPurposes.every((purpose) =>
+          found.supportedPurposes.includes(purpose)
+        );
+      if (found.authScheme !== spec.authScheme || !purposesMatch) {
         const upgraded: ProviderProtocolBinding = {
           ...found,
           authScheme: spec.authScheme,
+          supportedPurposes: [...spec.supportedPurposes],
           updatedAt: now
         };
         const index = protocolBindings.findIndex((item) => item.id === found.id);
@@ -376,6 +409,13 @@ function purposesForModelKey(
   }
   if (providerModelKey === 'viduimage-2') {
     return ['image_generation', 'image_editing'];
+  }
+  // Official reference2image models from Vidu docs.
+  if (providerModelKey === 'viduq2') {
+    return ['image_generation', 'reference_to_image', 'image_editing'];
+  }
+  if (providerModelKey === 'viduq1') {
+    return ['reference_to_image'];
   }
   return ['reference_to_image'];
 }

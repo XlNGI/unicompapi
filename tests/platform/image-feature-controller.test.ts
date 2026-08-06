@@ -11,9 +11,11 @@ import {
   toProtocolBindingId,
   toProviderId,
   toUsageSchemaId,
+  type FeatureCandidateSubjectV1,
   type ImageWorkspaceDraft,
   type ImageWorkspaceRepository,
-  type ParameterSchemaV2
+  type ParameterSchemaV2,
+  type SubmissionUserConfirmationV1
 } from '../../src/domain';
 import {
   ImageFeatureController,
@@ -22,6 +24,7 @@ import {
   RouteSelectionTokenVault,
   type ResolvedFeatureCandidateV1
 } from '../../src/platform';
+import type { ImageFeatureSubmissionDto } from '../../src/shared/image-feature-ipc';
 
 const projectId = toProjectId('project-image-feature-controller');
 const createdAt = toIsoTimestamp('2026-08-03T12:00:00.000Z');
@@ -134,9 +137,75 @@ describe('ImageFeatureController', () => {
       error: { code: 'stale_route_selection' }
     });
   });
+
+  it('prepare → confirm → submit returns completed when runtime submit is wired', async () => {
+    const fixture = createFixture({
+      async submit() {
+        return {
+          schemaVersion: 1 as const,
+          status: 'completed' as const,
+          retryAllowed: false as const,
+          resultImageUrls: ['https://example.test/generated.png'],
+          workId: 'work-fixture-image'
+        };
+      }
+    });
+    const prepared = await fixture.controller.prepareSubmission({
+      draftId: fixture.draft.id,
+      draftUpdatedAt: fixture.draft.updatedAt,
+      candidateId: 'candidate-image-controller'
+    });
+    if (!prepared.ok) throw new Error(prepared.error.message);
+
+    // Simulate autosave bumping updatedAt after prepare (UI race that previously cleared prep).
+    const bumped = createImageWorkspaceDraft({
+      ...fixture.draft,
+      updatedAt: toIsoTimestamp('2026-08-03T12:00:30.000Z')
+    });
+    fixture.setDraft(bumped);
+
+    await expect(fixture.controller.submitDraft({
+      draftId: bumped.id,
+      draftUpdatedAt: bumped.updatedAt,
+      routeSelectionToken: prepared.value.routeSelectionToken,
+      confirmationId: prepared.value.confirmation.confirmationId,
+      confirmed: true
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'stale_route_selection' }
+    });
+
+    const preparedAgain = await fixture.controller.prepareSubmission({
+      draftId: bumped.id,
+      draftUpdatedAt: bumped.updatedAt,
+      candidateId: 'candidate-image-controller'
+    });
+    if (!preparedAgain.ok) throw new Error(preparedAgain.error.message);
+
+    await expect(fixture.controller.submitDraft({
+      draftId: bumped.id,
+      draftUpdatedAt: bumped.updatedAt,
+      routeSelectionToken: preparedAgain.value.routeSelectionToken,
+      confirmationId: preparedAgain.value.confirmation.confirmationId,
+      confirmed: true
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        status: 'completed',
+        resultImageUrls: ['https://example.test/generated.png'],
+        workId: 'work-fixture-image'
+      }
+    });
+  });
 });
 
-function createFixture() {
+function createFixture(options?: {
+  submit?: (input: {
+    readonly subject: FeatureCandidateSubjectV1;
+    readonly routeSelectionToken: string;
+    readonly confirmation: SubmissionUserConfirmationV1;
+  }) => Promise<ImageFeatureSubmissionDto>;
+}) {
   let draft: ImageWorkspaceDraft = createImageWorkspaceDraft({
     ...createEmptyImageWorkspaceDraft({
       id: toDraftId('draft-image-feature-controller'),
@@ -184,7 +253,11 @@ function createFixture() {
       projectName: 'Image feature fixture',
       rootDirectory: 'C:\\fixture\\image-feature'
     }),
-    getRuntime: () => ({ drafts, candidates }),
+    getRuntime: () => ({
+      drafts,
+      candidates,
+      ...(options?.submit ? { submit: options.submit } : {})
+    }),
     mutations: new ImageWorkspaceMutationCoordinator()
   });
   return {

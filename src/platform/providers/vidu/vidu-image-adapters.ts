@@ -173,38 +173,54 @@ export class ViduGeminiImageV2Adapter implements ProviderProtocolSubmitPort {
           'not_retryable'
         );
       }
-      assertSingleInputCount(request, 1);
       const image = requireImageSubmission(request);
+      const purpose = image.purpose;
       if (
-        request.evidence.capability !== 'reference_to_image' ||
-        !request.binding.supportedPurposes.includes('reference_to_image')
+        purpose !== 'reference_to_image' &&
+        purpose !== 'image_generation' &&
+        purpose !== 'image_editing'
+      ) {
+        return failedBeforeSubmission(
+          'The Gemini Image V2 adapter does not support this operation',
+          'not_retryable'
+        );
+      }
+      if (
+        request.evidence.capability !== purpose ||
+        !request.binding.supportedPurposes.includes(purpose)
       ) {
         throw new ViduImageAdapterError(
           'The Gemini image capability does not match the task',
           'not_retryable'
         );
       }
+      const expectedInputs =
+        purpose === 'image_generation' ? 0 : 1;
+      assertSingleInputCount(request, expectedInputs);
       const connection = await requireConnection(
         this.dependencies.connections,
         request.model.connectionId
       );
-      const material = await this.dependencies.materials.resolve({
-        projectId: request.task.projectId,
-        assetId: request.task.submission.assetIds![0]
-      });
       const generationConfig = geminiGenerationConfig(image.parameters);
+      const parts: Array<Record<string, unknown>> = [
+        { text: requirePrompt(request) }
+      ];
+      if (expectedInputs === 1) {
+        const material = await this.dependencies.materials.resolve({
+          projectId: request.task.projectId,
+          assetId: request.task.submission.assetIds![0]
+        });
+        parts.push({
+          inlineData: {
+            mimeType: material.mimeType,
+            data: material.base64
+          }
+        });
+      }
       const body = {
         content: [{
           role: 'user',
-          part: [
-            { text: requirePrompt(request) },
-            {
-              inlineData: {
-                mimeType: material.mimeType,
-                data: material.base64
-              }
-            }
-          ]
+          part: parts
         }],
         generationConfig: {
           responseModalities: ['IMAGE'],
@@ -368,9 +384,15 @@ function imageV1Parameters(
 function geminiGenerationConfig(
   parameters: Readonly<Record<string, DynamicParameterValue>>
 ): Record<string, string> | undefined {
-  const allowed = new Set(['aspectRatio', 'imageSize']);
+  const aliases: Readonly<Record<string, string>> = {
+    aspectRatio: 'aspectRatio',
+    imageSize: 'imageSize',
+    aspect_ratio: 'aspectRatio',
+    resolution: 'imageSize'
+  };
+  const ignored = new Set(['seed']);
   for (const key of Object.keys(parameters)) {
-    if (!allowed.has(key)) {
+    if (!aliases[key] && !ignored.has(key)) {
       throw new ViduImageAdapterError(
         'The Gemini image request contains an unsupported parameter',
         'not_retryable'
@@ -378,17 +400,20 @@ function geminiGenerationConfig(
     }
   }
   const result: Record<string, string> = {};
-  for (const key of allowed) {
-    const value = parameters[key];
-    if (value !== undefined) {
-      if (typeof value !== 'string' || value.trim().length === 0) {
-        throw new ViduImageAdapterError(
-          'The Gemini image parameter is invalid',
-          'not_retryable'
-        );
-      }
-      result[key] = value;
+  for (const [inputKey, outputKey] of Object.entries(aliases)) {
+    const value = parameters[inputKey];
+    if (value === undefined) continue;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      // Official docs expose seed as int; ignore for Gemini imageConfig.
+      continue;
     }
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      throw new ViduImageAdapterError(
+        'The Gemini image parameter is invalid',
+        'not_retryable'
+      );
+    }
+    result[outputKey] = value;
   }
   return Object.keys(result).length > 0 ? result : undefined;
 }
@@ -477,6 +502,20 @@ function mapSubmitFailure(
   providerOperationId: string,
   requestStarted: boolean
 ): ProviderSubmitOutcome {
+  if (requestStarted) {
+    // Request bytes were already handed to transport: preserve a safe, code-derived
+    // message so the UI can show remote feedback without leaking response bodies.
+    const message = error instanceof ViduRuntimeError ||
+      error instanceof ViduImageAdapterError ||
+      error instanceof ControlledImageMaterialError
+      ? error.message
+      : 'The synchronous Vidu submission outcome is unknown';
+    return {
+      kind: 'submission_outcome_unknown',
+      providerOperationId,
+      message
+    };
+  }
   if (error instanceof ViduImageAdapterError) {
     return failedBeforeSubmission(error.message, error.retryability);
   }
@@ -484,23 +523,6 @@ function mapSubmitFailure(
     return failedBeforeSubmission(error.message, 'not_retryable');
   }
   if (error instanceof ViduRuntimeError) {
-    if (requestStarted &&
-      [
-        'timeout',
-        'network_error',
-        'provider_unavailable',
-        'response_too_large',
-        'invalid_response',
-        'redirect_not_allowed',
-        'cancelled'
-      ].includes(error.code)
-    ) {
-      return {
-        kind: 'submission_outcome_unknown',
-        providerOperationId,
-        message: 'The synchronous Vidu submission outcome is unknown'
-      };
-    }
     return failedBeforeSubmission(error.message, error.retryability);
   }
   return failedBeforeSubmission(

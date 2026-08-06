@@ -41,7 +41,12 @@ test('text-to-video keeps prompt and shot planning local', () => {
 
 test('text-to-video uses only the unified candidate and confirmation panel', () => {
   assert.match(source, /VideoFeatureSubmissionPanel/);
+  assert.match(source, /showProgressSteps/);
+  assert.match(source, /GenerationResultPreview/);
+  assert.match(source, /onSubmissionComplete/);
   assert.match(panel, /routeSelectionToken/);
   assert.match(panel, /confirmationId/);
+  assert.match(panel, /SubmissionProgressSteps/);
+  assert.match(panel, /showProgressSteps = false/);
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
 });
