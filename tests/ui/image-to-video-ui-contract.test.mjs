@@ -56,7 +56,12 @@ test('image-to-video preserves separate prompt, requirements and context facts',
 
 test('image-to-video uses the unified feature panel and opens derived drafts', () => {
   assert.match(source, /VideoFeatureSubmissionPanel/);
+  assert.match(source, /showProgressSteps/);
+  assert.match(source, /GenerationResultPreview/);
+  assert.match(source, /createWorkMediaHandle|onSubmissionComplete/);
+  assert.match(panel, /SubmissionProgressSteps/);
   assert.match(page, /preferredDraftId=\{preferredDraftId\}/);
   assert.match(shell, /drafts\.find\(\(draft\) => draft\.draftId === selectedDraftId\)/);
+  assert.match(shell, /usesFlowAutosave/);
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
 });

@@ -168,7 +168,7 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
         'https://api.vidu.cn/ent/v2/image/reference2image/{providerModelKey}',
       authScheme: 'token',
       executionLifecycle: 'synchronous_completed',
-      supportedPurposes: ['reference_to_image'],
+      supportedPurposes: ['reference_to_image', 'image_generation', 'image_editing'],
       createdAt: catalogTimestamp,
       updatedAt: catalogTimestamp
     })
@@ -196,7 +196,9 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
       providerModelKey,
       modelId: `model-image-vidu-gemini-${providerModelKey}`,
       binding: protocolBindings[2],
-      purposes: ['reference_to_image'] as const
+      purposes: providerModelKey === 'viduq2'
+        ? (['image_generation', 'reference_to_image', 'image_editing'] as const)
+        : (['reference_to_image'] as const)
     }))
   ];
 

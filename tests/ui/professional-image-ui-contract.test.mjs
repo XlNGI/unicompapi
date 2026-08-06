@@ -10,6 +10,10 @@ const featurePanelSource = await readFile(
   'src/pages/creation/image/ImageFeatureSubmissionPanel.tsx',
   'utf8'
 );
+const enhancePanelSource = await readFile(
+  'src/pages/creation/image/ImagePromptEnhancePanel.tsx',
+  'utf8'
+);
 const selectorSource = await readFile(
   'src/pages/creation/WorkspaceContextSelector.tsx',
   'utf8'
@@ -18,7 +22,11 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
-const source = `${professionalSource}\n${featurePanelSource}\n${selectorSource}`;
+const enhanceServiceSource = await readFile(
+  'src/platform/providers/image-prompt-enhance-submission.ts',
+  'utf8'
+);
+const source = `${professionalSource}\n${featurePanelSource}\n${selectorSource}\n${enhancePanelSource}`;
 
 test('professional image requires an explicit text or reference feature', () => {
   assert.match(professionalSource, /aria-label="生图方式"/);
@@ -28,7 +36,7 @@ test('professional image requires an explicit text or reference feature', () => 
   assert.match(professionalSource, /图生图/);
   assert.match(professionalSource, /图生图必须选择恰好一张图片/);
   assert.match(professionalSource, /文生图不能包含图片/);
-  assert.match(professionalSource, /clearInput\(draft\.draftId\)/);
+  assert.match(professionalSource, /clearInput\(saved\.draftId\)/);
 });
 
 test('professional image consumes only revision-pinned ProjectContext', () => {
@@ -40,6 +48,42 @@ test('professional image consumes only revision-pinned ProjectContext', () => {
   assert.match(selectorSource, /includeInPrompt: true/);
   assert.match(selectorSource, /projectContextsOnly[\s\S]*visibleSections/);
   assert.match(professionalSource, /清理旧上下文/);
+});
+
+test('professional image gates models until an explicit feature is chosen', () => {
+  assert.match(professionalSource, /requireExplicitFeature/);
+  assert.match(featurePanelSource, /requireExplicitFeature = false/);
+  assert.match(featurePanelSource, /awaitingFeatureChoice/);
+  assert.match(
+    featurePanelSource,
+    /请先在上方选择文生图或图生图；选定功能后才会显示可用模型与参数/
+  );
+  assert.match(
+    professionalSource,
+    /请先选择文生图或图生图，再显示可用模型与参数/
+  );
+  assert.match(featurePanelSource, /\{awaitingFeatureChoice \? \(/);
+});
+
+const progressStepsSource = await readFile(
+  'src/components/SubmissionProgressSteps.tsx',
+  'utf8'
+);
+
+test('professional image shows in-page four-step submit progress', () => {
+  assert.match(professionalSource, /showProgressSteps/);
+  assert.match(featurePanelSource, /showProgressSteps = false/);
+  assert.match(featurePanelSource, /SubmissionProgressSteps/);
+  assert.match(progressStepsSource, /准备/);
+  assert.match(progressStepsSource, /请求中/);
+  assert.match(progressStepsSource, /等待上游返回数据/);
+  assert.match(progressStepsSource, /完成/);
+  assert.match(progressStepsSource, /准备已完成/);
+  assert.match(featurePanelSource, /busyRef/);
+  assert.match(
+    featurePanelSource,
+    /Do NOT clear it on draft\.updatedAt \/ autosave/
+  );
 });
 
 test('professional image preserves prompt layers and dynamic safe parameters', () => {
@@ -54,8 +98,46 @@ test('professional image preserves prompt layers and dynamic safe parameters', (
   }
   assert.match(professionalSource, /systemSupplements/);
   assert.match(professionalSource, /finalPrompt/);
-  assert.match(featurePanelSource, /parameterSchema\.fields\.map/);
+  assert.match(
+    featurePanelSource,
+    /toDynamicParameterFields\(selectedCandidate\.parameterSchema\.fields\)/
+  );
   assert.doesNotMatch(featurePanelSource, /ProviderRegistry|CapabilityEvidence/);
+});
+
+test('professional image offers optional prompt enhance without image Task', () => {
+  assert.match(professionalSource, /ImagePromptEnhancePanel/);
+  assert.match(enhancePanelSource, /text_chat/);
+  assert.match(enhancePanelSource, /text_reasoning/);
+  assert.match(enhancePanelSource, /imagePromptEnhance/);
+  assert.match(enhancePanelSource, /SubmissionProgressSteps/);
+  assert.match(enhancePanelSource, /系统补充/);
+  assert.match(enhanceServiceSource, /source: 'enhancement'/);
+  assert.doesNotMatch(enhanceServiceSource, /createImageTask|ImageDraftArtifactFactory/);
+  assert.doesNotMatch(
+    enhancePanelSource,
+    /createTask\(|createExecution\(|submitDraft\(/
+  );
+  assert.doesNotMatch(professionalSource, /ImageToPromptWorkspace/);
+  assert.doesNotMatch(
+    featurePanelSource,
+    /请先保存本地草稿，再读取候选或准备生成/
+  );
+  assert.doesNotMatch(
+    enhancePanelSource,
+    /请先保存本地草稿，再准备提示词增强/
+  );
+});
+
+test('professional image autosaves drafts without a manual save gate', async () => {
+  const workbench = await readFile(
+    'src/pages/creation/image/ImageWorkbenchPage.tsx',
+    'utf8'
+  );
+  assert.match(workbench, /正在自动保存/);
+  assert.match(workbench, /已自动保存/);
+  assert.match(workbench, /isProfessionalImage/);
+  assert.match(workbench, /imageWorkspaces\.update\(/);
 });
 
 test('professional image uses controlled local media and the safe feature API', () => {

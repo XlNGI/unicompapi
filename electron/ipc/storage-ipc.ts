@@ -9,20 +9,18 @@ import {
   ImageLocalMediaController,
   ImageFeatureController,
   VideoFeatureController,
+  ImagePromptEnhanceController,
   ImageSubmissionController,
   ImageWorkspaceController,
   ImageWorkspaceMutationCoordinator,
   ProjectSessionController,
   ProjectCatalogService,
   JsonProviderRegistryStore,
-  JsonAssetRepository,
-  JsonVideoWorkspaceRepository,
-  JsonProjectContextRepository,
+  JsonImageWorkspaceRepository,
   LocalMediaHandleRegistry,
   NodeProjectStorage,
   StorageProjectSessionRegistry,
   VideoReferenceMediaController,
-  VideoSubmissionController,
   VideoEditorController,
   VideoEditorMediaController,
   VideoExportController,
@@ -33,17 +31,17 @@ import {
   createDevelopmentVideoEditorPreviewAdapter,
   type ProviderUsageSchemaResolverPort,
   type StorageProjectSession,
-  ProjectVideoFeatureSubjectResolver,
-  ProviderFeatureCandidateService,
-  ProviderFeatureContractRegistry,
   ProviderPackageRegistry,
-  RegistryFeatureCandidateSource,
-  RouteSelectionTokenVault,
   createImageFeatureControllerRuntime,
+  createVideoFeatureControllerRuntime,
   type ImageFeatureControllerRuntime,
+  type VideoFeatureControllerRuntime,
   type ProviderCandidateRuntimeAuthorizationPort,
   type RuntimeAuthorizationOrchestrationPort,
-  createVideoProviderFeatureContracts,
+  ImagePromptEnhanceService,
+  type DeepSeekSharedRuntime,
+  type NewApiSharedRuntime,
+  type SecureCredentialVault,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
@@ -54,9 +52,9 @@ import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
 import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
 import { imageFeatureIpcChannels } from '../../src/shared/image-feature-ipc';
+import { imagePromptEnhanceIpcChannels } from '../../src/shared/image-prompt-enhance-ipc';
 import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
 import { videoFeatureIpcChannels } from '../../src/shared/video-feature-ipc';
-import { videoSubmissionIpcChannels } from '../../src/shared/video-submission-ipc';
 import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
 import type { ElectronViduComposition } from './vidu-composition';
 
@@ -76,6 +74,11 @@ export function registerStorageIpcHandlers(options: {
   readonly providerPackages?: ProviderPackageRegistry;
   readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort &
     Partial<RuntimeAuthorizationOrchestrationPort>;
+  readonly textSubmission?: {
+    readonly credentialVault: SecureCredentialVault;
+    readonly deepSeekRuntime: DeepSeekSharedRuntime;
+    readonly newApiRuntime: NewApiSharedRuntime;
+  };
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
   const choosePath = async (
@@ -161,6 +164,48 @@ export function registerStorageIpcHandlers(options: {
     getRuntime: getImageFeatureRuntime,
     mutations: imageMutations
   });
+  let imagePromptEnhanceRuntime: {
+    readonly projectId: string;
+    readonly rootDirectory: string;
+    readonly value: ImagePromptEnhanceService;
+  } | undefined;
+  const getImagePromptEnhanceService = (session: StorageProjectSession) => {
+    if (!options.textSubmission) return undefined;
+    if (
+      imagePromptEnhanceRuntime?.projectId === session.projectId &&
+      imagePromptEnhanceRuntime.rootDirectory === session.rootDirectory
+    ) {
+      return imagePromptEnhanceRuntime.value;
+    }
+    const authorization = options.runtimeAuthorization ?? denyRuntimeAuthorization;
+    const storage = new NodeProjectStorage(session.rootDirectory);
+    const drafts = new JsonImageWorkspaceRepository(storage, session.projectId);
+    const value = new ImagePromptEnhanceService({
+      projectId: session.projectId,
+      drafts,
+      runtimes: {
+        deepSeekRuntime: options.textSubmission.deepSeekRuntime,
+        newApiRuntime: options.textSubmission.newApiRuntime,
+        credentialVault: options.textSubmission.credentialVault,
+        providerRegistry,
+        providerPackages
+      },
+      runtimeAuthorization: authorization,
+      submissionAuthorization: hasSubmissionAuthorization(authorization)
+        ? authorization
+        : undefined
+    });
+    imagePromptEnhanceRuntime = {
+      projectId: session.projectId,
+      rootDirectory: session.rootDirectory,
+      value
+    };
+    return value;
+  };
+  const imagePromptEnhance = new ImagePromptEnhanceController({
+    getSession: () => sessionRegistry.get(),
+    getService: getImagePromptEnhanceService
+  });
   const imageLocalMedia = new ImageLocalMediaController({
     getSession: () => sessionRegistry.get(),
     chooseImageFile: () => choosePath(['openFile']),
@@ -178,16 +223,10 @@ export function registerStorageIpcHandlers(options: {
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
   });
-  const videoFeatureContracts = new ProviderFeatureContractRegistry(
-    createVideoProviderFeatureContracts()
-  );
   let videoFeatureRuntime: {
     readonly projectId: string;
     readonly rootDirectory: string;
-    readonly value: {
-      readonly drafts: JsonVideoWorkspaceRepository;
-      readonly candidates: ProviderFeatureCandidateService;
-    };
+    readonly value: VideoFeatureControllerRuntime;
   } | undefined;
   const getVideoFeatureRuntime = (session: StorageProjectSession) => {
     if (
@@ -196,31 +235,34 @@ export function registerStorageIpcHandlers(options: {
     ) {
       return videoFeatureRuntime.value;
     }
-    const storage = new NodeProjectStorage(session.rootDirectory);
-    const drafts = new JsonVideoWorkspaceRepository(storage, session.projectId);
-    const contexts = new JsonProjectContextRepository(storage, session.projectId);
-    const assets = new JsonAssetRepository(storage, session.projectId);
-    const candidates = new ProviderFeatureCandidateService(
-      new ProjectVideoFeatureSubjectResolver(
-        session.projectId,
-        drafts,
-        contexts,
-        assets
-      ),
-      new RegistryFeatureCandidateSource(
-        providerRegistry,
-        providerPackages,
-        videoFeatureContracts,
-        options.runtimeAuthorization ?? denyRuntimeAuthorization
-      ),
-      new RouteSelectionTokenVault()
-    );
+    const authorization = options.runtimeAuthorization ?? denyRuntimeAuthorization;
+    const value = createVideoFeatureControllerRuntime({
+      session,
+      providerRegistry,
+      providerPackages,
+      runtimeAuthorization: authorization,
+      submissionAuthorization: hasSubmissionAuthorization(authorization)
+        ? authorization
+        : undefined,
+      ...(options.vidu
+        ? {
+            videoSubmission: {
+              viduPackage: options.vidu.providerPackage,
+              credentialVault: options.vidu.credentialVault
+            },
+            asyncOperationPort: providerOperations?.videoAsync,
+            rememberVideoOperation: providerOperations?.rememberVideoOperation,
+            resultReceiver: providerOperations?.videoResultReceiver
+          }
+        : {}),
+      mutations: videoMutations
+    });
     videoFeatureRuntime = {
       projectId: session.projectId,
       rootDirectory: session.rootDirectory,
-      value: { drafts, candidates }
+      value
     };
-    return videoFeatureRuntime.value;
+    return value;
   };
   const videoFeatures = new VideoFeatureController({
     getSession: () => sessionRegistry.get(),
@@ -286,14 +328,6 @@ export function registerStorageIpcHandlers(options: {
     handles: mediaHandles,
     mutations: videoMutations
   });
-  const videoSubmissions = new VideoSubmissionController({
-    getSession: () => sessionRegistry.get(),
-    providerRegistry,
-    mutations: videoMutations,
-    operationPort: providerOperations?.video,
-    asyncOperationPort: providerOperations?.videoAsync,
-    resultReceiver: providerOperations?.videoResultReceiver
-  });
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
@@ -315,6 +349,7 @@ export function registerStorageIpcHandlers(options: {
         controller.waitForMutations(),
         imageWorkspaces.waitForMutations(),
         imageFeatures.waitForOperations(),
+        imagePromptEnhance.waitForOperations(),
         videoWorkspaces.waitForMutations(),
         videoFeatures.waitForOperations(),
         videoEditors.waitForMutations(),
@@ -323,6 +358,7 @@ export function registerStorageIpcHandlers(options: {
     },
     afterSessionChange: async () => {
       imageFeatureRuntime = undefined;
+      imagePromptEnhanceRuntime = undefined;
       videoFeatureRuntime = undefined;
       await videoExports.recoverExports();
     },
@@ -444,6 +480,18 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(
     imageFeatureIpcChannels.generateQuickImage,
     (_event, request: unknown) => imageFeatures.generateQuickImage(request)
+  );
+  ipcMain.handle(
+    imagePromptEnhanceIpcChannels.listCandidates,
+    (_event, request: unknown) => imagePromptEnhance.listCandidates(request)
+  );
+  ipcMain.handle(
+    imagePromptEnhanceIpcChannels.prepare,
+    (_event, request: unknown) => imagePromptEnhance.prepare(request)
+  );
+  ipcMain.handle(
+    imagePromptEnhanceIpcChannels.submit,
+    (_event, request: unknown) => imagePromptEnhance.submit(request)
   );
   ipcMain.handle(videoWorkspaceIpcChannels.create, (_event, request: unknown) =>
     videoWorkspaces.create(request)
@@ -571,38 +619,6 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) =>
       videoReferenceMedia.createMaterialPreview(request)
   );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.preflight,
-    (_event, request: unknown) => videoSubmissions.preflight(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.createTask,
-    (_event, request: unknown) => videoSubmissions.createTask(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.createExecution,
-    (_event, request: unknown) => videoSubmissions.createExecution(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.invokeExecution,
-    (_event, request: unknown) => videoSubmissions.invokeExecution(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.refreshExecution,
-    (_event, request: unknown) => videoSubmissions.refreshExecution(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.cancelExecution,
-    (_event, request: unknown) => videoSubmissions.cancelExecution(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.recoverExecutions,
-    (_event, request: unknown) => videoSubmissions.recoverExecutions(request)
-  );
-  ipcMain.handle(
-    videoSubmissionIpcChannels.receiveResult,
-    (_event, request: unknown) => videoSubmissions.receiveResult(request)
-  );
   return {
     resolveEntry: (token) => mediaHandles.resolveEntry(token),
     get activeExportCount() {
@@ -620,6 +636,7 @@ export function registerStorageIpcHandlers(options: {
         videoExports.interruptActiveExports('application_shutdown'),
         previewAdapter.dispose?.(),
         imageFeatures.waitForOperations(),
+        imagePromptEnhance.waitForOperations(),
         videoFeatures.waitForOperations()
       ]);
       await videoExports.waitForExports();

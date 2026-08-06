@@ -19,6 +19,13 @@ export interface DynamicParameterField {
   readonly step?: number;
 }
 
+/** Display the parameter key without internal label namespace prefixes. */
+export function displayParameterKey(value: string): string {
+  return value
+    .replace(/^provider\.parameter\./, '')
+    .replace(/^provider\./, '');
+}
+
 export interface DynamicParameterFormProps {
   readonly fields: readonly DynamicParameterField[];
   readonly values: Readonly<Record<string, DynamicParameterValue | undefined>>;
@@ -60,6 +67,7 @@ export function toDynamicParameterFields(
     readonly label?: string;
     readonly valueType?: string;
     readonly kind?: string;
+    readonly exposure?: string;
     readonly required: boolean;
     readonly options?: readonly (string | number | boolean)[];
     readonly minimum?: number;
@@ -67,16 +75,43 @@ export function toDynamicParameterFields(
     readonly step?: number;
   }[]
 ): readonly DynamicParameterField[] {
-  return fields.map((field, index) => ({
-    fieldId: field.fieldId ?? field.key ?? `field-${index}`,
-    labelId: field.labelId ?? field.label ?? field.fieldId ?? field.key ?? `field-${index}`,
-    valueType: field.valueType ?? field.kind ?? 'string',
-    required: field.required,
-    ...(field.options ? { options: field.options } : {}),
-    ...(field.minimum === undefined ? {} : { minimum: field.minimum }),
-    ...(field.maximum === undefined ? {} : { maximum: field.maximum }),
-    ...(field.step === undefined ? {} : { step: field.step })
-  }));
+  return fields.map((field, index) => {
+    const fieldId = field.fieldId ?? field.key ?? `field-${index}`;
+    return {
+      fieldId,
+      labelId: field.labelId ?? field.label ?? fieldId,
+      valueType: field.valueType ?? field.kind ?? 'string',
+      required: field.required === true || field.exposure === 'user_required',
+      ...(field.options ? { options: field.options } : {}),
+      ...(field.minimum === undefined ? {} : { minimum: field.minimum }),
+      ...(field.maximum === undefined ? {} : { maximum: field.maximum }),
+      ...(field.step === undefined ? {} : { step: field.step })
+    };
+  });
+}
+
+function parameterLabel(field: DynamicParameterField): {
+  readonly text: string;
+  readonly required: boolean;
+} {
+  return {
+    text: displayParameterKey(field.fieldId || field.labelId),
+    required: field.required
+  };
+}
+
+function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
+  const { text, required } = parameterLabel(field);
+  return (
+    <span className="uc-dynamic-parameters__label">
+      <span className="uc-dynamic-parameters__key">{text}</span>
+      {required ? (
+        <span aria-label="必填" className="uc-dynamic-parameters__required">
+          必填
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function ParameterField({
@@ -90,7 +125,6 @@ function ParameterField({
   readonly disabled: boolean;
   readonly onChange: (value: DynamicParameterValue | undefined) => void;
 }) {
-  const label = `${field.labelId}${field.required ? '（必填）' : ''}`;
   if (field.valueType === 'boolean') {
     return (
       <label className="uc-model-select__checkbox">
@@ -100,23 +134,24 @@ function ParameterField({
           onChange={(event) => onChange(event.target.checked)}
           type="checkbox"
         />
-        <span>{label}</span>
+        <ParameterLabel field={field} />
       </label>
     );
   }
   if (field.valueType === 'enum') {
     return (
       <label className="uc-model-select__field">
-        <span>{label}</span>
+        <ParameterLabel field={field} />
         <select
           disabled={disabled}
           onChange={(event) => {
             const option = field.options?.find((item) => String(item) === event.target.value);
             onChange(option);
           }}
+          required={field.required}
           value={value === undefined ? '' : String(value)}
         >
-          <option value="">请选择</option>
+          <option value="">{field.required ? '请选择（必填）' : '请选择'}</option>
           {field.options?.map((option) => (
             <option key={String(option)} value={String(option)}>{String(option)}</option>
           ))}
@@ -127,7 +162,7 @@ function ParameterField({
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
       <label className="uc-model-select__field">
-        <span>{label}</span>
+        <ParameterLabel field={field} />
         <input
           disabled={disabled}
           max={field.maximum}
@@ -135,6 +170,7 @@ function ParameterField({
           onChange={(event) => onChange(
             event.target.value === '' ? undefined : Number(event.target.value)
           )}
+          required={field.required}
           step={field.valueType === 'integer' ? 1 : field.step}
           type="number"
           value={typeof value === 'number' ? value : ''}
@@ -145,7 +181,7 @@ function ParameterField({
   if (field.valueType === 'string_array' || field.valueType === 'number_array') {
     return (
       <label className="uc-model-select__field">
-        <span>{label}</span>
+        <ParameterLabel field={field} />
         <input
           disabled={disabled}
           onChange={(event) => {
@@ -157,6 +193,7 @@ function ParameterField({
                 : items);
           }}
           placeholder="使用逗号分隔"
+          required={field.required}
           type="text"
           value={Array.isArray(value) ? value.join(', ') : ''}
         />
@@ -169,17 +206,18 @@ function ParameterField({
   if (field.valueType === 'media_slot') {
     return (
       <label className="uc-model-select__field">
-        <span>{label}</span>
+        <ParameterLabel field={field} />
         <input disabled readOnly value="由当前草稿的受控素材提供" />
       </label>
     );
   }
   return (
     <label className="uc-model-select__field">
-      <span>{label}</span>
+      <ParameterLabel field={field} />
       <input
         disabled={disabled}
         onChange={(event) => onChange(event.target.value || undefined)}
+        required={field.required}
         type="text"
         value={typeof value === 'string' ? value : ''}
       />
@@ -206,10 +244,11 @@ function ObjectParameterField({
   }, [value]);
   return (
     <label className="uc-model-select__field">
-      <span>{field.labelId}{field.required ? '（必填）' : ''}</span>
+      <ParameterLabel field={field} />
       <textarea
         aria-invalid={invalid}
         disabled={disabled}
+        required={field.required}
         onBlur={() => {
           if (!text.trim()) {
             setInvalid(false);

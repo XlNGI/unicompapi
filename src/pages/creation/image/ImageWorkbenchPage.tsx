@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LuFilePlus2,
   LuImagePlus,
@@ -80,13 +80,18 @@ export function ImageWorkbenchPage({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
   const [message, setMessage] = useState('');
   const currentDraft = drafts[drafts.length - 1];
   const isQuickImage = mode.workspaceMode === 'quick_image';
+  const isProfessionalImage = mode.workspaceMode === 'professional_image';
   const isGenerationImage =
     isQuickImage ||
-    mode.workspaceMode === 'professional_image';
+    isProfessionalImage;
   const presentation = modePresentation[mode.workspaceMode];
+  const currentDraftRef = useRef(currentDraft);
+  currentDraftRef.current = currentDraft;
+  const autoSaveGeneration = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -223,6 +228,52 @@ export function ImageWorkbenchPage({
     setDirty(hasUnsavedChanges);
   }
 
+  useEffect(() => {
+    if (!isProfessionalImage || !dirty || !imageWorkspaces || !session) return;
+    const generation = ++autoSaveGeneration.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const snapshot = currentDraftRef.current;
+        if (!snapshot || snapshot.mode !== 'professional_image') return;
+        setAutoSaving(true);
+        try {
+          const result = await imageWorkspaces.update({
+            ...snapshot,
+            state: 'saved'
+          });
+          if (generation !== autoSaveGeneration.current) return;
+          if (!result.ok) {
+            setMessage(workspaceErrorMessages[result.error.code]);
+            return;
+          }
+          const latest = currentDraftRef.current;
+          const superseded =
+            latest !== undefined &&
+            latest.draftId === snapshot.draftId &&
+            latest !== snapshot;
+          if (superseded) return;
+          setDrafts((items) =>
+            items.map((draft) =>
+              draft.draftId === result.value.draftId ? result.value : draft
+            )
+          );
+          setDirty(false);
+        } catch {
+          if (generation === autoSaveGeneration.current) {
+            setMessage('自动保存草稿失败，请稍后重试。');
+          }
+        } finally {
+          if (generation === autoSaveGeneration.current) {
+            setAutoSaving(false);
+          }
+        }
+      })();
+    }, 400);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [dirty, imageWorkspaces, isProfessionalImage, session, currentDraft]);
+
   const projectStatus = loading
     ? '正在读取'
     : session
@@ -264,21 +315,27 @@ export function ImageWorkbenchPage({
             <LuFilePlus2 aria-hidden="true" />
             {busy ? '请稍候…' : '新建本地草稿'}
           </Button>
-          <Button
-            disabled={
-              !currentDraft ||
-              (!dirty &&
-                (currentDraft.state === 'saved' ||
-                  currentDraft.state === 'stale')) ||
-              currentDraft.state === 'archived' ||
-              busy
-            }
-            onClick={() => void saveDraft()}
-            variant="secondary"
-          >
-            <LuSave aria-hidden="true" />
-            保存本地草稿
-          </Button>
+          {isProfessionalImage ? (
+            <StatusPill tone={autoSaving || dirty ? 'info' : 'success'}>
+              {autoSaving || dirty ? '正在自动保存…' : '已自动保存'}
+            </StatusPill>
+          ) : (
+            <Button
+              disabled={
+                !currentDraft ||
+                (!dirty &&
+                  (currentDraft.state === 'saved' ||
+                    currentDraft.state === 'stale')) ||
+                currentDraft.state === 'archived' ||
+                busy
+              }
+              onClick={() => void saveDraft()}
+              variant="secondary"
+            >
+              <LuSave aria-hidden="true" />
+              保存本地草稿
+            </Button>
+          )}
           </div>
           )}
         </div>
@@ -299,7 +356,11 @@ export function ImageWorkbenchPage({
             {currentDraft ? draftStateLabels[currentDraft.state] : '无本地草稿'}
           </strong>
         </div>
-        <p>本页面只操作当前项目内草稿；不会自动上传、分析、生成或提交任务。</p>
+        <p>
+          {isProfessionalImage
+            ? '专业生图会在后台自动保存草稿；请直接选功能、模型、参数并提交。不会自动外发或创建任务。'
+            : '本页面只操作当前项目内草稿；不会自动上传、分析、生成或提交任务。'}
+        </p>
       </Card>
 
       {currentDraft?.mode === 'quick_image' ? (

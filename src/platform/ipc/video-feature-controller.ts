@@ -232,6 +232,12 @@ function mapError(error: unknown): {
       message: error.message
     };
   }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return {
+      code: 'storage_error',
+      message: error.message
+    };
+  }
   return {
     code: 'storage_error',
     message: 'The local video feature operation failed'

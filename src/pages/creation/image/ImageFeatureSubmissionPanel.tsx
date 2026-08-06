@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LuSend, LuShieldCheck } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
@@ -7,6 +7,10 @@ import {
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
 import { ModelSelect } from '../../../components/ModelSelect';
+import {
+  SubmissionProgressSteps,
+  type SubmissionProgressPhase
+} from '../../../components/SubmissionProgressSteps';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   ImageFeatureCandidateDto,
@@ -24,6 +28,13 @@ interface ImageFeatureSubmissionPanelProps {
   readonly draft: GenerationImageDraftDto;
   readonly blockedReason?: string;
   readonly oneShot?: boolean;
+  /**
+   * Professional image: do not infer text/reference feature from draft.input.
+   * Until the user explicitly picks a feature, hide model and parameter UI.
+   */
+  readonly requireExplicitFeature?: boolean;
+  /** Professional image: show in-page 准备 → 请求中 → 等待上游 → 完成 progress. */
+  readonly showProgressSteps?: boolean;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -68,6 +79,8 @@ export function ImageFeatureSubmissionPanel({
   draft,
   blockedReason,
   oneShot = false,
+  requireExplicitFeature = false,
+  showProgressSteps = false,
   onDraftChange,
   onDraftPersisted,
   onMessage,
@@ -80,39 +93,87 @@ export function ImageFeatureSubmissionPanel({
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
-  const featureSelection = draft.featureSelection ?? {
-    productFeature: draft.mode === 'professional_image' && draft.input
-      ? 'reference_to_image' as const
-      : 'text_to_image' as const,
-    parameterValues: {}
-  };
+  const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
+  const [progressFailure, setProgressFailure] = useState<string>();
+  const explicitFeature =
+    draft.featureSelection?.productFeature === 'text_to_image' ||
+    draft.featureSelection?.productFeature === 'reference_to_image'
+      ? draft.featureSelection.productFeature
+      : undefined;
+  const awaitingFeatureChoice = requireExplicitFeature && !explicitFeature;
+  const featureSelection =
+    !awaitingFeatureChoice && draft.featureSelection
+      ? draft.featureSelection
+      : requireExplicitFeature
+        ? {
+            productFeature: 'text_to_image' as const,
+            parameterValues: {}
+          }
+        : draft.featureSelection ?? {
+            productFeature: draft.mode === 'professional_image' && draft.input
+              ? 'reference_to_image' as const
+              : 'text_to_image' as const,
+            parameterValues: {}
+          };
   const selectedCandidate = candidates.find(
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
+  const parameterSignature = JSON.stringify(featureSelection.parameterValues ?? {});
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+
+  // Only invalidate a prepared confirmation when route-binding facts change.
+  // Do NOT clear it on draft.updatedAt / autosave, or prepare appears stuck.
+  useEffect(() => {
+    if (busyRef.current) return;
+    setPreparation(undefined);
+    setConfirmed(false);
+    setProgressPhase((phase) =>
+      phase === 'ready' ? 'idle' : phase
+    );
+  }, [
+    awaitingFeatureChoice,
+    blockedReason,
+    draft.draftId,
+    featureSelection.candidateId,
+    featureSelection.productFeature,
+    parameterSignature
+  ]);
 
   useEffect(() => {
     let active = true;
-    setPreparation(undefined);
-    setConfirmed(false);
-    if (!api || blockedReason) return;
-    if (!oneShot && (dirty || draft.state !== 'saved')) return;
+    if (awaitingFeatureChoice) {
+      setCandidates([]);
+      setLoadState('idle');
+      return;
+    }
+    if (!api) return;
+    if (blockedReason) {
+      setCandidates([]);
+      setLoadState('idle');
+      return;
+    }
     if (oneShot && draft.prompt.finalPrompt.trim().length === 0) {
       setCandidates([]);
       setLoadState('idle');
       return;
     }
-    const delayMs = oneShot && (dirty || draft.state !== 'saved') ? 350 : 0;
+    // Avoid racing prepare/submit: autosave + listCandidates must not run mid-flight.
+    if (busyRef.current) return;
+    const needsSave = dirty || draft.state !== 'saved';
+    const delayMs = needsSave ? 350 : 0;
     setLoadState('loading');
     const timer = window.setTimeout(() => {
       void (async () => {
+        if (busyRef.current) return;
         let draftId = draft.draftId;
         let draftUpdatedAt = draft.updatedAt;
-        if (oneShot && (dirty || draft.state !== 'saved') && imageWorkspaces) {
+        if (needsSave && imageWorkspaces) {
           const saved = await imageWorkspaces.update({
             ...draft,
             state: 'saved'
           });
-          if (!active) return;
+          if (!active || busyRef.current) return;
           if (!saved.ok) {
             setCandidates([]);
             setLoadState('loaded');
@@ -123,8 +184,9 @@ export function ImageFeatureSubmissionPanel({
           draftUpdatedAt = saved.value.updatedAt;
           onDraftPersisted?.(saved.value as GenerationImageDraftDto);
         }
+        if (busyRef.current) return;
         const result = await api.listCandidates(draftId, draftUpdatedAt);
-        if (!active) return;
+        if (!active || busyRef.current) return;
         if (!result.ok) {
           setCandidates([]);
           setLoadState('loaded');
@@ -134,7 +196,7 @@ export function ImageFeatureSubmissionPanel({
         setCandidates(result.value);
         setLoadState('loaded');
       })().catch(() => {
-        if (!active) return;
+        if (!active || busyRef.current) return;
         setCandidates([]);
         setLoadState('loaded');
         onMessage('读取图片服务候选失败，请重试。');
@@ -146,9 +208,13 @@ export function ImageFeatureSubmissionPanel({
     };
   }, [
     api,
+    awaitingFeatureChoice,
     blockedReason,
     dirty,
-    draft,
+    draft.draftId,
+    draft.prompt.finalPrompt,
+    draft.state,
+    draft.updatedAt,
     featureSelection.productFeature,
     imageWorkspaces,
     onDraftPersisted,
@@ -215,28 +281,63 @@ export function ImageFeatureSubmissionPanel({
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
     setBusy(true);
+    busyRef.current = true;
     onMessage('');
+    if (showProgressSteps) {
+      setProgressFailure(undefined);
+      setProgressPhase('preparing');
+    }
     try {
-      const saved = await ensureSavedDraft();
-      if (!saved) return;
-      const result = await api.prepareSubmission(
+      let saved = await ensureSavedDraft();
+      if (!saved) {
+        if (showProgressSteps) setProgressPhase('failed');
+        return;
+      }
+      let result = await api.prepareSubmission(
         saved.draftId,
         saved.updatedAt,
         selectedCandidate.candidateId
       );
+      // Autosave may bump revision between ensureSavedDraft and prepare; retry once.
+      if (!result.ok && result.error.code === 'draft_revision_changed' && imageWorkspaces) {
+        const refreshed = await imageWorkspaces.get(saved.draftId);
+        if (refreshed.ok && refreshed.value) {
+          saved = refreshed.value as GenerationImageDraftDto;
+          onDraftPersisted?.(saved);
+          result = await api.prepareSubmission(
+            saved.draftId,
+            saved.updatedAt,
+            selectedCandidate.candidateId
+          );
+        }
+      }
       if (!result.ok) {
         onMessage(errorMessages[result.error.code]);
+        if (showProgressSteps) {
+          setProgressFailure(errorMessages[result.error.code]);
+          setProgressPhase('failed');
+        }
         return;
       }
       setPreparation(result.value);
       setConfirmed(oneShot);
-      onMessage(oneShot ? '已准备生成。' : '已固定本次服务选择，请核对外发事实。');
+      onMessage(
+        oneShot
+          ? '已准备生成。'
+          : '准备完成：请勾选确认外发事实，再点击「确认并提交」。'
+      );
+      if (showProgressSteps && !oneShot) setProgressPhase('ready');
       if (oneShot) {
         await submitPrepared(saved, result.value);
       }
     } catch {
       onMessage('准备图片提交失败，请重试。');
+      if (showProgressSteps) {
+        setProgressFailure('准备图片提交失败，请重试。');
+        setProgressPhase('failed');
+      }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -246,39 +347,81 @@ export function ImageFeatureSubmissionPanel({
     prepared: ImageFeaturePreparationDto
   ) {
     if (!api) return;
-    const result = await api.submitDraft(
-      saved.draftId,
-      saved.updatedAt,
-      prepared.routeSelectionToken,
-      prepared.confirmation.confirmationId,
-      true
-    );
-    if (!result.ok) {
-      onMessage(errorMessages[result.error.code]);
-      return;
+    if (showProgressSteps) {
+      setProgressFailure(undefined);
+      setProgressPhase('requesting');
     }
-    const urls = result.value.resultImageUrls ?? [];
-    onMessage(
-      urls.length > 0
-        ? `提交完成（${result.value.status}），已保存图片 URL。`
-        : `提交状态：${result.value.status}`
-    );
-    onSubmissionComplete?.(result.value);
-    setPreparation(undefined);
-    setConfirmed(false);
+    const promoteWaiting =
+      showProgressSteps && typeof window !== 'undefined'
+        ? window.setTimeout(() => setProgressPhase('waiting'), 120)
+        : undefined;
+    try {
+      const result = await api.submitDraft(
+        saved.draftId,
+        saved.updatedAt,
+        prepared.routeSelectionToken,
+        prepared.confirmation.confirmationId,
+        true
+      );
+      if (!result.ok) {
+        const message =
+          result.error.message?.trim() ||
+          errorMessages[result.error.code] ||
+          '图片提交失败';
+        onMessage(message);
+        if (showProgressSteps) {
+          setProgressFailure(message);
+          setProgressPhase('failed');
+        }
+        return;
+      }
+      const urls = result.value.resultImageUrls ?? [];
+      const failed =
+        result.value.status !== 'completed' &&
+        result.value.status !== 'provider_accepted';
+      const feedback =
+        result.value.feedback ??
+        result.value.localResultError ??
+        (urls.length > 0
+          ? `提交完成（${result.value.status}），已保存图片 URL。`
+          : `提交状态：${result.value.status}`);
+      onMessage(feedback);
+      if (showProgressSteps) {
+        if (failed || result.value.localResultError) {
+          setProgressFailure(feedback);
+          setProgressPhase('failed');
+        } else {
+          setProgressPhase('completed');
+        }
+      }
+      onSubmissionComplete?.(result.value);
+      setPreparation(undefined);
+      setConfirmed(false);
+    } finally {
+      if (promoteWaiting !== undefined) window.clearTimeout(promoteWaiting);
+    }
   }
 
   async function submit() {
     if (!api || !preparation || (!confirmed && !oneShot) || busy) return;
     setBusy(true);
+    busyRef.current = true;
     onMessage('');
     try {
       const saved = await ensureSavedDraft();
-      if (!saved) return;
+      if (!saved) {
+        if (showProgressSteps) setProgressPhase('failed');
+        return;
+      }
       await submitPrepared(saved, preparation);
     } catch {
       onMessage('图片提交失败，请重试。');
+      if (showProgressSteps) {
+        setProgressFailure('图片提交失败，请重试。');
+        setProgressPhase('failed');
+      }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -325,7 +468,8 @@ export function ImageFeatureSubmissionPanel({
         );
         if (!result.ok) {
           onMessage(
-            `${errorMessages[result.error.code]}（${result.error.code}）`
+            result.error.message?.trim() ||
+              `${errorMessages[result.error.code]}（${result.error.code}）`
           );
           return;
         }
@@ -350,9 +494,9 @@ export function ImageFeatureSubmissionPanel({
         const submission = result.value.submission;
         const urls = submission.resultImageUrls ?? [];
         const status = submission.status;
-        if (submission.localResultError) {
+        if (submission.feedback || submission.localResultError) {
           onMessage(
-            `${submission.localResultError}${
+            `${submission.feedback ?? submission.localResultError}${
               urls.length > 0 ? `；调用记录中的 URL：${urls[0]}` : ''
             }`
           );
@@ -390,20 +534,20 @@ export function ImageFeatureSubmissionPanel({
 
   return (
     <div className="uc-image-feature-panel">
+      {awaitingFeatureChoice ? (
+        <p className="uc-image-quick__hint" role="status">
+          请先在上方选择文生图或图生图；选定功能后才会显示可用模型与参数。
+        </p>
+      ) : (
+        <>
       <ModelSelect
-        disabled={
-          !api ||
-          loadState !== 'loaded' ||
-          (!oneShot && dirty)
-        }
+        disabled={!api || loadState !== 'loaded'}
         emptyDescription={
           loadState === 'loading'
             ? '正在读取安全候选。'
             : oneShot && draft.prompt.finalPrompt.trim().length === 0
               ? '请先填写提示词，再读取可选模型。'
-              : !oneShot && (dirty || draft.state !== 'saved')
-                ? '请先保存本地草稿，再读取候选或准备生成。'
-                : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
+              : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
         }
         emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
         hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
@@ -442,7 +586,7 @@ export function ImageFeatureSubmissionPanel({
             </div>
           ) : null}
           <DynamicParameterForm
-            disabled={busy || dirty}
+            disabled={busy}
             emptyHint="当前表面没有需要用户填写的参数。"
             fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
             onChange={(fieldId, value) =>
@@ -460,10 +604,6 @@ export function ImageFeatureSubmissionPanel({
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>
         </div>
-      ) : !oneShot && (dirty || draft.state !== 'saved') ? (
-        <p className="uc-image-quick__hint" role="status">
-          请先保存本地草稿，再读取候选或准备生成。
-        </p>
       ) : oneShot && draft.prompt.finalPrompt.trim().length === 0 ? (
         <p className="uc-image-quick__hint" role="status">
           请先填写提示词，再选择模型并生成。
@@ -492,6 +632,13 @@ export function ImageFeatureSubmissionPanel({
         </fieldset>
       ) : null}
 
+      {showProgressSteps ? (
+        <SubmissionProgressSteps
+          failureMessage={progressFailure}
+          phase={progressPhase}
+        />
+      ) : null}
+
       <Button
         className="uc-image-feature-panel__primary"
         disabled={
@@ -500,7 +647,6 @@ export function ImageFeatureSubmissionPanel({
             : Boolean(blockedReason) ||
               busy ||
               !selectedCandidate?.available ||
-              dirty ||
               (Boolean(preparation) && !confirmed)
         }
         onClick={() => void (oneShot
@@ -533,6 +679,8 @@ export function ImageFeatureSubmissionPanel({
                   : '就绪：点击「生成」发起请求。'}
         </p>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

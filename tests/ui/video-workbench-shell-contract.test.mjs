@@ -40,7 +40,7 @@ test('video workbench keeps controlled and blocked states honest', () => {
     '快速与文生视频无素材；图生视频恰好一张图片',
     '运行授权',
     '不会发出请求，也不会伪造进度或结果',
-    '创建并保存草稿后，页面才会读取匹配的安全候选'
+    '页面会按功能读取匹配的安全候选'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }
@@ -68,8 +68,10 @@ test('saving a generation draft stays separate from submission', () => {
   for (const text of [
     '新建本地草稿',
     '保存本地草稿',
+    '已自动保存',
     '没有创建或提交任务'
   ]) {
     assert.match(workbenchSource, new RegExp(text));
   }
+  assert.match(workbenchSource, /usesFlowAutosave/);
 });

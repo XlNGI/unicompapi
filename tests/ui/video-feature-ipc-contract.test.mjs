@@ -10,7 +10,7 @@ const panel = await readFile(
   'utf8'
 );
 
-test('video feature IPC exposes candidate, preparation and confirmed submission only', () => {
+test('video feature IPC is the only generation submission surface', () => {
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(shared, new RegExp(`${operation}\\(`));
     assert.match(preload, new RegExp(`${operation}:`));
@@ -18,6 +18,8 @@ test('video feature IPC exposes candidate, preparation and confirmed submission 
   }
   assert.match(preload, /videoFeatures,/);
   assert.match(panel, /window\.unicomp\?\.videoFeatures/);
+  assert.doesNotMatch(preload, /videoSubmissions/);
+  assert.doesNotMatch(handlers, /videoSubmissionIpcChannels|VideoSubmissionController/);
 });
 
 test('renderer video feature DTO omits protected routing and provider facts', () => {
@@ -36,6 +38,12 @@ test('video submission binds exact revision, token and confirmation', () => {
   assert.match(shared, /confirmationId/);
   assert.match(shared, /confirmed: boolean/);
   assert.doesNotMatch(panel, /localStorage|sessionStorage|console\./);
+});
+
+test('video submission returns local work identity for in-page preview', () => {
+  assert.match(shared, /readonly workId\?: string/);
+  assert.match(shared, /readonly resultVideoUrls\?: readonly string\[\]/);
+  assert.match(shared, /readonly localResultError\?: string/);
 });
 
 test('video feature panel uses shared model select and dynamic parameter form', async () => {

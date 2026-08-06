@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -55,16 +55,22 @@ export function VideoWorkbenchPage({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const workspaceMode =
     'workspaceMode' in mode ? mode.workspaceMode : undefined;
+  const usesFlowAutosave =
+    workspaceMode === 'text_to_video' || workspaceMode === 'image_to_video';
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [drafts, setDrafts] = useState<readonly VideoWorkspaceDraftDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedDraftId, setSelectedDraftId] = useState(preferredDraftId);
   const currentDraft =
     drafts.find((draft) => draft.draftId === selectedDraftId) ??
     drafts[drafts.length - 1];
+  const currentDraftRef = useRef(currentDraft);
+  currentDraftRef.current = currentDraft;
+  const autoSaveGeneration = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -189,6 +195,57 @@ export function VideoWorkbenchPage({
     setDirty(hasUnsavedChanges);
   }
 
+  useEffect(() => {
+    if (!usesFlowAutosave || !dirty || !videoWorkspaces || !session) return;
+    const generation = ++autoSaveGeneration.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const snapshot = currentDraftRef.current;
+        if (
+          !snapshot ||
+          (snapshot.mode !== 'text_to_video' && snapshot.mode !== 'image_to_video')
+        ) {
+          return;
+        }
+        setAutoSaving(true);
+        try {
+          const result = await videoWorkspaces.update({
+            ...snapshot,
+            state: 'saved'
+          });
+          if (generation !== autoSaveGeneration.current) return;
+          if (!result.ok) {
+            setMessage(workspaceErrorMessages[result.error.code]);
+            return;
+          }
+          const latest = currentDraftRef.current;
+          const superseded =
+            latest !== undefined &&
+            latest.draftId === snapshot.draftId &&
+            latest !== snapshot;
+          if (superseded) return;
+          setDrafts((items) =>
+            items.map((draft) =>
+              draft.draftId === result.value.draftId ? result.value : draft
+            )
+          );
+          setDirty(false);
+        } catch {
+          if (generation === autoSaveGeneration.current) {
+            setMessage('自动保存草稿失败，请稍后重试。');
+          }
+        } finally {
+          if (generation === autoSaveGeneration.current) {
+            setAutoSaving(false);
+          }
+        }
+      })();
+    }, 400);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [dirty, session, usesFlowAutosave, videoWorkspaces, currentDraft]);
+
   const projectStatus = loading
     ? '正在读取'
     : session
@@ -222,19 +279,25 @@ export function VideoWorkbenchPage({
             >
               {busy ? '请稍候…' : '新建本地草稿'}
             </Button>
-            <Button
-              disabled={
-                !currentDraft ||
-                (!dirty &&
-                  (currentDraft.state === 'saved' ||
-                    currentDraft.state === 'stale')) ||
-                currentDraft.state === 'archived' ||
-                busy
-              }
-              onClick={() => void saveDraft()}
-            >
-              保存本地草稿
-            </Button>
+            {usesFlowAutosave ? (
+              <StatusPill tone={autoSaving || dirty ? 'info' : 'success'}>
+                {autoSaving || dirty ? '正在自动保存…' : '已自动保存'}
+              </StatusPill>
+            ) : (
+              <Button
+                disabled={
+                  !currentDraft ||
+                  (!dirty &&
+                    (currentDraft.state === 'saved' ||
+                      currentDraft.state === 'stale')) ||
+                  currentDraft.state === 'archived' ||
+                  busy
+                }
+                onClick={() => void saveDraft()}
+              >
+                保存本地草稿
+              </Button>
+            )}
           </div>
         ) : null}
       </header>
@@ -265,9 +328,11 @@ export function VideoWorkbenchPage({
           </strong>
         </div>
         <p>
-          {workspaceMode
-            ? '本页面只操作当前项目内视频草稿；不会自动上传、分析、生成或提交任务。'
-            : '基础编辑只保留冻结入口；阶段 6 不创建编辑草稿、时间线或导出任务。'}
+          {usesFlowAutosave
+            ? '文生/图生视频会在后台自动保存草稿；请直接选模型、填参数并提交。不会自动外发。'
+            : workspaceMode
+              ? '本页面只操作当前项目内视频草稿；不会自动上传、分析、生成或提交任务。'
+              : '基础编辑只保留冻结入口；阶段 6 不创建编辑草稿、时间线或导出任务。'}
         </p>
       </Card>
 
@@ -285,6 +350,7 @@ export function VideoWorkbenchPage({
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
         />
       ) : currentDraft?.mode === 'image_to_video' ? (
@@ -379,7 +445,7 @@ export function VideoWorkbenchPage({
               <dl className="uc-image-workbench__capability-list">
                 <CapabilityFact
                   label="视频服务候选"
-                  value="创建并保存草稿后按功能读取"
+                  value="草稿自动保存后按功能读取"
                 />
                 <CapabilityFact
                   label="视频生成能力"
@@ -390,11 +456,11 @@ export function VideoWorkbenchPage({
                   label="素材边界"
                   value="快速与文生视频无素材；图生视频恰好一张图片"
                 />
-                <CapabilityFact label="运行授权" value="默认关闭" />
+                <CapabilityFact label="运行授权" value="连接可用时按运行时策略判定" />
                 <CapabilityFact label="费用与外发范围" value="未知" />
               </dl>
               <p className="uc-image-quick__hint">
-                创建并保存草稿后，页面才会读取匹配的安全候选。
+                创建草稿后，页面会按功能读取匹配的安全候选；提交流程在页内展示。
               </p>
             </>
           ) : (

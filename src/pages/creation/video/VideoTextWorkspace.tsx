@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { EmptyState } from '../../../components/EmptyState';
+import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   VideoWorkspaceDraftDto,
@@ -19,6 +20,7 @@ interface VideoTextWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: TextVideoDraftDto;
   readonly onDraftChange: (draft: TextVideoDraftDto) => void;
+  readonly onDraftPersisted: (draft: TextVideoDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
 
@@ -26,8 +28,11 @@ export function VideoTextWorkspace({
   dirty,
   draft,
   onDraftChange,
+  onDraftPersisted,
   onMessage
 }: VideoTextWorkspaceProps) {
+  const [resultWorkId, setResultWorkId] = useState<string>();
+  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
       reference.kind !== 'project_context' ||
@@ -100,7 +105,7 @@ export function VideoTextWorkspace({
       ...draft,
       textToVideo: { ...draft.textToVideo, materials: undefined }
     });
-    onMessage('旧素材槽位已从当前草稿移除；请保存后重新选择服务。');
+    onMessage('旧素材槽位已从当前草稿移除；自动保存后可重新选择服务。');
   }
 
   function removeUnsupportedContexts() {
@@ -113,13 +118,13 @@ export function VideoTextWorkspace({
           reference.includeInPrompt !== undefined
       )
     });
-    onMessage('不受支持或未固定版本的旧上下文已移除；请保存后重新选择服务。');
+    onMessage('不受支持或未固定版本的旧上下文已移除；自动保存后可重新选择服务。');
   }
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-image-professional__workspace">
-        <Card className="uc-image-workbench__panel uc-image-quick__composer">
+      <div className="uc-image-workbench__workspace uc-video-text__workspace">
+        <Card className="uc-image-workbench__panel uc-video-text__source">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -154,7 +159,7 @@ export function VideoTextWorkspace({
             <small>{draft.prompt.originalInput.length} / 4000</small>
           </label>
           <WorkspaceContextSelector
-            disabled={dirty}
+            disabled={false}
             onChange={(contextReferences) => changeDraft({
               ...draft,
               contextReferences
@@ -185,7 +190,7 @@ export function VideoTextWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas">
+        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-text__canvas">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
@@ -234,20 +239,19 @@ export function VideoTextWorkspace({
               </section>
             ))}
           </div>
-          <EmptyState
-            description="结果必须经过本地文件校验后才会登记为作品。"
-            icon="视"
-            readOnly
-            title="尚无真实生成结果"
+          <GenerationResultPreview
+            mediaKind="video"
+            remoteUrls={resultUrls}
+            workId={resultWorkId}
           />
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
             <div>
-              <h2>服务、参数与确认</h2>
-              <p>候选只基于已保存的文生视频草稿事实。</p>
+              <h2>模型、参数与提交流程</h2>
+              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel
@@ -255,14 +259,20 @@ export function VideoTextWorkspace({
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as TextVideoDraftDto)}
+            onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
             onMessage={onMessage}
+            onSubmissionComplete={(submission) => {
+              setResultWorkId(submission.workId);
+              setResultUrls(submission.resultVideoUrls ?? []);
+            }}
+            showProgressSteps
           />
         </Card>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="warning">在线运行未授权</StatusPill>
-        <p>上下文、参数和外发确认任一变化都会使旧选择令牌失效。</p>
+        <StatusPill tone="info">调用记录</StatusPill>
+        <p>上下文、参数和外发确认任一变化都会使旧选择令牌失效；提交结果会显示在本页流程条。</p>
       </Card>
     </>
   );

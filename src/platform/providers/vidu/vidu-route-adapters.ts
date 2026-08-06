@@ -396,9 +396,12 @@ export class ViduImageRouteAdapter {
         : {
             adapterKey: this.adapterKey,
             adapterVersion: this.adapterVersion,
-            features: ['reference_to_image'],
+            features: ['text_to_image', 'reference_to_image', 'image_edit'],
             resultSchemaId: VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
-            constraintSetIds: [VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID]
+            constraintSetIds: [
+              VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID,
+              VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
+            ]
           }
     );
     return resolved;

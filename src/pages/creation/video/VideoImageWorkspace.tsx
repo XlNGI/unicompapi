@@ -3,6 +3,7 @@ import { LuImagePlus, LuTrash2 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
+import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   VideoWorkspaceDraftDto,
@@ -39,6 +40,8 @@ export function VideoImageWorkspace({
   const [material, setMaterial] = useState<VideoWorkspaceMaterialAssetDto>();
   const [preview, setPreview] = useState<VideoWorkspaceMaterialPreviewDto>();
   const [busy, setBusy] = useState(false);
+  const [resultWorkId, setResultWorkId] = useState<string>();
+  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
   const legacySelections = useMemo(
     () => draft.imageToVideo.materials?.slots.flatMap(
       (slot) => slot.selection ? [slot.selection] : []
@@ -101,13 +104,30 @@ export function VideoImageWorkspace({
     changeDraft({ ...draft, prompt });
   }
 
+  async function ensureSavedDraft(): Promise<ImageVideoDraftDto | undefined> {
+    if (!videoWorkspaces) return undefined;
+    if (!dirty && draft.state === 'saved') return draft;
+    const result = await videoWorkspaces.update({
+      ...draft,
+      state: 'saved'
+    });
+    if (!result.ok) {
+      onMessage(result.error.message);
+      return undefined;
+    }
+    onDraftPersisted(result.value as ImageVideoDraftDto);
+    return result.value as ImageVideoDraftDto;
+  }
+
   async function selectImage() {
-    if (!videoWorkspaces || dirty || busy) return;
+    if (!videoWorkspaces || busy) return;
     setBusy(true);
     onMessage('');
     try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
       const result = await videoWorkspaces.selectMaterial(
-        draft.draftId,
+        saved.draftId,
         imageSourceTarget,
         'image'
       );
@@ -119,7 +139,7 @@ export function VideoImageWorkspace({
       onDraftPersisted(result.value.draft as ImageVideoDraftDto);
       setMaterial(result.value.material);
       setPreview(undefined);
-      onMessage('图片已完成本地校验并登记到草稿；请保存草稿后选择服务。');
+      onMessage('图片已完成本地校验并登记到草稿。');
     } catch {
       onMessage('选择本地图片失败，请重试。');
     } finally {
@@ -128,12 +148,14 @@ export function VideoImageWorkspace({
   }
 
   async function clearImage() {
-    if (!videoWorkspaces || dirty || busy || !draft.imageToVideo.source) return;
+    if (!videoWorkspaces || busy || !draft.imageToVideo.source) return;
     setBusy(true);
     onMessage('');
     try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
       const result = await videoWorkspaces.clearMaterial(
-        draft.draftId,
+        saved.draftId,
         imageSourceTarget
       );
       if (!result.ok) {
@@ -173,8 +195,8 @@ export function VideoImageWorkspace({
       }
     });
     onMessage(source
-      ? '旧素材已明确迁移为唯一图片输入；请保存草稿后重新选择服务。'
-      : '旧素材槽位已明确移除；请重新选择一张图片并保存草稿。');
+      ? '旧素材已明确迁移为唯一图片输入；自动保存后可重新选择服务。'
+      : '旧素材槽位已明确移除；请重新选择一张图片。');
   }
 
   function removeUnsupportedContexts() {
@@ -187,13 +209,13 @@ export function VideoImageWorkspace({
           reference.includeInPrompt !== undefined
       )
     });
-    onMessage('不受支持或未固定版本的旧上下文已移除；请保存后重新选择服务。');
+    onMessage('不受支持或未固定版本的旧上下文已移除；自动保存后可重新选择服务。');
   }
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-image-professional__workspace">
-        <Card className="uc-image-workbench__panel uc-image-quick__composer">
+      <div className="uc-image-workbench__workspace uc-video-image__workspace">
+        <Card className="uc-image-workbench__panel uc-video-image__source">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -214,7 +236,7 @@ export function VideoImageWorkspace({
             </div>
             <div className="uc-image-quick__result-actions">
               <Button
-                disabled={!videoWorkspaces || dirty || busy}
+                disabled={!videoWorkspaces || busy}
                 onClick={() => void selectImage()}
                 variant="secondary"
               >
@@ -222,7 +244,7 @@ export function VideoImageWorkspace({
                 {draft.imageToVideo.source ? '更换图片' : '选择图片'}
               </Button>
               <Button
-                disabled={!draft.imageToVideo.source || dirty || busy}
+                disabled={!draft.imageToVideo.source || busy}
                 onClick={() => void clearImage()}
                 title="清除图片"
                 variant="ghost"
@@ -250,7 +272,7 @@ export function VideoImageWorkspace({
             </div>
           ) : null}
           <WorkspaceContextSelector
-            disabled={dirty}
+            disabled={false}
             onChange={(contextReferences) => changeDraft({
               ...draft,
               contextReferences
@@ -271,7 +293,7 @@ export function VideoImageWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas">
+        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
@@ -355,20 +377,19 @@ export function VideoImageWorkspace({
             })}
             value={draft.imageToVideo.prohibited}
           />
-          <EmptyState
-            description="结果必须经过本地文件校验后才会登记为作品。"
-            icon="视"
-            readOnly
-            title="尚无真实生成结果"
+          <GenerationResultPreview
+            mediaKind="video"
+            remoteUrls={resultUrls}
+            workId={resultWorkId}
           />
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-image__submit">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
             <div>
-              <h2>服务、参数与确认</h2>
-              <p>候选只基于已保存的单图图生视频草稿事实。</p>
+              <h2>模型、参数与提交流程</h2>
+              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel
@@ -376,14 +397,20 @@ export function VideoImageWorkspace({
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as ImageVideoDraftDto)}
+            onDraftPersisted={(next) => onDraftPersisted(next as ImageVideoDraftDto)}
             onMessage={onMessage}
+            onSubmissionComplete={(submission) => {
+              setResultWorkId(submission.workId);
+              setResultUrls(submission.resultVideoUrls ?? []);
+            }}
+            showProgressSteps
           />
         </Card>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="warning">在线运行未授权</StatusPill>
-        <p>候选、参数、图片、上下文和外发确认相互独立。</p>
+        <StatusPill tone="info">调用记录</StatusPill>
+        <p>候选、参数、图片、上下文和外发确认相互独立；提交结果会显示在本页流程条。</p>
       </Card>
     </>
   );

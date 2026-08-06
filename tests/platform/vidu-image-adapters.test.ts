@@ -161,7 +161,7 @@ describe('Vidu synchronous image adapters', () => {
     const adapter = new ViduGeminiImageV2Adapter(fixture.dependencies);
     const request = submitRequest(
       fixture,
-      'image_generation',
+      'reference_to_image',
       [toAssetId('asset-controlled-input')],
       { aspectRatio: '1:1', imageSize: '1K' }
     );
@@ -190,7 +190,7 @@ describe('Vidu synchronous image adapters', () => {
     });
     expect(body).not.toHaveProperty('tools');
     expect(fixture.transport.requests[0].url).toBe(
-      'https://api.vidu.cn/ent/v2/image/reference2image/q2-fast'
+      'https://api.vidu.cn/ent/v2/image/reference2image/viduq2'
     );
   });
 
@@ -203,7 +203,7 @@ describe('Vidu synchronous image adapters', () => {
     const adapter = new ViduGeminiImageV2Adapter(fixture.dependencies);
     const request = submitRequest(
       fixture,
-      'image_generation',
+      'reference_to_image',
       [toAssetId('asset-controlled-input')],
       {}
     );
@@ -232,7 +232,7 @@ describe('Vidu synchronous image adapters', () => {
     const adapter = new ViduGeminiImageV2Adapter(fixture.dependencies);
     const request = submitRequest(
       fixture,
-      'image_generation',
+      'reference_to_image',
       [toAssetId('asset-controlled-input')],
       {}
     );
@@ -240,7 +240,7 @@ describe('Vidu synchronous image adapters', () => {
     await expect(adapter.submit(request)).resolves.toEqual({
       kind: 'submission_outcome_unknown',
       providerOperationId: 'local-image-operation',
-      message: 'The synchronous Vidu submission outcome is unknown'
+      message: 'The Vidu request timed out'
     });
     expect(fixture.transport.requests).toHaveLength(1);
   });
@@ -322,16 +322,12 @@ function submitRequest(
     readonly evidence: ModelCapabilityEvidence;
     readonly evidences?: readonly ModelCapabilityEvidence[];
   },
-  purpose: 'image_generation' | 'image_editing',
+  purpose: 'image_generation' | 'image_editing' | 'reference_to_image',
   assetIds: readonly ReturnType<typeof toAssetId>[],
   parameters: Readonly<Record<string, DynamicParameterValue>>
 ) {
   const evidence = fixture.evidences?.find((candidate) =>
-    candidate.capability === (
-      fixture.binding.protocolId === 'vidu.ent.v2.image.reference2image'
-        ? 'reference_to_image'
-        : purpose
-    )
+    candidate.capability === purpose
   ) ?? fixture.evidence;
   const task = imageTask(
     { model: fixture.model, evidence },
@@ -362,7 +358,7 @@ function imageTask(
     readonly model: ProviderModel;
     readonly evidence: ModelCapabilityEvidence;
   },
-  purpose: 'image_generation' | 'image_editing',
+  purpose: 'image_generation' | 'image_editing' | 'reference_to_image',
   assetIds: readonly ReturnType<typeof toAssetId>[],
   parameters: Readonly<Record<string, DynamicParameterValue>>
 ): Task {

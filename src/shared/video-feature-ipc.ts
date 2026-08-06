@@ -124,6 +124,13 @@ export interface VideoFeatureSubmissionDto {
     | 'cancelled'
     | 'unknown_outcome';
   readonly retryAllowed: false;
+  readonly workId?: string;
+  readonly resultVideoUrls?: readonly string[];
+  /** Safe reason when provider completed but local video registration failed. */
+  readonly localResultError?: string;
+  /** User-facing outcome copy when the request reached or left the local submission path. */
+  readonly feedback?: string;
+  readonly safeCode?: string;
 }
 
 export interface VideoFeatureApi {

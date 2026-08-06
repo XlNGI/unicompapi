@@ -20,8 +20,12 @@ const imageContractSource = await readFile(
   'src/shared/image-submission-ipc.ts',
   'utf8'
 );
-const videoContractSource = await readFile(
-  'src/shared/video-submission-ipc.ts',
+const videoFeatureContractSource = await readFile(
+  'src/shared/video-feature-ipc.ts',
+  'utf8'
+);
+const videoResultContractSource = await readFile(
+  'src/shared/video-result-ipc.ts',
   'utf8'
 );
 const workspaceContractSource = await readFile(
@@ -55,7 +59,7 @@ test('Vidu runtime access is ledger-gated and no longer hard-blocked or frozen',
   assert.doesNotMatch(mainSource, /ensureFrozenViduCatalog/);
   assert.match(
     compositionSource,
-    /operationContext: new RegistryVideoOperationContext\(this\.registry\)/
+    /operationContext: videoOperationContext/
   );
   assert.match(mainSource, /new RuntimeAuthorizationLedger\(\s*new JsonRuntimeAuthorizationLedgerStore\(/);
   assert.match(mainSource, /new LedgerRuntimeAuthorizationSync\(\s*runtimeAuthorizationLedger\s*\)/);
@@ -71,24 +75,23 @@ test('Vidu runtime access is ledger-gated and no longer hard-blocked or frozen',
   );
 });
 
-test('preload exposes named lifecycle methods without generic Electron access', () => {
-  for (const operation of [
-    'createFromImageWork',
-    'refreshExecution',
-    'cancelExecution',
-    'recoverExecutions'
-  ]) {
-    assert.match(preloadSource, new RegExp(`\\b${operation}:`));
-  }
-  assert.match(
+test('preload exposes videoFeatures as the only video generation submission surface', () => {
+  assert.match(preloadSource, /const videoFeatures: VideoFeatureApi/);
+  assert.match(preloadSource, /\bcreateFromImageWork:/);
+  assert.match(preloadSource, /videoFeatures,/);
+  assert.doesNotMatch(preloadSource, /videoSubmissions/);
+  assert.doesNotMatch(preloadSource, /video-submission:/);
+  assert.doesNotMatch(storageHandlerSource, /videoSubmissionIpcChannels/);
+  assert.doesNotMatch(storageHandlerSource, /VideoSubmissionController/);
+  assert.doesNotMatch(compositionSource, /VideoOperationRouter/);
+  assert.doesNotMatch(
     preloadSource,
-    /const videoWorkspaces:[\s\S]*createFromImageWork:[\s\S]*const videoSubmissions:/
+    /contextBridge\.exposeInMainWorld\([^,]+,\s*ipcRenderer/
   );
-  assert.doesNotMatch(preloadSource, /contextBridge\.exposeInMainWorld\([^,]+,\s*ipcRenderer/);
 });
 
 test('renderer contracts contain controlled IDs and no provider or filesystem facts', () => {
-  const contracts = `${imageContractSource}\n${videoContractSource}\n${workspaceContractSource}`;
+  const contracts = `${imageContractSource}\n${videoFeatureContractSource}\n${videoResultContractSource}\n${workspaceContractSource}`;
   for (const protectedField of [
     'absolutePath',
     'relativePath',
@@ -104,4 +107,6 @@ test('renderer contracts contain controlled IDs and no provider or filesystem fa
     assert.doesNotMatch(contracts, new RegExp(protectedField));
   }
   assert.match(workspaceContractSource, /createFromImageWork\(\s*workId: string/);
+  assert.match(videoFeatureContractSource, /submitDraft\(/);
+  assert.match(videoResultContractSource, /VideoWorkRegisteredDto/);
 });

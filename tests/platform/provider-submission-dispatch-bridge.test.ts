@@ -126,6 +126,15 @@ describe('provider submission dispatch bridge', () => {
       safeCode: 'adapter.submission_outcome_unknown'
     });
     expect(normalizeProviderSubmitOutcome({
+      kind: 'submission_outcome_unknown',
+      message: 'Vidu authentication failed',
+      providerOperationId: 'operation-auth'
+    })).toEqual({
+      kind: 'unknown_outcome',
+      providerOperationId: 'operation-auth',
+      safeCode: 'vidu.authentication_failed'
+    });
+    expect(normalizeProviderSubmitOutcome({
       kind: 'failed_before_submission',
       message: 'credential abc must not escape',
       retryability: 'not_retryable'

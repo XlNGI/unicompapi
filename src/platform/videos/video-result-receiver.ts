@@ -21,7 +21,7 @@ import type {
   VideoSubmissionErrorCode,
   VideoSubmissionResult,
   VideoWorkRegisteredDto
-} from '../../shared/video-submission-ipc';
+} from '../../shared/video-result-ipc';
 import {
   NodeSha256FileVerifier,
   NodeVideoInspector,
