@@ -53,8 +53,20 @@ describe('ImageDraftArtifactFactory', () => {
           }],
           models: [{
             id: toModelId('model-vidu'),
-            capabilityEvidenceId: toCapabilityEvidenceId('evidence-vidu')
-          }]
+            capabilityEvidenceId: toCapabilityEvidenceId('evidence-vidu-image-generation')
+          }],
+          capabilities: [
+            {
+              id: toCapabilityEvidenceId('evidence-vidu-image-generation'),
+              modelId: toModelId('model-vidu'),
+              capability: 'image_generation'
+            },
+            {
+              id: toCapabilityEvidenceId('evidence-vidu-reference-to-image'),
+              modelId: toModelId('model-vidu'),
+              capability: 'reference_to_image'
+            }
+          ]
         };
       }
     } as unknown as JsonProviderRegistryStore;
@@ -112,7 +124,16 @@ describe('ImageDraftArtifactFactory', () => {
 
     expect(built.subjectArtifacts).toMatchObject({
       kind: 'media',
-      task: { id: 'task-image-1', sourceDraftId: draft.id },
+      task: {
+        id: 'task-image-1',
+        sourceDraftId: draft.id,
+        submission: {
+          image: {
+            purpose: 'image_generation',
+            capabilityEvidenceId: 'evidence-vidu-image-generation'
+          }
+        }
+      },
       execution: { id: 'execution-image-1', taskId: 'task-image-1' }
     });
     expect(built.dispatchRequest).toMatchObject({
@@ -175,6 +196,7 @@ function candidate(): ResolvedFeatureCandidateV1 {
       protocolBindingId: toProtocolBindingId('binding-vidu'),
       protocolBindingRevision: 1,
       productFeature: 'text_to_image',
+      internalPurpose: 'image_generation',
       featureMappingVersion: 1,
       parameterSchemaId: 'parameter-schema.vidu.text-to-image',
       parameterSchemaRevision: 1,

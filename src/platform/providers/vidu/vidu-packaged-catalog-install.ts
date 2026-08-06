@@ -30,13 +30,19 @@ import {
   VIDU_IMAGE_V1_PROTOCOL_ID,
   VIDU_IMAGE_V1_PROTOCOL_VERSION,
   VIDU_PROVIDER_PACKAGE_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+  VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+  VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
   createViduModelContract,
   frozenViduGeminiImageModelKeys,
+  frozenViduLegacyGeminiImageModelKeys,
   frozenViduModelKeys,
+  frozenViduOfficialImageModelKeys,
   frozenViduVideoModelKeys,
+  viduProviderPackageDescriptor,
   type FrozenViduModelKey
 } from './vidu-contracts';
 
@@ -51,11 +57,55 @@ export interface InstallPackagedViduCatalogResult {
 }
 
 /**
- * Idempotently installs the packaged Vidu model catalog onto one connection:
- * three protocol bindings, all frozen model keys, definitions, capability
- * evidence, and active profiles.
+ * Idempotently installs the packaged Vidu model catalog onto one connection,
+ * then remounts every other Vidu connection in the same snapshot (including
+ * deleted ones that still retain models/profiles). Model definitions are
+ * package-global; remounting only one connection would leave sibling profiles
+ * pointing at stale Gemini adapters and fail registry reference validation.
  */
 export function applyPackagedViduCatalogInstall(
+  snapshot: ProviderRegistrySnapshot,
+  input: InstallPackagedViduCatalogInput
+): {
+  readonly snapshot: ProviderRegistrySnapshot;
+  readonly result: InstallPackagedViduCatalogResult;
+} {
+  const providerId = toProviderId(input.providerId);
+  const connectionId = toConnectionId(input.connectionId);
+  const target = snapshot.connections.find((item) => item.id === connectionId);
+  if (!target || target.providerId !== providerId) {
+    throw new TypeError('Vidu packaged catalog install requires an owned connection');
+  }
+  if (target.packageId !== VIDU_PROVIDER_PACKAGE_ID) {
+    throw new TypeError('Vidu packaged catalog install requires a Vidu package connection');
+  }
+
+  const siblingIds = snapshot.connections
+    .filter(
+      (item) =>
+        item.packageId === VIDU_PROVIDER_PACKAGE_ID &&
+        item.id !== connectionId
+    )
+    .map((item) => item.id);
+  const connectionIds = [connectionId, ...siblingIds];
+
+  let current = snapshot;
+  let count = 0;
+  for (const id of connectionIds) {
+    const connection = current.connections.find((item) => item.id === id);
+    if (!connection) continue;
+    const installed = applyPackagedViduCatalogInstallForConnection(current, {
+      providerId: connection.providerId,
+      connectionId: connection.id,
+      now: input.now
+    });
+    current = installed.snapshot;
+    if (id === connectionId) count = installed.result.count;
+  }
+  return { snapshot: current, result: { count } };
+}
+
+function applyPackagedViduCatalogInstallForConnection(
   snapshot: ProviderRegistrySnapshot,
   input: InstallPackagedViduCatalogInput
 ): {
@@ -89,8 +139,10 @@ export function applyPackagedViduCatalogInstall(
   for (const providerModelKey of frozenViduModelKeys) {
     const binding = bindingForModelKey(bindings.byKind, providerModelKey);
     const purposes = purposesForModelKey(providerModelKey);
-    const enabled = true;
-    const profileStatus = 'verified' as const;
+    // Image V1 remains unverified; keep it installed but disabled so
+    // text-to-image candidates prefer official viduq2 instead.
+    const enabled = providerModelKey !== 'viduimage-2';
+    const profileStatus = enabled ? ('verified' as const) : ('disabled' as const);
 
     let model = models.find(
       (candidate) =>
@@ -153,12 +205,15 @@ export function applyPackagedViduCatalogInstall(
           })
         );
       }
-      if (model.protocolBindingId !== binding.id) {
+      const bindingNeedsUpdate = model.protocolBindingId !== binding.id;
+      const enabledNeedsUpdate = model.enabled !== enabled;
+      if (bindingNeedsUpdate || enabledNeedsUpdate) {
         const updated: ProviderModel = {
           ...model,
           protocolBindingId: binding.id,
           mediaKind: binding.mediaKind,
           catalogState: 'present',
+          enabled,
           revision: model.revision + 1,
           updatedAt: input.now
         };
@@ -222,6 +277,8 @@ export function applyPackagedViduCatalogInstall(
     } else {
       // Refresh declared features/evidence when packaged contracts expand
       // (e.g. viduq2 gaining text_to_image) without recreating the profile id.
+      // Also promote restricted/disabled packaged profiles to the install target
+      // status so official models become selectable after sync.
       const nextFeatures = template.features;
       const nextEvidenceIds = capabilities
         .filter((evidence) => evidence.modelId === model!.id)
@@ -230,7 +287,19 @@ export function applyPackagedViduCatalogInstall(
         JSON.stringify(existingProfile.features) !== JSON.stringify(nextFeatures);
       const evidenceChanged =
         JSON.stringify(existingProfile.evidenceIds) !== JSON.stringify(nextEvidenceIds);
-      if (featuresChanged || evidenceChanged) {
+      const bindingChanged =
+        existingProfile.protocolBindingId !== model!.protocolBindingId ||
+        existingProfile.adapterKey !== template.adapterKey;
+      const modelRevisionChanged =
+        existingProfile.modelRevision !== model!.revision;
+      const statusChanged = existingProfile.status !== profileStatus;
+      if (
+        featuresChanged ||
+        evidenceChanged ||
+        bindingChanged ||
+        modelRevisionChanged ||
+        statusChanged
+      ) {
         modelProfiles = modelProfiles.map((profile) =>
           profile.profileId === existingProfile.profileId
             ? {
@@ -240,6 +309,8 @@ export function applyPackagedViduCatalogInstall(
                 sourceTemplateId: template.templateId,
                 adapterKey: template.adapterKey,
                 protocolBindingId: model!.protocolBindingId,
+                modelRevision: model!.revision,
+                status: profileStatus,
                 recordedAt: input.now
               }
             : profile
@@ -247,6 +318,35 @@ export function applyPackagedViduCatalogInstall(
       }
     }
   }
+
+  const requiredAdapterBindings = viduProviderPackageDescriptor.adapters.map(
+    (adapter) => ({
+      adapterId: adapter.adapterId,
+      adapterVersion: adapter.adapterVersion,
+      protocolId: adapter.protocolId,
+      protocolVersion: adapter.protocolVersion
+    })
+  );
+  const connections = snapshot.connections.map((item) => {
+    if (item.id !== connectionId) return item;
+    const existing = item.adapterBindings ?? [];
+    const missing = requiredAdapterBindings.filter(
+      (required) =>
+        !existing.some(
+          (binding) =>
+            binding.adapterId === required.adapterId &&
+            binding.adapterVersion === required.adapterVersion &&
+            binding.protocolId === required.protocolId &&
+            binding.protocolVersion === required.protocolVersion
+        )
+    );
+    if (missing.length === 0) return item;
+    return {
+      ...item,
+      adapterBindings: [...existing, ...missing],
+      updatedAt: input.now
+    };
+  });
 
   const count = models.filter(
     (model) =>
@@ -257,6 +357,7 @@ export function applyPackagedViduCatalogInstall(
   return {
     snapshot: {
       ...snapshot,
+      connections,
       protocolBindings,
       models,
       capabilities,
@@ -274,7 +375,11 @@ export async function installPackagedViduCatalog(
   return registry.mutate((snapshot) => applyPackagedViduCatalogInstall(snapshot, input));
 }
 
-type BindingKind = 'referenceVideoV2' | 'imageV1' | 'geminiImageV2';
+type BindingKind =
+  | 'referenceVideoV2'
+  | 'imageV1'
+  | 'geminiImageV2'
+  | 'referenceImageV2';
 
 function ensureProtocolBindings(
   existing: readonly ProviderProtocolBinding[],
@@ -328,7 +433,22 @@ function ensureProtocolBindings(
         'https://api.vidu.cn/ent/v2/image/reference2image/{providerModelKey}',
       authScheme: 'token',
       executionLifecycle: 'synchronous_completed',
-      supportedPurposes: ['reference_to_image', 'image_generation', 'image_editing']
+      supportedPurposes: ['reference_to_image']
+    },
+    {
+      kind: 'referenceImageV2',
+      protocolId: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
+      mediaKind: 'image',
+      adapterKind: VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+      endpointTemplate: 'https://api.vidu.cn/ent/v2/reference2image',
+      authScheme: 'token',
+      executionLifecycle: 'synchronous_completed',
+      supportedPurposes: [
+        'reference_to_image',
+        'image_generation',
+        'image_editing'
+      ]
     }
   ];
 
@@ -349,11 +469,18 @@ function ensureProtocolBindings(
         spec.supportedPurposes.every((purpose) =>
           found.supportedPurposes.includes(purpose)
         );
-      if (found.authScheme !== spec.authScheme || !purposesMatch) {
+      if (
+        found.authScheme !== spec.authScheme ||
+        !purposesMatch ||
+        found.endpointTemplate !== spec.endpointTemplate ||
+        found.executionLifecycle !== spec.executionLifecycle
+      ) {
         const upgraded: ProviderProtocolBinding = {
           ...found,
           authScheme: spec.authScheme,
           supportedPurposes: [...spec.supportedPurposes],
+          endpointTemplate: spec.endpointTemplate,
+          executionLifecycle: spec.executionLifecycle,
           updatedAt: now
         };
         const index = protocolBindings.findIndex((item) => item.id === found.id);
@@ -395,7 +522,19 @@ function bindingForModelKey(
     return byKind.referenceVideoV2;
   }
   if (providerModelKey === 'viduimage-2') return byKind.imageV1;
-  if ((frozenViduGeminiImageModelKeys as readonly string[]).includes(providerModelKey)) {
+  if (
+    (frozenViduOfficialImageModelKeys as readonly string[]).includes(
+      providerModelKey
+    )
+  ) {
+    return byKind.referenceImageV2;
+  }
+  if (
+    (frozenViduLegacyGeminiImageModelKeys as readonly string[]).includes(
+      providerModelKey
+    ) ||
+    (frozenViduGeminiImageModelKeys as readonly string[]).includes(providerModelKey)
+  ) {
     return byKind.geminiImageV2;
   }
   throw new TypeError(`Unsupported Vidu model key: ${providerModelKey}`);

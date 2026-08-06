@@ -23,6 +23,8 @@ import {
   VIDU_PROVIDER_PACKAGE_ID,
   VIDU_OFFICIAL_TEMPLATE_ID,
   VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   ViduPackagedParameterSchemaResolver,
@@ -71,6 +73,7 @@ describe('Vidu Provider Package migration', () => {
     expect(template.adapters.map((adapter) => adapter.adapterId)).toEqual([
       VIDU_IMAGE_V1_ADAPTER_ID,
       VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+      VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
       VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
     ]);
     expect(registry.resolveEndpoint(template, undefined, false)).toBe(
@@ -230,6 +233,50 @@ describe('Vidu RouteSnapshot adapters', () => {
     expect(JSON.stringify(fixture.usage)).not.toContain(syntheticCredentialValue);
   });
 
+  it('submits viduq2 text-to-image without assets and reference-to-image with one asset', async () => {
+    const fixture = await routeFixture(['viduq2']);
+    const textRoute = routeFor(fixture.snapshot, 'viduq2', 'text_to_image');
+    const referenceRoute = routeFor(
+      fixture.snapshot,
+      'viduq2',
+      'reference_to_image'
+    );
+
+    await expect(fixture.adapters.referenceImageV2.submit(textRoute, {
+      request: dispatchRequest(textRoute, true)
+    })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+
+    const textOutcome = await fixture.adapters.referenceImageV2.submit(textRoute, {
+      request: dispatchRequest(textRoute, false)
+    });
+    expect(textOutcome).toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url' }]
+    });
+    expect(
+      fixture.service.requests.some((request) =>
+        request.url.includes('/ent/v2/reference2image') &&
+        !request.url.includes('/image/reference2image/')
+      )
+    ).toBe(true);
+    expect(
+      fixture.service.count('GET', '/ent/v2/tasks/synthetic-image-task/creations')
+    ).toBeGreaterThanOrEqual(1);
+
+    await expect(fixture.adapters.referenceImageV2.submit(referenceRoute, {
+      request: dispatchRequest(referenceRoute, false)
+    })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+
+    const referenceOutcome = await fixture.adapters.referenceImageV2.submit(
+      referenceRoute,
+      { request: dispatchRequest(referenceRoute, true) }
+    );
+    expect(referenceOutcome).toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url' }]
+    });
+  });
+
   it('uses the captured route for video query, cancel, restart attach and result receipt', async () => {
     const fixture = await routeFixture();
     const route = routeFor(
@@ -296,7 +343,13 @@ describe('Vidu RouteSnapshot adapters', () => {
   });
 });
 
-async function routeFixture() {
+async function routeFixture(
+  enabledModelKeys: readonly string[] = [
+    'viduimage-2',
+    'q3-lite',
+    'viduq3-turbo'
+  ]
+) {
   const root = await makeRoot('vidu-route-migration-');
   const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
   const records = createUserViduRegistryRecords();
@@ -330,15 +383,12 @@ async function routeFixture() {
     })),
     models: initial.models.map((model) => ({
       ...model,
-      enabled: ['viduimage-2', 'q3-lite', 'viduq3-turbo'].includes(
-        model.providerModelKey
-      ),
+      enabled: enabledModelKeys.includes(model.providerModelKey),
       updatedAt: timestamp
     })),
     modelProfiles: initial.modelProfiles!.map((profile) => {
       const model = initial.models.find((candidate) => candidate.id === profile.modelId);
-      return model &&
-        ['viduimage-2', 'q3-lite', 'viduq3-turbo'].includes(model.providerModelKey)
+      return model && enabledModelKeys.includes(model.providerModelKey)
         ? { ...profile, status: 'verified' as const, recordedAt: timestamp }
         : profile;
     })
@@ -421,7 +471,9 @@ function routeFor(
     ? VIDU_IMAGE_V1_ADAPTER_VERSION
     : binding.adapterKind === VIDU_GEMINI_IMAGE_V2_ADAPTER_ID
       ? VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION
-      : VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION;
+      : binding.adapterKind === VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+        ? VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION
+        : VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION;
   return createProviderExecutionRouteSnapshot({
     id: toProviderExecutionRouteSnapshotId(
       `route-vidu-${modelKey}-${productFeature}`

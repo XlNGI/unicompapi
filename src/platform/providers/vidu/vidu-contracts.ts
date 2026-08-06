@@ -30,6 +30,14 @@ export const VIDU_GEMINI_IMAGE_V2_PROTOCOL_VERSION = '2';
 export const VIDU_GEMINI_IMAGE_V2_SOURCE_DOCUMENT_REVISION =
   'vidu-gemini-image-v2-c2-evidence@2026-07-29';
 
+/** Official async reference2image (viduq2 / viduq1). Dual-track with legacy Gemini sync. */
+export const VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID = 'vidu_reference_image_v2';
+export const VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION = '2026-08-06';
+export const VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID = 'vidu.ent.v2.reference2image';
+export const VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION = '2';
+export const VIDU_REFERENCE_IMAGE_V2_SOURCE_DOCUMENT_REVISION =
+  'vidu-reference-image-v2-official@2026-08-06';
+
 export const VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID =
   'vidu_reference_video_v2';
 export const VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION = '2026-08-03';
@@ -42,9 +50,19 @@ export const VIDU_REFERENCE_VIDEO_V2_SOURCE_DOCUMENT_REVISION =
 export const VIDU_IMAGE_V1_RESULT_SCHEMA_ID = 'results.vidu.image-v1';
 export const VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID =
   'results.vidu.gemini-image-v2';
+export const VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID =
+  'results.vidu.reference-image-v2';
 export const VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID =
   'results.vidu.reference-video-v2';
 export const VIDU_USAGE_SCHEMA_ID = 'usage.vidu.not-reported';
+
+export const frozenViduOfficialImageModelKeys = ['viduq2', 'viduq1'] as const;
+export const frozenViduLegacyGeminiImageModelKeys = [
+  'q2-fast',
+  'q2-pro',
+  'q3-fast',
+  'q3-lite'
+] as const;
 
 export const VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID =
   'constraints.vidu.text-only-single-output';
@@ -62,12 +80,8 @@ export const frozenViduVideoModelKeys = [
 ] as const;
 
 export const frozenViduGeminiImageModelKeys = [
-  'viduq2',
-  'viduq1',
-  'q2-fast',
-  'q2-pro',
-  'q3-fast',
-  'q3-lite'
+  ...frozenViduOfficialImageModelKeys,
+  ...frozenViduLegacyGeminiImageModelKeys
 ] as const;
 
 export const frozenViduModelKeys = [
@@ -144,11 +158,24 @@ export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {
       operations: ['submit', 'receive_result']
     },
     {
+      adapterId: VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+      adapterVersion: VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
+      protocolId: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
+      operations: ['submit', 'receive_result']
+    },
+    {
       adapterId: VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
       adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
       protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
       protocolVersion: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
-      operations: ['validate_connection', 'submit', 'query', 'cancel', 'receive_result']
+      operations: [
+        'validate_connection',
+        'submit',
+        'query',
+        'cancel',
+        'receive_result'
+      ]
     }
   ],
   templates: [
@@ -173,6 +200,10 @@ export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {
         {
           adapterId: VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
           adapterVersion: VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION
+        },
+        {
+          adapterId: VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+          adapterVersion: VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION
         },
         {
           adapterId: VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
@@ -252,10 +283,12 @@ function geminiImageContract(
   // viduq2 supports text-to-image (0 images), reference-to-image, and image edit.
   // viduq1 supports reference-to-image only (1–7 images).
   if (providerModelKey === 'viduq2') {
-    const textSchemaId = `parameters.vidu.gemini-image-v2.text-to-image.${providerModelKey}`;
+    const textSchemaId =
+      `parameters.vidu.reference-image-v2.text-to-image.${providerModelKey}`;
     const referenceSchemaId =
-      `parameters.vidu.gemini-image-v2.reference-to-image.${providerModelKey}`;
-    const editSchemaId = `parameters.vidu.gemini-image-v2.image-edit.${providerModelKey}`;
+      `parameters.vidu.reference-image-v2.reference-to-image.${providerModelKey}`;
+    const editSchemaId =
+      `parameters.vidu.reference-image-v2.image-edit.${providerModelKey}`;
     const commonFields: readonly ParameterFieldSchemaV2[] = [
       optionalString('aspect_ratio', 10),
       optionalString('resolution', 20),
@@ -264,29 +297,29 @@ function geminiImageContract(
     return {
       definition: definition(
         providerModelKey,
-        VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
-        VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
-        VIDU_GEMINI_IMAGE_V2_SOURCE_DOCUMENT_REVISION,
+        VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+        VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+        VIDU_REFERENCE_IMAGE_V2_SOURCE_DOCUMENT_REVISION,
         [
           feature(
             'text_to_image',
             'image_generation',
             textSchemaId,
-            VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID,
             VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID
           ),
           feature(
             'reference_to_image',
             'reference_to_image',
             referenceSchemaId,
-            VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID,
             VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
           ),
           feature(
             'image_edit',
             'image_editing',
             editSchemaId,
-            VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID,
             VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
           )
         ]
@@ -302,18 +335,18 @@ function geminiImageContract(
 
   if (providerModelKey === 'viduq1') {
     const schemaId =
-      `parameters.vidu.gemini-image-v2.reference-to-image.${providerModelKey}`;
+      `parameters.vidu.reference-image-v2.reference-to-image.${providerModelKey}`;
     return {
       definition: definition(
         providerModelKey,
-        VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
-        VIDU_GEMINI_IMAGE_V2_PROTOCOL_ID,
-        VIDU_GEMINI_IMAGE_V2_SOURCE_DOCUMENT_REVISION,
+        VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+        VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+        VIDU_REFERENCE_IMAGE_V2_SOURCE_DOCUMENT_REVISION,
         [feature(
           'reference_to_image',
           'reference_to_image',
           schemaId,
-          VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+          VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID,
           VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
         )]
       ),

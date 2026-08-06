@@ -453,13 +453,15 @@ export class ProviderManagementFramework {
           : validationInstalled
             ? 'available'
             : 'requires_live_api_approval',
-        modelDiscoveryAction: template.modelDiscoveryKind === 'manual_exact'
-          ? 'manual_exact'
-          : template.modelDiscoveryKind === 'none'
-            ? 'unsupported'
-            : discoveryInstalled
-              ? 'catalog_available'
-              : 'requires_live_api_approval'
+        modelDiscoveryAction: template.packageId === VIDU_PROVIDER_PACKAGE_ID
+          ? 'catalog_available'
+          : template.modelDiscoveryKind === 'manual_exact'
+            ? 'manual_exact'
+            : template.modelDiscoveryKind === 'none'
+              ? 'unsupported'
+              : discoveryInstalled
+                ? 'catalog_available'
+                : 'requires_live_api_approval'
       };
     });
   }
@@ -880,13 +882,46 @@ export class ProviderManagementFramework {
       const connectionId = parseIdRequest(input, 'connectionId');
       const snapshot = await this.registry.load();
       const resolved = resolveOwnedConnection(snapshot, this.packages, connectionId);
+      requireAvailableConnection(resolved.connection);
+
+      // Packaged Vidu catalog remount (official reference2image dual-track).
+      // Templates stay manual_exact for ad-hoc keys, but Sync must refresh
+      // frozen packaged models, bindings, and profiles.
+      if (resolved.connection.packageId === VIDU_PROVIDER_PACKAGE_ID) {
+        const observedAt = this.now();
+        const installed = await installPackagedViduCatalog(this.registry, {
+          providerId: resolved.connection.providerId,
+          connectionId: resolved.connection.id,
+          now: observedAt
+        });
+        const catalogRevision = nextCatalogRevision(
+          (await this.registry.load()).models,
+          resolved.connection.id
+        );
+        await this.record({
+          action: 'catalog_synced',
+          outcome: 'succeeded',
+          providerId: resolved.connection.providerId,
+          connectionId: resolved.connection.id,
+          count: installed.count
+        }, observedAt);
+        return {
+          ok: true,
+          value: {
+            connectionId: resolved.connection.id,
+            count: installed.count,
+            catalogRevision,
+            observedAt
+          }
+        };
+      }
+
       if (resolved.template.template.modelDiscoveryKind !== 'catalog') {
         throw new ProviderManagementFrameworkError(
           'catalog_sync_unavailable',
           'This provider template does not publish a model catalog operation'
         );
       }
-      requireAvailableConnection(resolved.connection);
       const adapter = this.adapters.resolve(
         resolved.connection,
         resolved.template,

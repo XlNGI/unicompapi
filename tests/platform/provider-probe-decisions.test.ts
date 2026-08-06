@@ -44,7 +44,7 @@ describe('provider probe decisions (PR3 contract)', () => {
     });
     expect(byTemplate.get('vidu-official')).toMatchObject({
       validationAction: 'available',
-      modelDiscoveryAction: 'manual_exact'
+      modelDiscoveryAction: 'catalog_available'
     });
     expect(byTemplate.get('unicompapi-official')).toMatchObject({
       kind: 'official',
@@ -150,7 +150,7 @@ describe('provider probe decisions (PR3 contract)', () => {
         state: 'available',
         validated: true,
         catalog: 'synced',
-        catalogCount: 10
+        catalogCount: 12
       }
     });
     expect(viduProgress).toEqual(['validating', 'saving', 'syncing']);
@@ -161,7 +161,7 @@ describe('provider probe decisions (PR3 contract)', () => {
     if (!vidu.ok) throw new Error('vidu add failed');
     expect(
       snapshot.models.filter((model) => model.connectionId === vidu.value.connectionId)
-    ).toHaveLength(10);
+    ).toHaveLength(12);
   });
 });
 

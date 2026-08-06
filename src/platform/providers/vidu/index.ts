@@ -7,5 +7,6 @@ export * from './vidu-provider-package';
 export * from './vidu-packaged-catalog-install';
 export * from './controlled-image-material';
 export * from './vidu-image-adapters';
+export * from './vidu-reference-image-adapter';
 export * from './vidu-image-result-port';
 export * from './vidu-video-adapter';

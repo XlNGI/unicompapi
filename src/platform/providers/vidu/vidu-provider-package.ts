@@ -14,6 +14,7 @@ import {
   type ViduConnectionPort,
   type ViduImageV1AdapterOptions
 } from './vidu-image-adapters';
+import { ViduReferenceImageV2Adapter } from './vidu-reference-image-adapter';
 import type { ControlledImageMaterialPort } from './controlled-image-material';
 import {
   ViduReferenceVideoV2Adapter,
@@ -99,7 +100,8 @@ export class ViduProviderPackage {
     };
     return {
       imageV1: new ViduImageV1Adapter(dependencies, options.imageV1),
-      geminiImageV2: new ViduGeminiImageV2Adapter(dependencies)
+      geminiImageV2: new ViduGeminiImageV2Adapter(dependencies),
+      referenceImageV2: new ViduReferenceImageV2Adapter(dependencies)
     };
   }
 
@@ -139,6 +141,10 @@ export class ViduProviderPackage {
       imageV1: new ViduImageRouteAdapter('image_v1', dependencies),
       geminiImageV2: new ViduImageRouteAdapter(
         'gemini_image_v2',
+        dependencies
+      ),
+      referenceImageV2: new ViduImageRouteAdapter(
+        'reference_image_v2',
         dependencies
       ),
       referenceVideoV2: new ViduVideoRouteAdapter(dependencies)

@@ -76,7 +76,7 @@ afterEach(async () => {
 });
 
 describe('Vidu local synthetic service validation', () => {
-  it('authenticates locally, routes all three protocols and rejects cross-media before transport', async () => {
+  it('authenticates locally, routes packaged image and video protocols and rejects cross-media before transport', async () => {
     const fixture = await createProtocolFixture();
 
     await expect(
@@ -666,7 +666,8 @@ async function createProtocolFixture(
   });
   const imageRouter = new ImageOperationRouter(registry, {
     vidu_image_v1: imageAdapters.imageV1,
-    vidu_gemini_image_v2: imageAdapters.geminiImageV2
+    vidu_gemini_image_v2: imageAdapters.geminiImageV2,
+    vidu_reference_image_v2: imageAdapters.referenceImageV2
   });
   const videoRouter = new VideoOperationRouter(registry, {
     vidu_reference_video_v2: videoAdapter

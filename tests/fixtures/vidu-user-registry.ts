@@ -34,6 +34,10 @@ import {
   VIDU_OFFICIAL_TEMPLATE_ID,
   VIDU_PROVIDER_PACKAGE_ID,
   VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+  VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
@@ -52,6 +56,9 @@ export const VIDU_USER_PROTOCOL_BINDING_IDS = {
   imageV1: toProtocolBindingId('protocol-binding-vidu-image-v1'),
   geminiImageV2: toProtocolBindingId(
     'protocol-binding-vidu-gemini-image-v2'
+  ),
+  referenceImageV2: toProtocolBindingId(
+    'protocol-binding-vidu-reference-image-v2'
   )
 } as const;
 
@@ -113,6 +120,12 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
         protocolVersion: VIDU_GEMINI_IMAGE_V2_PROTOCOL_VERSION
       },
       {
+        adapterId: VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+        adapterVersion: VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
+        protocolId: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+        protocolVersion: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION
+      },
+      {
         adapterId: VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
         adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
         protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
@@ -168,7 +181,26 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
         'https://api.vidu.cn/ent/v2/image/reference2image/{providerModelKey}',
       authScheme: 'token',
       executionLifecycle: 'synchronous_completed',
-      supportedPurposes: ['reference_to_image', 'image_generation', 'image_editing'],
+      supportedPurposes: ['reference_to_image'],
+      createdAt: catalogTimestamp,
+      updatedAt: catalogTimestamp
+    }),
+    createProviderProtocolBinding({
+      id: VIDU_USER_PROTOCOL_BINDING_IDS.referenceImageV2,
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolId: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
+      mediaKind: 'image',
+      adapterKind: VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+      endpointTemplate: 'https://api.vidu.cn/ent/v2/reference2image',
+      authScheme: 'token',
+      executionLifecycle: 'synchronous_completed',
+      supportedPurposes: [
+        'reference_to_image',
+        'image_generation',
+        'image_editing'
+      ],
       createdAt: catalogTimestamp,
       updatedAt: catalogTimestamp
     })
@@ -195,7 +227,10 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
     ...frozenViduModelKeys.slice(6).map((providerModelKey) => ({
       providerModelKey,
       modelId: `model-image-vidu-gemini-${providerModelKey}`,
-      binding: protocolBindings[2],
+      binding:
+        providerModelKey === 'viduq2' || providerModelKey === 'viduq1'
+          ? protocolBindings[3]
+          : protocolBindings[2],
       purposes: providerModelKey === 'viduq2'
         ? (['image_generation', 'reference_to_image', 'image_editing'] as const)
         : (['reference_to_image'] as const)

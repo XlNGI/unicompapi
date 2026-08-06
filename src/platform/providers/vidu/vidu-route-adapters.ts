@@ -47,6 +47,9 @@ import {
   VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID,
   VIDU_PROVIDER_PACKAGE_ID,
   VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID,
@@ -63,6 +66,7 @@ import {
   type ViduAdapterRequestControl,
   type ViduConnectionPort
 } from './vidu-image-adapters';
+import { ViduReferenceImageV2Adapter } from './vidu-reference-image-adapter';
 import { readViduImmediateImageResult } from './vidu-image-result-port';
 import type { ControlledImageMaterialPort } from './controlled-image-material';
 import type { ViduSharedRuntime } from './vidu-shared-runtime';
@@ -117,11 +121,12 @@ export class ViduRegistryExecutionRouteResolver
         candidate.usageSchemaId === route.usageSchemaId &&
         candidate.constraintSetId === route.constraintSetId
     );
-    const evidence = model?.capabilityEvidenceId
-      ? snapshot.capabilities.find(
-          (candidate) => candidate.id === model.capabilityEvidenceId
-        )
-      : undefined;
+    const evidence = selectRouteCapabilityEvidence(
+      snapshot.capabilities,
+      model,
+      route.internalPurpose,
+      profile?.evidenceIds
+    );
     const adapterBinding = connection?.adapterBindings?.find(
       (candidate) =>
         candidate.adapterId === route.adapterKey &&
@@ -262,15 +267,19 @@ export class ViduImageRouteAdapter {
   }>();
 
   constructor(
-    private readonly kind: 'image_v1' | 'gemini_image_v2',
+    private readonly kind: 'image_v1' | 'gemini_image_v2' | 'reference_image_v2',
     private readonly dependencies: ViduRouteAdapterDependencies
   ) {
     this.adapterKey = kind === 'image_v1'
       ? VIDU_IMAGE_V1_ADAPTER_ID
-      : VIDU_GEMINI_IMAGE_V2_ADAPTER_ID;
+      : kind === 'reference_image_v2'
+        ? VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+        : VIDU_GEMINI_IMAGE_V2_ADAPTER_ID;
     this.adapterVersion = kind === 'image_v1'
       ? VIDU_IMAGE_V1_ADAPTER_VERSION
-      : VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION;
+      : kind === 'reference_image_v2'
+        ? VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION
+        : VIDU_GEMINI_IMAGE_V2_ADAPTER_VERSION;
     this.ids = dependencies.ids ?? defaultIds();
   }
 
@@ -290,7 +299,7 @@ export class ViduImageRouteAdapter {
         input.request,
         resolved.route,
         schema,
-        this.kind === 'gemini_image_v2'
+        routeRequiresControlledImageAsset(resolved.route.productFeature)
       );
       const dependencies = {
         runtime: this.dependencies.runtime,
@@ -300,7 +309,9 @@ export class ViduImageRouteAdapter {
       };
       const adapter = this.kind === 'image_v1'
         ? new ViduImageV1Adapter(dependencies, VIDU_IMAGE_V1_VERIFIED_OPTIONS)
-        : new ViduGeminiImageV2Adapter(dependencies);
+        : this.kind === 'reference_image_v2'
+          ? new ViduReferenceImageV2Adapter(dependencies)
+          : new ViduGeminiImageV2Adapter(dependencies);
       const outcome = await adapter.submit(
         legacyImageRequest(resolved, request),
         control(input, () => { requestStarted = true; })
@@ -393,16 +404,24 @@ export class ViduImageRouteAdapter {
               VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
             ]
           }
-        : {
-            adapterKey: this.adapterKey,
-            adapterVersion: this.adapterVersion,
-            features: ['text_to_image', 'reference_to_image', 'image_edit'],
-            resultSchemaId: VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
-            constraintSetIds: [
-              VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID,
-              VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
-            ]
-          }
+        : this.kind === 'reference_image_v2'
+          ? {
+              adapterKey: this.adapterKey,
+              adapterVersion: this.adapterVersion,
+              features: ['text_to_image', 'reference_to_image', 'image_edit'],
+              resultSchemaId: VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID,
+              constraintSetIds: [
+                VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID,
+                VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
+              ]
+            }
+          : {
+              adapterKey: this.adapterKey,
+              adapterVersion: this.adapterVersion,
+              features: ['reference_to_image'],
+              resultSchemaId: VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+              constraintSetIds: [VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID]
+            }
     );
     return resolved;
   }
@@ -730,6 +749,40 @@ async function requireParameterSchema(
     );
   }
   return schema;
+}
+
+function routeRequiresControlledImageAsset(
+  productFeature: ProviderExecutionRouteSnapshotV1['productFeature']
+): boolean {
+  return productFeature === 'reference_to_image' ||
+    productFeature === 'image_edit';
+}
+
+function selectRouteCapabilityEvidence(
+  capabilities: readonly ModelCapabilityEvidence[],
+  model: ProviderModel | undefined,
+  purpose: string | undefined,
+  evidenceIds: readonly string[] | undefined
+): ModelCapabilityEvidence | undefined {
+  if (!model || !purpose) return undefined;
+  const allowed = evidenceIds ? new Set(evidenceIds) : undefined;
+  const matched = capabilities.find(
+    (candidate) =>
+      candidate.modelId === model.id &&
+      candidate.capability === purpose &&
+      (allowed === undefined || allowed.has(candidate.id))
+  );
+  if (matched) return matched;
+  // Legacy single-pointer models: accept only when the pointer matches this route purpose.
+  if (!model.capabilityEvidenceId) return undefined;
+  const pointed = capabilities.find(
+    (candidate) => candidate.id === model.capabilityEvidenceId
+  );
+  return pointed &&
+    pointed.modelId === model.id &&
+    pointed.capability === purpose
+    ? pointed
+    : undefined;
 }
 
 function parseDispatchRequest(

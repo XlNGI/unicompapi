@@ -14,6 +14,7 @@ import {
   VIDU_IMAGE_V1_ADAPTER_ID,
   VIDU_OFFICIAL_TEMPLATE_ID,
   VIDU_PROVIDER_PACKAGE_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
@@ -25,6 +26,9 @@ import {
   type CredentialProtector,
   type ProviderManagementAdapterPort
 } from '../../src/platform';
+import {
+  createUserViduRegistryRecords
+} from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-08-05T14:00:00.000Z');
@@ -35,7 +39,7 @@ afterEach(async () => {
 });
 
 describe('Vidu packaged catalog install', () => {
-  it('installs ten models with three protocol bindings and verified profiles', async () => {
+  it('installs ten models with four protocol bindings and verified profiles', async () => {
     const fixture = await installFixture();
     const progress: string[] = [];
     const added = await fixture.framework.addConnection({
@@ -65,6 +69,7 @@ describe('Vidu packaged catalog install', () => {
     expect(bindings.map((binding) => binding.adapterKind).sort()).toEqual([
       VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
       VIDU_IMAGE_V1_ADAPTER_ID,
+      VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
       VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
     ].sort());
 
@@ -74,11 +79,21 @@ describe('Vidu packaged catalog install', () => {
     expect(models.every((model) => (model.catalogState ?? 'present') === 'present')).toBe(true);
 
     const imageV1 = models.find((model) => model.providerModelKey === 'viduimage-2');
-    expect(imageV1?.enabled).toBe(true);
+    expect(imageV1?.enabled).toBe(false);
     const video = models.find((model) => model.providerModelKey === 'viduq3-turbo');
     expect(video?.enabled).toBe(true);
     const gemini = models.find((model) => model.providerModelKey === 'q3-lite');
     expect(gemini?.enabled).toBe(true);
+    const official = models.find((model) => model.providerModelKey === 'viduq2');
+    expect(official?.enabled).toBe(true);
+    const officialBinding = bindings.find(
+      (binding) => binding.adapterKind === VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+    );
+    const geminiBinding = bindings.find(
+      (binding) => binding.adapterKind === VIDU_GEMINI_IMAGE_V2_ADAPTER_ID
+    );
+    expect(official?.protocolBindingId).toBe(officialBinding?.id);
+    expect(gemini?.protocolBindingId).toBe(geminiBinding?.id);
     expect(
       snapshot.protocolBindings.find(
         (binding) =>
@@ -94,7 +109,16 @@ describe('Vidu packaged catalog install', () => {
     const imageProfile = snapshot.modelProfiles?.find(
       (profile) => profile.profileId === imageV1?.activeProfileId
     );
-    expect(imageProfile?.status).toBe('verified');
+    expect(imageProfile?.status).toBe('disabled');
+    const officialProfile = snapshot.modelProfiles?.find(
+      (profile) => profile.profileId === official?.activeProfileId
+    );
+    expect(officialProfile?.status).toBe('verified');
+    expect(
+      officialProfile?.features.some(
+        (feature) => feature.productFeature === 'text_to_image'
+      )
+    ).toBe(true);
   });
 
   it('is idempotent for the same connection', async () => {
@@ -128,7 +152,128 @@ describe('Vidu packaged catalog install', () => {
       snapshot.protocolBindings.filter(
         (binding) => binding.connectionId === added.value.connectionId
       )
-    ).toHaveLength(3);
+    ).toHaveLength(4);
+  });
+
+  it('remounts legacy gemini viduq2 onto official binding and fills missing adapterBindings', async () => {
+    const frozen = createUserViduRegistryRecords();
+    const geminiBinding = frozen.protocolBindings.find(
+      (binding) => binding.adapterKind === VIDU_GEMINI_IMAGE_V2_ADAPTER_ID
+    )!;
+    const legacyConnection = {
+      ...frozen.connections[0],
+      adapterBindings: (frozen.connections[0].adapterBindings ?? []).filter(
+        (binding) => binding.adapterId !== VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+      ),
+      connectionRevision: 1
+    };
+    const legacyModels = frozen.models.map((model) => {
+      const profile = frozen.modelProfiles.find(
+        (item) => item.modelId === model.id
+      );
+      if (model.providerModelKey === 'viduq2' || model.providerModelKey === 'viduq1') {
+        return {
+          ...model,
+          protocolBindingId: geminiBinding.id,
+          revision: 1,
+          activeProfileId: profile?.profileId
+        };
+      }
+      return {
+        ...model,
+        activeProfileId: profile?.profileId
+      };
+    });
+    const legacyProfiles = frozen.modelProfiles.map((profile) => {
+      const model = legacyModels.find((item) => item.id === profile.modelId);
+      if (!model) return profile;
+      if (model.providerModelKey === 'viduq2' || model.providerModelKey === 'viduq1') {
+        return {
+          ...profile,
+          adapterKey: VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
+          protocolBindingId: geminiBinding.id,
+          modelRevision: model.revision,
+          status: 'restricted' as const
+        };
+      }
+      if (model.providerModelKey === 'viduimage-2') {
+        return {
+          ...profile,
+          status: 'verified' as const
+        };
+      }
+      return profile;
+    });
+    const snapshot = {
+      schemaVersion: 2 as const,
+      registryRevision: 1,
+      providers: frozen.providers,
+      connections: [legacyConnection],
+      protocolBindings: frozen.protocolBindings.filter(
+        (binding) => binding.adapterKind !== VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+      ),
+      models: legacyModels.map((model) =>
+        model.providerModelKey === 'viduimage-2'
+          ? { ...model, enabled: true }
+          : model
+      ),
+      capabilities: frozen.capabilities,
+      routingPreferences: [],
+      modelDefinitions: frozen.modelDefinitions,
+      modelProfiles: legacyProfiles
+    };
+
+    const installed = applyPackagedViduCatalogInstall(snapshot, {
+      providerId: legacyConnection.providerId,
+      connectionId: legacyConnection.id,
+      now: t1
+    });
+
+    const connection = installed.snapshot.connections.find(
+      (item) => item.id === legacyConnection.id
+    )!;
+    expect(connection.connectionRevision).toBe(1);
+    expect(
+      connection.adapterBindings?.some(
+        (binding) => binding.adapterId === VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+      )
+    ).toBe(true);
+
+    const officialBinding = installed.snapshot.protocolBindings.find(
+      (binding) =>
+        binding.connectionId === legacyConnection.id &&
+        binding.adapterKind === VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID
+    )!;
+    const viduq2 = installed.snapshot.models.find(
+      (model) => model.providerModelKey === 'viduq2'
+    )!;
+    expect(viduq2.enabled).toBe(true);
+    expect(viduq2.protocolBindingId).toBe(officialBinding.id);
+    expect(viduq2.revision).toBeGreaterThan(1);
+    const profile = installed.snapshot.modelProfiles?.find(
+      (item) => item.profileId === viduq2.activeProfileId
+    );
+    expect(profile?.adapterKey).toBe(VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID);
+    expect(profile?.protocolBindingId).toBe(officialBinding.id);
+    expect(profile?.modelRevision).toBe(viduq2.revision);
+    expect(profile?.status).toBe('verified');
+    expect(
+      profile?.features.some((feature) => feature.productFeature === 'text_to_image')
+    ).toBe(true);
+
+    const imageV1 = installed.snapshot.models.find(
+      (model) => model.providerModelKey === 'viduimage-2'
+    )!;
+    expect(imageV1.enabled).toBe(false);
+    const imageProfile = installed.snapshot.modelProfiles?.find(
+      (item) => item.profileId === imageV1.activeProfileId
+    );
+    expect(imageProfile?.status).toBe('disabled');
+
+    const q3 = installed.snapshot.models.find(
+      (model) => model.providerModelKey === 'q3-lite'
+    )!;
+    expect(q3.protocolBindingId).toBe(geminiBinding.id);
   });
 
   it('applyPackagedViduCatalogInstall rejects non-Vidu connections', () => {
