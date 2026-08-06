@@ -10,6 +10,12 @@ import {
   NewApiSharedRuntime,
   NewApiTransportFailure,
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
+  ViduManagementAdapter,
+  ViduSharedRuntime,
+  ViduTransportFailure,
+  VolcengineManagementAdapter,
+  VolcengineSharedRuntime,
+  VolcengineTransportFailure,
   type DeepSeekHttpTransport,
   type DeepSeekHttpTransportRequest,
   type DeepSeekHttpTransportResponse,
@@ -19,7 +25,13 @@ import {
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
   type NewApiHttpTransportResponse,
-  type ProviderManagementAdapterPort
+  type ProviderManagementAdapterPort,
+  type ViduHttpTransport,
+  type ViduHttpTransportRequest,
+  type ViduHttpTransportResponse,
+  type VolcengineHttpTransport,
+  type VolcengineHttpTransportRequest,
+  type VolcengineHttpTransportResponse
 } from '../../src/platform';
 import type { ProxyMode } from '../../src/domain';
 
@@ -42,13 +54,23 @@ export function createLiveProviderManagementAdapters(options: {
     transport: new ElectronKlingHttpTransport(),
     proxy: () => activeProxy
   });
+  const volcengineRuntime = new VolcengineSharedRuntime({
+    transport: new ElectronVolcengineHttpTransport(),
+    proxy: () => activeProxy
+  });
+  const viduRuntime = new ViduSharedRuntime({
+    transport: new ElectronViduHttpTransport(),
+    proxy: () => activeProxy
+  });
   return [
     new DeepSeekManagementAdapter(deepSeekRuntime),
     new NewApiManagementAdapter(newApiRuntime),
     new NewApiManagementAdapter(newApiRuntime, {
       packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
     }),
-    new KlingManagementAdapter(klingRuntime)
+    new KlingManagementAdapter(klingRuntime),
+    new VolcengineManagementAdapter(volcengineRuntime),
+    new ViduManagementAdapter(viduRuntime)
   ];
 }
 
@@ -138,6 +160,66 @@ class ElectronKlingHttpTransport implements KlingHttpTransport {
       }
       if (error instanceof KlingTransportFailure) throw error;
       throw new KlingTransportFailure('network');
+    }
+  }
+}
+
+class ElectronVolcengineHttpTransport implements VolcengineHttpTransport {
+  async send(request: VolcengineHttpTransportRequest): Promise<VolcengineHttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body.byteLength > 0 ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(
+        response,
+        request.maxResponseBytes,
+        () => new VolcengineTransportFailure('response_too_large')
+      );
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new VolcengineTransportFailure('cancelled');
+      }
+      if (error instanceof VolcengineTransportFailure) throw error;
+      throw new VolcengineTransportFailure('network');
+    }
+  }
+}
+
+class ElectronViduHttpTransport implements ViduHttpTransport {
+  async send(request: ViduHttpTransportRequest): Promise<ViduHttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(
+        response,
+        request.maxResponseBytes,
+        () => new ViduTransportFailure('response_too_large')
+      );
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new ViduTransportFailure('cancelled');
+      }
+      if (error instanceof ViduTransportFailure) throw error;
+      throw new ViduTransportFailure('network');
     }
   }
 }

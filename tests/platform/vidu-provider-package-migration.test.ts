@@ -65,8 +65,8 @@ describe('Vidu Provider Package migration', () => {
     expect(template.template).toMatchObject({
       kind: 'official',
       baseUrlMode: 'fixed',
-      freeConnectionValidation: false,
-      modelDiscoveryKind: 'none'
+      freeConnectionValidation: true,
+      modelDiscoveryKind: 'manual_exact'
     });
     expect(template.adapters.map((adapter) => adapter.adapterId)).toEqual([
       VIDU_IMAGE_V1_ADAPTER_ID,

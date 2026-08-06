@@ -10,6 +10,7 @@ export const providerIpcChannels = {
   registerExactModel: 'providers:register-exact-model',
   setConnectionEnabled: 'providers:set-managed-connection-enabled',
   setModelEnabled: 'providers:set-managed-model-enabled',
+  deleteModel: 'providers:delete-managed-model',
   deleteConnection: 'providers:delete-managed-connection'
 } as const;
 
@@ -384,6 +385,12 @@ export interface ProviderApi {
   ): Promise<ProviderFrameworkResult<{
     readonly modelId: string;
     readonly state: 'enabled' | 'disabled';
+  }>>;
+  deleteModel(
+    modelId: string
+  ): Promise<ProviderFrameworkResult<{
+    readonly modelId: string;
+    readonly state: 'deleted';
   }>>;
   deleteConnection(
     connectionId: string,

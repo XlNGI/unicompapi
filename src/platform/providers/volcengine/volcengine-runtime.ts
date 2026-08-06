@@ -125,6 +125,7 @@ export interface VolcengineSafeLogEvent {
     | 'request_failed'
     | 'runtime_disposed';
   readonly operation?:
+    | 'connection_probe'
     | 'vision_chat'
     | 'video_submit'
     | 'video_query'
@@ -251,6 +252,107 @@ export class VolcengineSharedRuntime {
     });
     if (response.body.byteLength !== 0) {
       throw new VolcengineRuntimeError('invalid_response', 'not_retryable');
+    }
+  }
+
+  /**
+   * Save-time connectivity probe: GET a synthetic video task id.
+   * 401 => invalid API key; 404/operation_not_found => auth accepted (no generation).
+   */
+  async requestConnectivityProbe(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
+    if (this.disposed) {
+      throw new VolcengineRuntimeError('runtime_shutting_down', 'not_retryable');
+    }
+    validateManagementConnection(input.connection, this.baseUrl, seedanceIdentity);
+    const credential = parseCredential(input.credentials);
+    const path = videoTaskPath('unicomp-connectivity-probe');
+    const url = resolveOfficialPath(this.baseUrl, path);
+    const timeoutMs = this.options.defaultTimeoutMs ?? 30_000;
+    const maximumResponseBytes = 256 * 1024;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+      throw new VolcengineRuntimeError('invalid_request', 'not_retryable');
+    }
+    const controller = new AbortController();
+    const removeExternalAbort = linkAbort(input.signal, controller);
+    this.active.add(controller);
+    let timedOut = false;
+    const startedAt = this.now();
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    try {
+      if (controller.signal.aborted) {
+        throw new VolcengineRuntimeError('cancelled', 'not_retryable');
+      }
+      this.log({
+        event: 'request_started',
+        operation: 'connection_probe',
+        method: 'GET'
+      });
+      const response = await this.options.transport.send({
+        method: 'GET',
+        url: url.toString(),
+        headers: {
+          accept: 'application/json',
+          authorization: `Bearer ${credential}`
+        },
+        body: new Uint8Array(),
+        signal: controller.signal,
+        timeoutMs,
+        maxRequestBytes: 1,
+        maxResponseBytes: maximumResponseBytes,
+        proxy: this.options.proxy?.() ?? { kind: 'system_default' },
+        redirect: 'manual'
+      });
+      validateDeclaredResponseSize(response.headers, maximumResponseBytes);
+      if (response.status >= 300 && response.status < 400) {
+        throw new VolcengineRuntimeError('redirect_not_allowed', 'not_retryable');
+      }
+      if (response.status === 401) {
+        throw new VolcengineRuntimeError('authentication_failed', 'not_retryable');
+      }
+      if (response.status === 404 || response.status === 410) {
+        this.log({
+          event: 'request_completed',
+          operation: 'connection_probe',
+          method: 'GET',
+          status: response.status,
+          elapsedMs: Math.max(0, this.now() - startedAt)
+        });
+        return;
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw mapHttpStatus(response.status, response.headers, true);
+      }
+      if (response.body.byteLength > maximumResponseBytes) {
+        throw new VolcengineRuntimeError('response_too_large', 'not_retryable');
+      }
+      this.log({
+        event: 'request_completed',
+        operation: 'connection_probe',
+        method: 'GET',
+        status: response.status,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+    } catch (error) {
+      const mapped = mapRuntimeFailure(error, controller.signal, timedOut);
+      this.log({
+        event: 'request_failed',
+        operation: 'connection_probe',
+        method: 'GET',
+        errorCode: mapped.code,
+        elapsedMs: Math.max(0, this.now() - startedAt)
+      });
+      throw mapped;
+    } finally {
+      clearTimeout(timeout);
+      removeExternalAbort();
+      this.active.delete(controller);
     }
   }
 
@@ -550,6 +652,44 @@ function validateOfficialConnection(
     throw new VolcengineRuntimeError('protocol_mismatch', 'not_retryable');
   }
   const endpoint = parseBaseUrl(connection.endpoint ?? '');
+  if (
+    endpoint.origin !== baseUrl.origin ||
+    trimTrailingSlash(endpoint.pathname) !== trimTrailingSlash(baseUrl.pathname)
+  ) {
+    throw new VolcengineRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+}
+
+function validateManagementConnection(
+  connection: ProviderConnection,
+  baseUrl: URL,
+  identity: VolcengineAdapterIdentity
+): void {
+  const binding = connection.adapterBindings?.find(
+    (item) =>
+      item.adapterId === identity.adapterId &&
+      item.adapterVersion === identity.adapterVersion &&
+      item.protocolId === identity.protocolId &&
+      item.protocolVersion === identity.protocolVersion
+  );
+  if (
+    connection.packageId !== VOLCENGINE_PROVIDER_PACKAGE_ID ||
+    connection.packageVersion !== VOLCENGINE_PROVIDER_PACKAGE_VERSION ||
+    connection.templateId !== VOLCENGINE_OFFICIAL_TEMPLATE_ID ||
+    connection.credentialSchemaId !== VOLCENGINE_CREDENTIAL_SCHEMA_ID ||
+    connection.credentialSchemaVersion !== 1 ||
+    connection.endpointPolicyId !== VOLCENGINE_ENDPOINT_POLICY_ID ||
+    connection.endpointPolicyRevision !== 1 ||
+    connection.state === 'disabled' ||
+    connection.state === 'deleted' ||
+    !binding
+  ) {
+    throw new VolcengineRuntimeError('protocol_mismatch', 'not_retryable');
+  }
+  if (!connection.endpoint) {
+    throw new VolcengineRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  const endpoint = parseBaseUrl(connection.endpoint);
   if (
     endpoint.origin !== baseUrl.origin ||
     trimTrailingSlash(endpoint.pathname) !== trimTrailingSlash(baseUrl.pathname)

@@ -228,7 +228,7 @@ export const volcengineProviderPackageDescriptor: ProviderPackageDescriptor = {
       adapterVersion: SEEDANCE_VIDEO_ADAPTER_VERSION,
       protocolId: SEEDANCE_VIDEO_PROTOCOL_ID,
       protocolVersion: SEEDANCE_VIDEO_PROTOCOL_VERSION,
-      operations: ['submit', 'query', 'cancel', 'receive_result']
+      operations: ['validate_connection', 'submit', 'query', 'cancel', 'receive_result']
     }
   ],
   templates: [
@@ -255,7 +255,7 @@ export const volcengineProviderPackageDescriptor: ProviderPackageDescriptor = {
           adapterVersion: SEEDANCE_VIDEO_ADAPTER_VERSION
         }
       ],
-      freeConnectionValidation: false,
+      freeConnectionValidation: true,
       modelDiscoveryKind: 'manual_exact'
     }
   ]

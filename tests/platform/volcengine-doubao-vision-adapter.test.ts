@@ -86,7 +86,7 @@ describe('Volcengine official package contracts', () => {
         required: true,
         kind: 'token'
       }],
-      freeConnectionValidation: false,
+      freeConnectionValidation: true,
       modelDiscoveryKind: 'manual_exact'
     }]);
     expect(JSON.stringify(registry.listSafeTemplates())).not.toMatch(

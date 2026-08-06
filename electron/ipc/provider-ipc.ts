@@ -46,6 +46,9 @@ export function registerProviderIpcHandlers(options: {
   ipcMain.handle(providerIpcChannels.setModelEnabled, (_event, input) =>
     options.management.setModelEnabled(input)
   );
+  ipcMain.handle(providerIpcChannels.deleteModel, (_event, input) =>
+    options.management.deleteModel(input)
+  );
   ipcMain.handle(providerIpcChannels.deleteConnection, (_event, input) =>
     options.management.deleteConnection(input)
   );
