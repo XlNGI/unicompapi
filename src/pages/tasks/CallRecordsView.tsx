@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DatePicker, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -35,6 +36,23 @@ const emptyFilters: CallFilters = {
   createdFrom: '',
   createdTo: ''
 };
+
+/** 把 YYYY-MM-DD 字符串解析为本地零点的 Date；空串返回 null。用本地分量避免 UTC 时区漂移。 */
+function parseYmdToDate(value: string): Date | null {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+/** 把 Date 格式化为本地 YYYY-MM-DD；null 返回空串。保持与既有字符串比较语义一致。 */
+function formatDateToYmd(date: Date | null): string {
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 const callStates: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
   submitting: { label: '正在提交', tone: 'info' },
@@ -255,24 +273,32 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
           }))}
           value={filters.state}
         />
-        <label>
+        <div className="uc-rsuite-field">
           开始日期
-          <input
-            max={filters.createdTo || undefined}
-            onChange={(event) => changeFilter('createdFrom', event.target.value)}
-            type="date"
-            value={filters.createdFrom}
+          <DatePicker
+            aria-label="开始日期"
+            format="yyyy-MM-dd"
+            onChange={(date) => changeFilter('createdFrom', formatDateToYmd(date))}
+            oneTap
+            shouldDisableDate={(date) =>
+              filters.createdTo ? formatDateToYmd(date) > filters.createdTo : false
+            }
+            value={parseYmdToDate(filters.createdFrom)}
           />
-        </label>
-        <label>
+        </div>
+        <div className="uc-rsuite-field">
           结束日期
-          <input
-            min={filters.createdFrom || undefined}
-            onChange={(event) => changeFilter('createdTo', event.target.value)}
-            type="date"
-            value={filters.createdTo}
+          <DatePicker
+            aria-label="结束日期"
+            format="yyyy-MM-dd"
+            onChange={(date) => changeFilter('createdTo', formatDateToYmd(date))}
+            oneTap
+            shouldDisableDate={(date) =>
+              filters.createdFrom ? formatDateToYmd(date) < filters.createdFrom : false
+            }
+            value={parseYmdToDate(filters.createdTo)}
           />
-        </label>
+        </div>
       </Card>
 
       {issues.length > 0 ? (
@@ -473,15 +499,18 @@ function SelectFilter({
   readonly onChange: (value: string) => void;
 }) {
   return (
-    <label>
+    <div className="uc-rsuite-field">
       {label}
-      <select onChange={(event) => onChange(event.target.value)} value={value}>
-        <option value="all">全部</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))}
-      </select>
-    </label>
+      <SelectPicker
+        aria-label={label}
+        block
+        cleanable={false}
+        data={[{ value: 'all', label: '全部' }, ...options]}
+        onChange={(next) => onChange(next ?? 'all')}
+        searchable={false}
+        value={value}
+      />
+    </div>
   );
 }
 

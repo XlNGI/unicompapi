@@ -5,6 +5,7 @@ import {
   LuImage,
   LuMessageCircle
 } from 'react-icons/lu';
+import { Checkbox } from 'rsuite';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
@@ -266,42 +267,40 @@ export function WorkspaceContextSelector({
             <div className="uc-context-selector__list">
               {openKind === 'project_context'
                 ? contexts.map((candidate) => (
-                    <label key={candidate.contextId}>
-                      <input
-                        checked={references.some(
-                          (item) =>
-                            item.kind === openKind &&
-                            item.referenceId === candidate.contextId &&
-                            item.contextRevision === candidate.revision &&
-                            item.includeInPrompt === true
-                        )}
-                        onChange={(event) => toggle(
-                          openKind,
-                          candidate.contextId,
-                          event.target.checked,
-                          candidate.revision
-                        )}
-                        type="checkbox"
-                      />
+                    <Checkbox
+                      checked={references.some(
+                        (item) =>
+                          item.kind === openKind &&
+                          item.referenceId === candidate.contextId &&
+                          item.contextRevision === candidate.revision &&
+                          item.includeInPrompt === true
+                      )}
+                      key={candidate.contextId}
+                      onChange={(_value, checked) => toggle(
+                        openKind,
+                        candidate.contextId,
+                        checked,
+                        candidate.revision
+                      )}
+                    >
                       <span>
                         <strong>{candidate.labels.join('、') || '未命名上下文'}</strong>
                         <small>{candidate.contentPreview}</small>
                         <small>revision {candidate.revision} · {sourceStatusLabel(candidate.sourceStatus)}</small>
                       </span>
-                    </label>
+                    </Checkbox>
                   ))
                 : conversations.map((candidate) => (
-                    <label key={candidate.conversationId}>
-                      <input
-                        checked={references.some((item) => item.kind === openKind && item.referenceId === candidate.conversationId)}
-                        onChange={(event) => toggle(openKind, candidate.conversationId, event.target.checked)}
-                        type="checkbox"
-                      />
+                    <Checkbox
+                      checked={references.some((item) => item.kind === openKind && item.referenceId === candidate.conversationId)}
+                      key={candidate.conversationId}
+                      onChange={(_value, checked) => toggle(openKind, candidate.conversationId, checked)}
+                    >
                       <span>
                         <strong>{candidate.title}</strong>
                         <small>{candidate.status === 'archived' ? '已归档' : '进行中'} · {candidate.messageCount} 条消息 · {candidate.completedMessageCount} 条已完成</small>
                       </span>
-                    </label>
+                    </Checkbox>
                   ))}
             </div>
           )}

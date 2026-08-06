@@ -29,7 +29,7 @@ test('call records use the controlled list and detail read ports', () => {
     'createdFrom',
     'createdTo'
   ]) assert.match(calls, new RegExp(filter));
-  assert.match(calls, /type="date"/);
+  assert.match(calls, /DatePicker/);
   assert.match(calls, /开始日期不能晚于结束日期/);
 });
 

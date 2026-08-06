@@ -44,7 +44,7 @@ test('A3 selects music and covers only through controlled main-process ports', (
 test('A3 makes cover insertion explicit and defaults to a non-destructive cover', () => {
   assert.match(editorSource, /仅作为封面（默认）/);
   assert.match(editorSource, /拼接到视频开头/);
-  assert.match(editorSource, /setPrependToVideo\(false\)/);
+  assert.match(editorSource, /setPrependToVideo\(value === 'prepend'\)/);
   assert.match(editorSource, /封面不改变视频内容/);
 });
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -195,40 +196,55 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       <Card className="uc-work-library__filters">
         <label>
           搜索作品
-          <input
-            onChange={(event) => setQuery(event.target.value)}
+          <Input
+            onChange={(value) => setQuery(value)}
             placeholder="作品名、项目名或作品 ID"
             type="search"
             value={query}
           />
         </label>
-        <label>
+        <div className="uc-rsuite-field">
           所属项目
-          <select onChange={(event) => setProjectFilter(event.target.value)} value={projectFilter}>
-            <option value="all">全部项目</option>
-            {projects.map(([projectId, projectName]) => (
-              <option key={projectId} value={projectId}>{projectName}</option>
-            ))}
-          </select>
-        </label>
-        <label>
+          <SelectPicker
+            aria-label="所属项目"
+            cleanable={false}
+            data={[
+              { value: 'all', label: '全部项目' },
+              ...projects.map(([projectId, projectName]) => ({ value: projectId, label: projectName }))
+            ]}
+            onChange={(value) => setProjectFilter(value ?? 'all')}
+            searchable={false}
+            value={projectFilter}
+          />
+        </div>
+        <div className="uc-rsuite-field">
           媒体类型
-          <select onChange={(event) => setMediaFilter(event.target.value)} value={mediaFilter}>
-            <option value="all">全部类型</option>
-            {Object.entries(mediaKinds).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
+          <SelectPicker
+            aria-label="媒体类型"
+            cleanable={false}
+            data={[
+              { value: 'all', label: '全部类型' },
+              ...Object.entries(mediaKinds).map(([value, label]) => ({ value, label }))
+            ]}
+            onChange={(value) => setMediaFilter(value ?? 'all')}
+            searchable={false}
+            value={mediaFilter}
+          />
+        </div>
+        <div className="uc-rsuite-field">
           文件状态
-          <select onChange={(event) => setStateFilter(event.target.value)} value={stateFilter}>
-            <option value="all">全部状态</option>
-            {Object.entries(fileStates).map(([value, state]) => (
-              <option key={value} value={value}>{state.label}</option>
-            ))}
-          </select>
-        </label>
+          <SelectPicker
+            aria-label="文件状态"
+            cleanable={false}
+            data={[
+              { value: 'all', label: '全部状态' },
+              ...Object.entries(fileStates).map(([value, state]) => ({ value, label: state.label }))
+            ]}
+            onChange={(value) => setStateFilter(value ?? 'all')}
+            searchable={false}
+            value={stateFilter}
+          />
+        </div>
       </Card>
 
       {issues.length > 0 && (

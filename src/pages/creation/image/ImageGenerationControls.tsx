@@ -1,3 +1,4 @@
+import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
 import type {
   ImagePreflightCandidateDto,
   ImageSubmissionConfirmationDto,
@@ -177,27 +178,23 @@ function ImageModelFields({
 
   return (
     <>
-      <label className="uc-image-quick__field">
+      <div className="uc-image-quick__field">
         <span>{label || '选择模型'}</span>
-        <select
+        <SelectPicker
           aria-label="选择模型"
+          block
+          data={modelOptions.map((option) => ({
+            value: option.modelId,
+            label: `${option.label}${option.reason ? `（${option.reason}）` : ''}`,
+            disabled: Boolean(option.reason)
+          }))}
           disabled={modelOptions.length === 0}
-          onChange={(event) => changeModel(event.target.value)}
+          onChange={(value) => changeModel(value ?? '')}
+          placeholder="请选择模型"
+          searchable={false}
           value={model?.modelId ?? ''}
-        >
-          <option value="">请选择模型</option>
-          {modelOptions.map((option) => (
-            <option
-              disabled={Boolean(option.reason)}
-              key={option.modelId}
-              value={option.modelId}
-            >
-              {option.label}
-              {option.reason ? `（${option.reason}）` : ''}
-            </option>
-          ))}
-        </select>
-      </label>
+        />
+      </div>
       {modelOptions.length === 0 ? (
         <p className="uc-image-quick__hint">
           没有符合当前用途的模型或路由；请先在“模型与服务商”页面完成配置。
@@ -380,74 +377,78 @@ function DynamicParameterField({
 }) {
   if (field.kind === 'boolean') {
     return (
-      <label className="uc-image-quick__checkbox">
-        <input
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-          type="checkbox"
-        />
+      <Checkbox
+        checked={value === true}
+        className="uc-image-quick__checkbox"
+        onChange={(_value, checked) => onChange(checked)}
+      >
         <span>
           {field.label}
           {field.required ? '（必填）' : ''}
         </span>
-      </label>
+      </Checkbox>
     );
   }
 
   if (field.kind === 'enum') {
+    return (
+      <div className="uc-image-quick__field">
+        <span>
+          {field.label}
+          {field.required ? '（必填）' : ''}
+        </span>
+        <SelectPicker
+          aria-label={field.label}
+          block
+          cleanable={!field.required}
+          data={(field.options ?? []).map((option) => ({
+            value: JSON.stringify(option),
+            label: String(option)
+          }))}
+          onChange={(next) =>
+            onChange(
+              next
+                ? (JSON.parse(next) as ImageWorkspaceParameterValueDto)
+                : undefined
+            )
+          }
+          placeholder="请选择"
+          searchable={false}
+          value={value === undefined ? null : JSON.stringify(value)}
+        />
+      </div>
+    );
+  }
+
+  const numeric = field.kind === 'number' || field.kind === 'integer';
+  if (numeric) {
     return (
       <label className="uc-image-quick__field">
         <span>
           {field.label}
           {field.required ? '（必填）' : ''}
         </span>
-        <select
-          onChange={(event) =>
-            onChange(
-              event.target.value
-                ? (JSON.parse(
-                    event.target.value
-                  ) as ImageWorkspaceParameterValueDto)
-                : undefined
-            )
+        <InputNumber
+          max={field.maximum}
+          min={field.minimum}
+          onChange={(next) =>
+            onChange(next === null || next === '' ? undefined : Number(next))
           }
-          value={value === undefined ? '' : JSON.stringify(value)}
-        >
-          <option value="">请选择</option>
-          {field.options?.map((option) => (
-            <option key={JSON.stringify(option)} value={JSON.stringify(option)}>
-              {String(option)}
-            </option>
-          ))}
-        </select>
+          step={field.kind === 'integer' ? 1 : undefined}
+          value={typeof value === 'number' ? value : ''}
+        />
       </label>
     );
   }
-
-  const numeric = field.kind === 'number' || field.kind === 'integer';
   return (
     <label className="uc-image-quick__field">
       <span>
         {field.label}
         {field.required ? '（必填）' : ''}
       </span>
-      <input
-        max={field.maximum}
-        min={field.minimum}
-        onChange={(event) =>
-          onChange(
-            event.target.value === ''
-              ? undefined
-              : numeric
-                ? Number(event.target.value)
-                : event.target.value
-          )
-        }
-        step={field.kind === 'integer' ? 1 : undefined}
-        type={numeric ? 'number' : 'text'}
-        value={
-          typeof value === 'string' || typeof value === 'number' ? value : ''
-        }
+      <Input
+        onChange={(next) => onChange(next === '' ? undefined : next)}
+        value={typeof value === 'string' ? value : ''}
       />
     </label>
   );
@@ -463,13 +464,12 @@ function Confirmation({
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="uc-image-quick__checkbox">
-      <input
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        type="checkbox"
-      />
+    <Checkbox
+      checked={checked}
+      className="uc-image-quick__checkbox"
+      onChange={(_value, nextChecked) => onChange(nextChecked)}
+    >
       <span>{label}</span>
-    </label>
+    </Checkbox>
   );
 }

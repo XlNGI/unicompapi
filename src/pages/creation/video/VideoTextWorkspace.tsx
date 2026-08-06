@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
+import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
@@ -132,27 +133,32 @@ export function VideoTextWorkspace({
               <p>文生视频固定为无素材输入，可显式选择固定 revision 的项目上下文。</p>
             </div>
           </header>
-          <label className="uc-image-quick__field">
+          <div className="uc-image-quick__field">
             <span>文字来源</span>
-            <select
-              onChange={(event) => changeDraft({
+            <SelectPicker
+              aria-label="文字来源"
+              cleanable={false}
+              data={[
+                { value: 'short_idea', label: '简短创意' },
+                { value: 'long_form', label: '长文本脚本' }
+              ]}
+              onChange={(value) => changeDraft({
                 ...draft,
                 textToVideo: {
                   ...draft.textToVideo,
-                  sourceKind: event.target.value as 'short_idea' | 'long_form'
+                  sourceKind: value as 'short_idea' | 'long_form'
                 }
               })}
+              searchable={false}
               value={draft.textToVideo.sourceKind}
-            >
-              <option value="short_idea">简短创意</option>
-              <option value="long_form">长文本脚本</option>
-            </select>
-          </label>
+            />
+          </div>
           <label className="uc-image-quick__field">
             <span>原始需求</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={4000}
-              onChange={(event) => changePrompt('originalInput', event.target.value)}
+              onChange={(value) => changePrompt('originalInput', value)}
               rows={7}
               value={draft.prompt.originalInput}
             />
@@ -200,9 +206,10 @@ export function VideoTextWorkspace({
           </header>
           <label className="uc-image-quick__field">
             <span>最终提示词</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={6000}
-              onChange={(event) => changePrompt('finalPrompt', event.target.value)}
+              onChange={(value) => changePrompt('finalPrompt', value)}
               rows={8}
               value={draft.prompt.finalPrompt}
             />
@@ -230,8 +237,9 @@ export function VideoTextWorkspace({
                 </div>
                 <label className="uc-image-quick__field">
                   <span>画面描述</span>
-                  <textarea
-                    onChange={(event) => updateShot(shot.id, { description: event.target.value })}
+                  <Input
+                    as="textarea"
+                    onChange={(value) => updateShot(shot.id, { description: value })}
                     rows={3}
                     value={shot.description}
                   />

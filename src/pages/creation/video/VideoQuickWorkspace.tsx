@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LuArrowRight, LuSparkles } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -103,9 +104,10 @@ export function VideoQuickWorkspace({
           </header>
           <label className="uc-image-quick__field">
             <span>描述你想生成的视频</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={1000}
-              onChange={(event) => changePrompt(event.target.value)}
+              onChange={(value) => changePrompt(value)}
               placeholder="例如：海边日出时，一辆复古列车沿悬崖缓慢驶过"
               rows={7}
               value={draft.prompt.originalInput}

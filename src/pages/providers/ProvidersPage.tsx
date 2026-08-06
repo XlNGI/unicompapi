@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { LuRefreshCw, LuShieldCheck } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -358,21 +359,21 @@ export function ProvidersPage() {
               </div>
               <label>
                 连接名称
-                <input maxLength={200} onChange={(event) => setConnectionName(event.target.value)} required value={connectionName} />
+                <Input maxLength={200} onChange={(value) => setConnectionName(value)} required value={connectionName} />
               </label>
               {createTemplate.baseUrlMode !== 'fixed' && (
                 <label>
                   接口地址{createTemplate.baseUrlMode === 'required' ? '' : '（可选）'}
-                  <input onChange={(event) => setEndpoint(event.target.value)} required={createTemplate.baseUrlMode === 'required'} type="url" value={endpoint} />
+                  <Input onChange={(value) => setEndpoint(value)} required={createTemplate.baseUrlMode === 'required'} type="url" value={endpoint} />
                 </label>
               )}
               {createTemplate.credentialFields.map((field) => (
                 <label key={field.key}>
                   {field.label}
-                  <input
+                  <Input
                     autoComplete="new-password"
                     maxLength={65536}
-                    onChange={(event) => setNewCredentials((current) => ({ ...current, [field.key]: event.target.value }))}
+                    onChange={(value) => setNewCredentials((current) => ({ ...current, [field.key]: value }))}
                     required={field.required}
                     type={field.secret ? 'password' : 'text'}
                     value={newCredentials[field.key] ?? ''}

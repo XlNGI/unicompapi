@@ -1,3 +1,4 @@
+import { SelectPicker } from 'rsuite';
 import { EmptyState } from './EmptyState';
 
 export interface ModelSelectOption {
@@ -46,33 +47,35 @@ export function ModelSelect({
     );
   }
 
+  const data = options.map((option) => ({
+    value: option.id,
+    label: option.available
+      ? option.label
+      : `${option.label}（${(option.unavailableReasons ?? [])
+          .map((reason) => reasonLabels[reason] ?? reason)
+          .join('、') || '不可用'}）`
+  }));
+  const disabledItemValues = options
+    .filter((option) => !option.available)
+    .map((option) => option.id);
+
   return (
     <div className="uc-model-select">
-      <label className="uc-model-select__field">
+      <div className="uc-model-select__field">
         <span>{label}</span>
-        <select
+        <SelectPicker
           aria-label={ariaLabel}
+          block
+          cleanable={false}
+          data={data}
           disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          value={value}
-        >
-          <option value="">请选择模型</option>
-          {options.map((option) => (
-            <option
-              disabled={!option.available}
-              key={option.id}
-              value={option.id}
-            >
-              {option.label}
-              {option.available
-                ? ''
-                : `（${(option.unavailableReasons ?? [])
-                    .map((reason) => reasonLabels[reason] ?? reason)
-                    .join('、') || '不可用'}）`}
-            </option>
-          ))}
-        </select>
-      </label>
+          disabledItemValues={disabledItemValues}
+          onChange={(next) => onChange(next ?? '')}
+          placeholder="请选择模型"
+          searchable={false}
+          value={value || null}
+        />
+      </div>
       {hint ? <p className="uc-model-select__hint" role="status">{hint}</p> : null}
     </div>
   );

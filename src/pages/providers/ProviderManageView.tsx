@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import type { FormEvent } from 'react';
 import { LuKeyRound, LuRefreshCw, LuShieldCheck, LuTrash2 } from 'react-icons/lu';
+import { Input, Toggle } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -142,7 +143,7 @@ export function ProviderManageView({
         <div className="uc-provider-page__panel-heading">
           <div><h2>服务连接</h2><p>{availableCount} 可用 · {problemCount} 待处理</p></div>
         </div>
-        <input aria-label="搜索连接或服务商" className="uc-provider-page__search" onChange={(event) => onSearchChange(event.target.value)} placeholder="搜索" type="search" value={search} />
+        <Input aria-label="搜索连接或服务商" className="uc-provider-page__search" onChange={(value) => onSearchChange(value)} placeholder="搜索" type="search" value={search} />
         <div className="uc-provider-page__filters" aria-label="连接状态筛选">
           {[
             ['all', '全部'],
@@ -256,8 +257,8 @@ export function ProviderManageView({
                       <strong>手动登记模型</strong>
                       <small>目录同步失败或没有自动列出时，可填写远端模型标识直接登记。</small>
                     </div>
-                    <label>精确模型标识<input maxLength={500} onChange={(event) => onModelKeyChange(event.target.value)} placeholder="例如 gpt-4o" required value={modelKey} /></label>
-                    <label>显示名称<input maxLength={200} onChange={(event) => onModelDisplayNameChange(event.target.value)} placeholder="界面显示名" required value={modelDisplayName} /></label>
+                    <label>精确模型标识<Input maxLength={500} onChange={(value) => onModelKeyChange(value)} placeholder="例如 gpt-4o" required value={modelKey} /></label>
+                    <label>显示名称<Input maxLength={200} onChange={(value) => onModelDisplayNameChange(value)} placeholder="界面显示名" required value={modelDisplayName} /></label>
                     <Button disabled={busy || !modelKey.trim() || !modelDisplayName.trim()} type="submit">登记模型</Button>
                   </form>
                 )}
@@ -279,20 +280,16 @@ export function ProviderManageView({
                           <span>{model.profileStatus ? profileLabels[model.profileStatus] : '无 Profile'}</span>
                         </button>
                         <StatusPill tone={model.enabled ? 'success' : 'neutral'}>{model.enabled ? '已启用' : '已停用'}</StatusPill>
-                        <label className="uc-provider-page__switch">
-                          <input
-                            aria-label={`${model.displayName}启用状态`}
-                            checked={model.enabled}
-                            disabled={busy || selectedConnection.state === 'deleted'}
-                            onChange={() => providersApi && void runAction(
-                              () => providersApi.setModelEnabled(model.modelId, !model.enabled),
-                              model.enabled ? '模型已停用' : '模型已启用',
-                              selectedConnection.connectionId
-                            )}
-                            type="checkbox"
-                          />
-                          <span aria-hidden="true" />
-                        </label>
+                        <Toggle
+                          aria-label={`${model.displayName}启用状态`}
+                          checked={model.enabled}
+                          disabled={busy || selectedConnection.state === 'deleted'}
+                          onChange={() => providersApi && void runAction(
+                            () => providersApi.setModelEnabled(model.modelId, !model.enabled),
+                            model.enabled ? '模型已停用' : '模型已启用',
+                            selectedConnection.connectionId
+                          )}
+                        />
                         <Button
                           aria-label={`删除模型 ${model.displayName}`}
                           disabled={busy || selectedConnection.state === 'deleted'}
@@ -331,10 +328,10 @@ export function ProviderManageView({
                     {selectedTemplate.credentialFields.map((field) => (
                       <label key={field.key}>
                         {field.label}
-                        <input
+                        <Input
                           autoComplete="new-password"
                           maxLength={65536}
-                          onChange={(event) => onReplacementCredentialChange(field.key, event.target.value)}
+                          onChange={(value) => onReplacementCredentialChange(field.key, value)}
                           required={field.required}
                           type={field.secret ? 'password' : 'text'}
                           value={replacementCredentials[field.key] ?? ''}

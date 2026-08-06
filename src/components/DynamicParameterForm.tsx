@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
 
 export type DynamicParameterValue =
   | string
@@ -127,52 +128,54 @@ function ParameterField({
 }) {
   if (field.valueType === 'boolean') {
     return (
-      <label className="uc-model-select__checkbox">
-        <input
-          checked={value === true}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-          type="checkbox"
-        />
+      <Checkbox
+        checked={value === true}
+        className="uc-model-select__checkbox"
+        disabled={disabled}
+        onChange={(_value, checked) => onChange(checked)}
+      >
         <ParameterLabel field={field} />
-      </label>
+      </Checkbox>
     );
   }
   if (field.valueType === 'enum') {
+    const data = (field.options ?? []).map((option) => ({
+      value: String(option),
+      label: String(option)
+    }));
     return (
-      <label className="uc-model-select__field">
+      <div className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <select
+        <SelectPicker
+          aria-label={displayParameterKey(field.fieldId || field.labelId)}
+          block
+          cleanable={!field.required}
+          data={data}
           disabled={disabled}
-          onChange={(event) => {
-            const option = field.options?.find((item) => String(item) === event.target.value);
+          onChange={(next) => {
+            const option = field.options?.find((item) => String(item) === next);
             onChange(option);
           }}
-          required={field.required}
-          value={value === undefined ? '' : String(value)}
-        >
-          <option value="">{field.required ? '请选择（必填）' : '请选择'}</option>
-          {field.options?.map((option) => (
-            <option key={String(option)} value={String(option)}>{String(option)}</option>
-          ))}
-        </select>
-      </label>
+          placeholder={field.required ? '请选择（必填）' : '请选择'}
+          searchable={false}
+          value={value === undefined ? null : String(value)}
+        />
+      </div>
     );
   }
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
       <label className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <input
+        <InputNumber
           disabled={disabled}
           max={field.maximum}
           min={field.minimum}
-          onChange={(event) => onChange(
-            event.target.value === '' ? undefined : Number(event.target.value)
+          onChange={(next) => onChange(
+            next === null || next === '' ? undefined : Number(next)
           )}
           required={field.required}
           step={field.valueType === 'integer' ? 1 : field.step}
-          type="number"
           value={typeof value === 'number' ? value : ''}
         />
       </label>
@@ -182,10 +185,10 @@ function ParameterField({
     return (
       <label className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <input
+        <Input
           disabled={disabled}
-          onChange={(event) => {
-            const items = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
+          onChange={(next) => {
+            const items = next.split(',').map((item) => item.trim()).filter(Boolean);
             onChange(items.length === 0
               ? undefined
               : field.valueType === 'number_array'
@@ -194,7 +197,6 @@ function ParameterField({
           }}
           placeholder="使用逗号分隔"
           required={field.required}
-          type="text"
           value={Array.isArray(value) ? value.join(', ') : ''}
         />
       </label>
@@ -207,18 +209,17 @@ function ParameterField({
     return (
       <label className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <input disabled readOnly value="由当前草稿的受控素材提供" />
+        <Input disabled readOnly value="由当前草稿的受控素材提供" />
       </label>
     );
   }
   return (
     <label className="uc-model-select__field">
       <ParameterLabel field={field} />
-      <input
+      <Input
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value || undefined)}
+        onChange={(next) => onChange(next || undefined)}
         required={field.required}
-        type="text"
         value={typeof value === 'string' ? value : ''}
       />
     </label>
@@ -245,10 +246,10 @@ function ObjectParameterField({
   return (
     <label className="uc-model-select__field">
       <ParameterLabel field={field} />
-      <textarea
+      <Input
         aria-invalid={invalid}
+        as="textarea"
         disabled={disabled}
-        required={field.required}
         onBlur={() => {
           if (!text.trim()) {
             setInvalid(false);
@@ -266,7 +267,7 @@ function ObjectParameterField({
             setInvalid(true);
           }
         }}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(next) => setText(next)}
         rows={3}
         value={text}
       />

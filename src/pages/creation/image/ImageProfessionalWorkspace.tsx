@@ -6,6 +6,7 @@ import {
   LuTrash2,
   LuType
 } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
@@ -251,9 +252,10 @@ export function ImageProfessionalWorkspace({
 
           <label className="uc-image-quick__field">
             <span>原始创作需求</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={1000}
-              onChange={(event) => changeOriginalInput(event.target.value)}
+              onChange={(value) => changeOriginalInput(value)}
               placeholder="描述主体、场景、氛围和创作用途"
               rows={5}
               value={draft.prompt.originalInput}
@@ -299,10 +301,10 @@ export function ImageProfessionalWorkspace({
               ) : null}
               <label className="uc-image-quick__field">
                 <span>图片用途</span>
-                <input
+                <Input
                   disabled={!draft.input}
                   maxLength={200}
-                  onChange={(event) => changeReferencePurpose(event.target.value)}
+                  onChange={(value) => changeReferencePurpose(value)}
                   placeholder="例如：仅参考构图，不复制人物"
                   value={draft.input?.purpose ?? ''}
                 />
@@ -362,12 +364,13 @@ export function ImageProfessionalWorkspace({
             </section>
             <section>
               <StatusPill tone="success">最终提交提示词</StatusPill>
-              <textarea
+              <Input
                 aria-label="最终提交提示词"
+                as="textarea"
                 maxLength={2000}
-                onChange={(event) => changeDraft({
+                onChange={(value) => changeDraft({
                   ...draft,
-                  prompt: { ...draft.prompt, finalPrompt: event.target.value }
+                  prompt: { ...draft.prompt, finalPrompt: value }
                 })}
                 rows={9}
                 value={draft.prompt.finalPrompt}

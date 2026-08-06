@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { LuSend, LuShieldCheck } from 'react-icons/lu';
+import { Checkbox } from 'rsuite';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -623,14 +624,13 @@ export function ImageFeatureSubmissionPanel({
             <div><dt>数量</dt><dd>{preparation.confirmation.parameterFieldCount} 个参数 · {preparation.confirmation.materialCount} 份素材 · {preparation.confirmation.contextCount} 份上下文</dd></div>
             <div><dt>费用</dt><dd>{costLabel(preparation.confirmation.cost)}</dd></div>
           </dl>
-          <label className="uc-image-quick__checkbox">
-            <input
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-              type="checkbox"
-            />
+          <Checkbox
+            checked={confirmed}
+            className="uc-image-quick__checkbox"
+            onChange={(_value, checked) => setConfirmed(checked)}
+          >
             <span>我已核对并确认以上接收方、外发范围、内容与费用事实。</span>
-          </label>
+          </Checkbox>
         </fieldset>
       ) : null}
 

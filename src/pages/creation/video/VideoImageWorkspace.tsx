@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LuImagePlus, LuTrash2 } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { EmptyState } from '../../../components/EmptyState';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
@@ -303,18 +303,20 @@ export function VideoImageWorkspace({
           </header>
           <label className="uc-image-quick__field">
             <span>原始需求</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={3000}
-              onChange={(event) => changePrompt('originalInput', event.target.value)}
+              onChange={(value) => changePrompt('originalInput', value)}
               rows={5}
               value={draft.prompt.originalInput}
             />
           </label>
           <label className="uc-image-quick__field">
             <span>最终提示词</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={5000}
-              onChange={(event) => changePrompt('finalPrompt', event.target.value)}
+              onChange={(value) => changePrompt('finalPrompt', value)}
               rows={7}
               value={draft.prompt.finalPrompt}
             />
@@ -428,7 +430,7 @@ function TextField({
   return (
     <label className="uc-image-quick__field">
       <span>{label}</span>
-      <input onChange={(event) => onChange(event.target.value)} type="text" value={value} />
+      <Input onChange={(next) => onChange(next)} type="text" value={value} />
     </label>
   );
 }
@@ -445,9 +447,9 @@ function ListField({
   return (
     <label className="uc-image-quick__field">
       <span>{label}</span>
-      <input
-        onChange={(event) => onChange(
-          event.target.value.split(',').map((item) => item.trim()).filter(Boolean)
+      <Input
+        onChange={(next) => onChange(
+          next.split(',').map((item) => item.trim()).filter(Boolean)
         )}
         placeholder="使用逗号分隔"
         type="text"

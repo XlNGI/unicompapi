@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Input } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -187,11 +188,11 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
         <Card raised>
           <form className="uc-project-center__create-form" onSubmit={handleCreateProject}>
             <label htmlFor="project-name">项目名称</label>
-            <input
+            <Input
               autoFocus
               id="project-name"
               maxLength={100}
-              onChange={(event) => setProjectName(event.target.value)}
+              onChange={(value) => setProjectName(value)}
               placeholder="例如：产品宣传片"
               value={projectName}
             />

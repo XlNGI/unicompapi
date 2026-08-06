@@ -11,6 +11,7 @@ import {
   LuSparkles,
   LuVideo
 } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -265,9 +266,10 @@ export function ImageEditingWorkspace({
           </div>
           <label className="uc-image-quick__field">
             <span>原始编辑要求</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={1000}
-              onChange={(event) => changeRequirement(event.target.value)}
+              onChange={(value) => changeRequirement(value)}
               placeholder="描述需要修改、删除或替换的内容"
               rows={5}
               value={draft.prompt.originalInput}
@@ -277,9 +279,10 @@ export function ImageEditingWorkspace({
           {editingLists.map((field) => (
             <label className="uc-image-quick__field" key={field.key}>
               <span>{field.title}</span>
-              <textarea
+              <Input
+                as="textarea"
                 maxLength={1000}
-                onChange={(event) => changeList(field.key, event.target.value)}
+                onChange={(value) => changeList(field.key, value)}
                 placeholder={field.placeholder}
                 rows={4}
                 value={draft.editing[field.key].join('\n')}
