@@ -128,6 +128,27 @@ export class SyntheticViduService implements ViduHttpTransport {
         }]
       });
     }
+    if (method === 'POST' && path === '/ent/v2/reference2image') {
+      return jsonResponse(200, { task_id: 'synthetic-image-task', state: 'created' });
+    }
+    if (
+      method === 'GET' &&
+      path === '/ent/v2/tasks/synthetic-image-task/creations'
+    ) {
+      return jsonResponse(200, {
+        state: 'success',
+        creations: [{
+          id: 'synthetic-image-result',
+          url: 'https://results.synthetic.invalid/reference.png?signature=private'
+        }]
+      });
+    }
+    if (
+      method === 'POST' &&
+      path === '/ent/v2/tasks/synthetic-image-task/cancel'
+    ) {
+      return jsonResponse(200, {});
+    }
     if (method === 'POST' && path === '/ent/v2/reference2video') {
       return jsonResponse(200, { task_id: 'synthetic-video-task' });
     }

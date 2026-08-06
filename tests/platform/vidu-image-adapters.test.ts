@@ -190,7 +190,7 @@ describe('Vidu synchronous image adapters', () => {
     });
     expect(body).not.toHaveProperty('tools');
     expect(fixture.transport.requests[0].url).toBe(
-      'https://api.vidu.cn/ent/v2/image/reference2image/viduq2'
+      `https://api.vidu.cn/ent/v2/image/reference2image/${fixture.model.providerModelKey}`
     );
   });
 

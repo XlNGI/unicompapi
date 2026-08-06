@@ -61,6 +61,10 @@ import {
   VIDU_IMAGE_V1_PROTOCOL_VERSION,
   VIDU_PROVIDER_PACKAGE_ID,
   VIDU_PROVIDER_PACKAGE_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
+  VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+  VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
   ViduPackagedParameterSchemaResolver,
   ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
@@ -140,6 +144,19 @@ export function createImageFeatureDispatchBridge(
         request: input.request,
         beforeRequestStarted: input.beforeRequestStarted
       })
+    }),
+    wrapMediaAdapter({
+      packageId: VIDU_PROVIDER_PACKAGE_ID,
+      packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
+      adapterKey: VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+      adapterVersion: VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
+      protocolId: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
+      submit: (input) =>
+        viduAdapters.referenceImageV2.submit(input.routeSnapshot, {
+          request: input.request,
+          beforeRequestStarted: input.beforeRequestStarted
+        })
     })
   ];
 

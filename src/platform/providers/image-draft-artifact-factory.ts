@@ -63,8 +63,7 @@ export class ImageDraftArtifactFactory implements SubmissionArtifactFactoryPort 
     const provider = registry.providers.find(
       (item) => item.id === input.candidate.routeTemplate.providerId
     );
-    const evidenceId = model?.capabilityEvidenceId;
-    if (!model || !provider || !evidenceId) {
+    if (!model || !provider) {
       throw new TypeError('Image route model capability evidence is unavailable');
     }
 
@@ -72,6 +71,21 @@ export class ImageDraftArtifactFactory implements SubmissionArtifactFactoryPort 
       (draft.mode === 'quick_image' || draft.mode === 'professional_image')
       ? 'reference_to_image' as const
       : imagePurposeForMode(draft.mode);
+    const routePurpose =
+      input.candidate.routeTemplate.internalPurpose ?? purpose;
+    const capabilities = registry.capabilities ?? [];
+    const evidence =
+      capabilities.find(
+        (item) =>
+          item.modelId === model.id && item.capability === routePurpose
+      ) ??
+      (model.capabilityEvidenceId
+        ? capabilities.find((item) => item.id === model.capabilityEvidenceId)
+        : undefined);
+    const evidenceId = evidence?.id ?? model.capabilityEvidenceId;
+    if (!evidenceId || (evidence && evidence.modelId !== model.id)) {
+      throw new TypeError('Image route model capability evidence is unavailable');
+    }
     const confirmation: ImageSubmissionConfirmationSnapshot = {
       mode: draft.mode,
       purpose,

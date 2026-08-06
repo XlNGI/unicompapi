@@ -105,6 +105,11 @@ const protocolPaths: Readonly<Record<string, readonly RegExp[]>> = {
   'vidu.ent.v2.image.reference2image': [
     /^\/ent\/v2\/image\/reference2image\/[A-Za-z0-9._-]+$/
   ],
+  'vidu.ent.v2.reference2image': [
+    /^\/ent\/v2\/reference2image$/,
+    /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/creations$/,
+    /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/cancel$/
+  ],
   'vidu.ent.v2.reference2video': [
     /^\/ent\/v2\/reference2video$/,
     /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/creations$/,
