@@ -24,16 +24,22 @@ test('quick video migrates legacy drafts explicitly without silently clearing th
 
 test('quick video has one safe feature submission flow', () => {
   assert.match(quick, /VideoFeatureSubmissionPanel/);
+  assert.match(quick, /onDraftPersisted/);
+  assert.match(quick, /showProgressSteps/);
   assert.match(panel, /listCandidates/);
   assert.match(panel, /prepareSubmission/);
   assert.match(panel, /submitDraft/);
+  assert.match(panel, /persistVideoWorkspaceDraft/);
   assert.doesNotMatch(bundle, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
   assert.doesNotMatch(bundle, /fetch\(|localStorage|absolutePath|remoteOperationId|upload\(/);
 });
 
-test('quick video reports the blocked runtime and never invents a result', () => {
-  assert.match(quick, /在线运行未授权/);
-  assert.match(quick, /尚无真实生成结果/);
+test('quick video shares the text/image result and call-record surface', () => {
+  assert.match(quick, /GenerationResultPreview/);
+  assert.match(quick, /尚无生成结果/);
+  assert.match(quick, /调用记录/);
+  assert.match(quick, /快速\/文生\/图生视频共用同一提交/);
   assert.match(panel, /runtime_not_allowed/);
+  assert.doesNotMatch(quick, /在线运行未授权/);
   assert.doesNotMatch(bundle, /默认 1 个结果|16:9|1080p|24fps|Runway|Sora/);
 });

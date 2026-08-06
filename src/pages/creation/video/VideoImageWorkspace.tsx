@@ -7,12 +7,38 @@ import { GenerationResultPreview } from '../../../components/GenerationResultPre
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   VideoWorkspaceDraftDto,
+  VideoWorkspaceIpcErrorCode,
   VideoWorkspaceMaterialAssetDto,
   VideoWorkspaceMaterialPreviewDto,
   VideoWorkspaceMaterialSelectionDto
 } from '../../../shared/video-workspace-ipc';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
+import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 import { VideoFeatureSubmissionPanel } from './VideoFeatureSubmissionPanel';
+
+const workspaceErrorMessages: Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
+  project_not_open: '请先在“项目”页面新建或打开一个项目。',
+  draft_not_found: '当前视频草稿已不存在。',
+  draft_conflict: '视频草稿已在其他操作中更新，请稍后重试。',
+  material_target_not_found: '当前素材槽位已不存在，请刷新页面后重试。',
+  material_target_mismatch: '当前素材目标与视频模式不匹配。',
+  material_type_mismatch: '所选素材类型不符合当前槽位要求。',
+  material_not_found: '已选素材记录不可用，请重新选择。',
+  unsupported_image: '所选文件不是当前支持的图片。',
+  unsupported_video: '所选文件不是当前支持的 MP4 或 MOV 视频。',
+  media_unreadable: '所选素材无法读取或无法完成本地校验。',
+  media_changed_during_selection: '所选素材在校验过程中发生变化，请重新选择。',
+  preview_unavailable: '素材已丢失、变化或不可读，暂时无法预览。',
+  workspace_storage_error: '本地视频草稿保存失败，请检查项目目录后重试。',
+  invalid_request: '当前视频草稿数据无效，请刷新页面后重试。'
+};
+
+function describeWorkspaceError(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  return workspaceErrorMessages[error.code as VideoWorkspaceIpcErrorCode] ?? error.message;
+}
 
 type ImageVideoDraftDto = Extract<
   VideoWorkspaceDraftDto,
@@ -107,12 +133,13 @@ export function VideoImageWorkspace({
   async function ensureSavedDraft(): Promise<ImageVideoDraftDto | undefined> {
     if (!videoWorkspaces) return undefined;
     if (!dirty && draft.state === 'saved') return draft;
-    const result = await videoWorkspaces.update({
-      ...draft,
-      state: 'saved'
-    });
+    const result = await persistVideoWorkspaceDraft(
+      videoWorkspaces,
+      draft,
+      'saved'
+    );
     if (!result.ok) {
-      onMessage(result.error.message);
+      onMessage(describeWorkspaceError(result.error));
       return undefined;
     }
     onDraftPersisted(result.value as ImageVideoDraftDto);
@@ -132,7 +159,7 @@ export function VideoImageWorkspace({
         'image'
       );
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage(describeWorkspaceError(result.error));
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -159,7 +186,7 @@ export function VideoImageWorkspace({
         imageSourceTarget
       );
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage(describeWorkspaceError(result.error));
         return;
       }
       onDraftPersisted(result.value as ImageVideoDraftDto);
@@ -410,7 +437,9 @@ export function VideoImageWorkspace({
 
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="info">调用记录</StatusPill>
-        <p>候选、参数、图片、上下文和外发确认相互独立；提交结果会显示在本页流程条。</p>
+        <p>
+          快速/文生/图生视频共用同一提交与调用记录流程；图片、参数或上下文变化会使旧选择令牌失效。
+        </p>
       </Card>
     </>
   );

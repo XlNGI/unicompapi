@@ -55,6 +55,10 @@ import {
   VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID,
   VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID,
   VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID,
+  VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION,
+  VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID,
   VIDU_USAGE_SCHEMA_ID,
   viduPackagedParameterSchemas,
   viduUsageSchema
@@ -74,6 +78,7 @@ import {
   ViduReferenceVideoV2Adapter,
   type ViduVideoOperationContext as ViduAdapterOperationContext
 } from './vidu-video-adapter';
+import { ViduTextVideoV2Adapter } from './vidu-text-video-adapter';
 
 export interface ViduRouteRegistryPort {
   load(): Promise<ProviderRegistrySnapshot>;
@@ -465,14 +470,27 @@ interface ViduVideoOperationContext {
   usagePersisted: boolean;
 }
 
+type ViduVideoRouteKind = 'reference' | 'text';
+
 export class ViduVideoRouteAdapter {
-  readonly adapterKey = VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID;
-  readonly adapterVersion = VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION;
+  readonly adapterKey: string;
+  readonly adapterVersion: string;
   readonly operations = ['submit', 'query', 'cancel', 'receive_result'] as const;
   private readonly contexts = new Map<string, ViduVideoOperationContext>();
   private readonly ids: ViduRouteAdapterIdFactory;
+  private readonly kind: ViduVideoRouteKind;
 
-  constructor(private readonly dependencies: ViduRouteAdapterDependencies) {
+  constructor(
+    kind: ViduVideoRouteKind,
+    private readonly dependencies: ViduRouteAdapterDependencies
+  ) {
+    this.kind = kind;
+    this.adapterKey = kind === 'text'
+      ? VIDU_TEXT_VIDEO_V2_ADAPTER_ID
+      : VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID;
+    this.adapterVersion = kind === 'text'
+      ? VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION
+      : VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION;
     this.ids = dependencies.ids ?? defaultIds();
   }
 
@@ -488,7 +506,15 @@ export class ViduVideoRouteAdapter {
         this.dependencies.parameterSchemas,
         resolved.route
       );
-      request = parseDispatchRequest(input.request, resolved.route, schema, true);
+      const requireAsset =
+        this.kind === 'reference' &&
+        resolved.route.productFeature === 'image_to_video';
+      request = parseDispatchRequest(
+        input.request,
+        resolved.route,
+        schema,
+        requireAsset
+      );
       const adapter = this.legacyAdapter(resolved);
       const outcome = await adapter.submit(
         legacyVideoRequest(resolved, request),
@@ -601,37 +627,60 @@ export class ViduVideoRouteAdapter {
 
   private async resolve(routeSnapshot: unknown): Promise<ResolvedViduExecutionRoute> {
     const resolved = await this.dependencies.routes.resolve(routeSnapshot);
+    if (this.kind === 'text') {
+      validateRouteIdentity(resolved.route, {
+        adapterKey: this.adapterKey,
+        adapterVersion: this.adapterVersion,
+        features: ['text_to_video'],
+        resultSchemaId: VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID,
+        constraintSetIds: [VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID]
+      });
+      return resolved;
+    }
     validateRouteIdentity(resolved.route, {
       adapterKey: this.adapterKey,
       adapterVersion: this.adapterVersion,
-      features: ['image_to_video'],
-      resultSchemaId: VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID,
-      constraintSetIds: [VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID]
+      features: ['image_to_video', 'text_to_video'],
+      resultSchemaId: resolved.route.productFeature === 'text_to_video'
+        ? VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID
+        : VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID,
+      constraintSetIds: [
+        VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID,
+        VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID
+      ]
     });
     return resolved;
   }
 
   private legacyAdapter(
     resolved: ResolvedViduExecutionRoute
-  ): ViduReferenceVideoV2Adapter {
+  ): ViduReferenceVideoV2Adapter | ViduTextVideoV2Adapter {
     const remembered = new Map<string, ViduAdapterOperationContext>();
+    const operationContext = {
+      remember: (taskId: string, context: ViduAdapterOperationContext) => {
+        remembered.set(taskId, context);
+      },
+      resolve: async (taskId: string) =>
+        remembered.get(taskId) ??
+        (this.contexts.has(taskId)
+          ? {
+              connectionId: resolved.connection.id,
+              binding: resolved.binding
+            }
+          : undefined)
+    };
+    if (this.kind === 'text') {
+      return new ViduTextVideoV2Adapter({
+        runtime: this.dependencies.runtime,
+        connections: fixedConnection(resolved.connection),
+        operationContext
+      });
+    }
     return new ViduReferenceVideoV2Adapter({
       runtime: this.dependencies.runtime,
       connections: fixedConnection(resolved.connection),
       materials: this.dependencies.materials,
-      operationContext: {
-        remember: (taskId, context) => {
-          remembered.set(taskId, context);
-        },
-        resolve: async (taskId) =>
-          remembered.get(taskId) ??
-          (this.contexts.has(taskId)
-            ? {
-                connectionId: resolved.connection.id,
-                binding: resolved.binding
-              }
-            : undefined)
-      }
+      operationContext
     });
   }
 
@@ -890,7 +939,8 @@ function legacyVideoRequest(
   request: ViduRouteDispatchRequestV1
 ): ProviderProtocolSubmitRequest {
   const taskId = toTaskId(`task-${resolved.route.id}`);
-  const assetId = toAssetId(request.assetId!);
+  const textToVideo = resolved.route.productFeature === 'text_to_video';
+  const assetId = request.assetId ? toAssetId(request.assetId) : undefined;
   const task: Task = {
     schemaVersion: 1,
     id: taskId,
@@ -899,10 +949,10 @@ function legacyVideoRequest(
     submission: {
       kind: 'video_generation',
       prompt: promptSnapshot(request.prompt),
-      assetIds: [assetId],
+      assetIds: assetId ? [assetId] : [],
       confirmedAt: resolved.route.createdAt,
       video: {
-        mode: 'image_to_video',
+        mode: textToVideo ? 'text_to_video' : 'image_to_video',
         purpose: 'video_generation',
         modelId: resolved.model.id,
         capabilityEvidenceId: resolved.evidence.id,
@@ -915,23 +965,31 @@ function legacyVideoRequest(
         privacyState: 'unknown',
         regionState: 'unknown',
         parameters: videoParameters(request.parameterValues),
-        materials: [{
-          assetId,
-          mediaKind: 'image',
-          role: 'first_frame',
-          target: { kind: 'slot', slotId: 'first_frame' }
-        }],
+        materials: textToVideo || !assetId
+          ? []
+          : [{
+              assetId,
+              mediaKind: 'image',
+              role: 'first_frame',
+              target: { kind: 'slot', slotId: 'first_frame' }
+            }],
         contextReferences: [],
-        input: {
-          mode: 'image_to_video',
-          mustKeep: [],
-          allowedChanges: [],
-          prohibited: [],
-          subjectAction: '',
-          cameraMovement: '',
-          pace: '',
-          depthOfField: ''
-        },
+        input: textToVideo
+          ? {
+              mode: 'text_to_video',
+              sourceKind: 'short_idea',
+              shots: []
+            }
+          : {
+              mode: 'image_to_video',
+              mustKeep: [],
+              allowedChanges: [],
+              prohibited: [],
+              subjectAction: '',
+              cameraMovement: '',
+              pace: '',
+              depthOfField: ''
+            },
         confirmations: {
           recipient: true,
           outboundScope: true,

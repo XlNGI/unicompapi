@@ -19,6 +19,7 @@ import {
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   applyPackagedViduCatalogInstall,
   frozenViduModelKeys,
   installPackagedViduCatalog,
@@ -70,7 +71,8 @@ describe('Vidu packaged catalog install', () => {
       VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
       VIDU_IMAGE_V1_ADAPTER_ID,
       VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
-      VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
+      VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+      VIDU_TEXT_VIDEO_V2_ADAPTER_ID
     ].sort());
 
     const models = snapshot.models.filter((model) => model.connectionId === connectionId);
@@ -106,6 +108,21 @@ describe('Vidu packaged catalog install', () => {
       (profile) => profile.profileId === video?.activeProfileId
     );
     expect(videoProfile?.status).toBe('verified');
+    expect(
+      videoProfile?.features.map((feature) => feature.productFeature).sort()
+    ).toEqual(['image_to_video', 'text_to_video'].sort());
+    const textOnly = models.find((model) => model.providerModelKey === 'viduq3-pro');
+    expect(textOnly?.enabled).toBe(true);
+    const textBinding = bindings.find(
+      (binding) => binding.adapterKind === VIDU_TEXT_VIDEO_V2_ADAPTER_ID
+    );
+    expect(textOnly?.protocolBindingId).toBe(textBinding?.id);
+    const textProfile = snapshot.modelProfiles?.find(
+      (profile) => profile.profileId === textOnly?.activeProfileId
+    );
+    expect(
+      textProfile?.features.map((feature) => feature.productFeature)
+    ).toEqual(['text_to_video']);
     const imageProfile = snapshot.modelProfiles?.find(
       (profile) => profile.profileId === imageV1?.activeProfileId
     );
@@ -152,7 +169,7 @@ describe('Vidu packaged catalog install', () => {
       snapshot.protocolBindings.filter(
         (binding) => binding.connectionId === added.value.connectionId
       )
-    ).toHaveLength(4);
+    ).toHaveLength(5);
   });
 
   it('remounts legacy gemini viduq2 onto official binding and fills missing adapterBindings', async () => {

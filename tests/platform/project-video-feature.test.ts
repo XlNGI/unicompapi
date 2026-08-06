@@ -109,12 +109,20 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
       .rejects.toThrow(/exactly one image/);
   });
 
-  it('publishes only complete fixed Vidu image-to-video contracts', () => {
+  it('publishes complete fixed Vidu image-to-video and text-to-video contracts', () => {
     const contracts = createVideoProviderFeatureContracts();
     expect(contracts.length).toBeGreaterThan(0);
-    expect(contracts.every(
-      (contract) => contract.parameterSchema.productFeature === 'image_to_video'
-    )).toBe(true);
+    const features = new Set(
+      contracts.map((contract) => contract.parameterSchema.productFeature)
+    );
+    expect(features.has('image_to_video')).toBe(true);
+    expect(features.has('text_to_video')).toBe(true);
+    expect(
+      contracts.every((contract) =>
+        contract.parameterSchema.productFeature === 'image_to_video' ||
+        contract.parameterSchema.productFeature === 'text_to_video'
+      )
+    ).toBe(true);
   });
 });
 

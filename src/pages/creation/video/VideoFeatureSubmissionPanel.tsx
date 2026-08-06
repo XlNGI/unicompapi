@@ -20,8 +20,10 @@ import type {
 } from '../../../shared/video-feature-ipc';
 import type {
   VideoWorkspaceDraftDto,
+  VideoWorkspaceIpcErrorCode,
   VideoWorkspaceParameterValueDto
 } from '../../../shared/video-workspace-ipc';
+import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 
 interface VideoFeatureSubmissionPanelProps {
   readonly dirty: boolean;
@@ -55,6 +57,25 @@ const errorMessages: Record<VideoFeatureIpcErrorCode, string> = {
   adapter_contract_invalid: '视频适配器合同不匹配，已停止提交。',
   storage_error: '本地视频功能操作失败，请重试。'
 };
+
+const workspaceErrorMessages: Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
+  project_not_open: '请先在“项目”页面新建或打开一个项目。',
+  draft_not_found: '当前视频草稿已不存在。',
+  draft_conflict: '视频草稿已在其他操作中更新，请稍后重试。',
+  workspace_storage_error: '本地视频草稿保存失败，请检查项目目录后重试。',
+  invalid_request: '当前视频草稿数据无效，请刷新页面后重试。'
+};
+
+function describeWorkspacePersistError(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  return (
+    workspaceErrorMessages[error.code as VideoWorkspaceIpcErrorCode] ??
+    errorMessages[error.code as VideoFeatureIpcErrorCode] ??
+    error.message
+  );
+}
 
 function describeVideoFeatureError(
   error: { readonly code: VideoFeatureIpcErrorCode; readonly message: string }
@@ -149,15 +170,16 @@ export function VideoFeatureSubmissionPanel({
         let draftUpdatedAt = draft.updatedAt;
         if (needsSave && videoWorkspaces) {
           const snapshot = draftRef.current;
-          const saved = await videoWorkspaces.update({
-            ...snapshot,
-            state: 'saved'
-          });
+          const saved = await persistVideoWorkspaceDraft(
+            videoWorkspaces,
+            snapshot,
+            'saved'
+          );
           if (!active || busyRef.current) return;
           if (!saved.ok) {
             setCandidates([]);
             setLoadState('loaded');
-            onMessage(errorMessages[saved.error.code] ?? saved.error.message);
+            onMessage(describeWorkspacePersistError(saved.error));
             return;
           }
           const latest = draftRef.current;
@@ -171,15 +193,16 @@ export function VideoFeatureSubmissionPanel({
             draftId = latest.draftId;
             draftUpdatedAt = latest.updatedAt;
             if (latest.state !== 'saved') {
-              const again = await videoWorkspaces.update({
-                ...latest,
-                state: 'saved'
-              });
+              const again = await persistVideoWorkspaceDraft(
+                videoWorkspaces,
+                latest,
+                'saved'
+              );
               if (!active || busyRef.current) return;
               if (!again.ok) {
                 setCandidates([]);
                 setLoadState('loaded');
-                onMessage(errorMessages[again.error.code] ?? again.error.message);
+                onMessage(describeWorkspacePersistError(again.error));
                 return;
               }
               draftId = again.value.draftId;
@@ -268,12 +291,13 @@ export function VideoFeatureSubmissionPanel({
     if (!videoWorkspaces) return undefined;
     const snapshot = draftRef.current;
     if (!dirty && snapshot.state === 'saved') return snapshot;
-    const result = await videoWorkspaces.update({
-      ...snapshot,
-      state: 'saved'
-    });
+    const result = await persistVideoWorkspaceDraft(
+      videoWorkspaces,
+      snapshot,
+      'saved'
+    );
     if (!result.ok) {
-      onMessage(errorMessages[result.error.code] ?? result.error.message);
+      onMessage(describeWorkspacePersistError(result.error));
       return undefined;
     }
     onDraftPersisted?.(result.value);

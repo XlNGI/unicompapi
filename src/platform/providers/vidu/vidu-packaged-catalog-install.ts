@@ -36,11 +36,16 @@ import {
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+  VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+  VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
   createViduModelContract,
   frozenViduGeminiImageModelKeys,
   frozenViduLegacyGeminiImageModelKeys,
   frozenViduModelKeys,
   frozenViduOfficialImageModelKeys,
+  frozenViduReferenceVideoModelKeys,
+  frozenViduTextVideoModelKeys,
   frozenViduVideoModelKeys,
   viduProviderPackageDescriptor,
   type FrozenViduModelKey
@@ -377,6 +382,7 @@ export async function installPackagedViduCatalog(
 
 type BindingKind =
   | 'referenceVideoV2'
+  | 'textVideoV2'
   | 'imageV1'
   | 'geminiImageV2'
   | 'referenceImageV2';
@@ -410,7 +416,19 @@ function ensureProtocolBindings(
       endpointTemplate: 'https://api.vidu.cn/ent/v2/reference2video',
       authScheme: 'token',
       executionLifecycle: 'asynchronous_polling',
-      supportedPurposes: ['reference_to_video']
+      // video_generation allows dual-feature viduq3-turbo text2video submits.
+      supportedPurposes: ['reference_to_video', 'video_generation']
+    },
+    {
+      kind: 'textVideoV2',
+      protocolId: VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
+      mediaKind: 'video',
+      adapterKind: VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+      endpointTemplate: 'https://api.vidu.cn/ent/v2/text2video',
+      authScheme: 'token',
+      executionLifecycle: 'asynchronous_polling',
+      supportedPurposes: ['video_generation']
     },
     {
       kind: 'imageV1',
@@ -518,7 +536,13 @@ function bindingForModelKey(
   byKind: Record<BindingKind, ProviderProtocolBinding>,
   providerModelKey: FrozenViduModelKey
 ): ProviderProtocolBinding {
-  if ((frozenViduVideoModelKeys as readonly string[]).includes(providerModelKey)) {
+  if (providerModelKey === 'viduq3-pro') return byKind.textVideoV2;
+  if (
+    (frozenViduReferenceVideoModelKeys as readonly string[]).includes(
+      providerModelKey
+    ) ||
+    (frozenViduVideoModelKeys as readonly string[]).includes(providerModelKey)
+  ) {
     return byKind.referenceVideoV2;
   }
   if (providerModelKey === 'viduimage-2') return byKind.imageV1;
@@ -543,8 +567,23 @@ function bindingForModelKey(
 function purposesForModelKey(
   providerModelKey: FrozenViduModelKey
 ): readonly ProviderOperationPurpose[] {
-  if ((frozenViduVideoModelKeys as readonly string[]).includes(providerModelKey)) {
+  if (providerModelKey === 'viduq3-pro') {
+    return ['video_generation'];
+  }
+  if (providerModelKey === 'viduq3-turbo') {
+    return ['reference_to_video', 'video_generation'];
+  }
+  if (
+    (frozenViduReferenceVideoModelKeys as readonly string[]).includes(
+      providerModelKey
+    )
+  ) {
     return ['reference_to_video'];
+  }
+  if (
+    (frozenViduTextVideoModelKeys as readonly string[]).includes(providerModelKey)
+  ) {
+    return ['video_generation'];
   }
   if (providerModelKey === 'viduimage-2') {
     return ['image_generation', 'image_editing'];

@@ -112,6 +112,13 @@ const protocolPaths: Readonly<Record<string, readonly RegExp[]>> = {
   ],
   'vidu.ent.v2.reference2video': [
     /^\/ent\/v2\/reference2video$/,
+    // Dual-feature viduq3-turbo may submit official text2video on this binding.
+    /^\/ent\/v2\/text2video$/,
+    /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/creations$/,
+    /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/cancel$/
+  ],
+  'vidu.ent.v2.text2video': [
+    /^\/ent\/v2\/text2video$/,
     /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/creations$/,
     /^\/ent\/v2\/tasks\/[A-Za-z0-9._-]+\/cancel$/
   ]

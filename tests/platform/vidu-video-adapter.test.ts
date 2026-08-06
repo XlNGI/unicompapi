@@ -81,6 +81,38 @@ describe('Vidu Q3 reference video adapter', () => {
     });
   });
 
+  it('submits dual-feature viduq3-turbo text_to_video via official text2video without materials', async () => {
+    const fixture = await createTurboTextFixture();
+    fixture.transport.responses.push(jsonResponse(200, { task_id: 'task-turbo-t2v' }));
+
+    await expect(
+      fixture.adapter.submit(submitTextRequest(fixture, {
+        audio: true,
+        duration: 5,
+        resolution: '720p',
+        aspect_ratio: '16:9'
+      }))
+    ).resolves.toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'task-turbo-t2v',
+      state: 'queued'
+    });
+
+    expect(fixture.materials.calls).toBe(0);
+    expect(fixture.transport.requests[0]).toMatchObject({
+      method: 'POST',
+      url: 'https://api.vidu.cn/ent/v2/text2video'
+    });
+    expect(bodyOf(fixture.transport.requests[0])).toEqual({
+      model: 'viduq3-turbo',
+      prompt: 'Create a synthetic text video',
+      audio: true,
+      duration: 5,
+      resolution: '720p',
+      aspect_ratio: '16:9'
+    });
+  });
+
   it('rejects unsupported models, parameters, durations and oversized bodies before HTTP', async () => {
     const fixture = await createFixture();
 
@@ -251,6 +283,25 @@ describe('Vidu Q3 reference video adapter', () => {
 });
 
 async function createFixture(options: { readonly now?: () => number } = {}) {
+  return createAdapterFixture({
+    providerModelKey: 'viduq3-drama',
+    capability: 'reference_to_video',
+    now: options.now
+  });
+}
+
+async function createTurboTextFixture() {
+  return createAdapterFixture({
+    providerModelKey: 'viduq3-turbo',
+    capability: 'video_generation'
+  });
+}
+
+async function createAdapterFixture(options: {
+  readonly providerModelKey: 'viduq3-drama' | 'viduq3-turbo';
+  readonly capability: 'reference_to_video' | 'video_generation';
+  readonly now?: () => number;
+}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-vidu-video-'));
   roots.push(root);
   const vault = new SecureCredentialVault(
@@ -259,12 +310,14 @@ async function createFixture(options: { readonly now?: () => number } = {}) {
   );
   await vault.save('credential-vidu-video', 'synthetic-token');
   const frozen = createUserViduRegistryRecords();
-  const binding = frozen.protocolBindings[0];
+  const binding = frozen.protocolBindings.find(
+    (item) => item.adapterKind === 'vidu_reference_video_v2'
+  )!;
   const model = frozen.models.find((candidate) =>
-    candidate.providerModelKey === 'viduq3-drama'
+    candidate.providerModelKey === options.providerModelKey
   )!;
   const evidence = frozen.capabilities.find((candidate) =>
-    candidate.id === model.capabilityEvidenceId
+    candidate.modelId === model.id && candidate.capability === options.capability
   )!;
   const connection = createProviderConnection({
     ...frozen.connections[0],
@@ -314,6 +367,33 @@ function submitRequest(
   const execution = transitionExecution(
     createExecution({
       id: toExecutionId('execution-vidu-video'),
+      taskId: task.id,
+      createdAt: timestamp
+    }),
+    'submitting',
+    timestamp
+  );
+  return {
+    task,
+    execution,
+    model: fixture.model,
+    binding: fixture.binding,
+    evidence: fixture.evidence
+  };
+}
+
+function submitTextRequest(
+  fixture: {
+    readonly binding: ProviderProtocolBinding;
+    readonly evidence: ModelCapabilityEvidence;
+    readonly model: ProviderModel;
+  },
+  parameters: Readonly<Record<string, VideoDynamicParameterValue>>
+) {
+  const task = textVideoTask(fixture, parameters);
+  const execution = transitionExecution(
+    createExecution({
+      id: toExecutionId('execution-vidu-text-video'),
       taskId: task.id,
       createdAt: timestamp
     }),
@@ -381,6 +461,63 @@ function videoTask(
           cameraMovement: '',
           pace: '',
           depthOfField: ''
+        },
+        confirmations: {
+          recipient: true,
+          outboundScope: true,
+          materials: true,
+          costPrivacyRegion: true,
+          finalPrompt: true,
+          model: true
+        }
+      }
+    },
+    executionIds: [],
+    createdAt: timestamp
+  };
+}
+
+function textVideoTask(
+  fixture: {
+    readonly evidence: ModelCapabilityEvidence;
+    readonly model: ProviderModel;
+  },
+  parameters: Readonly<Record<string, VideoDynamicParameterValue>>
+): Task {
+  return {
+    schemaVersion: 1,
+    id: toTaskId('task-vidu-turbo-text'),
+    projectId: toProjectId('project-vidu-video'),
+    sourceDraftId: toDraftId('draft-vidu-turbo-text'),
+    submission: {
+      kind: 'video_generation',
+      prompt: {
+        originalInput: 'Create a synthetic text video',
+        systemSupplements: [],
+        finalPrompt: 'Create a synthetic text video'
+      },
+      assetIds: [],
+      confirmedAt: timestamp,
+      video: {
+        mode: 'text_to_video',
+        purpose: 'video_generation',
+        modelId: fixture.model.id,
+        capabilityEvidenceId: fixture.evidence.id,
+        providerId: fixture.model.providerId,
+        connectionId: fixture.model.connectionId,
+        recipientName: 'Vidu synthetic fixture',
+        accessCategory: 'online',
+        outboundScope: 'external_service',
+        costState: 'unknown',
+        privacyState: 'unknown',
+        regionState: 'unknown',
+        parameters,
+        materials: [],
+        contextReferences: [],
+        input: {
+          mode: 'text_to_video',
+          sourceKind: 'short_idea',
+          shots: []
         },
         confirmations: {
           recipient: true,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/video-workspace-ipc';
 import '../../../styles/pages.css';
 import type { VideoCreationMode } from '../creationModes';
+import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 import { VideoQuickWorkspace } from './VideoQuickWorkspace';
 import { VideoImageWorkspace } from './VideoImageWorkspace';
 import { VideoTextWorkspace } from './VideoTextWorkspace';
@@ -55,22 +56,21 @@ export function VideoWorkbenchPage({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const workspaceMode =
     'workspaceMode' in mode ? mode.workspaceMode : undefined;
+  // Quick / text / image video share one persist path via FeatureSubmissionPanel.
   const usesFlowAutosave =
-    workspaceMode === 'text_to_video' || workspaceMode === 'image_to_video';
+    workspaceMode === 'quick_video' ||
+    workspaceMode === 'text_to_video' ||
+    workspaceMode === 'image_to_video';
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [drafts, setDrafts] = useState<readonly VideoWorkspaceDraftDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [autoSaving, setAutoSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedDraftId, setSelectedDraftId] = useState(preferredDraftId);
   const currentDraft =
     drafts.find((draft) => draft.draftId === selectedDraftId) ??
     drafts[drafts.length - 1];
-  const currentDraftRef = useRef(currentDraft);
-  currentDraftRef.current = currentDraft;
-  const autoSaveGeneration = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -163,10 +163,11 @@ export function VideoWorkbenchPage({
     setBusy(true);
     setMessage('');
     try {
-      const result = await videoWorkspaces.update({
-        ...currentDraft,
-        state: currentDraft.state === 'stale' ? 'stale' : 'saved'
-      });
+      const result = await persistVideoWorkspaceDraft(
+        videoWorkspaces,
+        currentDraft,
+        currentDraft.state === 'stale' ? 'stale' : 'saved'
+      );
       if (!result.ok) {
         setMessage(workspaceErrorMessages[result.error.code]);
         return;
@@ -194,57 +195,6 @@ export function VideoWorkbenchPage({
     );
     setDirty(hasUnsavedChanges);
   }
-
-  useEffect(() => {
-    if (!usesFlowAutosave || !dirty || !videoWorkspaces || !session) return;
-    const generation = ++autoSaveGeneration.current;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        const snapshot = currentDraftRef.current;
-        if (
-          !snapshot ||
-          (snapshot.mode !== 'text_to_video' && snapshot.mode !== 'image_to_video')
-        ) {
-          return;
-        }
-        setAutoSaving(true);
-        try {
-          const result = await videoWorkspaces.update({
-            ...snapshot,
-            state: 'saved'
-          });
-          if (generation !== autoSaveGeneration.current) return;
-          if (!result.ok) {
-            setMessage(workspaceErrorMessages[result.error.code]);
-            return;
-          }
-          const latest = currentDraftRef.current;
-          const superseded =
-            latest !== undefined &&
-            latest.draftId === snapshot.draftId &&
-            latest !== snapshot;
-          if (superseded) return;
-          setDrafts((items) =>
-            items.map((draft) =>
-              draft.draftId === result.value.draftId ? result.value : draft
-            )
-          );
-          setDirty(false);
-        } catch {
-          if (generation === autoSaveGeneration.current) {
-            setMessage('自动保存草稿失败，请稍后重试。');
-          }
-        } finally {
-          if (generation === autoSaveGeneration.current) {
-            setAutoSaving(false);
-          }
-        }
-      })();
-    }, 400);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [dirty, session, usesFlowAutosave, videoWorkspaces, currentDraft]);
 
   const projectStatus = loading
     ? '正在读取'
@@ -280,8 +230,8 @@ export function VideoWorkbenchPage({
               {busy ? '请稍候…' : '新建本地草稿'}
             </Button>
             {usesFlowAutosave ? (
-              <StatusPill tone={autoSaving || dirty ? 'info' : 'success'}>
-                {autoSaving || dirty ? '正在自动保存…' : '已自动保存'}
+              <StatusPill tone={dirty ? 'info' : 'success'}>
+                {dirty ? '正在自动保存…' : '已自动保存'}
               </StatusPill>
             ) : (
               <Button
@@ -329,7 +279,7 @@ export function VideoWorkbenchPage({
         </div>
         <p>
           {usesFlowAutosave
-            ? '文生/图生视频会在后台自动保存草稿；请直接选模型、填参数并提交。不会自动外发。'
+            ? '快速/文生/图生视频共用同一套流程：选模型、填参数、确认后提交；草稿在选择服务前自动保存，不会自动外发。'
             : workspaceMode
               ? '本页面只操作当前项目内视频草稿；不会自动上传、分析、生成或提交任务。'
               : '基础编辑只保留冻结入口；阶段 6 不创建编辑草稿、时间线或导出任务。'}
@@ -341,6 +291,7 @@ export function VideoWorkbenchPage({
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
+          onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
           onNavigateToImageToVideo={onNavigateToImageToVideo}
           onNavigateToTextToVideo={onNavigateToTextToVideo}

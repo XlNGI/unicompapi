@@ -2,9 +2,12 @@ import { useState } from 'react';
 import { LuArrowRight, LuSparkles } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { EmptyState } from '../../../components/EmptyState';
+import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
-import type { VideoWorkspaceDraftDto } from '../../../shared/video-workspace-ipc';
+import type {
+  VideoWorkspaceDraftDto,
+  VideoWorkspaceIpcErrorCode
+} from '../../../shared/video-workspace-ipc';
 import { VideoFeatureSubmissionPanel } from './VideoFeatureSubmissionPanel';
 
 type QuickVideoDraftDto = Extract<
@@ -16,21 +19,40 @@ interface VideoQuickWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: QuickVideoDraftDto;
   readonly onDraftChange: (draft: QuickVideoDraftDto) => void;
+  readonly onDraftPersisted: (draft: QuickVideoDraftDto) => void;
   readonly onMessage: (message: string) => void;
   readonly onNavigateToTextToVideo?: () => void;
   readonly onNavigateToImageToVideo?: (draftId: string) => void;
+}
+
+const workspaceErrorMessages: Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
+  project_not_open: '请先在“项目”页面新建或打开一个项目。',
+  draft_not_found: '当前视频草稿已不存在。',
+  draft_conflict: '视频草稿已在其他操作中更新，请稍后重试。',
+  workspace_storage_error: '本地视频草稿保存失败，请检查项目目录后重试。',
+  invalid_request: '当前视频草稿数据无效，请刷新页面后重试。'
+};
+
+function describeWorkspaceError(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  return workspaceErrorMessages[error.code as VideoWorkspaceIpcErrorCode] ?? error.message;
 }
 
 export function VideoQuickWorkspace({
   dirty,
   draft,
   onDraftChange,
+  onDraftPersisted,
   onMessage,
   onNavigateToTextToVideo,
   onNavigateToImageToVideo
 }: VideoQuickWorkspaceProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [busy, setBusy] = useState(false);
+  const [resultWorkId, setResultWorkId] = useState<string>();
+  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
   const legacyReference = draft.quick.reference;
   const hasLegacyContexts = draft.contextReferences.length > 0;
   const legacyReason = legacyReference?.mediaKind === 'video'
@@ -74,7 +96,7 @@ export function VideoQuickWorkspace({
     try {
       const result = await videoWorkspaces.derive(draft.draftId, targetMode);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage(describeWorkspaceError(result.error));
         return;
       }
       onMessage('已创建专业视频派生草稿；没有创建或提交任务。');
@@ -98,7 +120,7 @@ export function VideoQuickWorkspace({
             <span aria-hidden="true">1</span>
             <div>
               <h2>输入一句话生成视频</h2>
-              <p>快速视频固定为纯文生视频，只发送明确保存的文字需求。</p>
+              <p>快速视频固定为纯文生视频；选模型、填参数后确认提交，与文生/图生共用流程。</p>
             </div>
           </header>
           <label className="uc-image-quick__field">
@@ -141,8 +163,8 @@ export function VideoQuickWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
-              <h2>服务、参数与提交确认</h2>
-              <p>候选和参数来自固定草稿 revision 的安全功能路由。</p>
+              <h2>模型、参数与提交流程</h2>
+              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel
@@ -150,7 +172,13 @@ export function VideoQuickWorkspace({
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as QuickVideoDraftDto)}
+            onDraftPersisted={(next) => onDraftPersisted(next as QuickVideoDraftDto)}
             onMessage={onMessage}
+            onSubmissionComplete={(submission) => {
+              setResultWorkId(submission.workId);
+              setResultUrls(submission.resultVideoUrls ?? []);
+            }}
+            showProgressSteps
           />
         </Card>
 
@@ -159,14 +187,15 @@ export function VideoQuickWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>生成结果</h2>
-              <p>只显示主进程完成本地校验并登记的真实作品。</p>
+              <p>展示服务商返回的结果 URL；本地校验作品另行登记。</p>
             </div>
           </header>
-          <EmptyState
-            description="在线视频运行尚未获准，当前没有真实生成结果。"
-            icon="视"
-            readOnly
-            title="尚无真实生成结果"
+          <GenerationResultPreview
+            emptyDescription="填写提示词并选择模型后准备并提交。"
+            emptyTitle="尚无生成结果"
+            mediaKind="video"
+            remoteUrls={resultUrls}
+            workId={resultWorkId}
           />
           <div className="uc-image-quick__result-actions">
             <Button
@@ -182,8 +211,10 @@ export function VideoQuickWorkspace({
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="warning">在线运行未授权</StatusPill>
-        <p>主进程运行授权关闭时不会创建请求、费用或假结果。</p>
+        <StatusPill tone="info">调用记录</StatusPill>
+        <p>
+          快速/文生/图生视频共用同一提交与调用记录流程；每次提交都会写入任务中心。
+        </p>
       </Card>
     </>
   );

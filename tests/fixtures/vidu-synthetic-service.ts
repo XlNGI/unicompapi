@@ -152,6 +152,27 @@ export class SyntheticViduService implements ViduHttpTransport {
     if (method === 'POST' && path === '/ent/v2/reference2video') {
       return jsonResponse(200, { task_id: 'synthetic-video-task' });
     }
+    if (method === 'POST' && path === '/ent/v2/text2video') {
+      return jsonResponse(200, { task_id: 'synthetic-text-video-task' });
+    }
+    if (
+      method === 'GET' &&
+      path === '/ent/v2/tasks/synthetic-text-video-task/creations'
+    ) {
+      return jsonResponse(200, {
+        state: 'success',
+        creations: [{
+          id: 'synthetic-text-video-result',
+          url: 'https://results.synthetic.invalid/text-generated.mp4?signature=private'
+        }]
+      });
+    }
+    if (
+      method === 'POST' &&
+      path === '/ent/v2/tasks/synthetic-text-video-task/cancel'
+    ) {
+      return jsonResponse(200, {});
+    }
     if (
       method === 'GET' &&
       path === '/ent/v2/tasks/synthetic-video-task/creations'

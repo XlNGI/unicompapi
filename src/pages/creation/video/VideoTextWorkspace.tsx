@@ -272,7 +272,9 @@ export function VideoTextWorkspace({
 
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="info">调用记录</StatusPill>
-        <p>上下文、参数和外发确认任一变化都会使旧选择令牌失效；提交结果会显示在本页流程条。</p>
+        <p>
+          快速/文生/图生视频共用同一提交与调用记录流程；上下文或参数变化会使旧选择令牌失效。
+        </p>
       </Card>
     </>
   );

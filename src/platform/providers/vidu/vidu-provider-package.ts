@@ -20,6 +20,7 @@ import {
   ViduReferenceVideoV2Adapter,
   type ViduVideoOperationContextPort
 } from './vidu-video-adapter';
+import { ViduTextVideoV2Adapter } from './vidu-text-video-adapter';
 import {
   VIDU_PROVIDER_PACKAGE_ID,
   viduProviderPackageDescriptor
@@ -120,6 +121,19 @@ export class ViduProviderPackage {
     });
   }
 
+  createTextVideoAdapter(options: {
+    readonly connections: ViduConnectionPort;
+    readonly operationContext: ViduVideoOperationContextPort;
+    readonly now?: () => number;
+  }) {
+    return new ViduTextVideoV2Adapter({
+      runtime: this.runtime,
+      connections: options.connections,
+      operationContext: options.operationContext,
+      now: options.now
+    });
+  }
+
   createRouteAdapters(options: {
     readonly routes: ViduExecutionRouteResolverPort;
     readonly parameterSchemas: ViduParameterSchemaResolverPort;
@@ -147,7 +161,8 @@ export class ViduProviderPackage {
         'reference_image_v2',
         dependencies
       ),
-      referenceVideoV2: new ViduVideoRouteAdapter(dependencies)
+      referenceVideoV2: new ViduVideoRouteAdapter('reference', dependencies),
+      textVideoV2: new ViduVideoRouteAdapter('text', dependencies)
     };
   }
 
