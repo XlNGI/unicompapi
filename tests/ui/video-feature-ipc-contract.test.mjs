@@ -38,9 +38,13 @@ test('video submission binds exact revision, token and confirmation', () => {
   assert.doesNotMatch(panel, /localStorage|sessionStorage|console\./);
 });
 
-test('video feature panel edits object parameters as validated JSON objects', () => {
-  assert.match(panel, /field\.valueType === 'object'/);
-  assert.match(panel, /ObjectParameterField/);
-  assert.match(panel, /JSON\.parse\(text\)/);
-  assert.match(panel, /请输入有效的 JSON 对象/);
+test('video feature panel uses shared model select and dynamic parameter form', async () => {
+  const form = await readFile('src/components/DynamicParameterForm.tsx', 'utf8');
+  assert.match(panel, /ModelSelect/);
+  assert.match(panel, /DynamicParameterForm/);
+  assert.match(panel, /已锁定参数合同/);
+  assert.match(form, /field\.valueType === 'object'/);
+  assert.match(form, /ObjectParameterField/);
+  assert.match(form, /JSON\.parse\(text\)/);
+  assert.match(form, /请输入有效的 JSON 对象/);
 });

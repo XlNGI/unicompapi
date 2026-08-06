@@ -1,7 +1,8 @@
 export const imageFeatureIpcChannels = {
   listCandidates: 'image-feature:list-candidates',
   prepareSubmission: 'image-feature:prepare-submission',
-  submitDraft: 'image-feature:submit-draft'
+  submitDraft: 'image-feature:submit-draft',
+  generateQuickImage: 'image-feature:generate-quick-image'
 } as const;
 
 export type ImageFeatureIpcErrorCode =
@@ -124,6 +125,20 @@ export interface ImageFeatureSubmissionDto {
     | 'cancelled'
     | 'unknown_outcome';
   readonly retryAllowed: false;
+  readonly invocationAttemptId?: string;
+  readonly taskId?: string;
+  readonly executionId?: string;
+  readonly workId?: string;
+  readonly resultImageUrls?: readonly string[];
+  /** Safe reason when provider completed but local image registration failed. */
+  readonly localResultError?: string;
+}
+
+export interface ImageFeatureGenerateQuickDto {
+  readonly schemaVersion: 1;
+  readonly draftId: string;
+  readonly draftUpdatedAt: string;
+  readonly submission: ImageFeatureSubmissionDto;
 }
 
 export interface ImageFeatureApi {
@@ -143,4 +158,9 @@ export interface ImageFeatureApi {
     confirmationId: string,
     confirmed: boolean
   ): Promise<ImageFeatureIpcResult<ImageFeatureSubmissionDto>>;
+  generateQuickImage(
+    prompt: string,
+    candidateId: string,
+    parameterValues: Readonly<Record<string, string | number | boolean | readonly string[]>>
+  ): Promise<ImageFeatureIpcResult<ImageFeatureGenerateQuickDto>>;
 }

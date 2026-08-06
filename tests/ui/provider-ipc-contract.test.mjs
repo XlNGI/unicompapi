@@ -78,7 +78,8 @@ test('Vidu billable validation is absent from the renderer and IPC public surfac
 });
 
 test('desktop composition installs live provider management adapters in the main process', () => {
-  assert.match(main, /createLiveProviderManagementAdapters/);
+  assert.match(main, /createLiveProviderManagementComposition/);
+  assert.match(main, /liveProviders\.adapters/);
   assert.doesNotMatch(
     main,
     /new ProviderManagementAdapterRegistry\(providerPackages, \[\]\)/
@@ -108,5 +109,7 @@ test('management adapter composition registers the evidence-backed probes', () =
   ]) {
     assert.match(managementAdapters, new RegExp(`class ${transport}`));
   }
+  assert.match(managementAdapters, /wantsEventStream/);
+  assert.match(managementAdapters, /readStreamingResponse/);
   assert.doesNotMatch(managementAdapters, /api[_-]?key\s*[:=]\s*['"][^'"]+['"]/i);
 });

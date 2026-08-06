@@ -195,6 +195,8 @@ export interface StorageCallLocalResultDto {
   readonly width?: number;
   readonly height?: number;
   readonly byteLength?: string;
+  /** Provider-returned image URL shown in call records (owner decision). */
+  readonly resultImageUrl?: string;
   readonly validationState: 'pending' | 'valid' | 'invalid';
   readonly observedAt: string;
 }

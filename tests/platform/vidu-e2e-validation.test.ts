@@ -600,7 +600,8 @@ async function createProtocolFixture(
   const bindings = frozen.protocolBindings.map((binding) =>
     createProviderProtocolBinding({
       ...binding,
-      authScheme: 'token',
+      authScheme:
+        binding.protocolId === 'vidu.ent.v1.images' ? 'bearer' : 'token',
       updatedAt: timestamp
     })
   );
@@ -721,10 +722,6 @@ async function createProtocolFixture(
   const imageAdapters = providerPackage.createImageAdapters({
     connections,
     materials,
-    imageV1: {
-      imageInputShape: 'string_array',
-      base64Encoding: 'data_url'
-    },
     createProviderOperationId: sequentialId('synthetic-image-operation')
   });
   const videoAdapter = providerPackage.createVideoAdapter({

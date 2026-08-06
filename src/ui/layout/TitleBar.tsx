@@ -7,6 +7,7 @@ import {
 } from 'react-icons/lu';
 import { ThemeSwitch } from '../../components/ThemeSwitch';
 import type { NavigationItemId } from '../navigation/navigationItems';
+import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
 import { WindowControls } from './WindowControls';
 
 export function TitleBar({
@@ -32,9 +33,11 @@ export function TitleBar({
 
     void refreshProject();
     window.addEventListener('focus', refreshProject);
+    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, refreshProject);
     return () => {
       active = false;
       window.removeEventListener('focus', refreshProject);
+      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refreshProject);
     };
   }, [storage]);
 

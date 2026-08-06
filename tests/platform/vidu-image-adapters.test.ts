@@ -115,18 +115,31 @@ describe('Vidu synchronous image adapters', () => {
     expect(fixture.transport.requests).toHaveLength(1);
   });
 
-  it('keeps Image V1 blocked while its authorization and input shape are unresolved', async () => {
+  it('rejects Image V1 when the protocol binding is not bearer', async () => {
     const fixture = await createFixture('imageV1', { verifiedImageV1Auth: false });
-    const adapter = new ViduImageV1Adapter(fixture.dependencies, {});
+    const adapter = new ViduImageV1Adapter(fixture.dependencies);
 
     await expect(
       adapter.submit(submitRequest(fixture, 'image_generation', [], {}))
     ).resolves.toEqual({
       kind: 'failed_before_submission',
-      message: 'The Image V1 authorization scheme has not been verified',
+      message: 'The Image V1 authorization scheme must be bearer',
       retryability: 'not_retryable'
     });
     expect(fixture.transport.requests).toHaveLength(0);
+  });
+
+  it('sends Image V1 requests with Bearer authorization', async () => {
+    const fixture = await createFixture('imageV1');
+    fixture.transport.responses.push(jsonResponse({
+      data: [{ url: 'https://cdn.synthetic.invalid/result.png' }],
+      output_format: 'png'
+    }));
+    const adapter = imageV1Adapter(fixture);
+    await adapter.submit(submitRequest(fixture, 'image_generation', [], {}));
+    expect(fixture.transport.requests[0]?.headers.authorization).toBe(
+      'Bearer synthetic-token'
+    );
   });
 
   it('submits Gemini V2 reference images without enabling image search', async () => {
@@ -258,9 +271,11 @@ async function createFixture(
   });
   const bindingIndex = protocol === 'imageV1' ? 1 : 2;
   const originalBinding = frozen.protocolBindings[bindingIndex];
-  const binding = protocol === 'imageV1' && options.verifiedImageV1Auth !== false
-    ? createProviderProtocolBinding({ ...originalBinding, authScheme: 'token' })
-    : originalBinding;
+  const binding = protocol === 'imageV1' && options.verifiedImageV1Auth === false
+    ? createProviderProtocolBinding({ ...originalBinding, authScheme: 'unknown' })
+    : protocol === 'imageV1'
+      ? createProviderProtocolBinding({ ...originalBinding, authScheme: 'bearer' })
+      : originalBinding;
   const model = frozen.models.find(
     (candidate) => candidate.protocolBindingId === binding.id
   )!;

@@ -97,7 +97,7 @@ export const providerExecutionLifecycles = [
 export type ProviderExecutionLifecycle =
   (typeof providerExecutionLifecycles)[number];
 
-export const providerAuthSchemes = ['token', 'unknown'] as const;
+export const providerAuthSchemes = ['token', 'bearer', 'unknown'] as const;
 export type ProviderAuthScheme = (typeof providerAuthSchemes)[number];
 
 export const providerOperationPurposes = [

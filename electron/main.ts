@@ -31,7 +31,7 @@ import {
   volcengineProviderPackageDescriptor
 } from '../src/platform';
 import { ElectronViduComposition } from './ipc/vidu-composition';
-import { createLiveProviderManagementAdapters } from './ipc/management-adapters';
+import { createLiveProviderManagementComposition } from './ipc/management-adapters';
 import { LedgerRuntimeAuthorizationSync } from './ipc/runtime-authorization-sync';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -71,15 +71,16 @@ const runtimeAuthorizationLedger = new RuntimeAuthorizationLedger(
 const runtimeAuthorizationSync = new LedgerRuntimeAuthorizationSync(
   runtimeAuthorizationLedger
 );
+const liveProviders = createLiveProviderManagementComposition({
+  getProxyMode: () => settingsLifecycle.getProxyMode()
+});
 const providerManagement = new ProviderManagementFramework(
   providerPackages,
   viduComposition.registry,
   viduComposition.credentialVault,
   new ProviderManagementAdapterRegistry(
     providerPackages,
-    createLiveProviderManagementAdapters({
-      getProxyMode: () => settingsLifecycle.getProxyMode()
-    })
+    liveProviders.adapters
   ),
   new JsonProviderManagementAuditStore(
     path.join(app.getPath('userData'), 'provider-management-audit.json')
@@ -91,7 +92,12 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get(),
   providerRegistry: viduComposition.registry,
   providerPackages,
-  runtimeAuthorization: runtimeAuthorizationLedger
+  runtimeAuthorization: runtimeAuthorizationLedger,
+  textSubmission: {
+    credentialVault: viduComposition.credentialVault,
+    deepSeekRuntime: liveProviders.deepSeekRuntime,
+    newApiRuntime: liveProviders.newApiRuntime
+  }
 });
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,

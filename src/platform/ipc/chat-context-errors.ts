@@ -21,7 +21,9 @@ import {
 } from '../repositories';
 import {
   ConversationResponseExecutionLifecycleError,
-  FeatureSubmissionError
+  FeatureSubmissionError,
+  RuntimeAuthorizationDeniedError,
+  SubmissionOrchestrationError
 } from '../providers';
 
 export function chatContextFailure<T>(
@@ -68,6 +70,18 @@ export function chatContextFailure<T>(
       ? 'invalid_request'
       : error.code;
     return failure(code, error.message);
+  }
+  if (error instanceof SubmissionOrchestrationError) {
+    if (error.code === 'authorization_not_claimed') {
+      return failure('runtime_not_allowed', error.message);
+    }
+    if (error.code === 'adapter_contract_invalid') {
+      return failure('adapter_unavailable', error.message);
+    }
+    return failure('storage_error', error.message);
+  }
+  if (error instanceof RuntimeAuthorizationDeniedError) {
+    return failure('runtime_not_allowed', error.message);
   }
   if (error instanceof ProjectContextSnapshotError) {
     const code = error.code === 'context_not_found' ||

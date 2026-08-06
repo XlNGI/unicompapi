@@ -242,6 +242,60 @@ describe('ViduSharedRuntime', () => {
     packageRuntime.dispose();
   });
 
+  it('reads production structured_record tokens for authenticated requests', async () => {
+    const fixture = await createStructuredFixture();
+    fixture.transport.responses.push(response(200, {
+      data: [{ url: 'https://cdn.example.com/result.png' }]
+    }));
+    const runtime = runtimeFor(fixture);
+
+    await expect(
+      runtime.request({
+        connection: fixture.connection,
+        binding: fixture.imageBinding,
+        method: 'POST',
+        path: '/ent/v1/images/generations',
+        body: new TextEncoder().encode(JSON.stringify({ prompt: 'cat', n: 1 })),
+        contentType: 'application/json',
+        authScheme: 'bearer',
+        maxResponseBytes: 2 * 1024 * 1024
+      })
+    ).resolves.toMatchObject({ status: 200 });
+
+    expect(fixture.transport.requests[0].headers.authorization).toBe(
+      `Bearer ${token}`
+    );
+  });
+
+  it('maps CreditInsufficient 400 responses to a definitive credit error', async () => {
+    const fixture = await createStructuredFixture();
+    fixture.transport.responses.push(response(400, {
+      code: 400,
+      reason: 'CreditInsufficient',
+      message: 'insufficient credits',
+      metadata: { trace_id: '0123456789abcdef0123456789abcdef' }
+    }));
+    const runtime = runtimeFor(fixture);
+
+    await expect(
+      runtime.request({
+        connection: fixture.connection,
+        binding: fixture.imageBinding,
+        method: 'POST',
+        path: '/ent/v1/images/generations',
+        body: new TextEncoder().encode(JSON.stringify({ prompt: 'cat', n: 1 })),
+        contentType: 'application/json',
+        authScheme: 'bearer',
+        maxResponseBytes: 2 * 1024 * 1024
+      })
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'credit_insufficient',
+        message: 'Vidu credits are insufficient'
+      })
+    );
+  });
+
   it('maps missing credentials and transport failures to stable sanitized errors', async () => {
     const fixture = await createFixture();
     const missingCredential = createProviderConnection({
@@ -296,6 +350,38 @@ async function createFixture() {
     transport: new FixtureTransport(),
     connection,
     imageBinding: frozen.protocolBindings[1]
+  };
+}
+
+async function createStructuredFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-vidu-runtime-'));
+  roots.push(root);
+  const vault = new SecureCredentialVault(
+    path.join(root, 'credentials.json'),
+    reversibleProtector()
+  );
+  const credentialReference = 'credential-vidu-runtime-structured';
+  await vault.saveRecord(credentialReference, {
+    schemaId: 'credential.vidu.token',
+    schemaVersion: 1,
+    values: { token }
+  });
+  const frozen = createUserViduRegistryRecords();
+  const connection = createProviderConnection({
+    ...frozen.connections[0],
+    endpoint: 'https://api.vidu.cn',
+    state: 'saved',
+    credentialState: 'saved',
+    credentialReference,
+    updatedAt: toIsoTimestamp('2026-07-28T12:00:00.000Z')
+  });
+  return {
+    vault,
+    transport: new FixtureTransport(),
+    connection,
+    imageBinding: frozen.protocolBindings.find(
+      (binding) => binding.protocolId === 'vidu.ent.v1.images'
+    ) ?? frozen.protocolBindings[1]
   };
 }
 

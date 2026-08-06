@@ -70,18 +70,10 @@ describe('provider submission dispatch bridge', () => {
           requestStarted += 1;
         }
       });
-      if (registered.adapterKey === VIDU_IMAGE_V1_ADAPTER_ID) {
-        expect(outcome).toEqual({
-          kind: 'failed_before_submission',
-          safeCode: 'adapter.failed_before_submission'
-        });
-        expect(requestStarted).toBe(0);
-      } else {
-        expect(outcome).toMatchObject({
-          providerOperationId: `operation-${registered.adapterKey}`
-        });
-        expect(requestStarted).toBe(1);
-      }
+      expect(outcome).toMatchObject({
+        providerOperationId: `operation-${registered.adapterKey}`
+      });
+      expect(requestStarted).toBe(1);
     }
 
     expect(new Set(calls)).toEqual(new Set(ports.map((item) =>
@@ -162,13 +154,6 @@ function port(
       calls.push(
         `${providerPackage.packageId}:${adapter.adapterId}@${adapter.adapterVersion}`
       );
-      if (adapter.adapterId === VIDU_IMAGE_V1_ADAPTER_ID) {
-        return normalizeProviderSubmitOutcome({
-          kind: 'failed_before_submission',
-          message: 'Vidu Image V1 remains unverified',
-          retryability: 'not_retryable'
-        });
-      }
       await input.beforeRequestStarted();
       return normalizeProviderSubmitOutcome(providerOutcome(adapter.adapterId));
     }

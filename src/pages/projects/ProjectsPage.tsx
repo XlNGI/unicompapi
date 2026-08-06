@@ -12,6 +12,7 @@ import type {
   StorageTaskSummaryDto,
   StorageWorkSummaryDto
 } from '../../shared/storage-ipc';
+import { notifyProjectSessionChanged } from '../../ui/project-session-events';
 import '../../styles/pages.css';
 
 interface ProjectsPageProps {
@@ -111,6 +112,7 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
     else if (result.value.cancelled) setMessage('已取消选择项目');
     else if (result.value.session) {
       setSession(result.value.session);
+      notifyProjectSessionChanged();
       setMessage('项目已打开');
       await refreshDashboard();
     }
@@ -128,6 +130,7 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
     else if (result.value.cancelled) setMessage('已取消新建项目');
     else if (result.value.session) {
       setSession(result.value.session);
+      notifyProjectSessionChanged();
       setProjectName('');
       setCreating(false);
       setMessage('项目已创建');
@@ -142,6 +145,7 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
     const result = await storage.closeProject();
     if (result.ok) {
       setSession(undefined);
+      notifyProjectSessionChanged();
       setMessage('项目已关闭');
     } else setMessage(describeStorageError(result.error.code, result.error.message));
     setBusy(false);

@@ -1,11 +1,13 @@
 import {
   toDraftId,
+  type DynamicParameterValue,
   type FeatureCandidateSubjectV1,
   type ImageWorkspaceRepository,
   type SubmissionUserConfirmationV1
 } from '../../domain';
 import type {
   ImageFeatureCandidateDto,
+  ImageFeatureGenerateQuickDto,
   ImageFeatureIpcErrorCode,
   ImageFeatureIpcResult,
   ImageFeaturePreparationDto,
@@ -20,6 +22,12 @@ import {
 import type { ImageWorkspaceMutationCoordinator } from './image-workspace-mutations';
 import type { StorageProjectSession } from './storage-ipc-controller';
 
+export interface ImageFeatureGenerateQuickInput {
+  readonly prompt: string;
+  readonly candidateId: string;
+  readonly parameterValues: Readonly<Record<string, DynamicParameterValue>>;
+}
+
 export interface ImageFeatureControllerRuntime {
   readonly drafts: ImageWorkspaceRepository;
   readonly candidates: ProviderFeatureCandidateService;
@@ -28,6 +36,9 @@ export interface ImageFeatureControllerRuntime {
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
   }): Promise<ImageFeatureSubmissionDto>;
+  generateQuickImage?(
+    input: ImageFeatureGenerateQuickInput
+  ): Promise<ImageFeatureGenerateQuickDto>;
 }
 
 export interface ImageFeatureControllerDependencies {
@@ -103,6 +114,27 @@ export class ImageFeatureController {
           routeSelectionToken: input.routeSelectionToken,
           confirmation
         })
+      };
+    });
+  }
+
+  generateQuickImage(
+    request: unknown
+  ): Promise<ImageFeatureIpcResult<ImageFeatureGenerateQuickDto>> {
+    return this.execute(async () => {
+      const input = parseGenerateQuickRequest(request);
+      const session = this.dependencies.getSession();
+      if (!session) throw controllerError('project_not_open', 'A project must be open');
+      const runtime = this.dependencies.getRuntime(session);
+      if (!runtime.generateQuickImage) {
+        return failure(
+          'runtime_not_allowed',
+          'Image provider runtime access is not approved'
+        );
+      }
+      return {
+        ok: true,
+        value: await runtime.generateQuickImage(input)
       };
     });
   }
@@ -195,6 +227,40 @@ function parseSubmitRequest(request: unknown): DraftRequest & {
     routeSelectionToken: nonBlank(request.routeSelectionToken),
     confirmationId: nonBlank(request.confirmationId),
     confirmed: request.confirmed
+  };
+}
+
+function parseGenerateQuickRequest(request: unknown): ImageFeatureGenerateQuickInput {
+  if (
+    typeof request !== 'object' ||
+    request === null ||
+    Array.isArray(request)
+  ) {
+    throw invalidRequest();
+  }
+  const item = request as Record<string, unknown>;
+  const keys = Object.keys(item);
+  if (
+    keys.length !== 3 ||
+    !keys.includes('prompt') ||
+    !keys.includes('candidateId') ||
+    !keys.includes('parameterValues')
+  ) {
+    throw invalidRequest();
+  }
+  const prompt = nonBlank(item.prompt);
+  if (prompt.length > 1000) throw invalidRequest();
+  if (
+    typeof item.parameterValues !== 'object' ||
+    item.parameterValues === null ||
+    Array.isArray(item.parameterValues)
+  ) {
+    throw invalidRequest();
+  }
+  return {
+    prompt,
+    candidateId: nonBlank(item.candidateId),
+    parameterValues: item.parameterValues as ImageFeatureGenerateQuickInput['parameterValues']
   };
 }
 

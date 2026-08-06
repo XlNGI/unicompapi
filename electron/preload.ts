@@ -195,7 +195,13 @@ const imageFeatures: ImageFeatureApi = {
     routeSelectionToken,
     confirmationId,
     confirmed
-  })
+  }),
+  generateQuickImage: (prompt, candidateId, parameterValues) =>
+    ipcRenderer.invoke(imageFeatureIpcChannels.generateQuickImage, {
+      prompt,
+      candidateId,
+      parameterValues
+    })
 };
 
 const videoFeatures: VideoFeatureApi = {
@@ -524,6 +530,10 @@ const chatContexts: ChatContextApi = {
     ipcRenderer.invoke(chatContextIpcChannels.listResponseCandidates, {
       responseDraftId,
       expectedRevision
+    }),
+  listTextCandidates: (productFeature) =>
+    ipcRenderer.invoke(chatContextIpcChannels.listTextCandidates, {
+      productFeature
     }),
   prepareResponseSubmission: (responseDraftId, expectedRevision, candidateId) =>
     ipcRenderer.invoke(chatContextIpcChannels.prepareResponseSubmission, {

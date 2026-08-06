@@ -21,6 +21,7 @@ const operations = [
   'createResponseDraft',
   'replaceResponseContexts',
   'listResponseCandidates',
+  'listTextCandidates',
   'prepareResponseSubmission',
   'submitResponse',
   'getResponseExecution',

@@ -89,6 +89,7 @@ export async function readViduImmediateImageResult(
   if (result.kind === 'base64') {
     return decodeBase64(result.value, maximumResultBytes);
   }
+  // remote_url | file_uri — both are HTTPS-downloadable result references
   try {
     const downloaded = await runtime.downloadResult({
       url: result.value,

@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { LuSend, LuShieldCheck } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
+import {
+  DynamicParameterForm,
+  toDynamicParameterFields,
+  type DynamicParameterValue
+} from '../../../components/DynamicParameterForm';
+import { ModelSelect } from '../../../components/ModelSelect';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
   ImageFeatureCandidateDto,
   ImageFeatureIpcErrorCode,
-  ImageFeatureParameterFieldDto,
-  ImageFeaturePreparationDto
+  ImageFeaturePreparationDto,
+  ImageFeatureSubmissionDto
 } from '../../../shared/image-feature-ipc';
 import type {
   ImageWorkspaceParameterValueDto
@@ -17,8 +23,11 @@ interface ImageFeatureSubmissionPanelProps {
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
   readonly blockedReason?: string;
+  readonly oneShot?: boolean;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
+  readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
+  readonly onSubmissionComplete?: (submission: ImageFeatureSubmissionDto) => void;
 }
 
 const errorMessages: Record<ImageFeatureIpcErrorCode, string> = {
@@ -58,10 +67,14 @@ export function ImageFeatureSubmissionPanel({
   dirty,
   draft,
   blockedReason,
+  oneShot = false,
   onDraftChange,
-  onMessage
+  onDraftPersisted,
+  onMessage,
+  onSubmissionComplete
 }: ImageFeatureSubmissionPanelProps) {
   const api = window.unicomp?.imageFeatures;
+  const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const [candidates, setCandidates] = useState<readonly ImageFeatureCandidateDto[]>([]);
   const [preparation, setPreparation] = useState<ImageFeaturePreparationDto>();
   const [confirmed, setConfirmed] = useState(false);
@@ -81,36 +94,66 @@ export function ImageFeatureSubmissionPanel({
     let active = true;
     setPreparation(undefined);
     setConfirmed(false);
-    if (!api || dirty || draft.state !== 'saved' || blockedReason) return;
+    if (!api || blockedReason) return;
+    if (!oneShot && (dirty || draft.state !== 'saved')) return;
+    if (oneShot && draft.prompt.finalPrompt.trim().length === 0) {
+      setCandidates([]);
+      setLoadState('idle');
+      return;
+    }
+    const delayMs = oneShot && (dirty || draft.state !== 'saved') ? 350 : 0;
     setLoadState('loading');
-    void api.listCandidates(draft.draftId, draft.updatedAt).then((result) => {
-      if (!active) return;
-      if (!result.ok) {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        let draftId = draft.draftId;
+        let draftUpdatedAt = draft.updatedAt;
+        if (oneShot && (dirty || draft.state !== 'saved') && imageWorkspaces) {
+          const saved = await imageWorkspaces.update({
+            ...draft,
+            state: 'saved'
+          });
+          if (!active) return;
+          if (!saved.ok) {
+            setCandidates([]);
+            setLoadState('loaded');
+            onMessage(errorMessages[saved.error.code] ?? saved.error.message);
+            return;
+          }
+          draftId = saved.value.draftId;
+          draftUpdatedAt = saved.value.updatedAt;
+          onDraftPersisted?.(saved.value as GenerationImageDraftDto);
+        }
+        const result = await api.listCandidates(draftId, draftUpdatedAt);
+        if (!active) return;
+        if (!result.ok) {
+          setCandidates([]);
+          setLoadState('loaded');
+          onMessage(errorMessages[result.error.code]);
+          return;
+        }
+        setCandidates(result.value);
+        setLoadState('loaded');
+      })().catch(() => {
+        if (!active) return;
         setCandidates([]);
         setLoadState('loaded');
-        onMessage(errorMessages[result.error.code]);
-        return;
-      }
-      setCandidates(result.value);
-      setLoadState('loaded');
-    }).catch(() => {
-      if (!active) return;
-      setCandidates([]);
-      setLoadState('loaded');
-      onMessage('读取图片服务候选失败，请重试。');
-    });
+        onMessage('读取图片服务候选失败，请重试。');
+      });
+    }, delayMs);
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
   }, [
     api,
     blockedReason,
     dirty,
-    draft.draftId,
-    draft.state,
-    draft.updatedAt,
+    draft,
     featureSelection.productFeature,
-    onMessage
+    imageWorkspaces,
+    onDraftPersisted,
+    onMessage,
+    oneShot
   ]);
 
   function changeCandidate(candidateId: string) {
@@ -154,14 +197,31 @@ export function ImageFeatureSubmissionPanel({
     });
   }
 
+  async function ensureSavedDraft(): Promise<GenerationImageDraftDto | undefined> {
+    if (!imageWorkspaces) return undefined;
+    if (!dirty && draft.state === 'saved') return draft;
+    const result = await imageWorkspaces.update({
+      ...draft,
+      state: 'saved'
+    });
+    if (!result.ok) {
+      onMessage(errorMessages[result.error.code] ?? result.error.message);
+      return undefined;
+    }
+    onDraftPersisted?.(result.value as GenerationImageDraftDto);
+    return result.value as GenerationImageDraftDto;
+  }
+
   async function prepare() {
-    if (!api || !selectedCandidate || dirty || busy || blockedReason) return;
+    if (!api || !selectedCandidate || busy || blockedReason) return;
     setBusy(true);
     onMessage('');
     try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
       const result = await api.prepareSubmission(
-        draft.draftId,
-        draft.updatedAt,
+        saved.draftId,
+        saved.updatedAt,
         selectedCandidate.candidateId
       );
       if (!result.ok) {
@@ -169,8 +229,11 @@ export function ImageFeatureSubmissionPanel({
         return;
       }
       setPreparation(result.value);
-      setConfirmed(false);
-      onMessage('已固定本次服务选择，请核对外发事实。');
+      setConfirmed(oneShot);
+      onMessage(oneShot ? '已准备生成。' : '已固定本次服务选择，请核对外发事实。');
+      if (oneShot) {
+        await submitPrepared(saved, result.value);
+      }
     } catch {
       onMessage('准备图片提交失败，请重试。');
     } finally {
@@ -178,25 +241,41 @@ export function ImageFeatureSubmissionPanel({
     }
   }
 
+  async function submitPrepared(
+    saved: GenerationImageDraftDto,
+    prepared: ImageFeaturePreparationDto
+  ) {
+    if (!api) return;
+    const result = await api.submitDraft(
+      saved.draftId,
+      saved.updatedAt,
+      prepared.routeSelectionToken,
+      prepared.confirmation.confirmationId,
+      true
+    );
+    if (!result.ok) {
+      onMessage(errorMessages[result.error.code]);
+      return;
+    }
+    const urls = result.value.resultImageUrls ?? [];
+    onMessage(
+      urls.length > 0
+        ? `提交完成（${result.value.status}），已保存图片 URL。`
+        : `提交状态：${result.value.status}`
+    );
+    onSubmissionComplete?.(result.value);
+    setPreparation(undefined);
+    setConfirmed(false);
+  }
+
   async function submit() {
-    if (!api || !preparation || !confirmed || dirty || busy) return;
+    if (!api || !preparation || (!confirmed && !oneShot) || busy) return;
     setBusy(true);
     onMessage('');
     try {
-      const result = await api.submitDraft(
-        draft.draftId,
-        draft.updatedAt,
-        preparation.routeSelectionToken,
-        preparation.confirmation.confirmationId,
-        true
-      );
-      if (!result.ok) {
-        onMessage(errorMessages[result.error.code]);
-        return;
-      }
-      onMessage(`提交状态：${result.value.status}`);
-      setPreparation(undefined);
-      setConfirmed(false);
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      await submitPrepared(saved, preparation);
     } catch {
       onMessage('图片提交失败，请重试。');
     } finally {
@@ -204,38 +283,146 @@ export function ImageFeatureSubmissionPanel({
     }
   }
 
+  async function generateOneShot() {
+    if (busy) return;
+    if (!api) {
+      onMessage('当前运行环境未连接桌面图片功能。');
+      return;
+    }
+    if (blockedReason) {
+      onMessage(blockedReason);
+      return;
+    }
+    if (!selectedCandidate) {
+      onMessage('请先选择可用的服务商 / 连接 / 模型。');
+      return;
+    }
+    if (!selectedCandidate.available) {
+      onMessage(
+        `所选模型当前不可用：${
+          selectedCandidate.unavailableReasons
+            .map((reason) => unavailableReasonLabels[reason] ?? reason)
+            .join('、') || '未知原因'
+        }`
+      );
+      return;
+    }
+    const prompt = draft.prompt.finalPrompt.trim();
+    if (prompt.length === 0) {
+      onMessage('请先填写提示词。');
+      return;
+    }
+    setBusy(true);
+    onMessage('正在生成…');
+    try {
+      if (api.generateQuickImage) {
+        const result = await api.generateQuickImage(
+          prompt,
+          selectedCandidate.candidateId,
+          featureSelection.parameterValues as Readonly<
+            Record<string, string | number | boolean | readonly string[]>
+          >
+        );
+        if (!result.ok) {
+          onMessage(
+            `${errorMessages[result.error.code]}（${result.error.code}）`
+          );
+          return;
+        }
+        onDraftPersisted?.({
+          ...draft,
+          draftId: result.value.draftId,
+          updatedAt: result.value.draftUpdatedAt,
+          state: 'saved',
+          prompt: {
+            originalInput: prompt,
+            systemSupplements: [],
+            finalPrompt: prompt
+          },
+          featureSelection: {
+            productFeature: 'text_to_image',
+            candidateId: selectedCandidate.candidateId,
+            parameterSchemaId: selectedCandidate.parameterSchema.schemaId,
+            parameterSchemaRevision: selectedCandidate.parameterSchema.revision,
+            parameterValues: featureSelection.parameterValues
+          }
+        } as GenerationImageDraftDto);
+        const submission = result.value.submission;
+        const urls = submission.resultImageUrls ?? [];
+        const status = submission.status;
+        if (submission.localResultError) {
+          onMessage(
+            `${submission.localResultError}${
+              urls.length > 0 ? `；调用记录中的 URL：${urls[0]}` : ''
+            }`
+          );
+        } else if (status !== 'completed' && status !== 'provider_accepted') {
+          onMessage(
+            `生成未完成：${status}${
+              urls.length > 0 ? '；已记录部分结果 URL。' : '。请打开任务中心查看时间线。'
+            }`
+          );
+        } else if (urls.length > 0 || submission.workId) {
+          onMessage(
+            urls.length > 0
+              ? '生成完成，已写入调用记录与图片 URL。'
+              : `生成完成，本地作品：${submission.workId}`
+          );
+        } else {
+          onMessage(
+            `生成状态：${status}，但没有图片 URL 也没有本地作品。请打开任务中心查看时间线。`
+          );
+        }
+        onSubmissionComplete?.(submission);
+        return;
+      }
+      await prepare();
+    } catch (error) {
+      onMessage(
+        error instanceof Error && error.message.trim().length > 0
+          ? `一键生成失败：${error.message}`
+          : '一键生成失败，请重试。'
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="uc-image-feature-panel">
-      <label className="uc-image-quick__field">
-        <span>服务商 / 连接 / 模型</span>
-        <select
-          disabled={!api || dirty || loadState !== 'loaded' || candidates.length === 0}
-          onChange={(event) => changeCandidate(event.target.value)}
-          value={featureSelection.candidateId ?? ''}
-        >
-          <option value="">请选择服务候选</option>
-          {candidates.map((candidate) => (
-            <option key={candidate.candidateId} value={candidate.candidateId}>
-              {candidate.providerName} / {candidate.connectionName} / {candidate.modelName}
-              {candidate.available ? '' : '（不可用）'}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {loadState === 'loading' ? (
-        <p className="uc-image-quick__hint" role="status">正在读取安全候选。</p>
-      ) : loadState === 'loaded' && candidates.length === 0 ? (
-        <p className="uc-image-quick__hint" role="status">
-          当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。
-        </p>
-      ) : null}
+      <ModelSelect
+        disabled={
+          !api ||
+          loadState !== 'loaded' ||
+          (!oneShot && dirty)
+        }
+        emptyDescription={
+          loadState === 'loading'
+            ? '正在读取安全候选。'
+            : oneShot && draft.prompt.finalPrompt.trim().length === 0
+              ? '请先填写提示词，再读取可选模型。'
+              : !oneShot && (dirty || draft.state !== 'saved')
+                ? '请先保存本地草稿，再读取候选或准备生成。'
+                : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
+        }
+        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
+        hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
+        onChange={changeCandidate}
+        options={candidates.map((candidate) => ({
+          id: candidate.candidateId,
+          label: `${candidate.providerName} · ${candidate.connectionName} · ${candidate.modelName}`,
+          available: candidate.available,
+          unavailableReasons: candidate.unavailableReasons
+        }))}
+        reasonLabels={unavailableReasonLabels}
+        value={featureSelection.candidateId ?? ''}
+      />
 
       {selectedCandidate ? (
         <>
           <div className="uc-image-feature-panel__facts">
             <span>
-              <strong>参数合同</strong>
+              <strong>已锁定参数合同</strong>
               {selectedCandidate.parameterSchema.schemaId} · revision {selectedCandidate.parameterSchema.revision}
             </span>
             <span>
@@ -254,18 +441,17 @@ export function ImageFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          <div className="uc-image-quick__parameters">
-            {selectedCandidate.parameterSchema.fields.length === 0 ? (
-              <p className="uc-image-quick__hint">当前表面没有需要用户填写的参数。</p>
-            ) : selectedCandidate.parameterSchema.fields.map((field) => (
-              <ParameterField
-                field={field}
-                key={field.fieldId}
-                onChange={(value) => changeParameter(field.fieldId, value)}
-                value={featureSelection.parameterValues[field.fieldId]}
-              />
-            ))}
-          </div>
+          <DynamicParameterForm
+            disabled={busy || dirty}
+            emptyHint="当前表面没有需要用户填写的参数。"
+            fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+            onChange={(fieldId, value) =>
+              changeParameter(fieldId, value as ImageWorkspaceParameterValueDto | undefined)
+            }
+            values={featureSelection.parameterValues as Readonly<
+              Record<string, DynamicParameterValue | undefined>
+            >}
+          />
         </>
       ) : null}
 
@@ -274,13 +460,17 @@ export function ImageFeatureSubmissionPanel({
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>
         </div>
-      ) : dirty || draft.state !== 'saved' ? (
+      ) : !oneShot && (dirty || draft.state !== 'saved') ? (
         <p className="uc-image-quick__hint" role="status">
           请先保存本地草稿，再读取候选或准备生成。
         </p>
+      ) : oneShot && draft.prompt.finalPrompt.trim().length === 0 ? (
+        <p className="uc-image-quick__hint" role="status">
+          请先填写提示词，再选择模型并生成。
+        </p>
       ) : null}
 
-      {preparation ? (
+      {!oneShot && preparation ? (
         <fieldset className="uc-image-quick__confirmations">
           <legend>确认本次外发</legend>
           <dl className="uc-image-feature-panel__confirmation-facts">
@@ -305,165 +495,45 @@ export function ImageFeatureSubmissionPanel({
       <Button
         className="uc-image-feature-panel__primary"
         disabled={
-          Boolean(blockedReason) ||
-          dirty ||
-          busy ||
-          !selectedCandidate?.available ||
-          (Boolean(preparation) && !confirmed)
+          oneShot
+            ? busy
+            : Boolean(blockedReason) ||
+              busy ||
+              !selectedCandidate?.available ||
+              dirty ||
+              (Boolean(preparation) && !confirmed)
         }
-        onClick={() => void (preparation ? submit() : prepare())}
+        onClick={() => void (oneShot
+          ? generateOneShot()
+          : preparation
+            ? submit()
+            : prepare())}
       >
-        {preparation ? <LuSend aria-hidden="true" /> : <LuShieldCheck aria-hidden="true" />}
-        {busy ? '处理中' : preparation ? '确认并提交' : '准备生成'}
+        {oneShot || preparation
+          ? <LuSend aria-hidden="true" />
+          : <LuShieldCheck aria-hidden="true" />}
+        {busy
+          ? '处理中'
+          : oneShot
+            ? '生成'
+            : preparation
+              ? '确认并提交'
+              : '准备生成'}
       </Button>
+      {oneShot ? (
+        <p className="uc-image-feature-panel__action-hint" role="status">
+          {!selectedCandidate
+            ? '下一步：在上方选择可用模型。'
+            : !selectedCandidate.available
+              ? '所选模型当前不可用，请换一个或到「模型与服务商」检查连接授权。'
+              : draft.prompt.finalPrompt.trim().length === 0
+                ? '下一步：填写左侧提示词。'
+                : busy
+                  ? '正在向主进程提交…'
+                  : '就绪：点击「生成」发起请求。'}
+        </p>
+      ) : null}
     </div>
-  );
-}
-
-function ParameterField({
-  field,
-  value,
-  onChange
-}: {
-  readonly field: ImageFeatureParameterFieldDto;
-  readonly value: ImageWorkspaceParameterValueDto | undefined;
-  readonly onChange: (value: ImageWorkspaceParameterValueDto | undefined) => void;
-}) {
-  const label = `${field.labelId}${field.required ? '（必填）' : ''}`;
-  if (field.valueType === 'boolean') {
-    return (
-      <label className="uc-image-quick__checkbox">
-        <input
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-          type="checkbox"
-        />
-        <span>{label}</span>
-      </label>
-    );
-  }
-  if (field.valueType === 'enum') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <select
-          onChange={(event) => {
-            const option = field.options?.find((item) => String(item) === event.target.value);
-            onChange(option);
-          }}
-          value={value === undefined ? '' : String(value)}
-        >
-          <option value="">请选择</option>
-          {field.options?.map((option) => (
-            <option key={String(option)} value={String(option)}>{String(option)}</option>
-          ))}
-        </select>
-      </label>
-    );
-  }
-  if (field.valueType === 'number' || field.valueType === 'integer') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <input
-          max={field.maximum}
-          min={field.minimum}
-          onChange={(event) => onChange(
-            event.target.value === '' ? undefined : Number(event.target.value)
-          )}
-          step={field.valueType === 'integer' ? 1 : field.step}
-          type="number"
-          value={typeof value === 'number' ? value : ''}
-        />
-      </label>
-    );
-  }
-  if (field.valueType === 'string_array' || field.valueType === 'number_array') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <input
-          onChange={(event) => {
-            const items = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
-            onChange(items.length === 0
-              ? undefined
-              : field.valueType === 'number_array'
-                ? items.map(Number)
-                : items);
-          }}
-          placeholder="使用逗号分隔"
-          type="text"
-          value={Array.isArray(value) ? value.join(', ') : ''}
-        />
-      </label>
-    );
-  }
-  if (field.valueType === 'object') {
-    return <ObjectParameterField field={field} onChange={onChange} value={value} />;
-  }
-  if (field.valueType === 'media_slot') {
-    return (
-      <label className="uc-image-quick__field">
-        <span>{label}</span>
-        <input disabled readOnly value="由当前草稿的受控素材提供" />
-      </label>
-    );
-  }
-  return (
-    <label className="uc-image-quick__field">
-      <span>{label}</span>
-      <input
-        onChange={(event) => onChange(event.target.value || undefined)}
-        type="text"
-        value={typeof value === 'string' ? value : ''}
-      />
-    </label>
-  );
-}
-
-function ObjectParameterField({
-  field,
-  value,
-  onChange
-}: {
-  readonly field: ImageFeatureParameterFieldDto;
-  readonly value: ImageWorkspaceParameterValueDto | undefined;
-  readonly onChange: (value: ImageWorkspaceParameterValueDto | undefined) => void;
-}) {
-  const [text, setText] = useState(value === undefined ? '' : JSON.stringify(value));
-  const [invalid, setInvalid] = useState(false);
-  useEffect(() => {
-    setText(value === undefined ? '' : JSON.stringify(value));
-    setInvalid(false);
-  }, [value]);
-  return (
-    <label className="uc-image-quick__field">
-      <span>{field.labelId}{field.required ? '（必填）' : ''}</span>
-      <textarea
-        aria-invalid={invalid}
-        onBlur={() => {
-          if (!text.trim()) {
-            setInvalid(false);
-            onChange(undefined);
-            return;
-          }
-          try {
-            const parsed = JSON.parse(text) as unknown;
-            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-              throw new TypeError('object required');
-            }
-            setInvalid(false);
-            onChange(parsed as ImageWorkspaceParameterValueDto);
-          } catch {
-            setInvalid(true);
-          }
-        }}
-        onChange={(event) => setText(event.target.value)}
-        rows={3}
-        value={text}
-      />
-      {invalid ? <small role="alert">请输入有效的 JSON 对象。</small> : null}
-    </label>
   );
 }
 

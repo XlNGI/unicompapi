@@ -367,7 +367,7 @@ function parseDispatchRequest(
   const item = exactRequestRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    [],
+    ['taskId', 'executionId'],
     'NewAPI image request'
   );
   const projectId = requireOpaqueId(item.projectId, 'project ID');

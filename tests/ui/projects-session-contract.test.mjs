@@ -17,6 +17,7 @@ test('projects page uses the controlled project session API', () => {
     assert.match(source, new RegExp(`storage\\.${operation}`));
   }
   assert.match(source, /projectName/);
+  assert.match(source, /notifyProjectSessionChanged/);
   assert.doesNotMatch(source, /rootDirectory|absolutePath|readFile|writeFile/);
 });
 

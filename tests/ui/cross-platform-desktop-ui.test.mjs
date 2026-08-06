@@ -15,6 +15,7 @@ test('keeps native macOS chrome and controlled Windows window actions', () => {
   assert.match(main, /titleBarStyle: isMac \? 'hiddenInset' : 'default'/);
   assert.match(titleBar, /platform === 'darwin'/);
   assert.match(titleBar, /platform === 'win32' \? <WindowControls \/> : null/);
+  assert.match(titleBar, /PROJECT_SESSION_CHANGED_EVENT/);
   assert.match(styles, /\.title-bar--mac \.title-bar__brand \{[\s\S]*?padding-left: 80px/);
   assert.match(windowControls, /role="group"/);
   assert.match(windowControls, /isMaximized \? '还原窗口' : '最大化窗口'/);

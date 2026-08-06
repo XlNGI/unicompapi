@@ -35,9 +35,15 @@ import {
 } from '../../src/platform';
 import type { ProxyMode } from '../../src/domain';
 
-export function createLiveProviderManagementAdapters(options: {
+export interface LiveProviderManagementComposition {
+  readonly adapters: readonly ProviderManagementAdapterPort[];
+  readonly deepSeekRuntime: DeepSeekSharedRuntime;
+  readonly newApiRuntime: NewApiSharedRuntime;
+}
+
+export function createLiveProviderManagementComposition(options: {
   readonly getProxyMode: () => Promise<ProxyMode>;
-}): ProviderManagementAdapterPort[] {
+}): LiveProviderManagementComposition {
   let activeProxy: ProxyMode = { kind: 'system_default' };
   void options.getProxyMode().then((proxy) => {
     activeProxy = proxy;
@@ -62,16 +68,26 @@ export function createLiveProviderManagementAdapters(options: {
     transport: new ElectronViduHttpTransport(),
     proxy: () => activeProxy
   });
-  return [
-    new DeepSeekManagementAdapter(deepSeekRuntime),
-    new NewApiManagementAdapter(newApiRuntime),
-    new NewApiManagementAdapter(newApiRuntime, {
-      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
-    }),
-    new KlingManagementAdapter(klingRuntime),
-    new VolcengineManagementAdapter(volcengineRuntime),
-    new ViduManagementAdapter(viduRuntime)
-  ];
+  return {
+    deepSeekRuntime,
+    newApiRuntime,
+    adapters: [
+      new DeepSeekManagementAdapter(deepSeekRuntime),
+      new NewApiManagementAdapter(newApiRuntime),
+      new NewApiManagementAdapter(newApiRuntime, {
+        packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
+      }),
+      new KlingManagementAdapter(klingRuntime),
+      new VolcengineManagementAdapter(volcengineRuntime),
+      new ViduManagementAdapter(viduRuntime)
+    ]
+  };
+}
+
+export function createLiveProviderManagementAdapters(options: {
+  readonly getProxyMode: () => Promise<ProxyMode>;
+}): ProviderManagementAdapterPort[] {
+  return [...createLiveProviderManagementComposition(options).adapters];
 }
 
 class ElectronDeepSeekHttpTransport implements DeepSeekHttpTransport {
@@ -84,6 +100,23 @@ class ElectronDeepSeekHttpTransport implements DeepSeekHttpTransport {
         signal: request.signal,
         redirect: request.redirect
       });
+      const headers = Object.fromEntries(response.headers.entries());
+      if (wantsEventStream(request.headers)) {
+        await rejectOversizedDeclaredLength(
+          response,
+          request.maxResponseBytes,
+          () => new DeepSeekTransportFailure('response_too_large')
+        );
+        return {
+          status: response.status,
+          headers,
+          stream: readStreamingResponse(
+            response,
+            request.maxResponseBytes,
+            () => new DeepSeekTransportFailure('response_too_large')
+          )
+        };
+      }
       const body = await readBoundedResponse(
         response,
         request.maxResponseBytes,
@@ -91,7 +124,7 @@ class ElectronDeepSeekHttpTransport implements DeepSeekHttpTransport {
       );
       return {
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers,
         body
       };
     } catch (error) {
@@ -114,6 +147,23 @@ class ElectronNewApiHttpTransport implements NewApiHttpTransport {
         signal: request.signal,
         redirect: request.redirect
       });
+      const headers = Object.fromEntries(response.headers.entries());
+      if (wantsEventStream(request.headers)) {
+        await rejectOversizedDeclaredLength(
+          response,
+          request.maxResponseBytes,
+          () => new NewApiTransportFailure('response_too_large')
+        );
+        return {
+          status: response.status,
+          headers,
+          stream: readStreamingResponse(
+            response,
+            request.maxResponseBytes,
+            () => new NewApiTransportFailure('response_too_large')
+          )
+        };
+      }
       const body = await readBoundedResponse(
         response,
         request.maxResponseBytes,
@@ -121,7 +171,7 @@ class ElectronNewApiHttpTransport implements NewApiHttpTransport {
       );
       return {
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers,
         body
       };
     } catch (error) {
@@ -224,16 +274,53 @@ class ElectronViduHttpTransport implements ViduHttpTransport {
   }
 }
 
-async function readBoundedResponse(
+function wantsEventStream(headers: Readonly<Record<string, string>>): boolean {
+  const accept = headers.accept ?? headers.Accept ?? '';
+  return accept.toLowerCase().includes('text/event-stream');
+}
+
+async function rejectOversizedDeclaredLength(
   response: Response,
   maximumBytes: number,
   tooLarge: () => Error
-): Promise<Uint8Array> {
+): Promise<void> {
   const declared = response.headers.get('content-length');
   if (declared !== null && Number(declared) > maximumBytes) {
     await response.body?.cancel();
     throw tooLarge();
   }
+}
+
+async function* readStreamingResponse(
+  response: Response,
+  maximumBytes: number,
+  tooLarge: () => Error
+): AsyncIterable<Uint8Array> {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  let total = 0;
+  try {
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) break;
+      total += result.value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel();
+        throw tooLarge();
+      }
+      yield result.value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function readBoundedResponse(
+  response: Response,
+  maximumBytes: number,
+  tooLarge: () => Error
+): Promise<Uint8Array> {
+  await rejectOversizedDeclaredLength(response, maximumBytes, tooLarge);
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];

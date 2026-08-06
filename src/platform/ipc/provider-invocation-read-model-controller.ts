@@ -287,6 +287,9 @@ export class ProviderInvocationReadModelController {
           ...(result.width === undefined ? {} : { width: result.width }),
           ...(result.height === undefined ? {} : { height: result.height }),
           ...(result.byteLength ? { byteLength: result.byteLength } : {}),
+          ...(result.resultImageUrl
+            ? { resultImageUrl: result.resultImageUrl }
+            : {}),
           validationState: result.validationState,
           observedAt: result.observedAt
         })),

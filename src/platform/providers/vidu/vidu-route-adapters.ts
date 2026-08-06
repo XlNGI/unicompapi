@@ -57,7 +57,9 @@ import {
   viduUsageSchema
 } from './vidu-contracts';
 import {
+  VIDU_IMAGE_V1_VERIFIED_OPTIONS,
   ViduGeminiImageV2Adapter,
+  ViduImageV1Adapter,
   type ViduAdapterRequestControl,
   type ViduConnectionPort
 } from './vidu-image-adapters';
@@ -276,23 +278,6 @@ export class ViduImageRouteAdapter {
     routeSnapshot: ProviderExecutionRouteSnapshotV1,
     input: ViduRouteSubmitInput
   ): Promise<ProviderSubmitOutcome> {
-    if (this.kind === 'image_v1') {
-      validateRouteIdentity(routeSnapshot, {
-        adapterKey: this.adapterKey,
-        adapterVersion: this.adapterVersion,
-        features: ['text_to_image', 'image_edit'],
-        resultSchemaId: VIDU_IMAGE_V1_RESULT_SCHEMA_ID,
-        constraintSetIds: [
-          VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID,
-          VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
-        ]
-      });
-      return {
-        kind: 'failed_before_submission',
-        message: 'The Vidu Image V1 contract is still unverified and blocked',
-        retryability: 'not_retryable'
-      };
-    }
     let request: ViduRouteDispatchRequestV1 | undefined;
     let requestStarted = false;
     try {
@@ -301,13 +286,21 @@ export class ViduImageRouteAdapter {
         this.dependencies.parameterSchemas,
         resolved.route
       );
-      request = parseDispatchRequest(input.request, resolved.route, schema, true);
-      const adapter = new ViduGeminiImageV2Adapter({
+      request = parseDispatchRequest(
+        input.request,
+        resolved.route,
+        schema,
+        this.kind === 'gemini_image_v2'
+      );
+      const dependencies = {
         runtime: this.dependencies.runtime,
         connections: fixedConnection(resolved.connection),
         materials: this.dependencies.materials,
         createProviderOperationId: () => this.ids.nextProviderOperationId()
-      });
+      };
+      const adapter = this.kind === 'image_v1'
+        ? new ViduImageV1Adapter(dependencies, VIDU_IMAGE_V1_VERIFIED_OPTIONS)
+        : new ViduGeminiImageV2Adapter(dependencies);
       const outcome = await adapter.submit(
         legacyImageRequest(resolved, request),
         control(input, () => { requestStarted = true; })
@@ -336,12 +329,6 @@ export class ViduImageRouteAdapter {
     routeSnapshot: ProviderExecutionRouteSnapshotV1,
     reference: ViduImmediateResultReferenceV1
   ): Promise<Readable> {
-    if (this.kind === 'image_v1') {
-      throw routeError(
-        'vidu.image_v1_unverified',
-        'The Vidu Image V1 result contract is still unverified'
-      );
-    }
     const resolved = await this.resolve(routeSnapshot);
     const parsed = parseImmediateResult(reference);
     const attached = this.results.get(parsed.providerOperationId);
@@ -369,12 +356,6 @@ export class ViduImageRouteAdapter {
     readonly providerOperationId: string;
     readonly result: ProviderImmediateResultReference;
   }): Promise<void> {
-    if (this.kind === 'image_v1') {
-      throw routeError(
-        'vidu.image_v1_unverified',
-        'The Vidu Image V1 result contract is still unverified'
-      );
-    }
     const resolved = await this.resolve(input.routeSnapshot);
     const parsed = parseImmediateResult({
       providerOperationId: input.providerOperationId,
@@ -399,13 +380,27 @@ export class ViduImageRouteAdapter {
 
   private async resolve(routeSnapshot: unknown): Promise<ResolvedViduExecutionRoute> {
     const resolved = await this.dependencies.routes.resolve(routeSnapshot);
-    validateRouteIdentity(resolved.route, {
-      adapterKey: this.adapterKey,
-      adapterVersion: this.adapterVersion,
-      features: ['reference_to_image'],
-      resultSchemaId: VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
-      constraintSetIds: [VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID]
-    });
+    validateRouteIdentity(
+      resolved.route,
+      this.kind === 'image_v1'
+        ? {
+            adapterKey: this.adapterKey,
+            adapterVersion: this.adapterVersion,
+            features: ['text_to_image', 'image_edit'],
+            resultSchemaId: VIDU_IMAGE_V1_RESULT_SCHEMA_ID,
+            constraintSetIds: [
+              VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID,
+              VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID
+            ]
+          }
+        : {
+            adapterKey: this.adapterKey,
+            adapterVersion: this.adapterVersion,
+            features: ['reference_to_image'],
+            resultSchemaId: VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID,
+            constraintSetIds: [VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID]
+          }
+    );
     return resolved;
   }
 
@@ -743,7 +738,7 @@ function parseDispatchRequest(
   const item = exactRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    ['assetId'],
+    ['assetId', 'taskId', 'executionId'],
     'Vidu dispatch request'
   );
   const projectId = requireOpaqueId(item.projectId, 'project ID');

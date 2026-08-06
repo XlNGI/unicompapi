@@ -117,7 +117,7 @@ describe('provider probe decisions (PR3 contract)', () => {
     }
   });
 
-  it('runs Volcengine and Vidu connectivity probes during save without model discovery', async () => {
+  it('runs Volcengine probe without catalog and Vidu probe with packaged catalog install', async () => {
     const fixture = await decisionsFixture();
     const volcProgress: string[] = [];
     const volcengine = await fixture.framework.addConnection({
@@ -149,13 +149,19 @@ describe('provider probe decisions (PR3 contract)', () => {
       value: {
         state: 'available',
         validated: true,
-        catalog: 'skipped'
+        catalog: 'synced',
+        catalogCount: 10
       }
     });
-    expect(viduProgress).toEqual(['validating', 'saving']);
+    expect(viduProgress).toEqual(['validating', 'saving', 'syncing']);
     expect(fixture.viduValidationCalls).toBe(1);
     expect(fixture.klingValidationCalls).toBe(0);
-    expect((await fixture.registry.load()).connections).toHaveLength(2);
+    const snapshot = await fixture.registry.load();
+    expect(snapshot.connections).toHaveLength(2);
+    if (!vidu.ok) throw new Error('vidu add failed');
+    expect(
+      snapshot.models.filter((model) => model.connectionId === vidu.value.connectionId)
+    ).toHaveLength(10);
   });
 });
 

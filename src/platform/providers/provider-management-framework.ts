@@ -35,6 +35,8 @@ import {
   NEWAPI_CHAT_PROTOCOL_ID
 } from './newapi/newapi-contracts';
 import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
+import { VIDU_PROVIDER_PACKAGE_ID } from './vidu/vidu-contracts';
+import { installPackagedViduCatalog } from './vidu/vidu-packaged-catalog-install';
 import {
   ProviderConnectionContractService,
   type ProviderConnectionContractResult
@@ -545,7 +547,28 @@ export class ProviderManagementFramework {
       let catalog: 'synced' | 'skipped' | 'failed' = 'skipped';
       let catalogCount: number | undefined;
       let catalogWarning: string | undefined;
-      if (
+      if (parsed.state === 'available' && request.packageId === VIDU_PROVIDER_PACKAGE_ID) {
+        progress?.('syncing');
+        try {
+          const installed = await installPackagedViduCatalog(this.registry, {
+            providerId: saved.value.providerId,
+            connectionId: saved.value.connectionId,
+            now: this.now()
+          });
+          catalog = 'synced';
+          catalogCount = installed.count;
+          await this.record({
+            action: 'catalog_synced',
+            outcome: 'succeeded',
+            providerId: saved.value.providerId,
+            connectionId: saved.value.connectionId,
+            count: installed.count
+          }, this.now());
+        } catch {
+          catalog = 'failed';
+          catalogWarning = 'catalog_sync_unavailable';
+        }
+      } else if (
         parsed.state === 'available' &&
         resolved.template.modelDiscoveryKind === 'catalog'
       ) {

@@ -78,7 +78,7 @@ describe('Vidu Provider Package migration', () => {
     );
 
     const imageV1 = createViduModelContract('viduimage-2');
-    expect(imageV1.defaultProfileStatus).toBe('disabled');
+    expect(imageV1.defaultProfileStatus).toBe('verified');
     expect(
       imageV1.definition.profileTemplates[0].features.map(
         (feature) => feature.productFeature
@@ -148,7 +148,7 @@ describe('Vidu Provider Package migration', () => {
 });
 
 describe('Vidu RouteSnapshot adapters', () => {
-  it('blocks Image V1 and stale routes before HTTP, then receives one Gemini image', async () => {
+  it('submits Image V1 with Bearer and receives Gemini image results', async () => {
     const fixture = await routeFixture();
     const imageV1Route = routeFor(fixture.snapshot, 'viduimage-2', 'text_to_image');
     const geminiRoute = routeFor(
@@ -157,19 +157,24 @@ describe('Vidu RouteSnapshot adapters', () => {
       'reference_to_image'
     );
 
-    await expect(fixture.adapters.imageV1.submit(imageV1Route, {
+    const imageV1Outcome = await fixture.adapters.imageV1.submit(imageV1Route, {
       request: dispatchRequest(imageV1Route, false)
-    })).resolves.toMatchObject({
-      kind: 'failed_before_submission',
-      retryability: 'not_retryable'
     });
-    expect(fixture.service.requests).toHaveLength(0);
+    expect(imageV1Outcome).toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url' }]
+    });
+    expect(fixture.service.count('POST', '/ent/v1/images/generations')).toBe(1);
+    expect(
+      fixture.service.requests.find((request) =>
+        request.url.includes('/ent/v1/images/generations')
+      )?.authorized
+    ).toBe(true);
 
     await expect(fixture.adapters.geminiImageV2.submit(
       { ...geminiRoute, connectionRevision: geminiRoute.connectionRevision + 1 },
       { request: dispatchRequest(geminiRoute, true) }
     )).resolves.toMatchObject({ kind: 'failed_before_submission' });
-    expect(fixture.service.requests).toHaveLength(0);
 
     let requestStarted = 0;
     const outcome = await fixture.adapters.geminiImageV2.submit(geminiRoute, {
@@ -210,8 +215,8 @@ describe('Vidu RouteSnapshot adapters', () => {
       geminiRoute,
       resultReference
     ))).resolves.toEqual(pngBytes(8, 8));
-    expect(fixture.usage).toHaveLength(1);
-    expect(fixture.usage[0].status).toBe('not_reported');
+    expect(fixture.usage).toHaveLength(2);
+    expect(fixture.usage.every((item) => item.status === 'not_reported')).toBe(true);
     expect(JSON.stringify(fixture.usage)).not.toContain(syntheticCredentialValue);
   });
 
@@ -315,12 +320,15 @@ async function routeFixture() {
     })),
     models: initial.models.map((model) => ({
       ...model,
-      enabled: ['q3-lite', 'viduq3-turbo'].includes(model.providerModelKey),
+      enabled: ['viduimage-2', 'q3-lite', 'viduq3-turbo'].includes(
+        model.providerModelKey
+      ),
       updatedAt: timestamp
     })),
     modelProfiles: initial.modelProfiles!.map((profile) => {
       const model = initial.models.find((candidate) => candidate.id === profile.modelId);
-      return model && ['q3-lite', 'viduq3-turbo'].includes(model.providerModelKey)
+      return model &&
+        ['viduimage-2', 'q3-lite', 'viduq3-turbo'].includes(model.providerModelKey)
         ? { ...profile, status: 'verified' as const, recordedAt: timestamp }
         : profile;
     })

@@ -150,7 +150,7 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
       mediaKind: 'image',
       adapterKind: VIDU_IMAGE_V1_ADAPTER_ID,
       endpointTemplate: 'https://api.vidu.cn/ent/v1/images/{operation}',
-      authScheme: 'unknown',
+      authScheme: 'bearer',
       executionLifecycle: 'synchronous_completed',
       supportedPurposes: ['image_generation', 'image_editing'],
       createdAt: catalogTimestamp,
