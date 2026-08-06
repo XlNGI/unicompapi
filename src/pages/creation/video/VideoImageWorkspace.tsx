@@ -61,7 +61,7 @@ export function VideoImageWorkspace({
       : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
         ? '图生视频必须选择恰好一张受控图片。'
         : unsupportedContexts.length > 0
-          ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
           : undefined;
 
   useEffect(() => {
@@ -112,7 +112,7 @@ export function VideoImageWorkspace({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(result.error.message);
+      onMessage('保存草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted(result.value as ImageVideoDraftDto);
@@ -132,7 +132,7 @@ export function VideoImageWorkspace({
         'image'
       );
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -159,7 +159,7 @@ export function VideoImageWorkspace({
         imageSourceTarget
       );
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('清除图片失败，请重试。');
         return;
       }
       onDraftPersisted(result.value as ImageVideoDraftDto);
@@ -284,7 +284,7 @@ export function VideoImageWorkspace({
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文</strong>
-              <span>图生视频只接受固定 revision 的项目上下文。</span>
+              <span>图生视频只接受固定版本的项目上下文。</span>
               <Button onClick={removeUnsupportedContexts} variant="secondary">
                 <LuTrash2 aria-hidden="true" />
                 明确移除旧上下文
@@ -391,7 +391,7 @@ export function VideoImageWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>模型、参数与提交流程</h2>
-              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
+              <p>选择模型后由后台锁定接口与参数配置；填写参数后准备并提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel

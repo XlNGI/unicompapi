@@ -5,6 +5,7 @@ import test from 'node:test';
 const shell = await readFile('src/pages/providers/ProvidersPage.tsx', 'utf8');
 const gallery = await readFile('src/pages/providers/ProviderGalleryView.tsx', 'utf8');
 const manage = await readFile('src/pages/providers/ProviderManageView.tsx', 'utf8');
+const brandIcon = await readFile('src/pages/providers/ProviderBrandIcon.tsx', 'utf8');
 const source = [shell, gallery, manage].join('\n');
 
 test('provider page is driven by registry and package templates', () => {
@@ -40,6 +41,34 @@ test('gallery shows only adapted templates as cards with a request-adapter entry
   assert.match(gallery, /保存时验证/);
   assert.doesNotMatch(gallery, /保存后待验证/);
   assert.match(gallery, /validationAction !== 'available'/);
+});
+
+test('provider cards and connections use local brand icons with a safe fallback', () => {
+  assert.match(gallery, /ProviderBrandIcon/);
+  assert.match(manage, /ProviderBrandIcon/);
+  for (const packageId of [
+    'provider-package-deepseek',
+    'provider-package-volcengine',
+    'provider-package-kling',
+    'provider-package-newapi',
+    'provider-package-unicompapi',
+    'provider-package-vidu-v1'
+  ]) assert.match(brandIcon, new RegExp(packageId));
+  assert.match(brandIcon, /label\.slice\(0, 1\)/);
+  assert.match(brandIcon, /unicompapi\.png/);
+  assert.match(brandIcon, /vidu\.svg/);
+  assert.doesNotMatch(brandIcon, /https?:|fetch\(|window\.unicomp/);
+});
+
+test('provider feedback uses a closable floating status card without changing actions', () => {
+  assert.match(shell, /providerMessageTone/);
+  assert.match(shell, /uc-provider-page__message--\$\{messageTone\}/);
+  assert.match(shell, /aria-label="关闭通知"/);
+  assert.match(shell, /LuCircleCheck/);
+  assert.match(shell, /LuCircleAlert/);
+  assert.match(shell, /6_000/);
+  assert.match(shell, /4_000/);
+  assert.match(shell, /window\.clearTimeout/);
 });
 
 test('provider page exposes the controlled framework mutations', () => {

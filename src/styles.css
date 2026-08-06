@@ -143,6 +143,7 @@ button {
   max-width: min(320px, 40vw);
   border-color: var(--uc-color-border-default);
   background: var(--uc-color-surface-base);
+  cursor: default;
 }
 
 .title-bar__project span {
@@ -158,14 +159,12 @@ button {
   flex: 0 0 auto;
 }
 
-.title-bar__project:hover,
 .title-bar__utility:hover {
   border-color: var(--uc-color-border-strong);
   color: var(--uc-color-text-primary);
   background: var(--uc-color-surface-subtle);
 }
 
-.title-bar__project:focus-visible,
 .title-bar__utility:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: -2px;
@@ -209,7 +208,6 @@ button {
 
 .theme-switch__trigger:focus-visible,
 .theme-switch__option:focus-visible,
-.title-bar__project:focus-visible,
 .title-bar__utility:focus-visible,
 .window-control:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);

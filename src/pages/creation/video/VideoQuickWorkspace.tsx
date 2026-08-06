@@ -75,7 +75,7 @@ export function VideoQuickWorkspace({
     try {
       const result = await videoWorkspaces.derive(draft.draftId, targetMode);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('保存快速视频草稿失败，请重试。');
         return;
       }
       onMessage('已创建专业视频派生草稿；没有创建或提交任务。');
@@ -144,7 +144,7 @@ export function VideoQuickWorkspace({
             <span aria-hidden="true">2</span>
             <div>
               <h2>服务、参数与提交确认</h2>
-              <p>候选和参数来自固定草稿 revision 的安全功能路由。</p>
+              <p>候选和参数来自固定草稿版本的安全功能路由。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel

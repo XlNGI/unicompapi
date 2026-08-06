@@ -61,11 +61,7 @@ function describeVideoFeatureError(
   error: { readonly code: VideoFeatureIpcErrorCode; readonly message: string }
 ): string {
   const fallback = errorMessages[error.code];
-  const detail = error.message?.trim();
-  if (!detail || detail === fallback) return fallback;
-  // Prefer the concrete underlying message when the controller surfaced it.
-  if (error.code === 'storage_error') return detail;
-  return `${fallback}（${detail}）`;
+  return fallback;
 }
 
 const unavailableReasonLabels: Readonly<Record<string, string>> = {
@@ -77,7 +73,7 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   binding_unavailable: '协议适配器不可用',
   runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '草稿约束不满足',
-  schema_unsupported: '参数 Schema 无法解释'
+  schema_unsupported: '参数定义无法识别'
 };
 
 export function VideoFeatureSubmissionPanel({
@@ -158,7 +154,7 @@ export function VideoFeatureSubmissionPanel({
           if (!saved.ok) {
             setCandidates([]);
             setLoadState('loaded');
-            onMessage(errorMessages[saved.error.code] ?? saved.error.message);
+            onMessage(errorMessages[saved.error.code] ?? '保存视频草稿失败，请重试。');
             return;
           }
           const latest = draftRef.current;
@@ -180,7 +176,7 @@ export function VideoFeatureSubmissionPanel({
               if (!again.ok) {
                 setCandidates([]);
                 setLoadState('loaded');
-                onMessage(errorMessages[again.error.code] ?? again.error.message);
+                onMessage(errorMessages[again.error.code] ?? '重新保存视频草稿失败，请重试。');
                 return;
               }
               draftId = again.value.draftId;
@@ -274,7 +270,7 @@ export function VideoFeatureSubmissionPanel({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(errorMessages[result.error.code] ?? result.error.message);
+      onMessage(errorMessages[result.error.code] ?? '保存视频草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted?.(result.value);
@@ -368,9 +364,10 @@ export function VideoFeatureSubmissionPanel({
         }
         return;
       }
-      const feedback =
-        result.value.feedback ??
-        `提交状态：${result.value.status}`;
+      const rawFeedback = result.value.feedback;
+      const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+        ? rawFeedback
+        : `提交状态：${submissionStatusLabel(result.value.status)}`;
       onMessage(feedback);
       if (showProgressSteps) {
         if (result.value.status === 'completed') {
@@ -439,7 +436,7 @@ export function VideoFeatureSubmissionPanel({
           <div className="uc-image-feature-panel__facts">
             <span>
               <strong>已锁定参数合同</strong>
-              {selectedCandidate.parameterSchema.schemaId} · revision {selectedCandidate.parameterSchema.revision}
+              参数配置版本 {selectedCandidate.parameterSchema.revision}
             </span>
             <span><strong>费用</strong>{costLabel(selectedCandidate.cost)}</span>
             <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
@@ -450,7 +447,7 @@ export function VideoFeatureSubmissionPanel({
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>
               {selectedCandidate.unavailableReasons.map((reason) => (
-                <span key={reason}>• {unavailableReasonLabels[reason] ?? reason}</span>
+                <span key={reason}>• {unavailableReasonLabels[reason] ?? '其他不可用原因'}</span>
               ))}
             </div>
           ) : null}
@@ -519,7 +516,7 @@ export function VideoFeatureSubmissionPanel({
       {showProgressSteps ? (
         <p className="uc-image-feature-panel__action-hint" role="status">
           {!selectedCandidate
-            ? '下一步：选择可用模型；后台会按模型锁定 API 与参数合同。'
+            ? '下一步：选择可用模型；后台会按模型锁定接口与参数配置。'
             : !selectedCandidate.available
               ? '所选模型当前不可用，请换一个或到「模型与服务商」检查连接授权。'
               : preparation && !confirmed
@@ -533,6 +530,19 @@ export function VideoFeatureSubmissionPanel({
       ) : null}
     </div>
   );
+}
+
+function submissionStatusLabel(status: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    submitting: '正在提交',
+    provider_accepted: '服务商已接受',
+    running: '生成中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    unknown_outcome: '结果未知'
+  };
+  return labels[status] ?? '未知提交状态';
 }
 
 function costLabel(cost: { readonly state: string; readonly summary?: string }): string {

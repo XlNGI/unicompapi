@@ -1,4 +1,8 @@
 import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
+import {
+  displayParameterKey,
+  displayParameterOption
+} from '../../../components/DynamicParameterForm';
 import type {
   ImagePreflightCandidateDto,
   ImageSubmissionConfirmationDto,
@@ -30,7 +34,7 @@ export const imageSubmissionErrorMessages: Record<
   string
 > = {
   submission_outcome_unknown:
-    'Submission outcome is unknown. Create a new task only after confirming the charge status.',
+    '提交结果未知。请先确认服务商账单状态，再决定是否创建新任务。',
   project_not_open: '当前没有打开的项目。',
   invalid_request: '提交信息无效，请检查当前草稿。',
   draft_not_found: '当前草稿已不存在。',
@@ -38,7 +42,7 @@ export const imageSubmissionErrorMessages: Record<
   input_required: '当前操作需要一张图片输入。',
   no_route_candidate: '没有符合当前用途的已启用模型路由。',
   capability_unverified: '图片生成能力尚未验证。',
-  parameter_schema_missing: '模型没有可用的动态参数 Schema。',
+  parameter_schema_missing: '模型没有可用的动态参数定义。',
   parameters_invalid: '动态参数缺失或超出模型声明范围。',
   confirmation_required: '请逐项确认接收方、外发范围、费用、提示词和模型。',
   task_not_found: '图片任务已不存在。',
@@ -241,7 +245,7 @@ export function ImageSubmissionConfirmations({
       />
       <Confirmation
         checked={confirmations.outboundScope}
-        label={`外发范围：${candidate.outboundScope}`}
+        label={`外发范围：${outboundScopeLabel(candidate.outboundScope)}`}
         onChange={(checked) =>
           onChange({ ...confirmations, outboundScope: checked })
         }
@@ -329,7 +333,7 @@ function getModelOptions(
                   )
                 ? '能力未验证'
                 : !evidence.parameterSchema
-                  ? '缺少参数 Schema'
+                  ? '缺少参数定义'
                   : undefined;
       return {
         modelId: model.modelId,
@@ -383,7 +387,7 @@ function DynamicParameterField({
         onChange={(_value, checked) => onChange(checked)}
       >
         <span>
-          {field.label}
+          {displayParameterKey(field.key || field.label)}
           {field.required ? '（必填）' : ''}
         </span>
       </Checkbox>
@@ -394,16 +398,16 @@ function DynamicParameterField({
     return (
       <div className="uc-image-quick__field">
         <span>
-          {field.label}
+          {displayParameterKey(field.key || field.label)}
           {field.required ? '（必填）' : ''}
         </span>
         <SelectPicker
-          aria-label={field.label}
+          aria-label={displayParameterKey(field.key || field.label)}
           block
           cleanable={!field.required}
-          data={(field.options ?? []).map((option) => ({
+          data={(field.options ?? []).map((option, index) => ({
             value: JSON.stringify(option),
-            label: String(option)
+            label: displayParameterOption(option, index)
           }))}
           onChange={(next) =>
             onChange(
@@ -425,7 +429,7 @@ function DynamicParameterField({
     return (
       <label className="uc-image-quick__field">
         <span>
-          {field.label}
+          {displayParameterKey(field.key || field.label)}
           {field.required ? '（必填）' : ''}
         </span>
         <InputNumber
@@ -443,7 +447,7 @@ function DynamicParameterField({
   return (
     <label className="uc-image-quick__field">
       <span>
-        {field.label}
+        {displayParameterKey(field.key || field.label)}
         {field.required ? '（必填）' : ''}
       </span>
       <Input
@@ -452,6 +456,13 @@ function DynamicParameterField({
       />
     </label>
   );
+}
+
+function outboundScopeLabel(scope: string): string {
+  if (scope === 'local_device') return '仅在本机';
+  if (scope === 'local_network') return '局域网';
+  if (scope === 'external_service') return '外部服务';
+  return '未知';
 }
 
 function Confirmation({

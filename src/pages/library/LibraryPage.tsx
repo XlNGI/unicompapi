@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -6,6 +6,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
 import type { StatusTone } from '../../components/StatusPill';
 import type {
+  StorageApi,
   StorageLocalMediaHandleDto,
   StorageReadModelIssueDto,
   StorageWorkDetailsDto,
@@ -66,7 +67,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
     if (!storage) return;
     const result = await storage.listWorks();
     if (!result.ok) {
-      setMessage(`读取作品失败：${result.error.message}`);
+      setMessage('读取作品失败，请重试');
       return;
     }
     setWorks(result.value.items);
@@ -116,7 +117,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
       .then(async (result) => {
         if (!active) return;
         if (!result.ok) {
-          setMessage(`读取作品详情失败：${result.error.message}`);
+          setMessage('读取作品详情失败，请重试');
           return;
         }
         setDetails(result.value);
@@ -128,7 +129,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
         const mediaResult = await storage.createWorkMediaHandle(selectedWorkId);
         if (!active) return;
         if (mediaResult.ok) setMedia(mediaResult.value);
-        else setMessage(`作品预览不可用：${mediaResult.error.message}`);
+        else setMessage('作品预览不可用。');
       })
       .catch(() => {
         if (active) setMessage('读取作品详情失败，请重试');
@@ -147,7 +148,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
     setBusy(true);
     setMessage('');
     const result = await storage.revealWorkFile(details.workId);
-    setMessage(result.ok ? '已在系统文件管理器中定位作品' : `无法定位作品：${result.error.message}`);
+    setMessage(result.ok ? '已在系统文件管理器中定位作品' : '无法定位作品。');
     setBusy(false);
   }
 
@@ -156,7 +157,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
     setBusy(true);
     setMessage('');
     const result = await storage.relinkFile(details.fileId);
-    if (!result.ok) setMessage(`重新定位失败：${result.error.message}`);
+    if (!result.ok) setMessage('重新定位失败。');
     else if (result.value.cancelled) setMessage('已取消重新定位');
     else {
       setMessage('文件已重新定位，正在刷新作品状态');
@@ -198,7 +199,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
           搜索作品
           <Input
             onChange={(value) => setQuery(value)}
-            placeholder="作品名、项目名或作品 ID"
+            placeholder="作品名、项目名或作品编号"
             type="search"
             value={query}
           />
@@ -290,9 +291,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
                       onClick={() => setSelectedWorkId(work.workId)}
                       type="button"
                     >
-                      <span className="uc-work-library__work-preview" aria-hidden="true">
-                        {mediaKinds[work.mediaKind]?.slice(0, 1) ?? '文'}
-                      </span>
+                      <WorkThumbnail storage={storage} work={work} />
                       <span className="uc-work-library__work-heading">
                         <strong>{work.name}</strong>
                         <StatusPill tone={state.tone}>{state.label}</StatusPill>
@@ -328,6 +327,64 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
 
       <p className="uc-work-library__message" aria-live="polite">{message}</p>
     </section>
+  );
+}
+
+function WorkThumbnail({
+  storage,
+  work
+}: {
+  storage?: StorageApi;
+  work: StorageWorkSummaryDto;
+}) {
+  const previewRef = useRef<HTMLSpanElement>(null);
+  const [media, setMedia] = useState<StorageLocalMediaHandleDto>();
+  const canPreview = work.fileState === 'available' && ['image', 'video'].includes(work.mediaKind);
+
+  useEffect(() => {
+    const preview = previewRef.current;
+    let active = true;
+    setMedia(undefined);
+    if (!preview || !storage || !canPreview) return () => {
+      active = false;
+    };
+
+    const load = () => {
+      void storage.createWorkMediaHandle(work.workId)
+        .then((result) => {
+          if (active && result.ok) setMedia(result.value);
+        })
+        .catch(() => undefined);
+    };
+    const observer = typeof IntersectionObserver === 'undefined'
+      ? undefined
+      : new IntersectionObserver(([entry]) => {
+        if (!entry?.isIntersecting) return;
+        load();
+        observer?.disconnect();
+      }, { rootMargin: '240px' });
+    if (observer) observer.observe(preview);
+    else load();
+
+    return () => {
+      active = false;
+      observer?.disconnect();
+    };
+  }, [canPreview, storage, work.workId]);
+
+  return (
+    <span className="uc-work-library__work-preview" ref={previewRef} aria-hidden="true">
+      {media && work.mediaKind === 'image' ? (
+        <img alt="" loading="lazy" src={media.url} />
+      ) : media && work.mediaKind === 'video' ? (
+        <video muted playsInline preload="metadata" src={media.url} />
+      ) : (
+        <span className="uc-work-library__work-preview-fallback">
+          {mediaKinds[work.mediaKind]?.slice(0, 1) ?? '文'}
+        </span>
+      )}
+      <span className="uc-work-library__work-kind">{mediaKinds[work.mediaKind] ?? work.mediaKind}</span>
+    </span>
   );
 }
 

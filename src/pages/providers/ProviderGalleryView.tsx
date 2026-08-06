@@ -6,6 +6,7 @@ import type {
   ProviderConnectionSummaryDto,
   ProviderTemplateSummaryDto
 } from '../../shared/provider-ipc';
+import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { templateKeyOf } from './provider-page-shared';
 
 interface ProviderGalleryViewProps {
@@ -54,9 +55,11 @@ export function ProviderGalleryView({
         return (
           <Card className="uc-provider-gallery__card" key={templateKey}>
             <div className="uc-provider-gallery__card-heading">
-              <span className="uc-provider-gallery__avatar" aria-hidden="true">
-                {template.providerName.slice(0, 1)}
-              </span>
+              <ProviderBrandIcon
+                className="uc-provider-gallery__avatar"
+                label={template.providerName}
+                packageId={template.packageId}
+              />
               <div>
                 <strong>{template.providerName}</strong>
                 <small>{template.displayName}</small>

@@ -67,7 +67,7 @@ export function ImageQuickWorkspace({
         'professional_image'
       );
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('保存快速生图草稿失败，请重试。');
         return;
       }
       onMessage('已创建专业生图派生草稿；没有创建或提交任务。');
@@ -130,7 +130,7 @@ export function ImageQuickWorkspace({
             <span aria-hidden="true">2</span>
             <div>
               <h2>模型与生成</h2>
-              <p>选择服务后一键生成；调用记录会保存返回的图片 URL。</p>
+              <p>选择服务后一键生成；调用记录会保存返回的图片链接。</p>
             </div>
           </header>
           <ImageFeatureSubmissionPanel
@@ -153,7 +153,7 @@ export function ImageQuickWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>生成结果</h2>
-              <p>展示服务商返回的图片 URL；任务中心调用记录同步可见。</p>
+              <p>展示服务商返回的图片链接；任务中心调用记录同步可见。</p>
             </div>
           </header>
           <GenerationResultPreview
@@ -179,7 +179,7 @@ export function ImageQuickWorkspace({
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="info">调用记录</StatusPill>
         <p>
-          每次生成都会写入任务中心调用记录，并保存可展示的图片 URL；本地校验作品另行登记。
+          每次生成都会写入任务中心调用记录，并保存可展示的图片链接；本地校验作品另行登记。
         </p>
       </Card>
     </>

@@ -151,7 +151,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
       if (!storage || !videoEditors) {
         if (active) {
           setLoading(false);
-          setMessage('本地编辑端口不可用，请在 Electron 桌面应用中打开。');
+      setMessage('本地编辑功能不可用，请在桌面应用中打开。');
         }
         return;
       }
@@ -977,7 +977,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
       <div className="uc-video-editor__workspace">
         <Card className="uc-video-editor__media-bin">
           <PanelHeading
-            description="素材只通过 B2 受控端口登记，不读取 renderer 路径。"
+            description="素材只通过受控接口登记，界面不会读取本地绝对路径。"
             title="素材与片段"
           />
           <div className="uc-video-editor__tabs" role="tablist">
@@ -1043,7 +1043,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
             </Button>
           )}
           <p className="uc-video-editor__hint">
-            导入只登记或复制视频并追加片段，不上传、不调用在线 AI、不创建任务。
+              导入只登记或复制视频并追加片段，不上传、不调用在线智能服务、不创建任务。
           </p>
         </Card>
 
@@ -1296,7 +1296,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
 
         <Card className="uc-video-editor__inspector">
           <PanelHeading
-            description="表单只提交领域命令；成功 DTO 是唯一持久化事实。"
+            description="表单只提交编辑操作；成功返回的数据是唯一保存依据。"
             title="属性面板"
           />
           <div className="uc-video-editor__tabs" role="tablist">
@@ -1485,7 +1485,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
         <StatusPill tone={saveStateTones[saveState]}>
           {saveStateLabels[saveState]}
         </StatusPill>
-        <span>草稿：{currentDraft ? `revision ${currentDraft.revision}` : '无'}</span>
+        <span>草稿：{currentDraft ? `版本 ${currentDraft.revision}` : '无'}</span>
         <span>
           源文件：
           {currentDraft
@@ -1562,7 +1562,7 @@ function MediaList({
   if (!draft) {
     return (
       <EmptyState
-        description="点击顶部“新建草稿”建立项目内空白 EditDraft。"
+        description="点击顶部“新建草稿”建立项目内空白编辑草稿。"
         icon="编"
         readOnly
         title="还没有编辑草稿"
@@ -1650,7 +1650,7 @@ function ProjectVideoList({
           type="button"
         >
           <strong>{work.name}</strong>
-          <small>{work.fileState === 'available' ? '本地可用' : work.fileState}</small>
+          <small>{fileStateLabel(work.fileState)}</small>
         </button>
       ))}
     </div>
@@ -1894,8 +1894,8 @@ function ClipInspector({
         <Checkbox className="uc-video-editor__check" defaultChecked={clip.transform.flipX} name="flipX">水平翻转</Checkbox>
         <Checkbox className="uc-video-editor__check" defaultChecked={clip.transform.flipY} name="flipY">垂直翻转</Checkbox>
         <Checkbox className="uc-video-editor__check" defaultChecked={clip.transform.crop !== null} name="cropEnabled">启用裁切</Checkbox>
-        <label>裁切 X（%）<InputNumber defaultValue={(clip.transform.crop?.xPermille ?? 0) / 10} min={0} name="cropXPercent" step={0.1} /></label>
-        <label>裁切 Y（%）<InputNumber defaultValue={(clip.transform.crop?.yPermille ?? 0) / 10} min={0} name="cropYPercent" step={0.1} /></label>
+        <label>横向裁切（%）<InputNumber defaultValue={(clip.transform.crop?.xPermille ?? 0) / 10} min={0} name="cropXPercent" step={0.1} /></label>
+        <label>纵向裁切（%）<InputNumber defaultValue={(clip.transform.crop?.yPermille ?? 0) / 10} min={0} name="cropYPercent" step={0.1} /></label>
         <label>裁切宽度（%）<InputNumber defaultValue={(clip.transform.crop?.widthPermille ?? 1000) / 10} min={0.1} name="cropWidthPercent" step={0.1} /></label>
         <label>裁切高度（%）<InputNumber defaultValue={(clip.transform.crop?.heightPermille ?? 1000) / 10} min={0.1} name="cropHeightPercent" step={0.1} /></label>
         <Button disabled={busy} type="submit">保存画面变换</Button>
@@ -2862,6 +2862,21 @@ function errorMessage(code: VideoEditorIpcErrorCode, fallback: string): string {
   return errorMessages[code] ?? fallback;
 }
 
+function fileStateLabel(state: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    pending: '等待写入',
+    writing: '写入中',
+    verifying: '校验中',
+    available: '本地可用',
+    missing: '文件丢失',
+    read_only: '只读',
+    disconnected: '存储已断开',
+    corrupted: '文件损坏',
+    deleted: '已删除'
+  };
+  return labels[state] ?? '未知文件状态';
+}
+
 function sourceStatusDisplay(
   status?: VideoEditorSourceStatusDto
 ): { readonly label: string; readonly tone: StatusTone } {
@@ -2879,7 +2894,7 @@ function sourceStatusDisplay(
     case 'disconnected':
       return { label: '存储已断开', tone: 'warning' };
     default:
-      return { label: status.state, tone: status.relinkRequired ? 'warning' : 'neutral' };
+      return { label: '未知文件状态', tone: status.relinkRequired ? 'warning' : 'neutral' };
   }
 }
 
@@ -2951,7 +2966,7 @@ function exportStateDisplay(state?: string): { readonly label: string; readonly 
     expired: { label: '已过期', tone: 'danger' }
   };
   return state
-    ? states[state] ?? { label: state, tone: 'neutral' }
+    ? states[state] ?? { label: '未知导出状态', tone: 'neutral' }
     : { label: '尚未创建任务', tone: 'neutral' };
 }
 
@@ -2981,7 +2996,7 @@ function exportReasonLabel(reason: string): string {
   if (reason.includes('does not have enough free space')) return '目标磁盘空间不足';
   if (reason.includes('requested export destination')) return '所选目标目录不受当前管线支持';
   if (reason.includes('requested') && reason.includes('unavailable')) return '所选输出能力不可用';
-  return reason;
+  return '未知原因';
 }
 
 function hardwarePolicyLabel(value: 'software_only'): string {

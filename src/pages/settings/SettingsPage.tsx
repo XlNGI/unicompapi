@@ -87,61 +87,61 @@ const categories: readonly SettingsCategoryItem[] = [
   {
     id: 'general', label: '常规', icon: LuSettings,
     description: '启动、界面、语言与关闭行为',
-    capabilityId: 'platform_capability_detection', delivery: 'A1 当前已接入',
+    capabilityId: 'platform_capability_detection', delivery: '当前已接入',
     keywords: '启动 主题 缩放 密度 动画 语言 日期 时间 关闭'
   },
   {
     id: 'storage', label: '存储与文件', icon: LuFolderOpen,
     description: '目录、容量、迁移与清理',
-    capabilityId: 'directory_operations', delivery: 'A2 当前已接入',
+    capabilityId: 'directory_operations', delivery: '当前已接入',
     keywords: '目录 容量 磁盘 文件 迁移 清理'
   },
   {
     id: 'performance', label: '任务与性能', icon: LuGauge,
     description: '并发、后台运行与设备负载',
-    capabilityId: 'task_policy', delivery: 'A2 当前已接入',
+    capabilityId: 'task_policy', delivery: '当前已接入',
     keywords: '任务 性能 并发 后台 CPU GPU 内存'
   },
   {
     id: 'media', label: '本地媒体处理', icon: LuMonitorPlay,
     description: '本机媒体组件与硬件能力',
-    capabilityId: 'media_components', delivery: 'A2 当前已接入',
+    capabilityId: 'media_components', delivery: '当前已接入',
     keywords: '媒体 视频 图片 音频 编码 硬件 代理'
   },
   {
     id: 'privacy', label: '隐私与权限', icon: LuShield,
     description: '文件访问、外发确认与系统权限',
-    capabilityId: 'permission_controls', delivery: 'A3 当前已接入',
+    capabilityId: 'permission_controls', delivery: '当前已接入',
     keywords: '隐私 权限 文件 外发 剪贴板'
   },
   {
     id: 'network', label: '网络与代理', icon: LuWifi,
     description: '系统代理、连接与超时',
-    capabilityId: 'proxy_controls', delivery: 'A3 当前已接入',
+    capabilityId: 'proxy_controls', delivery: '当前已接入',
     keywords: '网络 代理 连接 DNS 证书 超时'
   },
   {
     id: 'notifications', label: '通知', icon: LuBell,
     description: '应用内、系统与声音提醒',
-    capabilityId: 'notification_controls', delivery: 'A3 当前已接入',
+    capabilityId: 'notification_controls', delivery: '当前已接入',
     keywords: '通知 提醒 声音 系统'
   },
   {
     id: 'shortcuts', label: '快捷键', icon: LuKeyboard,
     description: 'Windows 与 macOS 按键映射',
-    capabilityId: 'shortcut_controls', delivery: 'A3 当前已接入',
+    capabilityId: 'shortcut_controls', delivery: '当前已接入',
     keywords: '快捷键 按键 Windows macOS 冲突'
   },
   {
     id: 'diagnostics', label: '日志与诊断', icon: LuFileText,
     description: '本地日志、脱敏与诊断包',
-    capabilityId: 'diagnostics', delivery: 'A4 当前已接入',
+    capabilityId: 'diagnostics', delivery: '当前已接入',
     keywords: '日志 诊断 脱敏 导出'
   },
   {
     id: 'updates', label: '应用更新', icon: LuRefreshCw,
     description: '应用和获批组件更新状态',
-    capabilityId: 'updates', delivery: 'A4 当前已接入',
+    capabilityId: 'updates', delivery: '当前已接入',
     keywords: '更新 版本 签名 安装 回退'
   }
 ];
@@ -171,7 +171,7 @@ export function SettingsPage() {
     let active = true;
     if (!settings) {
       setSaveState('failed');
-      setMessage('设置端口不可用，请在 Electron 桌面应用中打开。');
+      setMessage('设置功能不可用，请在桌面应用中打开。');
       return () => {
         active = false;
       };
@@ -225,10 +225,10 @@ export function SettingsPage() {
     };
   }, [settings]);
 
-  function acceptSnapshot(next: SettingsSnapshotDto) {
+  function acceptSnapshot(next: SettingsSnapshotDto, applySavedTheme = false) {
     setSnapshot(next);
     setValues(next.values);
-    setPreference(next.values.general.theme);
+    if (applySavedTheme) setPreference(next.values.general.theme);
     setSaveState('saved');
     setMessage(snapshotSourceMessage(next));
   }
@@ -245,7 +245,10 @@ export function SettingsPage() {
         setMessage(settingsErrorMessage(result.error.code));
         return;
       }
-      acceptSnapshot(result.value);
+      acceptSnapshot(
+        result.value,
+        nextValues.general.theme !== snapshot.values.general.theme
+      );
     } catch {
       setSaveState('failed');
       setMessage('保存失败；页面中的待保存值仍保留，可以重试。');
@@ -428,7 +431,10 @@ export function SettingsPage() {
         setMessage(settingsErrorMessage(result.error.code));
         return;
       }
-      acceptSnapshot(result.value);
+      acceptSnapshot(
+        result.value,
+        result.value.values.general.theme !== values?.general.theme
+      );
       await refreshSystemStatus();
       await refreshMaintenanceStatus();
       setMessage(operationCopy.success);
@@ -736,8 +742,8 @@ export function SettingsPage() {
                   { kind: 'update_performance', values: next },
                   {
                     title,
-                    description: '新策略只作用于后续任务和新的 attempt；运行中的任务不会被取消、抢占或改写。',
-                    success: '任务与性能策略已保存，只对后续任务和新的 attempt 生效。'
+                    description: '新策略只作用于后续任务和新的执行尝试；运行中的任务不会被取消、抢占或改写。',
+                    success: '任务与性能策略已保存，只对后续任务和新的执行尝试生效。'
                   }
                 )}
                 status={systemStatus.performance}
@@ -857,8 +863,8 @@ export function SettingsPage() {
           </div>
           <dl className="uc-settings__facts">
             <Fact label="设置来源" value={snapshot ? repositoryLabel(snapshot.statuses.repository) : '尚未读取'} />
-            <Fact label="Schema" value={snapshot ? `V${snapshot.statuses.schemaVersion}` : '未知'} />
-            <Fact label="Revision" value={snapshot ? String(snapshot.revision) : '未知'} />
+            <Fact label="设置结构版本" value={snapshot ? `第 ${snapshot.statuses.schemaVersion} 版` : '未知'} />
+            <Fact label="修订版本" value={snapshot ? String(snapshot.revision) : '未知'} />
             <Fact label="待重启" value={snapshot?.pendingRestart.length ? `${snapshot.pendingRestart.length} 项` : '无'} />
           </dl>
           <section className="uc-settings__status-card">
@@ -1145,7 +1151,7 @@ function StorageSettingsPanel({
             <SettingRow
               description={directory
                 ? `${directory.displayName} · 可用空间 ${formatBytes(directory.freeBytes, unit)}`
-                : '使用应用默认位置；renderer 不会取得绝对路径。'}
+                : '使用应用默认位置；界面不会取得绝对路径。'}
               key={purpose}
               label={label}
             >
@@ -1363,7 +1369,7 @@ function MediaSettingsPanel({ directories, disabled, onChange, onHardware, onMig
       <SettingsGroup title="1. 本地媒体引擎">
         <div className="uc-settings__metric-grid">
           <Metric label="引擎状态" value={capabilityLabel(status.engine)} />
-          <Metric label="适配器" value={status.engine.adapterId ?? '未配置'} />
+          <Metric label="适配器" value={status.engine.adapterId ? '已配置' : '未配置'} />
           <Metric label="版本" value={status.engine.version ?? '未知'} />
           <Metric label="分发范围" value={status.engine.distributionScope === 'development_test_only' ? '仅本地开发/测试' : '未配置'} />
         </div>
@@ -1372,7 +1378,7 @@ function MediaSettingsPanel({ directories, disabled, onChange, onHardware, onMig
           <span>{status.engine.reason ? capabilityReason(status.engine) : '只展示真实探测结果。'}</span>
         </div>
         {status.engine.distributionScope === 'development_test_only' ? (
-          <p className="uc-settings__notice uc-settings__notice--warning">当前 `.tools` 媒体引擎仅供本地开发和测试，不是生产组件，也不会进入发布物。</p>
+          <p className="uc-settings__notice uc-settings__notice--warning">当前媒体引擎仅供本地开发和测试，不是生产组件，也不会进入发布物。</p>
         ) : null}
       </SettingsGroup>
 
@@ -1417,13 +1423,13 @@ function MediaSettingsPanel({ directories, disabled, onChange, onHardware, onMig
         <SettingRow description="代理不会替代或覆盖原始素材。" label="最终导出读取原文件">
           <Toggle checked={values.exportFromOriginal} disabled label="最终导出读取原文件" onChange={() => undefined} />
         </SettingRow>
-        <SettingRow description="当前 B2 只提供逐次清理计划，尚无修改自动规则的受控端口。" label="自动清理过期代理">
+        <SettingRow description="当前只提供逐次清理计划，尚无修改自动规则的受控接口。" label="自动清理过期代理">
           <Toggle checked={values.cleanupExpiredProxies} disabled label="自动清理过期代理" onChange={() => undefined} />
         </SettingRow>
         <SettingRow
           description={proxyDirectory
             ? `${proxyDirectory.displayName} · 可用空间 ${formatBytes(proxyDirectory.freeBytes, unit)}`
-            : '使用缓存目录；renderer 不会取得绝对路径。'}
+            : '使用缓存目录；界面不会取得绝对路径。'}
           label="代理保存位置"
         >
           <div className="uc-settings__inline-actions">
@@ -1641,7 +1647,7 @@ function NotificationsSettingsPanel({ disabled, onChange, onOpenSystemSettings, 
         <div className="uc-settings__group-actions">
           <Button disabled={disabled} onClick={() => onTest(true, true)} variant="secondary">发送测试通知</Button>
           <Button disabled={disabled} onClick={() => onOpenSystemSettings('notifications')} variant="secondary">打开通知设置</Button>
-          <span>{result ? `应用内：${result.inApp}，系统：${deliveryLabel(result.system)}，声音：${deliveryLabel(result.sound)}` : '尚未发送本次测试。'}</span>
+          <span>{result ? `应用内：已保留，系统：${deliveryLabel(result.system)}，声音：${deliveryLabel(result.sound)}` : '尚未发送本次测试。'}</span>
         </div>
       </SettingsGroup>
 
@@ -1819,7 +1825,7 @@ function DiagnosticsSettingsPanel({
         </div>
         {categories.map(([category, checked]) => (
           <SettingRow
-            description="只控制本地日志类别，诊断包仍会按 B4 规则脱敏。"
+            description="只控制本地日志类别，诊断包仍会按安全规则脱敏。"
             key={category}
             label={diagnosticCategoryLabel(category)}
           >
@@ -1831,7 +1837,7 @@ function DiagnosticsSettingsPanel({
             />
           </SettingRow>
         ))}
-        <SettingRow description="普通运行建议保持 info；debug 只用于本机排查。" label="日志级别">
+        <SettingRow description="普通运行建议保持常规信息级别；调试信息只用于本机排查。" label="日志级别">
           <SelectPicker
             aria-label="日志级别"
             cleanable={false}
@@ -2028,7 +2034,7 @@ function UpdatesSettingsPanel({ disabled, onChange, onCheck, status, values }: {
             value={values.downloadMode}
           />
         </SettingRow>
-        <SettingRow description="安装必须由用户明确确认；当前 UI 不提供执行安装入口。" label="安装策略">
+        <SettingRow description="安装必须由用户明确确认；当前界面不提供执行安装入口。" label="安装策略">
           <SelectPicker
             aria-label="安装策略"
             cleanable={false}
@@ -2061,7 +2067,7 @@ function UpdatesSettingsPanel({ disabled, onChange, onCheck, status, values }: {
             <ul>
               {status.blockers.length ? status.blockers.map((blocker) => (
                 <li key={blocker}>{updateBlockerLabel(blocker)}</li>
-              )) : <li>当前没有来自 B4 的更新执行阻断项。</li>}
+              )) : <li>当前没有更新执行阻断项。</li>}
             </ul>
           </section>
           <section>
@@ -2399,7 +2405,7 @@ function proxyTestLabel(result: SettingsSystemStatusDto['network']['lastTest']):
 
 function proxyFailureLabel(failure: Exclude<SettingsSystemStatusDto['network']['lastTest'], null | { readonly ok: true }>['failure']): string {
   const labels: Record<typeof failure, string> = {
-    dns: 'DNS',
+    dns: '域名解析',
     certificate: '证书',
     authentication: '认证',
     timeout: '超时',
@@ -2446,7 +2452,7 @@ function shortcutActionLabel(actionId: string): string {
     focus_search: '聚焦搜索',
     cancel_current_action: '取消当前操作'
   };
-  return labels[actionId] ?? actionId;
+  return labels[actionId] ?? '其他快捷操作';
 }
 
 function diagnosticCategoryLabel(category: keyof DiagnosticSettings['categories']): string {
@@ -2478,7 +2484,7 @@ function diagnosticExcludeReasonLabel(reason: string): string {
     file_empty: '本机文件为空',
     read_failed: '读取失败'
   };
-  return labels[reason] ?? reason;
+  return labels[reason] ?? '其他排除原因';
 }
 
 function diagnosticRedactionLabel(rule: string): string {
@@ -2488,7 +2494,7 @@ function diagnosticRedactionLabel(rule: string): string {
     full_prompts: '不包含完整提示词',
     user_media: '不包含用户媒体文件'
   };
-  return labels[rule] ?? rule;
+  return labels[rule] ?? '其他脱敏规则';
 }
 
 function localDataScopeLabel(scope: LocalApplicationDataScope): string {
@@ -2509,7 +2515,7 @@ function localDataScopeDescription(scope: LocalApplicationDataScope): string {
     settings: '清除设置备份；如同时重置设置，会在计划里明确标出。',
     directory_authorizations: '清除本机目录授权记录，不删除目录内容。',
     provider_registry: '清除本机服务商注册缓存，不删除项目。',
-    local_credentials: '清除本机加密凭证；计划会标出 credentialsDeleted。',
+    local_credentials: '清除本机加密凭证；计划会明确标出凭证删除影响。',
     project_catalog: '清除项目目录索引，不删除项目文件夹。',
     logs: '清除本机日志文件。',
     caches: '清除缓存和临时文件。'
@@ -2551,7 +2557,7 @@ function updateReasonLabel(reason: string): string {
     verified_update_available: '发现已验证候选更新',
     integrity_or_signature_failed: '完整性或签名校验失败'
   };
-  return labels[reason] ?? reason;
+  return labels[reason] ?? '其他更新原因';
 }
 
 function integrityLabel(state: UpdateItemStatusDto['integrity'] | UpdateItemStatusDto['signature']): string {
@@ -2570,7 +2576,7 @@ function updateBlockerLabel(blocker: string): string {
     active_exports: '当前有导出任务',
     component_repair_in_progress: '组件修复任务进行中'
   };
-  return labels[blocker] ?? blocker;
+  return labels[blocker] ?? '其他更新阻断项';
 }
 
 function formatBytes(bytes: number | null, unit: GeneralSettings['fileSizeUnit']): string {
@@ -2585,7 +2591,7 @@ function formatBytes(bytes: number | null, unit: GeneralSettings['fileSizeUnit']
 
 function operationCodeLabel(code: string): string {
   const labels: Record<string, string> = {
-    changes_apply_only_to_new_tasks_and_attempts: '只影响后续任务和新的 attempt，活动任务保持不变。',
+    changes_apply_only_to_new_tasks_and_attempts: '只影响后续任务和新的执行尝试，活动任务保持不变。',
     changes_apply_to_new_requests_only: '只影响后续网络请求，活动请求保持不变。',
     active_requests_are_not_retried: '活动请求不会被重试、抢占或改写。',
     mandatory_outbound_and_cost_confirmations_remain_enabled: '外发和未知费用确认仍保持强制开启。',
@@ -2596,12 +2602,12 @@ function operationCodeLabel(code: string): string {
     external_files_are_excluded: '外部文件明确排除，不会被本次清除。',
     deleted_application_data_cannot_be_recovered: '被清除的本机应用数据不可恢复，请确认选择范围。',
     shortcut_conflict: '快捷键存在冲突，当前不能执行。',
-    proxy_test_dns: '代理测试失败：DNS 解析失败。',
+    proxy_test_dns: '代理测试失败：域名解析失败。',
     proxy_test_certificate: '代理测试失败：证书校验失败。',
     proxy_test_authentication: '代理测试失败：认证失败。',
     proxy_test_timeout: '代理测试失败：连接超时。',
     proxy_test_unknown: '代理测试失败：原因未知。',
-    proxy_probe_failed_dns: '代理测试失败：DNS 解析失败。',
+    proxy_probe_failed_dns: '代理测试失败：域名解析失败。',
     proxy_probe_failed_certificate: '代理测试失败：证书校验失败。',
     proxy_probe_failed_authentication: '代理测试失败：认证失败。',
     proxy_probe_failed_timeout: '代理测试失败：连接超时。',
@@ -2621,7 +2627,7 @@ function operationCodeLabel(code: string): string {
     unsafe_scan_root: '不能选择磁盘根目录或用户主目录。',
     scan_limit_exceeded: '目录内容超过安全扫描上限。'
   };
-  return labels[code] ?? `操作被平台阻止（${code}）。`;
+  return labels[code] ?? '操作被平台阻止。';
 }
 
 function capabilityFor(snapshot: SettingsSnapshotDto | undefined, id: string) {
@@ -2649,7 +2655,7 @@ function capabilityReason(capability?: SettingsCapabilityDto): string {
   if (capability.reason === 'phase8_platform_adapter_pending') {
     return '平台适配器尚未接入，因此不提供可执行控件。';
   }
-  return capability.reason ?? `当前状态：${capabilityLabel(capability)}。`;
+  return `当前状态：${capabilityLabel(capability)}。`;
 }
 
 function repositoryLabel(source: SettingsSnapshotDto['statuses']['repository']): string {
@@ -2660,12 +2666,12 @@ function repositoryLabel(source: SettingsSnapshotDto['statuses']['repository']):
 
 function snapshotSourceMessage(snapshot: SettingsSnapshotDto): string {
   if (snapshot.statuses.repository === 'backup') {
-    return `已从有效备份读取，revision ${snapshot.revision}；损坏证据没有被覆盖。`;
+    return `已从有效备份读取，修订版本 ${snapshot.revision}；损坏证据没有被覆盖。`;
   }
   if (snapshot.statuses.repository === 'default') {
     return '正在使用版本化默认值；第一次修改成功后才写入本机设置文件。';
   }
-  return `已保存到此设备，revision ${snapshot.revision}。`;
+  return `已保存到此设备，修订版本 ${snapshot.revision}。`;
 }
 
 function saveStateLabel(state: SaveState): string {

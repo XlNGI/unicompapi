@@ -37,6 +37,13 @@ test('work library exposes filters, provenance, version and controlled preview',
   assert.match(source, /<audio controls/);
 });
 
+test('work cards lazily show controlled image and video covers without opening details', () => {
+  assert.match(source, /IntersectionObserver/);
+  assert.match(source, /storage\.createWorkMediaHandle\(work\.workId\)/);
+  assert.match(source, /<img alt="" loading="lazy"/);
+  assert.match(source, /<video muted playsInline preload="metadata"/);
+});
+
 test('work library is not a generic file manager and does not overwrite history', () => {
   assert.doesNotMatch(source, /导入作品|删除作品|覆盖原文件|保存修改|renameFile|deleteFile/);
 });

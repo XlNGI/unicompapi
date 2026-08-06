@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { LuClapperboard, LuImagePlus } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -20,13 +21,22 @@ interface ProjectsPageProps {
   onNavigate?: (itemId: 'image-creation' | 'video-creation') => void;
 }
 
-function describeStorageError(code: StorageIpcErrorCode, message: string) {
-  if (code === 'invalid_project') return `项目损坏或格式无效：${message}`;
-  if (code === 'project_create_failed') return `无法创建项目，所选位置可能只读：${message}`;
-  if (code === 'project_open_failed') return `项目位置可能已失效或断盘：${message}`;
-  if (code === 'storage_error') return `存储设备可能已断开：${message}`;
-  return `操作失败：${message}`;
+function describeStorageError(code: StorageIpcErrorCode, _message: string) {
+  if (code === 'invalid_project') return '项目损坏或格式无效。';
+  if (code === 'project_create_failed') return '无法创建项目，所选位置可能只读。';
+  if (code === 'project_open_failed') return '项目位置可能已失效或断盘。';
+  if (code === 'storage_error') return '存储设备可能已断开。';
+  return '操作失败，请重试。';
 }
+
+const projectTaskKindLabels: Readonly<Record<string, string>> = {
+  image_generation: '图片生成',
+  image_analysis: '图片识别',
+  image_editing: '图片编辑',
+  image_to_prompt: '图片转提示词',
+  video_generation: '视频生成',
+  video_editing: '视频编辑'
+};
 
 export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
   const [session, setSession] = useState<StorageProjectSessionDto>();
@@ -248,13 +258,13 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
               <p>{session ? `内容将保存到“${session.projectName}”` : '请先新建或打开项目'}</p>
             </div>
             <div className="uc-project-center__entry-grid">
-              <button onClick={() => handleCreationEntry('image-creation')} type="button">
-                <span aria-hidden="true">图</span>
+              <button data-entry-kind="image" onClick={() => handleCreationEntry('image-creation')} type="button">
+                <span aria-hidden="true"><LuImagePlus /></span>
                 <strong>图片创作</strong>
                 <small>进入图片创作工具</small>
               </button>
-              <button onClick={() => handleCreationEntry('video-creation')} type="button">
-                <span aria-hidden="true">影</span>
+              <button data-entry-kind="video" onClick={() => handleCreationEntry('video-creation')} type="button">
+                <span aria-hidden="true"><LuClapperboard /></span>
                 <strong>视频创作</strong>
                 <small>进入视频创作工具</small>
               </button>
@@ -301,9 +311,9 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
                 <ul className="uc-project-center__summary-list">
                   {tasks.slice(0, 3).map((task) => (
                     <li key={task.taskId}>
-                      <strong>{task.kind}</strong>
+                      <strong>{projectTaskKindLabels[task.kind] ?? '其他任务'}</strong>
                       <span>{task.projectName}</span>
-                      <StatusPill tone="info">{task.latestExecutionState ?? '尚未执行'}</StatusPill>
+                      <StatusPill tone="info">{projectExecutionStateLabel(task.latestExecutionState)}</StatusPill>
                     </li>
                   ))}
                 </ul>
@@ -325,7 +335,7 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
                       <strong>{work.name}</strong>
                       <span>{work.projectName}</span>
                       <StatusPill tone={work.fileState === 'available' ? 'success' : 'warning'}>
-                        {work.fileState}
+                        {projectFileStateLabel(work.fileState)}
                       </StatusPill>
                     </li>
                   ))}
@@ -341,4 +351,22 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
       </p>
     </section>
   );
+}
+
+function projectExecutionStateLabel(state?: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    created: '已创建', submitting: '正在提交', queued: '排队中',
+    processing: '处理中', running: '执行中', completed: '已完成',
+    failed: '失败', cancelled: '已取消', interrupted: '已中断'
+  };
+  return state ? labels[state] ?? '未知任务状态' : '尚未执行';
+}
+
+function projectFileStateLabel(state: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    pending: '等待写入', writing: '写入中', verifying: '校验中',
+    available: '本地可用', missing: '文件丢失', read_only: '只读',
+    disconnected: '存储已断开', corrupted: '文件损坏', deleted: '已删除'
+  };
+  return labels[state] ?? '未知文件状态';
 }

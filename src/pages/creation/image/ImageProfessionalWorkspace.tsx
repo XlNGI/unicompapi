@@ -66,7 +66,7 @@ export function ImageProfessionalWorkspace({
       : productFeature === 'reference_to_image' && !draft.input
         ? '图生图必须选择恰好一张图片。'
         : unsupportedContexts.length > 0
-          ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
           : undefined;
 
   useEffect(() => {
@@ -143,7 +143,7 @@ export function ImageProfessionalWorkspace({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(result.error.message);
+      onMessage('保存草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted(result.value as GenerationImageDraftDto);
@@ -163,7 +163,7 @@ export function ImageProfessionalWorkspace({
       if (!saved) return;
       const result = await imageWorkspaces.selectInput(saved.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -190,7 +190,7 @@ export function ImageProfessionalWorkspace({
       if (!saved) return;
       const result = await imageWorkspaces.clearInput(saved.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('清除图片失败，请重试。');
         return;
       }
       onDraftPersisted(result.value as GenerationImageDraftDto);
@@ -214,7 +214,7 @@ export function ImageProfessionalWorkspace({
           reference.includeInPrompt !== undefined
       )
     });
-    onMessage('已从草稿清除不受支持或未固定 revision 的旧上下文。');
+    onMessage('已从草稿清除不受支持或未固定版本的旧上下文。');
   }
 
   return (
@@ -325,7 +325,7 @@ export function ImageProfessionalWorkspace({
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文引用</strong>
-              <span>专业生图只接受固定 revision 的 ProjectContext。</span>
+              <span>专业生图只接受固定版本的项目上下文。</span>
               <Button onClick={clearUnsupportedContexts} variant="secondary">
                 <LuTrash2 aria-hidden="true" />
                 清理旧上下文

@@ -45,7 +45,7 @@ export function VideoTextWorkspace({
     : draft.textToVideo.materials
       ? '此旧草稿含素材槽位；文生视频必须移除全部素材后才能提交。'
       : unsupportedContexts.length > 0
-        ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+        ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
         : undefined;
 
   function changeDraft(next: TextVideoDraftDto) {
@@ -130,7 +130,7 @@ export function VideoTextWorkspace({
             <span aria-hidden="true">1</span>
             <div>
               <h2>文字需求与项目上下文</h2>
-              <p>文生视频固定为无素材输入，可显式选择固定 revision 的项目上下文。</p>
+              <p>文生视频固定为无素材输入，可显式选择固定版本的项目上下文。</p>
             </div>
           </header>
           <div className="uc-image-quick__field">
@@ -177,7 +177,7 @@ export function VideoTextWorkspace({
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文</strong>
-              <span>文生视频只接受固定 revision 的项目上下文。</span>
+              <span>文生视频只接受固定版本的项目上下文。</span>
               <Button onClick={removeUnsupportedContexts} variant="secondary">
                 <LuTrash2 aria-hidden="true" />
                 明确移除旧上下文
@@ -259,7 +259,7 @@ export function VideoTextWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>模型、参数与提交流程</h2>
-              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
+              <p>选择模型后由后台锁定接口与参数配置；填写参数后准备并提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel

@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { LuSend, LuShieldCheck, LuSparkles } from 'react-icons/lu';
+import {
+  LuBrainCircuit,
+  LuMessageCircle,
+  LuSend,
+  LuShieldCheck,
+  LuSparkles
+} from 'react-icons/lu';
 import { Checkbox } from 'rsuite';
 import { Button } from '../../../components/Button';
 import {
@@ -59,7 +65,7 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   binding_unavailable: '协议适配器不可用',
   runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '约束不满足',
-  schema_unsupported: '参数 Schema 无法解释'
+  schema_unsupported: '参数格式无法识别'
 };
 
 export function ImagePromptEnhancePanel({
@@ -110,7 +116,7 @@ export function ImagePromptEnhancePanel({
           if (!active) return;
           if (!saved.ok) {
             setLoadState('loaded');
-            onMessage(errorMessages[saved.error.code] ?? saved.error.message);
+            onMessage(errorMessages[saved.error.code] ?? '保存图片草稿失败，请重试。');
             return;
           }
           working = saved.value as GenerationImageDraftDto;
@@ -120,7 +126,7 @@ export function ImagePromptEnhancePanel({
         if (!active) return;
         if (!result.ok) {
           setLoadState('loaded');
-          onMessage(errorMessages[result.error.code] ?? result.error.message);
+          onMessage(errorMessages[result.error.code] ?? '读取增强模型失败，请重试。');
           return;
         }
         setCandidates(result.value);
@@ -154,7 +160,7 @@ export function ImagePromptEnhancePanel({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(result.error.message);
+      onMessage('保存图片草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted(result.value as GenerationImageDraftDto);
@@ -183,7 +189,7 @@ export function ImagePromptEnhancePanel({
         ) as Readonly<Record<string, string | number | boolean | readonly string[]>>
       );
       if (!result.ok) {
-        const message = errorMessages[result.error.code] ?? result.error.message;
+        const message = errorMessages[result.error.code] ?? '准备提示词增强失败，请重试。';
         onMessage(message);
         setProgressFailure(message);
         setProgressPhase('failed');
@@ -223,16 +229,14 @@ export function ImagePromptEnhancePanel({
         true
       );
       if (!result.ok) {
-        const message = errorMessages[result.error.code] ?? result.error.message;
+        const message = errorMessages[result.error.code] ?? '提示词增强失败，请重试。';
         onMessage(message);
         setProgressFailure(message);
         setProgressPhase('failed');
         return;
       }
       if (result.value.status !== 'completed' || !result.value.enhancedText) {
-        const message = result.value.safeCode
-          ? `提示词增强失败：${result.value.safeCode}`
-          : '提示词增强未完成。';
+        const message = '提示词增强未完成，请重试。';
         onMessage(message);
         setProgressFailure(message);
         setProgressPhase('failed');
@@ -286,14 +290,19 @@ export function ImagePromptEnhancePanel({
         </div>
       </header>
 
-      <div aria-label="文本能力" className="uc-image-feature-mode" role="group">
+      <div
+        aria-label="文本能力"
+        className="uc-image-feature-mode uc-image-prompt-enhance__modes"
+        role="group"
+      >
         <button
           aria-pressed={productFeature === 'text_chat'}
           className="uc-image-feature-mode__option"
           onClick={() => setProductFeature('text_chat')}
           type="button"
         >
-          <span><strong>文本对话</strong><small>text_chat</small></span>
+          <LuMessageCircle aria-hidden="true" />
+          <span><strong>文本对话</strong><small>适合直接改写与日常表达</small></span>
         </button>
         <button
           aria-pressed={productFeature === 'text_reasoning'}
@@ -301,7 +310,8 @@ export function ImagePromptEnhancePanel({
           onClick={() => setProductFeature('text_reasoning')}
           type="button"
         >
-          <span><strong>文本推理</strong><small>text_reasoning</small></span>
+          <LuBrainCircuit aria-hidden="true" />
+          <span><strong>文本推理</strong><small>适合复杂要求与深入梳理</small></span>
         </button>
       </div>
 
@@ -335,9 +345,8 @@ export function ImagePromptEnhancePanel({
         <>
           <div className="uc-image-feature-panel__facts">
             <span>
-              <strong>已锁定参数合同</strong>
-              {selectedCandidate.parameterSchema.schemaId} · revision{' '}
-              {selectedCandidate.parameterSchema.revision}
+              <strong>已锁定参数设置</strong>
+              配置版本 {selectedCandidate.parameterSchema.revision}
             </span>
             <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
               {selectedCandidate.available ? '可准备' : '当前不可用'}

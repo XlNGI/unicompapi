@@ -91,7 +91,7 @@ export function useImageSubmissionFlow(options: {
       const result = await submissions.invokeExecution(execution.executionId);
       if (!result.ok) return reportError(result.error.code);
       setExecution(result.value);
-      options.onMessage(`图片提交已返回真实状态：${result.value.state}。`);
+      options.onMessage('图片提交已返回，当前状态已更新。');
     } catch {
       options.onMessage('提交图片任务失败，请重试。');
     } finally {
@@ -112,7 +112,7 @@ export function useImageSubmissionFlow(options: {
       if (!result.ok) return reportError(result.error.code);
       setWork(result.value);
       setExecution({ ...execution, state: 'completed' });
-      options.onMessage(`图片结果已校验并登记为 Work：${result.value.name}。`);
+      options.onMessage(`图片结果已校验并登记为作品：${result.value.name}。`);
     } catch {
       options.onMessage('接收图片结果失败，请重试。');
     } finally {
@@ -129,7 +129,7 @@ export function useImageSubmissionFlow(options: {
         options.onMessage(result.error.message);
         return;
       }
-      options.onMessage('已从校验图片 Work 创建图生视频草稿；尚未创建视频任务。');
+      options.onMessage('已从校验图片作品创建图生视频草稿；尚未创建视频任务。');
       options.onVideoDraftCreated?.(result.value.draftId);
     } catch {
       options.onMessage('创建图生视频草稿失败，请重试。');

@@ -48,7 +48,7 @@ interface ImageEditingWorkspaceProps {
 const editingErrorMessages = {
   ...imageSubmissionErrorMessages,
   capability_unverified: '图片编辑能力尚未验证。',
-  parameter_schema_missing: '图片编辑模型没有可用的动态参数 Schema。',
+  parameter_schema_missing: '图片编辑模型没有可用的动态参数定义。',
   adapter_unavailable: '没有配置真实图片编辑适配器，当前不会外发或修改图片。'
 };
 
@@ -149,7 +149,7 @@ export function ImageEditingWorkspace({
     try {
       const result = await imageWorkspaces.selectInput(draft.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -223,7 +223,7 @@ export function ImageEditingWorkspace({
     try {
       const result = await imageWorkspaces.derive(draft.draftId, targetMode);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('创建新草稿失败，请重试。');
         return;
       }
       onMessage('已创建派生草稿；没有创建或提交任务。');
@@ -348,8 +348,8 @@ export function ImageEditingWorkspace({
               <strong>可选蒙版</strong>
               <span>
                 {draft.editing.maskAssetId
-                  ? `已登记蒙版 Asset：${draft.editing.maskAssetId}`
-                  : '当前 DTO 尚未提供受控蒙版选择接口。'}
+                  ? `已登记蒙版素材：${draft.editing.maskAssetId}`
+                  : '当前界面尚未提供受控蒙版选择功能。'}
               </span>
             </div>
             <Button disabled variant="secondary">
@@ -451,7 +451,7 @@ export function ImageEditingWorkspace({
           </div>
           {submission.execution ? (
             <p className="uc-image-quick__hint" role="status">
-              执行 #{submission.execution.attempt}：{submission.execution.state}
+              执行第 {submission.execution.attempt} 次：{executionStateLabel(submission.execution.state)}
               {submission.work ? `；已登记 ${submission.work.name}` : ''}
             </p>
           ) : null}
@@ -473,7 +473,7 @@ export function ImageEditingWorkspace({
         </header>
         <dl className="uc-image-workbench__capability-list">
           <div>
-            <dt>源 Asset</dt>
+            <dt>源素材</dt>
             <dd>
               {draft.editing.lineage?.parentAssetId ??
                 draft.input?.assetId ??
@@ -535,4 +535,18 @@ export function ImageEditingWorkspace({
       </Card>
     </>
   );
+}
+
+function executionStateLabel(state: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    created: '已创建',
+    submitting: '正在提交',
+    accepted: '已接受',
+    running: '执行中',
+    remote_completed: '远端已完成',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消'
+  };
+  return labels[state] ?? '未知执行状态';
 }

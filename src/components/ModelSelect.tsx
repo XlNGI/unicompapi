@@ -52,7 +52,7 @@ export function ModelSelect({
     label: option.available
       ? option.label
       : `${option.label}（${(option.unavailableReasons ?? [])
-          .map((reason) => reasonLabels[reason] ?? reason)
+          .map((reason) => reasonLabels[reason] ?? '其他不可用原因')
           .join('、') || '不可用'}）`
   }));
   const disabledItemValues = options

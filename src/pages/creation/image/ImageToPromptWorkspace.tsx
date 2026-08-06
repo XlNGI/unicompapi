@@ -86,7 +86,7 @@ const staleReasonLabels: Record<
 const promptErrorMessages = {
   ...imageSubmissionErrorMessages,
   capability_unverified: '图片转提示词能力尚未验证。',
-  parameter_schema_missing: '图片转提示词模型没有可用的能力 Schema。',
+  parameter_schema_missing: '图片转提示词模型没有可用的参数定义。',
   adapter_unavailable:
     '没有配置真实图片转提示词适配器，当前不会外发或生成提示词。'
 };
@@ -159,7 +159,7 @@ export function ImageToPromptWorkspace({
     try {
       const result = await imageWorkspaces.selectInput(draft.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -227,7 +227,7 @@ export function ImageToPromptWorkspace({
     try {
       const result = await imageWorkspaces.derive(draft.draftId, targetMode);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('创建新草稿失败，请重试。');
         return;
       }
       onMessage('已创建派生草稿；没有创建或提交任务。');

@@ -115,7 +115,7 @@ export function WorkspaceContextSelector({
       if (kind === 'project_context') {
         const result = await chat.listProjectContextCandidates();
         if (!result.ok) {
-          onMessage(result.error.message);
+          onMessage('读取项目上下文失败，请重试。');
           setContexts([]);
         } else {
           setContexts(result.value);
@@ -123,7 +123,7 @@ export function WorkspaceContextSelector({
       } else {
         const result = await chat.listConversationCandidates();
         if (!result.ok) {
-          onMessage(result.error.message);
+          onMessage('读取项目对话失败，请重试。');
           setConversations([]);
         } else {
           setConversations(result.value);
@@ -143,7 +143,7 @@ export function WorkspaceContextSelector({
     contextRevision?: number
   ) {
     if (kind === 'project_context' && contextRevision === undefined) {
-      onMessage('项目上下文 revision 无效，请重新读取候选。');
+      onMessage('项目上下文版本无效，请重新读取候选。');
       return;
     }
     const exists = references.some(
@@ -286,7 +286,7 @@ export function WorkspaceContextSelector({
                       <span>
                         <strong>{candidate.labels.join('、') || '未命名上下文'}</strong>
                         <small>{candidate.contentPreview}</small>
-                        <small>revision {candidate.revision} · {sourceStatusLabel(candidate.sourceStatus)}</small>
+                        <small>版本 {candidate.revision} · {sourceStatusLabel(candidate.sourceStatus)}</small>
                       </span>
                     </Checkbox>
                   ))

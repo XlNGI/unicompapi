@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { LuRefreshCw, LuShieldCheck } from 'react-icons/lu';
+import {
+  LuCircleAlert,
+  LuCircleCheck,
+  LuInfo,
+  LuRefreshCw,
+  LuShieldCheck,
+  LuX
+} from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -26,6 +33,13 @@ const emptyRegistry: ProviderRegistryDto = {
 };
 
 type ProviderPageView = 'gallery' | 'manage';
+type ProviderMessageTone = 'success' | 'info' | 'danger';
+
+function providerMessageTone(message: string): ProviderMessageTone {
+  if (/失败|无法|不可用|无效|超时|未保存|未删除|未连接/u.test(message)) return 'danger';
+  if (/正在|尚未|即将|取消/u.test(message)) return 'info';
+  return 'success';
+}
 
 function describeValidationSafeCode(safeCode: string): string {
   const normalized = safeCode.replace(/^(?:newapi|deepseek|kling|volcengine|vidu)\./u, '');
@@ -42,7 +56,7 @@ function describeValidationSafeCode(safeCode: string): string {
     operation_failed: '远程验证失败',
     unavailable: '远程服务不可用'
   };
-  return labels[normalized] ?? labels[safeCode] ?? safeCode;
+  return labels[normalized] ?? labels[safeCode] ?? '远程验证失败';
 }
 
 const addProgressLabels: Record<string, string> = {
@@ -130,6 +144,15 @@ export function ProvidersPage() {
       });
     return () => { active = false; };
   }, [providersApi]);
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(
+      () => setMessage(''),
+      providerMessageTone(message) === 'danger' ? 6_000 : 4_000
+    );
+    return () => window.clearTimeout(timeout);
+  }, [message]);
 
   const createTemplate = templates.find(
     (template) => templateKeyOf(template) === selectedTemplateKey
@@ -254,7 +277,7 @@ export function ProvidersPage() {
     if (!providersApi || !selectedConnectionId) return;
     const registered = await runAction(
       () => providersApi.registerExactModel(selectedConnectionId, modelKey.trim(), modelDisplayName.trim()),
-      '模型已精确登记；未创建 Profile',
+      '模型已精确登记；未创建功能配置',
       selectedConnectionId
     );
     if (registered) {
@@ -310,6 +333,13 @@ export function ProvidersPage() {
     }
   }
 
+  const messageTone = providerMessageTone(message);
+  const MessageIcon = messageTone === 'success'
+    ? LuCircleCheck
+    : messageTone === 'danger'
+      ? LuCircleAlert
+      : LuInfo;
+
   return (
     <section className="uc-provider-page" aria-labelledby="providers-page-title">
       <header className="uc-provider-page__header">
@@ -339,7 +369,18 @@ export function ProvidersPage() {
         <span>凭证不回显；保存连接时将自动测试远程连通性，通过后自动获取可用模型目录。</span>
       </Card>
 
-      {message && <p className="uc-provider-page__message" role="status">{message}</p>}
+      {message && (
+        <div
+          className={`uc-provider-page__message uc-provider-page__message--${messageTone}`}
+          role={messageTone === 'danger' ? 'alert' : 'status'}
+        >
+          <MessageIcon aria-hidden="true" />
+          <span>{message}</span>
+          <button aria-label="关闭通知" onClick={() => setMessage('')} type="button">
+            <LuX aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {addingConnection && createTemplate ? (
         <Card className="uc-provider-page__form-card" raised>

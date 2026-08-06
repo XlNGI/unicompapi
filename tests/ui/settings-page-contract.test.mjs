@@ -26,6 +26,14 @@ test('A1 uses only the controlled B1 snapshot and save operations', () => {
   assert.doesNotMatch(page, /localStorage|sessionStorage|fetch\(|process\.platform|navigator\.platform/);
 });
 
+test('A1 keeps the active shell theme when the settings snapshot first loads', () => {
+  const initialLoad = page.slice(page.indexOf('useEffect(() => {'), page.indexOf('function acceptSnapshot'));
+  assert.match(initialLoad, /acceptSnapshot\(result\.value\)/);
+  assert.doesNotMatch(initialLoad, /setPreference/);
+  assert.match(page, /if \(applySavedTheme\) setPreference\(next\.values\.general\.theme\)/);
+  assert.match(page, /nextValues\.general\.theme !== snapshot\.values\.general\.theme/);
+});
+
 test('A1 exposes honest save, recovery and unavailable states', () => {
   for (const text of [
     '已自动保存', '保存中', '保存失败', '设置冲突',

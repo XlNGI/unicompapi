@@ -550,7 +550,7 @@ export function ImageWorkbenchPage({
               <dt>动态参数</dt>
               <dd>
                 {isGenerationImage
-                  ? '由模型能力 Schema 动态提供'
+                  ? '由模型能力定义动态提供'
                   : '由当前模式能力事实提供'}
               </dd>
             </div>

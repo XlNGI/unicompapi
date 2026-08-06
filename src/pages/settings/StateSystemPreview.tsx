@@ -113,7 +113,7 @@ export function StateSystemPreview() {
 
   return (
     <details className="uc-state-preview">
-      <summary>阶段 2 UI 状态预览</summary>
+      <summary>阶段 2 界面状态预览</summary>
       <p className="uc-state-preview__description">
         纯本地夹具，不访问后台或文件系统。
       </p>

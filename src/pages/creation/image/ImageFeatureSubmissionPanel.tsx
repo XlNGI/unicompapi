@@ -72,7 +72,7 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   binding_unavailable: '协议适配器不可用',
   runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '草稿约束不满足',
-  schema_unsupported: '参数 Schema 无法解释'
+  schema_unsupported: '参数定义无法识别'
 };
 
 export function ImageFeatureSubmissionPanel({
@@ -178,7 +178,7 @@ export function ImageFeatureSubmissionPanel({
           if (!saved.ok) {
             setCandidates([]);
             setLoadState('loaded');
-            onMessage(errorMessages[saved.error.code] ?? saved.error.message);
+            onMessage(errorMessages[saved.error.code] ?? '保存图片草稿失败，请重试。');
             return;
           }
           draftId = saved.value.draftId;
@@ -272,7 +272,7 @@ export function ImageFeatureSubmissionPanel({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(errorMessages[result.error.code] ?? result.error.message);
+      onMessage(errorMessages[result.error.code] ?? '保存图片草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted?.(result.value as GenerationImageDraftDto);
@@ -366,7 +366,6 @@ export function ImageFeatureSubmissionPanel({
       );
       if (!result.ok) {
         const message =
-          result.error.message?.trim() ||
           errorMessages[result.error.code] ||
           '图片提交失败';
         onMessage(message);
@@ -380,12 +379,15 @@ export function ImageFeatureSubmissionPanel({
       const failed =
         result.value.status !== 'completed' &&
         result.value.status !== 'provider_accepted';
-      const feedback =
-        result.value.feedback ??
-        result.value.localResultError ??
-        (urls.length > 0
-          ? `提交完成（${result.value.status}），已保存图片 URL。`
-          : `提交状态：${result.value.status}`);
+      const fallbackFeedback = urls.length > 0
+        ? '提交完成，已保存图片结果。'
+        : failed
+          ? '图片提交未完成，请检查任务状态。'
+          : '图片提交已受理。';
+      const rawFeedback = result.value.feedback ?? result.value.localResultError;
+      const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+        ? rawFeedback
+        : fallbackFeedback;
       onMessage(feedback);
       if (showProgressSteps) {
         if (failed || result.value.localResultError) {
@@ -445,7 +447,7 @@ export function ImageFeatureSubmissionPanel({
       onMessage(
         `所选模型当前不可用：${
           selectedCandidate.unavailableReasons
-            .map((reason) => unavailableReasonLabels[reason] ?? reason)
+            .map((reason) => unavailableReasonLabels[reason] ?? '其他不可用原因')
             .join('、') || '未知原因'
         }`
       );
@@ -470,8 +472,7 @@ export function ImageFeatureSubmissionPanel({
         );
         if (!result.ok) {
           onMessage(
-            result.error.message?.trim() ||
-              `${errorMessages[result.error.code]}（${result.error.code}）`
+            errorMessages[result.error.code] || '图片生成失败，请重试。'
           );
           return;
         }
@@ -495,40 +496,35 @@ export function ImageFeatureSubmissionPanel({
         } as GenerationImageDraftDto);
         const submission = result.value.submission;
         const urls = submission.resultImageUrls ?? [];
-        const status = submission.status;
+        const status = submissionStatusLabel(submission.status);
         if (submission.feedback || submission.localResultError) {
-          onMessage(
-            `${submission.feedback ?? submission.localResultError}${
-              urls.length > 0 ? `；调用记录中的 URL：${urls[0]}` : ''
-            }`
-          );
-        } else if (status !== 'completed' && status !== 'provider_accepted') {
+          const rawFeedback = submission.feedback ?? submission.localResultError ?? '';
+          onMessage(/[A-Za-z_]/u.test(rawFeedback)
+            ? '图片生成未完成，请打开任务中心查看详情。'
+            : `${rawFeedback}${urls.length > 0 ? `；调用记录中的链接：${urls[0]}` : ''}`);
+        } else if (submission.status !== 'completed' && submission.status !== 'provider_accepted') {
           onMessage(
             `生成未完成：${status}${
-              urls.length > 0 ? '；已记录部分结果 URL。' : '。请打开任务中心查看时间线。'
+              urls.length > 0 ? '；已记录部分结果链接。' : '。请打开任务中心查看时间线。'
             }`
           );
         } else if (urls.length > 0 || submission.workId) {
           onMessage(
             urls.length > 0
-              ? '生成完成，已写入调用记录与图片 URL。'
+              ? '生成完成，已写入调用记录与图片链接。'
               : `生成完成，本地作品：${submission.workId}`
           );
         } else {
           onMessage(
-            `生成状态：${status}，但没有图片 URL 也没有本地作品。请打开任务中心查看时间线。`
+            `生成状态：${status}，但没有图片链接也没有本地作品。请打开任务中心查看时间线。`
           );
         }
         onSubmissionComplete?.(submission);
         return;
       }
       await prepare();
-    } catch (error) {
-      onMessage(
-        error instanceof Error && error.message.trim().length > 0
-          ? `一键生成失败：${error.message}`
-          : '一键生成失败，请重试。'
-      );
+    } catch {
+      onMessage('一键生成失败，请重试。');
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -570,7 +566,7 @@ export function ImageFeatureSubmissionPanel({
           <div className="uc-image-feature-panel__facts">
             <span>
               <strong>已锁定参数合同</strong>
-              {selectedCandidate.parameterSchema.schemaId} · revision {selectedCandidate.parameterSchema.revision}
+              参数配置版本 {selectedCandidate.parameterSchema.revision}
             </span>
             <span>
               <strong>费用</strong>
@@ -584,7 +580,7 @@ export function ImageFeatureSubmissionPanel({
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>
               {selectedCandidate.unavailableReasons.map((reason) => (
-                <span key={reason}>• {unavailableReasonLabels[reason] ?? reason}</span>
+                <span key={reason}>• {unavailableReasonLabels[reason] ?? '其他不可用原因'}</span>
               ))}
             </div>
           ) : null}
@@ -685,6 +681,20 @@ export function ImageFeatureSubmissionPanel({
       )}
     </div>
   );
+}
+
+function submissionStatusLabel(status: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    created: '已创建',
+    submitting: '正在提交',
+    provider_accepted: '服务商已接受',
+    running: '生成中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    unknown_outcome: '结果未知'
+  };
+  return labels[status] ?? '未知生成状态';
 }
 
 function costLabel(cost: { readonly state: string; readonly summary?: string }): string {

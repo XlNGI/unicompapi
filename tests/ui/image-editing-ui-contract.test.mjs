@@ -33,7 +33,7 @@ test('image editing keeps source, region, mask and requirements explicit', () =>
     '禁止出现内容',
     '启用编辑区域',
     '可选蒙版',
-    '尚未提供受控蒙版选择接口'
+    '尚未提供受控蒙版选择功能'
   ]) {
     assert.match(source, new RegExp(text));
   }
@@ -71,12 +71,14 @@ test('image editing uses controlled media and dynamic preflight facts', () => {
   );
   assert.match(editingSource, /useImageSubmissionFlow/);
   assert.match(editingSource, /submission\.canCreateTask/);
+  assert.match(controlsSource, /提交结果未知。请先确认服务商账单状态/);
+  assert.doesNotMatch(controlsSource, /Submission outcome is unknown/);
 });
 
 test('image editing preserves lineage and derives without overwriting', () => {
   for (const text of [
     '版本关系',
-    '源 Asset',
+    '源素材',
     '父草稿',
     '父作品',
     '原图保持不变',

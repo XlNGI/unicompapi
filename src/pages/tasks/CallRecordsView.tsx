@@ -141,7 +141,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
       .then((result) => {
         if (!active) return;
         if (!result.ok) {
-          setMessage(`读取调用记录失败：${result.error.message}`);
+          setMessage('读取调用记录失败，请重试');
           return;
         }
         setRecords(result.value.items);
@@ -193,7 +193,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
       .then((result) => {
         if (!active) return;
         if (!result.ok) {
-          setMessage(`读取调用详情失败：${result.error.message}`);
+          setMessage('读取调用详情失败，请重试');
           return;
         }
         setDetails(result.value);
@@ -242,7 +242,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
           onChange={(value) => changeFilter('productFeature', value)}
           options={options.features.map((value) => ({
             value,
-            label: featureLabels[value] ?? value
+            label: featureLabels[value] ?? '其他功能'
           }))}
           value={filters.productFeature}
         />
@@ -308,7 +308,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
             <p key={issue.projectId}>
               {issue.projectName}：{issue.reason === 'unavailable'
                 ? '项目失效或断盘'
-                : '调用数据损坏或缺少精确 Schema'}
+                : '调用数据损坏或缺少精确参数定义'}
             </p>
           ))}
         </Card>
@@ -343,13 +343,13 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
                   type="button"
                 >
                   <span>
-                    <strong>{featureLabels[record.productFeature] ?? record.productFeature}</strong>
+                    <strong>{featureLabels[record.productFeature] ?? '其他功能'}</strong>
                     <small>{record.projectName}</small>
                   </span>
                   <StatusPill tone={state.tone}>{state.label}</StatusPill>
                   <small>{displayRoute(record)}</small>
                   <small>{formatTimestamp(record.createdAt)}</small>
-                  <small>{usageLabels[record.usageAvailability] ?? record.usageAvailability}</small>
+                  <small>{usageLabels[record.usageAvailability] ?? '用量状态未知'}</small>
                 </button>
               );
             })}
@@ -385,7 +385,7 @@ function CallDetails({
     <div className="uc-task-center__details-content">
       <div className="uc-task-center__details-heading">
         <div>
-          <strong>{featureLabels[details.productFeature] ?? details.productFeature}</strong>
+          <strong>{featureLabels[details.productFeature] ?? '其他功能'}</strong>
           <small>{details.invocationAttemptId}</small>
         </div>
         <StatusPill tone={state.tone}>{state.label}</StatusPill>
@@ -409,9 +409,9 @@ function CallDetails({
             <li key={event.sequence}>
               <span aria-hidden="true" />
               <div>
-                <strong>{eventLabels[event.type] ?? event.type}</strong>
+                <strong>{eventLabels[event.type] ?? '其他状态更新'}</strong>
                 <small>{formatTimestamp(event.occurredAt)}</small>
-                {event.safeCode ? <small>原因代码：{event.safeCode}</small> : null}
+                {event.safeCode ? <small>详细原因已记录</small> : null}
               </div>
             </li>
           ))}
@@ -422,7 +422,7 @@ function CallDetails({
         <div className="uc-task-center__details-heading">
           <h3>上游用量</h3>
           <StatusPill tone={usageTone(details.usage.availability)}>
-            {usageLabels[details.usage.availability] ?? details.usage.availability}
+            {usageLabels[details.usage.availability] ?? '用量状态未知'}
           </StatusPill>
         </div>
         {details.usage.facts.length === 0 ? (
@@ -433,8 +433,8 @@ function CallDetails({
           <dl className="uc-task-center__usage-list">
             {details.usage.facts.map((fact) => (
               <div key={`${fact.metricId}:${fact.unit}`}>
-                <dt>{fact.metricId}</dt>
-                <dd>{fact.quantity} {fact.unit}</dd>
+                <dt>{usageMetricLabel(fact.metricId)}</dt>
+                <dd>{fact.quantity} {usageUnitLabel(fact.unit)}</dd>
                 <small>{usageSourceLabel(fact.source)}</small>
               </div>
             ))}
@@ -459,7 +459,7 @@ function CallDetails({
                 <small>{localResultFacts(result)}</small>
                 {result.resultImageUrl ? (
                   <p className="uc-task-center__result-url">
-                    <strong>图片 URL</strong>
+                    <strong>图片链接</strong>
                     <a href={result.resultImageUrl} rel="noreferrer" target="_blank">
                       {result.resultImageUrl}
                     </a>
@@ -560,7 +560,7 @@ function uniqueValues(values: readonly string[]): readonly string[] {
 }
 
 function callState(state: string) {
-  return callStates[state] ?? { label: state, tone: 'neutral' as const };
+  return callStates[state] ?? { label: '未知调用状态', tone: 'neutral' as const };
 }
 
 function displayRoute(record: StorageCallRecordSummaryDto): string {
@@ -597,6 +597,34 @@ function usageSourceLabel(source: string): string {
   if (source === 'provider_header') return '来源：服务商响应头白名单字段';
   if (source === 'provider_usage_endpoint') return '来源：服务商用量接口白名单字段';
   return '来源不可用';
+}
+
+function usageMetricLabel(metric: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    input_tokens: '输入文本用量',
+    output_tokens: '输出文本用量',
+    total_tokens: '总文本用量',
+    input_images: '输入图片数',
+    output_images: '输出图片数',
+    duration_ms: '处理时长'
+  };
+  return labels[metric] ?? '其他用量';
+}
+
+function usageUnitLabel(unit: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    token: '个文本单位',
+    tokens: '个文本单位',
+    image: '张',
+    images: '张',
+    millisecond: '毫秒',
+    milliseconds: '毫秒',
+    second: '秒',
+    seconds: '秒',
+    byte: '字节',
+    bytes: '字节'
+  };
+  return labels[unit] ?? '单位';
 }
 
 function registrationTone(state: string): StatusTone {
