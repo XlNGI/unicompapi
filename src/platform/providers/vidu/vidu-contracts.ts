@@ -47,6 +47,14 @@ export const VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION = '2';
 export const VIDU_REFERENCE_VIDEO_V2_SOURCE_DOCUMENT_REVISION =
   'vidu-reference-video-v2-c2-evidence@2026-07-29';
 
+/** Official async text2video. https://platform.vidu.cn/docs/text-to-video */
+export const VIDU_TEXT_VIDEO_V2_ADAPTER_ID = 'vidu_text_video_v2';
+export const VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION = '2026-08-06';
+export const VIDU_TEXT_VIDEO_V2_PROTOCOL_ID = 'vidu.ent.v2.text2video';
+export const VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION = '2';
+export const VIDU_TEXT_VIDEO_V2_SOURCE_DOCUMENT_REVISION =
+  'vidu-text-video-v2-official@2026-08-06';
+
 export const VIDU_IMAGE_V1_RESULT_SCHEMA_ID = 'results.vidu.image-v1';
 export const VIDU_GEMINI_IMAGE_V2_RESULT_SCHEMA_ID =
   'results.vidu.gemini-image-v2';
@@ -54,6 +62,8 @@ export const VIDU_REFERENCE_IMAGE_V2_RESULT_SCHEMA_ID =
   'results.vidu.reference-image-v2';
 export const VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID =
   'results.vidu.reference-video-v2';
+export const VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID =
+  'results.vidu.text-video-v2';
 export const VIDU_USAGE_SCHEMA_ID = 'usage.vidu.not-reported';
 
 export const frozenViduOfficialImageModelKeys = ['viduq2', 'viduq1'] as const;
@@ -70,13 +80,30 @@ export const VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID =
   'constraints.vidu.single-controlled-image-single-output';
 export const VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID =
   'constraints.vidu.single-controlled-first-frame-single-output';
+export const VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID =
+  'constraints.vidu.text-only-single-video-output';
+
+/** Official text2video models that do not collide with packaged image keys. */
+export const frozenViduTextVideoModelKeys = [
+  'viduq3-pro',
+  'viduq3-turbo'
+] as const;
+
+export const frozenViduReferenceVideoModelKeys = [
+  'viduq3-drama',
+  'viduq3-ad',
+  'viduq3-mix',
+  'viduq3-turbo',
+  'viduq3'
+] as const;
 
 export const frozenViduVideoModelKeys = [
   'viduq3-drama',
   'viduq3-ad',
   'viduq3-mix',
   'viduq3-turbo',
-  'viduq3'
+  'viduq3',
+  'viduq3-pro'
 ] as const;
 
 export const frozenViduGeminiImageModelKeys = [
@@ -176,6 +203,14 @@ export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {
         'cancel',
         'receive_result'
       ]
+    },
+    {
+      adapterId: VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+      adapterVersion: VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION,
+      protocolId: VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
+      // Connection validation stays on the reference video adapter identity.
+      operations: ['submit', 'query', 'cancel', 'receive_result']
     }
   ],
   templates: [
@@ -208,6 +243,10 @@ export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {
         {
           adapterId: VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
           adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION
+        },
+        {
+          adapterId: VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+          adapterVersion: VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION
         }
       ],
       freeConnectionValidation: true,
@@ -222,7 +261,11 @@ export function createViduModelContract(
   const exactKey = requireFrozenModelKey(providerModelKey);
   if (exactKey === 'viduimage-2') return imageV1Contract(exactKey);
   if (isGeminiImageKey(exactKey)) return geminiImageContract(exactKey);
-  return referenceVideoContract(exactKey);
+  if (exactKey === 'viduq3-pro') return textVideoContract(exactKey);
+  if (exactKey === 'viduq3-turbo') return dualVideoContract(exactKey);
+  return referenceVideoContract(
+    exactKey as (typeof frozenViduReferenceVideoModelKeys)[number]
+  );
 }
 
 export const viduPackagedModelContracts: readonly ViduModelContractV1[] =
@@ -383,10 +426,10 @@ function geminiImageContract(
 }
 
 function referenceVideoContract(
-  providerModelKey: (typeof frozenViduVideoModelKeys)[number]
+  providerModelKey: (typeof frozenViduReferenceVideoModelKeys)[number]
 ): ViduModelContractV1 {
   const schemaId = `parameters.vidu.reference-video-v2.image-to-video.${providerModelKey}`;
-  const range = durationRange(providerModelKey);
+  const range = referenceDurationRange(providerModelKey);
   return {
     definition: definition(
       providerModelKey,
@@ -407,6 +450,102 @@ function referenceVideoContract(
       optionalString('resolution', 30),
       optionalString('aspect_ratio', 40)
     ])],
+    defaultProfileStatus: 'restricted'
+  };
+}
+
+function textVideoContract(
+  providerModelKey: 'viduq3-pro'
+): ViduModelContractV1 {
+  // Official text2video: https://platform.vidu.cn/docs/text-to-video
+  const schemaId =
+    `parameters.vidu.text-video-v2.text-to-video.${providerModelKey}`;
+  const range = textDurationRange(providerModelKey);
+  return {
+    definition: definition(
+      providerModelKey,
+      VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+      VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+      VIDU_TEXT_VIDEO_V2_SOURCE_DOCUMENT_REVISION,
+      [feature(
+        'text_to_video',
+        'video_generation',
+        schemaId,
+        VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID,
+        VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID
+      )]
+    ),
+    parameterSchemas: [schema(schemaId, 'text_to_video', [
+      optionalBoolean('audio', 10),
+      optionalInteger('duration', 20, range.minimum, range.maximum, 'second'),
+      optionalString('resolution', 30),
+      optionalString('aspect_ratio', 40)
+    ])],
+    defaultProfileStatus: 'restricted'
+  };
+}
+
+function dualVideoContract(
+  providerModelKey: 'viduq3-turbo'
+): ViduModelContractV1 {
+  // Official docs list viduq3-turbo for text2video and the packaged reference
+  // path. Catalog install binds one profile/adapter per model, so both product
+  // features share the reference video adapter; submit routes by capability.
+  const referenceSchemaId =
+    `parameters.vidu.reference-video-v2.image-to-video.${providerModelKey}`;
+  const textSchemaId =
+    `parameters.vidu.text-video-v2.text-to-video.${providerModelKey}`;
+  const referenceRange = referenceDurationRange(providerModelKey);
+  const textRange = textDurationRange(providerModelKey);
+  return {
+    definition: definition(
+      providerModelKey,
+      VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+      VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
+      VIDU_REFERENCE_VIDEO_V2_SOURCE_DOCUMENT_REVISION,
+      [
+        feature(
+          'image_to_video',
+          'reference_to_video',
+          referenceSchemaId,
+          VIDU_REFERENCE_VIDEO_V2_RESULT_SCHEMA_ID,
+          VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID
+        ),
+        feature(
+          'text_to_video',
+          'video_generation',
+          textSchemaId,
+          VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID,
+          VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID
+        )
+      ]
+    ),
+    parameterSchemas: [
+      schema(referenceSchemaId, 'image_to_video', [
+        optionalBoolean('audio', 10),
+        optionalInteger(
+          'duration',
+          20,
+          referenceRange.minimum,
+          referenceRange.maximum,
+          'second'
+        ),
+        optionalString('resolution', 30),
+        optionalString('aspect_ratio', 40)
+      ]),
+      schema(textSchemaId, 'text_to_video', [
+        optionalBoolean('audio', 10),
+        optionalInteger(
+          'duration',
+          20,
+          textRange.minimum,
+          textRange.maximum,
+          'second'
+        ),
+        optionalString('resolution', 30),
+        optionalString('aspect_ratio', 40)
+      ])
+    ],
     defaultProfileStatus: 'restricted'
   };
 }
@@ -501,12 +640,22 @@ function optionalField(
   };
 }
 
-function durationRange(
-  modelKey: (typeof frozenViduVideoModelKeys)[number]
+function referenceDurationRange(
+  modelKey: (typeof frozenViduReferenceVideoModelKeys)[number]
 ): { readonly minimum: number; readonly maximum: number } {
   if (modelKey === 'viduq3-drama') return { minimum: 2, maximum: 15 };
   if (modelKey === 'viduq3') return { minimum: 3, maximum: 16 };
   return { minimum: 3, maximum: 15 };
+}
+
+function textDurationRange(
+  modelKey: (typeof frozenViduTextVideoModelKeys)[number]
+): { readonly minimum: number; readonly maximum: number } {
+  // Official text2video duration: q3 models 1–16.
+  if (modelKey === 'viduq3-pro' || modelKey === 'viduq3-turbo') {
+    return { minimum: 1, maximum: 16 };
+  }
+  return { minimum: 1, maximum: 16 };
 }
 
 function requireFrozenModelKey(value: string): FrozenViduModelKey {

@@ -160,7 +160,14 @@ export function createVideoProviderFeatureContracts(): readonly ProviderFeatureC
       (template) => template.features
     );
     return modelContract.parameterSchemas.flatMap((parameterSchema) => {
-      if (parameterSchema.productFeature !== 'image_to_video') return [];
+      // Official Vidu text2video schemas must be registered so quick/text video
+      // pages can resolve selectable candidates (image_to_video alone is not enough).
+      if (
+        parameterSchema.productFeature !== 'image_to_video' &&
+        parameterSchema.productFeature !== 'text_to_video'
+      ) {
+        return [];
+      }
       const feature = features.find(
         (item) => item.parameterSchemaId === parameterSchema.schemaId
       );

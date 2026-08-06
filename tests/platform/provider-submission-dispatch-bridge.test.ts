@@ -29,6 +29,7 @@ import {
   VIDU_IMAGE_V1_ADAPTER_ID,
   VIDU_PROVIDER_PACKAGE_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   VOLCENGINE_PROVIDER_PACKAGE_ID,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
@@ -173,6 +174,7 @@ function providerOutcome(adapterId: string): ProviderSubmitOutcome {
   const asyncAdapters = new Set([
     SEEDANCE_VIDEO_ADAPTER_ID,
     VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+    VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
     KLING_VIDEO_ADAPTER_ID,
     NEWAPI_VIDEO_ADAPTER_ID
   ]);
@@ -242,7 +244,11 @@ function productFeature(adapterId: string): ProductFeature {
     adapterId === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID ||
     adapterId === NEWAPI_VIDEO_ADAPTER_ID
   ) return 'image_to_video';
-  if (adapterId === SEEDANCE_VIDEO_ADAPTER_ID || adapterId === KLING_VIDEO_ADAPTER_ID) {
+  if (
+    adapterId === SEEDANCE_VIDEO_ADAPTER_ID ||
+    adapterId === KLING_VIDEO_ADAPTER_ID ||
+    adapterId === VIDU_TEXT_VIDEO_V2_ADAPTER_ID
+  ) {
     return 'text_to_video';
   }
   if (adapterId === DOUBAO_VISION_ADAPTER_ID) return 'image_understanding';

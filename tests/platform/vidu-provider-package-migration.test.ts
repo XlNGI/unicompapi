@@ -27,6 +27,7 @@ import {
   VIDU_REFERENCE_IMAGE_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   ViduPackagedParameterSchemaResolver,
   ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
@@ -74,7 +75,8 @@ describe('Vidu Provider Package migration', () => {
       VIDU_IMAGE_V1_ADAPTER_ID,
       VIDU_GEMINI_IMAGE_V2_ADAPTER_ID,
       VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
-      VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
+      VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+      VIDU_TEXT_VIDEO_V2_ADAPTER_ID
     ]);
     expect(registry.resolveEndpoint(template, undefined, false)).toBe(
       'https://api.vidu.cn/'
@@ -103,6 +105,16 @@ describe('Vidu Provider Package migration', () => {
     expect(createViduModelContract('viduq3-turbo')).toMatchObject({
       defaultProfileStatus: 'restricted'
     });
+    expect(
+      createViduModelContract('viduq3-turbo').definition.profileTemplates[0].features.map(
+        (feature) => feature.productFeature
+      )
+    ).toEqual(['image_to_video', 'text_to_video']);
+    expect(
+      createViduModelContract('viduq3-pro').definition.profileTemplates[0].features.map(
+        (feature) => feature.productFeature
+      )
+    ).toEqual(['text_to_video']);
     expect(() => createViduModelContract('viduq3-guessed')).toThrow(
       'exact frozen model key'
     );

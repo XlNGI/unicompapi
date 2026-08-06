@@ -10,3 +10,4 @@ export * from './vidu-image-adapters';
 export * from './vidu-reference-image-adapter';
 export * from './vidu-image-result-port';
 export * from './vidu-video-adapter';
+export * from './vidu-text-video-adapter';

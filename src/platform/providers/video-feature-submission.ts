@@ -30,6 +30,10 @@ import {
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION,
+  VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+  VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
   ViduPackagedParameterSchemaResolver,
   ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
@@ -87,6 +91,18 @@ export function createVideoFeatureDispatchBridge(
       protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
       protocolVersion: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
       submit: (input) => viduAdapters.referenceVideoV2.submit(input.routeSnapshot, {
+        request: input.request,
+        beforeRequestStarted: input.beforeRequestStarted
+      })
+    }),
+    wrapVideoAdapter({
+      packageId: VIDU_PROVIDER_PACKAGE_ID,
+      packageVersion: VIDU_PROVIDER_PACKAGE_VERSION,
+      adapterKey: VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+      adapterVersion: VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION,
+      protocolId: VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
+      submit: (input) => viduAdapters.textVideoV2.submit(input.routeSnapshot, {
         request: input.request,
         beforeRequestStarted: input.beforeRequestStarted
       })

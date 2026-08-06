@@ -13,6 +13,7 @@ import {
   ViduProviderPackage,
   ViduTransportFailure,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   type ImageOperationPorts,
   type ImageSubmissionControllerDependencies,
   type ProviderAsyncOperationPort,
@@ -22,6 +23,7 @@ import {
   type ViduHttpTransportResponse,
   type ViduVideoOperationContext,
   type ViduVideoOperationContextPort,
+  type VideoResultPort,
   type VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
 import type { ProxyMode } from '../../src/domain';
@@ -95,11 +97,20 @@ export class ElectronViduComposition {
     const videoOperationContext = new RegistryVideoOperationContext(this.registry);
     // Shared adapter instance for feature-path poll + local result landing only.
     // Product submit goes through createRouteAdapters / videoFeatures, not this port.
-    const video = this.providerPackage.createVideoAdapter({
+    const referenceVideo = this.providerPackage.createVideoAdapter({
       connections,
       materials,
       operationContext: videoOperationContext
     });
+    const textVideo = this.providerPackage.createTextVideoAdapter({
+      connections,
+      operationContext: videoOperationContext
+    });
+    const videoPort = createCompositeViduVideoPort(
+      videoOperationContext,
+      referenceVideo,
+      textVideo
+    );
     const imageRouter = new ImageOperationRouter(this.registry, {
       vidu_image_v1: images.imageV1,
       vidu_gemini_image_v2: images.geminiImageV2
@@ -117,13 +128,13 @@ export class ElectronViduComposition {
       }
     };
     const videoAsync: ProviderAsyncOperationPort = {
-      query: (providerOperationId) => video.query(providerOperationId),
-      cancel: (providerOperationId) => video.cancel(providerOperationId)
+      query: (providerOperationId) => videoPort.query(providerOperationId),
+      cancel: (providerOperationId) => videoPort.cancel(providerOperationId)
     };
     const videoReceiver = new LocalVideoResultReceiver({
       getSession: options.getSession,
       mutations: options.videoMutations,
-      port: video
+      port: videoPort
     });
     return {
       image: {
@@ -179,17 +190,62 @@ class RegistryVideoOperationContext implements ViduVideoOperationContextPort {
     this.remembered.set(taskId, context);
   }
 
+  peek(taskId: string): ViduVideoOperationContext | undefined {
+    return this.remembered.get(taskId);
+  }
+
   async resolve(taskId: string): Promise<ViduVideoOperationContext | undefined> {
     const remembered = this.remembered.get(taskId);
     if (remembered) return remembered;
     const snapshot = await this.registry.load();
     const candidates = snapshot.protocolBindings.filter(
-      (binding) => binding.adapterKind === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
+      (binding) =>
+        binding.adapterKind === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID ||
+        binding.adapterKind === VIDU_TEXT_VIDEO_V2_ADAPTER_ID
     );
-    if (candidates.length === 0) return undefined;
+    // With both text and reference video bindings installed, guessing the first
+    // binding routes pro text2video polls to the wrong adapter. Only fall back
+    // when a single video binding exists (legacy installs).
+    if (candidates.length !== 1) return undefined;
     const binding = candidates[0];
     return { connectionId: binding.connectionId, binding };
   }
+}
+
+function createCompositeViduVideoPort(
+  context: RegistryVideoOperationContext,
+  referenceVideo: ProviderAsyncOperationPort & VideoResultPort,
+  textVideo: ProviderAsyncOperationPort & VideoResultPort
+): ProviderAsyncOperationPort & VideoResultPort {
+  const select = async (providerOperationId: string) => {
+    const resolved =
+      context.peek(providerOperationId) ??
+      (await context.resolve(providerOperationId));
+    if (resolved?.binding.adapterKind === VIDU_TEXT_VIDEO_V2_ADAPTER_ID) {
+      return textVideo;
+    }
+    if (resolved?.binding.adapterKind === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID) {
+      return referenceVideo;
+    }
+    throw new Error(
+      'The Vidu video operation context is unavailable for poll or result landing'
+    );
+  };
+  return {
+    query: async (providerOperationId) =>
+      (await select(providerOperationId)).query(providerOperationId),
+    cancel: async (providerOperationId) =>
+      (await select(providerOperationId)).cancel(providerOperationId),
+    getCompletion: async (remoteOperationId) =>
+      (await select(remoteOperationId)).getCompletion(remoteOperationId),
+    listResults: async (remoteOperationId) =>
+      (await select(remoteOperationId)).listResults(remoteOperationId),
+    openDownload: async (remoteOperationId, remoteResultId) =>
+      (await select(remoteOperationId)).openDownload(
+        remoteOperationId,
+        remoteResultId
+      )
+  };
 }
 
 class ElectronViduHttpTransport implements ViduHttpTransport {

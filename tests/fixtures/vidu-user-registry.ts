@@ -42,8 +42,15 @@ import {
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
   VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+  VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION,
+  VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+  VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
   createViduModelContract,
-  frozenViduModelKeys
+  frozenViduGeminiImageModelKeys,
+  frozenViduModelKeys,
+  frozenViduReferenceVideoModelKeys,
+  frozenViduTextVideoModelKeys
 } from '../../src/platform';
 
 export const VIDU_USER_PROVIDER_ID = toProviderId('provider-vidu');
@@ -53,6 +60,7 @@ export const VIDU_USER_PROTOCOL_BINDING_IDS = {
   referenceVideoV2: toProtocolBindingId(
     'protocol-binding-vidu-reference-video-v2'
   ),
+  textVideoV2: toProtocolBindingId('protocol-binding-vidu-text-video-v2'),
   imageV1: toProtocolBindingId('protocol-binding-vidu-image-v1'),
   geminiImageV2: toProtocolBindingId(
     'protocol-binding-vidu-gemini-image-v2'
@@ -130,6 +138,12 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
         adapterVersion: VIDU_REFERENCE_VIDEO_V2_ADAPTER_VERSION,
         protocolId: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_ID,
         protocolVersion: VIDU_REFERENCE_VIDEO_V2_PROTOCOL_VERSION
+      },
+      {
+        adapterId: VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+        adapterVersion: VIDU_TEXT_VIDEO_V2_ADAPTER_VERSION,
+        protocolId: VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+        protocolVersion: VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION
       }
     ],
     state: 'unconfigured',
@@ -150,7 +164,22 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
       endpointTemplate: 'https://api.vidu.cn/ent/v2/reference2video',
       authScheme: 'token',
       executionLifecycle: 'asynchronous_polling',
-      supportedPurposes: ['reference_to_video'],
+      supportedPurposes: ['reference_to_video', 'video_generation'],
+      createdAt: catalogTimestamp,
+      updatedAt: catalogTimestamp
+    }),
+    createProviderProtocolBinding({
+      id: VIDU_USER_PROTOCOL_BINDING_IDS.textVideoV2,
+      providerId: provider.id,
+      connectionId: connection.id,
+      protocolId: VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
+      protocolVersion: VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
+      mediaKind: 'video',
+      adapterKind: VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+      endpointTemplate: 'https://api.vidu.cn/ent/v2/text2video',
+      authScheme: 'token',
+      executionLifecycle: 'asynchronous_polling',
+      supportedPurposes: ['video_generation'],
       createdAt: catalogTimestamp,
       updatedAt: catalogTimestamp
     }),
@@ -206,31 +235,56 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
     })
   ] as const;
 
+  const referenceBinding = protocolBindings.find(
+    (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.referenceVideoV2
+  )!;
+  const textBinding = protocolBindings.find(
+    (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.textVideoV2
+  )!;
+  const imageV1Binding = protocolBindings.find(
+    (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.imageV1
+  )!;
+  const geminiBinding = protocolBindings.find(
+    (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.geminiImageV2
+  )!;
+  const referenceImageBinding = protocolBindings.find(
+    (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.referenceImageV2
+  )!;
   const definitions: readonly {
     readonly providerModelKey: (typeof frozenViduModelKeys)[number];
     readonly modelId: string;
     readonly binding: ProviderProtocolBinding;
     readonly purposes: readonly ProviderOperationPurpose[];
   }[] = [
-    ...frozenViduModelKeys.slice(0, 5).map((providerModelKey) => ({
+    ...frozenViduReferenceVideoModelKeys.map((providerModelKey) => ({
       providerModelKey,
       modelId: `model-video-vidu-${providerModelKey}`,
-      binding: protocolBindings[0],
-      purposes: ['reference_to_video'] as const
+      binding: referenceBinding,
+      purposes: providerModelKey === 'viduq3-turbo'
+        ? (['reference_to_video', 'video_generation'] as const)
+        : (['reference_to_video'] as const)
     })),
+    ...frozenViduTextVideoModelKeys
+      .filter((key) => key === 'viduq3-pro')
+      .map((providerModelKey) => ({
+        providerModelKey,
+        modelId: `model-video-vidu-${providerModelKey}`,
+        binding: textBinding,
+        purposes: ['video_generation'] as const
+      })),
     {
-      providerModelKey: 'viduimage-2',
+      providerModelKey: 'viduimage-2' as const,
       modelId: 'model-image-vidu-viduimage-2',
-      binding: protocolBindings[1],
-      purposes: ['image_generation', 'image_editing']
+      binding: imageV1Binding,
+      purposes: ['image_generation', 'image_editing'] as const
     },
-    ...frozenViduModelKeys.slice(6).map((providerModelKey) => ({
+    ...frozenViduGeminiImageModelKeys.map((providerModelKey) => ({
       providerModelKey,
       modelId: `model-image-vidu-gemini-${providerModelKey}`,
       binding:
         providerModelKey === 'viduq2' || providerModelKey === 'viduq1'
-          ? protocolBindings[3]
-          : protocolBindings[2],
+          ? referenceImageBinding
+          : geminiBinding,
       purposes: providerModelKey === 'viduq2'
         ? (['image_generation', 'reference_to_image', 'image_editing'] as const)
         : (['reference_to_image'] as const)

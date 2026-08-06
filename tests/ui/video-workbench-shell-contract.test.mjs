@@ -22,7 +22,7 @@ test('video workbench uses only the real B1 local draft operations', () => {
   assert.match(workbenchSource, /storage\.getProjectSession\(\)/);
   assert.match(workbenchSource, /videoWorkspaces\.list\(\)/);
   assert.match(workbenchSource, /videoWorkspaces\.create\(workspaceMode\)/);
-  assert.match(workbenchSource, /videoWorkspaces\.update\(/);
+  assert.match(workbenchSource, /persistVideoWorkspaceDraft\(/);
   assert.doesNotMatch(workbenchSource, /providers[\s\S]{0,50}\.getRegistry\(\)/);
   assert.doesNotMatch(
     workbenchSource,
@@ -65,13 +65,13 @@ test('all three generation pages reuse the shared shell and mode source', () => 
 });
 
 test('saving a generation draft stays separate from submission', () => {
-  for (const text of [
-    '新建本地草稿',
-    '保存本地草稿',
-    '已自动保存',
-    '没有创建或提交任务'
-  ]) {
-    assert.match(workbenchSource, new RegExp(text));
-  }
+  assert.match(workbenchSource, /新建本地草稿/);
+  assert.match(workbenchSource, /已自动保存/);
+  assert.match(workbenchSource, /没有创建或提交任务/);
+  assert.match(workbenchSource, /共用同一套流程/);
   assert.match(workbenchSource, /usesFlowAutosave/);
+  assert.match(workbenchSource, /workspaceMode === 'quick_video'/);
+  assert.match(workbenchSource, /workspaceMode === 'text_to_video'/);
+  assert.match(workbenchSource, /workspaceMode === 'image_to_video'/);
+  assert.match(workbenchSource, /persistVideoWorkspaceDraft/);
 });

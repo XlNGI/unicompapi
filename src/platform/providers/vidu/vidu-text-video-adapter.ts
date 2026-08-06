@@ -20,33 +20,22 @@ import type {
   VideoResultPort
 } from '../../videos/video-result-port';
 import { VideoResultPortError } from '../../videos/video-result-port';
-import {
-  ControlledImageMaterialError,
-  type ControlledImageMaterialPort
-} from './controlled-image-material';
 import type { ViduConnectionPort } from './vidu-image-adapters';
 import type { ViduAdapterRequestControl } from './vidu-image-adapters';
 import { ViduRuntimeError } from './vidu-runtime-errors';
 import type { ViduSharedRuntime } from './vidu-shared-runtime';
+import type {
+  ViduVideoOperationContext,
+  ViduVideoOperationContextPort
+} from './vidu-video-adapter';
 
 const maximumRequestBytes = 20 * 1024 * 1024;
 const maximumResultBytes = 512 * 1024 * 1024;
 const resultUrlLifetimeMs = 24 * 60 * 60 * 1_000;
 
-export interface ViduVideoOperationContext {
-  readonly connectionId: string;
-  readonly binding: ProviderProtocolBinding;
-}
-
-export interface ViduVideoOperationContextPort {
-  remember(taskId: string, context: ViduVideoOperationContext): void;
-  resolve(taskId: string): Promise<ViduVideoOperationContext | undefined>;
-}
-
-export interface ViduReferenceVideoV2Dependencies {
+export interface ViduTextVideoV2Dependencies {
   readonly runtime: ViduSharedRuntime;
   readonly connections: ViduConnectionPort;
-  readonly materials: ControlledImageMaterialPort;
   readonly operationContext: ViduVideoOperationContextPort;
   readonly now?: () => number;
 }
@@ -59,11 +48,15 @@ interface ViduVideoResultSnapshot {
   }[];
 }
 
-export class ViduReferenceVideoV2Adapter
+/**
+ * Official Vidu text2video adapter.
+ * POST /ent/v2/text2video — https://platform.vidu.cn/docs/text-to-video
+ */
+export class ViduTextVideoV2Adapter
   implements ProviderProtocolSubmitPort, ProviderAsyncOperationPort, VideoResultPort {
   private readonly results = new Map<string, ViduVideoResultSnapshot>();
 
-  constructor(private readonly dependencies: ViduReferenceVideoV2Dependencies) {}
+  constructor(private readonly dependencies: ViduTextVideoV2Dependencies) {}
 
   async submit(
     request: ProviderProtocolSubmitRequest,
@@ -73,40 +66,22 @@ export class ViduReferenceVideoV2Adapter
     try {
       validateSubmitRequest(request);
       const video = request.task.submission.video!;
-      const textToVideo = request.evidence.capability === 'video_generation';
       const connection = await this.requireConnection(request.model.connectionId);
       const parameters = videoParameters(
         request.model.providerModelKey,
-        video.parameters,
-        textToVideo ? 'text' : 'reference'
+        video.parameters
       );
-      const prompt = requirePrompt(request);
-      let body: Uint8Array;
-      if (textToVideo) {
-        body = serializeBoundedJson({
-          model: request.model.providerModelKey,
-          prompt,
-          audio: parameters.audio,
-          ...parameters.optional
-        });
-      } else {
-        const material = await this.dependencies.materials.resolve({
-          projectId: request.task.projectId,
-          assetId: video.materials[0].assetId
-        });
-        body = serializeBoundedJson({
-          model: request.model.providerModelKey,
-          images: [`data:${material.mimeType};base64,${material.base64}`],
-          prompt,
-          audio: parameters.audio,
-          ...parameters.optional
-        });
-      }
+      const body = serializeBoundedJson({
+        model: request.model.providerModelKey,
+        prompt: requirePrompt(request),
+        audio: parameters.audio,
+        ...parameters.optional
+      });
       const response = await this.dependencies.runtime.request({
         connection,
         binding: request.binding,
         method: 'POST',
-        path: textToVideo ? '/ent/v2/text2video' : '/ent/v2/reference2video',
+        path: '/ent/v2/text2video',
         body,
         contentType: 'application/json',
         authScheme: 'token',
@@ -267,12 +242,12 @@ export class ViduReferenceVideoV2Adapter
   ) {
     const context = await this.dependencies.operationContext.resolve(taskId);
     if (!context) {
-      throw new ViduVideoAdapterError(
+      throw new ViduTextVideoAdapterError(
         'The Vidu video operation context is unavailable',
         'unknown'
       );
     }
-    assertViduVideoBinding(context.binding, context.connectionId);
+    assertViduTextVideoBinding(context.binding, context.connectionId);
     const connection = await this.requireConnection(context.connectionId);
     return this.dependencies.runtime.request({
       connection,
@@ -291,7 +266,7 @@ export class ViduReferenceVideoV2Adapter
   private async requireConnection(connectionId: string): Promise<ProviderConnection> {
     const connection = await this.dependencies.connections.get(connectionId);
     if (!connection || connection.id !== connectionId) {
-      throw new ViduVideoAdapterError(
+      throw new ViduTextVideoAdapterError(
         'The Vidu connection is unavailable',
         'not_retryable'
       );
@@ -304,93 +279,30 @@ export class ViduReferenceVideoV2Adapter
   }
 }
 
-export interface ViduPollerOptions {
-  readonly maximumAttempts?: number;
-  readonly initialDelayMs?: number;
-  readonly maximumDelayMs?: number;
-  readonly jitterRatio?: number;
-  readonly random?: () => number;
-  readonly wait?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
-}
-
-export class ViduBoundedPoller {
-  private readonly maximumAttempts: number;
-  private readonly initialDelayMs: number;
-  private readonly maximumDelayMs: number;
-  private readonly jitterRatio: number;
-  private readonly random: () => number;
-  private readonly wait: (delayMs: number, signal?: AbortSignal) => Promise<void>;
-
-  constructor(
-    private readonly operations: ProviderAsyncOperationPort,
-    options: ViduPollerOptions = {}
-  ) {
-    this.maximumAttempts = positiveInteger(options.maximumAttempts ?? 120);
-    this.initialDelayMs = positiveInteger(options.initialDelayMs ?? 1_000);
-    this.maximumDelayMs = positiveInteger(options.maximumDelayMs ?? 30_000);
-    this.jitterRatio = options.jitterRatio ?? 0.2;
-    if (this.jitterRatio < 0 || this.jitterRatio > 1) {
-      throw new TypeError('poll jitter ratio must be between zero and one');
-    }
-    this.random = options.random ?? Math.random;
-    this.wait = options.wait ?? waitForDelay;
-  }
-
-  async poll(
-    providerOperationId: string,
-    signal?: AbortSignal
-  ): Promise<ProviderAsyncOperationStatus | { readonly state: 'polling_exhausted' }> {
-    for (let attempt = 0; attempt < this.maximumAttempts; attempt += 1) {
-      if (signal?.aborted) throw new ViduRuntimeError('cancelled', 'not_retryable');
-      try {
-        const status = await this.operations.query(providerOperationId);
-        if (status.state !== 'queued' && status.state !== 'processing') return status;
-      } catch (error) {
-        if (!(error instanceof ViduRuntimeError) || error.retryability !== 'retryable') {
-          throw error;
-        }
-      }
-      if (attempt + 1 < this.maximumAttempts) {
-        await this.wait(this.delayForAttempt(attempt), signal);
-      }
-    }
-    return { state: 'polling_exhausted' };
-  }
-
-  private delayForAttempt(attempt: number): number {
-    const base = Math.min(
-      this.maximumDelayMs,
-      this.initialDelayMs * 2 ** Math.min(attempt, 20)
-    );
-    const jitter = (this.random() * 2 - 1) * this.jitterRatio;
-    return Math.max(1, Math.round(base * (1 + jitter)));
-  }
-}
-
-class ViduVideoAdapterError extends Error {
+class ViduTextVideoAdapterError extends Error {
   constructor(
     message: string,
     readonly retryability: 'retryable' | 'not_retryable' | 'unknown'
   ) {
     super(message);
-    this.name = 'ViduVideoAdapterError';
+    this.name = 'ViduTextVideoAdapterError';
   }
 }
 
-function assertViduVideoBinding(
+function assertViduTextVideoBinding(
   binding: ProviderProtocolBinding,
   connectionId: string
 ): void {
   if (
-    binding.protocolId !== 'vidu.ent.v2.reference2video' ||
-    binding.adapterKind !== 'vidu_reference_video_v2' ||
+    binding.protocolId !== 'vidu.ent.v2.text2video' ||
+    binding.adapterKind !== 'vidu_text_video_v2' ||
     binding.mediaKind !== 'video' ||
     binding.authScheme !== 'token' ||
     binding.executionLifecycle !== 'asynchronous_polling' ||
     binding.connectionId !== connectionId
   ) {
-    throw new ViduVideoAdapterError(
-      'The Vidu video protocol binding is invalid',
+    throw new ViduTextVideoAdapterError(
+      'The Vidu text video protocol binding is invalid',
       'not_retryable'
     );
   }
@@ -401,57 +313,32 @@ function validateSubmitRequest(
 ): void {
   const video = request.task.submission.video;
   const assetIds = request.task.submission.assetIds;
-  const textToVideo = request.evidence.capability === 'video_generation';
-  const commonInvalid =
+  if (
     request.execution.taskId !== request.task.id ||
     request.execution.state !== 'submitting' ||
     request.model.mediaKind !== 'video' ||
     request.binding.mediaKind !== 'video' ||
-    request.binding.protocolId !== 'vidu.ent.v2.reference2video' ||
-    request.binding.adapterKind !== 'vidu_reference_video_v2' ||
+    request.binding.protocolId !== 'vidu.ent.v2.text2video' ||
+    request.binding.adapterKind !== 'vidu_text_video_v2' ||
     request.binding.executionLifecycle !== 'asynchronous_polling' ||
     request.binding.authScheme !== 'token' ||
     request.model.protocolBindingId !== request.binding.id ||
     request.model.providerId !== request.binding.providerId ||
     request.model.connectionId !== request.binding.connectionId ||
     request.evidence.modelId !== request.model.id ||
+    request.evidence.capability !== 'video_generation' ||
+    !request.binding.supportedPurposes.includes('video_generation') ||
     !video ||
     video.modelId !== request.model.id ||
     video.capabilityEvidenceId !== request.evidence.id ||
     video.providerId !== request.model.providerId ||
-    video.connectionId !== request.model.connectionId;
-  if (commonInvalid) {
-    throw new ViduVideoAdapterError(
-      'The video operation does not match the Vidu reference protocol',
-      'not_retryable'
-    );
-  }
-  if (textToVideo) {
-    if (
-      request.evidence.capability !== 'video_generation' ||
-      !request.binding.supportedPurposes.includes('video_generation') ||
-      request.model.providerModelKey !== 'viduq3-turbo' ||
-      video!.materials.length !== 0 ||
-      (assetIds !== undefined && assetIds.length !== 0)
-    ) {
-      throw new ViduVideoAdapterError(
-        'The video operation does not match the Vidu text2video protocol',
-        'not_retryable'
-      );
-    }
-    return;
-  }
-  if (
-    request.evidence.capability !== 'reference_to_video' ||
-    !request.binding.supportedPurposes.includes('reference_to_video') ||
-    video!.materials.length !== 1 ||
-    video!.materials[0]?.mediaKind !== 'image' ||
-    !assetIds ||
-    assetIds.length !== 1 ||
-    assetIds[0] !== video!.materials[0]?.assetId
+    video.connectionId !== request.model.connectionId ||
+    video.materials.length !== 0 ||
+    (assetIds !== undefined && assetIds.length !== 0) ||
+    !['viduq3-pro', 'viduq3-turbo'].includes(request.model.providerModelKey)
   ) {
-    throw new ViduVideoAdapterError(
-      'The video operation does not match the Vidu reference protocol',
+    throw new ViduTextVideoAdapterError(
+      'The video operation does not match the Vidu text2video protocol',
       'not_retryable'
     );
   }
@@ -459,29 +346,29 @@ function validateSubmitRequest(
 
 function videoParameters(
   modelKey: string,
-  values: Readonly<Record<string, VideoDynamicParameterValue>>,
-  mode: 'text' | 'reference'
+  values: Readonly<Record<string, VideoDynamicParameterValue>>
 ): { readonly audio: boolean; readonly optional: Readonly<Record<string, unknown>> } {
   const allowed = new Set(['audio', 'duration', 'resolution', 'aspect_ratio']);
   if (Object.keys(values).some((key) => !allowed.has(key))) {
-    throw new ViduVideoAdapterError(
+    throw new ViduTextVideoAdapterError(
       'The Vidu video request contains an unsupported parameter',
       'not_retryable'
     );
   }
-  const audio = values.audio ?? (mode === 'text');
+  // Official text2video default for audio is true (q3).
+  const audio = values.audio ?? true;
   if (typeof audio !== 'boolean') {
-    throw new ViduVideoAdapterError('The Vidu audio option is invalid', 'not_retryable');
+    throw new ViduTextVideoAdapterError('The Vidu audio option is invalid', 'not_retryable');
   }
   const optional: Record<string, unknown> = {};
   if (values.duration !== undefined) {
     const duration = values.duration;
-    const range = durationRange(modelKey, mode);
+    const range = durationRange(modelKey);
     if (!Number.isSafeInteger(duration) ||
       typeof duration !== 'number' ||
       duration < range.minimum ||
       duration > range.maximum) {
-      throw new ViduVideoAdapterError(
+      throw new ViduTextVideoAdapterError(
         'The Vidu video duration is outside the approved model range',
         'not_retryable'
       );
@@ -492,7 +379,7 @@ function videoParameters(
     const value = values[key];
     if (value !== undefined) {
       if (typeof value !== 'string' || value.trim().length === 0) {
-        throw new ViduVideoAdapterError(
+        throw new ViduTextVideoAdapterError(
           'The Vidu video parameter is invalid',
           'not_retryable'
         );
@@ -503,26 +390,20 @@ function videoParameters(
   return { audio, optional };
 }
 
-function durationRange(
-  modelKey: string,
-  mode: 'text' | 'reference'
-): { minimum: number; maximum: number } {
-  if (mode === 'text') {
-    if (modelKey === 'viduq3-turbo') return { minimum: 1, maximum: 16 };
-    throw new ViduVideoAdapterError('The Vidu text2video model is unavailable', 'not_retryable');
+function durationRange(modelKey: string): { minimum: number; maximum: number } {
+  if (modelKey === 'viduq3-pro' || modelKey === 'viduq3-turbo') {
+    return { minimum: 1, maximum: 16 };
   }
-  if (modelKey === 'viduq3-drama') return { minimum: 2, maximum: 15 };
-  if (['viduq3-ad', 'viduq3-mix', 'viduq3-turbo'].includes(modelKey)) {
-    return { minimum: 3, maximum: 15 };
-  }
-  if (modelKey === 'viduq3') return { minimum: 3, maximum: 16 };
-  throw new ViduVideoAdapterError('The Vidu Q3 model is unavailable', 'not_retryable');
+  throw new ViduTextVideoAdapterError(
+    'The Vidu text2video model is unavailable',
+    'not_retryable'
+  );
 }
 
 function requirePrompt(request: ProviderProtocolSubmitRequest): string {
   const prompt = request.task.submission.prompt?.finalPrompt.trim();
   if (!prompt || prompt.length > 5_000) {
-    throw new ViduVideoAdapterError('The Vidu video prompt is invalid', 'not_retryable');
+    throw new ViduTextVideoAdapterError('The Vidu video prompt is invalid', 'not_retryable');
   }
   return prompt;
 }
@@ -530,7 +411,7 @@ function requirePrompt(request: ProviderProtocolSubmitRequest): string {
 function serializeBoundedJson(value: unknown): Uint8Array {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   if (bytes.byteLength > maximumRequestBytes) {
-    throw new ViduVideoAdapterError(
+    throw new ViduTextVideoAdapterError(
       'The serialized Vidu video request exceeds 20 MB',
       'not_retryable'
     );
@@ -613,18 +494,11 @@ function mapSubmissionFailure(
   error: unknown,
   requestSent: boolean
 ): ProviderSubmitOutcome {
-  if (error instanceof ViduVideoAdapterError) {
+  if (error instanceof ViduTextVideoAdapterError) {
     return {
       kind: 'failed_before_submission',
       message: error.message,
       retryability: error.retryability
-    };
-  }
-  if (error instanceof ControlledImageMaterialError) {
-    return {
-      kind: 'failed_before_submission',
-      message: error.message,
-      retryability: 'not_retryable'
     };
   }
   if (error instanceof ViduRuntimeError && (
@@ -665,26 +539,4 @@ function runtimeRetryability(
   return error instanceof ViduRuntimeError ? error.retryability : 'unknown';
 }
 
-function positiveInteger(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError('poll limit must be a positive integer');
-  }
-  return value;
-}
-
-function waitForDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(finish, delayMs);
-    const abort = () => {
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', abort);
-      reject(new ViduRuntimeError('cancelled', 'not_retryable'));
-    };
-    function finish() {
-      signal?.removeEventListener('abort', abort);
-      resolve();
-    }
-    if (signal?.aborted) abort();
-    else signal?.addEventListener('abort', abort, { once: true });
-  });
-}
+export type { ViduVideoOperationContext };
