@@ -6,6 +6,7 @@ const shell = await readFile('src/pages/providers/ProvidersPage.tsx', 'utf8');
 const gallery = await readFile('src/pages/providers/ProviderGalleryView.tsx', 'utf8');
 const manage = await readFile('src/pages/providers/ProviderManageView.tsx', 'utf8');
 const brandIcon = await readFile('src/pages/providers/ProviderBrandIcon.tsx', 'utf8');
+const pageStyles = await readFile('src/styles/pages.css', 'utf8');
 const source = [shell, gallery, manage].join('\n');
 
 test('provider page is driven by registry and package templates', () => {
@@ -69,6 +70,12 @@ test('provider feedback uses a closable floating status card without changing ac
   assert.match(shell, /6_000/);
   assert.match(shell, /4_000/);
   assert.match(shell, /window\.clearTimeout/);
+  assert.match(shell, /providerMessageDuration/);
+  assert.match(shell, /uc-provider-page__message-progress/);
+  assert.match(shell, /animationDuration: `\$\{messageDurationMs\}ms`/);
+  assert.match(pageStyles, /@keyframes uc-provider-message-countdown/);
+  assert.match(pageStyles, /transform: scaleX\(0\)/);
+  assert.match(pageStyles, /prefers-reduced-motion: reduce/);
 });
 
 test('provider page exposes the controlled framework mutations', () => {

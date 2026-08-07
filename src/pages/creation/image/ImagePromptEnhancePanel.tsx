@@ -24,6 +24,7 @@ import type {
   ImagePromptEnhanceIpcErrorCode,
   ImagePromptEnhancePreparationDto
 } from '../../../shared/image-prompt-enhance-ipc';
+import type { ImageWorkspaceIpcErrorCode } from '../../../shared/image-workspace-ipc';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 
 interface ImagePromptEnhancePanelProps {
@@ -33,7 +34,10 @@ interface ImagePromptEnhancePanelProps {
   readonly onMessage: (message: string) => void;
 }
 
-const errorMessages: Partial<Record<ImagePromptEnhanceIpcErrorCode, string>> = {
+const errorMessages: Partial<Record<
+  ImagePromptEnhanceIpcErrorCode | ImageWorkspaceIpcErrorCode,
+  string
+>> = {
   invalid_request: '提示词增强请求无效。',
   project_not_open: '当前没有打开的项目。',
   draft_not_found: '当前图片草稿已不存在。',

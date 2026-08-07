@@ -21,6 +21,7 @@ import type {
 } from '../../../shared/video-feature-ipc';
 import type {
   VideoWorkspaceDraftDto,
+  VideoWorkspaceIpcErrorCode,
   VideoWorkspaceParameterValueDto
 } from '../../../shared/video-workspace-ipc';
 
@@ -36,7 +37,8 @@ interface VideoFeatureSubmissionPanelProps {
   readonly onSubmissionComplete?: (submission: VideoFeatureSubmissionDto) => void;
 }
 
-const errorMessages: Record<VideoFeatureIpcErrorCode, string> = {
+const errorMessages: Record<VideoFeatureIpcErrorCode, string> &
+  Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
   invalid_request: '视频功能请求无效，请重新保存当前草稿。',
   project_not_open: '当前没有打开的项目。',
   draft_not_found: '当前视频草稿已不存在。',

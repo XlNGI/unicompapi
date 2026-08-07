@@ -41,6 +41,10 @@ function providerMessageTone(message: string): ProviderMessageTone {
   return 'success';
 }
 
+function providerMessageDuration(tone: ProviderMessageTone): number {
+  return tone === 'danger' ? 6_000 : 4_000;
+}
+
 function describeValidationSafeCode(safeCode: string): string {
   const normalized = safeCode.replace(/^(?:newapi|deepseek|kling|volcengine|vidu)\./u, '');
   const labels: Record<string, string> = {
@@ -149,7 +153,7 @@ export function ProvidersPage() {
     if (!message) return;
     const timeout = window.setTimeout(
       () => setMessage(''),
-      providerMessageTone(message) === 'danger' ? 6_000 : 4_000
+      providerMessageDuration(providerMessageTone(message))
     );
     return () => window.clearTimeout(timeout);
   }, [message]);
@@ -334,6 +338,7 @@ export function ProvidersPage() {
   }
 
   const messageTone = providerMessageTone(message);
+  const messageDurationMs = providerMessageDuration(messageTone);
   const MessageIcon = messageTone === 'success'
     ? LuCircleCheck
     : messageTone === 'danger'
@@ -375,10 +380,15 @@ export function ProvidersPage() {
           role={messageTone === 'danger' ? 'alert' : 'status'}
         >
           <MessageIcon aria-hidden="true" />
-          <span>{message}</span>
+          <span className="uc-provider-page__message-text">{message}</span>
           <button aria-label="关闭通知" onClick={() => setMessage('')} type="button">
             <LuX aria-hidden="true" />
           </button>
+          <span
+            aria-hidden="true"
+            className="uc-provider-page__message-progress"
+            style={{ animationDuration: `${messageDurationMs}ms` }}
+          />
         </div>
       )}
 

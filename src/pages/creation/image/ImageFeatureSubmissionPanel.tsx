@@ -20,6 +20,7 @@ import type {
   ImageFeatureSubmissionDto
 } from '../../../shared/image-feature-ipc';
 import type {
+  ImageWorkspaceIpcErrorCode,
   ImageWorkspaceParameterValueDto
 } from '../../../shared/image-workspace-ipc';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
@@ -42,7 +43,8 @@ interface ImageFeatureSubmissionPanelProps {
   readonly onSubmissionComplete?: (submission: ImageFeatureSubmissionDto) => void;
 }
 
-const errorMessages: Record<ImageFeatureIpcErrorCode, string> = {
+const errorMessages: Record<ImageFeatureIpcErrorCode, string> &
+  Partial<Record<ImageWorkspaceIpcErrorCode, string>> = {
   invalid_request: '图片功能请求无效，请重新保存当前草稿。',
   project_not_open: '当前没有打开的项目。',
   draft_not_found: '当前图片草稿已不存在。',

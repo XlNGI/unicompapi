@@ -3854,6 +3854,7 @@
   color: var(--uc-color-text-primary);
   background: var(--uc-color-surface-raised);
   box-shadow: var(--uc-shadow-lg);
+  overflow: hidden;
 }
 
 .uc-provider-page__message > svg {
@@ -3862,9 +3863,33 @@
   color: var(--uc-color-status-info);
 }
 
-.uc-provider-page__message > span {
+.uc-provider-page__message-text {
   overflow-wrap: anywhere;
   padding: 0 var(--uc-space-3);
+}
+
+.uc-provider-page__message-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--uc-color-status-info);
+  pointer-events: none;
+  transform-origin: left center;
+  animation-name: uc-provider-message-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes uc-provider-message-countdown {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
 }
 
 .uc-provider-page__message button {
@@ -3898,12 +3923,27 @@
   color: var(--uc-color-status-success);
 }
 
+.uc-provider-page__message--success .uc-provider-page__message-progress {
+  background: var(--uc-color-status-success);
+}
+
 .uc-provider-page__message--danger {
   border-color: var(--uc-color-status-danger-border);
 }
 
 .uc-provider-page__message--danger > svg {
   color: var(--uc-color-status-danger);
+}
+
+.uc-provider-page__message--danger .uc-provider-page__message-progress {
+  background: var(--uc-color-status-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uc-provider-page__message-progress {
+    animation: none;
+    transform: scaleX(0);
+  }
 }
 
 .uc-provider-page__form-card form,
