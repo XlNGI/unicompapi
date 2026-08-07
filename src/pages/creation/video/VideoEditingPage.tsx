@@ -1,4 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  Checkbox,
+  Input,
+  InputNumber,
+  Radio,
+  RadioGroup,
+  SelectPicker,
+  Slider
+} from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -142,7 +151,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
       if (!storage || !videoEditors) {
         if (active) {
           setLoading(false);
-          setMessage('本地编辑端口不可用，请在 Electron 桌面应用中打开。');
+      setMessage('本地编辑功能不可用，请在桌面应用中打开。');
         }
         return;
       }
@@ -875,21 +884,21 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
             </StatusPill>
           </div>
           <div className="uc-video-editor__draft-picker">
-            <label>
+            <div className="uc-rsuite-field">
               <span>编辑草稿</span>
-              <select
+              <SelectPicker
+                aria-label="编辑草稿"
+                cleanable={false}
+                data={drafts.map((draft) => ({
+                  label: draft.title,
+                  value: draft.draftId
+                }))}
                 disabled={!session || loading || operationBlocked || drafts.length === 0}
-                onChange={(event) => void openDraft(event.target.value)}
-                value={currentDraft?.draftId ?? ''}
-              >
-                {drafts.length === 0 ? <option value="">暂无编辑草稿</option> : null}
-                {drafts.map((draft) => (
-                  <option key={draft.draftId} value={draft.draftId}>
-                    {draft.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(value) => value && void openDraft(value)}
+                placeholder={drafts.length === 0 ? '暂无编辑草稿' : '选择编辑草稿'}
+                value={currentDraft?.draftId ?? null}
+              />
+            </div>
             <span>项目：{session?.projectName ?? '尚未打开项目'}</span>
           </div>
         </div>
@@ -968,7 +977,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
       <div className="uc-video-editor__workspace">
         <Card className="uc-video-editor__media-bin">
           <PanelHeading
-            description="素材只通过 B2 受控端口登记，不读取 renderer 路径。"
+            description="素材只通过受控接口登记，界面不会读取本地绝对路径。"
             title="素材与片段"
           />
           <div className="uc-video-editor__tabs" role="tablist">
@@ -1034,7 +1043,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
             </Button>
           )}
           <p className="uc-video-editor__hint">
-            导入只登记或复制视频并追加片段，不上传、不调用在线 AI、不创建任务。
+              导入只登记或复制视频并追加片段，不上传、不调用在线智能服务、不创建任务。
           </p>
         </Card>
 
@@ -1245,15 +1254,14 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
               <span>{segments.length} 个片段</span>
               <span>{formatTime(totalDurationUs)}</span>
             </div>
-            <input
+            <Slider
               aria-label="时间线播放头"
               className="uc-video-editor__playhead"
               disabled={totalDurationUs === 0}
               max={Math.max(1, totalDurationUs)}
-              min="0"
-              onChange={(event) => seekTimeline(Number(event.target.value))}
-              step="1000"
-              type="range"
+              min={0}
+              onChange={seekTimeline}
+              step={1000}
               value={Math.min(playheadUs, Math.max(1, totalDurationUs))}
             />
             <VideoTimelineTrack
@@ -1288,7 +1296,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
 
         <Card className="uc-video-editor__inspector">
           <PanelHeading
-            description="表单只提交领域命令；成功 DTO 是唯一持久化事实。"
+            description="表单只提交编辑操作；成功返回的数据是唯一保存依据。"
             title="属性面板"
           />
           <div className="uc-video-editor__tabs" role="tablist">
@@ -1348,11 +1356,11 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
           </div>
           <label className="uc-video-editor__title-field">
             <span>草稿名称</span>
-            <input
+            <Input
               disabled={!currentDraft}
               onBlur={() => void commitTitle()}
-              onChange={(event) => {
-                setTitle(event.target.value);
+              onChange={(value) => {
+                setTitle(value);
                 setSaveState('editing');
               }}
               onKeyDown={(event) => {
@@ -1385,6 +1393,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
             <CanvasInspector
               busy={operationBlocked}
               canvas={currentDraft.canvas}
+              key={`${currentDraft.draftId}-${JSON.stringify(currentDraft.canvas)}`}
               onCommand={(canvas) =>
                 void runCommand(
                   { kind: 'set_canvas', canvas },
@@ -1476,7 +1485,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
         <StatusPill tone={saveStateTones[saveState]}>
           {saveStateLabels[saveState]}
         </StatusPill>
-        <span>草稿：{currentDraft ? `revision ${currentDraft.revision}` : '无'}</span>
+        <span>草稿：{currentDraft ? `版本 ${currentDraft.revision}` : '无'}</span>
         <span>
           源文件：
           {currentDraft
@@ -1553,7 +1562,7 @@ function MediaList({
   if (!draft) {
     return (
       <EmptyState
-        description="点击顶部“新建草稿”建立项目内空白 EditDraft。"
+        description="点击顶部“新建草稿”建立项目内空白编辑草稿。"
         icon="编"
         readOnly
         title="还没有编辑草稿"
@@ -1641,7 +1650,7 @@ function ProjectVideoList({
           type="button"
         >
           <strong>{work.name}</strong>
-          <small>{work.fileState === 'available' ? '本地可用' : work.fileState}</small>
+          <small>{fileStateLabel(work.fileState)}</small>
         </button>
       ))}
     </div>
@@ -1843,22 +1852,20 @@ function ClipInspector({
         <h3>裁剪</h3>
         <label>
           开始（毫秒）
-          <input
+          <InputNumber
             defaultValue={clip.sourceRange.inUs / 1000}
-            min="0"
+            min={0}
             name="trimStartMs"
-            step="1"
-            type="number"
+            step={1}
           />
         </label>
         <label>
           结束（毫秒）
-          <input
+          <InputNumber
             defaultValue={clip.sourceRange.outUs / 1000}
-            min="1"
+            min={1}
             name="trimEndMs"
-            step="1"
-            type="number"
+            step={1}
           />
         </label>
         <Button disabled={busy} type="submit">保存裁剪</Button>
@@ -1868,12 +1875,11 @@ function ClipInspector({
         <h3>速度</h3>
         <label>
           速度百分比
-          <input
+          <InputNumber
             defaultValue={(clip.speed.numerator / clip.speed.denominator) * 100}
-            min="1"
+            min={1}
             name="speedPercent"
-            step="1"
-            type="number"
+            step={1}
           />
         </label>
         <Button disabled={busy} type="submit">保存速度</Button>
@@ -1881,26 +1887,31 @@ function ClipInspector({
 
       <form className="uc-video-editor__form" key={`transform-${clip.clipId}-${JSON.stringify(clip.transform)}`} onSubmit={submitTransform}>
         <h3>画面变换</h3>
-        <label>缩放（%）<input defaultValue={clip.transform.scalePermille / 10} min="0.1" name="scalePercent" step="0.1" type="number" /></label>
-        <label>水平位置（%）<input defaultValue={clip.transform.positionXPermille / 10} name="positionXPercent" step="0.1" type="number" /></label>
-        <label>垂直位置（%）<input defaultValue={clip.transform.positionYPermille / 10} name="positionYPercent" step="0.1" type="number" /></label>
-        <label>旋转（度）<input defaultValue={clip.transform.rotationMilliDegrees / 1000} name="rotationDegrees" step="0.001" type="number" /></label>
-        <label className="uc-video-editor__check"><input defaultChecked={clip.transform.flipX} name="flipX" type="checkbox" />水平翻转</label>
-        <label className="uc-video-editor__check"><input defaultChecked={clip.transform.flipY} name="flipY" type="checkbox" />垂直翻转</label>
-        <label className="uc-video-editor__check"><input defaultChecked={clip.transform.crop !== null} name="cropEnabled" type="checkbox" />启用裁切</label>
-        <label>裁切 X（%）<input defaultValue={(clip.transform.crop?.xPermille ?? 0) / 10} min="0" name="cropXPercent" step="0.1" type="number" /></label>
-        <label>裁切 Y（%）<input defaultValue={(clip.transform.crop?.yPermille ?? 0) / 10} min="0" name="cropYPercent" step="0.1" type="number" /></label>
-        <label>裁切宽度（%）<input defaultValue={(clip.transform.crop?.widthPermille ?? 1000) / 10} min="0.1" name="cropWidthPercent" step="0.1" type="number" /></label>
-        <label>裁切高度（%）<input defaultValue={(clip.transform.crop?.heightPermille ?? 1000) / 10} min="0.1" name="cropHeightPercent" step="0.1" type="number" /></label>
+        <label>缩放（%）<InputNumber defaultValue={clip.transform.scalePermille / 10} min={0.1} name="scalePercent" step={0.1} /></label>
+        <label>水平位置（%）<InputNumber defaultValue={clip.transform.positionXPermille / 10} name="positionXPercent" step={0.1} /></label>
+        <label>垂直位置（%）<InputNumber defaultValue={clip.transform.positionYPermille / 10} name="positionYPercent" step={0.1} /></label>
+        <label>旋转（度）<InputNumber defaultValue={clip.transform.rotationMilliDegrees / 1000} name="rotationDegrees" step={0.001} /></label>
+        <Checkbox className="uc-video-editor__check" defaultChecked={clip.transform.flipX} name="flipX">水平翻转</Checkbox>
+        <Checkbox className="uc-video-editor__check" defaultChecked={clip.transform.flipY} name="flipY">垂直翻转</Checkbox>
+        <Checkbox className="uc-video-editor__check" defaultChecked={clip.transform.crop !== null} name="cropEnabled">启用裁切</Checkbox>
+        <label>横向裁切（%）<InputNumber defaultValue={(clip.transform.crop?.xPermille ?? 0) / 10} min={0} name="cropXPercent" step={0.1} /></label>
+        <label>纵向裁切（%）<InputNumber defaultValue={(clip.transform.crop?.yPermille ?? 0) / 10} min={0} name="cropYPercent" step={0.1} /></label>
+        <label>裁切宽度（%）<InputNumber defaultValue={(clip.transform.crop?.widthPermille ?? 1000) / 10} min={0.1} name="cropWidthPercent" step={0.1} /></label>
+        <label>裁切高度（%）<InputNumber defaultValue={(clip.transform.crop?.heightPermille ?? 1000) / 10} min={0.1} name="cropHeightPercent" step={0.1} /></label>
         <Button disabled={busy} type="submit">保存画面变换</Button>
       </form>
 
-      <label className="uc-video-editor__disabled-field">
+      <div className="uc-video-editor__disabled-field">
         基础转场
-        <select disabled>
-          <option>无转场（媒体引擎尚未审批）</option>
-        </select>
-      </label>
+        <SelectPicker
+          aria-label="基础转场"
+          cleanable={false}
+          data={[{ value: 'none', label: '无转场（媒体引擎尚未审批）' }]}
+          disabled
+          searchable={false}
+          value="none"
+        />
+      </div>
     </div>
   );
 }
@@ -1922,12 +1933,20 @@ function CanvasInspector({
     sourceClip?.source.identity.width ?? 1,
     sourceClip?.source.identity.height ?? 1
   );
+  const [ratioKind, setRatioKind] = useState<'source' | 'ratio'>(
+    canvas.aspectRatio.kind
+  );
+  const [transformPolicy, setTransformPolicy] = useState<'fit' | 'fill'>(
+    canvas.transformPolicy
+  );
+  const [backgroundKind, setBackgroundKind] = useState<'solid' | 'blur_source'>(
+    canvas.background.kind
+  );
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    const ratioKind = data.get('ratioKind');
     const numerator = Math.round(formNumber(form, 'ratioNumerator'));
     const denominator = Math.round(formNumber(form, 'ratioDenominator'));
     const strengthPermille = percentToPermille(
@@ -1948,9 +1967,9 @@ function CanvasInspector({
         ratioKind === 'ratio'
           ? { kind: 'ratio', numerator, denominator }
           : { kind: 'source' },
-      transformPolicy: data.get('transformPolicy') === 'fill' ? 'fill' : 'fit',
+      transformPolicy: transformPolicy === 'fill' ? 'fill' : 'fit',
       background:
-        data.get('backgroundKind') === 'blur_source'
+        backgroundKind === 'blur_source'
           ? { kind: 'blur_source', strengthPermille }
           : { kind: 'solid', color: String(data.get('backgroundColor')) }
     });
@@ -1967,35 +1986,55 @@ function CanvasInspector({
       onSubmit={submit}
     >
       <h3>画布</h3>
-      <label>
+      <div className="uc-rsuite-field">
         比例来源
-        <select
-          defaultValue={canvas.aspectRatio.kind}
-          name="ratioKind"
-        >
-          <option value="source">跟随首个源视频</option>
-          <option value="ratio">自定义比例</option>
-        </select>
-      </label>
-      <label>比例宽<input defaultValue={ratio.numerator} min="1" name="ratioNumerator" step="1" type="number" /></label>
-      <label>比例高<input defaultValue={ratio.denominator} min="1" name="ratioDenominator" step="1" type="number" /></label>
-      <label>
+        <SelectPicker
+          aria-label="比例来源"
+          cleanable={false}
+          data={[
+            { value: 'source', label: '跟随首个源视频' },
+            { value: 'ratio', label: '自定义比例' }
+          ]}
+          onChange={(value) => setRatioKind(value === 'ratio' ? 'ratio' : 'source')}
+          searchable={false}
+          value={ratioKind}
+        />
+      </div>
+      <label>比例宽<InputNumber defaultValue={ratio.numerator} min={1} name="ratioNumerator" step={1} /></label>
+      <label>比例高<InputNumber defaultValue={ratio.denominator} min={1} name="ratioDenominator" step={1} /></label>
+      <div className="uc-rsuite-field">
         适配方式
-        <select defaultValue={canvas.transformPolicy} name="transformPolicy">
-          <option value="fit">适应画布</option>
-          <option value="fill">填满画布</option>
-        </select>
-      </label>
-      <label>
+        <SelectPicker
+          aria-label="适配方式"
+          cleanable={false}
+          data={[
+            { value: 'fit', label: '适应画布' },
+            { value: 'fill', label: '填满画布' }
+          ]}
+          onChange={(value) => setTransformPolicy(value === 'fill' ? 'fill' : 'fit')}
+          searchable={false}
+          value={transformPolicy}
+        />
+      </div>
+      <div className="uc-rsuite-field">
         背景
-        <select defaultValue={canvas.background.kind} name="backgroundKind">
-          <option value="solid">纯色</option>
-          <option value="blur_source">源画面模糊</option>
-        </select>
-      </label>
+        <SelectPicker
+          aria-label="背景"
+          cleanable={false}
+          data={[
+            { value: 'solid', label: '纯色' },
+            { value: 'blur_source', label: '源画面模糊' }
+          ]}
+          onChange={(value) =>
+            setBackgroundKind(value === 'blur_source' ? 'blur_source' : 'solid')
+          }
+          searchable={false}
+          value={backgroundKind}
+        />
+      </div>
       <label>
         背景颜色
-        <input
+        <Input
           defaultValue={
             canvas.background.kind === 'solid'
               ? canvas.background.color
@@ -2007,17 +2046,16 @@ function CanvasInspector({
       </label>
       <label>
         模糊强度（%）
-        <input
+        <InputNumber
           defaultValue={
             canvas.background.kind === 'blur_source'
               ? canvas.background.strengthPermille / 10
               : 50
           }
-          max="100"
-          min="0"
+          max={100}
+          min={0}
           name="blurStrengthPercent"
-          step="0.1"
-          type="number"
+          step={0.1}
         />
       </label>
       <Button disabled={busy} type="submit">保存画布设置</Button>
@@ -2043,6 +2081,67 @@ function TextInspector({
   readonly totalDurationUs: number;
 }) {
   const selected = texts.find((text) => text.textId === selectedTextId);
+
+  return (
+    <div className="uc-video-editor__inspector-content">
+      <div className="uc-video-editor__layer-list">
+        <Button
+          disabled={busy}
+          onClick={() => onSelect('')}
+          variant={selected ? 'ghost' : 'secondary'}
+        >
+          新建文字
+        </Button>
+        {texts.map((text, index) => (
+          <button
+            aria-pressed={selectedTextId === text.textId}
+            key={text.textId}
+            onClick={() => onSelect(text.textId)}
+            type="button"
+          >
+            {index + 1}. {text.content || '空文字层'}
+          </button>
+        ))}
+      </div>
+      <TextLayerForm
+        busy={busy}
+        key={selected?.textId ?? 'new-text'}
+        onCommand={onCommand}
+        onInvalid={onInvalid}
+        onSelect={onSelect}
+        selected={selected}
+        totalDurationUs={totalDurationUs}
+      />
+    </div>
+  );
+}
+
+function TextLayerForm({
+  busy,
+  onCommand,
+  onInvalid,
+  onSelect,
+  selected,
+  totalDurationUs
+}: {
+  readonly busy: boolean;
+  readonly onCommand: (command: VideoEditorUpdateDto, message: string) => void;
+  readonly onInvalid: (message: string) => void;
+  readonly onSelect: (textId: string) => void;
+  readonly selected?: VideoEditorTextOverlayDto;
+  readonly totalDurationUs: number;
+}) {
+  const [alignment, setAlignment] = useState<'left' | 'center' | 'right'>(
+    selected?.style.alignment === 'left' || selected?.style.alignment === 'right'
+      ? selected.style.alignment
+      : 'center'
+  );
+  const [entrance, setEntrance] = useState<'none' | 'fade_in'>(
+    selected?.entrance === 'fade_in' ? 'fade_in' : 'none'
+  );
+  const [exit, setExit] = useState<'none' | 'fade_out'>(
+    selected?.exit === 'fade_out' ? 'fade_out' : 'none'
+  );
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2095,16 +2194,13 @@ function TextInspector({
               ? { resolvedFontId: selected.style.resolvedFontId }
               : {}),
             fontSizeMilliPx,
-            alignment:
-              data.get('alignment') === 'left' || data.get('alignment') === 'right'
-                ? data.get('alignment') as 'left' | 'right'
-                : 'center',
+            alignment,
             opacityPermille,
             color: String(data.get('color'))
           },
           position: { xPermille, yPermille },
-          entrance: data.get('entrance') === 'fade_in' ? 'fade_in' : 'none',
-          exit: data.get('exit') === 'fade_out' ? 'fade_out' : 'none'
+          entrance,
+          exit
         }
       },
       selected ? '文字层修改已保存。' : '新文字层已添加。'
@@ -2112,64 +2208,39 @@ function TextInspector({
   }
 
   return (
-    <div className="uc-video-editor__inspector-content">
-      <div className="uc-video-editor__layer-list">
+    <form className="uc-video-editor__form" onSubmit={submit}>
+      <h3>{selected ? '编辑文字层' : '新建文字层'}</h3>
+      <label>文字内容<Input as="textarea" defaultValue={selected?.content ?? ''} name="content" rows={3} /></label>
+      <label>开始（毫秒）<InputNumber defaultValue={(selected?.range.startUs ?? 0) / 1000} min={0} name="startMs" step={1} /></label>
+      <label>结束（毫秒）<InputNumber defaultValue={(selected?.range.endUs ?? totalDurationUs) / 1000} min={1} name="endMs" step={1} /></label>
+      <label>字体<Input defaultValue={selected?.style.requestedFontFamily ?? defaultTextFontFamily} name="fontFamily" /></label>
+      <label>字号（px）<InputNumber defaultValue={(selected?.style.fontSizeMilliPx ?? 32_000) / 1000} min={1} name="fontSizePx" step={0.1} /></label>
+      <div className="uc-rsuite-field">对齐<SelectPicker aria-label="对齐" cleanable={false} data={[{ value: 'left', label: '左对齐' }, { value: 'center', label: '居中' }, { value: 'right', label: '右对齐' }]} onChange={(value) => setAlignment(value === 'left' || value === 'right' ? value : 'center')} searchable={false} value={alignment} /></div>
+      <label>水平位置（%）<InputNumber defaultValue={(selected?.position.xPermille ?? 500) / 10} max={100} min={0} name="xPercent" step={0.1} /></label>
+      <label>垂直位置（%）<InputNumber defaultValue={(selected?.position.yPermille ?? 850) / 10} max={100} min={0} name="yPercent" step={0.1} /></label>
+      <label>透明度（%）<InputNumber defaultValue={(selected?.style.opacityPermille ?? 1000) / 10} max={100} min={0} name="opacityPercent" step={0.1} /></label>
+      <label>颜色<Input defaultValue={selected?.style.color ?? '#ffffff'} name="color" type="color" /></label>
+      <div className="uc-rsuite-field">出现<SelectPicker aria-label="出现" cleanable={false} data={[{ value: 'none', label: '直接出现' }, { value: 'fade_in', label: '淡入' }]} onChange={(value) => setEntrance(value === 'fade_in' ? 'fade_in' : 'none')} searchable={false} value={entrance} /></div>
+      <div className="uc-rsuite-field">消失<SelectPicker aria-label="消失" cleanable={false} data={[{ value: 'none', label: '直接消失' }, { value: 'fade_out', label: '淡出' }]} onChange={(value) => setExit(value === 'fade_out' ? 'fade_out' : 'none')} searchable={false} value={exit} /></div>
+      <Button disabled={busy || totalDurationUs <= 0} type="submit">
+        {selected ? '保存文字层' : '添加文字层'}
+      </Button>
+      {selected ? (
         <Button
           disabled={busy}
-          onClick={() => onSelect('')}
-          variant={selected ? 'ghost' : 'secondary'}
+          onClick={() => {
+            onCommand(
+              { kind: 'remove_text', textId: selected.textId },
+              '文字层已删除。'
+            );
+            onSelect('');
+          }}
+          variant="ghost"
         >
-          新建文字
+          删除文字层
         </Button>
-        {texts.map((text, index) => (
-          <button
-            aria-pressed={selectedTextId === text.textId}
-            key={text.textId}
-            onClick={() => onSelect(text.textId)}
-            type="button"
-          >
-            {index + 1}. {text.content || '空文字层'}
-          </button>
-        ))}
-      </div>
-      <form
-        className="uc-video-editor__form"
-        key={selected?.textId ?? 'new-text'}
-        onSubmit={submit}
-      >
-        <h3>{selected ? '编辑文字层' : '新建文字层'}</h3>
-        <label>文字内容<textarea defaultValue={selected?.content ?? ''} name="content" rows={3} /></label>
-        <label>开始（毫秒）<input defaultValue={(selected?.range.startUs ?? 0) / 1000} min="0" name="startMs" step="1" type="number" /></label>
-        <label>结束（毫秒）<input defaultValue={(selected?.range.endUs ?? totalDurationUs) / 1000} min="1" name="endMs" step="1" type="number" /></label>
-        <label>字体<input defaultValue={selected?.style.requestedFontFamily ?? defaultTextFontFamily} name="fontFamily" /></label>
-        <label>字号（px）<input defaultValue={(selected?.style.fontSizeMilliPx ?? 32_000) / 1000} min="1" name="fontSizePx" step="0.1" type="number" /></label>
-        <label>对齐<select defaultValue={selected?.style.alignment ?? 'center'} name="alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
-        <label>水平位置（%）<input defaultValue={(selected?.position.xPermille ?? 500) / 10} max="100" min="0" name="xPercent" step="0.1" type="number" /></label>
-        <label>垂直位置（%）<input defaultValue={(selected?.position.yPermille ?? 850) / 10} max="100" min="0" name="yPercent" step="0.1" type="number" /></label>
-        <label>透明度（%）<input defaultValue={(selected?.style.opacityPermille ?? 1000) / 10} max="100" min="0" name="opacityPercent" step="0.1" type="number" /></label>
-        <label>颜色<input defaultValue={selected?.style.color ?? '#ffffff'} name="color" type="color" /></label>
-        <label>出现<select defaultValue={selected?.entrance ?? 'none'} name="entrance"><option value="none">直接出现</option><option value="fade_in">淡入</option></select></label>
-        <label>消失<select defaultValue={selected?.exit ?? 'none'} name="exit"><option value="none">直接消失</option><option value="fade_out">淡出</option></select></label>
-        <Button disabled={busy || totalDurationUs <= 0} type="submit">
-          {selected ? '保存文字层' : '添加文字层'}
-        </Button>
-        {selected ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              onCommand(
-                { kind: 'remove_text', textId: selected.textId },
-                '文字层已删除。'
-              );
-              onSelect('');
-            }}
-            variant="ghost"
-          >
-            删除文字层
-          </Button>
-        ) : null}
-      </form>
-    </div>
+      ) : null}
+    </form>
   );
 }
 
@@ -2271,8 +2342,8 @@ function AudioInspector({
       {clip ? (
         <form className="uc-video-editor__form" key={`audio-${clip.clipId}`} onSubmit={submitSourceAudio}>
           <h3>片段原声</h3>
-          <label className="uc-video-editor__check"><input defaultChecked={clip.sourceAudio.muted} name="muted" type="checkbox" />静音当前片段</label>
-          <label>原声音量（%）<input defaultValue={clip.sourceAudio.volumePermille / 10} max="100" min="0" name="volumePercent" step="0.1" type="number" /></label>
+          <Checkbox className="uc-video-editor__check" defaultChecked={clip.sourceAudio.muted} name="muted">静音当前片段</Checkbox>
+          <label>原声音量（%）<InputNumber defaultValue={clip.sourceAudio.volumePermille / 10} max={100} min={0} name="volumePercent" step={0.1} /></label>
           <Button disabled={busy} type="submit">保存原声</Button>
         </form>
       ) : (
@@ -2288,13 +2359,13 @@ function AudioInspector({
       {backgroundMusic ? (
         <form className="uc-video-editor__form" key={backgroundMusic.fileId} onSubmit={submitMusic}>
           <h3>音乐范围与混音</h3>
-          <label>源开始（毫秒）<input defaultValue={backgroundMusic.sourceRange.inUs / 1000} min="0" name="sourceStartMs" step="1" type="number" /></label>
-          <label>源结束（毫秒）<input defaultValue={backgroundMusic.sourceRange.outUs / 1000} min="1" name="sourceEndMs" step="1" type="number" /></label>
-          <label>时间线开始（毫秒）<input defaultValue={backgroundMusic.timelineRange.startUs / 1000} min="0" name="trackStartMs" step="1" type="number" /></label>
-          <label>时间线结束（毫秒）<input defaultValue={backgroundMusic.timelineRange.endUs / 1000} min="1" name="trackEndMs" step="1" type="number" /></label>
-          <label>音乐音量（%）<input defaultValue={backgroundMusic.volumePermille / 10} max="100" min="0" name="musicVolumePercent" step="0.1" type="number" /></label>
-          <label>淡入（毫秒）<input defaultValue={backgroundMusic.fadeInUs / 1000} min="0" name="fadeInMs" step="1" type="number" /></label>
-          <label>淡出（毫秒）<input defaultValue={backgroundMusic.fadeOutUs / 1000} min="0" name="fadeOutMs" step="1" type="number" /></label>
+          <label>源开始（毫秒）<InputNumber defaultValue={backgroundMusic.sourceRange.inUs / 1000} min={0} name="sourceStartMs" step={1} /></label>
+          <label>源结束（毫秒）<InputNumber defaultValue={backgroundMusic.sourceRange.outUs / 1000} min={1} name="sourceEndMs" step={1} /></label>
+          <label>时间线开始（毫秒）<InputNumber defaultValue={backgroundMusic.timelineRange.startUs / 1000} min={0} name="trackStartMs" step={1} /></label>
+          <label>时间线结束（毫秒）<InputNumber defaultValue={backgroundMusic.timelineRange.endUs / 1000} min={1} name="trackEndMs" step={1} /></label>
+          <label>音乐音量（%）<InputNumber defaultValue={backgroundMusic.volumePermille / 10} max={100} min={0} name="musicVolumePercent" step={0.1} /></label>
+          <label>淡入（毫秒）<InputNumber defaultValue={backgroundMusic.fadeInUs / 1000} min={0} name="fadeInMs" step={1} /></label>
+          <label>淡出（毫秒）<InputNumber defaultValue={backgroundMusic.fadeOutUs / 1000} min={0} name="fadeOutMs" step={1} /></label>
           <Button disabled={busy} type="submit">保存背景音乐</Button>
           <Button
             disabled={busy}
@@ -2346,12 +2417,14 @@ function CoverInspector({
     cover?.prependDurationUs ? String(cover.prependDurationUs / 1000) : ''
   );
   const [projectWorkId, setProjectWorkId] = useState(imageWorks[0]?.workId ?? '');
+  const [frameClipId, setFrameClipId] = useState(
+    selectedClipId || clips[0]?.clipId || ''
+  );
 
   function submitVideoFrame(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const data = new FormData(form);
-    const clipId = String(data.get('clipId'));
+    const clipId = frameClipId;
     const clip = clips.find((candidate) => candidate.clipId === clipId);
     const sourceTimeUs = millisecondsToUs(formNumber(form, 'sourceTimeMs'));
     const prependDurationUs = readPrependDuration();
@@ -2412,16 +2485,23 @@ function CoverInspector({
       </dl>
       <fieldset className="uc-video-editor__choice">
         <legend>封面是否加入视频</legend>
-        <label><input checked={!prependToVideo} name="prependChoice" onChange={() => setPrependToVideo(false)} type="radio" />仅作为封面（默认）</label>
-        <label><input checked={prependToVideo} name="prependChoice" onChange={() => setPrependToVideo(true)} type="radio" />拼接到视频开头</label>
+        <RadioGroup
+          inline
+          name="prependChoice"
+          onChange={(value) => setPrependToVideo(value === 'prepend')}
+          value={prependToVideo ? 'prepend' : 'cover'}
+        >
+          <Radio value="cover">仅作为封面（默认）</Radio>
+          <Radio value="prepend">拼接到视频开头</Radio>
+        </RadioGroup>
       </fieldset>
       {prependToVideo ? (
-        <label>封面显示时长（毫秒）<input min="1" onChange={(event) => setPrependDurationMs(event.target.value)} step="1" type="number" value={prependDurationMs} /></label>
+        <label>封面显示时长（毫秒）<InputNumber min={1} onChange={(value) => setPrependDurationMs(value === null ? '' : String(value))} step={1} value={prependDurationMs} /></label>
       ) : null}
       <form className="uc-video-editor__form" onSubmit={submitVideoFrame}>
         <h3>从视频选帧</h3>
-        <label>片段<select defaultValue={selectedClipId || clips[0]?.clipId} name="clipId">{clips.map((clip, index) => <option key={clip.clipId} value={clip.clipId}>片段 {index + 1}</option>)}</select></label>
-        <label>源时间（毫秒）<input defaultValue={(clips.find((clip) => clip.clipId === selectedClipId)?.sourceRange.inUs ?? clips[0]?.sourceRange.inUs ?? 0) / 1000} min="0" name="sourceTimeMs" step="1" type="number" /></label>
+        <div className="uc-rsuite-field">片段<SelectPicker aria-label="片段" cleanable={false} data={clips.map((clip, index) => ({ value: clip.clipId, label: `片段 ${index + 1}` }))} onChange={(value) => value && setFrameClipId(value)} searchable={false} value={frameClipId || null} /></div>
+        <label>源时间（毫秒）<InputNumber defaultValue={(clips.find((clip) => clip.clipId === selectedClipId)?.sourceRange.inUs ?? clips[0]?.sourceRange.inUs ?? 0) / 1000} min={0} name="sourceTimeMs" step={1} /></label>
         <Button disabled={busy || clips.length === 0} type="submit">使用视频帧</Button>
       </form>
       <div className="uc-video-editor__form">
@@ -2430,7 +2510,7 @@ function CoverInspector({
       </div>
       <div className="uc-video-editor__form">
         <h3>项目图片作品</h3>
-        <label>图片作品<select disabled={imageWorks.length === 0} onChange={(event) => setProjectWorkId(event.target.value)} value={projectWorkId}>{imageWorks.length === 0 ? <option value="">暂无项目图片</option> : null}{imageWorks.map((work) => <option key={work.workId} value={work.workId}>{work.name}</option>)}</select></label>
+        <div className="uc-rsuite-field">图片作品<SelectPicker aria-label="图片作品" cleanable={false} data={imageWorks.map((work) => ({ value: work.workId, label: work.name }))} disabled={imageWorks.length === 0} onChange={(value) => setProjectWorkId(value ?? '')} placeholder={imageWorks.length === 0 ? '暂无项目图片' : undefined} value={projectWorkId || null} /></div>
         <Button disabled={busy || !projectWorkId} onClick={attachProjectCover} variant="secondary">使用项目图片</Button>
       </div>
       {cover ? (
@@ -2508,27 +2588,29 @@ function ExportInspector({
         <h3>输出文件</h3>
         <label>
           文件名
-          <input
+          <Input
             maxLength={80}
-            onChange={(event) => setFileName(event.target.value)}
+            onChange={(value) => setFileName(value)}
             placeholder="视频作品名称"
             value={fileName}
           />
         </label>
-        <label>
+        <div className="uc-rsuite-field">
           同名冲突
-          <select
-            onChange={(event) =>
-              setConflictPolicy(
-                event.target.value === 'fail' ? 'fail' : 'create_unique_name'
-              )
+          <SelectPicker
+            aria-label="同名冲突"
+            cleanable={false}
+            data={[
+              { value: 'create_unique_name', label: '创建独立版本（推荐）' },
+              { value: 'fail', label: '同名时停止' }
+            ]}
+            onChange={(value) =>
+              setConflictPolicy(value === 'fail' ? 'fail' : 'create_unique_name')
             }
+            searchable={false}
             value={conflictPolicy}
-          >
-            <option value="create_unique_name">创建独立版本（推荐）</option>
-            <option value="fail">同名时停止</option>
-          </select>
-        </label>
+          />
+        </div>
         <Button
           disabled={busy || !fileName.trim() || !preferencesDirty}
           type="submit"
@@ -2592,14 +2674,13 @@ function ExportInspector({
           {currentPreflight ? '重新执行预检' : '执行导出预检'}
         </Button>
         {currentPreflight?.ready ? (
-          <label className="uc-video-editor__export-check">
-            <input
-              checked={confirmed}
-              onChange={(event) => onConfirm(event.target.checked)}
-              type="checkbox"
-            />
+          <Checkbox
+            checked={confirmed}
+            className="uc-video-editor__export-check"
+            onChange={(_value, checked) => onConfirm(checked)}
+          >
             我已核对来源、目标、格式、质量、硬件策略和空间校验时机
-          </label>
+          </Checkbox>
         ) : null}
         <Button
           disabled={busy || active || !currentPreflight?.ready || !confirmed}
@@ -2781,6 +2862,21 @@ function errorMessage(code: VideoEditorIpcErrorCode, fallback: string): string {
   return errorMessages[code] ?? fallback;
 }
 
+function fileStateLabel(state: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    pending: '等待写入',
+    writing: '写入中',
+    verifying: '校验中',
+    available: '本地可用',
+    missing: '文件丢失',
+    read_only: '只读',
+    disconnected: '存储已断开',
+    corrupted: '文件损坏',
+    deleted: '已删除'
+  };
+  return labels[state] ?? '未知文件状态';
+}
+
 function sourceStatusDisplay(
   status?: VideoEditorSourceStatusDto
 ): { readonly label: string; readonly tone: StatusTone } {
@@ -2798,7 +2894,7 @@ function sourceStatusDisplay(
     case 'disconnected':
       return { label: '存储已断开', tone: 'warning' };
     default:
-      return { label: status.state, tone: status.relinkRequired ? 'warning' : 'neutral' };
+      return { label: '未知文件状态', tone: status.relinkRequired ? 'warning' : 'neutral' };
   }
 }
 
@@ -2870,7 +2966,7 @@ function exportStateDisplay(state?: string): { readonly label: string; readonly 
     expired: { label: '已过期', tone: 'danger' }
   };
   return state
-    ? states[state] ?? { label: state, tone: 'neutral' }
+    ? states[state] ?? { label: '未知导出状态', tone: 'neutral' }
     : { label: '尚未创建任务', tone: 'neutral' };
 }
 
@@ -2900,7 +2996,7 @@ function exportReasonLabel(reason: string): string {
   if (reason.includes('does not have enough free space')) return '目标磁盘空间不足';
   if (reason.includes('requested export destination')) return '所选目标目录不受当前管线支持';
   if (reason.includes('requested') && reason.includes('unavailable')) return '所选输出能力不可用';
-  return reason;
+  return '未知原因';
 }
 
 function hardwarePolicyLabel(value: 'software_only'): string {

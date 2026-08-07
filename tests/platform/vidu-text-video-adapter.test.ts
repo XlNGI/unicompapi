@@ -75,7 +75,10 @@ describe('Vidu official text2video adapter', () => {
   it('rejects materials, unsupported models and out-of-range durations before HTTP', async () => {
     const fixture = await createFixture();
     const withMaterial = submitRequest(fixture, {});
-    const video = withMaterial.task.submission.video!;
+    const submission = withMaterial.task.submission;
+    if (submission.kind !== 'video_generation' || !submission.video) {
+      throw new Error('expected a video_generation submission');
+    }
     const assetId = toAssetId('asset-unexpected');
     await expect(
       fixture.adapter.submit({
@@ -83,15 +86,15 @@ describe('Vidu official text2video adapter', () => {
         task: {
           ...withMaterial.task,
           submission: {
-            ...withMaterial.task.submission,
+            ...submission,
             assetIds: [assetId],
             video: {
-              ...video,
+              ...submission.video,
               materials: [{
                 assetId,
-                mediaKind: 'image',
+                mediaKind: 'image' as const,
                 role: 'reference',
-                target: { kind: 'quick_reference' }
+                target: { kind: 'quick_reference' as const }
               }]
             }
           }

@@ -56,7 +56,7 @@ test('video editor shell exposes the frozen A1 regions and honest states', () =>
 test('video editor shell keeps unverified media options out of the UI', () => {
   for (const text of [
     '媒体引擎尚未审批',
-    '不上传、不调用在线 AI、不创建任务',
+    '不上传、不调用在线智能服务、不创建任务',
     '等待媒体引擎真实预检'
   ]) {
     assert.match(editorSource, new RegExp(text));

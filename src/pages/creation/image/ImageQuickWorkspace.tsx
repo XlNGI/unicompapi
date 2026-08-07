@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { LuArrowRight, LuSparkles } from 'react-icons/lu';
+import { LuArrowRight, LuFolderOpen, LuSparkles } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
+import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 
@@ -25,7 +27,10 @@ export function ImageQuickWorkspace({
   onNavigateToProfessional
 }: ImageQuickWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
+  const storage = window.unicomp?.storage;
+  const notifications = useGlobalNotifications();
   const [busy, setBusy] = useState(false);
+  const [revealing, setRevealing] = useState(false);
   const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
   const [workId, setWorkId] = useState<string>();
   const legacyReason = draft.input
@@ -66,7 +71,7 @@ export function ImageQuickWorkspace({
         'professional_image'
       );
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('保存快速生图草稿失败，请重试。');
         return;
       }
       onMessage('已创建专业生图派生草稿；没有创建或提交任务。');
@@ -75,6 +80,36 @@ export function ImageQuickWorkspace({
       onMessage('创建专业生图派生草稿失败，请重试。');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function revealResult() {
+    if (!storage || !workId || revealing) return;
+    setRevealing(true);
+    try {
+      const result = await storage.revealWorkFile(workId);
+      notifications.show(result.ok
+        ? {
+            id: `image-result-reveal:${draft.draftId}`,
+            kind: 'success',
+            title: '已打开图片位置',
+            description: '图片已在系统文件管理器中定位。'
+          }
+        : {
+            id: `image-result-reveal:${draft.draftId}`,
+            kind: 'error',
+            title: '打开图片位置失败',
+            description: '本地作品文件当前无法定位，请前往作品库检查文件状态。'
+          });
+    } catch {
+      notifications.show({
+        id: `image-result-reveal:${draft.draftId}`,
+        kind: 'error',
+        title: '打开图片位置失败',
+        description: '本地作品文件当前无法定位，请前往作品库检查文件状态。'
+      });
+    } finally {
+      setRevealing(false);
     }
   }
 
@@ -91,9 +126,10 @@ export function ImageQuickWorkspace({
           </header>
           <label className="uc-image-quick__field">
             <span>描述你想生成的图片</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={1000}
-              onChange={(event) => changePrompt(event.target.value)}
+              onChange={(value) => changePrompt(value)}
               placeholder="例如：雪山日落下的露营海报"
               rows={7}
               value={draft.prompt.originalInput}
@@ -128,7 +164,7 @@ export function ImageQuickWorkspace({
             <span aria-hidden="true">2</span>
             <div>
               <h2>模型与生成</h2>
-              <p>选择服务后一键生成；调用记录会保存返回的图片 URL。</p>
+              <p>选择服务后一键生成；调用记录会保存返回的图片链接。</p>
             </div>
           </header>
           <ImageFeatureSubmissionPanel
@@ -151,7 +187,7 @@ export function ImageQuickWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>生成结果</h2>
-              <p>展示服务商返回的图片 URL；任务中心调用记录同步可见。</p>
+              <p>展示服务商返回的图片链接；任务中心调用记录同步可见。</p>
             </div>
           </header>
           <GenerationResultPreview
@@ -162,6 +198,15 @@ export function ImageQuickWorkspace({
             workId={workId}
           />
           <div className="uc-image-quick__result-actions">
+            <Button
+              disabled={!storage || !workId || revealing}
+              onClick={() => void revealResult()}
+              title={workId ? '在系统文件管理器中定位已保存图片' : '图片完成本地保存后可用'}
+              variant="secondary"
+            >
+              <LuFolderOpen aria-hidden="true" />
+              打开图片位置
+            </Button>
             <Button
               disabled={busy || dirty}
               onClick={() => void enterProfessional()}
@@ -177,7 +222,7 @@ export function ImageQuickWorkspace({
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="info">调用记录</StatusPill>
         <p>
-          每次生成都会写入任务中心调用记录，并保存可展示的图片 URL；本地校验作品另行登记。
+          每次生成都会写入任务中心调用记录，并保存可展示的图片链接；本地校验作品另行登记。
         </p>
       </Card>
     </>

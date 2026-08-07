@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import type { FormEvent } from 'react';
 import { LuKeyRound, LuRefreshCw, LuShieldCheck, LuTrash2 } from 'react-icons/lu';
+import { Input, Toggle } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -11,6 +12,7 @@ import type {
   ProviderRegistryDto,
   ProviderTemplateSummaryDto
 } from '../../shared/provider-ipc';
+import { ProviderBrandIcon } from './ProviderBrandIcon';
 import {
   connectionLabels,
   credentialLabels,
@@ -19,6 +21,18 @@ import {
   toneForState,
   type DetailTab
 } from './provider-page-shared';
+
+const productFeatureLabels: Readonly<Record<string, string>> = {
+  text_chat: '文本对话',
+  text_reasoning: '文本推理',
+  image_understanding: '图片识别',
+  image_to_prompt: '图片转提示词',
+  text_to_image: '文生图',
+  reference_to_image: '图生图',
+  image_edit: '图片编辑',
+  text_to_video: '文生视频',
+  image_to_video: '图生视频'
+};
 
 export interface ProviderManageViewProps {
   readonly providersApi: ProviderApi | undefined;
@@ -142,7 +156,7 @@ export function ProviderManageView({
         <div className="uc-provider-page__panel-heading">
           <div><h2>服务连接</h2><p>{availableCount} 可用 · {problemCount} 待处理</p></div>
         </div>
-        <input aria-label="搜索连接或服务商" className="uc-provider-page__search" onChange={(event) => onSearchChange(event.target.value)} placeholder="搜索" type="search" value={search} />
+        <Input aria-label="搜索连接或服务商" className="uc-provider-page__search" onChange={(value) => onSearchChange(value)} placeholder="搜索" type="search" value={search} />
         <div className="uc-provider-page__filters" aria-label="连接状态筛选">
           {[
             ['all', '全部'],
@@ -166,7 +180,11 @@ export function ProviderManageView({
                 onClick={() => onSelectConnection(connection.connectionId)}
                 type="button"
               >
-                <span className="uc-provider-page__connection-icon" aria-hidden="true">{(provider?.name ?? connection.name).slice(0, 1)}</span>
+                <ProviderBrandIcon
+                  className="uc-provider-page__connection-icon"
+                  label={provider?.name ?? connection.name}
+                  packageId={connection.packageId ?? ''}
+                />
                 <span>
                   <strong>{connection.name}</strong>
                   <small>{provider?.name ?? '未知服务商'}</small>
@@ -230,7 +248,7 @@ export function ProviderManageView({
                         '连接验证已完成',
                         selectedConnection.connectionId
                       )}
-                      title={selectedTemplate?.validationAction === 'requires_live_api_approval' ? '等待真实 API 专项批准' : undefined}
+                      title={selectedTemplate?.validationAction === 'requires_live_api_approval' ? '等待真实接口专项批准' : undefined}
                       variant="secondary"
                     >
                       <LuShieldCheck aria-hidden="true" /> 验证连接
@@ -242,7 +260,7 @@ export function ProviderManageView({
                         '模型目录已同步',
                         selectedConnection.connectionId
                       )}
-                      title={selectedTemplate?.modelDiscoveryAction === 'requires_live_api_approval' ? '等待真实 API 专项批准' : undefined}
+                      title={selectedTemplate?.modelDiscoveryAction === 'requires_live_api_approval' ? '等待真实接口专项批准' : undefined}
                       variant="secondary"
                     >
                       <LuRefreshCw aria-hidden="true" /> 同步目录
@@ -256,8 +274,8 @@ export function ProviderManageView({
                       <strong>手动登记模型</strong>
                       <small>目录同步失败或没有自动列出时，可填写远端模型标识直接登记。</small>
                     </div>
-                    <label>精确模型标识<input maxLength={500} onChange={(event) => onModelKeyChange(event.target.value)} placeholder="例如 gpt-4o" required value={modelKey} /></label>
-                    <label>显示名称<input maxLength={200} onChange={(event) => onModelDisplayNameChange(event.target.value)} placeholder="界面显示名" required value={modelDisplayName} /></label>
+                    <label>精确模型标识<Input maxLength={500} onChange={(value) => onModelKeyChange(value)} placeholder="例如 gpt-4o" required value={modelKey} /></label>
+                    <label>显示名称<Input maxLength={200} onChange={(value) => onModelDisplayNameChange(value)} placeholder="界面显示名" required value={modelDisplayName} /></label>
                     <Button disabled={busy || !modelKey.trim() || !modelDisplayName.trim()} type="submit">登记模型</Button>
                   </form>
                 )}
@@ -276,23 +294,19 @@ export function ProviderManageView({
                       <div className="uc-provider-page__model" data-selected={selectedModel?.modelId === model.modelId || undefined} key={model.modelId}>
                         <button aria-pressed={selectedModel?.modelId === model.modelId} className="uc-provider-page__model-select" onClick={() => onSelectModel(model.modelId)} type="button">
                           <span><strong>{model.displayName}</strong><small>{model.providerModelKey}</small></span>
-                          <span>{model.profileStatus ? profileLabels[model.profileStatus] : '无 Profile'}</span>
+                          <span>{model.profileStatus ? profileLabels[model.profileStatus] : '无功能配置'}</span>
                         </button>
                         <StatusPill tone={model.enabled ? 'success' : 'neutral'}>{model.enabled ? '已启用' : '已停用'}</StatusPill>
-                        <label className="uc-provider-page__switch">
-                          <input
-                            aria-label={`${model.displayName}启用状态`}
-                            checked={model.enabled}
-                            disabled={busy || selectedConnection.state === 'deleted'}
-                            onChange={() => providersApi && void runAction(
-                              () => providersApi.setModelEnabled(model.modelId, !model.enabled),
-                              model.enabled ? '模型已停用' : '模型已启用',
-                              selectedConnection.connectionId
-                            )}
-                            type="checkbox"
-                          />
-                          <span aria-hidden="true" />
-                        </label>
+                        <Toggle
+                          aria-label={`${model.displayName}启用状态`}
+                          checked={model.enabled}
+                          disabled={busy || selectedConnection.state === 'deleted'}
+                          onChange={() => providersApi && void runAction(
+                            () => providersApi.setModelEnabled(model.modelId, !model.enabled),
+                            model.enabled ? '模型已停用' : '模型已启用',
+                            selectedConnection.connectionId
+                          )}
+                        />
                         <Button
                           aria-label={`删除模型 ${model.displayName}`}
                           disabled={busy || selectedConnection.state === 'deleted'}
@@ -331,10 +345,10 @@ export function ProviderManageView({
                     {selectedTemplate.credentialFields.map((field) => (
                       <label key={field.key}>
                         {field.label}
-                        <input
+                        <Input
                           autoComplete="new-password"
                           maxLength={65536}
-                          onChange={(event) => onReplacementCredentialChange(field.key, event.target.value)}
+                          onChange={(value) => onReplacementCredentialChange(field.key, value)}
                           required={field.required}
                           type={field.secret ? 'password' : 'text'}
                           value={replacementCredentials[field.key] ?? ''}
@@ -353,20 +367,20 @@ export function ProviderManageView({
       </section>
 
       <aside className="uc-provider-page__capabilities" aria-label="模型概要">
-        <div className="uc-provider-page__panel-heading"><div><h2>模型概要</h2><p>精确 Profile 投影</p></div></div>
+        <div className="uc-provider-page__panel-heading"><div><h2>模型概要</h2><p>精确功能配置</p></div></div>
         {!selectedModel ? (
           <EmptyState description="从模型目录选择模型。" icon="模" title="未选择模型" />
         ) : (
           <>
             <Card className="uc-provider-page__selected-model">
               <div><strong>{selectedModel.displayName}</strong><small>{selectedModel.providerModelKey}</small></div>
-              <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>{selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无 Profile'}</StatusPill>
+              <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>{selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无功能配置'}</StatusPill>
             </Card>
             <section className="uc-provider-page__capability-section">
               <h3>产品功能</h3>
               {selectedModel.productFeatures?.length ? selectedModel.productFeatures.map((feature) => (
-                <div className="uc-provider-page__capability" key={feature}><span>{feature}</span><StatusPill tone="info">Profile</StatusPill></div>
-              )) : <p>没有可公开的精确功能 Profile。</p>}
+                <div className="uc-provider-page__capability" key={feature}><span>{productFeatureLabels[feature] ?? '其他功能'}</span><StatusPill tone="info">已配置</StatusPill></div>
+              )) : <p>没有可公开的精确功能配置。</p>}
             </section>
           </>
         )}

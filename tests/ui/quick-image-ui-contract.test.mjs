@@ -14,6 +14,7 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
+const pageStyles = await readFile('src/styles/pages.css', 'utf8');
 const source = `${quickSource}\n${featurePanelSource}`;
 
 test('quick image is pure text-to-image with no material or context entry', () => {
@@ -64,6 +65,15 @@ test('quick image uses the safe feature DTO and one business submission action',
   );
 });
 
+test('quick image synchronously blocks duplicate one-shot submissions', () => {
+  const start = featurePanelSource.indexOf('async function generateOneShot()');
+  const end = featurePanelSource.indexOf('\n  return (', start);
+  const oneShot = featurePanelSource.slice(start, end);
+  assert.match(oneShot, /if \(busyRef\.current\) return/);
+  assert.match(oneShot, /busyRef\.current = true;[\s\S]*api\.generateQuickImage\(/);
+  assert.match(oneShot, /finally \{[\s\S]*busyRef\.current = false;/);
+});
+
 test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
   const composerIndex = quickSource.indexOf('uc-image-quick__composer');
   const inspectorIndex = quickSource.indexOf('uc-image-quick__inspector');
@@ -74,6 +84,20 @@ test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
   assert.match(quickSource.slice(composerIndex, inspectorIndex), />1</);
   assert.match(quickSource.slice(inspectorIndex, stageIndex), />2</);
   assert.match(quickSource.slice(stageIndex), />3</);
+});
+
+test('quick image result preview stays compact without stretching the image', () => {
+  assert.match(
+    pageStyles,
+    /\.uc-image-quick__stage \.uc-image-quick__result-item img \{[\s\S]*max-height: 322px;[\s\S]*object-fit: contain;/
+  );
+});
+
+test('quick image exposes the registered local result without duplicating download logic', () => {
+  assert.match(quickSource, /storage\.revealWorkFile\(workId\)/);
+  assert.match(quickSource, /打开图片位置/);
+  assert.match(quickSource, /disabled=\{!storage \|\| !workId \|\| revealing\}/);
+  assert.doesNotMatch(quickSource, /<a[^>]+download|fetch\(/);
 });
 
 test('quick image keeps unavailable runtime blocked without fake output', async () => {

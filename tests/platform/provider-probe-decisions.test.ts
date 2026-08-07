@@ -15,6 +15,7 @@ import {
   SecureCredentialVault,
   UNICOMPAPI_OFFICIAL_BASE_URL,
   unicompapiProviderPackageDescriptor,
+  frozenViduModelKeys,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type CredentialProtector,
@@ -150,7 +151,7 @@ describe('provider probe decisions (PR3 contract)', () => {
         state: 'available',
         validated: true,
         catalog: 'synced',
-        catalogCount: 12
+        catalogCount: frozenViduModelKeys.length
       }
     });
     expect(viduProgress).toEqual(['validating', 'saving', 'syncing']);
@@ -161,7 +162,7 @@ describe('provider probe decisions (PR3 contract)', () => {
     if (!vidu.ok) throw new Error('vidu add failed');
     expect(
       snapshot.models.filter((model) => model.connectionId === vidu.value.connectionId)
-    ).toHaveLength(12);
+    ).toHaveLength(frozenViduModelKeys.length);
   });
 });
 

@@ -26,6 +26,7 @@ const enhanceServiceSource = await readFile(
   'src/platform/providers/image-prompt-enhance-submission.ts',
   'utf8'
 );
+const pageStyles = await readFile('src/styles/pages.css', 'utf8');
 const source = `${professionalSource}\n${featurePanelSource}\n${selectorSource}\n${enhancePanelSource}`;
 
 test('professional image requires an explicit text or reference feature', () => {
@@ -138,6 +139,24 @@ test('professional image autosaves drafts without a manual save gate', async () 
   assert.match(workbench, /已自动保存/);
   assert.match(workbench, /isProfessionalImage/);
   assert.match(workbench, /imageWorkspaces\.update\(/);
+});
+
+test('prompt enhance presents the text modes as Chinese icon cards', () => {
+  assert.match(enhancePanelSource, /LuMessageCircle/);
+  assert.match(enhancePanelSource, /LuBrainCircuit/);
+  assert.match(enhancePanelSource, /适合直接改写与日常表达/);
+  assert.match(enhancePanelSource, /适合复杂要求与深入梳理/);
+  assert.doesNotMatch(enhancePanelSource, /<small>text_(?:chat|reasoning)<\/small>/);
+  assert.doesNotMatch(enhancePanelSource, /参数 Schema|· revision/);
+  assert.match(pageStyles, /\.uc-image-prompt-enhance__modes/);
+  assert.match(pageStyles, /repeat\(auto-fit, minmax\(220px, 1fr\)\)/);
+});
+
+test('image submission keeps internal status codes out of user messages', () => {
+  assert.match(featurePanelSource, /submission_outcome_unknown: '提交结果未知/);
+  assert.doesNotMatch(featurePanelSource, /提交状态：\$\{result\.value\.status\}/);
+  assert.doesNotMatch(featurePanelSource, /\$\{result\.error\.code\}/);
+  assert.match(featurePanelSource, /!\/\[A-Za-z_\]\/u\.test\(rawFeedback\)/);
 });
 
 test('professional image uses controlled local media and the safe feature API', () => {

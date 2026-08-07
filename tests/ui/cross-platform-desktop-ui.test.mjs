@@ -30,6 +30,11 @@ test('restores and focuses the existing window on desktop activation', () => {
   assert.match(main, /leave-full-screen/);
 });
 
+test('development window does not force open the viewport inspection overlay', () => {
+  assert.match(main, /VITE_DEV_SERVER_URL/);
+  assert.doesNotMatch(main, /openDevTools/);
+});
+
 test('provides keyboard focus paths for shell and theme controls', () => {
   assert.match(layout, /className="skip-link" href="#main-content"/);
   assert.match(layout, /<main className="workspace" id="main-content" tabIndex=\{-1\}>/);
@@ -45,7 +50,8 @@ test('keeps the approved 800 by 720 compact desktop minimum usable', () => {
   assert.match(main, /minHeight: 720/);
   assert.match(styles, /#root \{[\s\S]*?min-width: 800px;[\s\S]*?min-height: 720px;/);
   assert.match(styles, /@media \(max-width: 900px\)/);
-  assert.match(styles, /grid-template-columns: 136px minmax\(0, 1fr\)/);
+  assert.match(styles, /grid-template-columns: 200px minmax\(0, 1fr\)/);
+  assert.match(styles, /\.nav-subitem > span:last-child \{[\s\S]*?white-space: nowrap/);
 });
 
 test('uses native platform font fallbacks and accessibility media preferences', () => {

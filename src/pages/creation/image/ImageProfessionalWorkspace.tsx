@@ -6,6 +6,7 @@ import {
   LuTrash2,
   LuType
 } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
@@ -65,7 +66,7 @@ export function ImageProfessionalWorkspace({
       : productFeature === 'reference_to_image' && !draft.input
         ? '图生图必须选择恰好一张图片。'
         : unsupportedContexts.length > 0
-          ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
           : undefined;
 
   useEffect(() => {
@@ -142,7 +143,7 @@ export function ImageProfessionalWorkspace({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(result.error.message);
+      onMessage('保存草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted(result.value as GenerationImageDraftDto);
@@ -162,7 +163,7 @@ export function ImageProfessionalWorkspace({
       if (!saved) return;
       const result = await imageWorkspaces.selectInput(saved.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -189,7 +190,7 @@ export function ImageProfessionalWorkspace({
       if (!saved) return;
       const result = await imageWorkspaces.clearInput(saved.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('清除图片失败，请重试。');
         return;
       }
       onDraftPersisted(result.value as GenerationImageDraftDto);
@@ -213,7 +214,7 @@ export function ImageProfessionalWorkspace({
           reference.includeInPrompt !== undefined
       )
     });
-    onMessage('已从草稿清除不受支持或未固定 revision 的旧上下文。');
+    onMessage('已从草稿清除不受支持或未固定版本的旧上下文。');
   }
 
   return (
@@ -251,9 +252,10 @@ export function ImageProfessionalWorkspace({
 
           <label className="uc-image-quick__field">
             <span>原始创作需求</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={1000}
-              onChange={(event) => changeOriginalInput(event.target.value)}
+              onChange={(value) => changeOriginalInput(value)}
               placeholder="描述主体、场景、氛围和创作用途"
               rows={5}
               value={draft.prompt.originalInput}
@@ -299,10 +301,10 @@ export function ImageProfessionalWorkspace({
               ) : null}
               <label className="uc-image-quick__field">
                 <span>图片用途</span>
-                <input
+                <Input
                   disabled={!draft.input}
                   maxLength={200}
-                  onChange={(event) => changeReferencePurpose(event.target.value)}
+                  onChange={(value) => changeReferencePurpose(value)}
                   placeholder="例如：仅参考构图，不复制人物"
                   value={draft.input?.purpose ?? ''}
                 />
@@ -323,7 +325,7 @@ export function ImageProfessionalWorkspace({
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文引用</strong>
-              <span>专业生图只接受固定 revision 的 ProjectContext。</span>
+              <span>专业生图只接受固定版本的项目上下文。</span>
               <Button onClick={clearUnsupportedContexts} variant="secondary">
                 <LuTrash2 aria-hidden="true" />
                 清理旧上下文
@@ -362,12 +364,13 @@ export function ImageProfessionalWorkspace({
             </section>
             <section>
               <StatusPill tone="success">最终提交提示词</StatusPill>
-              <textarea
+              <Input
                 aria-label="最终提交提示词"
+                as="textarea"
                 maxLength={2000}
-                onChange={(event) => changeDraft({
+                onChange={(value) => changeDraft({
                   ...draft,
-                  prompt: { ...draft.prompt, finalPrompt: event.target.value }
+                  prompt: { ...draft.prompt, finalPrompt: value }
                 })}
                 rows={9}
                 value={draft.prompt.finalPrompt}

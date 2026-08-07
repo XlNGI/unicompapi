@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
 
 export type DynamicParameterValue =
   | string
@@ -19,11 +20,90 @@ export interface DynamicParameterField {
   readonly step?: number;
 }
 
-/** Display the parameter key without internal label namespace prefixes. */
+const parameterLabels: Readonly<Record<string, string>> = {
+  aspectRatio: '画面比例',
+  aspect_ratio: '画面比例',
+  audio: '音频',
+  background: '背景',
+  detail: '识别精度',
+  duration: '视频时长',
+  fps: '帧率',
+  frames: '帧数',
+  height: '高度',
+  imageSize: '图像尺寸',
+  include_usage: '包含用量信息',
+  input_fidelity: '输入保真度',
+  max_tokens: '最大生成长度',
+  negative_prompt: '反向提示词',
+  output_compression: '输出压缩率',
+  output_format: '输出格式',
+  prompt: '提示词',
+  quality: '画面质量',
+  ratio: '画面比例',
+  reasoning_effort: '推理强度',
+  resolution: '分辨率',
+  response_format: '返回格式',
+  seed: '随机种子',
+  size: '输出尺寸',
+  stream: '流式返回',
+  style: '画面风格',
+  temperature: '随机性',
+  thinking: '深度思考',
+  top_p: '核采样范围',
+  watermark: '添加水印',
+  width: '宽度'
+};
+
+const parameterOptionLabels: Readonly<Record<string, string>> = {
+  auto: '自动',
+  b64_json: 'Base64 数据',
+  disabled: '关闭',
+  enabled: '开启',
+  false: '关闭',
+  high: '高',
+  low: '低',
+  max: '最高',
+  medium: '中',
+  natural: '自然',
+  none: '无',
+  opaque: '不透明',
+  standard: '标准',
+  transparent: '透明',
+  true: '开启',
+  url: '链接',
+  vivid: '鲜艳',
+  xhigh: '超高'
+};
+
+const preservedFormatOptions = new Set([
+  'bmp', 'gif', 'jpeg', 'jpg', 'mov', 'mp4', 'png', 'wav', 'webm', 'webp'
+]);
+
+/** Convert an internal parameter key to a user-facing Chinese label. */
 export function displayParameterKey(value: string): string {
-  return value
+  const key = value
     .replace(/^provider\.parameter\./, '')
     .replace(/^provider\./, '');
+  if (parameterLabels[key]) return parameterLabels[key];
+  return /[\u3400-\u9fff]/.test(key) ? key : '其他参数';
+}
+
+/** Keep submitted option values unchanged while localizing their visible labels. */
+export function displayParameterOption(
+  value: string | number | boolean,
+  index = 0
+): string {
+  const text = String(value);
+  const normalized = text.toLowerCase();
+  if (parameterOptionLabels[normalized]) return parameterOptionLabels[normalized];
+  if (
+    !/[A-Za-z]/.test(text) ||
+    preservedFormatOptions.has(normalized) ||
+    /^\d+[pk]$/i.test(text)
+  ) {
+    return text;
+  }
+  return `其他选项 ${index + 1}`;
 }
 
 export interface DynamicParameterFormProps {
@@ -127,52 +207,54 @@ function ParameterField({
 }) {
   if (field.valueType === 'boolean') {
     return (
-      <label className="uc-model-select__checkbox">
-        <input
-          checked={value === true}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-          type="checkbox"
-        />
+      <Checkbox
+        checked={value === true}
+        className="uc-model-select__checkbox"
+        disabled={disabled}
+        onChange={(_value, checked) => onChange(checked)}
+      >
         <ParameterLabel field={field} />
-      </label>
+      </Checkbox>
     );
   }
   if (field.valueType === 'enum') {
+    const data = (field.options ?? []).map((option, index) => ({
+      value: String(option),
+      label: displayParameterOption(option, index)
+    }));
     return (
-      <label className="uc-model-select__field">
+      <div className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <select
+        <SelectPicker
+          aria-label={displayParameterKey(field.fieldId || field.labelId)}
+          block
+          cleanable={!field.required}
+          data={data}
           disabled={disabled}
-          onChange={(event) => {
-            const option = field.options?.find((item) => String(item) === event.target.value);
+          onChange={(next) => {
+            const option = field.options?.find((item) => String(item) === next);
             onChange(option);
           }}
-          required={field.required}
-          value={value === undefined ? '' : String(value)}
-        >
-          <option value="">{field.required ? '请选择（必填）' : '请选择'}</option>
-          {field.options?.map((option) => (
-            <option key={String(option)} value={String(option)}>{String(option)}</option>
-          ))}
-        </select>
-      </label>
+          placeholder={field.required ? '请选择（必填）' : '请选择'}
+          searchable={false}
+          value={value === undefined ? null : String(value)}
+        />
+      </div>
     );
   }
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
       <label className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <input
+        <InputNumber
           disabled={disabled}
           max={field.maximum}
           min={field.minimum}
-          onChange={(event) => onChange(
-            event.target.value === '' ? undefined : Number(event.target.value)
+          onChange={(next) => onChange(
+            next === null || next === '' ? undefined : Number(next)
           )}
           required={field.required}
           step={field.valueType === 'integer' ? 1 : field.step}
-          type="number"
           value={typeof value === 'number' ? value : ''}
         />
       </label>
@@ -182,10 +264,10 @@ function ParameterField({
     return (
       <label className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <input
+        <Input
           disabled={disabled}
-          onChange={(event) => {
-            const items = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
+          onChange={(next) => {
+            const items = next.split(',').map((item) => item.trim()).filter(Boolean);
             onChange(items.length === 0
               ? undefined
               : field.valueType === 'number_array'
@@ -194,7 +276,6 @@ function ParameterField({
           }}
           placeholder="使用逗号分隔"
           required={field.required}
-          type="text"
           value={Array.isArray(value) ? value.join(', ') : ''}
         />
       </label>
@@ -207,18 +288,17 @@ function ParameterField({
     return (
       <label className="uc-model-select__field">
         <ParameterLabel field={field} />
-        <input disabled readOnly value="由当前草稿的受控素材提供" />
+        <Input disabled readOnly value="由当前草稿的受控素材提供" />
       </label>
     );
   }
   return (
     <label className="uc-model-select__field">
       <ParameterLabel field={field} />
-      <input
+      <Input
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value || undefined)}
+        onChange={(next) => onChange(next || undefined)}
         required={field.required}
-        type="text"
         value={typeof value === 'string' ? value : ''}
       />
     </label>
@@ -245,10 +325,10 @@ function ObjectParameterField({
   return (
     <label className="uc-model-select__field">
       <ParameterLabel field={field} />
-      <textarea
+      <Input
         aria-invalid={invalid}
+        as="textarea"
         disabled={disabled}
-        required={field.required}
         onBlur={() => {
           if (!text.trim()) {
             setInvalid(false);
@@ -266,7 +346,7 @@ function ObjectParameterField({
             setInvalid(true);
           }
         }}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(next) => setText(next)}
         rows={3}
         value={text}
       />

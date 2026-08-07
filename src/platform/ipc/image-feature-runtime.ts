@@ -54,10 +54,7 @@ import {
   SubmissionIntentJournal,
   type ProjectSubmissionAcceptanceV1
 } from '../storage';
-import type {
-  ImageFeatureControllerRuntime,
-  ImageFeatureGenerateQuickInput
-} from './image-feature-controller';
+import type { ImageFeatureControllerRuntime } from './image-feature-controller';
 import type { ImageWorkspaceMutationCoordinator } from './image-workspace-mutations';
 import type { StorageProjectSession } from './storage-ipc-controller';
 
@@ -266,9 +263,19 @@ export function createImageFeatureControllerRuntime(
     ) {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'before_request');
+      await lifecycle.applyUnrecordedSubmitOutcome({
+        executionId: acceptance.subjectArtifacts.execution.id,
+        outcome: 'failed_before_submission',
+        message: localResultError
+      });
     } else if (acceptance.intent.status === 'unknown_outcome') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');
+      await lifecycle.applyUnrecordedSubmitOutcome({
+        executionId: acceptance.subjectArtifacts.execution.id,
+        outcome: 'submission_outcome_unknown',
+        message: localResultError
+      });
     }
 
     const feedbackSafeCode = latestSafeCode(acceptance.invocationEvents);

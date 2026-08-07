@@ -5,6 +5,8 @@ import test from 'node:test';
 const shell = await readFile('src/pages/providers/ProvidersPage.tsx', 'utf8');
 const gallery = await readFile('src/pages/providers/ProviderGalleryView.tsx', 'utf8');
 const manage = await readFile('src/pages/providers/ProviderManageView.tsx', 'utf8');
+const brandIcon = await readFile('src/pages/providers/ProviderBrandIcon.tsx', 'utf8');
+const pageStyles = await readFile('src/styles/pages.css', 'utf8');
 const source = [shell, gallery, manage].join('\n');
 
 test('provider page is driven by registry and package templates', () => {
@@ -42,6 +44,40 @@ test('gallery shows only adapted templates as cards with a request-adapter entry
   assert.match(gallery, /validationAction !== 'available'/);
 });
 
+test('provider cards and connections use local brand icons with a safe fallback', () => {
+  assert.match(gallery, /ProviderBrandIcon/);
+  assert.match(manage, /ProviderBrandIcon/);
+  for (const packageId of [
+    'provider-package-deepseek',
+    'provider-package-volcengine',
+    'provider-package-kling',
+    'provider-package-newapi',
+    'provider-package-unicompapi',
+    'provider-package-vidu-v1'
+  ]) assert.match(brandIcon, new RegExp(packageId));
+  assert.match(brandIcon, /label\.slice\(0, 1\)/);
+  assert.match(brandIcon, /unicompapi\.png/);
+  assert.match(brandIcon, /vidu\.svg/);
+  assert.doesNotMatch(brandIcon, /https?:|fetch\(|window\.unicomp/);
+});
+
+test('provider feedback uses a closable floating status card without changing actions', () => {
+  assert.match(shell, /providerMessageTone/);
+  assert.match(shell, /uc-provider-page__message--\$\{messageTone\}/);
+  assert.match(shell, /aria-label="关闭通知"/);
+  assert.match(shell, /LuCircleCheck/);
+  assert.match(shell, /LuCircleAlert/);
+  assert.match(shell, /6_000/);
+  assert.match(shell, /4_000/);
+  assert.match(shell, /window\.clearTimeout/);
+  assert.match(shell, /providerMessageDuration/);
+  assert.match(shell, /uc-provider-page__message-progress/);
+  assert.match(shell, /animationDuration: `\$\{messageDurationMs\}ms`/);
+  assert.match(pageStyles, /@keyframes uc-provider-message-countdown/);
+  assert.match(pageStyles, /transform: scaleX\(0\)/);
+  assert.match(pageStyles, /prefers-reduced-motion: reduce/);
+});
+
 test('provider page exposes the controlled framework mutations', () => {
   for (const action of [
     'addConnection',
@@ -66,7 +102,12 @@ test('connection creation runs the orchestrated validate-save-discover pipeline'
   assert.match(shell, /providersApi\.onAddConnectionProgress/);
   assert.match(shell, /allowUnavailableSave/);
   assert.match(shell, /connection_validation_failed/);
-  assert.match(source, /window\.confirm/);
+  assert.match(shell, /<Modal/);
+  assert.match(shell, /requestConfirmation/);
+  assert.match(shell, /远程连接验证未通过/);
+  assert.match(shell, /确认放弃活动调用/);
+  assert.match(shell, /确认删除模型/);
+  assert.doesNotMatch(source, /window\.confirm/);
 });
 
 test('credential fields are structured, write-only and cleared after writes', () => {

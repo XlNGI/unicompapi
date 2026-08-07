@@ -56,6 +56,30 @@ export class ProviderExecutionLifecycleService {
     return updated;
   }
 
+  async applyUnrecordedSubmitOutcome(input: {
+    readonly executionId: Execution['id'];
+    readonly outcome: 'failed_before_submission' | 'submission_outcome_unknown';
+    readonly message: string;
+  }): Promise<Execution | undefined> {
+    const current = await this.dependencies.executionRepository.get(
+      input.executionId
+    );
+    if (!current || current.state !== 'created') return current;
+    const now = this.now();
+    const submitting = transitionExecution(current, 'submitting', now);
+    const updated = input.outcome === 'failed_before_submission'
+      ? transitionExecution(submitting, 'failed', now, {
+          failure: {
+            stage: 'submitting',
+            message: input.message,
+            retryability: 'not_retryable'
+          }
+        })
+      : transitionExecution(submitting, 'submission_outcome_unknown', now);
+    await this.dependencies.executionRepository.save(updated);
+    return updated;
+  }
+
   async recoverExecution(
     recordId: ProviderOperationRecordId
   ): Promise<Execution> {

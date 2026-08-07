@@ -523,7 +523,11 @@ function validateConnection(connection: ProviderConnection, baseUrl: URL): void 
   if (
     connection.state === 'deleted' ||
     connection.state === 'disabled' ||
-    connection.providerId !== 'provider-vidu'
+    connection.packageId !== VIDU_PROVIDER_PACKAGE_ID ||
+    connection.packageVersion !== VIDU_PROVIDER_PACKAGE_VERSION ||
+    connection.templateId !== VIDU_OFFICIAL_TEMPLATE_ID ||
+    connection.endpointPolicyId !== VIDU_ENDPOINT_POLICY_ID ||
+    connection.endpointPolicyRevision !== 1
   ) {
     throw new ViduRuntimeError('protocol_mismatch', 'not_retryable');
   }
@@ -618,7 +622,7 @@ function validateProtocol(
   }
   if (
     !binding ||
-    binding.providerId !== 'provider-vidu' ||
+    binding.providerId !== connection.providerId ||
     binding.connectionId !== connection.id
   ) {
     throw new ViduRuntimeError('protocol_mismatch', 'not_retryable');

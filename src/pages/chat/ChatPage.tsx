@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Checkbox, Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import {
@@ -83,12 +84,12 @@ const unavailableLabels: Record<string, string> = {
   model_disabled: '模型已停用',
   model_not_present: '模型不在当前目录',
   connection_unavailable: '连接不可用',
-  profile_unavailable: '功能 Profile 不可用',
+  profile_unavailable: '功能配置不可用',
   feature_unsupported: '不支持当前文本功能',
   binding_unavailable: '协议绑定不可用',
   runtime_not_allowed: '运行授权未开放',
   subject_constraints_unsatisfied: '当前输入不满足约束',
-  schema_unsupported: '参数 Schema 不可解释'
+  schema_unsupported: '参数定义无法识别'
 };
 
 function mapExecutionStateToMessageState(
@@ -111,7 +112,7 @@ export function ChatPage() {
   const [renameTitle, setRenameTitle] = useState('');
   const [input, setInput] = useState('');
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
-  const [responseDraft, setResponseDraft] = useState<ConversationResponseDraftDto>();
+  const [, setResponseDraft] = useState<ConversationResponseDraftDto>();
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
   const [parameterValues, setParameterValues] = useState<
@@ -521,7 +522,7 @@ export function ChatPage() {
         selectedCandidateId
       );
       if (!prepared.ok) {
-        setNotice(errorMessages[prepared.error.code] ?? prepared.error.message);
+        setNotice(errorMessages[prepared.error.code] ?? '准备回复失败，请重试。');
         return;
       }
       const submitted = await chat.submitResponse(
@@ -532,7 +533,7 @@ export function ChatPage() {
         true
       );
       if (!submitted.ok) {
-        setNotice(errorMessages[submitted.error.code] ?? submitted.error.message);
+        setNotice(errorMessages[submitted.error.code] ?? '发送失败，请重试。');
         return;
       }
       setResponseExecution(submitted.value);
@@ -633,7 +634,7 @@ export function ChatPage() {
       setContextDraft(undefined);
       setContextLabels('');
       setContextConfirmed(false);
-      setNotice(`项目上下文已登记为 revision ${result.value.revision}。`);
+      setNotice(`项目上下文已登记为版本 ${result.value.revision}。`);
     } catch {
       setNotice('登记项目上下文失败，请重试。');
     } finally {
@@ -651,7 +652,7 @@ export function ChatPage() {
         <form className="uc-chat-page__new" onSubmit={(event) => { event.preventDefault(); void createConversation(); }}>
           <label>
             <span>新对话名称</span>
-            <input maxLength={200} onChange={(event) => setNewTitle(event.target.value)} placeholder="例如：品牌短片构思" value={newTitle} />
+            <Input maxLength={200} onChange={(value) => setNewTitle(value)} placeholder="例如：品牌短片构思" value={newTitle} />
           </label>
           <Button disabled={!session || busy || !newTitle.trim()} type="submit" variant="secondary">创建项目对话</Button>
         </form>
@@ -711,10 +712,10 @@ export function ChatPage() {
           <Card className="uc-chat-page__conversation-actions">
             <label>
               <span>对话名称</span>
-              <input
+              <Input
                 disabled={selected.readOnly || selected.status === 'deleted'}
                 maxLength={200}
-                onChange={(event) => setRenameTitle(event.target.value)}
+                onChange={(value) => setRenameTitle(value)}
                 value={renameTitle}
               />
             </label>
@@ -786,8 +787,7 @@ export function ChatPage() {
                 </Button>
               </div>
               <small>
-                {selectedCandidate.parameterSchema.schemaId} · revision{' '}
-                {selectedCandidate.parameterSchema.revision}
+                参数配置版本 {selectedCandidate.parameterSchema.revision}
               </small>
               <DynamicParameterForm
                 disabled={busy || !canCompose}
@@ -799,11 +799,12 @@ export function ChatPage() {
               />
             </Card>
           ) : null}
-          <textarea
+          <Input
             aria-label="对话输入"
+            as="textarea"
             disabled={!canCompose}
             maxLength={8000}
-            onChange={(event) => setInput(event.target.value)}
+            onChange={(value) => setInput(value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
@@ -831,29 +832,32 @@ export function ChatPage() {
               >
                 参数
               </button>
-              <label className="uc-chat-page__model-tool">
+              <div className="uc-chat-page__model-tool">
                 <span className="uc-visually-hidden">选择文本模型</span>
-                <select
+                <SelectPicker
                   aria-label="选择文本模型"
-                  disabled={!canCompose || busy || candidatesLoading}
-                  onChange={(event) => changeCandidate(event.target.value)}
-                  value={selectedCandidateId ?? ''}
-                >
-                  <option value="">
-                    {candidatesLoading ? '加载模型…' : modelOptions.length === 0 ? '暂无可用模型' : '选择模型'}
-                  </option>
-                  {modelOptions.map((option) => (
-                    <option disabled={!option.available} key={option.id} value={option.id}>
-                      {option.label}
-                      {option.available
+                  data={modelOptions.map((option) => ({
+                    value: option.id,
+                    label: `${option.label}${
+                      option.available
                         ? ''
                         : `（${(option.unavailableReasons ?? [])
-                            .map((reason) => unavailableLabels[reason] ?? reason)
-                            .join('、') || '不可用'}）`}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                            .map((reason) => unavailableLabels[reason] ?? '其他不可用原因')
+                            .join('、') || '不可用'}）`
+                    }`
+                  }))}
+                  disabled={!canCompose || busy || candidatesLoading}
+                  disabledItemValues={modelOptions
+                    .filter((option) => !option.available)
+                    .map((option) => option.id)}
+                  onChange={(value) => changeCandidate(value ?? '')}
+                  placeholder={
+                    candidatesLoading ? '加载模型…' : modelOptions.length === 0 ? '暂无可用模型' : '选择模型'
+                  }
+                  searchable={false}
+                  value={selectedCandidateId ?? null}
+                />
+              </div>
             </div>
             <div className="uc-chat-page__composer-actions">
               <span className="uc-chat-page__composer-count">{input.length} / 8000</span>
@@ -889,11 +893,11 @@ export function ChatPage() {
       <aside className="uc-chat-page__context" aria-labelledby="context-draft-title">
         <div className="uc-chat-page__panel-heading"><h2 id="context-draft-title">项目上下文</h2><StatusPill tone={session ? 'info' : 'neutral'}>{session ? '当前项目' : '无项目'}</StatusPill></div>
         <Card className="uc-chat-page__context-target"><small>目标项目</small><strong>{session?.projectName ?? '尚未打开项目'}</strong><span>已登记 {registeredContexts.length} 项</span></Card>
-        {registeredContexts.length > 0 ? <section className="uc-chat-page__response-contexts" aria-labelledby="response-context-title"><h3 id="response-context-title">本次回复上下文</h3>{duplicateIncludedContexts ? <p className="uc-chat-page__notice">勾选了内容相同的多项上下文，可能挤占输出长度并导致截断。</p> : null}{registeredContexts.map((context) => { const viewed = viewedContexts[context.contextId]; const included = includedContextIds.includes(context.contextId); return <Card key={context.contextId}><div><strong>{context.labels.join('、') || '未命名上下文'}</strong><StatusPill>rev {context.revision}</StatusPill></div><p>{viewed?.contentSnapshot ?? context.contentPreview}</p><div className="uc-chat-page__actions"><Button disabled={busy} onClick={() => void viewContext(context)} variant="secondary">查看固定版本</Button><label className="uc-chat-page__check"><input checked={included} disabled={!viewed} onChange={(event) => setIncludedContextIds((current) => event.target.checked ? [...current, context.contextId] : current.filter((id) => id !== context.contextId))} type="checkbox" />用于本次回复</label></div></Card>; })}</section> : null}
+        {registeredContexts.length > 0 ? <section className="uc-chat-page__response-contexts" aria-labelledby="response-context-title"><h3 id="response-context-title">本次回复上下文</h3>{duplicateIncludedContexts ? <p className="uc-chat-page__notice">勾选了内容相同的多项上下文，可能挤占输出长度并导致截断。</p> : null}{registeredContexts.map((context) => { const viewed = viewedContexts[context.contextId]; const included = includedContextIds.includes(context.contextId); return <Card key={context.contextId}><div><strong>{context.labels.join('、') || '未命名上下文'}</strong><StatusPill>版本 {context.revision}</StatusPill></div><p>{viewed?.contentSnapshot ?? context.contentPreview}</p><div className="uc-chat-page__actions"><Button disabled={busy} onClick={() => void viewContext(context)} variant="secondary">查看固定版本</Button><Checkbox checked={included} className="uc-chat-page__check" disabled={!viewed} onChange={(_value, checked) => setIncludedContextIds((current) => checked ? [...current, context.contextId] : current.filter((id) => id !== context.contextId))}>用于本次回复</Checkbox></div></Card>; })}</section> : null}
         {!session ? <EmptyState description="打开项目后才能登记上下文。" icon="项" readOnly title="需要目标项目" /> : !selected || selected.readOnly ? <EmptyState description="请选择当前项目中的可写对话。" icon="摘" readOnly title="不可登记" /> : completedMessages.length === 0 ? <EmptyState description="只有已完成消息可以登记。" icon="摘" readOnly title="没有可登记消息" /> : (
-          <fieldset className="uc-chat-page__selection-list" disabled={busy}><legend>登记新的项目上下文</legend>{completedMessages.map((item) => <label key={item.messageId}><input checked={Boolean(contextDraft?.fragments.some((fragment) => fragment.messageId === item.messageId))} onChange={(event) => void toggleMessageSelection(item, event.target.checked)} type="checkbox" /><span><strong>{item.role === 'user' ? '用户' : '助手'}</strong>{item.content}</span></label>)}</fieldset>
+          <fieldset className="uc-chat-page__selection-list" disabled={busy}><legend>登记新的项目上下文</legend>{completedMessages.map((item) => <Checkbox checked={Boolean(contextDraft?.fragments.some((fragment) => fragment.messageId === item.messageId))} key={item.messageId} onChange={(_value, checked) => void toggleMessageSelection(item, checked)}><span className="uc-chat-page__selection-copy"><strong>{item.role === 'user' ? '用户' : '助手'}</strong><span className="uc-chat-page__selection-content">{item.content}</span></span></Checkbox>)}</fieldset>
         )}
-        {contextDraft ? <><Card className="uc-chat-page__context-preview"><small>草稿预览 · revision {contextDraft.revision}</small><p>{contextDraft.contentPreview || '尚未选择内容'}</p></Card><label className="uc-chat-page__context-labels"><span>用户标签（逗号分隔）</span><input maxLength={500} onChange={(event) => setContextLabels(event.target.value)} placeholder="例如：品牌语气，镜头约束" value={contextLabels} /></label><Button disabled={busy} onClick={() => void saveContextLabels()} variant="secondary">更新标签</Button><label className="uc-chat-page__check"><input checked={contextConfirmed} disabled={!contextDraft.canRegister} onChange={(event) => setContextConfirmed(event.target.checked)} type="checkbox" />我已检查目标项目、消息内容和标签</label><Button disabled={!contextDraft.canRegister || !contextConfirmed || busy} onClick={() => void registerContext()}>确认登记到项目</Button></> : null}
+        {contextDraft ? <><Card className="uc-chat-page__context-preview"><small>草稿预览 · 版本 {contextDraft.revision}</small><p>{contextDraft.contentPreview || '尚未选择内容'}</p></Card><label className="uc-chat-page__context-labels"><span>用户标签（逗号分隔）</span><Input maxLength={500} onChange={(value) => setContextLabels(value)} placeholder="例如：品牌语气，镜头约束" value={contextLabels} /></label><Button disabled={busy} onClick={() => void saveContextLabels()} variant="secondary">更新标签</Button><Checkbox checked={contextConfirmed} className="uc-chat-page__check" disabled={!contextDraft.canRegister} onChange={(_value, checked) => setContextConfirmed(checked)}>我已检查目标项目、消息内容和标签</Checkbox><Button disabled={!contextDraft.canRegister || !contextConfirmed || busy} onClick={() => void registerContext()}>确认登记到项目</Button></> : null}
         <p className="uc-chat-page__notice">查看上下文不会自动用于回复；只有显式勾选的固定版本会进入本次外发快照。</p>
       </aside>
     </section>

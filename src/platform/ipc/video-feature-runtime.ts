@@ -4,7 +4,8 @@ import {
   toIsoTimestamp,
   toLocalResultObservationId,
   toProviderOperationRecordId,
-  transitionExecution
+  transitionExecution,
+  type ProviderProtocolBinding
 } from '../../domain';
 import type { VideoFeatureSubmissionDto } from '../../shared/video-feature-ipc';
 import {
@@ -75,7 +76,7 @@ export interface VideoFeatureRuntimeOptions {
     providerOperationId: string,
     context: {
       readonly connectionId: string;
-      readonly binding: import('../../domain').ProviderProtocolBinding;
+      readonly binding: ProviderProtocolBinding;
     }
   ) => void;
   readonly resultReceiver?: {
@@ -342,9 +343,19 @@ export function createVideoFeatureControllerRuntime(
     } else if (acceptance.intent.status === 'failed_before_submission') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'before_request');
+      await lifecycle.applyUnrecordedSubmitOutcome({
+        executionId: acceptance.subjectArtifacts.execution.id,
+        outcome: 'failed_before_submission',
+        message: localResultError
+      });
     } else if (acceptance.intent.status === 'unknown_outcome') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');
+      await lifecycle.applyUnrecordedSubmitOutcome({
+        executionId: acceptance.subjectArtifacts.execution.id,
+        outcome: 'submission_outcome_unknown',
+        message: localResultError
+      });
     }
 
     const feedbackSafeCode = latestSafeCode(acceptance.invocationEvents);

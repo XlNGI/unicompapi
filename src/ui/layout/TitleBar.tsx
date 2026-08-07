@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   LuBell,
-  LuChevronDown,
   LuFolderKanban,
   LuSettings
 } from 'react-icons/lu';
@@ -50,23 +49,20 @@ export function TitleBar({
         <div
           aria-hidden="true"
           className="title-bar__brand-mark"
-          title="正式品牌 Logo 待接入"
+          title="正式品牌标志待接入"
         >
           U
         </div>
         <span className="title-bar__brand-name">UniComp AI</span>
       </div>
       <div className="title-bar__context">
-        <button
+        <div
           className="title-bar__project"
-          onClick={() => onNavigate('projects')}
-          title={`当前项目：${projectName}`}
-          type="button"
+          title={`所属项目：${projectName}`}
         >
           <LuFolderKanban aria-hidden="true" />
-          <span>当前项目：{projectName}</span>
-          <LuChevronDown aria-hidden="true" />
-        </button>
+          <span>所属项目：{projectName}</span>
+        </div>
         <div className="title-bar__drag-region" aria-hidden="true" />
       </div>
       <div className="title-bar__actions">
