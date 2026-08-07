@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto';
 import {
   parseUsageSchema,
+  toIsoTimestamp,
+  toProtocolBindingId,
   validateParameterSchemaV2,
   type ParameterSchemaV2,
   type ProductFeature,
   type UsageSchemaV1
 } from '../../domain';
+import { routeOpenAiCompatibleImageProfilesForEnabledModels } from './newapi/openai-compatible-image-routing';
+import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/openai-compatible-video-routing';
 import type { ProviderPackageRegistry } from './provider-package-registry';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type {
@@ -69,116 +73,149 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
   ) {}
 
   async list(subject: ResolvedFeatureSubjectV1): Promise<readonly ResolvedFeatureCandidateV1[]> {
-    const snapshot = await this.registry.load();
+    let snapshot = await this.registry.load();
+    if (subject.productFeature === 'text_to_image') {
+      const routed = await this.registry.mutate((current) => {
+        const next = routeOpenAiCompatibleImageProfilesForEnabledModels(
+          current,
+          this.packages,
+          toIsoTimestamp(new Date().toISOString())
+        );
+        return { snapshot: next, result: next };
+      });
+      snapshot = routed;
+    }
+    if (
+      subject.productFeature === 'text_to_video' ||
+      subject.productFeature === 'image_to_video'
+    ) {
+      const routed = await this.registry.mutate((current) => {
+        const next = routeOpenAiCompatibleVideoProfilesForEnabledModels(
+          current,
+          this.packages,
+          toIsoTimestamp(new Date().toISOString())
+        );
+        return { snapshot: next, result: next };
+      });
+      snapshot = routed;
+    }
     const candidates: ResolvedFeatureCandidateV1[] = [];
 
     for (const model of snapshot.models) {
       const provider = snapshot.providers.find((item) => item.id === model.providerId);
       const connection = snapshot.connections.find((item) => item.id === model.connectionId);
-      const profile = snapshot.modelProfiles?.find((item) =>
-        item.profileId === model.activeProfileId && item.modelId === model.id
+      if (!provider || !connection) continue;
+      const profiles = (snapshot.modelProfiles ?? []).filter(
+        (item) => item.modelId === model.id
       );
-      const binding = snapshot.protocolBindings.find((item) =>
-        item.id === model.protocolBindingId &&
-        item.providerId === model.providerId &&
-        item.connectionId === model.connectionId
-      );
-      if (!provider || !connection || !profile) continue;
 
-      for (const feature of profile.features.filter((item) =>
-        item.productFeature === subject.productFeature
-      )) {
-        const contract = this.contracts.resolve(feature);
-        if (!contract) continue;
-        const adapterBinding = connection.adapterBindings?.find((item) =>
-          item.adapterId === profile.adapterKey &&
-          item.protocolId === binding?.protocolId &&
-          item.protocolVersion === binding?.protocolVersion
+      for (const profile of profiles) {
+        const binding = snapshot.protocolBindings.find((item) =>
+          item.id === profile.protocolBindingId &&
+          item.providerId === model.providerId &&
+          item.connectionId === model.connectionId
         );
-        const bindingAvailable = Boolean(
-          binding && adapterBinding &&
-          provider.packageId === profile.packageId &&
-          connection.packageId === profile.packageId &&
-          connection.packageVersion === provider.packageVersion &&
-          profile.protocolBindingId === binding.id &&
-          binding.adapterKind === profile.adapterKey &&
-          adapterRegistered(
-            this.packages,
-            profile.packageId,
-            adapterBinding,
-            binding.protocolId,
-            binding.protocolVersion
-          )
-        );
-        const runtime = await this.authorization.checkAccess({
-          providerPackageId: profile.packageId,
-          connectionId: connection.id,
-          adapterKey: profile.adapterKey,
-          operation: 'submit'
-        });
-        const policyId = runtime.policyId ?? 'runtime-policy-unavailable';
-        const policyRevision = runtime.policyRevision ?? 1;
-        const adapterVersion = adapterBinding?.adapterVersion ?? 'unavailable';
 
-        candidates.push({
-          candidateId: candidateId(model.id, profile.profileId, feature.productFeature),
-          providerName: provider.name,
-          connectionName: connection.name,
-          modelName: model.displayName,
-          recipientName: `${provider.name} / ${connection.name}`,
-          outboundScope: outboundScope(provider.accessCategory),
-          contentCategories: contentCategories(subject),
-          parameterSchema: contract.parameterSchema,
-          usageSchema: {
-            schemaId: contract.usageSchema.id,
-            revision: contract.usageSchema.revision
-          },
-          cost: { state: 'unknown' },
-          eligibility: {
-            modelEnabled: model.enabled,
-            catalogState: model.catalogState ?? 'present',
-            connectionState: connection.state,
-            profileStatus: profile.status,
-            featureSupported: true,
-            bindingAvailable,
-            runtimeAllowed: runtime.allowed,
-            schemasInterpretable: true
-          },
-          routeTemplate: {
-            packageId: profile.packageId,
-            packageVersion: connection.packageVersion ?? provider.packageVersion ?? 'unavailable',
-            adapterKey: profile.adapterKey,
-            adapterVersion,
-            providerId: provider.id,
-            connectionId: connection.id,
-            connectionRevision: connection.connectionRevision ?? 1,
-            connectionConfigVersionId:
-              connection.connectionConfigVersionId ?? 'connection-config-unavailable',
-            endpointPolicyId: connection.endpointPolicyId ?? 'endpoint-policy-unavailable',
-            endpointPolicyRevision: connection.endpointPolicyRevision ?? 1,
-            credentialVersionId: connection.credentialVersionId ?? 'credential-version-unavailable',
-            modelId: model.id,
-            providerModelKey: model.providerModelKey,
-            modelRevision: model.revision,
-            profileId: profile.profileId,
-            profileRevision: profile.revision,
-            protocolBindingId: binding?.id ?? model.protocolBindingId,
-            protocolBindingRevision: 1,
-            productFeature: feature.productFeature,
-            ...(feature.internalPurpose ? { internalPurpose: feature.internalPurpose } : {}),
-            featureMappingVersion: contract.featureMappingVersion,
-            parameterSchemaId: contract.parameterSchema.schemaId,
-            parameterSchemaRevision: contract.parameterSchema.revision,
-            resultSchemaId: contract.resultSchemaId,
-            resultSchemaRevision: contract.resultSchemaRevision,
-            usageSchemaId: contract.usageSchema.id,
-            usageSchemaRevision: contract.usageSchema.revision,
-            constraintSetId: contract.constraintSetId,
-            constraintSetRevision: contract.constraintSetRevision,
-            runtimePolicyId: policyId,
-            runtimePolicyRevision: policyRevision
+        for (const feature of profile.features.filter((item) =>
+          item.productFeature === subject.productFeature
+        )) {
+          const contract = this.contracts.resolve(feature);
+          if (!contract) continue;
+          if (!packagePublishesAdapter(this.packages, profile.packageId, profile.adapterKey)) {
+            // Drop stale profiles after a package stops publishing the adapter
+            // (e.g. UniCompAPI no longer exposes images/generations).
+            continue;
           }
-        });
+          const adapterBinding = connection.adapterBindings?.find((item) =>
+            item.adapterId === profile.adapterKey &&
+            item.protocolId === binding?.protocolId &&
+            item.protocolVersion === binding?.protocolVersion
+          );
+          const bindingAvailable = Boolean(
+            binding && adapterBinding &&
+            provider.packageId === profile.packageId &&
+            connection.packageId === profile.packageId &&
+            connection.packageVersion === provider.packageVersion &&
+            profile.protocolBindingId === binding.id &&
+            binding.adapterKind === profile.adapterKey &&
+            adapterRegistered(
+              this.packages,
+              profile.packageId,
+              adapterBinding,
+              binding.protocolId,
+              binding.protocolVersion
+            )
+          );
+          const runtime = await this.authorization.checkAccess({
+            providerPackageId: profile.packageId,
+            connectionId: connection.id,
+            adapterKey: profile.adapterKey,
+            operation: 'submit'
+          });
+          const policyId = runtime.policyId ?? 'runtime-policy-unavailable';
+          const policyRevision = runtime.policyRevision ?? 1;
+          const adapterVersion = adapterBinding?.adapterVersion ?? 'unavailable';
+
+          candidates.push({
+            candidateId: candidateId(model.id, profile.profileId, feature.productFeature),
+            providerName: provider.name,
+            connectionName: connection.name,
+            modelName: model.displayName,
+            recipientName: `${provider.name} / ${connection.name}`,
+            outboundScope: outboundScope(provider.accessCategory),
+            contentCategories: contentCategories(subject),
+            parameterSchema: contract.parameterSchema,
+            usageSchema: {
+              schemaId: contract.usageSchema.id,
+              revision: contract.usageSchema.revision
+            },
+            cost: { state: 'unknown' },
+            eligibility: {
+              modelEnabled: model.enabled,
+              catalogState: model.catalogState ?? 'present',
+              connectionState: connection.state,
+              profileStatus: profile.status,
+              featureSupported: true,
+              bindingAvailable,
+              runtimeAllowed: runtime.allowed,
+              schemasInterpretable: true
+            },
+            routeTemplate: {
+              packageId: profile.packageId,
+              packageVersion: connection.packageVersion ?? provider.packageVersion ?? 'unavailable',
+              adapterKey: profile.adapterKey,
+              adapterVersion,
+              providerId: provider.id,
+              connectionId: connection.id,
+              connectionRevision: connection.connectionRevision ?? 1,
+              connectionConfigVersionId:
+                connection.connectionConfigVersionId ?? 'connection-config-unavailable',
+              endpointPolicyId: connection.endpointPolicyId ?? 'endpoint-policy-unavailable',
+              endpointPolicyRevision: connection.endpointPolicyRevision ?? 1,
+              credentialVersionId: connection.credentialVersionId ?? 'credential-version-unavailable',
+              modelId: model.id,
+              providerModelKey: model.providerModelKey,
+              modelRevision: model.revision,
+              profileId: profile.profileId,
+              profileRevision: profile.revision,
+              protocolBindingId: binding?.id ?? toProtocolBindingId(profile.protocolBindingId),
+              protocolBindingRevision: 1,
+              productFeature: feature.productFeature,
+              ...(feature.internalPurpose ? { internalPurpose: feature.internalPurpose } : {}),
+              featureMappingVersion: contract.featureMappingVersion,
+              parameterSchemaId: contract.parameterSchema.schemaId,
+              parameterSchemaRevision: contract.parameterSchema.revision,
+              resultSchemaId: contract.resultSchemaId,
+              resultSchemaRevision: contract.resultSchemaRevision,
+              usageSchemaId: contract.usageSchema.id,
+              usageSchemaRevision: contract.usageSchema.revision,
+              constraintSetId: contract.constraintSetId,
+              constraintSetRevision: contract.constraintSetRevision,
+              runtimePolicyId: policyId,
+              runtimePolicyRevision: policyRevision
+            }
+          });
+        }
       }
     }
     return candidates;
@@ -245,6 +282,25 @@ function adapterRegistered(
   } catch {
     return false;
   }
+}
+
+function packagePublishesAdapter(
+  packages: ProviderPackageRegistry,
+  packageId: string,
+  adapterId: string
+): boolean {
+  const templates = packages.listSafeTemplates().filter((item) => item.packageId === packageId);
+  for (const template of templates) {
+    try {
+      const resolved = packages.resolveTemplate(packageId, template.templateId);
+      if (resolved.adapters.some((adapter) => adapter.adapterId === adapterId)) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 function candidateId(modelId: string, profileId: string, feature: ProductFeature): string {

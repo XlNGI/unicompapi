@@ -6,12 +6,35 @@ import {
   toProviderInvocationAttemptId,
   toProviderInvocationEventId,
   toProviderOperationRecordId,
+  toProviderUsageObservationId,
   toSubmissionIntentId,
   toTaskId,
+  type ParameterSchemaV2,
+  type ProviderConnection,
   type ProviderExecutionRouteSnapshotV1,
-  type ProviderSubmitOutcome
+  type ProviderSubmitOutcome,
+  type StructuredCredentialRecord
 } from '../../domain';
 import type { SecureCredentialVault } from './credential-vault';
+import {
+  NEWAPI_ADAPTER_VERSION,
+  NEWAPI_PROVIDER_PACKAGE_ID,
+  NEWAPI_PROVIDER_PACKAGE_VERSION,
+  NEWAPI_PROTOCOL_VERSION,
+  NEWAPI_VIDEO_ADAPTER_ID,
+  NEWAPI_VIDEO_PROTOCOL_ID,
+  NewApiVideoAdapter,
+  type NewApiSharedRuntime,
+  type NewApiVideoConnectionResolverPort,
+  type NewApiVideoCredentialResolverPort,
+  type NewApiVideoParameterSchemaResolverPort,
+  type NewApiVideoUsageObservationSinkPort
+} from './newapi';
+import {
+  UNICOMPAPI_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_PROVIDER_PACKAGE_VERSION
+} from './newapi/unicompapi-contracts';
+import { createVideoProviderFeatureContracts } from './project-video-feature';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type { ProviderPackageRegistry } from './provider-package-registry';
 import {
@@ -41,7 +64,7 @@ import {
   type ViduUsageObservationSinkPort
 } from './vidu';
 
-const noopUsage: ViduUsageObservationSinkPort = {
+const noopUsage: NewApiVideoUsageObservationSinkPort & ViduUsageObservationSinkPort = {
   async append() {
     return;
   }
@@ -49,6 +72,9 @@ const noopUsage: ViduUsageObservationSinkPort = {
 
 export interface VideoFeatureSubmissionRuntimes {
   readonly viduPackage: ViduProviderPackage;
+  readonly newApiRuntime?: NewApiSharedRuntime;
+  /** Long-lived adapter shared with Electron poll/result landing. */
+  readonly newApiVideoAdapter?: NewApiVideoAdapter;
   readonly credentialVault: SecureCredentialVault;
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
@@ -72,7 +98,6 @@ export function createVideoFeatureSubmissionIdFactory(): ProviderSubmissionOrche
 export function createVideoFeatureDispatchBridge(
   options: VideoFeatureSubmissionRuntimes
 ): ProviderSubmissionDispatchBridge {
-  void options.credentialVault;
   const routes = new ViduRegistryExecutionRouteResolver(options.providerRegistry);
   const viduSchemas = new ViduPackagedParameterSchemaResolver();
   const viduAdapters = options.viduPackage.createRouteAdapters({
@@ -109,7 +134,62 @@ export function createVideoFeatureDispatchBridge(
     })
   ];
 
+  const newApiRuntime = options.newApiRuntime;
+  const newApiAdapter = options.newApiVideoAdapter
+    ?? (newApiRuntime
+      ? createNewApiVideoAdapterFromRuntimes({
+          ...options,
+          newApiRuntime
+        })
+      : undefined);
+  if (newApiAdapter) {
+    adapters.push(
+      wrapVideoAdapter({
+        packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+        packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
+        acceptedPackages: [{
+          packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+          packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION
+        }],
+        adapterKey: NEWAPI_VIDEO_ADAPTER_ID,
+        adapterVersion: NEWAPI_ADAPTER_VERSION,
+        protocolId: NEWAPI_VIDEO_PROTOCOL_ID,
+        protocolVersion: NEWAPI_PROTOCOL_VERSION,
+        submit: (input) => newApiAdapter.submit(input)
+      })
+    );
+  }
+
   return new ProviderSubmissionDispatchBridge(options.providerPackages, adapters);
+}
+
+export function createNewApiVideoAdapterFromRuntimes(
+  options: Pick<
+    VideoFeatureSubmissionRuntimes,
+    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials'
+  > & {
+    readonly newApiRuntime: NewApiSharedRuntime;
+  }
+): NewApiVideoAdapter {
+  const credentials = createRegistryCredentialResolver(
+    options.providerRegistry,
+    options.credentialVault
+  );
+  const connections = createRegistryConnectionResolver(options.providerRegistry);
+  const parameterSchemas = createVideoParameterSchemaResolver();
+  const images = createControlledNewApiImagePort(options.materials);
+  return new NewApiVideoAdapter(
+    options.newApiRuntime,
+    connections,
+    credentials,
+    parameterSchemas,
+    images,
+    noopUsage,
+    {
+      nextProviderUsageObservationId: () =>
+        toProviderUsageObservationId(`usage-${randomUUID()}`)
+    }
+  );
 }
 
 export function extractVideoResultUrls(outcome: ProviderSubmitOutcome): readonly string[] {
@@ -126,6 +206,7 @@ export function extractVideoResultUrls(outcome: ProviderSubmitOutcome): readonly
 function wrapVideoAdapter(input: {
   readonly packageId: string;
   readonly packageVersion: string;
+  readonly acceptedPackages?: ProviderSubmissionAdapterPort['acceptedPackages'];
   readonly adapterKey: string;
   readonly adapterVersion: string;
   readonly protocolId: string;
@@ -139,6 +220,7 @@ function wrapVideoAdapter(input: {
   return {
     packageId: input.packageId,
     packageVersion: input.packageVersion,
+    ...(input.acceptedPackages ? { acceptedPackages: input.acceptedPackages } : {}),
     adapterKey: input.adapterKey,
     adapterVersion: input.adapterVersion,
     protocolId: input.protocolId,
@@ -220,4 +302,82 @@ function dispatchFailureSafeCode(adapterKey: string, error: unknown): string {
     return `${adapterKey}.${(error as { code: string }).code}`;
   }
   return `${adapterKey}.failed_before_submission`;
+}
+
+function createRegistryCredentialResolver(
+  registry: JsonProviderRegistryStore,
+  vault: SecureCredentialVault
+): NewApiVideoCredentialResolverPort {
+  return {
+    async useCredential<T>(
+      input: {
+        readonly connectionId: string;
+        readonly credentialVersionId: string;
+      },
+      operation: (credential: StructuredCredentialRecord) => Promise<T>
+    ): Promise<T> {
+      const snapshot = await registry.load();
+      const connection = snapshot.connections.find(
+        (item) => item.id === input.connectionId
+      );
+      if (
+        !connection?.credentialReference ||
+        connection.credentialVersionId !== input.credentialVersionId
+      ) {
+        throw new Error('Provider credential is unavailable for the selected route');
+      }
+      return vault.useRecord(connection.credentialReference, operation);
+    }
+  };
+}
+
+function createRegistryConnectionResolver(
+  registry: JsonProviderRegistryStore
+): NewApiVideoConnectionResolverPort {
+  return {
+    async get(connectionId: string): Promise<ProviderConnection | undefined> {
+      const snapshot = await registry.load();
+      return snapshot.connections.find((item) => item.id === connectionId);
+    }
+  };
+}
+
+function createVideoParameterSchemaResolver(): NewApiVideoParameterSchemaResolverPort {
+  const schemas = createVideoProviderFeatureContracts().map(
+    (contract) => contract.parameterSchema
+  );
+  return {
+    async get(
+      schemaId: string,
+      revision: number
+    ): Promise<ParameterSchemaV2 | undefined> {
+      return schemas.find(
+        (schema) => schema.schemaId === schemaId && schema.revision === revision
+      );
+    }
+  };
+}
+
+function createControlledNewApiImagePort(
+  materials: ControlledImageMaterialPort
+) {
+  return {
+    async resolve(input: {
+      readonly projectId: string;
+      readonly assetId: string;
+    }) {
+      const material = await materials.resolve({
+        projectId: input.projectId as never,
+        assetId: input.assetId as never
+      });
+      return {
+        assetId: material.assetId,
+        mimeType: material.mimeType,
+        width: material.width,
+        height: material.height,
+        sizeBytes: material.sizeBytes,
+        bytes: Uint8Array.from(Buffer.from(material.base64, 'base64'))
+      };
+    }
+  };
 }

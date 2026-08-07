@@ -35,6 +35,7 @@ import {
   klingProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   normalizeProviderSubmitOutcome,
+  unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   type ProviderSubmissionAdapterPort
@@ -143,6 +144,59 @@ describe('provider submission dispatch bridge', () => {
       kind: 'failed_before_submission',
       safeCode: 'adapter.failed_before_submission'
     });
+    expect(normalizeProviderSubmitOutcome({
+      kind: 'failed_before_submission',
+      message: 'The NewAPI response was invalid',
+      retryability: 'not_retryable'
+    })).toEqual({
+      kind: 'failed_before_submission',
+      safeCode: 'newapi.invalid_response'
+    });
+    expect(normalizeProviderSubmitOutcome({
+      kind: 'failed_before_submission',
+      message: 'The NewAPI request is invalid',
+      retryability: 'not_retryable'
+    })).toEqual({
+      kind: 'failed_before_submission',
+      safeCode: 'newapi.invalid_request'
+    });
+  });
+
+  it('accepts UniCompAPI package routes on the shared NewAPI video adapter', async () => {
+    const calls: string[] = [];
+    const videoAdapter = newApiProviderPackageDescriptor.adapters.find(
+      (adapter) => adapter.adapterId === NEWAPI_VIDEO_ADAPTER_ID
+    );
+    if (!videoAdapter) throw new Error('newapi.video adapter missing');
+    const registered: ProviderSubmissionAdapterPort = {
+      ...port(newApiProviderPackageDescriptor, videoAdapter, calls),
+      acceptedPackages: [{
+        packageId: unicompapiProviderPackageDescriptor.packageId,
+        packageVersion: unicompapiProviderPackageDescriptor.packageVersion
+      }]
+    };
+    const bridge = new ProviderSubmissionDispatchBridge(
+      new ProviderPackageRegistry([
+        newApiProviderPackageDescriptor,
+        unicompapiProviderPackageDescriptor
+      ]),
+      [registered]
+    );
+    const outcome = await bridge.submit({
+      routeSnapshot: {
+        ...route(registered),
+        packageId: unicompapiProviderPackageDescriptor.packageId,
+        packageVersion: unicompapiProviderPackageDescriptor.packageVersion
+      },
+      request: { synthetic: true },
+      async beforeRequestStarted() {}
+    });
+    expect(outcome).toMatchObject({
+      providerOperationId: `operation-${NEWAPI_VIDEO_ADAPTER_ID}`
+    });
+    expect(calls).toEqual([
+      `${NEWAPI_PROVIDER_PACKAGE_ID}:${NEWAPI_VIDEO_ADAPTER_ID}@${videoAdapter.adapterVersion}`
+    ]);
   });
 });
 

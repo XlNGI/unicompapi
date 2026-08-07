@@ -25,6 +25,7 @@ import {
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
   type NewApiHttpTransportResponse,
+  type NewApiImageDownloadPort,
   type ProviderManagementAdapterPort,
   type ViduHttpTransport,
   type ViduHttpTransportRequest,
@@ -39,6 +40,7 @@ export interface LiveProviderManagementComposition {
   readonly adapters: readonly ProviderManagementAdapterPort[];
   readonly deepSeekRuntime: DeepSeekSharedRuntime;
   readonly newApiRuntime: NewApiSharedRuntime;
+  readonly newApiImageDownloads: NewApiImageDownloadPort;
 }
 
 export function createLiveProviderManagementComposition(options: {
@@ -71,6 +73,7 @@ export function createLiveProviderManagementComposition(options: {
   return {
     deepSeekRuntime,
     newApiRuntime,
+    newApiImageDownloads: createElectronNewApiImageDownloadPort(),
     adapters: [
       new DeepSeekManagementAdapter(deepSeekRuntime),
       new NewApiManagementAdapter(newApiRuntime),
@@ -346,6 +349,59 @@ async function readBoundedResponse(
     offset += chunk.byteLength;
   }
   return body;
+}
+
+function createElectronNewApiImageDownloadPort(): NewApiImageDownloadPort {
+  return {
+    async download(input) {
+      if (input.endpointSecurity.sendCredential) {
+        throw new NewApiTransportFailure('network');
+      }
+      if (input.endpointSecurity.allowPrivateNetwork) {
+        throw new NewApiTransportFailure('network');
+      }
+      let parsed: URL;
+      try {
+        parsed = new URL(input.url);
+      } catch {
+        throw new NewApiTransportFailure('network');
+      }
+      if (
+        parsed.username ||
+        parsed.password ||
+        parsed.hash ||
+        (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
+      ) {
+        throw new NewApiTransportFailure('network');
+      }
+      try {
+        const response = await net.fetch(parsed.toString(), {
+          method: 'GET',
+          headers: { accept: 'image/*' },
+          signal: input.signal,
+          redirect: 'error'
+        });
+        if (response.status < 200 || response.status >= 300) {
+          throw new NewApiTransportFailure('network');
+        }
+        const body = await readBoundedResponse(
+          response,
+          input.maximumResponseBytes,
+          () => new NewApiTransportFailure('response_too_large')
+        );
+        return {
+          body,
+          contentType: response.headers.get('content-type') ?? undefined
+        };
+      } catch (error) {
+        if (input.signal?.aborted || isAbortError(error)) {
+          throw new NewApiTransportFailure('cancelled');
+        }
+        if (error instanceof NewApiTransportFailure) throw error;
+        throw new NewApiTransportFailure('network');
+      }
+    }
+  };
 }
 
 function isAbortError(error: unknown): boolean {

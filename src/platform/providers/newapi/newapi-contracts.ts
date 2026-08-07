@@ -43,6 +43,12 @@ export const NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
   'parameters.newapi.text_chat.default';
 export const NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID =
   'parameters.newapi.text_reasoning.default';
+export const NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
+  'parameters.newapi.text_to_image.default';
+export const NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.newapi.text_to_video.default';
+export const NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.newapi.image_to_video.default';
 
 export interface NewApiNumericRangeDeclarationV1 {
   readonly minimum?: number;
@@ -99,22 +105,290 @@ export const newApiChatUsageSchema: UsageSchemaV1 = createUsageSchema({
   ]
 });
 
-/** Required-only text schemas: no user-adjustable fields; provider defaults apply. */
+/**
+ * Default OpenAI-compatible text schemas for UniCompAPI / NewAPI soft routing.
+ * Required wire fields are only model + messages (forced by the adapter).
+ * Optional sampling fields follow the gateway chat/completions surface;
+ * stream stays adapter-controlled (always true with include_usage).
+ */
 export const newApiDefaultTextChatParameterSchema: ParameterSchemaV2 = {
   schemaVersion: 2,
   schemaId: NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
-  revision: 1,
+  revision: 3,
   productFeature: 'text_chat',
-  fields: []
+  fields: [
+    {
+      fieldId: 'max_tokens',
+      labelId: 'provider.parameter.max_tokens',
+      groupId: 'provider.parameter.generation',
+      order: 10,
+      valueType: 'integer',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      minimum: 1,
+      maximum: 128000
+    },
+    {
+      fieldId: 'temperature',
+      labelId: 'provider.parameter.temperature',
+      groupId: 'provider.parameter.generation',
+      order: 20,
+      valueType: 'number',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      minimum: 0,
+      maximum: 2
+    },
+    {
+      fieldId: 'top_p',
+      labelId: 'provider.parameter.top_p',
+      groupId: 'provider.parameter.generation',
+      order: 30,
+      valueType: 'number',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      minimum: 0,
+      maximum: 1
+    },
+    {
+      fieldId: 'stop',
+      labelId: 'provider.parameter.stop',
+      groupId: 'provider.parameter.generation',
+      order: 40,
+      valueType: 'string',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    }
+  ]
 };
 
 export const newApiDefaultTextReasoningParameterSchema: ParameterSchemaV2 = {
   schemaVersion: 2,
   schemaId: NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
-  revision: 1,
+  revision: 3,
   productFeature: 'text_reasoning',
-  fields: []
+  fields: [
+    {
+      fieldId: 'max_completion_tokens',
+      labelId: 'provider.parameter.max_completion_tokens',
+      groupId: 'provider.parameter.generation',
+      order: 10,
+      valueType: 'integer',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      minimum: 1,
+      maximum: 128000
+    },
+    {
+      fieldId: 'reasoning_effort',
+      labelId: 'provider.parameter.reasoning_effort',
+      groupId: 'provider.parameter.generation',
+      order: 20,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['low', 'medium', 'high']
+    },
+    {
+      fieldId: 'stop',
+      labelId: 'provider.parameter.stop',
+      groupId: 'provider.parameter.generation',
+      order: 30,
+      valueType: 'string',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    }
+  ]
 };
+
+/**
+ * Default OpenAI-compatible text_to_image schema for POST /v1/images/generations.
+ * Mirrors the public parameter surface for generation; edit/multi-image inputs
+ * (images / image / mask) stay out of text_to_image.
+ */
+export const newApiDefaultTextToImageParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_to_image',
+  fields: [
+    {
+      fieldId: 'size',
+      labelId: 'provider.parameter.size',
+      groupId: 'provider.parameter.generation',
+      order: 10,
+      valueType: 'enum',
+      exposure: 'user_required',
+      defaultPolicy: 'require_user_value',
+      required: true,
+      options: [
+        '1024x1024',
+        '1536x1024',
+        '1024x1536',
+        '1792x1024',
+        '1024x1792',
+        '1328x1328',
+        '1664x928',
+        '928x1664'
+      ]
+    },
+    {
+      fieldId: 'n',
+      labelId: 'provider.parameter.n',
+      groupId: 'provider.parameter.generation',
+      order: 20,
+      valueType: 'integer',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      minimum: 1,
+      maximum: 8
+    },
+    {
+      fieldId: 'quality',
+      labelId: 'provider.parameter.quality',
+      groupId: 'provider.parameter.generation',
+      order: 30,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['auto', 'standard', 'hd', 'high', 'medium', 'low']
+    },
+    {
+      fieldId: 'response_format',
+      labelId: 'provider.parameter.response_format',
+      groupId: 'provider.parameter.generation',
+      order: 40,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['url', 'b64_json']
+    },
+    {
+      fieldId: 'style',
+      labelId: 'provider.parameter.style',
+      groupId: 'provider.parameter.generation',
+      order: 50,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['vivid', 'natural']
+    },
+    {
+      fieldId: 'output_format',
+      labelId: 'provider.parameter.output_format',
+      groupId: 'provider.parameter.generation',
+      order: 60,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['png', 'jpeg', 'webp']
+    },
+    {
+      fieldId: 'watermark',
+      labelId: 'provider.parameter.watermark',
+      groupId: 'provider.parameter.generation',
+      order: 70,
+      valueType: 'boolean',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    }
+  ]
+};
+
+/** Default OpenAI-compatible video schemas: optional fields only; provider defaults apply. */
+export const newApiDefaultTextToVideoParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  revision: 2,
+  productFeature: 'text_to_video',
+  fields: createOpenAiCompatibleDefaultVideoParameterFields()
+};
+
+export const newApiDefaultImageToVideoParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  revision: 2,
+  productFeature: 'image_to_video',
+  fields: createOpenAiCompatibleDefaultVideoParameterFields()
+};
+
+function createOpenAiCompatibleDefaultVideoParameterFields(): readonly ParameterFieldSchemaV2[] {
+  return [
+    {
+      fieldId: 'duration',
+      labelId: 'provider.parameter.duration',
+      groupId: 'provider.parameter.generation',
+      order: 10,
+      valueType: 'integer',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    },
+    {
+      fieldId: 'resolution',
+      labelId: 'provider.parameter.resolution',
+      groupId: 'provider.parameter.generation',
+      order: 20,
+      valueType: 'string',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    },
+    {
+      fieldId: 'aspect_ratio',
+      labelId: 'provider.parameter.aspect_ratio',
+      groupId: 'provider.parameter.generation',
+      order: 30,
+      valueType: 'string',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    },
+    {
+      fieldId: 'audio',
+      labelId: 'provider.parameter.audio',
+      groupId: 'provider.parameter.generation',
+      order: 40,
+      valueType: 'boolean',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    },
+    {
+      fieldId: 'mode',
+      labelId: 'provider.parameter.mode',
+      groupId: 'provider.parameter.generation',
+      order: 50,
+      valueType: 'string',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    },
+    {
+      fieldId: 'seed',
+      labelId: 'provider.parameter.seed',
+      groupId: 'provider.parameter.generation',
+      order: 60,
+      valueType: 'integer',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    }
+  ];
+}
 
 /**
  * Exact Model Definition for OpenAI-compatible chat bindings.
@@ -168,6 +442,120 @@ export function createOpenAiCompatibleDefaultTextDefinition(input: {
             resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
             usageSchemaId: NEWAPI_CHAT_USAGE_SCHEMA_ID,
             constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Exact Model Definition for OpenAI-compatible image bindings.
+ * Explicit attach only — never inferred from catalog sync.
+ * Endpoint: POST /v1/images/generations (URL or Base64 results).
+ */
+export function createOpenAiCompatibleDefaultImageDefinition(input: {
+  readonly packageId: string;
+  readonly packageVersion: string;
+  readonly providerModelKey: string;
+}): ProviderModelDefinition {
+  const providerModelKey = requireProviderModelKey(input.providerModelKey);
+  if (
+    input.packageId !== NEWAPI_PROVIDER_PACKAGE_ID &&
+    input.packageId !== 'provider-package-unicompapi'
+  ) {
+    throw new TypeError('OpenAI-compatible image definitions require a known package id');
+  }
+  const suffix = createHash('sha256')
+    .update(canonicalJson({
+      packageId: input.packageId,
+      packageVersion: input.packageVersion,
+      providerModelKey,
+      feature: 'text_to_image'
+    }))
+    .digest('hex')
+    .slice(0, 16);
+  return {
+    schemaVersion: 1,
+    definitionId: `definition.openai-compatible.image.${suffix}`,
+    packageId: input.packageId,
+    packageVersion: input.packageVersion,
+    providerModelKey,
+    profileTemplates: [
+      {
+        templateId: `profile-template.openai-compatible.image.${suffix}`,
+        adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
+        protocolDefinitionId: NEWAPI_IMAGE_PROTOCOL_ID,
+        sourceDocumentRevision: NEWAPI_SOURCE_DOCUMENT_REVISION,
+        features: [
+          {
+            productFeature: 'text_to_image',
+            internalPurpose: 'image_generation',
+            parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+            resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+            usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
+            constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Exact Model Definition for OpenAI-compatible video bindings.
+ * Explicit attach only — never inferred from catalog sync.
+ * Endpoint: POST /v1/videos (async) + GET /v1/videos/{id}.
+ */
+export function createOpenAiCompatibleDefaultVideoDefinition(input: {
+  readonly packageId: string;
+  readonly packageVersion: string;
+  readonly providerModelKey: string;
+}): ProviderModelDefinition {
+  const providerModelKey = requireProviderModelKey(input.providerModelKey);
+  if (
+    input.packageId !== NEWAPI_PROVIDER_PACKAGE_ID &&
+    input.packageId !== 'provider-package-unicompapi'
+  ) {
+    throw new TypeError('OpenAI-compatible video definitions require a known package id');
+  }
+  const suffix = createHash('sha256')
+    .update(canonicalJson({
+      packageId: input.packageId,
+      packageVersion: input.packageVersion,
+      providerModelKey,
+      feature: 'video'
+    }))
+    .digest('hex')
+    .slice(0, 16);
+  return {
+    schemaVersion: 1,
+    definitionId: `definition.openai-compatible.video.${suffix}`,
+    packageId: input.packageId,
+    packageVersion: input.packageVersion,
+    providerModelKey,
+    profileTemplates: [
+      {
+        templateId: `profile-template.openai-compatible.video.${suffix}`,
+        adapterKey: NEWAPI_VIDEO_ADAPTER_ID,
+        protocolDefinitionId: NEWAPI_VIDEO_PROTOCOL_ID,
+        sourceDocumentRevision: NEWAPI_SOURCE_DOCUMENT_REVISION,
+        features: [
+          {
+            productFeature: 'text_to_video',
+            internalPurpose: 'video_generation',
+            parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+            resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+            usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+            constraintSetId: NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID
+          },
+          {
+            productFeature: 'image_to_video',
+            internalPurpose: 'reference_to_video',
+            parameterSchemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+            resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+            usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+            constraintSetId: NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID
           }
         ]
       }

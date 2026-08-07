@@ -34,6 +34,8 @@ import {
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_CHAT_PROTOCOL_ID
 } from './newapi/newapi-contracts';
+import { routeOpenAiCompatibleImageProfile } from './newapi/openai-compatible-image-routing';
+import { routeOpenAiCompatibleVideoProfile } from './newapi/openai-compatible-video-routing';
 import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
 import { VIDU_PROVIDER_PACKAGE_ID } from './vidu/vidu-contracts';
 import { installPackagedViduCatalog } from './vidu/vidu-packaged-catalog-install';
@@ -64,7 +66,8 @@ export const providerManagementActions = [
   'model_deleted',
   'connection_deleted',
   // Legacy / transitional events that may already exist in local audit history.
-  'image_profile_attached'
+  'image_profile_attached',
+  'video_profile_attached'
 ] as const;
 export type ProviderManagementAction = (typeof providerManagementActions)[number];
 
@@ -1189,6 +1192,24 @@ export class ProviderManagementFramework {
           workingSnapshot = attached.snapshot;
           currentModel = attached.model;
         }
+        if (request.enabled) {
+          const imaged = routeOpenAiCompatibleImageProfile(
+            workingSnapshot,
+            this.packages,
+            currentModel,
+            now
+          );
+          workingSnapshot = imaged.snapshot;
+          currentModel = imaged.model;
+          const videoed = routeOpenAiCompatibleVideoProfile(
+            workingSnapshot,
+            this.packages,
+            currentModel,
+            now
+          );
+          workingSnapshot = videoed.snapshot;
+          currentModel = videoed.model;
+        }
         if (request.enabled) assertModelRoutableForEnable(workingSnapshot, currentModel);
         const updated = currentModel.enabled === request.enabled
           ? currentModel
@@ -1225,6 +1246,172 @@ export class ProviderManagementFramework {
       return {
         ok: true,
         value: { modelId: result.id, state: request.enabled ? 'enabled' : 'disabled' }
+      };
+    } catch (error) {
+      return frameworkFailure(error);
+    }
+  }
+
+  async attachOpenAiCompatibleImageProfile(input: unknown): Promise<
+    ProviderManagementFrameworkResult<{
+      readonly modelId: string;
+      readonly profileId?: string;
+      readonly state: 'attached' | 'already_attached' | 'skipped';
+    }>
+  > {
+    try {
+      const modelId = parseIdRequest(input, 'modelId');
+      const now = this.now();
+      const result = await this.registry.mutate((snapshot): {
+        readonly snapshot: ProviderRegistrySnapshot;
+        readonly result: {
+          readonly modelId: string;
+          readonly providerId: string;
+          readonly connectionId: string;
+          readonly profileId?: string;
+          readonly state: 'attached' | 'already_attached' | 'skipped';
+        };
+      } => {
+        const model = snapshot.models.find((candidate) => candidate.id === modelId);
+        if (!model) {
+          throw new ProviderManagementFrameworkError(
+            'model_not_found',
+            'The provider model was not found'
+          );
+        }
+        const routed = routeOpenAiCompatibleImageProfile(
+          snapshot,
+          this.packages,
+          model,
+          now
+        );
+        if (routed.state === 'skipped') {
+          return {
+            snapshot,
+            result: {
+              modelId: model.id,
+              providerId: model.providerId,
+              connectionId: model.connectionId,
+              state: 'skipped'
+            }
+          };
+        }
+        if (!routed.profileId) {
+          throw new ProviderManagementFrameworkError(
+            'operation_unavailable',
+            'OpenAI-compatible image routing is unavailable for this model'
+          );
+        }
+        return {
+          snapshot: routed.snapshot,
+          result: {
+            modelId: model.id,
+            providerId: model.providerId,
+            connectionId: model.connectionId,
+            profileId: routed.profileId,
+            state: routed.state
+          }
+        };
+      });
+      if (result.state !== 'skipped') {
+        await this.record({
+          action: 'image_profile_attached',
+          outcome: 'succeeded',
+          providerId: result.providerId,
+          connectionId: result.connectionId,
+          modelId: result.modelId
+        }, now);
+      }
+      return {
+        ok: true,
+        value: {
+          modelId: result.modelId,
+          ...(result.profileId ? { profileId: result.profileId } : {}),
+          state: result.state
+        }
+      };
+    } catch (error) {
+      return frameworkFailure(error);
+    }
+  }
+
+  async attachOpenAiCompatibleVideoProfile(input: unknown): Promise<
+    ProviderManagementFrameworkResult<{
+      readonly modelId: string;
+      readonly profileId?: string;
+      readonly state: 'attached' | 'already_attached' | 'skipped';
+    }>
+  > {
+    try {
+      const modelId = parseIdRequest(input, 'modelId');
+      const now = this.now();
+      const result = await this.registry.mutate((snapshot): {
+        readonly snapshot: ProviderRegistrySnapshot;
+        readonly result: {
+          readonly modelId: string;
+          readonly providerId: string;
+          readonly connectionId: string;
+          readonly profileId?: string;
+          readonly state: 'attached' | 'already_attached' | 'skipped';
+        };
+      } => {
+        const model = snapshot.models.find((candidate) => candidate.id === modelId);
+        if (!model) {
+          throw new ProviderManagementFrameworkError(
+            'model_not_found',
+            'The provider model was not found'
+          );
+        }
+        const routed = routeOpenAiCompatibleVideoProfile(
+          snapshot,
+          this.packages,
+          model,
+          now
+        );
+        if (routed.state === 'skipped') {
+          return {
+            snapshot,
+            result: {
+              modelId: model.id,
+              providerId: model.providerId,
+              connectionId: model.connectionId,
+              state: 'skipped'
+            }
+          };
+        }
+        if (!routed.profileId) {
+          throw new ProviderManagementFrameworkError(
+            'operation_unavailable',
+            'OpenAI-compatible video routing is unavailable for this model'
+          );
+        }
+        return {
+          snapshot: routed.snapshot,
+          result: {
+            modelId: model.id,
+            providerId: model.providerId,
+            connectionId: model.connectionId,
+            profileId: routed.profileId,
+            state: routed.state
+          }
+        };
+      });
+      if (result.state !== 'skipped') {
+        await this.record({
+          action: 'video_profile_attached',
+          outcome: 'succeeded',
+          providerId: result.providerId,
+          connectionId: result.connectionId,
+          modelId: result.modelId
+        }, now);
+      }
+      return {
+        ok: true,
+        value: {
+          modelId: result.modelId,
+          ...(result.profileId ? { profileId: result.profileId } : {}),
+          state: result.state
+        }
       };
     } catch (error) {
       return frameworkFailure(error);

@@ -30,8 +30,15 @@ import {
   NewApiVideoAdapter,
   ProviderPackageRegistry,
   createNewApiModelContract,
+  createOpenAiCompatibleDefaultImageDefinition,
+  createOpenAiCompatibleDefaultTextDefinition,
+  createOpenAiCompatibleDefaultVideoDefinition,
   mapNewApiImageUsage,
   mapNewApiUsage,
+  newApiDefaultTextChatParameterSchema,
+  newApiDefaultTextReasoningParameterSchema,
+  newApiDefaultTextToImageParameterSchema,
+  newApiDefaultTextToVideoParameterSchema,
   newApiProviderPackageDescriptor,
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
@@ -39,6 +46,11 @@ import {
   NEWAPI_CHAT_USAGE_SCHEMA_ID,
   NEWAPI_COMPATIBLE_TEMPLATE_ID,
   NEWAPI_CREDENTIAL_SCHEMA_ID,
+  NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+  NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_ENDPOINT_POLICY_ID,
   NEWAPI_IMAGE_ADAPTER_ID,
   NEWAPI_IMAGE_CONSTRAINT_SET_ID,
@@ -142,6 +154,122 @@ describe('NewAPI package and dynamic model contracts', () => {
     expect(() => createNewApiModelContract(modelKey, {
       textToImage: { sizes: ['1024x1024'], unknown: true } as never
     })).toThrow('unknown field');
+  });
+
+  it('publishes optional-field default text schemas for UniCompAPI chat soft routing', () => {
+    const definition = createOpenAiCompatibleDefaultTextDefinition({
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+      providerModelKey: 'qwen-plus'
+    });
+    expect(definition.profileTemplates[0]).toMatchObject({
+      adapterKey: NEWAPI_CHAT_ADAPTER_ID,
+      features: [
+        {
+          productFeature: 'text_chat',
+          parameterSchemaId: NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID
+        },
+        {
+          productFeature: 'text_reasoning',
+          parameterSchemaId: NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID
+        }
+      ]
+    });
+    expect(newApiDefaultTextChatParameterSchema.revision).toBe(3);
+    expect(newApiDefaultTextChatParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'max_tokens',
+      'temperature',
+      'top_p',
+      'stop'
+    ]);
+    expect(
+      newApiDefaultTextChatParameterSchema.fields.find((field) => field.fieldId === 'max_tokens')
+    ).toMatchObject({ minimum: 1, maximum: 128000 });
+    expect(newApiDefaultTextReasoningParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'max_completion_tokens',
+      'reasoning_effort',
+      'stop'
+    ]);
+    expect(
+      newApiDefaultTextChatParameterSchema.fields.every((field) =>
+        field.exposure === 'user_optional' &&
+        field.defaultPolicy === 'omit_use_provider_default' &&
+        field.required === false
+      )
+    ).toBe(true);
+  });
+
+  it('publishes an empty default image definition for explicit OpenAI-compatible attach', () => {
+    const definition = createOpenAiCompatibleDefaultImageDefinition({
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+      providerModelKey: 'flux-manual'
+    });
+    expect(definition.profileTemplates).toHaveLength(1);
+    expect(definition.profileTemplates[0]).toMatchObject({
+      adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
+      features: [{
+        productFeature: 'text_to_image',
+        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+        resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+        usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
+        constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID
+      }]
+    });
+    expect(newApiDefaultTextToImageParameterSchema.fields.some((field) =>
+      field.fieldId === 'size' && field.required
+    )).toBe(true);
+    expect(newApiDefaultTextToImageParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'size',
+      'n',
+      'quality',
+      'response_format',
+      'style',
+      'output_format',
+      'watermark'
+    ]);
+    expect(JSON.stringify(definition)).not.toMatch(/dall-e|sdxl/i);
+  });
+
+  it('publishes an optional-field default video definition for explicit OpenAI-compatible attach', () => {
+    const definition = createOpenAiCompatibleDefaultVideoDefinition({
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+      providerModelKey: 'sora-manual'
+    });
+    expect(definition.profileTemplates).toHaveLength(1);
+    expect(definition.profileTemplates[0]).toMatchObject({
+      adapterKey: NEWAPI_VIDEO_ADAPTER_ID,
+      features: [
+        {
+          productFeature: 'text_to_video',
+          parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+          resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+          usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+          constraintSetId: NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID
+        },
+        {
+          productFeature: 'image_to_video',
+          parameterSchemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+          resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+          usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+          constraintSetId: NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID
+        }
+      ]
+    });
+    expect(newApiDefaultTextToVideoParameterSchema.fields.every((field) =>
+      field.exposure === 'user_optional' &&
+      field.defaultPolicy === 'omit_use_provider_default' &&
+      field.required === false
+    )).toBe(true);
+    expect(newApiDefaultTextToVideoParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'duration',
+      'resolution',
+      'aspect_ratio',
+      'audio',
+      'mode',
+      'seed'
+    ]);
   });
 
   it('keeps dynamic contracts deterministic and rejects undeclared fixed values', () => {
@@ -376,6 +504,156 @@ describe('NewAPI chat adapter', () => {
     expect(body).not.toHaveProperty('thinking');
   });
 
+  it('serializes default UniCompAPI chat fields without forcing stream/user', async () => {
+    const sse = [
+      'data: {"id":"chat-default-1","object":"chat.completion.chunk","created":1,"model":"' +
+        modelKey +
+        '","choices":[{"index":0,"delta":{"role":"assistant","content":"你好"},"finish_reason":null}]}\n\n',
+      'data: {"id":"chat-default-1","object":"chat.completion.chunk","created":1,"model":"' +
+        modelKey +
+        '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\n',
+      'data: [DONE]\n\n'
+    ].join('');
+    const fixture = runtimeFixture(async () => streamResponse(sse));
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      credentialResolver(),
+      connectionResolver(),
+      {
+        get: async (schemaId, revision) =>
+          schemaId === newApiDefaultTextChatParameterSchema.schemaId &&
+          revision === newApiDefaultTextChatParameterSchema.revision
+            ? newApiDefaultTextChatParameterSchema
+            : undefined
+      },
+      lifecycle.port,
+      usageSink().port,
+      {
+        nextProviderOperationId: () => 'newapi-chat-default-op',
+        nextProviderUsageObservationId: () =>
+          toProviderUsageObservationId('newapi-chat-default-usage')
+      }
+    );
+    const route = {
+      ...routeFor('text_chat'),
+      parameterSchemaId: newApiDefaultTextChatParameterSchema.schemaId,
+      parameterSchemaRevision: newApiDefaultTextChatParameterSchema.revision
+    };
+    const handle = await adapter.submit({
+      routeSnapshot: route,
+      request: {
+        responseExecutionId: 'response-execution-default',
+        invocationAttemptId: 'attempt-chat-default',
+        messages: [{ role: 'user', content: '你好' }],
+        parameterValues: {
+          max_tokens: 256,
+          temperature: 0.7,
+          top_p: 0.9,
+          stop: 'END'
+        }
+      }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(requestJson(fixture.requests[0])).toEqual({
+      model: modelKey,
+      messages: [{ role: 'user', content: '你好' }],
+      stream: true,
+      stream_options: { include_usage: true },
+      max_tokens: 256,
+      temperature: 0.7,
+      top_p: 0.9,
+      stop: 'END'
+    });
+  });
+
+  it('accepts UniCompAPI stream chunks that omit finish_reason and add gateway fields', async () => {
+    const sse = [
+      event({
+        id: 'chatcmpl-gateway-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelKey,
+        service_tier: 'default',
+        first_token_return_time: 1786100681.6219459,
+        choices: [{ index: 0, delta: { role: 'assistant', content: '' } }]
+      }),
+      event({
+        id: 'chatcmpl-gateway-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelKey,
+        service_tier: 'default',
+        choices: [{
+          index: 0,
+          delta: { reasoning_content: '思考', content: '' }
+        }]
+      }),
+      event({
+        id: 'chatcmpl-gateway-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelKey,
+        service_tier: 'default',
+        choices: [{ index: 0, delta: { content: '汕头在粤东。' } }]
+      }),
+      event({
+        id: 'chatcmpl-gateway-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelKey,
+        service_tier: 'default',
+        first_token_return_time: 1786100681.6219459,
+        choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }]
+      }),
+      event({
+        id: 'chatcmpl-gateway-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: modelKey,
+        service_tier: 'default',
+        choices: [],
+        usage: {
+          prompt_tokens: 8,
+          completion_tokens: 85,
+          total_tokens: 93,
+          prompt_tokens_details: { cached_tokens: 0 },
+          completion_tokens_details: { reasoning_tokens: 65 }
+        }
+      }),
+      'data: [DONE]\n\n'
+    ].join('');
+    const fixture = runtimeFixture(async () => streamResponse(sse));
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      credentialResolver(),
+      connectionResolver(),
+      schemaResolver(),
+      lifecycle.port,
+      usageSink().port,
+      {
+        nextProviderOperationId: () => 'newapi-chat-gateway-op',
+        nextProviderUsageObservationId: () =>
+          toProviderUsageObservationId('newapi-chat-gateway-usage')
+      }
+    );
+    const handle = await adapter.submit({
+      routeSnapshot: routeFor('text_chat'),
+      request: {
+        responseExecutionId: 'response-execution-gateway',
+        invocationAttemptId: 'attempt-chat-gateway',
+        messages: [{ role: 'user', content: '几句话' }],
+        parameterValues: { max_tokens: 64 }
+      }
+    });
+    await expect(handle.completion).resolves.toMatchObject({
+      state: 'completed',
+      finishReason: 'stop'
+    });
+    expect(lifecycle.content).toBe('汕头在粤东。');
+  });
+
   it('rejects unknown JSON and mismatched schemas before HTTP', async () => {
     const fixture = runtimeFixture(async () => streamResponse('data: [DONE]\n\n'));
     const adapter = new NewApiChatAdapter(
@@ -583,7 +861,50 @@ describe('NewAPI image adapter', () => {
         parameterValues: {}
       }
     });
-    expect(ambiguous.kind).toBe('submission_outcome_unknown');
+    expect(ambiguous.kind).toBe('failed_before_submission');
+  });
+
+  it('accepts OpenAI-compatible extras such as revised_prompt and model', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fixture = runtimeFixture(async () => jsonResponse({
+      created: 1,
+      model: 'qwen-image',
+      data: [{
+        url: 'https://media.example.test/puppy.png',
+        revised_prompt: '一只可爱的小狗'
+      }],
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+        total_tokens: 2,
+        provider_extra: true
+      }
+    }));
+    const download = vi.fn(async () => ({
+      body: png,
+      contentType: 'image/png'
+    }));
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      connectionResolver(),
+      credentialResolver(),
+      schemaResolver(),
+      usageSink().port,
+      { download }
+    );
+    const outcome = await adapter.submit({
+      routeSnapshot: routeFor('text_to_image'),
+      request: {
+        invocationAttemptId: 'attempt-image-compatible-extras',
+        projectId: 'project-newapi',
+        prompt: '生成一只小狗',
+        parameterValues: {}
+      }
+    });
+    expect(outcome).toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url', value: 'https://media.example.test/puppy.png' }]
+    });
   });
 
   it('maps optional image usage details without inventing values', () => {
@@ -595,7 +916,136 @@ describe('NewAPI image adapter', () => {
 });
 
 describe('NewAPI video adapter', () => {
-  it('submits text-to-video multipart without image material and maps four states', async () => {
+  it('accepts gateway create payloads without status and numeric ids', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({
+      code: 0,
+      data: {
+        task_id: 987654321,
+        object: 'task'
+      },
+      message: 'ok'
+    }));
+    const adapter = videoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-loose-create',
+        projectId: 'project-newapi',
+        prompt: 'Loose create payload',
+        parameterValues: {}
+      }
+    })).resolves.toEqual({
+      kind: 'accepted_async',
+      providerOperationId: '987654321',
+      state: 'queued'
+    });
+  });
+
+  it('maps balance error envelopes to failed_before_submission', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({
+      error: {
+        message: 'token重算：tokens=108900, modelRatio=3.60',
+        type: 'invalid_request_error'
+      }
+    }, 400));
+    const adapter = videoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-balance',
+        projectId: 'project-newapi',
+        prompt: 'Balance failure',
+        parameterValues: {}
+      }
+    })).resolves.toMatchObject({
+      kind: 'failed_before_submission',
+      message: 'The NewAPI account balance is insufficient'
+    });
+  });
+
+  it('accepts NewAPI gateway statuses and extra response fields', async () => {
+    const responses = [
+      jsonResponse({
+        id: 'video-compat-1',
+        object: 'video',
+        model: modelKey,
+        created_at: 1,
+        status: 'processing',
+        progress: 0,
+        quality: 'standard'
+      }),
+      jsonResponse({
+        id: 'video-compat-1',
+        object: 'video',
+        model: 'echoed-display-name',
+        created_at: 1,
+        status: 'succeeded',
+        progress: 100,
+        quality: 'standard',
+        url: 'https://media.example.test/video.mp4',
+        error: null
+      }),
+      binaryResponse(Uint8Array.from([0, 0, 0, 20, 102, 116, 121, 112]), 'video/mp4')
+    ];
+    const fixture = runtimeFixture(async () => responses.shift()!);
+    const adapter = videoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-compat',
+        projectId: 'project-newapi',
+        prompt: 'Compat status mapping',
+        parameterValues: {}
+      }
+    })).resolves.toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'video-compat-1',
+      state: 'queued'
+    });
+    await expect(adapter.query('video-compat-1')).resolves.toEqual({ state: 'completed' });
+  });
+
+  it('treats UniCompAPI transient unknown query status as processing', async () => {
+    const responses = [
+      jsonResponse(videoObject('video-unknown', 'queued')),
+      jsonResponse({
+        id: 'video-unknown',
+        object: 'video',
+        model: '',
+        status: 'unknown',
+        progress: 0,
+        created_at: 1786099055,
+        completed_at: 1786099055
+      }),
+      jsonResponse({
+        id: 'video-unknown',
+        object: 'video',
+        model: modelKey,
+        status: 'completed',
+        progress: 100,
+        created_at: 1786099055,
+        completed_at: 1786099100
+      })
+    ];
+    const fixture = runtimeFixture(async () => responses.shift()!);
+    const adapter = videoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-unknown',
+        projectId: 'project-newapi',
+        prompt: 'Unknown status polling',
+        parameterValues: {}
+      }
+    })).resolves.toMatchObject({
+      kind: 'accepted_async',
+      providerOperationId: 'video-unknown'
+    });
+    await expect(adapter.query('video-unknown')).resolves.toEqual({ state: 'processing' });
+    await expect(adapter.query('video-unknown')).resolves.toEqual({ state: 'completed' });
+  });
+
+  it('submits text-to-video JSON matching UniCompAPI create shape', async () => {
     const responses = [
       jsonResponse(videoObject('video-1', 'queued')),
       jsonResponse(videoObject('video-1', 'in_progress')),
@@ -612,18 +1062,19 @@ describe('NewAPI video adapter', () => {
         invocationAttemptId: 'attempt-video-1',
         projectId: 'project-newapi',
         prompt: 'A synthetic video',
-        parameterValues: { duration: 5, width: 1280, height: 720 }
+        parameterValues: { duration: 5 }
       }
     });
     expect(outcome).toEqual({
       kind: 'accepted_async', providerOperationId: 'video-1', state: 'queued'
     });
-    const multipart = Buffer.from(fixture.requests[0].body!).toString('latin1');
-    expect(multipart).toContain('name="model"');
-    expect(multipart).toContain(modelKey);
-    expect(multipart).toContain('name="prompt"');
-    expect(multipart).not.toContain('name="image"');
-    expect(multipart).not.toContain('name="metadata"');
+    const jsonBody = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8')) as Record<string, unknown>;
+    expect(jsonBody).toEqual({
+      model: modelKey,
+      prompt: 'A synthetic video',
+      duration: 5
+    });
+    expect(fixture.requests[0].headers['content-type']).toBe('application/json');
     expect(imageResolve).not.toHaveBeenCalled();
     await expect(adapter.query('video-1')).resolves.toEqual({ state: 'processing' });
     await expect(adapter.query('video-1')).resolves.toEqual({ state: 'completed' });
@@ -634,6 +1085,70 @@ describe('NewAPI video adapter', () => {
       method: 'GET',
       url: 'https://gateway.example.test/v1/videos/video-1/content',
       headers: { authorization: 'Bearer synthetic-secret' }
+    });
+  });
+
+  it('projects default UniCompAPI video fields into resolution and metadata', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({
+      id: 'task_script_ok',
+      task_id: 'task_script_ok',
+      object: 'video',
+      model: modelKey,
+      status: 'queued',
+      progress: 0,
+      created_at: 1786096513
+    }));
+    const adapter = new NewApiVideoAdapter(
+      fixture.runtime,
+      connectionResolver(),
+      credentialResolver(),
+      {
+        get: async (schemaId, revision) =>
+          schemaId === newApiDefaultTextToVideoParameterSchema.schemaId &&
+          revision === newApiDefaultTextToVideoParameterSchema.revision
+            ? newApiDefaultTextToVideoParameterSchema
+            : undefined
+      },
+      { resolve: vi.fn() },
+      usageSink().port,
+      {
+        nextProviderUsageObservationId: () =>
+          toProviderUsageObservationId('newapi-video-usage-default')
+      }
+    );
+    const route = {
+      ...routeFor('text_to_video'),
+      parameterSchemaId: newApiDefaultTextToVideoParameterSchema.schemaId,
+      parameterSchemaRevision: newApiDefaultTextToVideoParameterSchema.revision
+    };
+    const outcome = await adapter.submit({
+      routeSnapshot: route,
+      request: {
+        invocationAttemptId: 'attempt-video-default',
+        projectId: 'project-newapi',
+        prompt: '@hero runs across the scene with consistent appearance',
+        parameterValues: {
+          duration: 5,
+          resolution: '720p',
+          aspect_ratio: '16:9',
+          audio: true
+        }
+      }
+    });
+    expect(outcome).toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'task_script_ok',
+      state: 'queued'
+    });
+    expect(JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'))).toEqual({
+      model: modelKey,
+      prompt: '@hero runs across the scene with consistent appearance',
+      duration: 5,
+      resolution: '720p',
+      metadata: {
+        aspect_ratio: '16:9',
+        audio: true
+      }
     });
   });
 
@@ -659,9 +1174,16 @@ describe('NewAPI video adapter', () => {
       }
     });
     expect(outcome.kind).toBe('accepted_async');
-    const multipart = Buffer.from(fixture.requests[0].body!).toString('latin1');
-    expect(multipart).toContain('name="image"; filename="first-frame.png"');
-    expect(multipart).toContain('Content-Type: image/png');
+    const jsonBody = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8')) as Record<string, unknown>;
+    expect(typeof jsonBody.image).toBe('string');
+    expect(String(jsonBody.image)).toMatch(/^data:image\/png;base64,/u);
+    expect(jsonBody.metadata).toEqual({ fps: 24, seed: 7 });
+    expect(jsonBody).not.toHaveProperty('images');
+    expect(jsonBody).not.toHaveProperty('input_reference');
+    expect(resolve).toHaveBeenCalledWith({
+      projectId: 'project-newapi',
+      assetId: 'asset-first-frame'
+    });
 
     const wrongFeature = await adapter.submit({
       routeSnapshot: routeFor('text_to_video'),

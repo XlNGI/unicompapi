@@ -129,6 +129,8 @@ const providers: ProviderApi = {
     }),
   setModelEnabled: (modelId, enabled) =>
     ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled }),
+  attachOpenAiCompatibleImageProfile: (modelId) =>
+    ipcRenderer.invoke(providerIpcChannels.attachOpenAiCompatibleImageProfile, { modelId }),
   deleteModel: (modelId) =>
     ipcRenderer.invoke(providerIpcChannels.deleteModel, { modelId })
 };

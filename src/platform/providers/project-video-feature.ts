@@ -22,6 +22,14 @@ import type {
 } from './provider-feature-candidates';
 import type { ProviderFeatureContractV1 } from './provider-registry-feature-candidates';
 import {
+  NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
+  NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID,
+  NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+  newApiDefaultImageToVideoParameterSchema,
+  newApiDefaultTextToVideoParameterSchema,
+  newApiVideoUsageSchema
+} from './newapi/newapi-contracts';
+import {
   viduPackagedModelContracts,
   viduUsageSchema
 } from './vidu/vidu-contracts';
@@ -155,7 +163,7 @@ export function videoDraftRevision(updatedAt: string): number {
 }
 
 export function createVideoProviderFeatureContracts(): readonly ProviderFeatureContractV1[] {
-  return viduPackagedModelContracts.flatMap((modelContract) => {
+  const viduContracts = viduPackagedModelContracts.flatMap((modelContract) => {
     const features = modelContract.definition.profileTemplates.flatMap(
       (template) => template.features
     );
@@ -183,6 +191,27 @@ export function createVideoProviderFeatureContracts(): readonly ProviderFeatureC
       }];
     });
   });
+  return [
+    ...viduContracts,
+    {
+      parameterSchema: newApiDefaultTextToVideoParameterSchema,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiVideoUsageSchema,
+      constraintSetId: NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: newApiDefaultImageToVideoParameterSchema,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiVideoUsageSchema,
+      constraintSetId: NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    }
+  ];
 }
 
 function featureForDraft(draft: VideoWorkspaceDraft) {

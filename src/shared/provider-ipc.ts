@@ -10,6 +10,7 @@ export const providerIpcChannels = {
   registerExactModel: 'providers:register-exact-model',
   setConnectionEnabled: 'providers:set-managed-connection-enabled',
   setModelEnabled: 'providers:set-managed-model-enabled',
+  attachOpenAiCompatibleImageProfile: 'providers:attach-openai-compatible-image-profile',
   deleteModel: 'providers:delete-managed-model',
   deleteConnection: 'providers:delete-managed-connection'
 } as const;
@@ -385,6 +386,13 @@ export interface ProviderApi {
   ): Promise<ProviderFrameworkResult<{
     readonly modelId: string;
     readonly state: 'enabled' | 'disabled';
+  }>>;
+  attachOpenAiCompatibleImageProfile(
+    modelId: string
+  ): Promise<ProviderFrameworkResult<{
+    readonly modelId: string;
+    readonly profileId?: string;
+    readonly state: 'attached' | 'already_attached' | 'skipped';
   }>>;
   deleteModel(
     modelId: string

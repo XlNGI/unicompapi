@@ -35,6 +35,8 @@ interface VideoFeatureSubmissionPanelProps {
   readonly dirty: boolean;
   readonly draft: VideoWorkspaceDraftDto;
   readonly blockedReason?: string;
+  /** Quick video: hide dynamic params and use provider defaults. */
+  readonly oneShot?: boolean;
   /** Text / image-to-video: show in-page 准备 → 请求中 → 等待上游 → 完成 progress. */
   readonly showProgressSteps?: boolean;
   readonly onDraftChange: (draft: VideoWorkspaceDraftDto) => void;
@@ -107,6 +109,7 @@ export function VideoFeatureSubmissionPanel({
   dirty,
   draft,
   blockedReason,
+  oneShot = false,
   showProgressSteps = false,
   onDraftChange,
   onDraftPersisted,
@@ -192,7 +195,7 @@ export function VideoFeatureSubmissionPanel({
   function showSubmissionOutcome(submission: VideoFeatureSubmissionDto) {
     const urls = submission.resultVideoUrls ?? [];
     const rawFeedback = submission.feedback ?? submission.localResultError;
-    const safeFeedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+    const safeFeedback = rawFeedback && isUserFacingVideoFeedback(rawFeedback)
       ? rawFeedback
       : undefined;
     if (isUnconfirmedGenerationOutcome(submission.status, submission.safeCode)) {
@@ -353,6 +356,16 @@ export function VideoFeatureSubmissionPanel({
     const sameSchema = candidate &&
       featureSelection.parameterSchemaId === candidate.parameterSchema.schemaId &&
       featureSelection.parameterSchemaRevision === candidate.parameterSchema.revision;
+    const allowedFields = new Set(
+      (candidate?.parameterSchema.fields ?? []).map((field) => field.fieldId)
+    );
+    const keptValues = sameSchema
+      ? Object.fromEntries(
+          Object.entries(featureSelection.parameterValues ?? {}).filter(([key]) =>
+            allowedFields.has(key)
+          )
+        )
+      : {};
     onDraftChange({
       ...draft,
       state: 'editing',
@@ -366,7 +379,7 @@ export function VideoFeatureSubmissionPanel({
               parameterSchemaRevision: candidate.parameterSchema.revision
             }
           : {}),
-        parameterValues: sameSchema ? featureSelection.parameterValues : {}
+        parameterValues: keptValues
       }
     });
   }
@@ -595,17 +608,23 @@ export function VideoFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          <DynamicParameterForm
-            disabled={busy}
-            emptyHint="当前表面没有需要用户填写的参数。"
-            fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
-            onChange={(fieldId, value) =>
-              changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
-            }
-            values={featureSelection.parameterValues as Readonly<
-              Record<string, DynamicParameterValue | undefined>
-            >}
-          />
+          {oneShot ? (
+            <p className="uc-model-select__hint" role="status">
+              快速视频使用服务默认参数，无需填写动态参数。
+            </p>
+          ) : (
+            <DynamicParameterForm
+              disabled={busy}
+              emptyHint="当前表面没有需要用户填写的参数。"
+              fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+              onChange={(fieldId, value) =>
+                changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
+              }
+              values={featureSelection.parameterValues as Readonly<
+                Record<string, DynamicParameterValue | undefined>
+              >}
+            />
+          )}
         </>
       ) : null}
 
@@ -674,6 +693,14 @@ export function VideoFeatureSubmissionPanel({
       ) : null}
     </div>
   );
+}
+
+function isUserFacingVideoFeedback(value: string): boolean {
+  const text = value.trim();
+  if (text.length === 0) return false;
+  // Prefer curated Chinese runtime copy; allow brief Latin only inside parentheses.
+  if (/^(远端|视频|凭证|请求|本地|轮询|服务商)/u.test(text)) return true;
+  return !/[A-Za-z_]/u.test(text);
 }
 
 function submissionStatusLabel(status: string): string {

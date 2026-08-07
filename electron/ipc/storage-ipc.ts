@@ -42,6 +42,7 @@ import {
   ImagePromptEnhanceService,
   type DeepSeekSharedRuntime,
   type NewApiSharedRuntime,
+  type NewApiImageDownloadPort,
   type SecureCredentialVault,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
@@ -79,6 +80,7 @@ export function registerStorageIpcHandlers(options: {
     readonly credentialVault: SecureCredentialVault;
     readonly deepSeekRuntime: DeepSeekSharedRuntime;
     readonly newApiRuntime: NewApiSharedRuntime;
+    readonly newApiImageDownloads?: NewApiImageDownloadPort;
   };
 } = {}): StorageIpcLifecycle {
   const sessionRegistry = options.sessionRegistry ?? new StorageProjectSessionRegistry();
@@ -115,7 +117,8 @@ export function registerStorageIpcHandlers(options: {
   const providerOperations = options.vidu?.createOperationPorts({
     getSession: () => sessionRegistry.get(),
     imageMutations,
-    videoMutations
+    videoMutations,
+    newApiRuntime: options.textSubmission?.newApiRuntime
   });
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),
@@ -146,7 +149,14 @@ export function registerStorageIpcHandlers(options: {
         ? {
             imageSubmission: {
               viduPackage: options.vidu.providerPackage,
-              credentialVault: options.vidu.credentialVault
+              credentialVault: options.vidu.credentialVault,
+              ...(options.textSubmission?.newApiRuntime &&
+              options.textSubmission.newApiImageDownloads
+                ? {
+                    newApiRuntime: options.textSubmission.newApiRuntime,
+                    newApiDownloads: options.textSubmission.newApiImageDownloads
+                  }
+                : {})
             },
             resultReceiver: providerOperations?.imageResultReceiver
           }
@@ -249,10 +259,19 @@ export function registerStorageIpcHandlers(options: {
         ? {
             videoSubmission: {
               viduPackage: options.vidu.providerPackage,
-              credentialVault: options.vidu.credentialVault
+              credentialVault: options.vidu.credentialVault,
+              ...(options.textSubmission?.newApiRuntime
+                ? {
+                    newApiRuntime: options.textSubmission.newApiRuntime,
+                    ...(providerOperations?.newApiVideoAdapter
+                      ? { newApiVideoAdapter: providerOperations.newApiVideoAdapter }
+                      : {})
+                  }
+                : {})
             },
             asyncOperationPort: providerOperations?.videoAsync,
             rememberVideoOperation: providerOperations?.rememberVideoOperation,
+            attachNewApiVideoOperation: providerOperations?.attachNewApiVideoOperation,
             resultReceiver: providerOperations?.videoResultReceiver
           }
         : {}),

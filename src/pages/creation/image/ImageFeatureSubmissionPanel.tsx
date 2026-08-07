@@ -333,11 +333,19 @@ export function ImageFeatureSubmissionPanel({
     oneShot
   ]);
 
+  // Quick image hides the parameter form; defaults are applied only at submit time.
+
   function changeCandidate(candidateId: string) {
     const candidate = candidates.find((item) => item.candidateId === candidateId);
     const sameSchema = candidate &&
       featureSelection.parameterSchemaId === candidate.parameterSchema.schemaId &&
       featureSelection.parameterSchemaRevision === candidate.parameterSchema.revision;
+    const nextValues = oneShot
+      ? {}
+      : {
+          ...defaultQuickImageParameterValues(candidate?.parameterSchema.fields ?? []),
+          ...(sameSchema ? featureSelection.parameterValues : {})
+        };
     onDraftChange({
       ...draft,
       state: 'editing',
@@ -351,7 +359,7 @@ export function ImageFeatureSubmissionPanel({
               parameterSchemaRevision: candidate.parameterSchema.revision
             }
           : {}),
-        parameterValues: sameSchema ? featureSelection.parameterValues : {}
+        parameterValues: nextValues
       }
     });
   }
@@ -582,12 +590,19 @@ export function ImageFeatureSubmissionPanel({
     showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
     try {
       if (api.generateQuickImage) {
+        const parameterValues: Record<string, string | number | boolean | readonly string[]> = {
+          ...defaultQuickImageParameterValues(selectedCandidate.parameterSchema.fields),
+          ...(featureSelection.parameterValues as Readonly<
+            Record<string, string | number | boolean | readonly string[]>
+          >)
+        };
+        if (parameterValues.size === undefined) {
+          parameterValues.size = QUICK_IMAGE_DEFAULT_SIZE;
+        }
         const result = await api.generateQuickImage(
           prompt,
           selectedCandidate.candidateId,
-          featureSelection.parameterValues as Readonly<
-            Record<string, string | number | boolean | readonly string[]>
-          >
+          parameterValues
         );
         if (!result.ok) {
           if (result.error.code === 'submission_outcome_unknown') {
@@ -614,7 +629,7 @@ export function ImageFeatureSubmissionPanel({
             candidateId: selectedCandidate.candidateId,
             parameterSchemaId: selectedCandidate.parameterSchema.schemaId,
             parameterSchemaRevision: selectedCandidate.parameterSchema.revision,
-            parameterValues: featureSelection.parameterValues
+            parameterValues
           }
         } as GenerationImageDraftDto);
         const submission = result.value.submission;
@@ -684,17 +699,23 @@ export function ImageFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          <DynamicParameterForm
-            disabled={busy}
-            emptyHint="当前表面没有需要用户填写的参数。"
-            fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
-            onChange={(fieldId, value) =>
-              changeParameter(fieldId, value as ImageWorkspaceParameterValueDto | undefined)
-            }
-            values={featureSelection.parameterValues as Readonly<
-              Record<string, DynamicParameterValue | undefined>
-            >}
-          />
+          {oneShot ? (
+            <p className="uc-image-feature-panel__action-hint" role="status">
+              快速生图使用服务默认参数（含默认输出尺寸），无需填写动态参数。
+            </p>
+          ) : (
+            <DynamicParameterForm
+              disabled={busy}
+              emptyHint="当前表面没有需要用户填写的参数。"
+              fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+              onChange={(fieldId, value) =>
+                changeParameter(fieldId, value as ImageWorkspaceParameterValueDto | undefined)
+              }
+              values={featureSelection.parameterValues as Readonly<
+                Record<string, DynamicParameterValue | undefined>
+              >}
+            />
+          )}
         </>
       ) : null}
 
@@ -801,6 +822,38 @@ function costLabel(cost: { readonly state: string; readonly summary?: string }):
   if (cost.state === 'known') return cost.summary ?? '费用已知';
   if (cost.state === 'not_applicable') return '不适用';
   return '未知，以服务商账单为准';
+}
+
+const QUICK_IMAGE_DEFAULT_SIZE = '1024x1024';
+
+function defaultQuickImageParameterValues(
+  fields: readonly {
+    readonly fieldId: string;
+    readonly required?: boolean;
+    readonly exposure?: string;
+    readonly options?: readonly (string | number | boolean)[];
+  }[]
+): Readonly<Record<string, string | number | boolean>> {
+  const values: Record<string, string | number | boolean> = {};
+  for (const field of fields) {
+    if (field.fieldId === 'size' && field.options && field.options.length > 0) {
+      values.size = field.options.includes(QUICK_IMAGE_DEFAULT_SIZE)
+        ? QUICK_IMAGE_DEFAULT_SIZE
+        : (field.options[0] as string | number | boolean);
+      continue;
+    }
+    const required = field.required === true || field.exposure === 'user_required';
+    if (!required || !field.options || field.options.length < 1) continue;
+    const first = field.options[0];
+    if (typeof first === 'string' || typeof first === 'number' || typeof first === 'boolean') {
+      values[field.fieldId] = first;
+    }
+  }
+  // Even if schema options are missing, quick image still needs a size for UniCompAPI.
+  if (values.size === undefined && fields.some((field) => field.fieldId === 'size')) {
+    values.size = QUICK_IMAGE_DEFAULT_SIZE;
+  }
+  return values;
 }
 
 function outboundScopeLabel(scope: ImageFeaturePreparationDto['confirmation']['outboundScope']) {

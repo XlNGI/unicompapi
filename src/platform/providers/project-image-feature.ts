@@ -22,6 +22,12 @@ import type {
 } from './provider-feature-candidates';
 import type { ProviderFeatureContractV1 } from './provider-registry-feature-candidates';
 import {
+  NEWAPI_IMAGE_CONSTRAINT_SET_ID,
+  NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+  newApiDefaultTextToImageParameterSchema,
+  newApiImageUsageSchema
+} from './newapi/newapi-contracts';
+import {
   DOUBAO_IMAGE_TO_PROMPT_RESULT_SCHEMA_ID,
   DOUBAO_IMAGE_UNDERSTANDING_RESULT_SCHEMA_ID,
   DOUBAO_VISION_CONSTRAINT_SET_ID,
@@ -205,6 +211,15 @@ export function createImageProviderFeatureContracts(): readonly ProviderFeatureC
   });
   return [
     ...viduContracts,
+    {
+      parameterSchema: newApiDefaultTextToImageParameterSchema,
+      resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiImageUsageSchema,
+      constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
     {
       parameterSchema: doubaoImageUnderstandingParameterSchema,
       resultSchemaId: DOUBAO_IMAGE_UNDERSTANDING_RESULT_SCHEMA_ID,

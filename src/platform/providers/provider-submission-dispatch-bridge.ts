@@ -167,6 +167,72 @@ export function safeCodeForProviderMessage(
   if (message === 'The synchronous Vidu submission outcome is unknown') {
     return 'adapter.submission_outcome_unknown';
   }
+  if (message === 'The NewAPI request is invalid') {
+    return 'newapi.invalid_request';
+  }
+  if (message === 'The NewAPI protocol binding does not match the request') {
+    return 'newapi.protocol_mismatch';
+  }
+  if (message === 'The NewAPI endpoint is not allowed') {
+    return 'newapi.endpoint_not_allowed';
+  }
+  if (message === 'The NewAPI credential is unavailable') {
+    return 'newapi.credential_unavailable';
+  }
+  if (message === 'NewAPI authentication failed') {
+    return 'newapi.authentication_failed';
+  }
+  if (message === 'NewAPI denied the request') {
+    return 'newapi.permission_denied';
+  }
+  if (message === 'The NewAPI account balance is insufficient') {
+    return 'newapi.insufficient_balance';
+  }
+  if (message === 'The NewAPI model was not found') {
+    return 'newapi.model_not_found';
+  }
+  if (message === 'The NewAPI operation was not found') {
+    return 'newapi.operation_not_found';
+  }
+  if (message === 'NewAPI rejected the request parameters') {
+    return 'newapi.invalid_parameters';
+  }
+  if (message === 'NewAPI rate limited the request') {
+    return 'newapi.rate_limited';
+  }
+  if (message === 'NewAPI is temporarily unavailable') {
+    return 'newapi.provider_unavailable';
+  }
+  if (message === 'The NewAPI request timed out') {
+    return 'newapi.timeout';
+  }
+  if (message === 'The NewAPI request was cancelled') {
+    return 'newapi.cancelled';
+  }
+  if (message === 'The NewAPI request exceeded the allowed size') {
+    return 'newapi.request_too_large';
+  }
+  if (message === 'The NewAPI response exceeded the allowed size') {
+    return 'newapi.response_too_large';
+  }
+  if (message === 'The NewAPI response redirected unexpectedly') {
+    return 'newapi.redirect_not_allowed';
+  }
+  if (message === 'The NewAPI response was invalid') {
+    return 'newapi.invalid_response';
+  }
+  if (message === 'The NewAPI network request failed') {
+    return 'newapi.network_error';
+  }
+  if (message === 'The NewAPI runtime is shutting down') {
+    return 'newapi.runtime_shutting_down';
+  }
+  if (message === 'The NewAPI image submission outcome is unknown') {
+    return 'adapter.submission_outcome_unknown';
+  }
+  if (message === 'The NewApi video submission outcome is unknown') {
+    return 'adapter.submission_outcome_unknown';
+  }
   return fallback;
 }
 

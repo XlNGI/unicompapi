@@ -1,7 +1,8 @@
 import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
 import {
   displayParameterKey,
-  displayParameterOption
+  displayParameterOption,
+  displayParameterDescription
 } from '../../../components/DynamicParameterForm';
 import type {
   ImagePreflightCandidateDto,
@@ -368,6 +369,26 @@ type ParameterField = NonNullable<
   ProviderCapabilitySummaryDto['parameterSchema']
 >['fields'][number];
 
+function ParameterCaption({
+  field
+}: {
+  readonly field: ParameterField;
+}) {
+  const key = field.key || field.label;
+  const description = displayParameterDescription(key);
+  return (
+    <span className="uc-dynamic-parameters__heading">
+      <span>
+        {displayParameterKey(key)}
+        {field.required ? '（必填）' : ''}
+      </span>
+      {description ? (
+        <span className="uc-dynamic-parameters__help">{description}</span>
+      ) : null}
+    </span>
+  );
+}
+
 function DynamicParameterField({
   field,
   value,
@@ -386,10 +407,7 @@ function DynamicParameterField({
         className="uc-image-quick__checkbox"
         onChange={(_value, checked) => onChange(checked)}
       >
-        <span>
-          {displayParameterKey(field.key || field.label)}
-          {field.required ? '（必填）' : ''}
-        </span>
+        <ParameterCaption field={field} />
       </Checkbox>
     );
   }
@@ -397,10 +415,7 @@ function DynamicParameterField({
   if (field.kind === 'enum') {
     return (
       <div className="uc-image-quick__field">
-        <span>
-          {displayParameterKey(field.key || field.label)}
-          {field.required ? '（必填）' : ''}
-        </span>
+        <ParameterCaption field={field} />
         <SelectPicker
           aria-label={displayParameterKey(field.key || field.label)}
           block
@@ -428,10 +443,7 @@ function DynamicParameterField({
   if (numeric) {
     return (
       <label className="uc-image-quick__field">
-        <span>
-          {displayParameterKey(field.key || field.label)}
-          {field.required ? '（必填）' : ''}
-        </span>
+        <ParameterCaption field={field} />
         <InputNumber
           max={field.maximum}
           min={field.minimum}
@@ -446,10 +458,7 @@ function DynamicParameterField({
   }
   return (
     <label className="uc-image-quick__field">
-      <span>
-        {displayParameterKey(field.key || field.label)}
-        {field.required ? '（必填）' : ''}
-      </span>
+      <ParameterCaption field={field} />
       <Input
         onChange={(next) => onChange(next === '' ? undefined : next)}
         value={typeof value === 'string' ? value : ''}

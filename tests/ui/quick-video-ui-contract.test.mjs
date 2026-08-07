@@ -34,6 +34,13 @@ test('quick video has one safe feature submission flow', () => {
   assert.doesNotMatch(bundle, /fetch\(|localStorage|absolutePath|remoteOperationId|upload\(/);
 });
 
+test('quick video hides dynamic parameters and uses provider defaults', () => {
+  assert.match(quick, /oneShot/);
+  assert.match(panel, /oneShot/);
+  assert.match(panel, /快速视频使用服务默认参数/);
+  assert.match(panel, /DynamicParameterForm/);
+});
+
 test('quick video shares the text/image result and call-record surface', () => {
   assert.match(quick, /GenerationResultPreview/);
   assert.match(quick, /尚无生成结果/);
