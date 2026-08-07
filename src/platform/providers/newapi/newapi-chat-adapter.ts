@@ -99,7 +99,7 @@ export interface NewApiChatTerminalObserverPort {
     readonly providerOperationId: string;
     readonly responseExecutionId: ConversationResponseExecutionId;
     readonly invocationAttemptId: ProviderInvocationAttemptId;
-    readonly finishReason: 'stop';
+    readonly finishReason: 'stop' | 'length';
   }): Promise<void>;
   failed?(input: {
     readonly providerOperationId: string;
@@ -136,7 +136,7 @@ export type NewApiChatTerminalResult =
   | {
       readonly state: 'completed';
       readonly providerOperationId: string;
-      readonly finishReason: 'stop';
+      readonly finishReason: 'stop' | 'length';
       readonly usageAvailability: 'reported' | 'not_reported';
     }
   | {
@@ -403,6 +403,26 @@ export class NewApiChatAdapter {
       });
       await this.usage.append(observation, newApiChatUsageSchema);
       usagePersisted = true;
+      // Official length means the returned content may be cut off. If deltas were
+      // already accepted, complete the local answer instead of failing after accept.
+      if (
+        stream.finishReason === 'length' &&
+        stream.contentLength > 0
+      ) {
+        await this.lifecycle.complete(operation.responseExecutionId);
+        await this.terminalObserver.completed?.({
+          providerOperationId: operation.providerOperationId,
+          responseExecutionId: operation.responseExecutionId,
+          invocationAttemptId: operation.invocationAttemptId,
+          finishReason: 'length'
+        });
+        return {
+          state: 'completed',
+          providerOperationId: operation.providerOperationId,
+          finishReason: 'length',
+          usageAvailability: stream.usage ? 'reported' : 'not_reported'
+        };
+      }
       if (stream.finishReason !== 'stop') {
         const safeCode = finishReasonSafeCode(stream.finishReason);
         await this.lifecycle.fail(operation.responseExecutionId, safeCode);
@@ -597,6 +617,7 @@ async function consumeNewApiStream(
   onContent: (delta: string) => Promise<void>
 ): Promise<{
   readonly finishReason: NewApiFinishReason;
+  readonly contentLength: number;
   readonly usage?: readonly UsageFactV1[];
 }> {
   const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -668,6 +689,7 @@ async function consumeNewApiStream(
   }
   return {
     finishReason: terminalReason,
+    contentLength,
     ...(usage ? { usage } : {})
   };
 }

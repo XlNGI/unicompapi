@@ -8,6 +8,7 @@ import {
   toProviderInvocationAttemptId,
   toProviderInvocationEventId,
   toSubmissionIntentId,
+  type MessageFailureReason,
   type ParameterSchemaV2,
   type ProjectConversationRepository,
   type ProviderConnection,
@@ -294,19 +295,32 @@ function createConversationLinkedLifecycle(
     },
     requestCancel: (executionId) => lifecycle.requestCancel(executionId),
     confirmCancelled: (executionId) => lifecycle.confirmCancelled(executionId),
-    async fail(executionId, _safeCode) {
-      await lifecycle.fail(executionId, _safeCode);
+    async fail(executionId, safeCode) {
+      await lifecycle.fail(executionId, safeCode);
       const model = await lifecycle.readModel(executionId);
       const conversation = await conversations.get(model.conversationId);
       if (!conversation) return;
       const updated = failAssistantMessage(
         conversation,
         model.assistantMessageId,
-        'unavailable',
+        failureReasonFromSafeCode(safeCode),
         toIsoTimestamp(now())
       );
       await conversations.save(updated, conversation.revision);
     },
     interrupt: (executionId, reason) => lifecycle.interrupt(executionId, reason)
   };
+}
+
+function failureReasonFromSafeCode(safeCode: string): MessageFailureReason {
+  if (safeCode.includes('finish.length')) {
+    return 'truncated';
+  }
+  if (safeCode.includes('invalid_response') || safeCode.includes('invalid_request')) {
+    return 'invalid_response';
+  }
+  if (safeCode.includes('interrupted') || safeCode.includes('application_shutdown')) {
+    return 'interrupted';
+  }
+  return 'unavailable';
 }

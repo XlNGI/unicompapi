@@ -36,6 +36,7 @@ export const messageFailureReasons = [
   'unavailable',
   'interrupted',
   'invalid_response',
+  'truncated',
   'unknown'
 ] as const;
 export type MessageFailureReason = (typeof messageFailureReasons)[number];

@@ -4,6 +4,7 @@ import {
   createProjectConversation,
   parseConversationResponseDraft,
   replaceConversationResponseContextSelections,
+  replaceConversationResponseParameterValues,
   toConversationId,
   toConversationResponseDraftId,
   toIsoTimestamp,
@@ -54,7 +55,8 @@ describe('project conversation and response draft contracts', () => {
       conversationRevision: 3,
       userMessageRevision: 2,
       productFeature: 'text_reasoning',
-      contextSelections: []
+      contextSelections: [],
+      parameterValues: {}
     });
     expect(() => parseConversationResponseDraft({
       ...draft,
@@ -86,5 +88,29 @@ describe('project conversation and response draft contracts', () => {
       [selection, selection],
       toIsoTimestamp('2026-08-03T04:03:00.000Z')
     )).toThrow('must be unique');
+
+    const withParameters = replaceConversationResponseParameterValues(
+      withContext,
+      { max_tokens: 4096 },
+      toIsoTimestamp('2026-08-03T04:04:00.000Z')
+    );
+    expect(withParameters).toMatchObject({
+      revision: 3,
+      parameterValues: { max_tokens: 4096 }
+    });
+    expect(parseConversationResponseDraft({
+      schemaVersion: 1,
+      id: withContext.id,
+      revision: withContext.revision,
+      projectId: withContext.projectId,
+      conversationId: withContext.conversationId,
+      conversationRevision: withContext.conversationRevision,
+      userMessageId: withContext.userMessageId,
+      userMessageRevision: withContext.userMessageRevision,
+      productFeature: withContext.productFeature,
+      contextSelections: withContext.contextSelections,
+      createdAt: withContext.createdAt,
+      updatedAt: withContext.updatedAt
+    }).parameterValues).toEqual({});
   });
 });

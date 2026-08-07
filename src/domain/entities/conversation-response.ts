@@ -10,7 +10,11 @@ import {
   type ProjectId
 } from '../ids';
 import { assertTimestampNotBefore, toIsoTimestamp, type IsoTimestamp } from '../timestamps';
-import { parseProductFeature, type ProductFeature } from './product-feature';
+import {
+  parseProductFeature,
+  type ParameterValue,
+  type ProductFeature
+} from './product-feature';
 import {
   parsePinnedProjectContextSelection,
   type PinnedProjectContextSelectionV1
@@ -32,6 +36,7 @@ export interface ConversationResponseDraftV1 {
   readonly userMessageRevision: number;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections: readonly PinnedProjectContextSelectionV1[];
+  readonly parameterValues: Readonly<Record<string, ParameterValue>>;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -45,6 +50,7 @@ export interface CreateConversationResponseDraftInput {
   readonly userMessageRevision: number;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections?: readonly PinnedProjectContextSelectionV1[];
+  readonly parameterValues?: Readonly<Record<string, ParameterValue>>;
   readonly createdAt: IsoTimestamp;
 }
 
@@ -62,6 +68,7 @@ export function createConversationResponseDraft(
     userMessageRevision: input.userMessageRevision,
     productFeature: input.productFeature,
     contextSelections: input.contextSelections ?? [],
+    parameterValues: input.parameterValues ?? {},
     createdAt: input.createdAt,
     updatedAt: input.createdAt
   });
@@ -76,6 +83,19 @@ export function replaceConversationResponseContextSelections(
     ...draft,
     revision: draft.revision + 1,
     contextSelections,
+    updatedAt
+  });
+}
+
+export function replaceConversationResponseParameterValues(
+  draft: ConversationResponseDraftV1,
+  parameterValues: Readonly<Record<string, ParameterValue>>,
+  updatedAt: IsoTimestamp
+): ConversationResponseDraftV1 {
+  return parseConversationResponseDraft({
+    ...draft,
+    revision: draft.revision + 1,
+    parameterValues,
     updatedAt
   });
 }
@@ -97,7 +117,7 @@ export function parseConversationResponseDraft(
   value: unknown
 ): ConversationResponseDraftV1 {
   const item = record(value);
-  const keys = new Set([
+  const requiredKeys = new Set([
     'schemaVersion',
     'id',
     'revision',
@@ -111,9 +131,11 @@ export function parseConversationResponseDraft(
     'createdAt',
     'updatedAt'
   ]);
+  const keys = Object.keys(item);
+  const hasParameterValues = Object.prototype.hasOwnProperty.call(item, 'parameterValues');
   if (
-    Object.keys(item).length !== keys.size ||
-    Object.keys(item).some((key) => !keys.has(key)) ||
+    keys.some((key) => !requiredKeys.has(key) && key !== 'parameterValues') ||
+    requiredKeys.size + (hasParameterValues ? 1 : 0) !== keys.length ||
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
     Number(item.revision) < 0 ||
@@ -154,9 +176,43 @@ export function parseConversationResponseDraft(
     userMessageRevision: Number(item.userMessageRevision),
     productFeature,
     contextSelections,
+    parameterValues: hasParameterValues
+      ? parseParameterValuesRecord(item.parameterValues)
+      : {},
     createdAt,
     updatedAt
   };
+}
+
+function parseParameterValuesRecord(
+  value: unknown
+): Readonly<Record<string, ParameterValue>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InvariantViolationError('conversation response draft parameterValues is invalid');
+  }
+  const result: Record<string, ParameterValue> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key.trim().length === 0 || !isParameterValue(entry)) {
+      throw new InvariantViolationError('conversation response draft parameterValues is invalid');
+    }
+    result[key] = entry;
+  }
+  return result;
+}
+
+function isParameterValue(value: unknown, depth = 0): value is ParameterValue {
+  if (depth > 8) return false;
+  if (typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) {
+    return value.every((entry) => isParameterValue(entry, depth + 1));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).every(
+      ([key, entry]) => key.trim().length > 0 && isParameterValue(entry, depth + 1)
+    );
+  }
+  return false;
 }
 
 function record(value: unknown): Record<string, unknown> {

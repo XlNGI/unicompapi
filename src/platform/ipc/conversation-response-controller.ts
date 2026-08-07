@@ -1,6 +1,7 @@
 import {
   createConversationResponseDraft,
   replaceConversationResponseContextSelections,
+  replaceConversationResponseParameterValues,
   toConversationId,
   toConversationResponseDraftId,
   toConversationResponseExecutionId,
@@ -11,6 +12,7 @@ import {
   type ConversationResponseDraftV1,
   type ConversationResponseExecutionReadModelV1,
   type FeatureCandidateSubjectV1,
+  type ParameterValue,
   type ProjectContextRepository,
   type ProjectConversationRepository,
   type SubmissionUserConfirmationV1
@@ -131,6 +133,28 @@ export class ConversationResponseController {
       const updated = replaceConversationResponseContextSelections(
         draft.value,
         selections,
+        toIsoTimestamp(this.now())
+      );
+      await runtime.drafts.save(updated, draft.value.revision);
+      return { ok: true, value: toResponseDraftDto(updated) };
+    });
+  }
+
+  replaceParameters(
+    request: unknown
+  ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.replaceResponseParameters(request);
+      const runtime = this.requireRuntime();
+      const draft = await this.requireDraft(
+        runtime,
+        input.responseDraftId,
+        input.expectedRevision
+      );
+      if (!draft.ok) return draft;
+      const updated = replaceConversationResponseParameterValues(
+        draft.value,
+        input.parameterValues as Readonly<Record<string, ParameterValue>>,
         toIsoTimestamp(this.now())
       );
       await runtime.drafts.save(updated, draft.value.revision);
@@ -335,6 +359,7 @@ export function toResponseDraftDto(
       contextRevision: selection.contextRevision,
       includeInPrompt: selection.includeInPrompt
     })),
+    parameterValues: { ...draft.parameterValues },
     createdAt: draft.createdAt,
     updatedAt: draft.updatedAt
   };
