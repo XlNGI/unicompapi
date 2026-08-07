@@ -19,7 +19,7 @@ import {
   type ViduHttpTransportResponse,
   type ViduSafeLogEvent
 } from '../../src/platform';
-import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
+import { createUserViduRegistryRecords, VIDU_USER_PROTOCOL_BINDING_IDS } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const token = 'synthetic-token-that-must-never-be-logged';
@@ -381,7 +381,9 @@ async function createFixture() {
     vault,
     transport: new FixtureTransport(),
     connection,
-    imageBinding: frozen.protocolBindings[1]
+    imageBinding: frozen.protocolBindings.find(
+      (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.imageV1
+    )!
   };
 }
 
@@ -413,7 +415,7 @@ async function createStructuredFixture() {
     connection,
     imageBinding: frozen.protocolBindings.find(
       (binding) => binding.protocolId === 'vidu.ent.v1.images'
-    ) ?? frozen.protocolBindings[1]
+    )!
   };
 }
 

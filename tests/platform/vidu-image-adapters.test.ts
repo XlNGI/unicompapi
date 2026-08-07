@@ -32,7 +32,7 @@ import {
   type ViduHttpTransportRequest,
   type ViduHttpTransportResponse
 } from '../../src/platform';
-import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
+import { createUserViduRegistryRecords, VIDU_USER_PROTOCOL_BINDING_IDS } from '../fixtures/vidu-user-registry';
 
 const roots: string[] = [];
 const timestamp = toIsoTimestamp('2026-07-29T00:00:00.000Z');
@@ -269,8 +269,13 @@ async function createFixture(
     credentialReference: 'credential-vidu-image',
     updatedAt: timestamp
   });
-  const bindingIndex = protocol === 'imageV1' ? 1 : 2;
-  const originalBinding = frozen.protocolBindings[bindingIndex];
+  const originalBinding = frozen.protocolBindings.find((binding) =>
+    binding.id === (
+      protocol === 'imageV1'
+        ? VIDU_USER_PROTOCOL_BINDING_IDS.imageV1
+        : VIDU_USER_PROTOCOL_BINDING_IDS.geminiImageV2
+    )
+  )!;
   const binding = protocol === 'imageV1' && options.verifiedImageV1Auth === false
     ? createProviderProtocolBinding({ ...originalBinding, authScheme: 'unknown' })
     : protocol === 'imageV1'
