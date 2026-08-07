@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const page = await readFile('src/pages/settings/SettingsPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
+const shellStyles = await readFile('src/styles.css', 'utf8');
 
 test('A1 keeps the ten frozen settings categories in order', () => {
   const labels = [
@@ -45,11 +46,21 @@ test('A1 exposes honest save, recovery and unavailable states', () => {
   assert.match(page, /settings_write_failed/);
   assert.match(page, /revision_conflict/);
   assert.match(page, /settings_persistence/);
+  assert.match(page, /useGlobalNotifications/);
+  assert.match(page, /id: 'settings-auto-save'/);
+  assert.match(page, /placement: 'top-end'/);
+  assert.match(page, /kind: saveState === 'saved'/);
+  assert.match(page, /label: '重试保存'/);
+  assert.match(page, /label: '重新载入最新设置'/);
+  assert.doesNotMatch(page, /<Message|uc-settings__save-message/);
+  assert.doesNotMatch(page, /<footer className=\{`uc-settings__save-bar/);
+  assert.match(shellStyles, /\.uc-global-notifications__item--success \.rs-notification/);
+  assert.match(shellStyles, /\.uc-global-notifications__item--warning \.rs-notification/);
+  assert.match(shellStyles, /\.uc-global-notifications__item--error \.rs-notification/);
 });
 
 test('A1 keeps controls accessible and layout responsive', () => {
   assert.match(page, /aria-label="本地设置分类"/);
-  assert.match(page, /aria-live="polite"/);
   assert.match(page, /aria-modal="true"|showModal\(\)/);
   assert.match(page, /type="search"/);
   assert.match(styles, /\.uc-settings__workspace/);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   LuCircleAlert,
@@ -8,7 +8,7 @@ import {
   LuShieldCheck,
   LuX
 } from 'react-icons/lu';
-import { Input } from 'rsuite';
+import { Input, Modal } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -34,6 +34,12 @@ const emptyRegistry: ProviderRegistryDto = {
 
 type ProviderPageView = 'gallery' | 'manage';
 type ProviderMessageTone = 'success' | 'info' | 'danger';
+
+interface ProviderConfirmation {
+  readonly title: string;
+  readonly description: string;
+  readonly confirmLabel: string;
+}
 
 function providerMessageTone(message: string): ProviderMessageTone {
   if (/失败|无法|不可用|无效|超时|未保存|未删除|未连接/u.test(message)) return 'danger';
@@ -104,6 +110,23 @@ export function ProvidersPage() {
     useState<Record<string, string>>({});
   const [modelKey, setModelKey] = useState('');
   const [modelDisplayName, setModelDisplayName] = useState('');
+  const [confirmation, setConfirmation] = useState<ProviderConfirmation>();
+  const confirmationResolver = useRef<((confirmed: boolean) => void)>();
+
+  function requestConfirmation(next: ProviderConfirmation): Promise<boolean> {
+    confirmationResolver.current?.(false);
+    setConfirmation(next);
+    return new Promise((resolve) => {
+      confirmationResolver.current = resolve;
+    });
+  }
+
+  function closeConfirmation(confirmed: boolean) {
+    const resolve = confirmationResolver.current;
+    confirmationResolver.current = undefined;
+    setConfirmation(undefined);
+    resolve?.(confirmed);
+  }
 
   async function refreshRegistry(preferredConnectionId?: string) {
     if (!providersApi) return;
@@ -157,6 +180,8 @@ export function ProvidersPage() {
     );
     return () => window.clearTimeout(timeout);
   }, [message]);
+
+  useEffect(() => () => confirmationResolver.current?.(false), []);
 
   const createTemplate = templates.find(
     (template) => templateKeyOf(template) === selectedTemplateKey
@@ -240,9 +265,11 @@ export function ProvidersPage() {
         }
         if (!result.ok) {
           if (result.error.code === 'connection_validation_failed' && !allowUnavailableSave) {
-            allowUnavailableSave = window.confirm(
-              `远程连通性验证未通过（${describeValidationSafeCode(result.error.message)}）。\n仍要将此连接保存为「不可用」状态吗？`
-            );
+            allowUnavailableSave = await requestConfirmation({
+              title: '远程连接验证未通过',
+              description: `失败原因：${describeValidationSafeCode(result.error.message)}。仍要将此连接保存为「不可用」状态吗？`,
+              confirmLabel: '仍要保存'
+            });
             if (allowUnavailableSave) continue;
             setMessage('连接未保存');
             leaveAddConnection();
@@ -301,7 +328,11 @@ export function ProvidersPage() {
     try {
       let result = await providersApi.deleteConnection(selectedConnection.connectionId, false);
       if (!result.ok && result.error.code === 'active_operations_present') {
-        const abandon = window.confirm('此连接仍有活动调用。确认放弃这些调用的继续访问权限吗？');
+        const abandon = await requestConfirmation({
+          title: '确认放弃活动调用',
+          description: '此连接仍有活动调用。继续删除将放弃这些调用的继续访问权限。',
+          confirmLabel: '放弃并删除'
+        });
         if (!abandon) {
           setMessage('连接未删除');
           return;
@@ -325,7 +356,11 @@ export function ProvidersPage() {
     if (!providersApi || busy) return;
     const model = registry.models.find((item) => item.modelId === modelId);
     if (!model) return;
-    const confirmed = window.confirm(`确认删除模型「${model.displayName}」？`);
+    const confirmed = await requestConfirmation({
+      title: '确认删除模型',
+      description: `将从当前连接删除模型「${model.displayName}」。`,
+      confirmLabel: '删除模型'
+    });
     if (!confirmed) return;
     const deleted = await runAction(
       () => providersApi.deleteModel(modelId),
@@ -391,6 +426,29 @@ export function ProvidersPage() {
           />
         </div>
       )}
+
+      <Modal
+        backdrop="static"
+        centered
+        className="uc-provider-confirmation"
+        onClose={() => closeConfirmation(false)}
+        open={Boolean(confirmation)}
+        size="xs"
+      >
+        <Modal.Header>
+          <Modal.Title>{confirmation?.title}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="uc-provider-confirmation__content">
+            <LuCircleAlert aria-hidden="true" />
+            <p>{confirmation?.description}</p>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button onClick={() => closeConfirmation(false)} variant="ghost">取消</Button>
+          <Button onClick={() => closeConfirmation(true)}>{confirmation?.confirmLabel}</Button>
+        </Modal.Footer>
+      </Modal>
 
       {addingConnection && createTemplate ? (
         <Card className="uc-provider-page__form-card" raised>

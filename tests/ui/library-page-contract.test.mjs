@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile('src/pages/library/LibraryPage.tsx', 'utf8');
+const styles = await readFile('src/styles/pages.css', 'utf8');
 
 test('work library consumes only controlled work and file operations', () => {
   for (const call of [
@@ -42,6 +43,17 @@ test('work cards lazily show controlled image and video covers without opening d
   assert.match(source, /storage\.createWorkMediaHandle\(work\.workId\)/);
   assert.match(source, /<img alt="" loading="lazy"/);
   assert.match(source, /<video muted playsInline preload="metadata"/);
+});
+
+test('work list keeps at least three columns and protects long names from status badges', () => {
+  assert.match(styles, /\.uc-work-library__grid \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /@container work-library-list \(min-width: 760px\)[\s\S]*?repeat\(4/);
+  assert.match(styles, /@container work-library-list \(min-width: 980px\)[\s\S]*?repeat\(5/);
+  assert.match(source, /className="uc-work-library__work-state"/);
+  assert.match(source, /<strong title=\{work\.name\}>/);
+  assert.match(styles, /\.uc-work-library__work-heading strong \{[\s\S]*?-webkit-line-clamp: 2/);
+  assert.match(styles, /padding-right: 76px/);
+  assert.match(styles, /\.uc-work-library__work-state \{[\s\S]*?position: absolute;[\s\S]*?right: 0/);
 });
 
 test('work library is not a generic file manager and does not overwrite history', () => {

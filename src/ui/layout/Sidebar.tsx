@@ -24,6 +24,7 @@ import {
   type NavigationItemId,
   type SecondaryNavigationItemId
 } from '../navigation/navigationItems';
+import { GlobalStatusMonitor } from './GlobalStatusMonitor';
 
 const navigationIcons: Record<NavigationItemId, IconType> = {
   chat: LuMessageCircle,
@@ -158,6 +159,7 @@ export function Sidebar({
           );
         })}
       </nav>
+      <GlobalStatusMonitor onOpenTasks={() => onNavigate('tasks')} />
     </aside>
   );
 }

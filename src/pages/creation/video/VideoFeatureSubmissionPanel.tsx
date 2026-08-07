@@ -24,6 +24,7 @@ import type {
   VideoWorkspaceIpcErrorCode,
   VideoWorkspaceParameterValueDto
 } from '../../../shared/video-workspace-ipc';
+import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
 
 interface VideoFeatureSubmissionPanelProps {
   readonly dirty: boolean;
@@ -90,6 +91,7 @@ export function VideoFeatureSubmissionPanel({
 }: VideoFeatureSubmissionPanelProps) {
   const api = window.unicomp?.videoFeatures;
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
+  const notifications = useGlobalNotifications();
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
   const [preparation, setPreparation] = useState<VideoFeaturePreparationDto>();
   const [confirmed, setConfirmed] = useState(false);
@@ -111,6 +113,74 @@ export function VideoFeatureSubmissionPanel({
   const draftRef = useRef(draft);
   busyRef.current = busy;
   draftRef.current = draft;
+  const generationNotificationId = `video-generation:${draft.draftId}`;
+
+  function showGenerationProgress(
+    description: string,
+    title = '视频生成中',
+    trackTask = false
+  ) {
+    onMessage('');
+    notifications.show({
+      id: generationNotificationId,
+      kind: 'progress',
+      title,
+      description,
+      ...(trackTask ? {
+        tracking: {
+          mediaKind: 'video' as const,
+          sourceDraftId: draft.draftId
+        }
+      } : {})
+    });
+  }
+
+  function showGenerationError(description: string) {
+    onMessage('');
+    notifications.show({
+      id: generationNotificationId,
+      kind: 'error',
+      title: '视频生成失败',
+      description
+    });
+  }
+
+  function showSubmissionOutcome(submission: VideoFeatureSubmissionDto) {
+    const urls = submission.resultVideoUrls ?? [];
+    const rawFeedback = submission.feedback ?? submission.localResultError;
+    const safeFeedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+      ? rawFeedback
+      : undefined;
+    if (submission.localResultError) {
+      showGenerationError(safeFeedback ?? '远端结果未能完成本地登记，请打开任务中心查看详情。');
+      return;
+    }
+    if (submission.status === 'completed' && (urls.length > 0 || submission.workId)) {
+      onMessage('');
+      notifications.show({
+        id: generationNotificationId,
+        kind: 'success',
+        title: '已成功生成',
+        description: safeFeedback ?? (submission.workId
+          ? '视频已完成本地校验并登记到作品库。'
+          : '视频结果已返回，链接已写入调用记录。')
+      });
+      return;
+    }
+    if (submission.status === 'provider_accepted') {
+      showGenerationProgress(
+        safeFeedback ?? '服务商已接受请求，当前仍在排队或处理中；真实结果以任务中心为准。',
+        '视频生成已受理',
+        true
+      );
+      return;
+    }
+    showGenerationError(
+      safeFeedback ?? (submission.status === 'completed'
+        ? '任务已结束，但没有返回视频链接或本地作品，请打开任务中心查看详情。'
+        : `生成未完成：${submissionStatusLabel(submission.status)}。请打开任务中心查看时间线。`)
+    );
+  }
 
   // Only invalidate a prepared confirmation when route-binding facts change.
   // Do NOT clear it on draft.updatedAt / autosave, or prepare appears stuck.
@@ -272,7 +342,7 @@ export function VideoFeatureSubmissionPanel({
       state: 'saved'
     });
     if (!result.ok) {
-      onMessage(errorMessages[result.error.code] ?? '保存视频草稿失败，请重试。');
+      showGenerationError(errorMessages[result.error.code] ?? '保存视频草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted?.(result.value);
@@ -283,7 +353,7 @@ export function VideoFeatureSubmissionPanel({
     if (!api || !selectedCandidate || busy || blockedReason) return;
     setBusy(true);
     busyRef.current = true;
-    onMessage('');
+    showGenerationProgress('正在保存当前草稿并准备安全提交信息。');
     if (showProgressSteps) {
       setProgressFailure(undefined);
       setProgressPhase('preparing');
@@ -294,6 +364,7 @@ export function VideoFeatureSubmissionPanel({
         if (showProgressSteps) setProgressPhase('failed');
         return;
       }
+      showGenerationProgress('正在向主进程准备安全提交信息。');
       let result = await api.prepareSubmission(
         saved.draftId,
         saved.updatedAt,
@@ -313,7 +384,7 @@ export function VideoFeatureSubmissionPanel({
       }
       if (!result.ok) {
         const message = describeVideoFeatureError(result.error);
-        onMessage(message);
+        showGenerationError(message);
         if (showProgressSteps) {
           setProgressFailure(message);
           setProgressPhase('failed');
@@ -322,10 +393,13 @@ export function VideoFeatureSubmissionPanel({
       }
       setPreparation(result.value);
       setConfirmed(false);
-      onMessage('准备完成：请勾选确认外发事实，再点击「确认并提交」。');
+      showGenerationProgress(
+        '准备完成，请确认外发事实后点击「确认并提交」。',
+        '等待确认提交'
+      );
       if (showProgressSteps) setProgressPhase('ready');
     } catch {
-      onMessage('准备视频提交失败，请重试。');
+      showGenerationError('准备视频提交失败，请重试。');
       if (showProgressSteps) {
         setProgressFailure('准备视频提交失败，请重试。');
         setProgressPhase('failed');
@@ -341,6 +415,7 @@ export function VideoFeatureSubmissionPanel({
     prepared: VideoFeaturePreparationDto
   ) {
     if (!api) return;
+    showGenerationProgress('正在向主进程提交生成请求并等待真实结果。', '视频生成中', true);
     if (showProgressSteps) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');
@@ -359,7 +434,7 @@ export function VideoFeatureSubmissionPanel({
       );
       if (!result.ok) {
         const message = describeVideoFeatureError(result.error);
-        onMessage(message);
+        showGenerationError(message);
         if (showProgressSteps) {
           setProgressFailure(message);
           setProgressPhase('failed');
@@ -370,10 +445,12 @@ export function VideoFeatureSubmissionPanel({
       const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
         ? rawFeedback
         : `提交状态：${submissionStatusLabel(result.value.status)}`;
-      onMessage(feedback);
+      showSubmissionOutcome(result.value);
       if (showProgressSteps) {
         if (result.value.status === 'completed') {
           setProgressPhase('completed');
+        } else if (result.value.status === 'provider_accepted') {
+          setProgressPhase('waiting');
         } else {
           setProgressFailure(feedback);
           setProgressPhase('failed');
@@ -391,7 +468,7 @@ export function VideoFeatureSubmissionPanel({
     if (!api || !preparation || !confirmed || busy) return;
     setBusy(true);
     busyRef.current = true;
-    onMessage('');
+    showGenerationProgress('正在保存当前草稿并准备提交。');
     try {
       const saved = await ensureSavedDraft();
       if (!saved) {
@@ -400,7 +477,7 @@ export function VideoFeatureSubmissionPanel({
       }
       await submitPrepared(saved, preparation);
     } catch {
-      onMessage('视频提交失败，请重试。');
+      showGenerationError('视频提交失败，请重试。');
       if (showProgressSteps) {
         setProgressFailure('视频提交失败，请重试。');
         setProgressPhase('failed');

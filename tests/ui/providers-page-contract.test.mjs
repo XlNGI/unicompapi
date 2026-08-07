@@ -102,7 +102,12 @@ test('connection creation runs the orchestrated validate-save-discover pipeline'
   assert.match(shell, /providersApi\.onAddConnectionProgress/);
   assert.match(shell, /allowUnavailableSave/);
   assert.match(shell, /connection_validation_failed/);
-  assert.match(source, /window\.confirm/);
+  assert.match(shell, /<Modal/);
+  assert.match(shell, /requestConfirmation/);
+  assert.match(shell, /远程连接验证未通过/);
+  assert.match(shell, /确认放弃活动调用/);
+  assert.match(shell, /确认删除模型/);
+  assert.doesNotMatch(source, /window\.confirm/);
 });
 
 test('credential fields are structured, write-only and cleared after writes', () => {

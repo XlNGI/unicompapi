@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { LuArrowRight, LuSparkles } from 'react-icons/lu';
+import { LuArrowRight, LuFolderOpen, LuSparkles } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
+import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 
@@ -26,7 +27,10 @@ export function ImageQuickWorkspace({
   onNavigateToProfessional
 }: ImageQuickWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
+  const storage = window.unicomp?.storage;
+  const notifications = useGlobalNotifications();
   const [busy, setBusy] = useState(false);
+  const [revealing, setRevealing] = useState(false);
   const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
   const [workId, setWorkId] = useState<string>();
   const legacyReason = draft.input
@@ -76,6 +80,36 @@ export function ImageQuickWorkspace({
       onMessage('创建专业生图派生草稿失败，请重试。');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function revealResult() {
+    if (!storage || !workId || revealing) return;
+    setRevealing(true);
+    try {
+      const result = await storage.revealWorkFile(workId);
+      notifications.show(result.ok
+        ? {
+            id: `image-result-reveal:${draft.draftId}`,
+            kind: 'success',
+            title: '已打开图片位置',
+            description: '图片已在系统文件管理器中定位。'
+          }
+        : {
+            id: `image-result-reveal:${draft.draftId}`,
+            kind: 'error',
+            title: '打开图片位置失败',
+            description: '本地作品文件当前无法定位，请前往作品库检查文件状态。'
+          });
+    } catch {
+      notifications.show({
+        id: `image-result-reveal:${draft.draftId}`,
+        kind: 'error',
+        title: '打开图片位置失败',
+        description: '本地作品文件当前无法定位，请前往作品库检查文件状态。'
+      });
+    } finally {
+      setRevealing(false);
     }
   }
 
@@ -164,6 +198,15 @@ export function ImageQuickWorkspace({
             workId={workId}
           />
           <div className="uc-image-quick__result-actions">
+            <Button
+              disabled={!storage || !workId || revealing}
+              onClick={() => void revealResult()}
+              title={workId ? '在系统文件管理器中定位已保存图片' : '图片完成本地保存后可用'}
+              variant="secondary"
+            >
+              <LuFolderOpen aria-hidden="true" />
+              打开图片位置
+            </Button>
             <Button
               disabled={busy || dirty}
               onClick={() => void enterProfessional()}

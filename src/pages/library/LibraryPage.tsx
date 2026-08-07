@@ -293,8 +293,10 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
                     >
                       <WorkThumbnail storage={storage} work={work} />
                       <span className="uc-work-library__work-heading">
-                        <strong>{work.name}</strong>
-                        <StatusPill tone={state.tone}>{state.label}</StatusPill>
+                        <strong title={work.name}>{work.name}</strong>
+                        <StatusPill className="uc-work-library__work-state" tone={state.tone}>
+                          {state.label}
+                        </StatusPill>
                       </span>
                       <small>{work.projectName} · {mediaKinds[work.mediaKind] ?? work.mediaKind}</small>
                       <small>{new Date(work.createdAt).toLocaleString('zh-CN')}</small>

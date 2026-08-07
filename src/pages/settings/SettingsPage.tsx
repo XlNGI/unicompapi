@@ -63,6 +63,7 @@ import type {
   UpdateItemStatusDto
 } from '../../shared/settings-ipc';
 import { useTheme } from '../../theme/useTheme';
+import { useGlobalNotifications } from '../../ui/notifications/GlobalNotificationProvider';
 import '../../styles/pages.css';
 
 type SaveState = 'loading' | 'saved' | 'saving' | 'failed' | 'conflict';
@@ -149,6 +150,7 @@ const categories: readonly SettingsCategoryItem[] = [
 export function SettingsPage() {
   const settings = window.unicomp?.settings;
   const { setPreference } = useTheme();
+  const notifications = useGlobalNotifications();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('general');
   const [query, setQuery] = useState('');
   const [snapshot, setSnapshot] = useState<SettingsSnapshotDto>();
@@ -166,6 +168,16 @@ export function SettingsPage() {
   const [operationCopy, setOperationCopy] = useState<OperationCopy>();
   const [operationBusy, setOperationBusy] = useState(false);
   const [notificationResult, setNotificationResult] = useState<NotificationTestResultDto>();
+  const retrySaveRef = useRef<() => void>(() => undefined);
+  const reloadSnapshotRef = useRef<() => void>(() => undefined);
+  const canRetrySave = Boolean(values && snapshot);
+
+  retrySaveRef.current = () => {
+    if (values && snapshot) void saveValues(values);
+  };
+  reloadSnapshotRef.current = () => {
+    void reloadSnapshot();
+  };
 
   useEffect(() => {
     let active = true;
@@ -224,6 +236,28 @@ export function SettingsPage() {
       active = false;
     };
   }, [settings]);
+
+  useEffect(() => {
+    const action = saveState === 'failed' && canRetrySave
+      ? { label: '重试保存', onClick: () => retrySaveRef.current() }
+      : saveState === 'conflict'
+        ? { label: '重新载入最新设置', onClick: () => reloadSnapshotRef.current() }
+        : undefined;
+    notifications.show({
+      id: 'settings-auto-save',
+      kind: saveState === 'saved'
+        ? 'success'
+        : saveState === 'conflict'
+          ? 'warning'
+          : saveState === 'failed'
+            ? 'error'
+            : 'progress',
+      title: saveStateLabel(saveState),
+      description: message,
+      placement: 'top-end',
+      ...(action ? { action } : {})
+    });
+  }, [canRetrySave, message, notifications, saveState]);
 
   function acceptSnapshot(next: SettingsSnapshotDto, applySavedTheme = false) {
     setSnapshot(next);
@@ -890,18 +924,6 @@ export function SettingsPage() {
           </section>
         </aside>
       </div>
-
-      <footer className={`uc-settings__save-bar uc-settings__save-bar--${saveState}`} aria-live="polite">
-        <div>
-          <strong>{saveStateLabel(saveState)}</strong>
-          <span>{message}</span>
-        </div>
-        {saveState === 'failed' && values && snapshot ? (
-          <Button onClick={() => void saveValues(values)} variant="secondary">重试保存</Button>
-        ) : saveState === 'conflict' ? (
-          <Button onClick={() => void reloadSnapshot()} variant="secondary">重新载入最新设置</Button>
-        ) : null}
-      </footer>
 
       {operationPlan && operationCopy ? (
         <ConfirmOperationDialog
