@@ -79,6 +79,7 @@ export interface VideoSubmissionMaterialSnapshot {
   readonly role: string;
   readonly target:
     | { readonly kind: 'quick_reference' }
+    | { readonly kind: 'image_source' }
     | { readonly kind: 'slot'; readonly slotId: string };
 }
 
@@ -318,6 +319,14 @@ function materialsForVideoDraft(
           target: { kind: 'quick_reference' }
         }]
       : [];
+  }
+  if (draft.mode === 'image_to_video' && draft.imageToVideo.source) {
+    return [{
+      assetId: draft.imageToVideo.source.assetId,
+      mediaKind: draft.imageToVideo.source.mediaKind,
+      role: draft.imageToVideo.source.role,
+      target: { kind: 'image_source' }
+    }];
   }
   const materials = draft.mode === 'text_to_video'
     ? draft.textToVideo.materials

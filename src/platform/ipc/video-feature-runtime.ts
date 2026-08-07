@@ -511,6 +511,16 @@ function userFacingSubmissionFeedback(
       return '远端反馈：模型不存在或当前连接不可用';
     case 'newapi.request_too_large':
       return '远端反馈：请求内容过大，请缩短提示词或减小参数';
+    case 'newapi.project_unavailable':
+      return '请求发送前失败：当前项目会话不可用，请重新打开项目后再试';
+    case 'newapi.material_not_found':
+      return '请求发送前失败：参考图不可用，请重新选择图片后再提交';
+    case 'newapi.material_changed':
+      return '请求发送前失败：参考图在确认后发生变化，请重新选择图片后再提交';
+    case 'newapi.material_invalid':
+      return '请求发送前失败：参考图无法读取或格式不受支持，请更换图片';
+    case 'newapi.material_too_large':
+      return '请求发送前失败：参考图过大，请更换较小的图片';
     case 'adapter.submission_outcome_unknown':
     case 'adapter.failed_before_submission':
       return phase === 'before_request'

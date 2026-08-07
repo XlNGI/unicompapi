@@ -105,4 +105,65 @@ describe('video submission task contracts', () => {
       confirmedAt
     })).toThrow(/does not match/);
   });
+
+  it('freezes image_to_video.source into confirmation materials and assetIds', () => {
+    const base = createEmptyVideoWorkspaceDraft({
+      id: toDraftId('draft-image-to-video-source'),
+      projectId: toProjectId('project-video-task'),
+      mode: 'image_to_video',
+      createdAt
+    });
+    if (base.mode !== 'image_to_video') throw new Error('unexpected mode');
+    const draft = {
+      ...base,
+      state: 'saved' as const,
+      prompt: {
+        ...base.prompt,
+        originalInput: 'pan slowly',
+        finalPrompt: 'pan slowly'
+      },
+      imageToVideo: {
+        ...base.imageToVideo,
+        source: {
+          assetId: 'asset-image-to-video-source' as never,
+          mediaKind: 'image' as const,
+          role: 'image_to_video_source',
+          selectedAt: createdAt
+        }
+      }
+    };
+    const confirmation: VideoSubmissionConfirmationSnapshot = {
+      ...createConfirmation(),
+      mode: 'image_to_video',
+      materials: [{
+        assetId: 'asset-image-to-video-source' as never,
+        mediaKind: 'image',
+        role: 'image_to_video_source',
+        target: { kind: 'image_source' }
+      }],
+      input: {
+        mode: 'image_to_video',
+        mustKeep: [],
+        allowedChanges: [],
+        prohibited: [],
+        subjectAction: '',
+        cameraMovement: '',
+        pace: '',
+        depthOfField: ''
+      }
+    };
+    const task = createVideoTask({
+      id: toTaskId('task-image-to-video-source'),
+      draft,
+      confirmation,
+      confirmedAt
+    });
+    expect(task.submission.assetIds).toEqual(['asset-image-to-video-source']);
+    expect(task.submission.video.materials).toEqual([{
+      assetId: 'asset-image-to-video-source',
+      mediaKind: 'image',
+      role: 'image_to_video_source',
+      target: { kind: 'image_source' }
+    }]);
+  });
 });

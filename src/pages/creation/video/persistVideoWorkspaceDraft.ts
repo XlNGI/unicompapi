@@ -42,9 +42,11 @@ export async function persistVideoWorkspaceDraft(
     return { ok: true, value: latest.value };
   }
 
+  // Another writer left an editing revision (e.g. just attached image-to-video
+  // source). Persist THAT content instead of replaying the stale caller snapshot,
+  // which would wipe materials/source and break preview + submit.
   return api.update({
-    ...draft,
-    updatedAt: latest.value.updatedAt,
+    ...latest.value,
     state
   });
 }

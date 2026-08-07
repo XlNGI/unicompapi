@@ -80,15 +80,17 @@ export function VideoImageWorkspace({
       reference.contextRevision === undefined ||
       reference.includeInPrompt === undefined
   );
-  const blockedReason = draft.featureSelection?.productFeature !== 'image_to_video'
-    ? '当前草稿没有固定为图生视频，请重新保存草稿。'
-    : draft.imageToVideo.materials
-      ? '此旧草稿仍含动态素材槽位，请先明确迁移或移除。'
-      : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
-        ? '图生视频必须选择恰好一张受控图片。'
-        : unsupportedContexts.length > 0
-          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
-          : undefined;
+  const blockedReason =
+    draft.featureSelection != null &&
+    draft.featureSelection.productFeature !== 'image_to_video'
+      ? '当前草稿没有固定为图生视频，请重新保存草稿。'
+      : draft.imageToVideo.materials
+        ? '此旧草稿仍含动态素材槽位，请先明确迁移或移除。'
+        : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
+          ? '图生视频必须选择恰好一张受控图片。'
+          : unsupportedContexts.length > 0
+            ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
+            : undefined;
 
   useEffect(() => {
     let active = true;
@@ -100,8 +102,17 @@ export function VideoImageWorkspace({
       videoWorkspaces.createMaterialPreview(draft.draftId, imageSourceTarget)
     ]).then(([materialResult, previewResult]) => {
       if (!active) return;
-      if (materialResult.ok) setMaterial(materialResult.value);
-      if (previewResult.ok) setPreview(previewResult.value);
+      if (materialResult.ok) {
+        setMaterial(materialResult.value);
+      } else {
+        onMessage(describeWorkspaceError(materialResult.error));
+      }
+      if (previewResult.ok) {
+        setPreview(previewResult.value);
+      } else {
+        setPreview(undefined);
+        onMessage(describeWorkspaceError(previewResult.error));
+      }
     }).catch(() => {
       if (active) onMessage('项目图片读取失败，请重新选择。');
     });
@@ -122,6 +133,20 @@ export function VideoImageWorkspace({
       generation: emptyGeneration()
     });
   }
+
+  // Heal drafts that lost featureSelection so submit candidates can load.
+  useEffect(() => {
+    if (draft.featureSelection != null) return;
+    changeDraft({
+      ...draft,
+      featureSelection: {
+        productFeature: 'image_to_video',
+        parameterValues: {}
+      }
+    });
+    // Intentionally only depends on absence of featureSelection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.draftId, draft.featureSelection]);
 
   function changePrompt(field: 'originalInput' | 'finalPrompt', value: string) {
     const prompt = field === 'originalInput' && draft.prompt.systemSupplements.length === 0
@@ -165,7 +190,17 @@ export function VideoImageWorkspace({
       if (result.value.cancelled || !result.value.draft) return;
       onDraftPersisted(result.value.draft as ImageVideoDraftDto);
       setMaterial(result.value.material);
-      setPreview(undefined);
+      const previewResult = await videoWorkspaces.createMaterialPreview(
+        result.value.draft.draftId,
+        imageSourceTarget
+      );
+      if (previewResult.ok) {
+        setPreview(previewResult.value);
+      } else {
+        setPreview(undefined);
+        onMessage(describeWorkspaceError(previewResult.error));
+        return;
+      }
       onMessage('图片已完成本地校验并登记到草稿。');
     } catch {
       onMessage('选择本地图片失败，请重试。');

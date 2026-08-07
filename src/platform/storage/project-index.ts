@@ -81,3 +81,11 @@ export function findFileIndexEntry(
 ): FileIndexEntry | undefined {
   return index.entries.find((entry) => entry.fileId === fileId);
 }
+
+export function findFileIndexEntryByRelativePath(
+  index: ProjectFileIndex,
+  relativePath: string
+): FileIndexEntry | undefined {
+  const normalized = toProjectRelativePath(relativePath);
+  return index.entries.find((entry) => entry.relativePath === normalized);
+}

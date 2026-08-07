@@ -44,6 +44,7 @@ import {
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
+import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
 
 const maximumImageBytes = 50_000_000;
 const maximumRequestBytes = 64 * 1024 * 1024;
@@ -959,6 +960,22 @@ function submissionOutcomeIsUnknown(error: unknown): boolean {
 }
 
 function safeSubmissionMessage(error: unknown): string {
+  if (error instanceof ControlledImageMaterialError) {
+    switch (error.code) {
+      case 'project_unavailable':
+        return 'The controlled project is unavailable';
+      case 'material_not_found':
+        return 'The selected image material is unavailable';
+      case 'material_changed':
+        return 'The selected image material changed after confirmation';
+      case 'material_invalid':
+        return 'The selected image material is invalid';
+      case 'material_too_large':
+        return 'The selected image material exceeds the allowed size';
+      default:
+        return 'The selected image material is unavailable';
+    }
+  }
   if (error instanceof NewApiVideoAdapterError) {
     return allowlistedAdapterMessage(error.safeCode) ?? 'The NewAPI request is invalid';
   }

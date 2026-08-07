@@ -160,6 +160,22 @@ describe('provider submission dispatch bridge', () => {
       kind: 'failed_before_submission',
       safeCode: 'newapi.invalid_request'
     });
+    expect(normalizeProviderSubmitOutcome({
+      kind: 'failed_before_submission',
+      message: 'The selected image material is unavailable',
+      retryability: 'not_retryable'
+    })).toEqual({
+      kind: 'failed_before_submission',
+      safeCode: 'newapi.material_not_found'
+    });
+    expect(normalizeProviderSubmitOutcome({
+      kind: 'failed_before_submission',
+      message: 'The selected image material changed after confirmation',
+      retryability: 'not_retryable'
+    })).toEqual({
+      kind: 'failed_before_submission',
+      safeCode: 'newapi.material_changed'
+    });
   });
 
   it('accepts UniCompAPI package routes on the shared NewAPI video adapter', async () => {

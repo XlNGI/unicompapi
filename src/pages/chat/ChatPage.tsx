@@ -353,7 +353,8 @@ export function ChatPage() {
       setParameterValues({});
       setLockedSchemaKey(schemaKey);
     }
-    if (!next) setParamsOpen(false);
+    // Show dynamic parameters as soon as a model is chosen (same expectation as image/video).
+    setParamsOpen(Boolean(next && candidate));
   }
 
   function confirmLeaveUnsentInput(): boolean {

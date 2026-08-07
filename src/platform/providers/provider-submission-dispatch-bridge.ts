@@ -233,6 +233,21 @@ export function safeCodeForProviderMessage(
   if (message === 'The NewApi video submission outcome is unknown') {
     return 'adapter.submission_outcome_unknown';
   }
+  if (message === 'The controlled project is unavailable') {
+    return 'newapi.project_unavailable';
+  }
+  if (message === 'The selected image material is unavailable') {
+    return 'newapi.material_not_found';
+  }
+  if (message === 'The selected image material changed after confirmation') {
+    return 'newapi.material_changed';
+  }
+  if (message === 'The selected image material is invalid') {
+    return 'newapi.material_invalid';
+  }
+  if (message === 'The selected image material exceeds the allowed size') {
+    return 'newapi.material_too_large';
+  }
   return fallback;
 }
 

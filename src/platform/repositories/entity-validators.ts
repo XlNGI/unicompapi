@@ -322,6 +322,7 @@ function isVideoSubmissionMaterial(value: unknown): boolean {
     isNonBlankString(value.role) &&
     isRecord(value.target) &&
     (value.target.kind === 'quick_reference' ||
+      value.target.kind === 'image_source' ||
       (value.target.kind === 'slot' && isNonBlankString(value.target.slotId)))
   );
 }
