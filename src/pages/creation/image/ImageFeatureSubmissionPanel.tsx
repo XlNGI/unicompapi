@@ -24,6 +24,10 @@ import type {
   ImageWorkspaceParameterValueDto
 } from '../../../shared/image-workspace-ipc';
 import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
+import {
+  describeUnconfirmedGenerationOutcome,
+  isUnconfirmedGenerationOutcome
+} from '../../../ui/notifications/generation-failure-reasons';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 
 interface ImageFeatureSubmissionPanelProps {
@@ -36,7 +40,7 @@ interface ImageFeatureSubmissionPanelProps {
    * Until the user explicitly picks a feature, hide model and parameter UI.
    */
   readonly requireExplicitFeature?: boolean;
-  /** Professional image: show in-page 准备 → 请求中 → 等待上游 → 完成 progress. */
+  /** Professional image: show in-page 准备 → 提交中 → 生成中 → 完成 progress. */
   readonly showProgressSteps?: boolean;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
@@ -160,12 +164,42 @@ export function ImageFeatureSubmissionPanel({
     });
   }
 
+  function showSubmissionError(description: string) {
+    onMessage('');
+    notifications.show({
+      id: generationNotificationId,
+      kind: 'error',
+      title: '图片提交失败',
+      description
+    });
+  }
+
+  function showGenerationUncertain(description: string) {
+    onMessage('');
+    notifications.show({
+      id: generationNotificationId,
+      kind: 'warning',
+      title: '图片生成状态待确认',
+      description
+    });
+  }
+
   function showSubmissionOutcome(submission: ImageFeatureSubmissionDto) {
     const urls = submission.resultImageUrls ?? [];
     const rawFeedback = submission.feedback ?? submission.localResultError;
     const safeFeedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
       ? rawFeedback
       : undefined;
+    if (isUnconfirmedGenerationOutcome(submission.status, submission.safeCode)) {
+      showGenerationUncertain(
+        describeUnconfirmedGenerationOutcome(submission.safeCode)
+      );
+      return;
+    }
+    if (submission.status === 'failed_before_submission') {
+      showSubmissionError(safeFeedback ?? '请求发送前失败，没有进入生成阶段。');
+      return;
+    }
     if (submission.localResultError) {
       showGenerationError(safeFeedback ?? '远端结果未能完成本地登记，请打开任务中心查看详情。');
       return;
@@ -184,8 +218,8 @@ export function ImageFeatureSubmissionPanel({
     }
     if (submission.status === 'provider_accepted') {
       showGenerationProgress(
-        safeFeedback ?? '服务商已接受请求，当前仍在排队或处理中；真实结果以任务中心为准。',
-        '图片生成已受理',
+        safeFeedback ?? '提交成功，服务商正在排队或生成；真实结果以任务中心为准。',
+        '图片生成中',
         true,
         submission.taskId
       );
@@ -348,7 +382,7 @@ export function ImageFeatureSubmissionPanel({
       state: 'saved'
     });
     if (!result.ok) {
-      showGenerationError(errorMessages[result.error.code] ?? '保存图片草稿失败，请重试。');
+      showSubmissionError(errorMessages[result.error.code] ?? '保存图片草稿失败，请重试。');
       return undefined;
     }
     onDraftPersisted?.(result.value as GenerationImageDraftDto);
@@ -359,7 +393,7 @@ export function ImageFeatureSubmissionPanel({
     if (!api || !selectedCandidate || busy || blockedReason) return;
     setBusy(true);
     busyRef.current = true;
-    showGenerationProgress('正在保存当前草稿并准备安全提交信息。');
+    showGenerationProgress('正在保存当前草稿并准备安全提交信息。', '图片提交准备中');
     if (showProgressSteps) {
       setProgressFailure(undefined);
       setProgressPhase('preparing');
@@ -367,10 +401,10 @@ export function ImageFeatureSubmissionPanel({
     try {
       let saved = await ensureSavedDraft();
       if (!saved) {
-        if (showProgressSteps) setProgressPhase('failed');
+        if (showProgressSteps) setProgressPhase('submission_failed');
         return;
       }
-      showGenerationProgress('正在向主进程准备安全提交信息。');
+      showGenerationProgress('正在向主进程准备安全提交信息。', '图片提交准备中');
       let result = await api.prepareSubmission(
         saved.draftId,
         saved.updatedAt,
@@ -390,10 +424,10 @@ export function ImageFeatureSubmissionPanel({
         }
       }
       if (!result.ok) {
-        showGenerationError(errorMessages[result.error.code]);
+        showSubmissionError(errorMessages[result.error.code]);
         if (showProgressSteps) {
           setProgressFailure(errorMessages[result.error.code]);
-          setProgressPhase('failed');
+          setProgressPhase('submission_failed');
         }
         return;
       }
@@ -403,17 +437,17 @@ export function ImageFeatureSubmissionPanel({
         oneShot
           ? '提交信息已准备完成，正在继续生成。'
           : '准备完成，请确认外发事实后点击「确认并提交」。',
-        oneShot ? '图片生成中' : '等待确认提交'
+        oneShot ? '图片提交中' : '等待确认提交'
       );
       if (showProgressSteps && !oneShot) setProgressPhase('ready');
       if (oneShot) {
         await submitPrepared(saved, result.value);
       }
     } catch {
-      showGenerationError('准备图片提交失败，请重试。');
+      showSubmissionError('准备图片提交失败，请重试。');
       if (showProgressSteps) {
         setProgressFailure('准备图片提交失败，请重试。');
-        setProgressPhase('failed');
+        setProgressPhase('submission_failed');
       }
     } finally {
       busyRef.current = false;
@@ -426,79 +460,87 @@ export function ImageFeatureSubmissionPanel({
     prepared: ImageFeaturePreparationDto
   ) {
     if (!api) return;
-    showGenerationProgress('正在向主进程提交生成请求并等待真实结果。', '图片生成中', true);
+    showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
     if (showProgressSteps) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');
     }
-    const promoteWaiting =
-      showProgressSteps && typeof window !== 'undefined'
-        ? window.setTimeout(() => setProgressPhase('waiting'), 120)
-        : undefined;
-    try {
-      const result = await api.submitDraft(
-        saved.draftId,
-        saved.updatedAt,
-        prepared.routeSelectionToken,
-        prepared.confirmation.confirmationId,
-        true
-      );
-      if (!result.ok) {
-        const message =
-          errorMessages[result.error.code] ||
-          '图片提交失败';
-        showGenerationError(message);
-        if (showProgressSteps) {
-          setProgressFailure(message);
-          setProgressPhase('failed');
-        }
-        return;
+    const result = await api.submitDraft(
+      saved.draftId,
+      saved.updatedAt,
+      prepared.routeSelectionToken,
+      prepared.confirmation.confirmationId,
+      true
+    );
+    if (!result.ok) {
+      const message =
+        errorMessages[result.error.code] ||
+        '图片提交失败';
+      const uncertain = result.error.code === 'submission_outcome_unknown';
+      if (uncertain) {
+        showGenerationUncertain(describeUnconfirmedGenerationOutcome());
+      } else {
+        showSubmissionError(message);
       }
-      const failed =
-        result.value.status !== 'completed' &&
-        result.value.status !== 'provider_accepted';
-      const rawFeedback = result.value.feedback ?? result.value.localResultError;
-      const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
-        ? rawFeedback
-        : failed
-          ? '图片提交未完成，请检查任务状态。'
-          : '图片提交已受理。';
-      showSubmissionOutcome(result.value);
       if (showProgressSteps) {
-        if (failed || result.value.localResultError) {
-          setProgressFailure(feedback);
-          setProgressPhase('failed');
-        } else if (result.value.status === 'provider_accepted') {
-          setProgressPhase('waiting');
-        } else {
-          setProgressPhase('completed');
-        }
+        setProgressFailure(uncertain ? describeUnconfirmedGenerationOutcome() : message);
+        setProgressPhase(uncertain ? 'submission_uncertain' : 'submission_failed');
       }
-      onSubmissionComplete?.(result.value);
-      setPreparation(undefined);
-      setConfirmed(false);
-    } finally {
-      if (promoteWaiting !== undefined) window.clearTimeout(promoteWaiting);
+      return;
     }
+    const uncertain = isUnconfirmedGenerationOutcome(
+      result.value.status,
+      result.value.safeCode
+    );
+    const failed =
+      result.value.status !== 'completed' &&
+      result.value.status !== 'provider_accepted';
+    const rawFeedback = result.value.feedback ?? result.value.localResultError;
+    const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+      ? rawFeedback
+      : failed
+        ? '图片提交未完成，请检查任务状态。'
+        : '图片提交已受理。';
+    showSubmissionOutcome(result.value);
+    if (showProgressSteps) {
+      if (uncertain) {
+        setProgressFailure(describeUnconfirmedGenerationOutcome(result.value.safeCode));
+        setProgressPhase('uncertain');
+      } else if (failed || result.value.localResultError) {
+        setProgressFailure(feedback);
+        setProgressPhase(
+          result.value.status === 'failed_before_submission'
+            ? 'submission_failed'
+            : 'failed'
+        );
+      } else if (result.value.status === 'provider_accepted') {
+        setProgressPhase('waiting');
+      } else {
+        setProgressPhase('completed');
+      }
+    }
+    onSubmissionComplete?.(result.value);
+    setPreparation(undefined);
+    setConfirmed(false);
   }
 
   async function submit() {
     if (!api || !preparation || (!confirmed && !oneShot) || busy) return;
     setBusy(true);
     busyRef.current = true;
-    showGenerationProgress('正在保存当前草稿并准备提交。');
+    showGenerationProgress('正在保存当前草稿并准备提交。', '图片提交准备中');
     try {
       const saved = await ensureSavedDraft();
       if (!saved) {
-        if (showProgressSteps) setProgressPhase('failed');
+        if (showProgressSteps) setProgressPhase('submission_failed');
         return;
       }
       await submitPrepared(saved, preparation);
     } catch {
-      showGenerationError('图片提交失败，请重试。');
+      showSubmissionError('图片提交失败，请重试。');
       if (showProgressSteps) {
         setProgressFailure('图片提交失败，请重试。');
-        setProgressPhase('failed');
+        setProgressPhase('submission_failed');
       }
     } finally {
       busyRef.current = false;
@@ -537,7 +579,7 @@ export function ImageFeatureSubmissionPanel({
     }
     busyRef.current = true;
     setBusy(true);
-    showGenerationProgress('正在向主进程提交生成请求并等待真实结果。', '图片生成中', true);
+    showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
     try {
       if (api.generateQuickImage) {
         const result = await api.generateQuickImage(
@@ -548,9 +590,13 @@ export function ImageFeatureSubmissionPanel({
           >
         );
         if (!result.ok) {
-          showGenerationError(
-            errorMessages[result.error.code] || '图片生成失败，请重试。'
-          );
+          if (result.error.code === 'submission_outcome_unknown') {
+            showGenerationUncertain(describeUnconfirmedGenerationOutcome());
+          } else {
+            showSubmissionError(
+              errorMessages[result.error.code] || '图片提交失败，请重试。'
+            );
+          }
           return;
         }
         onDraftPersisted?.({
@@ -578,7 +624,7 @@ export function ImageFeatureSubmissionPanel({
       }
       await prepare();
     } catch {
-      showGenerationError('一键生成失败，请重试。');
+      showSubmissionError('图片提交失败，请重试。');
     } finally {
       busyRef.current = false;
       setBusy(false);

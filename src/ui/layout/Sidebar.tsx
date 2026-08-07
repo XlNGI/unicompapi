@@ -159,7 +159,9 @@ export function Sidebar({
           );
         })}
       </nav>
-      <GlobalStatusMonitor onOpenTasks={() => onNavigate('tasks')} />
+      <div className="sidebar__status-dock">
+        <GlobalStatusMonitor />
+      </div>
     </aside>
   );
 }

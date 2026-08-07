@@ -59,6 +59,15 @@ const storage: StorageApi = {
   createProject: (name) =>
     ipcRenderer.invoke(storageIpcChannels.createProject, { name }),
   listProjects: () => ipcRenderer.invoke(storageIpcChannels.listProjects),
+  getLocalStorageSummary: () =>
+    ipcRenderer.invoke(storageIpcChannels.getLocalStorageSummary),
+  onLocalStorageChanged: (listener) => {
+    const wrapped = () => listener();
+    ipcRenderer.on(storageIpcChannels.localStorageChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(storageIpcChannels.localStorageChanged, wrapped);
+    };
+  },
   listTasks: () => ipcRenderer.invoke(storageIpcChannels.listTasks),
   getTaskDetails: (taskId) =>
     ipcRenderer.invoke(storageIpcChannels.getTaskDetails, { taskId }),

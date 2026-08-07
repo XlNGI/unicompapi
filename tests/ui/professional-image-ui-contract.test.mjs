@@ -76,8 +76,8 @@ test('professional image shows in-page four-step submit progress', () => {
   assert.match(featurePanelSource, /showProgressSteps = false/);
   assert.match(featurePanelSource, /SubmissionProgressSteps/);
   assert.match(progressStepsSource, /准备/);
-  assert.match(progressStepsSource, /请求中/);
-  assert.match(progressStepsSource, /等待上游返回数据/);
+  assert.match(progressStepsSource, /提交中/);
+  assert.match(progressStepsSource, /生成中/);
   assert.match(progressStepsSource, /完成/);
   assert.match(progressStepsSource, /准备已完成/);
   assert.match(featurePanelSource, /busyRef/);

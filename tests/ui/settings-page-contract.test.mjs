@@ -37,7 +37,7 @@ test('A1 keeps the active shell theme when the settings snapshot first loads', (
 
 test('A1 exposes honest save, recovery and unavailable states', () => {
   for (const text of [
-    '已自动保存', '保存中', '保存失败', '设置冲突',
+    '已保存', '保存中', '保存失败', '设置冲突',
     '重试保存', '重新载入最新设置', '平台适配器尚未接入',
     '未接平台适配器的分类只显示不可用，不提供假控件'
   ]) {
@@ -49,7 +49,10 @@ test('A1 exposes honest save, recovery and unavailable states', () => {
   assert.match(page, /useGlobalNotifications/);
   assert.match(page, /id: 'settings-auto-save'/);
   assert.match(page, /placement: 'top-end'/);
-  assert.match(page, /kind: saveState === 'saved'/);
+  assert.match(page, /notifications\.dismiss\('settings-auto-save'\)/);
+  assert.match(page, /title: '已保存'/);
+  assert.match(page, /description: ''/);
+  assert.doesNotMatch(page, /已自动保存/);
   assert.match(page, /label: '重试保存'/);
   assert.match(page, /label: '重新载入最新设置'/);
   assert.doesNotMatch(page, /<Message|uc-settings__save-message/);
@@ -64,6 +67,7 @@ test('A1 keeps controls accessible and layout responsive', () => {
   assert.match(page, /aria-modal="true"|showModal\(\)/);
   assert.match(page, /type="search"/);
   assert.match(styles, /\.uc-settings__workspace/);
+  assert.match(styles, /\.uc-settings__categories \{[\s\S]*?position: sticky;[\s\S]*?top: 0;/);
   assert.match(styles, /@media \(max-width: 1500px\)/);
   assert.match(styles, /@media \(max-width: 1180px\)/);
 });

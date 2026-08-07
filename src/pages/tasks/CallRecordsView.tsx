@@ -5,11 +5,18 @@ import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import type {
+  StorageApi,
   StorageCallDetailsDto,
   StorageCallRecordFilterDto,
   StorageCallRecordSummaryDto,
-  StorageReadModelIssueDto
+  StorageLocalMediaHandleDto,
+  StorageReadModelIssueDto,
+  StorageWorkDetailsDto
 } from '../../shared/storage-ipc';
+import {
+  describeGenerationSafeCode,
+  type GenerationSafeReason
+} from '../../ui/notifications/generation-failure-reasons';
 
 interface CallRecordsViewProps {
   readonly onNavigate?: (itemId: 'projects' | 'library') => void;
@@ -56,11 +63,11 @@ function formatDateToYmd(date: Date | null): string {
 
 const callStates: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
   submitting: { label: '正在提交', tone: 'info' },
-  failed_before_submission: { label: '提交前失败', tone: 'danger' },
-  accepted: { label: '已接受', tone: 'info' },
-  running: { label: '执行中', tone: 'info' },
+  failed_before_submission: { label: '提交失败', tone: 'danger' },
+  accepted: { label: '提交成功', tone: 'info' },
+  running: { label: '生成中', tone: 'info' },
   completed: { label: '已完成', tone: 'success' },
-  failed: { label: '失败', tone: 'danger' },
+  failed: { label: '生成失败', tone: 'danger' },
   cancelled: { label: '已取消', tone: 'neutral' },
   unknown_outcome: { label: '结果未知', tone: 'warning' }
 };
@@ -405,16 +412,30 @@ function CallDetails({
       <section className="uc-task-center__call-section">
         <h3>状态时间线</h3>
         <ol className="uc-task-center__timeline">
-          {details.timeline.map((event) => (
-            <li key={event.sequence}>
-              <span aria-hidden="true" />
-              <div>
-                <strong>{eventLabels[event.type] ?? '其他状态更新'}</strong>
-                <small>{formatTimestamp(event.occurredAt)}</small>
-                {event.safeCode ? <small>详细原因已记录</small> : null}
-              </div>
-            </li>
-          ))}
+          {details.timeline.map((event) => {
+            const tone = timelineEventTone(event.type);
+            const reason = timelineFailureReason(event);
+            return (
+              <li
+                className={`uc-task-center__timeline-item uc-task-center__timeline-item--${tone}`}
+                key={event.sequence}
+              >
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{eventLabels[event.type] ?? '其他状态更新'}</strong>
+                  <small>{formatTimestamp(event.occurredAt)}</small>
+                  {reason ? (
+                    <div className={`uc-task-center__timeline-reason uc-task-center__timeline-reason--${tone}`}>
+                      <strong>{reason.label}</strong>
+                      {reason.technicalCode ? (
+                        <code>技术代码：{reason.technicalCode}</code>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ol>
       </section>
 
@@ -449,32 +470,30 @@ function CallDetails({
             {registrationLabel(details.resultRegistration.state)}
           </StatusPill>
         </div>
-        {details.localResults.length === 0 ? (
+        {details.resultRegistration.workIds.length > 0 ? (
+          <div className="uc-task-center__result-list">
+            {details.resultRegistration.workIds.map((workId, index) => (
+              <RegisteredWorkResultCard
+                key={workId}
+                localResult={details.localResults[index] ?? details.localResults[0]}
+                onNavigate={onNavigate}
+                workId={workId}
+              />
+            ))}
+          </div>
+        ) : details.localResults.length === 0 ? (
           <p className="uc-task-center__muted">当前调用没有已记录的本地结果属性。</p>
         ) : (
           <div className="uc-task-center__result-list">
             {details.localResults.map((result, index) => (
-              <article key={`${result.observedAt}:${index}`}>
+              <article className="uc-task-center__result-summary" key={`${result.observedAt}:${index}`}>
                 <strong>{mediaLabel(result.mediaKind)} · {result.outputCount} 个结果</strong>
                 <small>{localResultFacts(result)}</small>
-                {result.resultImageUrl ? (
-                  <p className="uc-task-center__result-url">
-                    <strong>图片链接</strong>
-                    <a href={result.resultImageUrl} rel="noreferrer" target="_blank">
-                      {result.resultImageUrl}
-                    </a>
-                  </p>
-                ) : null}
                 <small>{validationLabel(result.validationState)} · {formatTimestamp(result.observedAt)}</small>
               </article>
             ))}
           </div>
         )}
-        {details.resultRegistration.workIds.length > 0 ? (
-          <p className="uc-task-center__muted">
-            已登记作品：{details.resultRegistration.workIds.join('、')}
-          </p>
-        ) : null}
       </section>
 
       <div className="uc-task-center__actions">
@@ -484,6 +503,123 @@ function CallDetails({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function RegisteredWorkResultCard({
+  localResult,
+  onNavigate,
+  workId
+}: {
+  readonly localResult?: StorageCallDetailsDto['localResults'][number];
+  readonly onNavigate?: CallRecordsViewProps['onNavigate'];
+  readonly workId: string;
+}) {
+  const storage: StorageApi | undefined = window.unicomp?.storage;
+  const [work, setWork] = useState<StorageWorkDetailsDto>();
+  const [media, setMedia] = useState<StorageLocalMediaHandleDto>();
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [revealing, setRevealing] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setWork(undefined);
+    setMedia(undefined);
+    setMessage('');
+    setLoading(true);
+    if (!storage) {
+      setMessage('本地作品读取能力不可用');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    void storage.getWorkDetails(workId)
+      .then(async (result) => {
+        if (!active) return;
+        if (!result.ok || !result.value) {
+          setMessage('本地作品信息不可用');
+          setLoading(false);
+          return;
+        }
+        setWork(result.value);
+        if (result.value.fileState !== 'available') {
+          setMessage('本地文件当前不可用');
+          setLoading(false);
+          return;
+        }
+        const mediaResult = await storage.createWorkMediaHandle(workId);
+        if (!active) return;
+        if (mediaResult.ok) setMedia(mediaResult.value);
+        else setMessage('本地预览暂不可用');
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active) {
+          setMessage('本地预览暂不可用');
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [storage, workId]);
+
+  async function revealWork() {
+    if (!storage || revealing) return;
+    setRevealing(true);
+    setMessage('');
+    try {
+      const result = await storage.revealWorkFile(workId);
+      setMessage(result.ok ? '已在文件管理器中定位作品' : '无法定位本地作品');
+    } catch {
+      setMessage('无法定位本地作品');
+    } finally {
+      setRevealing(false);
+    }
+  }
+
+  const kind = work?.mediaKind ?? media?.mediaKind ?? localResult?.mediaKind ?? 'image';
+  const title = work?.name ?? `${mediaLabel(kind)}作品`;
+  const fileAvailable = work?.fileState === 'available';
+
+  return (
+    <article className="uc-task-center__result-card">
+      <div className="uc-task-center__result-preview">
+        {media && kind === 'image' ? (
+          <img alt={`${title}预览`} loading="lazy" src={media.url} />
+        ) : media && kind === 'video' ? (
+          <video controls playsInline preload="metadata" src={media.url} />
+        ) : (
+          <span>{kind === 'video' ? '视频预览暂不可用' : '图片预览暂不可用'}</span>
+        )}
+      </div>
+      <div className="uc-task-center__result-info">
+        <div className="uc-task-center__result-heading">
+          <strong title={title}>{title}</strong>
+          <StatusPill tone={fileAvailable ? 'success' : 'warning'}>
+            {fileAvailable ? '本地可用' : loading ? '读取中' : '本地不可用'}
+          </StatusPill>
+        </div>
+        <small>{mediaLabel(kind)}{localResult ? ` · ${localResultFacts(localResult)}` : ''}</small>
+        <small>
+          {localResult ? `${validationLabel(localResult.validationState)} · ` : ''}
+          已保存到当前项目
+        </small>
+        <div className="uc-task-center__result-actions">
+          <Button disabled={!storage || !fileAvailable || revealing} loading={revealing} onClick={revealWork} variant="secondary">
+            打开文件位置
+          </Button>
+          <Button onClick={() => onNavigate?.('library')} variant="secondary">
+            查看作品
+          </Button>
+        </div>
+        {message ? <small aria-live="polite" role="status">{message}</small> : null}
+      </div>
+    </article>
   );
 }
 
@@ -656,6 +792,44 @@ function localResultFacts(result: StorageCallDetailsDto['localResults'][number])
     facts.push(`${result.width} × ${result.height}`);
   }
   if (result.durationMs) facts.push(`${result.durationMs} 毫秒`);
-  if (result.byteLength) facts.push(`${result.byteLength} 字节`);
+  if (result.byteLength) facts.push(formatByteLength(result.byteLength));
   return facts.join(' · ') || '没有额外的本地媒体属性';
+}
+
+function timelineEventTone(type: string): StatusTone {
+  if (type === 'completed') return 'success';
+  if (type === 'submission_failed_before_request' || type === 'failed') return 'danger';
+  if (type === 'cancel_requested' || type === 'outcome_unknown') return 'warning';
+  if (type === 'cancelled') return 'neutral';
+  return 'info';
+}
+
+function timelineFailureReason(
+  event: StorageCallDetailsDto['timeline'][number]
+): GenerationSafeReason | undefined {
+  if (!['submission_failed_before_request', 'failed', 'outcome_unknown'].includes(event.type)) {
+    return undefined;
+  }
+  const safeReason = describeGenerationSafeCode(event.safeCode);
+  if (safeReason) return safeReason;
+  return {
+    label: event.type === 'outcome_unknown'
+      ? '调用结果暂时无法确认'
+      : '未记录可公开的具体失败原因',
+    recognized: true
+  };
+}
+
+function formatByteLength(value: string): string {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return `${value} 字节`;
+  if (bytes < 1_024) return `${bytes} 字节`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let amount = bytes;
+  let unit = -1;
+  do {
+    amount /= 1_024;
+    unit += 1;
+  } while (amount >= 1_024 && unit < units.length - 1);
+  return `${amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)} ${units[unit]}`;
 }

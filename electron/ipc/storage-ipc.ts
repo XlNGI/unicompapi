@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import {
   StorageIpcController,
@@ -331,7 +332,19 @@ export function registerStorageIpcHandlers(options: {
   const catalog = new ProjectCatalogService(
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
-  const readModels = new GlobalReadModelController(catalog);
+  const readModels = new GlobalReadModelController(catalog, () => sessionRegistry.get());
+  const projectStorageMonitor = new ProjectStorageChangeMonitor(
+    catalog,
+    () => readModels.invalidateLocalStorageSummary(),
+    () => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.webContents.isDestroyed()) {
+          window.webContents.send(storageIpcChannels.localStorageChanged);
+        }
+      }
+    }
+  );
+  projectStorageMonitor.start();
   const callReadModels = new ProviderInvocationReadModelController(
     catalog,
     options.providerUsageSchemas
@@ -361,6 +374,8 @@ export function registerStorageIpcHandlers(options: {
       imagePromptEnhanceRuntime = undefined;
       videoFeatureRuntime = undefined;
       await videoExports.recoverExports();
+      await projectStorageMonitor.sync();
+      projectStorageMonitor.publishNow();
     },
     catalog
   });
@@ -388,6 +403,9 @@ export function registerStorageIpcHandlers(options: {
   );
   ipcMain.handle(storageIpcChannels.listProjects, () =>
     projectController.listProjects()
+  );
+  ipcMain.handle(storageIpcChannels.getLocalStorageSummary, () =>
+    readModels.getLocalStorageSummary()
   );
   ipcMain.handle(storageIpcChannels.listTasks, () => readModels.listTasks());
   ipcMain.handle(storageIpcChannels.getTaskDetails, (_event, request: unknown) =>
@@ -640,9 +658,107 @@ export function registerStorageIpcHandlers(options: {
         videoFeatures.waitForOperations()
       ]);
       await videoExports.waitForExports();
+      projectStorageMonitor.dispose();
       mediaHandles.clear();
     }
   };
+}
+
+class ProjectStorageChangeMonitor {
+  private readonly watchers = new Map<
+    string,
+    { readonly rootDirectory: string; readonly watcher: FSWatcher }
+  >();
+  private changeTimer: ReturnType<typeof setTimeout> | undefined;
+  private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  private syncOperation: Promise<void> | undefined;
+  private disposed = false;
+
+  constructor(
+    private readonly catalog: ProjectCatalogService,
+    private readonly invalidate: () => void,
+    private readonly notify: () => void
+  ) {}
+
+  start(): void {
+    if (this.disposed) return;
+    void this.sync();
+    this.refreshTimer = setInterval(() => {
+      void this.sync();
+      this.publishNow();
+    }, 60_000);
+    this.refreshTimer.unref?.();
+  }
+
+  sync(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    if (this.syncOperation) return this.syncOperation;
+    this.syncOperation = this.syncWatchers()
+      .catch(() => undefined)
+      .finally(() => {
+        this.syncOperation = undefined;
+      });
+    return this.syncOperation;
+  }
+
+  publishNow(): void {
+    if (this.disposed) return;
+    this.invalidate();
+    this.notify();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    if (this.changeTimer) clearTimeout(this.changeTimer);
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    for (const item of this.watchers.values()) item.watcher.close();
+    this.watchers.clear();
+  }
+
+  private async syncWatchers(): Promise<void> {
+    const entries = await this.catalog.getEntries();
+    if (this.disposed) return;
+    const activeIds = new Set<string>(entries.map((entry) => entry.projectId));
+    for (const [projectId, item] of this.watchers) {
+      const entry = entries.find((candidate) => candidate.projectId === projectId);
+      if (!activeIds.has(projectId) || entry?.rootDirectory !== item.rootDirectory) {
+        item.watcher.close();
+        this.watchers.delete(projectId);
+      }
+    }
+    for (const entry of entries) {
+      if (this.disposed) return;
+      if (this.watchers.has(entry.projectId)) continue;
+      try {
+        const watcher = watch(entry.rootDirectory, { recursive: true }, () => {
+          this.scheduleChange();
+        });
+        watcher.on('error', () => {
+          const current = this.watchers.get(entry.projectId);
+          if (current?.watcher === watcher) {
+            watcher.close();
+            this.watchers.delete(entry.projectId);
+          }
+          this.scheduleChange();
+        });
+        this.watchers.set(entry.projectId, {
+          rootDirectory: entry.rootDirectory,
+          watcher
+        });
+      } catch {
+        // The periodic refresh still covers unavailable or unsupported directories.
+      }
+    }
+  }
+
+  private scheduleChange(): void {
+    if (this.changeTimer) clearTimeout(this.changeTimer);
+    this.changeTimer = setTimeout(() => {
+      this.changeTimer = undefined;
+      this.publishNow();
+    }, 750);
+    this.changeTimer.unref?.();
+  }
 }
 
 const denyRuntimeAuthorization: ProviderCandidateRuntimeAuthorizationPort = {
