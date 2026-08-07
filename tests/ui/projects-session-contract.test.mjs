@@ -38,6 +38,14 @@ test('projects page keeps creation project-scoped and does not invent summaries'
   assert.doesNotMatch(source, /mock|fixture|demoProject/i);
 });
 
+test('project creation entries use distinct image and video icons', () => {
+  assert.match(source, /LuImagePlus/);
+  assert.match(source, /LuClapperboard/);
+  assert.match(source, /data-entry-kind="image"/);
+  assert.match(source, /data-entry-kind="video"/);
+  assert.doesNotMatch(source, /<span aria-hidden="true">图<\/span>|<span aria-hidden="true">影<\/span>/);
+});
+
 test('project page shows real task, work, and project-level issue summaries', () => {
   assert.match(source, /tasksResult\.value\.items/);
   assert.match(source, /worksResult\.value\.items/);

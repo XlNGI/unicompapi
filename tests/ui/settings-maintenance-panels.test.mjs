@@ -12,7 +12,7 @@ test('A4 renders diagnostics and update panels from B4 facts', () => {
   ]) {
     assert.match(page, new RegExp(text));
   }
-  assert.match(page, /delivery: 'A4 当前已接入'/);
+  assert.match(page, /delivery: '当前已接入'/);
 });
 
 test('A4 consumes only controlled B4 IPC and confirmation operations', () => {

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LuImagePlus, LuTrash2 } from 'react-icons/lu';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { EmptyState } from '../../../components/EmptyState';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
@@ -87,7 +87,7 @@ export function VideoImageWorkspace({
       : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
         ? '图生视频必须选择恰好一张受控图片。'
         : unsupportedContexts.length > 0
-          ? '草稿含有未固定 revision 或不受支持的旧上下文，请先清理。'
+          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
           : undefined;
 
   useEffect(() => {
@@ -311,7 +311,7 @@ export function VideoImageWorkspace({
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文</strong>
-              <span>图生视频只接受固定 revision 的项目上下文。</span>
+              <span>图生视频只接受固定版本的项目上下文。</span>
               <Button onClick={removeUnsupportedContexts} variant="secondary">
                 <LuTrash2 aria-hidden="true" />
                 明确移除旧上下文
@@ -330,18 +330,20 @@ export function VideoImageWorkspace({
           </header>
           <label className="uc-image-quick__field">
             <span>原始需求</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={3000}
-              onChange={(event) => changePrompt('originalInput', event.target.value)}
+              onChange={(value) => changePrompt('originalInput', value)}
               rows={5}
               value={draft.prompt.originalInput}
             />
           </label>
           <label className="uc-image-quick__field">
             <span>最终提示词</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={5000}
-              onChange={(event) => changePrompt('finalPrompt', event.target.value)}
+              onChange={(value) => changePrompt('finalPrompt', value)}
               rows={7}
               value={draft.prompt.finalPrompt}
             />
@@ -416,7 +418,7 @@ export function VideoImageWorkspace({
             <span aria-hidden="true">3</span>
             <div>
               <h2>模型、参数与提交流程</h2>
-              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
+              <p>选择模型后由后台锁定接口与参数配置；填写参数后准备并提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel
@@ -457,7 +459,7 @@ function TextField({
   return (
     <label className="uc-image-quick__field">
       <span>{label}</span>
-      <input onChange={(event) => onChange(event.target.value)} type="text" value={value} />
+      <Input onChange={(next) => onChange(next)} type="text" value={value} />
     </label>
   );
 }
@@ -474,9 +476,9 @@ function ListField({
   return (
     <label className="uc-image-quick__field">
       <span>{label}</span>
-      <input
-        onChange={(event) => onChange(
-          event.target.value.split(',').map((item) => item.trim()).filter(Boolean)
+      <Input
+        onChange={(next) => onChange(
+          next.split(',').map((item) => item.trim()).filter(Boolean)
         )}
         placeholder="使用逗号分隔"
         type="text"

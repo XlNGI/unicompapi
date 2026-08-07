@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { LuSend, LuShieldCheck } from 'react-icons/lu';
+import { Checkbox } from 'rsuite';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -24,6 +25,7 @@ import type {
   VideoWorkspaceParameterValueDto
 } from '../../../shared/video-workspace-ipc';
 import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
+import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
 
 interface VideoFeatureSubmissionPanelProps {
   readonly dirty: boolean;
@@ -37,7 +39,8 @@ interface VideoFeatureSubmissionPanelProps {
   readonly onSubmissionComplete?: (submission: VideoFeatureSubmissionDto) => void;
 }
 
-const errorMessages: Record<VideoFeatureIpcErrorCode, string> = {
+const errorMessages: Record<VideoFeatureIpcErrorCode, string> &
+  Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
   invalid_request: '视频功能请求无效，请重新保存当前草稿。',
   project_not_open: '当前没有打开的项目。',
   draft_not_found: '当前视频草稿已不存在。',
@@ -81,11 +84,7 @@ function describeVideoFeatureError(
   error: { readonly code: VideoFeatureIpcErrorCode; readonly message: string }
 ): string {
   const fallback = errorMessages[error.code];
-  const detail = error.message?.trim();
-  if (!detail || detail === fallback) return fallback;
-  // Prefer the concrete underlying message when the controller surfaced it.
-  if (error.code === 'storage_error') return detail;
-  return `${fallback}（${detail}）`;
+  return fallback;
 }
 
 const unavailableReasonLabels: Readonly<Record<string, string>> = {
@@ -97,7 +96,7 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   binding_unavailable: '协议适配器不可用',
   runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '草稿约束不满足',
-  schema_unsupported: '参数 Schema 无法解释'
+  schema_unsupported: '参数定义无法识别'
 };
 
 export function VideoFeatureSubmissionPanel({
@@ -112,6 +111,7 @@ export function VideoFeatureSubmissionPanel({
 }: VideoFeatureSubmissionPanelProps) {
   const api = window.unicomp?.videoFeatures;
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
+  const notifications = useGlobalNotifications();
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
   const [preparation, setPreparation] = useState<VideoFeaturePreparationDto>();
   const [confirmed, setConfirmed] = useState(false);
@@ -133,6 +133,74 @@ export function VideoFeatureSubmissionPanel({
   const draftRef = useRef(draft);
   busyRef.current = busy;
   draftRef.current = draft;
+  const generationNotificationId = `video-generation:${draft.draftId}`;
+
+  function showGenerationProgress(
+    description: string,
+    title = '视频生成中',
+    trackTask = false
+  ) {
+    onMessage('');
+    notifications.show({
+      id: generationNotificationId,
+      kind: 'progress',
+      title,
+      description,
+      ...(trackTask ? {
+        tracking: {
+          mediaKind: 'video' as const,
+          sourceDraftId: draft.draftId
+        }
+      } : {})
+    });
+  }
+
+  function showGenerationError(description: string) {
+    onMessage('');
+    notifications.show({
+      id: generationNotificationId,
+      kind: 'error',
+      title: '视频生成失败',
+      description
+    });
+  }
+
+  function showSubmissionOutcome(submission: VideoFeatureSubmissionDto) {
+    const urls = submission.resultVideoUrls ?? [];
+    const rawFeedback = submission.feedback ?? submission.localResultError;
+    const safeFeedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+      ? rawFeedback
+      : undefined;
+    if (submission.localResultError) {
+      showGenerationError(safeFeedback ?? '远端结果未能完成本地登记，请打开任务中心查看详情。');
+      return;
+    }
+    if (submission.status === 'completed' && (urls.length > 0 || submission.workId)) {
+      onMessage('');
+      notifications.show({
+        id: generationNotificationId,
+        kind: 'success',
+        title: '已成功生成',
+        description: safeFeedback ?? (submission.workId
+          ? '视频已完成本地校验并登记到作品库。'
+          : '视频结果已返回，链接已写入调用记录。')
+      });
+      return;
+    }
+    if (submission.status === 'provider_accepted') {
+      showGenerationProgress(
+        safeFeedback ?? '服务商已接受请求，当前仍在排队或处理中；真实结果以任务中心为准。',
+        '视频生成已受理',
+        true
+      );
+      return;
+    }
+    showGenerationError(
+      safeFeedback ?? (submission.status === 'completed'
+        ? '任务已结束，但没有返回视频链接或本地作品，请打开任务中心查看详情。'
+        : `生成未完成：${submissionStatusLabel(submission.status)}。请打开任务中心查看时间线。`)
+    );
+  }
 
   // Only invalidate a prepared confirmation when route-binding facts change.
   // Do NOT clear it on draft.updatedAt / autosave, or prepare appears stuck.
@@ -308,7 +376,7 @@ export function VideoFeatureSubmissionPanel({
     if (!api || !selectedCandidate || busy || blockedReason) return;
     setBusy(true);
     busyRef.current = true;
-    onMessage('');
+    showGenerationProgress('正在保存当前草稿并准备安全提交信息。');
     if (showProgressSteps) {
       setProgressFailure(undefined);
       setProgressPhase('preparing');
@@ -319,6 +387,7 @@ export function VideoFeatureSubmissionPanel({
         if (showProgressSteps) setProgressPhase('failed');
         return;
       }
+      showGenerationProgress('正在向主进程准备安全提交信息。');
       let result = await api.prepareSubmission(
         saved.draftId,
         saved.updatedAt,
@@ -338,7 +407,7 @@ export function VideoFeatureSubmissionPanel({
       }
       if (!result.ok) {
         const message = describeVideoFeatureError(result.error);
-        onMessage(message);
+        showGenerationError(message);
         if (showProgressSteps) {
           setProgressFailure(message);
           setProgressPhase('failed');
@@ -347,10 +416,13 @@ export function VideoFeatureSubmissionPanel({
       }
       setPreparation(result.value);
       setConfirmed(false);
-      onMessage('准备完成：请勾选确认外发事实，再点击「确认并提交」。');
+      showGenerationProgress(
+        '准备完成，请确认外发事实后点击「确认并提交」。',
+        '等待确认提交'
+      );
       if (showProgressSteps) setProgressPhase('ready');
     } catch {
-      onMessage('准备视频提交失败，请重试。');
+      showGenerationError('准备视频提交失败，请重试。');
       if (showProgressSteps) {
         setProgressFailure('准备视频提交失败，请重试。');
         setProgressPhase('failed');
@@ -366,6 +438,7 @@ export function VideoFeatureSubmissionPanel({
     prepared: VideoFeaturePreparationDto
   ) {
     if (!api) return;
+    showGenerationProgress('正在向主进程提交生成请求并等待真实结果。', '视频生成中', true);
     if (showProgressSteps) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');
@@ -384,20 +457,23 @@ export function VideoFeatureSubmissionPanel({
       );
       if (!result.ok) {
         const message = describeVideoFeatureError(result.error);
-        onMessage(message);
+        showGenerationError(message);
         if (showProgressSteps) {
           setProgressFailure(message);
           setProgressPhase('failed');
         }
         return;
       }
-      const feedback =
-        result.value.feedback ??
-        `提交状态：${result.value.status}`;
-      onMessage(feedback);
+      const rawFeedback = result.value.feedback;
+      const feedback = rawFeedback && !/[A-Za-z_]/u.test(rawFeedback)
+        ? rawFeedback
+        : `提交状态：${submissionStatusLabel(result.value.status)}`;
+      showSubmissionOutcome(result.value);
       if (showProgressSteps) {
         if (result.value.status === 'completed') {
           setProgressPhase('completed');
+        } else if (result.value.status === 'provider_accepted') {
+          setProgressPhase('waiting');
         } else {
           setProgressFailure(feedback);
           setProgressPhase('failed');
@@ -415,7 +491,7 @@ export function VideoFeatureSubmissionPanel({
     if (!api || !preparation || !confirmed || busy) return;
     setBusy(true);
     busyRef.current = true;
-    onMessage('');
+    showGenerationProgress('正在保存当前草稿并准备提交。');
     try {
       const saved = await ensureSavedDraft();
       if (!saved) {
@@ -424,7 +500,7 @@ export function VideoFeatureSubmissionPanel({
       }
       await submitPrepared(saved, preparation);
     } catch {
-      onMessage('视频提交失败，请重试。');
+      showGenerationError('视频提交失败，请重试。');
       if (showProgressSteps) {
         setProgressFailure('视频提交失败，请重试。');
         setProgressPhase('failed');
@@ -462,7 +538,7 @@ export function VideoFeatureSubmissionPanel({
           <div className="uc-image-feature-panel__facts">
             <span>
               <strong>已锁定参数合同</strong>
-              {selectedCandidate.parameterSchema.schemaId} · revision {selectedCandidate.parameterSchema.revision}
+              参数配置版本 {selectedCandidate.parameterSchema.revision}
             </span>
             <span><strong>费用</strong>{costLabel(selectedCandidate.cost)}</span>
             <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
@@ -473,7 +549,7 @@ export function VideoFeatureSubmissionPanel({
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>
               {selectedCandidate.unavailableReasons.map((reason) => (
-                <span key={reason}>• {unavailableReasonLabels[reason] ?? reason}</span>
+                <span key={reason}>• {unavailableReasonLabels[reason] ?? '其他不可用原因'}</span>
               ))}
             </div>
           ) : null}
@@ -509,14 +585,13 @@ export function VideoFeatureSubmissionPanel({
             <div><dt>数量</dt><dd>{preparation.confirmation.parameterFieldCount} 个参数 · {preparation.confirmation.materialCount} 份素材 · {preparation.confirmation.contextCount} 份上下文</dd></div>
             <div><dt>费用</dt><dd>{costLabel(preparation.confirmation.cost)}</dd></div>
           </dl>
-          <label className="uc-image-quick__checkbox">
-            <input
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-              type="checkbox"
-            />
+          <Checkbox
+            checked={confirmed}
+            className="uc-image-quick__checkbox"
+            onChange={(_value, checked) => setConfirmed(checked)}
+          >
             <span>我已核对并确认以上接收方、外发范围、内容与费用事实。</span>
-          </label>
+          </Checkbox>
         </fieldset>
       ) : null}
 
@@ -543,7 +618,7 @@ export function VideoFeatureSubmissionPanel({
       {showProgressSteps ? (
         <p className="uc-image-feature-panel__action-hint" role="status">
           {!selectedCandidate
-            ? '下一步：选择可用模型；后台会按模型锁定 API 与参数合同。'
+            ? '下一步：选择可用模型；后台会按模型锁定接口与参数配置。'
             : !selectedCandidate.available
               ? '所选模型当前不可用，请换一个或到「模型与服务商」检查连接授权。'
               : preparation && !confirmed
@@ -557,6 +632,19 @@ export function VideoFeatureSubmissionPanel({
       ) : null}
     </div>
   );
+}
+
+function submissionStatusLabel(status: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    submitting: '正在提交',
+    provider_accepted: '服务商已接受',
+    running: '生成中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    unknown_outcome: '结果未知'
+  };
+  return labels[status] ?? '未知提交状态';
 }
 
 function costLabel(cost: { readonly state: string; readonly summary?: string }): string {

@@ -1,3 +1,4 @@
+import { Checkbox, InputNumber } from 'rsuite';
 import type { ImageWorkspaceInputDto } from '../../../shared/image-workspace-ipc';
 
 export type ImageRegion = NonNullable<ImageWorkspaceInputDto['region']>;
@@ -29,21 +30,20 @@ export function ImageRegionFields({
 
   return (
     <>
-      <label className="uc-image-quick__checkbox">
-        <input
-          checked={Boolean(region)}
-          disabled={disabled}
-          onChange={(event) =>
-            onChange(
-              event.target.checked
-                ? { x: 0, y: 0, width: 1, height: 1 }
-                : undefined
-            )
-          }
-          type="checkbox"
-        />
+      <Checkbox
+        checked={Boolean(region)}
+        className="uc-image-quick__checkbox"
+        disabled={disabled}
+        onChange={(_value, checked) =>
+          onChange(
+            checked
+              ? { x: 0, y: 0, width: 1, height: 1 }
+              : undefined
+          )
+        }
+      >
         <span>{label}</span>
-      </label>
+      </Checkbox>
       {region ? (
         <div
           aria-label="图片区域百分比"
@@ -61,13 +61,12 @@ export function ImageRegionFields({
                       : '高度'}
                 （%）
               </span>
-              <input
+              <InputNumber
                 max={key === 'x' || key === 'y' ? 99 : 100}
                 min={key === 'width' || key === 'height' ? 1 : 0}
-                onChange={(event) =>
-                  changeField(key, Number(event.target.value))
+                onChange={(value) =>
+                  changeField(key, Number(value))
                 }
-                type="number"
                 value={Math.round(region[key] * 100)}
               />
             </label>

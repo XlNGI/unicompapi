@@ -478,6 +478,9 @@ describe('Vidu local synthetic service validation', () => {
     // Product video generation now goes through videoFeatures (feature submit +
     // poll + receive). The retired VideoSubmissionController closed loop is gone.
     expect(updatedVideoDraft.value.mode).toBe('image_to_video');
+    if (updatedVideoDraft.value.mode !== 'image_to_video') {
+      throw new Error(`Unexpected video draft mode: ${updatedVideoDraft.value.mode}`);
+    }
     expect(updatedVideoDraft.value.imageToVideo.materials?.slots[0]?.selection?.assetId)
       .toBe(source.assetId);
     expect(source.assetId).not.toBe(imageAssetId);

@@ -44,7 +44,8 @@ test('A2 shows real impact, blockers and one-time confirmation before execution'
 test('A2 keeps controls accessible and responsive', () => {
   assert.match(page, /role="radiogroup" aria-label="性能模式"/);
   assert.match(page, /aria-label="媒体硬件加速策略"/);
-  assert.match(page, /type="checkbox"/);
+  assert.match(page, /Toggle as RSuiteToggle/);
+  assert.match(page, /<Checkbox/);
   assert.match(styles, /\.uc-settings__metric-grid/);
   assert.match(styles, /\.uc-settings__cleanup-grid/);
   assert.match(styles, /@media \(max-width: 720px\)/);

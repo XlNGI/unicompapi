@@ -41,7 +41,7 @@ export function GenerationResultPreview({
         return;
       }
       setLocalUrl(undefined);
-      setLocalError(result.error.message || '本地预览暂不可用');
+      setLocalError('本地预览暂不可用');
     });
     return () => {
       cancelled = true;
@@ -73,7 +73,7 @@ export function GenerationResultPreview({
       ) : null}
       {!localUrl && remoteUrls.map((url) => (
         <article key={url} className="uc-image-quick__result-item">
-          <strong>{mediaKind === 'image' ? '图片 URL' : '视频 URL'}</strong>
+          <strong>{mediaKind === 'image' ? '图片链接' : '视频链接'}</strong>
           <a href={url} rel="noreferrer" target="_blank">{url}</a>
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" src={url} />

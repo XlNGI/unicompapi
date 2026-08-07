@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createProviderConnection,
   toIsoTimestamp,
+  toProviderId,
   type ProxyMode
 } from '../../src/domain';
 import {
@@ -30,6 +31,37 @@ afterEach(async () => {
 });
 
 describe('ViduSharedRuntime', () => {
+  it('accepts a clean-registry provider ID while rejecting a foreign binding', async () => {
+    const fixture = await createFixture();
+    const runtime = runtimeFor(fixture);
+    expect(fixture.connection.providerId).not.toBe('provider-vidu');
+    fixture.transport.responses.push(response(200, { data: [] }));
+
+    await expect(
+      runtime.request({
+        connection: fixture.connection,
+        binding: fixture.imageBinding,
+        method: 'POST',
+        path: '/ent/v1/images/generations',
+        authScheme: 'bearer'
+      })
+    ).resolves.toMatchObject({ status: 200 });
+
+    await expect(
+      runtime.request({
+        connection: fixture.connection,
+        binding: {
+          ...fixture.imageBinding,
+          providerId: toProviderId('provider-foreign')
+        },
+        method: 'POST',
+        path: '/ent/v1/images/generations',
+        authScheme: 'bearer'
+      })
+    ).rejects.toMatchObject({ code: 'protocol_mismatch' });
+    expect(fixture.transport.requests).toHaveLength(1);
+  });
+
   it('uses the credential only inside the vault callback and emits path-free safe logs', async () => {
     const fixture = await createFixture();
     const logs: ViduSafeLogEvent[] = [];

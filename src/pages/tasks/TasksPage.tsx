@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -19,6 +20,7 @@ interface TasksPageProps {
 const taskStates: Record<string, { label: string; tone: StatusTone }> = {
   created: { label: '已创建', tone: 'neutral' },
   submitting: { label: '正在提交', tone: 'info' },
+  submission_outcome_unknown: { label: '提交结果未知', tone: 'warning' },
   queued: { label: '排队中', tone: 'info' },
   processing: { label: '处理中', tone: 'info' },
   validating_sources: { label: '正在校验素材', tone: 'info' },
@@ -52,7 +54,7 @@ const taskKinds: Record<string, string> = {
 };
 
 function taskState(state?: string) {
-  return state ? (taskStates[state] ?? { label: state, tone: 'neutral' as const }) : {
+  return state ? (taskStates[state] ?? { label: '未知任务状态', tone: 'neutral' as const }) : {
     label: '等待执行',
     tone: 'neutral' as const
   };
@@ -89,7 +91,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
           setTasks(result.value.items);
           setIssues(result.value.issues);
           setSelectedTaskId(result.value.items[0]?.taskId);
-        } else setMessage(`读取任务失败：${result.error.message}`);
+        } else setMessage('读取任务失败，请重试');
       })
       .catch(() => {
         if (active) setMessage('读取任务失败，请重试');
@@ -119,7 +121,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
         if (result.ok) {
           setDetails(result.value);
           if (!result.value) setMessage('任务已不存在或所属项目当前不可用');
-        } else setMessage(`读取任务详情失败：${result.error.message}`);
+        } else setMessage('读取任务详情失败，请重试');
       })
       .catch(() => {
         if (active) setMessage('读取任务详情失败，请重试');
@@ -193,31 +195,41 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
           <Card className="uc-task-center__filters">
         <label>
           搜索任务
-          <input
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="任务 ID、类型或项目名称"
+          <Input
+            onChange={(value) => setQuery(value)}
+            placeholder="任务编号、类型或项目名称"
             type="search"
             value={query}
           />
         </label>
-        <label>
+        <div className="uc-rsuite-field">
           所属项目
-          <select onChange={(event) => setProjectFilter(event.target.value)} value={projectFilter}>
-            <option value="all">全部项目</option>
-            {projects.map(([projectId, projectName]) => (
-              <option key={projectId} value={projectId}>{projectName}</option>
-            ))}
-          </select>
-        </label>
-        <label>
+          <SelectPicker
+            aria-label="所属项目"
+            cleanable={false}
+            data={[
+              { value: 'all', label: '全部项目' },
+              ...projects.map(([projectId, projectName]) => ({ value: projectId, label: projectName }))
+            ]}
+            onChange={(value) => setProjectFilter(value ?? 'all')}
+            searchable={false}
+            value={projectFilter}
+          />
+        </div>
+        <div className="uc-rsuite-field">
           任务状态
-          <select onChange={(event) => setStateFilter(event.target.value)} value={stateFilter}>
-            <option value="all">全部状态</option>
-            {Object.entries(taskStates).map(([value, state]) => (
-              <option key={value} value={value}>{state.label}</option>
-            ))}
-          </select>
-        </label>
+          <SelectPicker
+            aria-label="任务状态"
+            cleanable={false}
+            data={[
+              { value: 'all', label: '全部状态' },
+              ...Object.entries(taskStates).map(([value, state]) => ({ value, label: state.label }))
+            ]}
+            onChange={(value) => setStateFilter(value ?? 'all')}
+            searchable={false}
+            value={stateFilter}
+          />
+        </div>
           </Card>
 
       {issues.length > 0 && (
@@ -263,7 +275,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
                     type="button"
                   >
                     <span>
-                      <strong>{taskKinds[task.kind] ?? task.kind}</strong>
+                      <strong>{taskKinds[task.kind] ?? '其他任务'}</strong>
                       <small>{task.projectName}</small>
                     </span>
                     <StatusPill tone={state.tone}>{state.label}</StatusPill>
@@ -315,7 +327,7 @@ function TaskDetails({
     <div className="uc-task-center__details-content">
       <div className="uc-task-center__details-heading">
         <div>
-          <strong>{taskKinds[details.kind] ?? details.kind}</strong>
+          <strong>{taskKinds[details.kind] ?? '其他任务'}</strong>
           <small>{details.taskId}</small>
         </div>
         <StatusPill tone={state.tone}>{state.label}</StatusPill>

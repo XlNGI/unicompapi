@@ -143,6 +143,7 @@ describe('ImageFeatureController', () => {
       async submit() {
         return {
           schemaVersion: 1 as const,
+          submissionIntentId: 'intent-fixture-image',
           status: 'completed' as const,
           retryAllowed: false as const,
           resultImageUrls: ['https://example.test/generated.png'],

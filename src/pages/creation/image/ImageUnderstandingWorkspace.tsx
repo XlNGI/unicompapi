@@ -9,6 +9,7 @@ import {
   LuShieldCheck,
   LuSparkles
 } from 'react-icons/lu';
+import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -91,7 +92,7 @@ const staleReasonLabels: Record<
 const understandingErrorMessages = {
   ...imageSubmissionErrorMessages,
   capability_unverified: '图片识别能力尚未验证。',
-  parameter_schema_missing: '图片识别模型没有可用的能力 Schema。',
+  parameter_schema_missing: '图片识别模型没有可用的参数定义。',
   adapter_unavailable: '没有配置真实图片识别适配器，当前不会外发或分析。'
 };
 
@@ -166,7 +167,7 @@ export function ImageUnderstandingWorkspace({
     try {
       const result = await imageWorkspaces.selectInput(draft.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -247,7 +248,7 @@ export function ImageUnderstandingWorkspace({
     try {
       const result = await imageWorkspaces.derive(draft.draftId, targetMode);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('创建新草稿失败，请重试。');
         return;
       }
       onMessage('已创建派生草稿；没有创建或提交任务。');
@@ -295,10 +296,11 @@ export function ImageUnderstandingWorkspace({
           </div>
           <label className="uc-image-quick__field">
             <span>识别目的或自定义问题</span>
-            <textarea
+            <Input
+              as="textarea"
               disabled={!draft.input}
               maxLength={500}
-              onChange={(event) => changePurpose(event.target.value)}
+              onChange={(value) => changePurpose(value)}
               placeholder="例如：提取画面中的可见文字，并说明哪些内容无法确认"
               rows={4}
               value={draft.input?.purpose ?? ''}
@@ -318,26 +320,31 @@ export function ImageUnderstandingWorkspace({
             }}
             region={draft.input?.region}
           />
-          <label className="uc-image-quick__field">
+          <div className="uc-image-quick__field">
             <span>结果保存范围</span>
-            <select
-              onChange={(event) =>
+            <SelectPicker
+              aria-label="结果保存范围"
+              block
+              cleanable={false}
+              data={[
+                { value: 'draft_only', label: '仅保存到当前草稿' },
+                { value: 'project_context', label: '标记为项目上下文' }
+              ]}
+              onChange={(value) =>
                 changeDraft({
                   ...draft,
                   understanding: {
                     ...analysis,
-                    saveScope: event.target.value as
+                    saveScope: (value ?? 'draft_only') as
                       | 'draft_only'
                       | 'project_context'
                   }
                 })
               }
+              searchable={false}
               value={analysis.saveScope}
-            >
-              <option value="draft_only">仅保存到当前草稿</option>
-              <option value="project_context">标记为项目上下文</option>
-            </select>
-          </label>
+            />
+          </div>
           <p className="uc-image-quick__hint">
             “项目上下文”当前只记录保存范围；项目上下文登记端口尚未提供。
           </p>
@@ -415,24 +422,24 @@ export function ImageUnderstandingWorkspace({
             </div>
           ) : null}
           {preflight?.candidates.length ? (
-            <label className="uc-image-quick__field">
+            <div className="uc-image-quick__field">
               <span>选择模型</span>
-              <select
+              <SelectPicker
                 aria-label="选择模型"
-                onChange={(event) => {
-                  setSelectedModelId(event.target.value);
+                block
+                data={preflight.candidates.map((candidate) => ({
+                  value: candidate.modelId,
+                  label: `${candidate.recipientName} · ${candidate.modelName}`
+                }))}
+                onChange={(value) => {
+                  setSelectedModelId(value ?? '');
                   setConfirmations(emptyImageConfirmations);
                 }}
+                placeholder="请选择模型"
+                searchable={false}
                 value={selectedModelId}
-              >
-                <option value="">请选择模型</option>
-                {preflight.candidates.map((candidate) => (
-                  <option key={candidate.modelId} value={candidate.modelId}>
-                    {candidate.recipientName} · {candidate.modelName}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
           ) : null}
           {selectedCandidate ? (
             <ImageSubmissionConfirmations
@@ -541,10 +548,11 @@ export function ImageUnderstandingWorkspace({
         <div className="uc-image-understanding__revision">
           <label className="uc-image-quick__field">
             <span>修改记录</span>
-            <textarea
+            <Input
+              as="textarea"
               disabled={analysis.analysisState === 'not_analyzed'}
               maxLength={500}
-              onChange={(event) => setRevisionContent(event.target.value)}
+              onChange={(value) => setRevisionContent(value)}
               placeholder={
                 targetObservation
                   ? `修订：${targetObservation.content}`

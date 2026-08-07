@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { LuRefreshCw, LuShieldCheck } from 'react-icons/lu';
+import {
+  LuCircleAlert,
+  LuCircleCheck,
+  LuInfo,
+  LuRefreshCw,
+  LuShieldCheck,
+  LuX
+} from 'react-icons/lu';
+import { Input, Modal } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -25,6 +33,23 @@ const emptyRegistry: ProviderRegistryDto = {
 };
 
 type ProviderPageView = 'gallery' | 'manage';
+type ProviderMessageTone = 'success' | 'info' | 'danger';
+
+interface ProviderConfirmation {
+  readonly title: string;
+  readonly description: string;
+  readonly confirmLabel: string;
+}
+
+function providerMessageTone(message: string): ProviderMessageTone {
+  if (/失败|无法|不可用|无效|超时|未保存|未删除|未连接/u.test(message)) return 'danger';
+  if (/正在|尚未|即将|取消/u.test(message)) return 'info';
+  return 'success';
+}
+
+function providerMessageDuration(tone: ProviderMessageTone): number {
+  return tone === 'danger' ? 6_000 : 4_000;
+}
 
 function describeValidationSafeCode(safeCode: string): string {
   const normalized = safeCode.replace(/^(?:newapi|deepseek|kling|volcengine|vidu)\./u, '');
@@ -41,7 +66,7 @@ function describeValidationSafeCode(safeCode: string): string {
     operation_failed: '远程验证失败',
     unavailable: '远程服务不可用'
   };
-  return labels[normalized] ?? labels[safeCode] ?? safeCode;
+  return labels[normalized] ?? labels[safeCode] ?? '远程验证失败';
 }
 
 const addProgressLabels: Record<string, string> = {
@@ -85,6 +110,23 @@ export function ProvidersPage() {
     useState<Record<string, string>>({});
   const [modelKey, setModelKey] = useState('');
   const [modelDisplayName, setModelDisplayName] = useState('');
+  const [confirmation, setConfirmation] = useState<ProviderConfirmation>();
+  const confirmationResolver = useRef<((confirmed: boolean) => void)>();
+
+  function requestConfirmation(next: ProviderConfirmation): Promise<boolean> {
+    confirmationResolver.current?.(false);
+    setConfirmation(next);
+    return new Promise((resolve) => {
+      confirmationResolver.current = resolve;
+    });
+  }
+
+  function closeConfirmation(confirmed: boolean) {
+    const resolve = confirmationResolver.current;
+    confirmationResolver.current = undefined;
+    setConfirmation(undefined);
+    resolve?.(confirmed);
+  }
 
   async function refreshRegistry(preferredConnectionId?: string) {
     if (!providersApi) return;
@@ -129,6 +171,17 @@ export function ProvidersPage() {
       });
     return () => { active = false; };
   }, [providersApi]);
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(
+      () => setMessage(''),
+      providerMessageDuration(providerMessageTone(message))
+    );
+    return () => window.clearTimeout(timeout);
+  }, [message]);
+
+  useEffect(() => () => confirmationResolver.current?.(false), []);
 
   const createTemplate = templates.find(
     (template) => templateKeyOf(template) === selectedTemplateKey
@@ -212,9 +265,11 @@ export function ProvidersPage() {
         }
         if (!result.ok) {
           if (result.error.code === 'connection_validation_failed' && !allowUnavailableSave) {
-            allowUnavailableSave = window.confirm(
-              `远程连通性验证未通过（${describeValidationSafeCode(result.error.message)}）。\n仍要将此连接保存为「不可用」状态吗？`
-            );
+            allowUnavailableSave = await requestConfirmation({
+              title: '远程连接验证未通过',
+              description: `失败原因：${describeValidationSafeCode(result.error.message)}。仍要将此连接保存为「不可用」状态吗？`,
+              confirmLabel: '仍要保存'
+            });
             if (allowUnavailableSave) continue;
             setMessage('连接未保存');
             leaveAddConnection();
@@ -253,7 +308,7 @@ export function ProvidersPage() {
     if (!providersApi || !selectedConnectionId) return;
     const registered = await runAction(
       () => providersApi.registerExactModel(selectedConnectionId, modelKey.trim(), modelDisplayName.trim()),
-      '模型已精确登记；未创建 Profile',
+      '模型已精确登记；未创建功能配置',
       selectedConnectionId
     );
     if (registered) {
@@ -273,7 +328,11 @@ export function ProvidersPage() {
     try {
       let result = await providersApi.deleteConnection(selectedConnection.connectionId, false);
       if (!result.ok && result.error.code === 'active_operations_present') {
-        const abandon = window.confirm('此连接仍有活动调用。确认放弃这些调用的继续访问权限吗？');
+        const abandon = await requestConfirmation({
+          title: '确认放弃活动调用',
+          description: '此连接仍有活动调用。继续删除将放弃这些调用的继续访问权限。',
+          confirmLabel: '放弃并删除'
+        });
         if (!abandon) {
           setMessage('连接未删除');
           return;
@@ -297,7 +356,11 @@ export function ProvidersPage() {
     if (!providersApi || busy) return;
     const model = registry.models.find((item) => item.modelId === modelId);
     if (!model) return;
-    const confirmed = window.confirm(`确认删除模型「${model.displayName}」？`);
+    const confirmed = await requestConfirmation({
+      title: '确认删除模型',
+      description: `将从当前连接删除模型「${model.displayName}」。`,
+      confirmLabel: '删除模型'
+    });
     if (!confirmed) return;
     const deleted = await runAction(
       () => providersApi.deleteModel(modelId),
@@ -308,6 +371,14 @@ export function ProvidersPage() {
       setSelectedModelId('');
     }
   }
+
+  const messageTone = providerMessageTone(message);
+  const messageDurationMs = providerMessageDuration(messageTone);
+  const MessageIcon = messageTone === 'success'
+    ? LuCircleCheck
+    : messageTone === 'danger'
+      ? LuCircleAlert
+      : LuInfo;
 
   return (
     <section className="uc-provider-page" aria-labelledby="providers-page-title">
@@ -338,7 +409,46 @@ export function ProvidersPage() {
         <span>凭证不回显；保存连接时将自动测试远程连通性，通过后自动获取可用模型目录。</span>
       </Card>
 
-      {message && <p className="uc-provider-page__message" role="status">{message}</p>}
+      {message && (
+        <div
+          className={`uc-provider-page__message uc-provider-page__message--${messageTone}`}
+          role={messageTone === 'danger' ? 'alert' : 'status'}
+        >
+          <MessageIcon aria-hidden="true" />
+          <span className="uc-provider-page__message-text">{message}</span>
+          <button aria-label="关闭通知" onClick={() => setMessage('')} type="button">
+            <LuX aria-hidden="true" />
+          </button>
+          <span
+            aria-hidden="true"
+            className="uc-provider-page__message-progress"
+            style={{ animationDuration: `${messageDurationMs}ms` }}
+          />
+        </div>
+      )}
+
+      <Modal
+        backdrop="static"
+        centered
+        className="uc-provider-confirmation"
+        onClose={() => closeConfirmation(false)}
+        open={Boolean(confirmation)}
+        size="xs"
+      >
+        <Modal.Header>
+          <Modal.Title>{confirmation?.title}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="uc-provider-confirmation__content">
+            <LuCircleAlert aria-hidden="true" />
+            <p>{confirmation?.description}</p>
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button onClick={() => closeConfirmation(false)} variant="ghost">取消</Button>
+          <Button onClick={() => closeConfirmation(true)}>{confirmation?.confirmLabel}</Button>
+        </Modal.Footer>
+      </Modal>
 
       {addingConnection && createTemplate ? (
         <Card className="uc-provider-page__form-card" raised>
@@ -358,21 +468,21 @@ export function ProvidersPage() {
               </div>
               <label>
                 连接名称
-                <input maxLength={200} onChange={(event) => setConnectionName(event.target.value)} required value={connectionName} />
+                <Input maxLength={200} onChange={(value) => setConnectionName(value)} required value={connectionName} />
               </label>
               {createTemplate.baseUrlMode !== 'fixed' && (
                 <label>
                   接口地址{createTemplate.baseUrlMode === 'required' ? '' : '（可选）'}
-                  <input onChange={(event) => setEndpoint(event.target.value)} required={createTemplate.baseUrlMode === 'required'} type="url" value={endpoint} />
+                  <Input onChange={(value) => setEndpoint(value)} required={createTemplate.baseUrlMode === 'required'} type="url" value={endpoint} />
                 </label>
               )}
               {createTemplate.credentialFields.map((field) => (
                 <label key={field.key}>
                   {field.label}
-                  <input
+                  <Input
                     autoComplete="new-password"
                     maxLength={65536}
-                    onChange={(event) => setNewCredentials((current) => ({ ...current, [field.key]: event.target.value }))}
+                    onChange={(value) => setNewCredentials((current) => ({ ...current, [field.key]: value }))}
                     required={field.required}
                     type={field.secret ? 'password' : 'text'}
                     value={newCredentials[field.key] ?? ''}

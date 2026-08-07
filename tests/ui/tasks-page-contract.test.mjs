@@ -14,6 +14,7 @@ test('task center covers the real execution and recovery states', () => {
   for (const state of [
     'queued',
     'processing',
+    'submission_outcome_unknown',
     'remote_completed',
     'downloading',
     'verifying',
@@ -23,6 +24,9 @@ test('task center covers the real execution and recovery states', () => {
   ]) assert.match(source, new RegExp(`${state}:`));
   assert.match(source, /可重试/);
   assert.match(source, /不可恢复/);
+  assert.match(source, /submission_outcome_unknown: \{ label: '提交结果未知'/);
+  assert.match(source, /label: '未知任务状态'/);
+  assert.doesNotMatch(source, /\{ label: state, tone:/);
 });
 
 test('task center provides filters, details, source navigation, and honest issues', () => {

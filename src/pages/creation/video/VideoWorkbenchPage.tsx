@@ -402,7 +402,7 @@ export function VideoWorkbenchPage({
                   label="视频生成能力"
                   value="按当前功能与已保存草稿事实读取"
                 />
-                <CapabilityFact label="动态参数" value="由安全 ParameterSchema 提供" />
+                <CapabilityFact label="动态参数" value="由安全参数定义提供" />
                 <CapabilityFact
                   label="素材边界"
                   value="快速与文生视频无素材；图生视频恰好一张图片"
@@ -416,7 +416,7 @@ export function VideoWorkbenchPage({
             </>
           ) : (
             <EmptyState
-              description="需要先批准编辑草稿 Schema、媒体引擎接口、预览与导出分层、恢复和跨平台测试方案。"
+              description="需要先批准编辑草稿定义、媒体引擎接口、预览与导出分层、恢复和跨平台测试方案。"
               icon="锁"
               readOnly
               title="尚未满足实现准入"

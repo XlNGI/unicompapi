@@ -6,6 +6,7 @@ import {
   LuShieldCheck,
   LuSparkles
 } from 'react-icons/lu';
+import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -85,7 +86,7 @@ const staleReasonLabels: Record<
 const promptErrorMessages = {
   ...imageSubmissionErrorMessages,
   capability_unverified: '图片转提示词能力尚未验证。',
-  parameter_schema_missing: '图片转提示词模型没有可用的能力 Schema。',
+  parameter_schema_missing: '图片转提示词模型没有可用的参数定义。',
   adapter_unavailable:
     '没有配置真实图片转提示词适配器，当前不会外发或生成提示词。'
 };
@@ -158,7 +159,7 @@ export function ImageToPromptWorkspace({
     try {
       const result = await imageWorkspaces.selectInput(draft.draftId);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('选择图片失败，请重试。');
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
@@ -226,7 +227,7 @@ export function ImageToPromptWorkspace({
     try {
       const result = await imageWorkspaces.derive(draft.draftId, targetMode);
       if (!result.ok) {
-        onMessage(result.error.message);
+        onMessage('创建新草稿失败，请重试。');
         return;
       }
       onMessage('已创建派生草稿；没有创建或提交任务。');
@@ -274,9 +275,10 @@ export function ImageToPromptWorkspace({
           </div>
           <label className="uc-image-quick__field">
             <span>目标用途</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={500}
-              onChange={(event) => changePurpose(event.target.value)}
+              onChange={(value) => changePurpose(value)}
               placeholder="例如：用于专业生图，保留真实构图和光线"
               rows={4}
               value={analysis.purpose}
@@ -285,9 +287,10 @@ export function ImageToPromptWorkspace({
           </label>
           <label className="uc-image-quick__field">
             <span>补充要求（每行一项）</span>
-            <textarea
+            <Input
+              as="textarea"
               maxLength={1000}
-              onChange={(event) => changeRequirements(event.target.value)}
+              onChange={(value) => changeRequirements(value)}
               placeholder="例如：&#10;保留人物和雪山&#10;排除文字与水印"
               rows={5}
               value={analysis.requirements.join('\n')}
@@ -384,24 +387,24 @@ export function ImageToPromptWorkspace({
             </div>
           ) : null}
           {preflight?.candidates.length ? (
-            <label className="uc-image-quick__field">
+            <div className="uc-image-quick__field">
               <span>选择模型</span>
-              <select
+              <SelectPicker
                 aria-label="选择模型"
-                onChange={(event) => {
-                  setSelectedModelId(event.target.value);
+                block
+                data={preflight.candidates.map((candidate) => ({
+                  value: candidate.modelId,
+                  label: `${candidate.recipientName} · ${candidate.modelName}`
+                }))}
+                onChange={(value) => {
+                  setSelectedModelId(value ?? '');
                   setConfirmations(emptyImageConfirmations);
                 }}
+                placeholder="请选择模型"
+                searchable={false}
                 value={selectedModelId}
-              >
-                <option value="">请选择模型</option>
-                {preflight.candidates.map((candidate) => (
-                  <option key={candidate.modelId} value={candidate.modelId}>
-                    {candidate.recipientName} · {candidate.modelName}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
           ) : null}
           {selectedCandidate ? (
             <ImageSubmissionConfirmations
@@ -501,15 +504,16 @@ export function ImageToPromptWorkspace({
         )}
         <label className="uc-image-quick__field">
           <span>最终提示词草稿（可编辑）</span>
-          <textarea
+          <Input
+            as="textarea"
             disabled={analysis.analysisState === 'not_analyzed'}
             maxLength={3000}
-            onChange={(event) =>
+            onChange={(value) =>
               changeDraft({
                 ...draft,
                 prompt: {
                   ...draft.prompt,
-                  finalPrompt: event.target.value
+                  finalPrompt: value
                 }
               })
             }
