@@ -933,6 +933,95 @@ describe('provider management audit store', () => {
     const recovered = await first.list();
     expect(recovered.map((event) => event.sequence)).toEqual([1, 2]);
   });
+
+  it('ignores unknown historical audit actions so append stays available', async () => {
+    const root = await makeRoot();
+    const auditPath = path.join(root, 'provider-audit-legacy.json');
+    await writeFile(
+      auditPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        revision: 2,
+        events: [
+          {
+            schemaVersion: 1,
+            eventId: 'provider-audit-legacy-1',
+            sequence: 1,
+            action: 'connection_created',
+            outcome: 'succeeded',
+            connectionId: 'connection-audit-legacy',
+            occurredAt: t0
+          },
+          {
+            schemaVersion: 1,
+            eventId: 'provider-audit-legacy-2',
+            sequence: 2,
+            action: 'future_unsupported_action',
+            outcome: 'succeeded',
+            connectionId: 'connection-audit-legacy',
+            occurredAt: t1
+          }
+        ]
+      }, null, 2)}\n`,
+      'utf8'
+    );
+    const audit = new JsonProviderManagementAuditStore(auditPath);
+    expect((await audit.list()).map((event) => event.action)).toEqual(['connection_created']);
+    await audit.append({
+      eventId: 'provider-audit-legacy-3',
+      action: 'connection_validated',
+      outcome: 'succeeded',
+      connectionId: 'connection-audit-legacy',
+      safeCode: 'available',
+      occurredAt: t2
+    });
+    expect((await audit.list()).map((event) => event.action)).toEqual([
+      'connection_created',
+      'connection_validated'
+    ]);
+  });
+
+  it('still adds and deletes connections when audit history contains unknown actions', async () => {
+    const fixture = await frameworkFixture();
+    const auditPath = path.join(path.dirname(fixture.vaultPath), 'provider-audit.json');
+    await writeFile(
+      auditPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        revision: 1,
+        events: [{
+          schemaVersion: 1,
+          eventId: 'provider-audit-poison',
+          sequence: 1,
+          action: 'future_unsupported_action',
+          outcome: 'succeeded',
+          connectionId: 'connection-poison',
+          occurredAt: t0
+        }]
+      }, null, 2)}\n`,
+      'utf8'
+    );
+    const created = await fixture.framework.addConnection({
+      packageId: 'management.fixture',
+      templateId: 'fixture-official-catalog',
+      name: 'audit-resilience',
+      credentials: { api_key: 'fixture-audit-resilience' }
+    });
+    expect(created).toMatchObject({
+      ok: true,
+      value: { state: 'available', validated: true }
+    });
+    if (!created.ok) throw new Error('addConnection failed under poisoned audit');
+    const deleted = await fixture.framework.deleteConnection({
+      connectionId: created.value.connectionId,
+      confirmLocalDeletion: true,
+      abandonActiveOperations: false
+    });
+    expect(deleted).toMatchObject({
+      ok: true,
+      value: { state: 'deleted' }
+    });
+  });
 });
 
 interface Fixture {

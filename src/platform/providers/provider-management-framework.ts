@@ -62,7 +62,9 @@ export const providerManagementActions = [
   'model_enabled',
   'model_disabled',
   'model_deleted',
-  'connection_deleted'
+  'connection_deleted',
+  // Legacy / transitional events that may already exist in local audit history.
+  'image_profile_attached'
 ] as const;
 export type ProviderManagementAction = (typeof providerManagementActions)[number];
 
@@ -1421,7 +1423,9 @@ export class ProviderManagementFramework {
           result: undefined
         };
       });
-      if (credentialReference) await this.vault.remove(credentialReference);
+      if (credentialReference) {
+        await this.vault.remove(credentialReference).catch(() => false);
+      }
       await this.record({
         action: 'connection_deleted',
         outcome: 'succeeded',
@@ -1444,15 +1448,20 @@ export class ProviderManagementFramework {
     }
   }
 
-  private record(
+  private async record(
     input: Omit<ProviderManagementAuditEventV1, 'schemaVersion' | 'sequence' | 'eventId' | 'occurredAt'>,
     occurredAt = this.now()
-  ): Promise<ProviderManagementAuditEventV1> {
-    return this.audit.append({
-      ...input,
-      eventId: `provider-audit-${randomUUID()}`,
-      occurredAt
-    });
+  ): Promise<ProviderManagementAuditEventV1 | undefined> {
+    try {
+      return await this.audit.append({
+        ...input,
+        eventId: `provider-audit-${randomUUID()}`,
+        occurredAt
+      });
+    } catch {
+      // Audit history must not block connection save/validate after local mutation succeeds.
+      return undefined;
+    }
   }
 }
 
@@ -2161,12 +2170,25 @@ function parseAuditDocument(value: unknown): ProviderManagementAuditDocumentV1 {
     !Array.isArray(value.events)) {
     throw new TypeError('Provider management audit document is invalid');
   }
-  const events = value.events.map(parseAuditEvent);
-  events.forEach((event, index) => {
-    if (event.sequence !== index + 1) {
-      throw new TypeError('Provider management audit sequence is invalid');
+  // Keep known events only. Unknown historical actions (from older builds) must not
+  // permanently poison append/load and block adding connections.
+  const events = value.events.flatMap((event, index) => {
+    try {
+      if (
+        isRecord(event) &&
+        typeof event.action === 'string' &&
+        !providerManagementActions.includes(event.action as ProviderManagementAction)
+      ) {
+        return [];
+      }
+      return [parseAuditEvent({
+        ...((isRecord(event) ? event : {}) as Record<string, unknown>),
+        sequence: index + 1
+      })];
+    } catch {
+      return [];
     }
-  });
+  }).map((event, index) => ({ ...event, sequence: index + 1 }));
   assertUnique(events.map((event) => event.eventId), 'provider audit event');
   return { schemaVersion: 1, revision: Number(value.revision), events };
 }

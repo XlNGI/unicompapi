@@ -58,6 +58,7 @@ export function describeError(code: string): string {
     connection_contract_stale: '这是旧版遗留连接，请删除后重新添加',
     credential_invalid: '凭证字段不完整或格式无效',
     provider_registry_conflict: '注册表已变化，请刷新后重试',
+    audit_store_unavailable: '本地管理审计不可用，请重启应用后重试',
     invalid_request: '当前输入或状态不允许执行此操作'
   };
   if (code.endsWith('_not_found')) return '目标记录不存在，请刷新后重试';
