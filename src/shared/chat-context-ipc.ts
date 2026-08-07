@@ -11,6 +11,7 @@ export const chatContextIpcChannels = {
   copyLegacyConversation: 'chat-context:copy-legacy-conversation',
   createResponseDraft: 'chat-context:create-response-draft',
   replaceResponseContexts: 'chat-context:replace-response-contexts',
+  replaceResponseParameters: 'chat-context:replace-response-parameters',
   listResponseCandidates: 'chat-context:list-response-candidates',
   listTextCandidates: 'chat-context:list-text-candidates',
   prepareResponseSubmission: 'chat-context:prepare-response-submission',
@@ -95,7 +96,7 @@ export interface MessageDto {
   readonly content: string;
   readonly attachments: readonly ConversationAttachmentDto[];
   readonly streamSequence?: number;
-  readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'unknown';
+  readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'truncated' | 'unknown';
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly startedAt?: string;
@@ -233,6 +234,9 @@ export interface ConversationResponseDraftDto {
     readonly contextRevision: number;
     readonly includeInPrompt: boolean;
   }[];
+  readonly parameterValues: Readonly<Record<string, string | number | boolean | readonly unknown[] | {
+    readonly [key: string]: unknown;
+  }>>;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -345,6 +349,12 @@ export interface ReplaceResponseContextsRequest extends ResponseDraftRevisionReq
     readonly contextRevision: number;
     readonly includeInPrompt: boolean;
   }[];
+}
+
+export interface ReplaceResponseParametersRequest extends ResponseDraftRevisionRequest {
+  readonly parameterValues: Readonly<Record<string, string | number | boolean | readonly unknown[] | {
+    readonly [key: string]: unknown;
+  }>>;
 }
 
 export interface ListTextCandidatesRequest {
@@ -522,6 +532,18 @@ export const chatContextRequestParsers = {
       responseDraftId: controlledId(record.responseDraftId, 'responseDraftId'),
       expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
       selections
+    };
+  },
+  replaceResponseParameters(value: unknown): ReplaceResponseParametersRequest {
+    const record = exactRecord(value, [
+      'responseDraftId',
+      'expectedRevision',
+      'parameterValues'
+    ]);
+    return {
+      responseDraftId: controlledId(record.responseDraftId, 'responseDraftId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      parameterValues: parameterValuesRecord(record.parameterValues)
     };
   },
   listTextCandidates(value: unknown): ListTextCandidatesRequest {
@@ -750,6 +772,13 @@ export interface ChatContextApi {
       readonly includeInPrompt: boolean;
     }[]
   ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>>;
+  replaceResponseParameters(
+    responseDraftId: string,
+    expectedRevision: number,
+    parameterValues: Readonly<Record<string, string | number | boolean | readonly unknown[] | {
+      readonly [key: string]: unknown;
+    }>>
+  ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>>;
   listResponseCandidates(
     responseDraftId: string,
     expectedRevision: number
@@ -904,4 +933,59 @@ function labelList(value: unknown): readonly string[] {
     throw new TypeError('labels are invalid');
   }
   return value.map((label) => boundedText(label, 'label', 100, false));
+}
+
+function parameterValuesRecord(
+  value: unknown
+): Readonly<Record<string, string | number | boolean | readonly unknown[] | {
+  readonly [key: string]: unknown;
+}>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('parameterValues is invalid');
+  }
+  const entries = Object.entries(value);
+  if (entries.length > 100) {
+    throw new TypeError('parameterValues is invalid');
+  }
+  const result: Record<string, string | number | boolean | readonly unknown[] | {
+    readonly [key: string]: unknown;
+  }> = {};
+  for (const [key, entry] of entries) {
+    if (
+      typeof key !== 'string' ||
+      key.trim().length === 0 ||
+      key.length > 200 ||
+      !isJsonParameterValue(entry)
+    ) {
+      throw new TypeError('parameterValues is invalid');
+    }
+    result[key] = entry as string | number | boolean | readonly unknown[] | {
+      readonly [key: string]: unknown;
+    };
+  }
+  return result;
+}
+
+function isJsonParameterValue(value: unknown, depth = 0): boolean {
+  if (depth > 8) return false;
+  if (typeof value === 'string') return value.length <= 1_000_000;
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) {
+    return value.length <= 100 && value.every((entry) => isJsonParameterValue(entry, depth + 1));
+  }
+  if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value);
+    return (
+      entries.length <= 100 &&
+      entries.every(
+        ([key, entry]) =>
+          typeof key === 'string' &&
+          key.trim().length > 0 &&
+          key.length <= 200 &&
+          isJsonParameterValue(entry, depth + 1)
+      )
+    );
+  }
+  return false;
 }

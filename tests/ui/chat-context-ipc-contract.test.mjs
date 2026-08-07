@@ -20,6 +20,7 @@ const operations = [
   'copyLegacyConversation',
   'createResponseDraft',
   'replaceResponseContexts',
+  'replaceResponseParameters',
   'listResponseCandidates',
   'listTextCandidates',
   'prepareResponseSubmission',

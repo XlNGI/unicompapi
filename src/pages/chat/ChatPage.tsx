@@ -62,6 +62,23 @@ const messageStateLabels: Record<MessageDto['state'], string> = {
   cancelled: '已取消'
 };
 
+function messageStatusLabel(message: MessageDto): string {
+  if (message.state === 'failed' && message.failureReason === 'truncated') {
+    return '已截断';
+  }
+  return messageStateLabels[message.state];
+}
+
+function messageStatusTone(
+  message: MessageDto
+): 'danger' | 'warning' | 'info' | 'neutral' {
+  if (message.state === 'failed' && message.failureReason === 'truncated') return 'warning';
+  if (message.state === 'failed') return 'danger';
+  if (message.state === 'streaming' || message.state === 'pending') return 'warning';
+  if (message.state === 'completed') return 'info';
+  return 'neutral';
+}
+
 const unavailableLabels: Record<string, string> = {
   model_disabled: '模型已停用',
   model_not_present: '模型不在当前目录',
@@ -138,6 +155,14 @@ export function ChatPage() {
       };
     });
   }, [selected, responseExecution]);
+  const duplicateIncludedContexts = useMemo(() => {
+    const included = registeredContexts.filter((context) =>
+      includedContextIds.includes(context.contextId)
+    );
+    if (included.length < 2) return false;
+    const previews = included.map((context) => context.contentPreview.trim());
+    return new Set(previews).size < included.length;
+  }, [registeredContexts, includedContextIds]);
   const modelOptions = responseCandidates.map((candidate) => ({
     id: candidate.candidateId,
     label: `${candidate.providerName} · ${candidate.connectionName} · ${candidate.modelName}`,
@@ -254,7 +279,29 @@ export function ChatPage() {
         setResponseExecution(result.value);
         if (!['pending', 'streaming'].includes(result.value.state) && selectedId) {
           void chat.getConversation(selectedId).then((conversation) => {
-            if (conversation.ok) replaceConversation(conversation.value);
+            if (!conversation.ok) return;
+            replaceConversation(conversation.value);
+            const assistant = conversation.value.messages.find(
+              (message) => message.messageId === result.value.assistantMessageId
+            );
+            if (result.value.state === 'completed') {
+              setNotice(
+                '回复已接收。若内容偏短，可在参数中提高 max_tokens 或减少勾选上下文后重试。'
+              );
+            } else if (
+              result.value.state === 'failed' &&
+              assistant?.failureReason === 'truncated'
+            ) {
+              setNotice(
+                '回复因输出长度限制被截断。可在参数中提高 max_tokens 后重试，或减少勾选的上下文。'
+              );
+            } else if (result.value.state === 'failed') {
+              setNotice('回复失败，请查看任务中心调用记录。');
+            } else if (result.value.state === 'cancelled') {
+              setNotice('回复已取消。');
+            } else if (result.value.state === 'interrupted') {
+              setNotice('回复被中断，请重试。');
+            }
           });
         }
       });
@@ -427,6 +474,21 @@ export function ChatPage() {
         return;
       }
       let draft = created.value;
+      const cleanedParameters = Object.fromEntries(
+        Object.entries(parameterValues).filter(([, value]) => value !== undefined)
+      ) as Record<string, string | number | boolean | readonly unknown[] | {
+        readonly [key: string]: unknown;
+      }>;
+      const parameterized = await chat.replaceResponseParameters(
+        draft.responseDraftId,
+        draft.revision,
+        cleanedParameters
+      );
+      if (!parameterized.ok) {
+        setNotice(errorMessages[parameterized.error.code] ?? parameterized.error.message);
+        return;
+      }
+      draft = parameterized.value;
       if (includedContextIds.length > 0) {
         const replaced = await chat.replaceResponseContexts(
           draft.responseDraftId,
@@ -450,6 +512,9 @@ export function ChatPage() {
         draft = replaced.value;
       }
       setResponseDraft(draft);
+      if (duplicateIncludedContexts) {
+        setNotice('已勾选内容重复的上下文，可能挤占输出长度。');
+      }
       const prepared = await chat.prepareResponseSubmission(
         draft.responseDraftId,
         draft.revision,
@@ -696,18 +761,8 @@ export function ChatPage() {
                 >
                   <div>
                     <strong>{item.role === 'user' ? '你' : '助手'}</strong>
-                    <StatusPill
-                      tone={
-                        item.state === 'failed'
-                          ? 'danger'
-                          : item.state === 'streaming' || item.state === 'pending'
-                            ? 'warning'
-                            : item.state === 'completed'
-                              ? 'info'
-                              : 'neutral'
-                      }
-                    >
-                      {messageStateLabels[item.state]}
+                    <StatusPill tone={messageStatusTone(item)}>
+                      {messageStatusLabel(item)}
                     </StatusPill>
                   </div>
                   <p>
@@ -834,7 +889,7 @@ export function ChatPage() {
       <aside className="uc-chat-page__context" aria-labelledby="context-draft-title">
         <div className="uc-chat-page__panel-heading"><h2 id="context-draft-title">项目上下文</h2><StatusPill tone={session ? 'info' : 'neutral'}>{session ? '当前项目' : '无项目'}</StatusPill></div>
         <Card className="uc-chat-page__context-target"><small>目标项目</small><strong>{session?.projectName ?? '尚未打开项目'}</strong><span>已登记 {registeredContexts.length} 项</span></Card>
-        {registeredContexts.length > 0 ? <section className="uc-chat-page__response-contexts" aria-labelledby="response-context-title"><h3 id="response-context-title">本次回复上下文</h3>{registeredContexts.map((context) => { const viewed = viewedContexts[context.contextId]; const included = includedContextIds.includes(context.contextId); return <Card key={context.contextId}><div><strong>{context.labels.join('、') || '未命名上下文'}</strong><StatusPill>rev {context.revision}</StatusPill></div><p>{viewed?.contentSnapshot ?? context.contentPreview}</p><div className="uc-chat-page__actions"><Button disabled={busy} onClick={() => void viewContext(context)} variant="secondary">查看固定版本</Button><label className="uc-chat-page__check"><input checked={included} disabled={!viewed} onChange={(event) => setIncludedContextIds((current) => event.target.checked ? [...current, context.contextId] : current.filter((id) => id !== context.contextId))} type="checkbox" />用于本次回复</label></div></Card>; })}</section> : null}
+        {registeredContexts.length > 0 ? <section className="uc-chat-page__response-contexts" aria-labelledby="response-context-title"><h3 id="response-context-title">本次回复上下文</h3>{duplicateIncludedContexts ? <p className="uc-chat-page__notice">勾选了内容相同的多项上下文，可能挤占输出长度并导致截断。</p> : null}{registeredContexts.map((context) => { const viewed = viewedContexts[context.contextId]; const included = includedContextIds.includes(context.contextId); return <Card key={context.contextId}><div><strong>{context.labels.join('、') || '未命名上下文'}</strong><StatusPill>rev {context.revision}</StatusPill></div><p>{viewed?.contentSnapshot ?? context.contentPreview}</p><div className="uc-chat-page__actions"><Button disabled={busy} onClick={() => void viewContext(context)} variant="secondary">查看固定版本</Button><label className="uc-chat-page__check"><input checked={included} disabled={!viewed} onChange={(event) => setIncludedContextIds((current) => event.target.checked ? [...current, context.contextId] : current.filter((id) => id !== context.contextId))} type="checkbox" />用于本次回复</label></div></Card>; })}</section> : null}
         {!session ? <EmptyState description="打开项目后才能登记上下文。" icon="项" readOnly title="需要目标项目" /> : !selected || selected.readOnly ? <EmptyState description="请选择当前项目中的可写对话。" icon="摘" readOnly title="不可登记" /> : completedMessages.length === 0 ? <EmptyState description="只有已完成消息可以登记。" icon="摘" readOnly title="没有可登记消息" /> : (
           <fieldset className="uc-chat-page__selection-list" disabled={busy}><legend>登记新的项目上下文</legend>{completedMessages.map((item) => <label key={item.messageId}><input checked={Boolean(contextDraft?.fragments.some((fragment) => fragment.messageId === item.messageId))} onChange={(event) => void toggleMessageSelection(item, event.target.checked)} type="checkbox" /><span><strong>{item.role === 'user' ? '用户' : '助手'}</strong>{item.content}</span></label>)}</fieldset>
         )}

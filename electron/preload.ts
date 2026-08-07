@@ -522,6 +522,12 @@ const chatContexts: ChatContextApi = {
       expectedRevision,
       selections
     }),
+  replaceResponseParameters: (responseDraftId, expectedRevision, parameterValues) =>
+    ipcRenderer.invoke(chatContextIpcChannels.replaceResponseParameters, {
+      responseDraftId,
+      expectedRevision,
+      parameterValues
+    }),
   listResponseCandidates: (responseDraftId, expectedRevision) =>
     ipcRenderer.invoke(chatContextIpcChannels.listResponseCandidates, {
       responseDraftId,

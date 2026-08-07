@@ -75,6 +75,9 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.replaceResponseContexts, (_event, request: unknown) =>
     runtime.responses.replaceContexts(request)
   );
+  ipcMain.handle(chatContextIpcChannels.replaceResponseParameters, (_event, request: unknown) =>
+    runtime.responses.replaceParameters(request)
+  );
   ipcMain.handle(chatContextIpcChannels.listResponseCandidates, (_event, request: unknown) =>
     runtime.responses.listCandidates(request)
   );

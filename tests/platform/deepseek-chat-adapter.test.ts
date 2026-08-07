@@ -286,7 +286,7 @@ describe('DeepSeek chat adapter', () => {
     expect(fixture.runtime.activeRequestCount).toBe(0);
   });
 
-  it('maps text_reasoning without unsupported sampling fields and fails explicit non-stop finishes', async () => {
+  it('maps text_reasoning without unsupported sampling fields and accepts length finishes with content', async () => {
     const fixture = chatFixture();
     fixture.transport.responses.push(streamResponse([
       chunk({ delta: { role: 'assistant', content: 'Partial answer' } }),
@@ -299,9 +299,10 @@ describe('DeepSeek chat adapter', () => {
       request: dispatchRequest({ max_tokens: 128, reasoning_effort: 'max' })
     });
     await expect(handle.completion).resolves.toEqual({
-      state: 'failed',
+      state: 'completed',
       providerOperationId: 'deepseek-operation-1',
-      safeCode: 'deepseek.finish.length'
+      finishReason: 'length',
+      usageAvailability: 'reported'
     });
     const body = bodyOf(fixture.transport.requests[0]);
     expect(body).toMatchObject({
@@ -312,7 +313,7 @@ describe('DeepSeek chat adapter', () => {
     expect(body).not.toHaveProperty('temperature');
     expect(body).not.toHaveProperty('top_p');
     expect(fixture.lifecycle.events.at(-1)).toBe(
-      'fail:deepseek.finish.length'
+      'complete:response-execution-deepseek'
     );
     expect(fixture.usage.observations[0]?.status).toBe('reported');
   });

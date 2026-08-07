@@ -17,6 +17,7 @@ test('chat page uses project conversations and composer-first streaming workflow
     'addUserMessage',
     'createResponseDraft',
     'replaceResponseContexts',
+    'replaceResponseParameters',
     'prepareResponseSubmission',
     'submitResponse',
     'getResponseExecution',
@@ -26,6 +27,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   }
   assert.match(source, /运行授权关闭/);
   assert.match(source, /runtime_not_allowed/);
+  assert.match(source, /replaceResponseParameters/);
+  assert.match(source, /已截断/);
+  assert.match(source, /finish\.length|输出长度限制被截断/);
   assert.match(source, /aria-label="选择文本模型"/);
   assert.match(source, /uc-chat-page__composer-toolbar/);
   assert.match(source, /参数/);

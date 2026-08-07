@@ -82,7 +82,7 @@ export class ProjectConversationResponseSubjectResolver
       imageCount: 0,
       videoCount: 0,
       contextCount: contextSnapshots.length,
-      parameterValues: {},
+      parameterValues: { ...draft.parameterValues },
       outboundTextSnapshot: userMessage.content,
       materialReferences: [],
       contextContentHashes: contextSnapshots.map((snapshot) => snapshot.contentHash)
