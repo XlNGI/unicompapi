@@ -48,6 +48,7 @@ import {
 } from '../repositories';
 import {
   NodeProjectStorage,
+  findFileIndexEntryByRelativePath,
   toProjectRelativePath
 } from '../storage';
 import type { LocalMediaHandleRegistry } from './controlled-local-media';
@@ -104,13 +105,17 @@ export class VideoReferenceMediaController {
 
         const before = await this.inspect(selectedPath, mediaKind);
         const createdAt = this.now();
-        const provisional = createFileReference({
+        const locator = locatorForSelectedFile(
+          context.session.rootDirectory,
+          selectedPath
+        );
+        const reusable = locator.kind === 'project'
+          ? await findReusableProjectFile(context, locator.relativePath)
+          : undefined;
+        const provisional = reusable ?? createFileReference({
           id: this.createFileId(),
           projectId: context.session.projectId,
-          locator: locatorForSelectedFile(
-            context.session.rootDirectory,
-            selectedPath
-          ),
+          locator,
           createdAt
         });
         const verifier = new NodeSha256FileVerifier(
@@ -126,7 +131,7 @@ export class VideoReferenceMediaController {
           );
         }
 
-        const file = createAvailableFile(provisional, verification);
+        const file = refreshAvailableFile(provisional, verification);
         const asset = createMediaAsset({
           id: this.createAssetId(),
           projectId: context.session.projectId,
@@ -146,6 +151,9 @@ export class VideoReferenceMediaController {
         await context.fileRepository.save(file);
         await context.assetRepository.save(asset);
         await context.workspaceRepository.save(updated);
+        if (file.locator.kind === 'project' && !reusable) {
+          await registerProjectFileIndex(context, file);
+        }
 
         return {
           cancelled: false,
@@ -681,6 +689,83 @@ function createAvailableFile(
     verification
   );
   return { ...available, lastVerification: { ...verification } };
+}
+
+function refreshAvailableFile(
+  provisional: FileReference,
+  verification: {
+    readonly sizeBytes: number;
+    readonly checksumSha256: string;
+    readonly matchesExpected: boolean | undefined;
+    readonly verifiedAt: IsoTimestamp;
+  }
+): FileReference {
+  if (provisional.state === 'available') {
+    return {
+      ...provisional,
+      sizeBytes: verification.sizeBytes,
+      checksumSha256: verification.checksumSha256,
+      updatedAt: verification.verifiedAt,
+      lastVerification: {
+        sizeBytes: verification.sizeBytes,
+        checksumSha256: verification.checksumSha256,
+        matchesExpected: verification.matchesExpected,
+        verifiedAt: verification.verifiedAt
+      }
+    };
+  }
+  return createAvailableFile(provisional, verification);
+}
+
+async function findReusableProjectFile(
+  context: VideoReferenceMediaContext,
+  relativePath: string
+): Promise<FileReference | undefined> {
+  const normalized = toProjectRelativePath(relativePath);
+  const indexed = findFileIndexEntryByRelativePath(
+    await context.indexRepository.load(),
+    normalized
+  );
+  if (indexed) {
+    const owned = await context.fileRepository.get(indexed.fileId);
+    if (
+      owned &&
+      owned.locator.kind === 'project' &&
+      owned.locator.relativePath === normalized
+    ) {
+      return owned;
+    }
+  }
+
+  const files = await context.fileRepository.list(context.session.projectId);
+  return files.find(
+    (candidate) =>
+      candidate.locator.kind === 'project' &&
+      candidate.locator.relativePath === normalized &&
+      candidate.state === 'available'
+  );
+}
+
+async function registerProjectFileIndex(
+  context: VideoReferenceMediaContext,
+  file: FileReference
+): Promise<void> {
+  if (file.locator.kind !== 'project') {
+    return;
+  }
+  try {
+    await context.indexRepository.upsert({
+      fileId: file.id,
+      relativePath: toProjectRelativePath(file.locator.relativePath),
+      state: file.state,
+      sizeBytes: file.sizeBytes,
+      checksumSha256: file.checksumSha256,
+      updatedAt: file.updatedAt
+    });
+  } catch {
+    // Selection already saved the file/asset/draft. Index ownership races are
+    // tolerated here because preview/submit can verify without stealing paths.
+  }
 }
 
 function locatorForSelectedFile(

@@ -184,4 +184,43 @@ describe('file verification persistence', () => {
       original
     );
   });
+
+  it('verifies alias project files without stealing an indexed path owner', async () => {
+    const fixture = await createFixture();
+    await writeFile(path.join(fixture.root, 'shared.txt'), 'hello', 'utf8');
+    const owner = createFileReference({
+      id: toFileReferenceId('file-owner'),
+      projectId: fixture.projectId,
+      locator: { kind: 'project', relativePath: 'shared.txt' },
+      checksumSha256: helloChecksum,
+      createdAt: timestamp
+    });
+    const alias = createFileReference({
+      id: toFileReferenceId('file-alias'),
+      projectId: fixture.projectId,
+      locator: { kind: 'project', relativePath: 'shared.txt' },
+      checksumSha256: helloChecksum,
+      createdAt: timestamp
+    });
+    const ownerResult = await fixture.probe.inspect(owner);
+    const owned = await fixture.service.persistProbeResult(owner, ownerResult);
+    expect(owned.state).toBe('available');
+    await expect(fixture.indexRepository.get(owner.id)).resolves.toMatchObject({
+      relativePath: 'shared.txt',
+      state: 'available'
+    });
+
+    const aliasResult = await fixture.probe.inspect(alias);
+    const verifiedAlias = await fixture.service.persistProbeResult(
+      alias,
+      aliasResult
+    );
+    expect(verifiedAlias.state).toBe('available');
+    expect(verifiedAlias.id).toBe(alias.id);
+    await expect(fixture.indexRepository.get(alias.id)).resolves.toBeUndefined();
+    await expect(fixture.indexRepository.get(owner.id)).resolves.toMatchObject({
+      relativePath: 'shared.txt',
+      fileId: owner.id
+    });
+  });
 });

@@ -298,6 +298,16 @@ function mapError(error: unknown): {
       message: error.message
     };
   }
+  if (
+    error instanceof TypeError &&
+    typeof error.message === 'string' &&
+    error.message.includes('capability evidence')
+  ) {
+    return {
+      code: 'subject_invalid',
+      message: error.message
+    };
+  }
   return {
     code: 'storage_error',
     message: 'The local image feature operation failed'

@@ -107,17 +107,26 @@ export class FileVerificationPersistenceService {
     let indexEntry: FileIndexEntry | undefined;
 
     if (updated.locator.kind === 'project') {
-      indexEntry = {
-        fileId: updated.id,
-        relativePath: toProjectRelativePath(updated.locator.relativePath),
-        state: updated.state,
-        sizeBytes: updated.sizeBytes,
-        checksumSha256: updated.checksumSha256,
-        updatedAt: updated.updatedAt
-      };
-
+      const relativePath = toProjectRelativePath(updated.locator.relativePath);
       const index = await this.indexRepository.load();
-      upsertFileIndexEntry(index, indexEntry);
+      const pathOwner = index.entries.find(
+        (entry) =>
+          entry.relativePath === relativePath && entry.fileId !== updated.id
+      );
+      // Alias material records may point at a path already owned by the
+      // canonical work-result file. Keep verifying the alias bytes, but never
+      // steal or conflict with the indexed owner.
+      if (!pathOwner) {
+        indexEntry = {
+          fileId: updated.id,
+          relativePath,
+          state: updated.state,
+          sizeBytes: updated.sizeBytes,
+          checksumSha256: updated.checksumSha256,
+          updatedAt: updated.updatedAt
+        };
+        upsertFileIndexEntry(index, indexEntry);
+      }
     }
 
     await this.fileRepository.save(updated);

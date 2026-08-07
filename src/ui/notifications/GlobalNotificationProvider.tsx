@@ -11,6 +11,11 @@ import {
 import { Notification } from 'rsuite';
 import { Button } from '../../components/Button';
 import type { StorageTaskSummaryDto } from '../../shared/storage-ipc';
+import {
+  describeGenerationSafeCode,
+  describeUnconfirmedGenerationOutcome,
+  isUnconfirmedGenerationOutcome
+} from './generation-failure-reasons';
 
 export type GlobalNotificationKind = 'progress' | 'success' | 'warning' | 'error';
 export type GlobalNotificationPlacement = 'top-end' | 'bottom-start';
@@ -117,16 +122,29 @@ export function GlobalNotificationProvider({ children }: { readonly children: Re
               description: `任务中心确认${mediaLabel}任务已完成。`
             });
           } else if (terminalFailureStates.has(state ?? '')) {
+            const failure = await findTrackedFailureSafeCode(storage, task);
+            if (!active) continue;
+            const safeCode = failure?.safeCode;
+            const uncertain = isUnconfirmedGenerationOutcome(state, safeCode);
+            const submissionFailed = failure?.state === 'failed_before_submission';
             show({
               id: notification.id,
-              kind: 'error',
-              title: `${mediaLabel}生成未完成`,
-              description: taskFailureDescription(state)
+              kind: uncertain ? 'warning' : 'error',
+              title: uncertain
+                ? `${mediaLabel}生成状态待确认`
+                : submissionFailed
+                  ? `${mediaLabel}提交失败`
+                  : `${mediaLabel}生成失败`,
+              description: uncertain
+                ? describeUnconfirmedGenerationOutcome(safeCode)
+                : taskFailureDescription(state, safeCode)
             });
           } else {
             show({
               ...notification,
-              title: `${mediaLabel}生成中`,
+              title: state === 'submitting'
+                ? `${mediaLabel}提交中`
+                : `${mediaLabel}生成中`,
               description: taskProgressDescription(state),
               tracking: {
                 ...notification.tracking!,
@@ -199,7 +217,9 @@ function NotificationViewport({ items, onDismiss, placement }: {
     >
       {items.map((item) => (
         <div
-          className={`uc-global-notifications__item uc-global-notifications__item--${item.kind}`}
+          className={`uc-global-notifications__item uc-global-notifications__item--${item.kind}${
+            item.description ? '' : ' uc-global-notifications__item--compact'
+          }`}
           key={item.id}
           role={item.kind === 'error' || item.kind === 'warning' ? 'alert' : 'status'}
         >
@@ -213,8 +233,10 @@ function NotificationViewport({ items, onDismiss, placement }: {
             onClose={() => onDismiss(item.id)}
             type={notificationType(item.kind)}
           >
-            <p>{item.description}</p>
-            {item.action ? (
+            {item.description ? <p>{isGenerationFailure(item)
+              ? generationFailureReason(item.description)
+              : item.description}</p> : null}
+            {item.action && !isGenerationFailure(item) ? (
               <Button
                 className="uc-global-notifications__action"
                 onClick={item.action.onClick}
@@ -292,6 +314,35 @@ async function findTrackedTask(
   return details.find((task) => task !== undefined);
 }
 
+async function findTrackedFailureSafeCode(
+  storage: NonNullable<typeof window.unicomp>['storage'],
+  task: StorageTaskSummaryDto
+): Promise<{ readonly state: string; readonly safeCode?: string } | undefined> {
+  const result = await storage.listCallRecords({
+    projectId: task.projectId,
+    limit: 50
+  });
+  if (!result.ok) return undefined;
+  const candidates = result.value.items.filter((record) => record.subjectKind === 'media');
+  for (const record of candidates) {
+    const details = await storage.getCallDetails(record.invocationAttemptId);
+    if (
+      !details.ok ||
+      details.value?.subject.kind !== 'media' ||
+      details.value.subject.taskId !== task.taskId
+    ) continue;
+    const safeCode = [...details.value.timeline]
+      .reverse()
+      .find((event) => event.safeCode)
+      ?.safeCode;
+    return {
+      state: record.state,
+      ...(safeCode ? { safeCode } : {})
+    };
+  }
+  return undefined;
+}
+
 function taskProgressDescription(state?: string): string {
   if (!state || state === 'created') return '任务已创建，正在等待处理。';
   if (state === 'submitting') return '正在向服务商提交生成请求。';
@@ -309,17 +360,37 @@ function taskProgressDescription(state?: string): string {
   return '任务状态正在更新，详情以任务中心为准。';
 }
 
-function taskFailureDescription(state?: string): string {
-  if (state === 'cancelled') return '任务已取消，没有生成新作品。';
-  if (state === 'expired') return '任务已过期，没有生成新作品。';
-  if (state === 'needs_user_action') return '任务需要用户处理，请打开任务中心查看具体原因。';
+function taskFailureDescription(state?: string, safeCode?: string): string {
+  const providerReason = describeGenerationSafeCode(safeCode);
+  if (providerReason) return providerReason.label;
+  if (state === 'cancelled') return '任务已取消';
+  if (state === 'expired') return '任务已过期';
+  if (state === 'needs_user_action') return '任务需要用户处理';
   if (state === 'submission_outcome_unknown' || state === 'cancellation_unknown') {
-    return '任务结果暂时无法确认，请打开任务中心核对真实状态。';
+    return '任务结果暂时无法确认';
   }
   if (state === 'interrupted' || state === 'recovery_required') {
-    return '任务执行已中断，请打开任务中心查看恢复要求。';
+    return '任务执行已中断';
   }
-  return '任务中心确认生成失败，请打开任务详情查看安全失败原因。';
+  return '生成失败';
+}
+
+function isGenerationFailure(notification: GlobalNotificationInput): boolean {
+  return notification.kind === 'error' &&
+    /^(?:image|video)-generation:/u.test(notification.id);
+}
+
+function generationFailureReason(description: string): string {
+  const exactReasons: Readonly<Record<string, string>> = {
+    '请先填写提示词。': '提示词为空',
+    '请确认本次外发事实后再提交。': '尚未确认本次外发事实'
+  };
+  const exact = exactReasons[description];
+  if (exact) return exact;
+  const withoutPrefix = description.replace(/^远端反馈[：:]\s*/u, '').trim();
+  const adviceStart = withoutPrefix.search(/[，；。:：](?:请|禁止自动重试)/u);
+  const reason = adviceStart >= 0 ? withoutPrefix.slice(0, adviceStart) : withoutPrefix;
+  return reason.replace(/[，；。\s]+$/u, '') || '生成失败';
 }
 
 function sameNotification(

@@ -55,6 +55,19 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   storage_error: '本地保存失败，请检查存储状态后重试。'
 };
 
+function describeChatError(error: {
+  readonly code: ChatContextIpcErrorCode;
+  readonly message: string;
+}): string {
+  if (
+    error.code === 'storage_error' &&
+    /max_tokens|parameter|invalid/i.test(error.message)
+  ) {
+    return '参数无效（例如 max_tokens 过大），请调小后重试。';
+  }
+  return errorMessages[error.code] ?? error.message;
+}
+
 const messageStateLabels: Record<MessageDto['state'], string> = {
   pending: '等待响应',
   streaming: '接收中',
@@ -340,7 +353,8 @@ export function ChatPage() {
       setParameterValues({});
       setLockedSchemaKey(schemaKey);
     }
-    if (!next) setParamsOpen(false);
+    // Show dynamic parameters as soon as a model is chosen (same expectation as image/video).
+    setParamsOpen(Boolean(next && candidate));
   }
 
   function confirmLeaveUnsentInput(): boolean {
@@ -471,7 +485,7 @@ export function ChatPage() {
         responseFeature
       );
       if (!created.ok) {
-        setNotice(errorMessages[created.error.code]);
+        setNotice(describeChatError(created.error));
         return;
       }
       let draft = created.value;
@@ -486,7 +500,7 @@ export function ChatPage() {
         cleanedParameters
       );
       if (!parameterized.ok) {
-        setNotice(errorMessages[parameterized.error.code] ?? parameterized.error.message);
+        setNotice(describeChatError(parameterized.error));
         return;
       }
       draft = parameterized.value;
@@ -507,7 +521,7 @@ export function ChatPage() {
         );
         if (!replaced.ok) {
           setResponseDraft(draft);
-          setNotice(errorMessages[replaced.error.code]);
+          setNotice(describeChatError(replaced.error));
           return;
         }
         draft = replaced.value;
@@ -522,7 +536,7 @@ export function ChatPage() {
         selectedCandidateId
       );
       if (!prepared.ok) {
-        setNotice(errorMessages[prepared.error.code] ?? '准备回复失败，请重试。');
+        setNotice(describeChatError(prepared.error));
         return;
       }
       const submitted = await chat.submitResponse(
@@ -533,7 +547,7 @@ export function ChatPage() {
         true
       );
       if (!submitted.ok) {
-        setNotice(errorMessages[submitted.error.code] ?? '发送失败，请重试。');
+        setNotice(describeChatError(submitted.error));
         return;
       }
       setResponseExecution(submitted.value);

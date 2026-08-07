@@ -36,8 +36,25 @@ import {
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 
 const maximumResultBytes = 128 * 1024 * 1024;
+/** Allowlisted images/generations body fields. Edit/multi-image inputs stay excluded. */
 const supportedParameterFields = new Set([
-  'size', 'quality', 'style', 'output_format'
+  'size',
+  'n',
+  'quality',
+  'response_format',
+  'style',
+  'output_format',
+  'output_compression',
+  'watermark',
+  'watermark_enabled',
+  'background',
+  'moderation',
+  'partial_images',
+  'user',
+  'user_id',
+  'extra_fields',
+  'sequential_image_generation',
+  'sequential_image_generation_options'
 ]);
 
 export interface NewApiImageCredentialResolverPort {
@@ -413,33 +430,59 @@ function parseImageResponse(body: Uint8Array): {
     | { readonly kind: 'base64'; readonly value: string; readonly mimeType: string };
   readonly usage?: readonly UsageFactV1[];
 } {
-  const value = exactResponseRecord(
-    parseJsonObject(body, 'NewAPI image response'),
-    ['created', 'data'],
-    ['usage'],
-    'NewAPI image response'
-  );
-  nonNegativeInteger(value.created, 'created');
-  if (!Array.isArray(value.data) || value.data.length !== 1) {
-    throw invalidResponse('NewAPI image response must contain exactly one result');
+  const value = parseJsonObject(body, 'NewAPI image response');
+  if (isRecord(value.error)) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'The NewAPI request is invalid'
+    );
   }
-  const item = exactResponseRecord(
-    value.data[0],
-    [],
-    ['b64_json', 'url'],
-    'NewAPI image result'
-  );
-  const hasBase64 = typeof item.b64_json === 'string';
-  const hasUrl = typeof item.url === 'string';
+  const data = Array.isArray(value.data)
+    ? value.data
+    : Array.isArray(value.images)
+      ? value.images
+      : undefined;
+  if (data === undefined) {
+    throw invalidResponse('The NewAPI response was invalid');
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'created')) {
+    nonNegativeInteger(value.created, 'created');
+  }
+  if (data.length < 1) {
+    throw invalidResponse('The NewAPI response was invalid');
+  }
+  const item = data[0];
+  if (typeof item === 'string' && item.length > 0) {
+    return { result: inlineResult(item) };
+  }
+  if (!isRecord(item)) {
+    throw invalidResponse('The NewAPI response was invalid');
+  }
+  const base64Candidate =
+    (typeof item.b64_json === 'string' && item.b64_json) ||
+    (typeof item.b64 === 'string' && item.b64) ||
+    (typeof item.base64 === 'string' && item.base64) ||
+    undefined;
+  const urlCandidate = typeof item.url === 'string' ? item.url : undefined;
+  const hasBase64 = typeof base64Candidate === 'string' && base64Candidate.length > 0;
+  const hasUrl = typeof urlCandidate === 'string' && urlCandidate.length > 0;
   if (hasBase64 === hasUrl) {
-    throw invalidResponse('NewAPI image result must contain one result reference');
+    throw invalidResponse('The NewAPI response was invalid');
   }
   const result = hasUrl
-    ? { kind: 'remote_url' as const, value: requireControlledResultUrl(item.url) }
-    : inlineResult(item.b64_json);
+    ? { kind: 'remote_url' as const, value: requireControlledResultUrl(urlCandidate) }
+    : inlineResult(base64Candidate);
+  let usage: readonly UsageFactV1[] | undefined;
+  if (value.usage !== undefined) {
+    try {
+      usage = mapNewApiImageUsage(value.usage);
+    } catch {
+      usage = undefined;
+    }
+  }
   return {
     result,
-    ...(value.usage === undefined ? {} : { usage: mapNewApiImageUsage(value.usage) })
+    ...(usage ? { usage } : {})
   };
 }
 
@@ -449,11 +492,17 @@ function inlineResult(value: unknown): {
   readonly mimeType: string;
 } {
   if (typeof value !== 'string' || value.length < 4 || value.length > 180_000_000) {
-    throw invalidResponse('NewAPI inline image result is invalid');
+    throw invalidResponse('The NewAPI response was invalid');
   }
-  const bytes = decodeBase64(value);
+  const stripped = value.startsWith('data:')
+    ? value.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/u, '')
+    : value;
+  if (stripped.length < 4 || stripped === value && value.startsWith('data:')) {
+    throw invalidResponse('The NewAPI response was invalid');
+  }
+  const bytes = decodeBase64(stripped);
   const mimeType = sniffImageMime(bytes);
-  if (!mimeType) throw invalidResponse('NewAPI inline image type is unsupported');
+  if (!mimeType) throw invalidResponse('The NewAPI response was invalid');
   return {
     kind: 'base64',
     value: Buffer.from(bytes).toString('base64'),
@@ -533,10 +582,40 @@ function mapSubmissionFailure(
   error: unknown,
   requestStarted: boolean
 ): ProviderSubmitOutcome {
+  // Parsed HTTP responses with an unusable body are known failures, not billing-unknown.
+  if (
+    requestStarted &&
+    error instanceof NewApiImageAdapterError &&
+    error.safeCode === 'newapi.invalid_response'
+  ) {
+    return {
+      kind: 'failed_before_submission',
+      message: 'The NewAPI response was invalid',
+      retryability: 'not_retryable'
+    };
+  }
+  if (
+    requestStarted &&
+    error instanceof NewApiImageAdapterError &&
+    error.safeCode === 'newapi.invalid_request'
+  ) {
+    return {
+      kind: 'failed_before_submission',
+      message: 'The NewAPI request is invalid',
+      retryability: 'not_retryable'
+    };
+  }
   if (requestStarted && submissionOutcomeIsUnknown(error)) {
     return {
       kind: 'submission_outcome_unknown',
       message: 'The NewAPI image submission outcome is unknown'
+    };
+  }
+  if (error instanceof NewApiRuntimeError) {
+    return {
+      kind: 'failed_before_submission',
+      message: error.message,
+      retryability: error.retryability
     };
   }
   return {
@@ -544,20 +623,20 @@ function mapSubmissionFailure(
     message: error instanceof NewApiImageAdapterError
       ? error.message
       : 'The NewAPI image request could not be prepared',
-    retryability: error instanceof NewApiRuntimeError
+    retryability: error instanceof NewApiImageAdapterError
       ? error.retryability
-      : error instanceof NewApiImageAdapterError
-        ? error.retryability
-        : 'unknown'
+      : 'unknown'
   };
 }
 
 function submissionOutcomeIsUnknown(error: unknown): boolean {
-  return error instanceof NewApiImageAdapterError ||
-    error instanceof NewApiRuntimeError && [
-      'timeout', 'network_error', 'provider_unavailable', 'cancelled',
-      'proxy_unavailable', 'response_too_large', 'invalid_response'
-    ].includes(error.code);
+  if (error instanceof NewApiImageAdapterError) {
+    return error.safeCode !== 'newapi.invalid_response';
+  }
+  return error instanceof NewApiRuntimeError && [
+    'timeout', 'network_error', 'provider_unavailable', 'cancelled',
+    'proxy_unavailable', 'response_too_large', 'invalid_response'
+  ].includes(error.code);
 }
 
 function parseJsonObject(body: Uint8Array, label: string): Record<string, unknown> {
@@ -657,5 +736,11 @@ function invalidRequest(safeCode: string, message: string): NewApiImageAdapterEr
 }
 
 function invalidResponse(message: string): NewApiImageAdapterError {
-  return new NewApiImageAdapterError('newapi.invalid_response', message, 'unknown');
+  return new NewApiImageAdapterError(
+    'newapi.invalid_response',
+    message === 'The NewAPI response was invalid'
+      ? message
+      : 'The NewAPI response was invalid',
+    'not_retryable'
+  );
 }

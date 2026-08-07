@@ -287,10 +287,19 @@ export class ProviderRegistryController {
               (model.catalogState ?? 'present') !== 'retired'
             )
             .map((model) => {
-            const profile = snapshot.modelProfiles?.find((candidate) =>
-              candidate.profileId === model.activeProfileId &&
-              candidate.modelId === model.id
+            const modelProfiles = (snapshot.modelProfiles ?? []).filter(
+              (candidate) => candidate.modelId === model.id
             );
+            const activeProfile = modelProfiles.find((candidate) =>
+              candidate.profileId === model.activeProfileId
+            );
+            const productFeatures = [...new Set(
+              modelProfiles
+                .filter((candidate) => candidate.status === 'verified')
+                .flatMap((candidate) =>
+                  candidate.features.map((feature) => feature.productFeature)
+                )
+            )];
             return {
             modelId: model.id,
             providerId: model.providerId,
@@ -307,8 +316,8 @@ export class ProviderRegistryController {
             lastSeenAt: model.lastSeenAt,
             displayName: model.displayName,
             enabled: model.enabled,
-            profileStatus: profile?.status,
-            productFeatures: profile?.features.map((feature) => feature.productFeature)
+            profileStatus: activeProfile?.status,
+            productFeatures: productFeatures.length > 0 ? productFeatures : undefined
             };
           }),
           capabilities: snapshot.capabilities.map((capability) => ({
@@ -606,9 +615,9 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
     modelProfiles.some((profile) => {
       const model = modelsById.get(profile.modelId as ProviderModel['id']);
       const provider = model ? providersById.get(model.providerId) : undefined;
-      const binding = model
-        ? bindingsById.get(model.protocolBindingId)
-        : undefined;
+      const binding = bindingsById.get(
+        profile.protocolBindingId as ProviderProtocolBinding['id']
+      );
       const definition = modelDefinitions.find(
         (candidate) =>
           candidate.packageId === profile.packageId &&
@@ -622,11 +631,12 @@ function parseSnapshot(value: unknown): ProviderRegistrySnapshot {
       );
       return (
         !model ||
-        model.protocolBindingId !== profile.protocolBindingId ||
         profile.modelRevision > model.revision ||
         !provider ||
         provider.packageId !== profile.packageId ||
         !binding ||
+        binding.providerId !== model.providerId ||
+        binding.connectionId !== model.connectionId ||
         binding.adapterKind !== profile.adapterKey ||
         !definition ||
         !template ||

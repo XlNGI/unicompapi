@@ -23,6 +23,7 @@ const managementActions = [
   'registerExactModel',
   'setConnectionEnabled',
   'setModelEnabled',
+  'attachOpenAiCompatibleImageProfile',
   'deleteModel',
   'deleteConnection'
 ];

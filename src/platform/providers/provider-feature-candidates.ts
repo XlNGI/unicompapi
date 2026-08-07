@@ -359,8 +359,16 @@ export class ProviderFeatureCandidateService {
       );
     }
     const projectionMode = parameterProjectionMode(resolvedSubject.surface);
-    validateParameterValues(candidate.parameterSchema, projectionMode, resolvedSubject.parameterValues);
-    return { subject: resolvedSubject, candidate };
+    const parameterValues = pruneParameterValuesToSchema(
+      candidate.parameterSchema,
+      projectionMode,
+      resolvedSubject.parameterValues
+    );
+    validateParameterValues(candidate.parameterSchema, projectionMode, parameterValues);
+    return {
+      subject: { ...resolvedSubject, parameterValues },
+      candidate
+    };
   }
 
   private async resolveSubject(
@@ -461,6 +469,20 @@ function bindingFingerprint(
 
 function parameterProjectionMode(surface: ProductFeatureSurface): ParameterProjectionMode {
   return surface === 'quick' ? 'required_only' : 'full';
+}
+
+/** Drop stale draft keys removed from the current schema (e.g. legacy `size`). */
+function pruneParameterValuesToSchema(
+  schema: ParameterSchemaV2,
+  mode: ParameterProjectionMode,
+  values: Readonly<Record<string, ParameterValue>>
+): Readonly<Record<string, ParameterValue>> {
+  const allowed = new Set(
+    projectParameterSchema(schema, mode).fields.map((field) => field.fieldId)
+  );
+  return Object.fromEntries(
+    Object.entries(values).filter(([key]) => allowed.has(key))
+  );
 }
 
 function sha256(value: string): string {

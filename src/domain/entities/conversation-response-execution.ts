@@ -411,7 +411,7 @@ export function parseConversationResponseStreamEvent(
     sequence: positiveInteger(item.sequence, 'event.sequence'),
     type,
     ...(type === 'content_delta'
-      ? { contentDelta: boundedText(item.contentDelta, 'event.contentDelta', 65_536) }
+      ? { contentDelta: streamContentDelta(item.contentDelta, 'event.contentDelta', 65_536) }
       : {}),
     ...(type === 'stream_failed'
       ? { safeCode: safeCode(item.safeCode) }
@@ -632,6 +632,19 @@ function nonBlank(value: unknown, label: string): string {
 
 function boundedText(value: unknown, label: string, maximumLength: number): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > maximumLength) {
+    throw new InvariantViolationError(`${label} is invalid`);
+  }
+  return value;
+}
+
+/** Stream deltas may be whitespace-only (e.g. "\\n\\n"); still reject empty and oversized. */
+function streamContentDelta(value: unknown, label: string, maximumLength: number): string {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > maximumLength ||
+    /\u0000/.test(value)
+  ) {
     throw new InvariantViolationError(`${label} is invalid`);
   }
   return value;

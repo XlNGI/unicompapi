@@ -123,6 +123,12 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
         contract.parameterSchema.productFeature === 'text_to_video'
       )
     ).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === 'parameters.newapi.text_to_video.default'
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === 'parameters.newapi.image_to_video.default'
+    )).toBe(true);
   });
 });
 

@@ -3,16 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  createEmptyVideoWorkspaceDraft,
-  createVideoWorkspaceDraft,
-  toCapabilityEvidenceId,
-  toDraftId,
-  toIsoTimestamp,
-  toModelId,
-  toProjectId
-} from '../../src/domain';
-import {
   JsonAssetRepository,
+  JsonFileIndexRepository,
   JsonFileReferenceRepository,
   JsonVideoWorkspaceRepository,
   LocalMediaHandleRegistry,
@@ -21,6 +13,18 @@ import {
   VideoWorkspaceMutationCoordinator,
   projectStoragePaths
 } from '../../src/platform';
+import {
+  createEmptyVideoWorkspaceDraft,
+  createFileReference,
+  createVideoWorkspaceDraft,
+  toCapabilityEvidenceId,
+  toDraftId,
+  toFileReferenceId,
+  toIsoTimestamp,
+  toModelId,
+  toProjectId,
+  transitionFile
+} from '../../src/domain';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-07-23T08:00:00.000Z');
@@ -327,6 +331,102 @@ describe('VideoReferenceMediaController', () => {
     expect(cleared.value.textToVideo.materials?.slots[0]).not.toHaveProperty(
       'selection'
     );
+  });
+
+  it('reuses an indexed project result path instead of creating a conflicting alias', async () => {
+    const { createHash } = await import('node:crypto');
+    const fixture = await createFixture('image_to_video');
+    const projectRoot = path.join(fixture.root, 'project');
+    const relativePath = 'files/results/work-result.png';
+    const absolutePath = path.join(projectRoot, relativePath);
+    const bytes = pngHeader(640, 480);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, bytes);
+    const checksum = createHash('sha256').update(bytes).digest('hex');
+
+    const seeded = {
+      ...transitionFile(
+        transitionFile(
+          createFileReference({
+            id: toFileReferenceId('file-result-owner'),
+            projectId: fixture.projectId,
+            locator: { kind: 'project', relativePath },
+            createdAt: t0
+          }),
+          'verifying',
+          t0
+        ),
+        'available',
+        t0,
+        { sizeBytes: bytes.byteLength, checksumSha256: checksum }
+      ),
+      lastVerification: {
+        sizeBytes: bytes.byteLength,
+        checksumSha256: checksum,
+        matchesExpected: true,
+        verifiedAt: t0
+      }
+    };
+    const files = new JsonFileReferenceRepository(
+      fixture.storage,
+      fixture.projectId
+    );
+    const index = new JsonFileIndexRepository(fixture.storage, fixture.projectId);
+    await files.save(seeded);
+    await index.upsert({
+      fileId: seeded.id,
+      relativePath,
+      state: seeded.state,
+      sizeBytes: seeded.sizeBytes,
+      checksumSha256: seeded.checksumSha256,
+      updatedAt: seeded.updatedAt
+    });
+
+    const controller = new VideoReferenceMediaController({
+      getSession: () => ({
+        projectId: fixture.projectId,
+        projectName: 'Video material project',
+        rootDirectory: projectRoot
+      }),
+      chooseMediaFile: async () => absolutePath,
+      handles: fixture.handles,
+      mutations: new VideoWorkspaceMutationCoordinator(),
+      createAssetId: () => 'asset-video-material-reuse',
+      createFileId: () => 'file-video-material-alias',
+      now: () => t1
+    });
+
+    const selected = await controller.selectMaterial({
+      draftId: fixture.draft.id,
+      target: { kind: 'image_source' },
+      mediaKind: 'image'
+    });
+    if (!selected.ok || selected.value.cancelled) {
+      throw new Error('expected project result reuse selection to succeed');
+    }
+
+    const assets = await new JsonAssetRepository(
+      fixture.storage,
+      fixture.projectId
+    ).list(fixture.projectId);
+    const storedFiles = await files.list(fixture.projectId);
+    expect(assets).toHaveLength(1);
+    expect(assets[0]?.fileId).toBe(seeded.id);
+    expect(storedFiles.map((file) => file.id)).toEqual([seeded.id]);
+    await expect(index.get(seeded.id)).resolves.toMatchObject({
+      relativePath,
+      fileId: seeded.id
+    });
+    await expect(
+      index.get(toFileReferenceId('file-video-material-alias'))
+    ).resolves.toBeUndefined();
+
+    await expect(
+      controller.createMaterialPreview({
+        draftId: fixture.draft.id,
+        target: { kind: 'image_source' }
+      })
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it('creates a short-lived preview only while the original content matches', async () => {

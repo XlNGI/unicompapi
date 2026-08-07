@@ -1,10 +1,11 @@
-import { stat } from 'node:fs/promises';
+import { stat, statfs } from 'node:fs/promises';
 import type { Execution, Task } from '../../domain';
 import { toTaskId, toWorkId } from '../../domain';
 import type {
   StorageIpcResult,
   StorageReadModelIssueDto,
   StorageReadModelListDto,
+  StorageLocalStorageSummaryDto,
   StorageTaskDetailsDto,
   StorageTaskSummaryDto,
   StorageWorkDetailsDto,
@@ -17,10 +18,52 @@ import {
   JsonWorkRepository
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
+import { scanDirectoryUsage } from '../settings';
 import type { ProjectCatalogEntry, ProjectCatalogService } from './project-catalog';
 
+interface CurrentProjectStorageSession {
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly rootDirectory: string;
+}
+
 export class GlobalReadModelController {
-  constructor(private readonly catalog: ProjectCatalogService) {}
+  private projectUsageCache: StorageLocalStorageSummaryDto['projectUsage'] | undefined;
+  private projectUsageRevision = 0;
+
+  constructor(
+    private readonly catalog: ProjectCatalogService,
+    private readonly getCurrentProject: () => CurrentProjectStorageSession | undefined = () => undefined
+  ) {}
+
+  invalidateLocalStorageSummary(): void {
+    this.projectUsageRevision += 1;
+    this.projectUsageCache = undefined;
+  }
+
+  async getLocalStorageSummary(): Promise<
+    StorageIpcResult<StorageLocalStorageSummaryDto>
+  > {
+    try {
+      const projectUsage = await this.getProjectUsage();
+      const current = this.getCurrentProject();
+      return {
+        ok: true,
+        value: {
+          projectUsage,
+          ...(current ? {
+            currentProject: {
+              projectId: current.projectId,
+              projectName: current.projectName,
+              diskFreeBytes: await availableBytes(current.rootDirectory)
+            }
+          } : {})
+        }
+      };
+    } catch {
+      return readFailure();
+    }
+  }
 
   async listTasks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageTaskSummaryDto>>
@@ -185,6 +228,41 @@ export class GlobalReadModelController {
       return readFailure();
     }
   }
+
+  private async getProjectUsage(): Promise<StorageLocalStorageSummaryDto['projectUsage']> {
+    if (this.projectUsageCache) return this.projectUsageCache;
+    const revision = this.projectUsageRevision;
+    const entries = await this.catalog.getEntries();
+    let totalBytes = 0;
+    let measuredProjectCount = 0;
+    let unavailableProjectCount = 0;
+    let truncated = false;
+
+    for (const entry of entries) {
+      try {
+        if (!(await isAvailable(entry))) {
+          unavailableProjectCount += 1;
+          continue;
+        }
+        const usage = await scanDirectoryUsage(entry.rootDirectory);
+        totalBytes += usage.totalBytes;
+        measuredProjectCount += 1;
+        truncated ||= usage.truncated;
+      } catch {
+        unavailableProjectCount += 1;
+      }
+    }
+
+    const usage = {
+      totalBytes,
+      projectCount: entries.length,
+      measuredProjectCount,
+      unavailableProjectCount,
+      truncated
+    };
+    if (revision === this.projectUsageRevision) this.projectUsageCache = usage;
+    return usage;
+  }
 }
 
 function createContext(entry: ProjectCatalogEntry) {
@@ -248,6 +326,16 @@ async function isAvailable(entry: ProjectCatalogEntry): Promise<boolean> {
     return (await stat(entry.rootDirectory)).isDirectory();
   } catch {
     return false;
+  }
+}
+
+async function availableBytes(directory: string): Promise<number | null> {
+  try {
+    const facts = await statfs(directory, { bigint: true });
+    const bytes = facts.bavail * facts.bsize;
+    return bytes > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(bytes);
+  } catch {
+    return null;
   }
 }
 

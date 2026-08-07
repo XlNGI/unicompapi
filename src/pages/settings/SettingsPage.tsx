@@ -238,6 +238,11 @@ export function SettingsPage() {
   }, [settings]);
 
   useEffect(() => {
+    if (saveState === 'loading' || saveState === 'saving') {
+      notifications.dismiss('settings-auto-save');
+      return;
+    }
+    if (saveState === 'saved') return;
     const action = saveState === 'failed' && canRetrySave
       ? { label: '重试保存', onClick: () => retrySaveRef.current() }
       : saveState === 'conflict'
@@ -245,13 +250,7 @@ export function SettingsPage() {
         : undefined;
     notifications.show({
       id: 'settings-auto-save',
-      kind: saveState === 'saved'
-        ? 'success'
-        : saveState === 'conflict'
-          ? 'warning'
-          : saveState === 'failed'
-            ? 'error'
-            : 'progress',
+      kind: saveState === 'conflict' ? 'warning' : 'error',
       title: saveStateLabel(saveState),
       description: message,
       placement: 'top-end',
@@ -269,6 +268,7 @@ export function SettingsPage() {
 
   async function saveValues(nextValues: SettingsValues) {
     if (!settings || !snapshot || saveState === 'saving') return;
+    notifications.dismiss('settings-auto-save');
     setValues(nextValues);
     setSaveState('saving');
     setMessage('正在原子保存到此设备…');
@@ -283,6 +283,13 @@ export function SettingsPage() {
         result.value,
         nextValues.general.theme !== snapshot.values.general.theme
       );
+      notifications.show({
+        id: 'settings-auto-save',
+        kind: 'success',
+        title: '已保存',
+        description: '',
+        placement: 'top-end'
+      });
     } catch {
       setSaveState('failed');
       setMessage('保存失败；页面中的待保存值仍保留，可以重试。');
@@ -2698,7 +2705,7 @@ function snapshotSourceMessage(snapshot: SettingsSnapshotDto): string {
 
 function saveStateLabel(state: SaveState): string {
   const labels: Record<SaveState, string> = {
-    loading: '读取中', saved: '已自动保存', saving: '保存中',
+    loading: '读取中', saved: '已保存', saving: '保存中',
     failed: '保存失败', conflict: '设置冲突'
   };
   return labels[state];

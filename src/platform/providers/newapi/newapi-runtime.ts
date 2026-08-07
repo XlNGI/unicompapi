@@ -257,7 +257,7 @@ export class NewApiSharedRuntime {
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
       accept: 'application/json',
-      contentType: requireMultipartContentType(input.contentType),
+      contentType: requireVideoCreateContentType(input.contentType),
       maximumRequestBytes: 64 * 1024 * 1024,
       maximumResponseBytes: 2 * 1024 * 1024,
       requireReadyConnection: true,
@@ -419,7 +419,12 @@ export class NewApiSharedRuntime {
         throw new NewApiRuntimeError('redirect_not_allowed', 'not_retryable');
       }
       if (response.status < 200 || response.status >= 300) {
-        throw mapHttpStatus(response.status, response.headers, input.notFoundKind);
+        throw mapHttpStatus(
+          response.status,
+          response.headers,
+          input.notFoundKind,
+          response.body
+        );
       }
       const headers = normalizeHeaders(response.headers);
       if (input.expectedResponse === 'stream') {
@@ -641,13 +646,25 @@ function requireMultipartContentType(value: string): string {
   return value;
 }
 
+function requireVideoCreateContentType(value: string): string {
+  if (value === 'application/json') return value;
+  return requireMultipartContentType(value);
+}
+
 function requireContentType(
   headers: Readonly<Record<string, string>>,
   expected: 'application/json' | 'text/event-stream'
 ): void {
-  if (normalizedContentType(headers) !== expected) {
-    throw new NewApiRuntimeError('invalid_response', 'not_retryable');
+  const actual = normalizedContentType(headers);
+  if (actual === expected) return;
+  // Some OpenAI-compatible video gateways omit Content-Type on JSON bodies.
+  if (
+    expected === 'application/json' &&
+    (actual === undefined || actual === 'text/json' || actual.endsWith('+json'))
+  ) {
+    return;
   }
+  throw new NewApiRuntimeError('invalid_response', 'not_retryable');
 }
 
 function normalizedContentType(
@@ -674,9 +691,9 @@ function validateDeclaredResponseSize(
 function mapHttpStatus(
   status: number,
   headers: Readonly<Record<string, string>>,
-  notFoundKind: 'model' | 'operation'
+  notFoundKind: 'model' | 'operation',
+  body?: Uint8Array
 ): NewApiRuntimeError {
-  if (status === 400) return new NewApiRuntimeError('invalid_request', 'not_retryable');
   if (status === 401) return new NewApiRuntimeError('authentication_failed', 'not_retryable');
   if (status === 402) return new NewApiRuntimeError('insufficient_balance', 'not_retryable');
   if (status === 403) return new NewApiRuntimeError('permission_denied', 'not_retryable');
@@ -687,15 +704,97 @@ function mapHttpStatus(
     );
   }
   if (status === 408 || status === 504) return new NewApiRuntimeError('timeout', 'retryable');
-  if (status === 409 || status === 422) return new NewApiRuntimeError('invalid_parameters', 'not_retryable');
   if (status === 413) return new NewApiRuntimeError('request_too_large', 'not_retryable');
   if (status === 429) {
     return new NewApiRuntimeError('rate_limited', 'retryable', parseRetryAfter(headers));
   }
   if (status >= 500 && status <= 599) {
+    // Some gateways wrap client parameter errors as HTTP 500 (e.g. invalid max_tokens).
+    const fromBody = classifyOpenAiErrorBody(body);
+    if (fromBody) return fromBody;
     return new NewApiRuntimeError('provider_unavailable', 'retryable');
   }
+  if (status === 400 || status === 409 || status === 422) {
+    const fromBody = classifyOpenAiErrorBody(body);
+    if (fromBody) return fromBody;
+    if (status === 409 || status === 422) {
+      return new NewApiRuntimeError('invalid_parameters', 'not_retryable');
+    }
+    return new NewApiRuntimeError('invalid_request', 'not_retryable');
+  }
   return new NewApiRuntimeError('invalid_response', 'not_retryable');
+}
+
+/** Classify OpenAI-style error envelopes by allowlisted code/type only — never echo free text. */
+function classifyOpenAiErrorBody(body: Uint8Array | undefined): NewApiRuntimeError | undefined {
+  if (!body || body.byteLength < 2 || body.byteLength > 64 * 1024) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) return undefined;
+  const error = isRecord(parsed.error) ? parsed.error : parsed;
+  if (!isRecord(error)) return undefined;
+  const code = typeof error.code === 'string' ? error.code.toLowerCase() : '';
+  const type = typeof error.type === 'string' ? error.type.toLowerCase() : '';
+  const token = code || type;
+  if (
+    token === 'model_not_found' ||
+    token === 'model_not_available' ||
+    token.includes('model_not_found')
+  ) {
+    return new NewApiRuntimeError('model_not_found', 'not_retryable');
+  }
+  if (
+    token === 'invalid_api_key' ||
+    token === 'authentication_error' ||
+    token === 'unauthorized'
+  ) {
+    return new NewApiRuntimeError('authentication_failed', 'not_retryable');
+  }
+  if (
+    token === 'insufficient_quota' ||
+    token === 'billing_not_active' ||
+    token === 'insufficient_balance'
+  ) {
+    return new NewApiRuntimeError('insufficient_balance', 'not_retryable');
+  }
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  if (
+    message.includes('insufficient') ||
+    message.includes('quota') ||
+    message.includes('balance') ||
+    message.includes('额度不足') ||
+    message.includes('余额不足') ||
+    message.includes('积分不足') ||
+    message.includes('token重算')
+  ) {
+    return new NewApiRuntimeError('insufficient_balance', 'not_retryable');
+  }
+  if (
+    message.includes('max_tokens') ||
+    message.includes('max_completion_tokens') ||
+    (token === 'invalid_request' && message.includes('invalid'))
+  ) {
+    return new NewApiRuntimeError('invalid_parameters', 'not_retryable');
+  }
+  if (token === 'rate_limit_exceeded' || token === 'rate_limit_error') {
+    return new NewApiRuntimeError('rate_limited', 'retryable');
+  }
+  if (
+    token === 'invalid_request_error' ||
+    token === 'invalid_request' ||
+    token === 'invalid_parameter' ||
+    token === 'invalid_parameters'
+  ) {
+    return new NewApiRuntimeError(
+      token.includes('parameter') ? 'invalid_parameters' : 'invalid_request',
+      'not_retryable'
+    );
+  }
+  return undefined;
 }
 
 function mapRuntimeFailure(

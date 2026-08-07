@@ -165,14 +165,15 @@ export function VideoQuickWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
-              <h2>服务、参数与提交确认</h2>
-              <p>选择模型后由后台锁定 API 与参数合同；填写参数后准备并提交。</p>
+              <h2>服务与提交确认</h2>
+              <p>选择模型后由后台锁定 API；快速视频使用服务默认参数，确认后即可提交。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel
             blockedReason={legacyReason}
             dirty={dirty}
             draft={draft}
+            oneShot
             onDraftChange={(next) => onDraftChange(next as QuickVideoDraftDto)}
             onDraftPersisted={(next) => onDraftPersisted(next as QuickVideoDraftDto)}
             onMessage={onMessage}

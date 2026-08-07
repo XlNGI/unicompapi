@@ -7,6 +7,8 @@ export const storageIpcChannels = {
   openProject: 'storage:open-project',
   createProject: 'storage:create-project',
   listProjects: 'storage:list-projects',
+  getLocalStorageSummary: 'storage:get-local-storage-summary',
+  localStorageChanged: 'storage:local-storage-changed',
   listTasks: 'storage:list-tasks',
   getTaskDetails: 'storage:get-task-details',
   listCallRecords: 'storage:list-call-records',
@@ -85,6 +87,21 @@ export interface StorageProjectSummaryDto {
   readonly projectName: string;
   readonly availability: 'available' | 'unavailable';
   readonly lastOpenedAt: string;
+}
+
+export interface StorageLocalStorageSummaryDto {
+  readonly projectUsage: {
+    readonly totalBytes: number;
+    readonly projectCount: number;
+    readonly measuredProjectCount: number;
+    readonly unavailableProjectCount: number;
+    readonly truncated: boolean;
+  };
+  readonly currentProject?: {
+    readonly projectId: string;
+    readonly projectName: string;
+    readonly diskFreeBytes: number | null;
+  };
 }
 
 export interface StorageReadModelIssueDto {
@@ -262,6 +279,8 @@ export interface StorageApi {
     name: string
   ): Promise<StorageIpcResult<StorageCreateProjectDto>>;
   listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>>;
+  getLocalStorageSummary(): Promise<StorageIpcResult<StorageLocalStorageSummaryDto>>;
+  onLocalStorageChanged(listener: () => void): () => void;
   listTasks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageTaskSummaryDto>>
   >;

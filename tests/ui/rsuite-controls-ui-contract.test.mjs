@@ -58,3 +58,15 @@ test('the shared RSuite theme and mature control set stay installed', () => {
   assert.match(editor, /<Checkbox/);
   assert.match(editor, /<Slider/);
 });
+
+test('shared model picker closes its portal when the workspace scrolls', () => {
+  const modelSelect = fs.readFileSync(path.join(srcRoot, 'components/ModelSelect.tsx'), 'utf8');
+
+  assert.match(modelSelect, /document\.querySelector<HTMLElement>\('\.workspace'\)/);
+  assert.match(modelSelect, /workspace\.addEventListener\('scroll',[\s\S]*?passive: true/);
+  assert.match(modelSelect, /workspace\.removeEventListener\('scroll'/);
+  assert.match(modelSelect, /open=\{open\}/);
+  assert.match(modelSelect, /placement="autoVerticalStart"/);
+  assert.match(modelSelect, /preventOverflow/);
+  assert.match(modelSelect, /listboxMaxHeight=\{320\}/);
+});

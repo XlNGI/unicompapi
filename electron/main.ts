@@ -108,7 +108,8 @@ const storageLifecycle = registerStorageIpcHandlers({
   textSubmission: {
     credentialVault: viduComposition.credentialVault,
     deepSeekRuntime: liveProviders.deepSeekRuntime,
-    newApiRuntime: liveProviders.newApiRuntime
+    newApiRuntime: liveProviders.newApiRuntime,
+    newApiImageDownloads: liveProviders.newApiImageDownloads
   },
   onActiveExportCountChanged: (count) => {
     powerPolicyRead = powerPolicyRead

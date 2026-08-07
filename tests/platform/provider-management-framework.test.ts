@@ -894,6 +894,49 @@ describe('provider management framework', () => {
       'text_chat',
       'text_reasoning'
     ]);
+    const imageProfiles = (afterEnable.modelProfiles ?? []).filter((candidate) =>
+      candidate.modelId === model.id && candidate.adapterKey === 'newapi.image'
+    );
+    expect(imageProfiles).toHaveLength(1);
+    expect(imageProfiles[0]?.features.map((feature) => feature.productFeature)).toEqual([
+      'text_to_image'
+    ]);
+    expect(afterEnable.capabilities.some((candidate) =>
+      candidate.modelId === model.id && candidate.capability === 'image_generation'
+    )).toBe(true);
+    const videoProfiles = (afterEnable.modelProfiles ?? []).filter((candidate) =>
+      candidate.modelId === model.id && candidate.adapterKey === 'newapi.video'
+    );
+    expect(videoProfiles).toHaveLength(1);
+    expect(videoProfiles[0]?.features.map((feature) => feature.productFeature).sort()).toEqual([
+      'image_to_video',
+      'text_to_video'
+    ]);
+    expect(afterEnable.capabilities.some((candidate) =>
+      candidate.modelId === model.id && candidate.capability === 'video_generation'
+    )).toBe(true);
+    await expect(framework.attachOpenAiCompatibleImageProfile({
+      modelId: model.id
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'already_attached', profileId: imageProfiles[0]?.profileId }
+    });
+    await expect(framework.attachOpenAiCompatibleVideoProfile({
+      modelId: model.id
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'already_attached', profileId: videoProfiles[0]?.profileId }
+    });
+    const summary = await new ProviderRegistryController(registry).getRegistry();
+    if (!summary.ok) throw new Error('registry summary unavailable');
+    const summaryModel = summary.value.models.find((candidate) => candidate.modelId === model.id);
+    expect(summaryModel?.productFeatures?.slice().sort()).toEqual([
+      'image_to_video',
+      'text_chat',
+      'text_reasoning',
+      'text_to_image',
+      'text_to_video'
+    ]);
   });
 });
 

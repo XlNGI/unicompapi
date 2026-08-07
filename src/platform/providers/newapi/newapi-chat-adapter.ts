@@ -714,10 +714,11 @@ function parseStreamChunk(data: string): {
   } catch {
     throw invalidStream('NewApi SSE data is not valid JSON');
   }
-  const item = exactRecord(
+  // UniCompAPI / NewAPI gateways may add extension fields (e.g. service_tier,
+  // first_token_return_time). Require the OpenAI chunk core, ignore unknowns.
+  const item = requireRecord(
     parsed,
     ['id', 'choices', 'created', 'model', 'object'],
-    ['system_fingerprint', 'usage'],
     'NewApi stream chunk'
   );
   const id = safeString(item.id, 'NewApi response ID', 512);
@@ -740,10 +741,10 @@ function parseStreamChunk(data: string): {
   if (item.choices.length !== 1) {
     throw invalidStream('NewApi stream choices are ambiguous');
   }
-  const choice = exactRecord(
+  // Intermediate gateway chunks often omit finish_reason entirely (not null).
+  const choice = requireRecord(
     item.choices[0],
-    ['delta', 'finish_reason', 'index'],
-    ['logprobs'],
+    ['delta', 'index'],
     'NewApi stream choice'
   );
   if (
@@ -752,18 +753,13 @@ function parseStreamChunk(data: string): {
   ) {
     throw invalidStream('NewApi stream choice is unsupported');
   }
-  const delta = exactRecord(
-    choice.delta,
-    [],
-    ['role', 'content', 'reasoning_content'],
-    'NewApi stream delta'
-  );
+  const delta = requireRecord(choice.delta, [], 'NewApi stream delta');
   if (delta.role !== undefined && delta.role !== 'assistant') {
     throw invalidStream('NewApi stream role is invalid');
   }
   const contentDelta = optionalDeltaText(delta.content, 'NewApi content delta');
   optionalDeltaText(delta.reasoning_content, 'NewApi reasoning delta');
-  const finishReason = choice.finish_reason === null
+  const finishReason = choice.finish_reason === undefined || choice.finish_reason === null
     ? undefined
     : parseFinishReason(choice.finish_reason);
   return {
@@ -824,7 +820,8 @@ function validateRoute(value: unknown) {
     route.endpointPolicyRevision !== 1 ||
     (route.productFeature !== 'text_chat' && route.productFeature !== 'text_reasoning') ||
     route.internalPurpose !== 'text_execution' ||
-    route.parameterSchemaRevision !== 1 ||
+    !Number.isSafeInteger(route.parameterSchemaRevision) ||
+    route.parameterSchemaRevision < 1 ||
     route.resultSchemaId !== NEWAPI_CHAT_RESULT_SCHEMA_ID ||
     route.resultSchemaRevision !== 1 ||
     route.usageSchemaId !== NEWAPI_CHAT_USAGE_SCHEMA_ID ||
@@ -888,16 +885,42 @@ function serializeRequest(
   schema: ParameterSchemaV2
 ): Uint8Array {
   const parameters = validateParameterValues(schema, 'full', request.parameterValues);
-  if ('temperature' in parameters && 'top_p' in parameters) {
-    throw invalidRequest('NewApi temperature and top_p cannot both be set');
-  }
+  // UniCompAPI / OpenAI-compatible gateways accept temperature and top_p together.
   const body: Record<string, unknown> = {
     model: route.providerModelKey,
     messages: request.messages,
+    // Product chat path always streams; do not expose stream as a user field.
     stream: true,
-    stream_options: { include_usage: true },
-    ...parameters
+    stream_options: { include_usage: true }
   };
+  if (typeof parameters.max_tokens === 'number') {
+    body.max_tokens = parameters.max_tokens;
+  }
+  if (typeof parameters.max_completion_tokens === 'number') {
+    body.max_completion_tokens = parameters.max_completion_tokens;
+  }
+  if (typeof parameters.temperature === 'number') {
+    body.temperature = parameters.temperature;
+  }
+  if (typeof parameters.top_p === 'number') {
+    body.top_p = parameters.top_p;
+  }
+  if (typeof parameters.reasoning_effort === 'string' && parameters.reasoning_effort.trim()) {
+    body.reasoning_effort = parameters.reasoning_effort.trim();
+  }
+  if (typeof parameters.stop === 'string' && parameters.stop.trim()) {
+    body.stop = parameters.stop.trim();
+  } else if (Array.isArray(parameters.stop)) {
+    const stops = parameters.stop
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (stops.length === 1) body.stop = stops[0];
+    else if (stops.length > 1) body.stop = stops;
+  }
+  if (typeof parameters.user === 'string' && parameters.user.trim()) {
+    body.user = parameters.user.trim();
+  }
   const encoded = new TextEncoder().encode(JSON.stringify(body));
   if (encoded.byteLength > 2 * 1024 * 1024) {
     throw invalidRequest('NewApi request exceeded the local size limit');
@@ -996,6 +1019,19 @@ function exactRecord(
     Object.keys(value).some((key) => !allowed.has(key))
   ) {
     throw invalidStream(`${label} contains unsupported fields`);
+  }
+  return value;
+}
+
+/** Require listed keys; tolerate gateway extension fields. */
+function requireRecord(
+  value: unknown,
+  required: readonly string[],
+  label: string
+): Record<string, unknown> {
+  if (!isRecord(value)) throw invalidStream(`${label} must be an object`);
+  if (required.some((key) => !(key in value))) {
+    throw invalidStream(`${label} is missing required fields`);
   }
   return value;
 }

@@ -6,14 +6,17 @@ const source = await readFile('src/components/DynamicParameterForm.tsx', 'utf8')
 
 test('dynamic parameter labels use Chinese display names without changing field ids', () => {
   assert.match(source, /displayParameterKey/);
+  assert.match(source, /displayParameterDescription/);
   assert.match(source, /replace\(\/\^provider\\.parameter\\.\/,/);
   assert.match(source, /uc-dynamic-parameters__key/);
+  assert.match(source, /uc-dynamic-parameters__help/);
   assert.match(source, /background: '背景'/);
   assert.match(source, /output_compression: '输出压缩率'/);
   assert.match(source, /output_format: '输出格式'/);
   assert.match(source, /quality: '画面质量'/);
   assert.match(source, /response_format: '返回格式'/);
   assert.match(source, /size: '输出尺寸'/);
+  assert.match(source, /输出宽×高/);
   assert.match(source, /onChange\(field\.fieldId, value\)/);
   assert.doesNotMatch(
     source,
@@ -51,5 +54,6 @@ test('dynamic enum values use Chinese labels while preserving submitted values',
   assert.match(source, /label: displayParameterOption\(option, index\)/);
   assert.match(source, /disabled: '关闭'/);
   assert.match(source, /high: '高'/);
+  assert.match(source, /\\d\+x\\d\+/);
   assert.match(source, /return `其他选项 \$\{index \+ 1\}`/);
 });

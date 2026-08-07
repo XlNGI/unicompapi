@@ -395,35 +395,61 @@ function userFacingSubmissionFeedback(
 ): string {
   switch (safeCode) {
     case 'vidu.credential_unavailable':
+    case 'newapi.credential_unavailable':
       return '凭证不可用：请到服务商连接里重新保存 Token 后再生成';
     case 'vidu.credit_insufficient':
       return '远端反馈：服务商积分不足，请充值后再生成';
     case 'vidu.invalid_request':
+    case 'newapi.invalid_request':
       return '远端反馈：请求参数被拒绝，请检查模型与参数后重试';
+    case 'newapi.invalid_response':
+      return '远端已返回结果，但响应格式无法解析为可用图片';
     case 'vidu.authentication_failed':
+    case 'newapi.authentication_failed':
       return '远端反馈：鉴权失败，请检查服务商连接凭证';
     case 'vidu.permission_denied':
+    case 'newapi.permission_denied':
       return '远端反馈：当前凭证无权执行该操作';
     case 'vidu.rate_limited':
+    case 'newapi.rate_limited':
       return '远端反馈：请求过于频繁，请稍后再试';
     case 'vidu.provider_unavailable':
+    case 'newapi.provider_unavailable':
       return '远端反馈：服务暂时不可用，请稍后重试';
     case 'vidu.timeout':
+    case 'newapi.timeout':
       return '远端反馈：请求超时，结果未知，禁止自动重试';
     case 'vidu.network_error':
+    case 'newapi.network_error':
       return '远端反馈：网络请求失败，结果未知，禁止自动重试';
     case 'vidu.invalid_response':
       return '远端反馈：响应无法解析为有效图片，禁止自动重试';
     case 'vidu.proxy_unavailable':
+    case 'newapi.proxy_unavailable':
       return '远端反馈：代理不可用，请检查网络代理设置';
     case 'vidu.protocol_mismatch':
+    case 'newapi.protocol_mismatch':
+    case 'newapi.route_mismatch':
       return '远端反馈：协议绑定与请求不匹配';
     case 'vidu.endpoint_not_allowed':
+    case 'newapi.endpoint_not_allowed':
       return '远端反馈：目标接口不在允许范围内';
+    case 'newapi.model_not_found':
+      return '远端反馈：模型不存在或当前连接不可用';
+    case 'newapi.insufficient_balance':
+      return '远端反馈：账户余额不足，请充值后再生成';
+    case 'newapi.invalid_parameters':
+      return '远端反馈：请求参数无效，请检查模型与参数后重试';
+    case 'newapi.request_too_large':
+      return '远端反馈：请求内容过大，请缩短提示词或减小参数';
+    case 'adapter.failed_before_submission':
+      return phase === 'before_request'
+        ? '请求未成功发出，因此没有图片结果'
+        : '远端已收到请求但未返回可用图片，禁止自动重试';
     default:
       return phase === 'before_request'
-        ? `请求未成功发出（${safeCode ?? 'adapter.failed_before_submission'}），因此没有图片结果`
-        : `远端已收到请求但未返回可用图片（${safeCode ?? 'adapter.submission_outcome_unknown'}），禁止自动重试`;
+        ? '请求未成功发出，因此没有图片结果'
+        : '远端已收到请求但未返回可用图片，禁止自动重试';
   }
 }
 

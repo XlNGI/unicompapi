@@ -40,13 +40,15 @@ export function VideoTextWorkspace({
       reference.contextRevision === undefined ||
       reference.includeInPrompt === undefined
   );
-  const blockedReason = draft.featureSelection?.productFeature !== 'text_to_video'
-    ? '当前草稿没有固定为文生视频，请重新保存草稿。'
-    : draft.textToVideo.materials
-      ? '此旧草稿含素材槽位；文生视频必须移除全部素材后才能提交。'
-      : unsupportedContexts.length > 0
-        ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
-        : undefined;
+  const blockedReason =
+    draft.featureSelection != null &&
+    draft.featureSelection.productFeature !== 'text_to_video'
+      ? '当前草稿没有固定为文生视频，请重新保存草稿。'
+      : draft.textToVideo.materials
+        ? '此旧草稿含素材槽位；文生视频必须移除全部素材后才能提交。'
+        : unsupportedContexts.length > 0
+          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
+          : undefined;
 
   function changeDraft(next: TextVideoDraftDto) {
     onDraftChange({

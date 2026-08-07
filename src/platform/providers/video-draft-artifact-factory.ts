@@ -68,9 +68,8 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
       throw new TypeError('Video route model capability evidence is unavailable');
     }
 
-    // Domain createVideoTask freezes materials/parameters against draft.generation
-    // and materialsForVideoDraft (slots / quick reference only). Feature-path
-    // params and image_to_video.source go out via dispatchRequest instead.
+    // Domain createVideoTask freezes materials against draft sources/slots.
+    // Feature-path parameterValues still go out via dispatchRequest.
     const confirmation: VideoSubmissionConfirmationSnapshot = {
       mode: draft.mode,
       purpose: 'video_generation',
@@ -163,6 +162,14 @@ function materialsMatchingDraft(
           target: { kind: 'quick_reference' }
         }]
       : [];
+  }
+  if (draft.mode === 'image_to_video' && draft.imageToVideo.source) {
+    return [{
+      assetId: draft.imageToVideo.source.assetId,
+      mediaKind: draft.imageToVideo.source.mediaKind,
+      role: draft.imageToVideo.source.role,
+      target: { kind: 'image_source' }
+    }];
   }
   const materials = draft.mode === 'text_to_video'
     ? draft.textToVideo.materials

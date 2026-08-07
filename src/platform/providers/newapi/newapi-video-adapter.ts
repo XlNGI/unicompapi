@@ -1,5 +1,4 @@
 ﻿import { Readable } from 'node:stream';
-import { randomBytes } from 'node:crypto';
 import {
   createProviderUsageObservation,
   parseProviderExecutionRouteSnapshot,
@@ -33,7 +32,6 @@ import {
 import {
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
-  NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID,
   NEWAPI_VIDEO_ADAPTER_ID,
   NEWAPI_VIDEO_RESULT_SCHEMA_ID,
@@ -42,9 +40,11 @@ import {
 } from './newapi-contracts';
 import {
   isOpenAiCompatibleEndpointPolicyId,
-  isOpenAiCompatiblePackageId
+  isOpenAiCompatiblePackageId,
+  isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
+import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
 
 const maximumImageBytes = 50_000_000;
 const maximumRequestBytes = 64 * 1024 * 1024;
@@ -52,11 +52,21 @@ const maximumResultBytes = 512 * 1024 * 1024;
 const resultId = 'video';
 const supportedImageMimeTypes = new Set(['image/jpeg', 'image/png']);
 const supportedParameterFields = new Set([
+  'model',
+  'prompt',
+  'mode',
+  'size',
+  'resolution',
   'duration',
+  'seconds',
+  'seed',
+  'aspect_ratio',
+  'aspectRatio',
+  'audio',
+  // Legacy aliases remapped onto gateway wire fields.
   'width',
   'height',
-  'fps',
-  'seed'
+  'fps'
 ]);
 
 export interface NewApiVideoCredentialResolverPort {
@@ -176,7 +186,7 @@ export class NewApiVideoAdapter
             assetId: request.assetId!
           }), request.assetId!)
         : undefined;
-      const multipart = serializeVideoRequest(route, request, image);
+      const serialized = serializeVideoRequest(route, request, image);
       const responseBody = await this.credentials.useCredential(
         {
           connectionId: route.connectionId,
@@ -185,8 +195,8 @@ export class NewApiVideoAdapter
         (credential) => this.runtime.requestVideoCreate({
           connection,
           credentials: credential,
-          body: multipart.body,
-          contentType: multipart.contentType,
+          body: serialized.body,
+          contentType: serialized.contentType,
           signal: input.signal,
           beforeRequestStarted: async () => {
             await input.beforeRequestStarted?.();
@@ -243,7 +253,7 @@ export class NewApiVideoAdapter
         existing.invocationAttemptId !== invocationAttemptId)
     ) {
       throw invalidRequest(
-        'newApi.operation_conflict',
+        'newapi.operation_conflict',
         'The NewApi operation is already attached to another route'
       );
     }
@@ -404,11 +414,15 @@ export class NewApiVideoAdapter
     }
   }
 
+  knowsOperation(providerOperationId: string): boolean {
+    return this.operations.has(providerOperationId);
+  }
+
   private requireOperation(providerOperationId: string): NewApiOperationContext {
     const context = this.operations.get(providerOperationId);
     if (!context) {
       throw invalidRequest(
-        'newApi.operation_not_attached',
+        'newapi.operation_not_attached',
         'The NewApi operation must be attached with its original route snapshot'
       );
     }
@@ -427,7 +441,7 @@ export class NewApiVideoAdapter
       connection.credentialVersionId !== route.credentialVersionId
     ) {
       throw invalidRequest(
-        'newApi.connection_snapshot_unavailable',
+        'newapi.connection_snapshot_unavailable',
         'The exact NewApi connection snapshot is unavailable'
       );
     }
@@ -446,7 +460,7 @@ export class NewApiVideoAdapter
       validated = validateParameterSchemaV2(schema!);
     } catch {
       throw invalidRequest(
-        'newApi.parameter_schema_unavailable',
+        'newapi.parameter_schema_unavailable',
         'The exact NewApi parameter schema is unavailable'
       );
     }
@@ -461,7 +475,7 @@ export class NewApiVideoAdapter
       )
     ) {
       throw invalidRequest(
-        'newApi.parameter_schema_unavailable',
+        'newapi.parameter_schema_unavailable',
         'The exact NewApi parameter schema is unavailable'
       );
     }
@@ -551,7 +565,7 @@ function validateRoute(value: unknown): ValidatedNewApiRoute {
       : undefined;
   if (
     !isOpenAiCompatiblePackageId(route.packageId) ||
-    route.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
+    !isOpenAiCompatiblePackageVersion(route.packageId, route.packageVersion) ||
     route.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID ||
     route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
     !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||
@@ -562,7 +576,8 @@ function validateRoute(value: unknown): ValidatedNewApiRoute {
     route.usageSchemaRevision !== 1 ||
     route.constraintSetId !== expectedConstraint ||
     route.constraintSetRevision !== 1 ||
-    route.parameterSchemaRevision !== 1 ||
+    !Number.isSafeInteger(route.parameterSchemaRevision) ||
+    route.parameterSchemaRevision < 1 ||
     !route.providerModelKey ||
     route.internalPurpose !== (feature === 'text_to_video'
       ? 'video_generation'
@@ -570,7 +585,7 @@ function validateRoute(value: unknown): ValidatedNewApiRoute {
     !expectedConstraint
   ) {
     throw invalidRequest(
-      'newApi.route_mismatch',
+      'newapi.route_mismatch',
       'The route snapshot does not select the exact NewApi video contract'
     );
   }
@@ -589,13 +604,13 @@ function parseDispatchRequest(
   const item = exactRequestRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    ['assetId'],
+    ['assetId', 'taskId', 'executionId'],
     'NewApi video request'
   );
   const projectId = requireOpaqueRequestId(item.projectId, 'project ID');
   if (projectId !== route.projectId) {
     throw invalidRequest(
-      'newApi.route_mismatch',
+      'newapi.route_mismatch',
       'The NewApi request project does not match the route snapshot'
     );
   }
@@ -607,7 +622,7 @@ function parseDispatchRequest(
     (route.productFeature === 'text_to_video' && assetId)
   ) {
     throw invalidRequest(
-      'newApi.invalid_request',
+      'newapi.invalid_request',
       'The NewApi request material does not match the product feature'
     );
   }
@@ -616,7 +631,7 @@ function parseDispatchRequest(
     parameterValues = validateParameterValues(schema, 'full', item.parameterValues);
   } catch {
     throw invalidRequest(
-      'newApi.invalid_request',
+      'newapi.invalid_request',
       'The NewApi parameter projection is invalid'
     );
   }
@@ -648,7 +663,7 @@ function validateImage(
     image.bytes.byteLength !== image.sizeBytes
   ) {
     throw invalidRequest(
-      'newApi.invalid_image',
+      'newapi.invalid_image',
       'The controlled first-frame image does not satisfy the NewApi contract'
     );
   }
@@ -660,65 +675,118 @@ function serializeVideoRequest(
   request: NewApiVideoDispatchRequestV1,
   image: ControlledNewApiImageV1 | undefined
 ): { readonly body: Uint8Array; readonly contentType: string } {
-  const fields: Record<string, string> = {
-    model: route.providerModelKey,
-    prompt: request.prompt
-  };
-  for (const [key, value] of Object.entries(request.parameterValues)) {
+  const values = request.parameterValues;
+  for (const [key, value] of Object.entries(values)) {
     if (
       !supportedParameterFields.has(key) ||
-      (typeof value !== 'string' && typeof value !== 'number')
+      (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean')
     ) {
       throw invalidRequest(
-        'newApi.invalid_request',
+        'newapi.invalid_request',
         'The NewApi request contains an unsupported parameter'
       );
     }
-    fields[key] = String(value);
   }
   if ((route.productFeature === 'image_to_video') !== Boolean(image)) {
     throw invalidRequest(
-      'newApi.invalid_request',
+      'newapi.invalid_request',
       'The NewAPI image input does not match the product feature'
     );
   }
-  const boundary = `unicomp-newapi-${randomBytes(18).toString('hex')}`;
-  const chunks: Buffer[] = [];
-  for (const [name, value] of Object.entries(fields)) {
-    chunks.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="${name}"\r\n\r\n` +
-      `${value}\r\n`,
-      'utf8'
-    ));
+
+  // Match UniCompAPI script-verified JSON create shape for POST /v1/videos.
+  const body: Record<string, unknown> = {
+    model: route.providerModelKey,
+    prompt: request.prompt
+  };
+  if (typeof values.mode === 'string' && values.mode.trim().length > 0) {
+    body.mode = values.mode.trim();
   }
+  if (typeof values.duration === 'number' && Number.isSafeInteger(values.duration)) {
+    body.duration = values.duration;
+  } else if (typeof values.duration === 'string' && /^\d+$/u.test(values.duration.trim())) {
+    body.duration = Number(values.duration.trim());
+  } else if (typeof values.seconds === 'string' || typeof values.seconds === 'number') {
+    const secondsText = String(values.seconds).trim();
+    if (secondsText.length > 0) {
+      body.seconds = secondsText;
+    }
+  }
+  if (typeof values.resolution === 'string' && values.resolution.trim().length > 0) {
+    body.resolution = values.resolution.trim();
+  }
+  const size = normalizeVideoSize(values);
+  if (size !== undefined) {
+    body.size = size;
+  }
+
+  const metadata: Record<string, string | number | boolean> = {};
+  const aspectRatio = typeof values.aspect_ratio === 'string'
+    ? values.aspect_ratio.trim()
+    : typeof values.aspectRatio === 'string'
+      ? values.aspectRatio.trim()
+      : '';
+  if (aspectRatio.length > 0) {
+    metadata.aspect_ratio = aspectRatio;
+  }
+  if (typeof values.audio === 'boolean') {
+    metadata.audio = values.audio;
+  }
+  if (typeof values.seed === 'number' || typeof values.seed === 'string') {
+    metadata.seed = values.seed;
+  }
+  if (typeof values.fps === 'number' || typeof values.fps === 'string') {
+    metadata.fps = values.fps;
+  }
+  if (Object.keys(metadata).length > 0) {
+    body.metadata = metadata;
+  }
+
   if (image) {
-    const extension = image.mimeType === 'image/png' ? 'png' : 'jpg';
-    chunks.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="image"; filename="first-frame.${extension}"\r\n` +
-      `Content-Type: ${image.mimeType}\r\n\r\n`,
-      'utf8'
-    ));
-    chunks.push(Buffer.from(image.bytes));
-    chunks.push(Buffer.from('\r\n', 'utf8'));
+    // Single controlled local frame only — never subjects[].images / images[].
+    body.image =
+      `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString('base64')}`;
   }
-  chunks.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
-  const body = Uint8Array.from(Buffer.concat(chunks));
-  if (body.byteLength < 1 || body.byteLength > maximumRequestBytes) {
+
+  const encoded = new TextEncoder().encode(JSON.stringify(body));
+  if (encoded.byteLength < 1 || encoded.byteLength > maximumRequestBytes) {
     throw invalidRequest(
-      'newApi.request_too_large',
+      'newapi.request_too_large',
       'The serialized NewApi request exceeds 64 MB'
     );
   }
   return {
-    body,
-    contentType: `multipart/form-data; boundary=${boundary}`
+    body: encoded,
+    contentType: 'application/json'
   };
 }
 
+/** Accept UI variants like `1920 × 1088` and emit gateway `1920x1088`. */
+function normalizeVideoSize(
+  values: Readonly<Record<string, ParameterValue>>
+): string | undefined {
+  const raw = typeof values.size === 'string' || typeof values.size === 'number'
+    ? String(values.size)
+    : (
+      typeof values.width === 'number' && typeof values.height === 'number'
+        ? `${values.width}x${values.height}`
+        : undefined
+    );
+  if (raw === undefined) return undefined;
+  const normalized = raw
+    .replace(/\u00d7/gu, 'x')
+    .replace(/\s+/gu, '')
+    .toLowerCase();
+  if (!/^\d+x\d+$/u.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
+}
+
 function parseCreateResponse(body: Uint8Array, expectedModel: string): string {
-  const video = parseVideoObject(body, expectedModel, 'NewAPI create response');
+  const video = parseVideoObject(body, expectedModel, 'NewAPI create response', {
+    defaultStatus: 'queued'
+  });
   if (video.status !== 'queued' && video.status !== 'in_progress') {
     throw invalidResponse('NewAPI create response status is invalid');
   }
@@ -740,64 +808,123 @@ function parseTaskResponse(
 function parseVideoObject(
   body: Uint8Array,
   expectedModel: string,
-  label: string
+  label: string,
+  options: { readonly defaultStatus?: ParsedNewApiTask['status'] } = {}
 ): { readonly id: string; readonly status: ParsedNewApiTask['status'] } {
-  const item = exactResponseRecord(
-    parseJsonObject(body, label),
-    ['id', 'object', 'created_at', 'status', 'model'],
-    [
-      'completed_at', 'error', 'expires_at', 'progress', 'prompt',
-      'remixed_from_video_id', 'seconds', 'size'
-    ],
-    label
+  const root = parseJsonObject(body, label);
+  rejectErrorEnvelope(root);
+  const item = unwrapVideoPayload(root);
+  rejectErrorEnvelope(item);
+
+  const id = requireRemoteId(
+    item.id ??
+    item.task_id ??
+    item.video_id ??
+    item.operation_id ??
+    item.taskId ??
+    item.videoId
   );
-  const id = requireRemoteId(item.id);
-  const status = taskStatus(item.status);
-  if (
-    item.object !== 'video' ||
-    !Number.isSafeInteger(item.created_at) ||
-    Number(item.created_at) < 0 ||
-    item.model !== expectedModel
-  ) {
-    throw invalidResponse(`${label} metadata is invalid`);
-  }
-  for (const timestamp of [item.completed_at, item.expires_at]) {
-    if (timestamp !== undefined && timestamp !== null) {
-      nonNegativeInteger(timestamp, 'video timestamp');
+  const rawStatus = item.status ?? item.state ?? item.task_status;
+  let status: ParsedNewApiTask['status'];
+  if (rawStatus === undefined || rawStatus === null) {
+    if (!options.defaultStatus) {
+      throw invalidResponse('NewApi task status is invalid');
     }
+    status = options.defaultStatus;
+  } else {
+    status = taskStatus(rawStatus);
   }
-  if (
-    item.progress !== undefined &&
-    (typeof item.progress !== 'number' || !Number.isFinite(item.progress) ||
-      item.progress < 0 || item.progress > 100)
-  ) {
-    throw invalidResponse(`${label} progress is invalid`);
-  }
-  for (const key of ['prompt', 'remixed_from_video_id', 'size'] as const) {
-    if (item[key] !== undefined && item[key] !== null) {
-      optionalRemoteText(item[key], key);
-    }
-  }
-  if (item.seconds !== undefined && item.seconds !== null) {
-    if (typeof item.seconds !== 'string' && typeof item.seconds !== 'number') {
-      throw invalidResponse(`${label} seconds is invalid`);
-    }
-  }
-  if (status === 'failed') {
-    const error = exactResponseRecord(
-      item.error,
-      ['code', 'message'],
-      ['param', 'type'],
-      'NewAPI video error'
-    );
-    optionalRemoteText(error.code, 'error code');
-    optionalRemoteText(error.message, 'error message');
-    if (error.param !== undefined && error.param !== null) optionalRemoteText(error.param, 'error param');
-    if (error.type !== undefined && error.type !== null) optionalRemoteText(error.type, 'error type');
-  } else if (item.error !== undefined && item.error !== null) {
-    throw invalidResponse(`${label} contains an unexpected error`);
-  }
+  void expectedModel;
+  // Optional metadata must not block acceptance when id+status are usable.
   return { id, status };
+}
+
+function unwrapVideoPayload(value: Record<string, unknown>): Record<string, unknown> {
+  if (isRecord(value.data)) return value.data;
+  if (isRecord(value.result)) return value.result;
+  if (isRecord(value.task)) return value.task;
+  if (isRecord(value.video)) return value.video;
+  return value;
+}
+
+function rejectErrorEnvelope(value: Record<string, unknown>): void {
+  const hasOperationIdentity =
+    value.id !== undefined ||
+    value.task_id !== undefined ||
+    value.video_id !== undefined ||
+    value.operation_id !== undefined ||
+    value.taskId !== undefined ||
+    value.videoId !== undefined;
+  const hasStatus =
+    value.status !== undefined ||
+    value.state !== undefined ||
+    value.task_status !== undefined;
+  if (hasOperationIdentity || hasStatus || isRecord(value.data)) {
+    return;
+  }
+  const error = isRecord(value.error) ? value.error : undefined;
+  const code = value.code;
+  const failedCode =
+    (typeof code === 'number' && code !== 0) ||
+    (typeof code === 'string' &&
+      code.trim() !== '' &&
+      code !== '0' &&
+      code.toLowerCase() !== 'success' &&
+      code.toLowerCase() !== 'ok');
+  if (!error && !failedCode && typeof value.message !== 'string') {
+    return;
+  }
+  if (error) {
+    classifyAdapterErrorRecord(error);
+  }
+  const message = typeof value.message === 'string' ? value.message : '';
+  if (
+    /额度不足|余额不足|积分不足|insufficient|quota|balance|token重算/i.test(message)
+  ) {
+    throw invalidRequest(
+      'newapi.insufficient_balance',
+      'The NewAPI account balance is insufficient'
+    );
+  }
+  if (failedCode || error || message.length > 0) {
+    throw invalidRequest('newapi.invalid_request', 'The NewAPI request is invalid');
+  }
+}
+
+function classifyAdapterErrorRecord(error: Record<string, unknown>): void {
+  const token = [
+    typeof error.code === 'string' ? error.code : '',
+    typeof error.type === 'string' ? error.type : '',
+    typeof error.message === 'string' ? error.message : ''
+  ].join(' ').toLowerCase();
+  if (
+    token.includes('insufficient') ||
+    token.includes('quota') ||
+    token.includes('balance') ||
+    token.includes('额度不足') ||
+    token.includes('余额不足') ||
+    token.includes('积分不足') ||
+    token.includes('token重算')
+  ) {
+    throw invalidRequest(
+      'newapi.insufficient_balance',
+      'The NewAPI account balance is insufficient'
+    );
+  }
+  if (token.includes('model_not_found') || token.includes('model not found')) {
+    throw invalidRequest('newapi.model_not_found', 'The NewAPI model was not found');
+  }
+  if (
+    token.includes('invalid_api_key') ||
+    token.includes('authentication') ||
+    token.includes('unauthorized')
+  ) {
+    throw invalidRequest(
+      'newapi.authentication_failed',
+      'NewAPI authentication failed'
+    );
+  }
+  throw invalidRequest('newapi.invalid_request', 'The NewAPI request is invalid');
 }
 
 function mapSubmissionFailure(
@@ -819,7 +946,7 @@ function mapSubmissionFailure(
 
 function submissionOutcomeIsUnknown(error: unknown): boolean {
   if (error instanceof NewApiVideoAdapterError) {
-    return error.safeCode === 'newApi.invalid_response';
+    return error.safeCode === 'newapi.invalid_response';
   }
   return error instanceof NewApiRuntimeError && [
     'timeout',
@@ -833,11 +960,52 @@ function submissionOutcomeIsUnknown(error: unknown): boolean {
 }
 
 function safeSubmissionMessage(error: unknown): string {
-  if (error instanceof NewApiVideoAdapterError) return error.message;
+  if (error instanceof ControlledImageMaterialError) {
+    switch (error.code) {
+      case 'project_unavailable':
+        return 'The controlled project is unavailable';
+      case 'material_not_found':
+        return 'The selected image material is unavailable';
+      case 'material_changed':
+        return 'The selected image material changed after confirmation';
+      case 'material_invalid':
+        return 'The selected image material is invalid';
+      case 'material_too_large':
+        return 'The selected image material exceeds the allowed size';
+      default:
+        return 'The selected image material is unavailable';
+    }
+  }
+  if (error instanceof NewApiVideoAdapterError) {
+    return allowlistedAdapterMessage(error.safeCode) ?? 'The NewAPI request is invalid';
+  }
   if (error instanceof NewApiRuntimeError) {
-    return 'The NewApi video request was rejected before acceptance';
+    return error.message;
   }
   return 'The NewApi video request could not be prepared';
+}
+
+function allowlistedAdapterMessage(safeCode: string): string | undefined {
+  switch (safeCode) {
+    case 'newapi.invalid_request':
+      return 'The NewAPI request is invalid';
+    case 'newapi.invalid_parameters':
+      return 'NewAPI rejected the request parameters';
+    case 'newapi.insufficient_balance':
+      return 'The NewAPI account balance is insufficient';
+    case 'newapi.authentication_failed':
+      return 'NewAPI authentication failed';
+    case 'newapi.model_not_found':
+      return 'The NewAPI model was not found';
+    case 'newapi.invalid_response':
+      return 'The NewAPI response was invalid';
+    case 'newapi.request_too_large':
+      return 'The NewAPI request exceeded the allowed size';
+    case 'newapi.route_mismatch':
+      return 'The NewAPI protocol binding does not match the request';
+    default:
+      return undefined;
+  }
 }
 
 function runtimeRetryability(
@@ -851,7 +1019,7 @@ function runtimeRetryability(
 function isInvalidResponse(error: unknown): boolean {
   return (
     error instanceof NewApiVideoAdapterError &&
-    error.safeCode === 'newApi.invalid_response'
+    error.safeCode === 'newapi.invalid_response'
   ) || (
     error instanceof NewApiRuntimeError &&
     error.code === 'invalid_response'
@@ -870,23 +1038,6 @@ function parseJsonObject(body: Uint8Array, label: string): Record<string, unknow
   }
 }
 
-function exactResponseRecord(
-  value: unknown,
-  required: readonly string[],
-  optional: readonly string[],
-  label: string
-): Record<string, unknown> {
-  if (!isRecord(value)) throw invalidResponse(`${label} must be an object`);
-  const allowed = new Set([...required, ...optional]);
-  if (
-    required.some((key) => !Object.prototype.hasOwnProperty.call(value, key)) ||
-    Object.keys(value).some((key) => !allowed.has(key))
-  ) {
-    throw invalidResponse(`${label} contains unsupported fields`);
-  }
-  return value;
-}
-
 function exactRequestRecord(
   value: unknown,
   required: readonly string[],
@@ -894,7 +1045,7 @@ function exactRequestRecord(
   label: string
 ): Record<string, unknown> {
   if (!isRecord(value)) {
-    throw invalidRequest('newApi.invalid_request', `${label} must be an object`);
+    throw invalidRequest('newapi.invalid_request', `${label} must be an object`);
   }
   const allowed = new Set([...required, ...optional]);
   if (
@@ -902,7 +1053,7 @@ function exactRequestRecord(
     Object.keys(value).some((key) => !allowed.has(key))
   ) {
     throw invalidRequest(
-      'newApi.invalid_request',
+      'newapi.invalid_request',
       `${label} contains unsupported fields`
     );
   }
@@ -924,62 +1075,90 @@ function requireOpaqueRequestId(value: unknown, label: string): string {
     value.length > 512 ||
     /[\u0000-\u001f\u007f]/u.test(value)
   ) {
-    throw invalidRequest('newApi.invalid_request', `${label} is invalid`);
+    throw invalidRequest('newapi.invalid_request', `${label} is invalid`);
   }
   return value;
 }
 
 function requireRemoteId(value: unknown): string {
+  const text = typeof value === 'number' && Number.isSafeInteger(value)
+    ? String(value)
+    : typeof value === 'string'
+      ? value.trim()
+      : '';
   if (
-    typeof value !== 'string' ||
-    value.length < 1 ||
-    value.length > 512 ||
-    !/^[A-Za-z0-9._-]+$/u.test(value)
+    text.length < 1 ||
+    text.length > 512 ||
+    !/^[A-Za-z0-9._:-]+$/u.test(text)
   ) {
     throw invalidResponse('NewApi operation ID is invalid');
   }
-  return value;
-}
-
-function optionalRemoteText(value: unknown, label: string): string {
-  if (
-    typeof value !== 'string' ||
-    value.length > 4_096 ||
-    /[\u0000-\u001f\u007f]/u.test(value)
-  ) {
-    throw invalidResponse(`NewApi ${label} is invalid`);
-  }
-  return value.trim();
+  return text;
 }
 
 function boundedPrompt(
   value: unknown
 ): string {
   if (typeof value !== 'string') {
-    throw invalidRequest('newApi.invalid_request', 'NewApi prompt is invalid');
+    throw invalidRequest('newapi.invalid_request', 'NewApi prompt is invalid');
   }
   const prompt = value.trim();
   if (prompt.length < 1 || prompt.length > 100_000) {
-    throw invalidRequest('newApi.invalid_request', 'NewApi prompt is invalid');
+    throw invalidRequest('newapi.invalid_request', 'NewApi prompt is invalid');
   }
   return prompt;
 }
 
-function nonNegativeInteger(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw invalidResponse(`NewApi ${label} must be a non-negative integer`);
-  }
-  return Number(value);
-}
-
 function taskStatus(value: unknown): ParsedNewApiTask['status'] {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    // Some gateways use numeric task codes.
+    if (value === 0 || value === 1) return 'queued';
+    if (value === 2 || value === 3) return 'in_progress';
+    if (value === 4 || value === 5) return 'completed';
+    if (value < 0 || value >= 6) return 'failed';
+  }
+  if (typeof value !== 'string') {
+    throw invalidResponse('NewApi task status is invalid');
+  }
+  const normalized = value.trim().toLowerCase();
   if (
-    value === 'queued' ||
-    value === 'in_progress' ||
-    value === 'completed' ||
-    value === 'failed'
+    normalized === 'queued' ||
+    normalized === 'pending' ||
+    normalized === 'submitted' ||
+    normalized === 'created' ||
+    normalized === 'not_start' ||
+    normalized === 'not-start'
   ) {
-    return value;
+    return 'queued';
+  }
+  if (
+    normalized === 'in_progress' ||
+    normalized === 'processing' ||
+    normalized === 'running' ||
+    normalized === 'working' ||
+    // UniCompAPI may emit transient "unknown" while upstream has not reported yet.
+    normalized === 'unknown'
+  ) {
+    return 'in_progress';
+  }
+  if (
+    normalized === 'completed' ||
+    normalized === 'succeeded' ||
+    normalized === 'success' ||
+    normalized === 'done' ||
+    normalized === 'successful'
+  ) {
+    return 'completed';
+  }
+  if (
+    normalized === 'failed' ||
+    normalized === 'failure' ||
+    normalized === 'error' ||
+    normalized === 'cancelled' ||
+    normalized === 'canceled' ||
+    normalized === 'expired'
+  ) {
+    return 'failed';
   }
   throw invalidResponse('NewApi task status is invalid');
 }
@@ -1004,5 +1183,5 @@ function invalidRequest(safeCode: string, message: string) {
 }
 
 function invalidResponse(message: string) {
-  return new NewApiVideoAdapterError('newApi.invalid_response', message, 'unknown');
+  return new NewApiVideoAdapterError('newapi.invalid_response', message, 'unknown');
 }

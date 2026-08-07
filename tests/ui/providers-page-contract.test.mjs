@@ -56,8 +56,10 @@ test('provider cards and connections use local brand icons with a safe fallback'
     'provider-package-vidu-v1'
   ]) assert.match(brandIcon, new RegExp(packageId));
   assert.match(brandIcon, /label\.slice\(0, 1\)/);
-  assert.match(brandIcon, /unicompapi\.png/);
+  assert.match(brandIcon, /assets\/brand\/unicomp-mark\.png/);
   assert.match(brandIcon, /vidu\.svg/);
+  assert.match(pageStyles, /data-provider-brand='unicomp'[\s\S]*?filter: invert\(1\)/);
+  assert.match(pageStyles, /data-theme='light'[\s\S]*?data-provider-brand='unicomp'[\s\S]*?filter: none/);
   assert.doesNotMatch(brandIcon, /https?:|fetch\(|window\.unicomp/);
 });
 
@@ -76,6 +78,10 @@ test('provider feedback uses a closable floating status card without changing ac
   assert.match(pageStyles, /@keyframes uc-provider-message-countdown/);
   assert.match(pageStyles, /transform: scaleX\(0\)/);
   assert.match(pageStyles, /prefers-reduced-motion: reduce/);
+  assert.match(pageStyles, /width: min\(var\(--uc-floating-notice-width\), calc\(100vw - var\(--uc-space-6\)\)\);/);
+  assert.match(pageStyles, /min-height: var\(--uc-floating-notice-min-height\);/);
+  assert.match(pageStyles, /padding: var\(--uc-floating-notice-padding\);/);
+  assert.doesNotMatch(shell, /useGlobalNotifications/);
 });
 
 test('provider page exposes the controlled framework mutations', () => {

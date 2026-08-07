@@ -70,6 +70,17 @@ export function isOpenAiCompatiblePackageId(packageId: string): boolean {
   return OPENAI_COMPATIBLE_PACKAGES.some((identity) => identity.packageId === packageId);
 }
 
+export function isOpenAiCompatiblePackageVersion(
+  packageId: string,
+  packageVersion: string
+): boolean {
+  return OPENAI_COMPATIBLE_PACKAGES.some(
+    (identity) =>
+      identity.packageId === packageId &&
+      identity.packageVersion === packageVersion
+  );
+}
+
 export function isOpenAiCompatibleEndpointPolicyId(policyId: string): boolean {
   return OPENAI_COMPATIBLE_PACKAGES.some(
     (identity) => identity.endpointPolicyId === policyId

@@ -4,6 +4,11 @@ import test from 'node:test';
 
 const page = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
 const calls = await readFile('src/pages/tasks/CallRecordsView.tsx', 'utf8');
+const styles = await readFile('src/styles/pages.css', 'utf8');
+const failureReasons = await readFile(
+  'src/ui/notifications/generation-failure-reasons.ts',
+  'utf8'
+);
 
 test('task center keeps tasks and call records as explicit segmented views', () => {
   assert.match(page, /role="tablist"/);
@@ -58,4 +63,34 @@ test('call records remain read-only and omit protected provider and content fact
     /originalInput|finalPrompt|promptSnapshot|outboundText|absolutePath|contentHash|routeSnapshot|packageId|adapterKey|protocolId|endpointUrl|endpointTemplate|endpointPolicy|credential|authorization|remoteOperation|signedUrl|rawResponse|stackTrace/i
   );
   assert.doesNotMatch(calls, /fetch\(|writeFile|createTask|retryTask|cancelTask|localStorage/);
+});
+
+test('registered call results use bounded local previews and never render provider image links', () => {
+  assert.match(calls, /storage\.getWorkDetails\(workId\)/);
+  assert.match(calls, /storage\.createWorkMediaHandle\(workId\)/);
+  assert.match(calls, /storage\.revealWorkFile\(workId\)/);
+  assert.match(calls, />\s*打开文件位置\s*</);
+  assert.match(calls, /已保存到当前项目/);
+  assert.doesNotMatch(calls, /resultImageUrl|图片链接/);
+  assert.match(styles, /\.uc-task-center__result-preview[\s\S]*?height: 220px/);
+  assert.match(styles, /\.uc-task-center__result-preview img,[\s\S]*?object-fit: contain/);
+  assert.match(styles, /\.uc-task-center__result-list \.uc-task-center__result-card[\s\S]*?overflow: hidden/);
+});
+
+test('call timeline shows theme-aware safe failure reasons instead of a hidden placeholder', () => {
+  assert.match(calls, /describeGenerationSafeCode\(event\.safeCode\)/);
+  assert.match(calls, /未记录可公开的具体失败原因/);
+  assert.match(calls, /技术代码：\{reason\.technicalCode\}/);
+  assert.doesNotMatch(calls, /详细原因已记录/);
+  assert.match(failureReasons, /authentication_failed: '服务商鉴权失败'/);
+  assert.match(failureReasons, /label: '未识别的服务商错误'/);
+  assert.match(styles, /\.uc-task-center__timeline-reason--danger \{[\s\S]*?var\(--uc-color-status-danger-bg\)/);
+  assert.match(styles, /\.uc-task-center__timeline-reason--warning \{[\s\S]*?var\(--uc-color-status-warning-bg\)/);
+});
+
+test('call records distinguish submission and generation lifecycle states', () => {
+  assert.match(calls, /failed_before_submission: \{ label: '提交失败'/);
+  assert.match(calls, /accepted: \{ label: '提交成功'/);
+  assert.match(calls, /running: \{ label: '生成中'/);
+  assert.match(calls, /failed: \{ label: '生成失败'/);
 });

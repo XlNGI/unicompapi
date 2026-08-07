@@ -127,6 +127,24 @@ describe('conversation response execution contract', () => {
     );
   });
 
+  it('accepts whitespace-only content deltas such as markdown newlines', () => {
+    const events = [
+      event(1, 'execution_created', t0),
+      event(2, 'stream_started', t1),
+      event(3, 'content_delta', t1, { contentDelta: '标题' }),
+      event(4, 'content_delta', t2, { contentDelta: '\n\n' }),
+      event(5, 'content_delta', t3, { contentDelta: '正文' }),
+      event(6, 'stream_completed', t3)
+    ];
+    const readModel = projectConversationResponseExecution({
+      execution: execution('completed'),
+      events
+    });
+    expect(readModel.content).toBe('标题\n\n正文');
+    expect(() => event(7, 'content_delta', t3, { contentDelta: '' })).toThrow('contentDelta');
+    expect(() => event(7, 'content_delta', t3, { contentDelta: '   ' })).not.toThrow();
+  });
+
   it('rejects media features, hidden provider fields and invalid stream transitions', () => {
     const valid = execution();
     expect(() => parseConversationResponseExecution({

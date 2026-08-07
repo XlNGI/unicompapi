@@ -14,8 +14,11 @@ import {
   ViduTransportFailure,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
+  createNewApiVideoAdapterFromRuntimes,
   type ImageOperationPorts,
   type ImageSubmissionControllerDependencies,
+  type NewApiSharedRuntime,
+  type NewApiVideoAdapter,
   type ProviderAsyncOperationPort,
   type StorageProjectSession,
   type ViduHttpTransport,
@@ -36,6 +39,7 @@ export class ElectronViduComposition {
   readonly registry: JsonProviderRegistryStore;
   readonly credentialVault: SecureCredentialVault;
   readonly providerPackage: ViduProviderPackage;
+  private newApiVideoAdapter: NewApiVideoAdapter | undefined;
 
   constructor(options: ElectronViduCompositionOptions) {
     const userDataPath = app.getPath('userData');
@@ -65,6 +69,7 @@ export class ElectronViduComposition {
     readonly getSession: () => StorageProjectSession | undefined;
     readonly imageMutations: ImageSubmissionControllerDependencies['mutations'];
     readonly videoMutations: VideoWorkspaceMutationCoordinator;
+    readonly newApiRuntime?: NewApiSharedRuntime;
   }): {
     readonly image: ImageOperationPorts;
     readonly imageResultReceiver: NonNullable<
@@ -75,6 +80,12 @@ export class ElectronViduComposition {
       taskId: string,
       context: ViduVideoOperationContext
     ) => void;
+    readonly attachNewApiVideoOperation?: (input: {
+      readonly routeSnapshot: unknown;
+      readonly providerOperationId: string;
+      readonly invocationAttemptId: string;
+    }) => Promise<void>;
+    readonly newApiVideoAdapter?: NewApiVideoAdapter;
     readonly videoResultReceiver: {
       receive(
         executionId: string
@@ -106,11 +117,21 @@ export class ElectronViduComposition {
       connections,
       operationContext: videoOperationContext
     });
-    const videoPort = createCompositeViduVideoPort(
+    const viduVideoPort = createCompositeViduVideoPort(
       videoOperationContext,
       referenceVideo,
       textVideo
     );
+    if (options.newApiRuntime && !this.newApiVideoAdapter) {
+      this.newApiVideoAdapter = createNewApiVideoAdapterFromRuntimes({
+        newApiRuntime: options.newApiRuntime,
+        credentialVault: this.credentialVault,
+        providerRegistry: this.registry,
+        materials
+      });
+    }
+    const newApiVideo = this.newApiVideoAdapter;
+    const videoPort = createCompositeVideoPort(newApiVideo, viduVideoPort);
     const imageRouter = new ImageOperationRouter(this.registry, {
       vidu_image_v1: images.imageV1,
       vidu_gemini_image_v2: images.geminiImageV2
@@ -169,6 +190,22 @@ export class ElectronViduComposition {
       rememberVideoOperation: (taskId, context) => {
         videoOperationContext.remember(taskId, context);
       },
+      ...(newApiVideo
+        ? {
+            attachNewApiVideoOperation: async (input: {
+              readonly routeSnapshot: unknown;
+              readonly providerOperationId: string;
+              readonly invocationAttemptId: string;
+            }) => {
+              await newApiVideo.attachOperation({
+                routeSnapshot: input.routeSnapshot,
+                providerOperationId: input.providerOperationId,
+                invocationAttemptId: input.invocationAttemptId as never
+              });
+            },
+            newApiVideoAdapter: newApiVideo
+          }
+        : {}),
       videoResultReceiver: {
         receive: (executionId) => videoReceiver.receive(executionId)
       }
@@ -210,6 +247,33 @@ class RegistryVideoOperationContext implements ViduVideoOperationContextPort {
     const binding = candidates[0];
     return { connectionId: binding.connectionId, binding };
   }
+}
+
+function createCompositeVideoPort(
+  newApiVideo: NewApiVideoAdapter | undefined,
+  viduVideo: ProviderAsyncOperationPort & VideoResultPort
+): ProviderAsyncOperationPort & VideoResultPort {
+  const select = async (providerOperationId: string) => {
+    if (newApiVideo?.knowsOperation(providerOperationId)) {
+      return newApiVideo;
+    }
+    return viduVideo;
+  };
+  return {
+    query: async (providerOperationId) =>
+      (await select(providerOperationId)).query(providerOperationId),
+    cancel: async (providerOperationId) =>
+      (await select(providerOperationId)).cancel(providerOperationId),
+    getCompletion: async (remoteOperationId) =>
+      (await select(remoteOperationId)).getCompletion(remoteOperationId),
+    listResults: async (remoteOperationId) =>
+      (await select(remoteOperationId)).listResults(remoteOperationId),
+    openDownload: async (remoteOperationId, remoteResultId) =>
+      (await select(remoteOperationId)).openDownload(
+        remoteOperationId,
+        remoteResultId
+      )
+  };
 }
 
 function createCompositeViduVideoPort(
