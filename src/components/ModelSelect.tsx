@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { SelectPicker } from 'rsuite';
 import { EmptyState } from './EmptyState';
 
@@ -33,6 +34,20 @@ export function ModelSelect({
   reasonLabels = {},
   onChange
 }: ModelSelectProps) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const workspace = document.querySelector<HTMLElement>('.workspace');
+    if (!workspace) return;
+    const handleScroll = () => setOpen(false);
+    workspace.addEventListener('scroll', handleScroll, {
+      capture: true,
+      passive: true
+    });
+    return () => workspace.removeEventListener('scroll', handleScroll, true);
+  }, [open]);
+
   if (options.length === 0) {
     return (
       <div className="uc-model-select">
@@ -70,8 +85,14 @@ export function ModelSelect({
           data={data}
           disabled={disabled}
           disabledItemValues={disabledItemValues}
+          listboxMaxHeight={320}
           onChange={(next) => onChange(next ?? '')}
+          onClose={() => setOpen(false)}
+          onOpen={() => setOpen(true)}
+          open={open}
+          placement="autoVerticalStart"
           placeholder="请选择模型"
+          preventOverflow
           searchable={false}
           value={value || null}
         />

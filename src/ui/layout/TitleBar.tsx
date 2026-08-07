@@ -4,6 +4,7 @@ import {
   LuFolderKanban,
   LuSettings
 } from 'react-icons/lu';
+import unicompMark from '../../assets/brand/unicomp-mark.png';
 import { ThemeSwitch } from '../../components/ThemeSwitch';
 import type { NavigationItemId } from '../navigation/navigationItems';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
@@ -49,9 +50,8 @@ export function TitleBar({
         <div
           aria-hidden="true"
           className="title-bar__brand-mark"
-          title="正式品牌标志待接入"
         >
-          U
+          <img alt="" src={unicompMark} />
         </div>
         <span className="title-bar__brand-name">UniComp AI</span>
       </div>

@@ -220,4 +220,57 @@ describe('GlobalReadModelController', () => {
       }
     });
   });
+
+  it('reports all project usage and free space for the current project disk without paths', async () => {
+    const root = await createRoot('unicomp-storage-summary-');
+    const missingParent = await createRoot('unicomp-storage-summary-missing-');
+    const missingRoot = path.join(missingParent, 'not-present');
+    await writeFile(path.join(root, 'project-data.bin'), '1234567');
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    const projectId = toProjectId('project-storage-summary');
+    await catalog.remember({
+      projectId,
+      projectName: 'Storage summary project',
+      rootDirectory: root
+    });
+    await catalog.remember({
+      projectId: toProjectId('project-storage-summary-missing'),
+      projectName: 'Missing storage project',
+      rootDirectory: missingRoot
+    });
+    const controller = new GlobalReadModelController(catalog, () => ({
+      projectId,
+      projectName: 'Storage summary project',
+      rootDirectory: root
+    }));
+
+    const first = await controller.getLocalStorageSummary();
+    expect(first).toMatchObject({
+      ok: true,
+      value: {
+        projectUsage: {
+          totalBytes: 7,
+          projectCount: 2,
+          measuredProjectCount: 1,
+          unavailableProjectCount: 1,
+          truncated: false
+        },
+        currentProject: {
+          projectId: 'project-storage-summary',
+          projectName: 'Storage summary project',
+          diskFreeBytes: expect.any(Number)
+        }
+      }
+    });
+    expect(JSON.stringify(first)).not.toContain(root);
+
+    await writeFile(path.join(root, 'more-project-data.bin'), '12345');
+    await expect(controller.getLocalStorageSummary()).resolves.toMatchObject({
+      value: { projectUsage: { totalBytes: 7 } }
+    });
+    controller.invalidateLocalStorageSummary();
+    await expect(controller.getLocalStorageSummary()).resolves.toMatchObject({
+      value: { projectUsage: { totalBytes: 12 } }
+    });
+  });
 });

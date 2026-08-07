@@ -8,7 +8,9 @@ const titleBar = await readFile('src/ui/layout/TitleBar.tsx', 'utf8');
 const windowControls = await readFile('src/ui/layout/WindowControls.tsx', 'utf8');
 const themeSwitch = await readFile('src/components/ThemeSwitch.tsx', 'utf8');
 const styles = await readFile('src/styles.css', 'utf8');
+const pageStyles = await readFile('src/styles/pages.css', 'utf8');
 const tokens = await readFile('src/styles/tokens.css', 'utf8');
+const brandMark = await readFile('src/assets/brand/unicomp-mark.png');
 
 test('keeps native macOS chrome and controlled Windows window actions', () => {
   assert.match(main, /frame: isMac/);
@@ -28,6 +30,15 @@ test('restores and focuses the existing window on desktop activation', () => {
   assert.match(main, /mainWindow\.show\(\);\s+mainWindow\.focus\(\)/);
   assert.match(main, /enter-full-screen/);
   assert.match(main, /leave-full-screen/);
+});
+
+test('uses the approved product mark in the title bar across both themes', () => {
+  assert.match(titleBar, /assets\/brand\/unicomp-mark\.png/);
+  assert.match(titleBar, /<img alt="" src=\{unicompMark\} \/>/);
+  assert.doesNotMatch(titleBar, /正式品牌标志待接入|>\s*U\s*</);
+  assert.deepEqual([...brandMark.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.match(styles, /\.title-bar__brand-mark img \{[\s\S]*?filter: invert\(1\)/);
+  assert.match(styles, /:root\[data-theme="light"\] \.title-bar__brand-mark img \{[\s\S]*?filter: none/);
 });
 
 test('development window does not force open the viewport inspection overlay', () => {
@@ -52,6 +63,8 @@ test('keeps the approved 800 by 720 compact desktop minimum usable', () => {
   assert.match(styles, /@media \(max-width: 900px\)/);
   assert.match(styles, /grid-template-columns: 200px minmax\(0, 1fr\)/);
   assert.match(styles, /\.nav-subitem > span:last-child \{[\s\S]*?white-space: nowrap/);
+  assert.match(pageStyles, /@media \(max-width: 1180px\)[\s\S]*?\.uc-image-workbench__project-strip \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(pageStyles, /\.uc-image-workbench__project-strip > p \{[\s\S]*?grid-column: 1 \/ -1/);
 });
 
 test('uses native platform font fallbacks and accessibility media preferences', () => {

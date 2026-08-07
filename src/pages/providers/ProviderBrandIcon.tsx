@@ -1,6 +1,6 @@
 import { SiBytedance, SiDeepseek, SiKuaishou } from 'react-icons/si';
 import { TbBrandOpenai } from 'react-icons/tb';
-import unicompApiLogo from '../../assets/provider-logos/unicompapi.png';
+import unicompApiLogo from '../../assets/brand/unicomp-mark.png';
 import viduLogo from '../../assets/provider-logos/vidu.svg';
 
 const providerBrands = {

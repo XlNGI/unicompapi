@@ -8,6 +8,10 @@
   --uc-shell-glow-primary: rgba(109, 93, 251, 0.16);
   --uc-shell-glow-secondary: rgba(105, 176, 255, 0.1);
   --uc-navigation-surface: rgba(14, 19, 29, 0.92);
+  --uc-floating-notice-width: 360px;
+  --uc-floating-notice-min-height: 52px;
+  --uc-floating-notice-padding: 10px 12px;
+  --uc-floating-notice-icon-size: 20px;
 }
 
 :root[data-theme="light"] {
@@ -96,11 +100,19 @@ button {
   height: 22px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: var(--uc-radius-6);
-  color: var(--uc-color-text-inverse);
-  background: linear-gradient(135deg, var(--uc-color-accent-fill), var(--uc-color-text-accent));
-  font-size: var(--uc-font-size-caption);
-  font-weight: 700;
+  color: var(--uc-color-text-primary);
+}
+
+.title-bar__brand-mark img {
+  display: block;
+  width: 18px;
+  height: 20px;
+  object-fit: contain;
+  filter: invert(1);
+}
+
+:root[data-theme="light"] .title-bar__brand-mark img {
+  filter: none;
 }
 
 .title-bar__brand-name {
@@ -313,7 +325,8 @@ button {
 .sidebar {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--uc-color-border-subtle);
   padding: 12px 10px;
   background: var(--uc-navigation-surface);
@@ -322,15 +335,76 @@ button {
 
 .nav-list {
   display: grid;
-  flex: 0 0 auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   gap: var(--uc-space-1);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--uc-space-1);
+  padding-bottom: var(--uc-space-3);
+  scrollbar-color: color-mix(in srgb, var(--uc-color-text-tertiary) 42%, transparent) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.nav-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nav-list::-webkit-scrollbar-track {
+  border-radius: var(--uc-radius-full);
+  background: transparent;
+}
+
+.nav-list::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  border: 2px solid transparent;
+  border-radius: var(--uc-radius-full);
+  background: color-mix(in srgb, var(--uc-color-text-tertiary) 42%, transparent);
+  background-clip: padding-box;
+}
+
+.nav-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--uc-color-text-accent) 62%, transparent);
+  background-clip: padding-box;
+}
+
+.nav-list::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.nav-list::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.sidebar__status-dock {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding-top: var(--uc-space-2);
+  background: var(--uc-navigation-surface);
+  box-shadow: 0 -8px 18px color-mix(in srgb, var(--uc-navigation-surface) 82%, transparent);
+}
+
+.sidebar__status-dock::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: var(--uc-space-4);
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--uc-navigation-surface));
+  content: '';
 }
 
 .global-status-monitor {
   display: grid;
   gap: var(--uc-space-2);
-  margin-top: auto;
-  padding-top: var(--uc-space-4);
+  margin: 0;
+  padding: 0;
 }
 
 .global-status-monitor__storage,
@@ -397,6 +471,73 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.global-status-monitor__storage-project {
+  display: grid;
+  min-width: 0;
+  border-top: 1px solid var(--uc-color-border-subtle);
+  padding-top: var(--uc-space-2);
+}
+
+.global-status-monitor__storage-project > span {
+  color: var(--uc-color-text-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.global-status-monitor__storage-project > strong,
+.global-status-monitor__storage-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-status-monitor__storage-project > strong {
+  color: var(--uc-color-text-primary);
+  font-size: var(--uc-font-size-caption);
+  line-height: 18px;
+}
+
+.global-status-monitor__storage-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--uc-color-text-secondary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.global-status-monitor__storage-state > span {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--uc-color-text-tertiary);
+}
+
+.global-status-monitor__storage-state--success {
+  color: var(--uc-color-status-success);
+}
+
+.global-status-monitor__storage-state--success > span {
+  background: var(--uc-color-status-success);
+}
+
+.global-status-monitor__storage-state--warning {
+  color: var(--uc-color-status-warning);
+}
+
+.global-status-monitor__storage-state--warning > span {
+  background: var(--uc-color-status-warning);
+}
+
+.global-status-monitor__storage-state--danger {
+  color: var(--uc-color-status-danger);
+}
+
+.global-status-monitor__storage-state--danger > span {
+  background: var(--uc-color-status-danger);
+}
+
 .global-status-monitor__toggle {
   justify-content: space-between;
   width: 100%;
@@ -420,7 +561,6 @@ button {
 
 .global-status-monitor__task-details {
   display: grid;
-  gap: var(--uc-space-3);
   border-top: 1px solid var(--uc-color-border-subtle);
   padding: var(--uc-space-3);
 }
@@ -452,35 +592,6 @@ button {
 
 .global-status-monitor__dot--completed {
   background: var(--uc-color-status-success);
-}
-
-.global-status-monitor__recent {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  border-top: 1px solid var(--uc-color-border-subtle);
-  padding-top: var(--uc-space-2);
-}
-
-.global-status-monitor__recent span,
-.global-status-monitor__recent small {
-  color: var(--uc-color-text-secondary);
-  font-size: 10px;
-}
-
-.global-status-monitor__recent strong {
-  overflow: hidden;
-  color: var(--uc-color-text-primary);
-  font-size: var(--uc-font-size-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.global-status-monitor__task-details .uc-button {
-  width: 100%;
-  min-height: 30px;
-  padding-inline: var(--uc-space-2);
-  font-size: 10px;
 }
 
 .nav-group {
@@ -692,14 +803,14 @@ button {
   position: fixed;
   z-index: 900;
   display: grid;
-  width: min(440px, calc(100vw - var(--uc-space-8)));
-  gap: var(--uc-space-3);
+  width: min(var(--uc-floating-notice-width), calc(100vw - var(--uc-space-6)));
+  gap: var(--uc-space-2);
   pointer-events: none;
 }
 
 .uc-global-notifications--top-end {
   top: calc(42px + var(--uc-space-4));
-  right: var(--uc-space-6);
+  right: var(--uc-space-4);
 }
 
 .uc-global-notifications--bottom-start {
@@ -716,14 +827,31 @@ button {
 }
 
 .uc-global-notifications__item .rs-notification {
+  --rs-notify-spacing: 10px;
+  --rs-notify-title-font-size: var(--uc-font-size-label);
+  --rs-notify-line-height: var(--uc-line-height-label);
+  --rs-notify-icon-size: var(--uc-floating-notice-icon-size);
+  --rs-notify-title-description-gap: 3px;
   width: 100%;
-  min-height: 72px;
+  min-height: var(--uc-floating-notice-min-height);
   border: 1px solid var(--uc-color-status-info-border);
-  border-left-width: 4px;
-  border-radius: var(--uc-radius-12);
-  padding: var(--uc-space-4);
+  border-left-width: 3px;
+  border-radius: var(--uc-radius-10);
+  padding: var(--uc-floating-notice-padding);
   background: var(--uc-color-surface-raised);
   box-shadow: var(--uc-shadow-lg);
+}
+
+.uc-global-notifications__item--compact {
+  width: auto;
+  min-width: 160px;
+  justify-self: end;
+}
+
+.uc-global-notifications__item--compact .rs-notification {
+  width: auto;
+  min-height: 44px;
+  padding: var(--uc-space-2) var(--uc-space-3);
 }
 
 .uc-global-notifications__item--success .rs-notification {
@@ -748,7 +876,8 @@ button {
 .uc-global-notifications__item p {
   margin: 0;
   color: var(--uc-color-text-secondary);
-  line-height: var(--uc-line-height-body);
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-caption);
   overflow-wrap: anywhere;
 }
 
@@ -762,7 +891,7 @@ button {
   bottom: 0;
   left: 0;
   z-index: 2;
-  height: 3px;
+  height: 2px;
   pointer-events: none;
 }
 
@@ -790,6 +919,8 @@ button {
   align-items: center;
   gap: var(--uc-space-2);
   color: var(--uc-color-text-primary);
+  font-size: var(--uc-font-size-label);
+  line-height: var(--uc-line-height-label);
   font-weight: 700;
 }
 
