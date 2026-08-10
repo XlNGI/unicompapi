@@ -150,6 +150,45 @@ test('model controls use exact registration and verified profile projections', (
   assert.doesNotMatch(source, /capability\.capability|protocolId ===|providerId === ['"]/);
 });
 
+test('model catalog provides local search by display name or exact model key', () => {
+  assert.match(manage, /useState\(''\)/);
+  assert.match(manage, /const visibleModels = useMemo/);
+  assert.match(manage, /model\.displayName/);
+  assert.match(manage, /model\.providerModelKey/);
+  assert.match(manage, /aria-label="搜索模型"/);
+  assert.match(manage, /placeholder="搜索模型名称或标识"/);
+  assert.match(manage, /visibleModels\.map/);
+  assert.match(manage, /没有匹配的模型/);
+  assert.match(manage, /setModelSearch\(''\)/);
+});
+
+test('manual model registration stays collapsed behind an accessible add icon', () => {
+  assert.match(manage, /const \[manualModelOpen, setManualModelOpen\] = useState\(false\)/);
+  assert.match(manage, /aria-controls="provider-manual-model-form"/);
+  assert.match(manage, /aria-expanded=\{manualModelOpen\}/);
+  assert.match(manage, /aria-label=\{manualModelOpen \? '收起手动添加模型' : '手动添加模型'\}/);
+  assert.match(manage, /LuCirclePlus/);
+  assert.match(manage, /LuX/);
+  assert.match(manage, /selectedConnection\.state === 'available' && manualModelOpen/);
+  assert.match(manage, /id="provider-manual-model-form"/);
+  assert.match(manage, /setManualModelOpen\(false\)/);
+  assert.match(pageStyles, /\.uc-provider-page__icon-button\[aria-expanded='true'\]/);
+});
+
+test('model summary stays docked at the page bottom as a compact always-visible row', () => {
+  assert.match(manage, /className="uc-provider-page__summary-features" aria-label="产品功能"/);
+  assert.match(manage, /selectedModel\.productFeatures\.map/);
+  assert.match(manage, /uc-provider-page__summary-feature/);
+  assert.match(manage, /selectedModel\.providerModelKey\.toLocaleLowerCase\('zh-CN'\) !==/);
+  assert.doesNotMatch(manage, /modelSummaryOpen|provider-model-summary-details|LuChevron/);
+  assert.match(pageStyles, /\.uc-provider-page__capabilities \{[\s\S]*?position: fixed;[\s\S]*?right: 0;[\s\S]*?bottom: 0;[\s\S]*?left: 200px;/);
+  assert.match(pageStyles, /border-radius: 0;/);
+  assert.match(pageStyles, /padding: var\(--uc-space-2\) calc\(var\(--uc-space-4\) \+ var\(--uc-space-6\)\);/);
+  assert.match(pageStyles, /\.uc-provider-page__capabilities \{[\s\S]*?background: var\(--uc-navigation-surface\);/);
+  assert.match(pageStyles, /padding-bottom: calc\(56px \+ var\(--uc-space-4\)\);/);
+  assert.match(pageStyles, /\.uc-provider-page__summary-features \{[\s\S]*?max-height: 42px;[\s\S]*?overflow: hidden;/);
+});
+
 test('deleted connections are never listed in the manage view', () => {
   assert.doesNotMatch(manage, /显示已删除/);
   assert.doesNotMatch(manage, /showDeleted/);

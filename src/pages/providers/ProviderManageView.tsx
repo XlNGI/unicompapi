@@ -1,9 +1,15 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { LuKeyRound, LuRefreshCw, LuShieldCheck, LuTrash2 } from 'react-icons/lu';
+import {
+  LuCirclePlus,
+  LuKeyRound,
+  LuRefreshCw,
+  LuShieldCheck,
+  LuTrash2,
+  LuX
+} from 'react-icons/lu';
 import { Input, Toggle } from 'rsuite';
 import { Button } from '../../components/Button';
-import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
 import type {
@@ -97,6 +103,8 @@ export function ProviderManageView({
   onDeleteConnection,
   onGoGallery
 }: ProviderManageViewProps) {
+  const [manualModelOpen, setManualModelOpen] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
   const selectedConnection = registry.connections.find(
     (item) => item.connectionId === selectedConnectionId
   );
@@ -107,17 +115,30 @@ export function ProviderManageView({
     template.packageId === selectedConnection?.packageId &&
     template.templateId === selectedConnection?.templateId
   );
-  const connectionModels = registry.models.filter(
-    (item) => item.connectionId === selectedConnectionId
+  const connectionModels = useMemo(
+    () => registry.models.filter((item) => item.connectionId === selectedConnectionId),
+    [registry.models, selectedConnectionId]
   );
   const selectedModel = connectionModels.find((item) => item.modelId === selectedModelId)
     ?? connectionModels[0];
 
   useEffect(() => {
     onSelectModel(connectionModels[0]?.modelId ?? '');
+    setManualModelOpen(false);
+    setModelSearch('');
     onResetReplacementCredentials();
     // connectionModels derived from registry; selection resets follow the connection id
   }, [selectedConnectionId]);
+
+  const visibleModels = useMemo(() => {
+    const term = modelSearch.trim().toLocaleLowerCase('zh-CN');
+    if (!term) return connectionModels;
+    return connectionModels.filter((model) =>
+      [model.displayName, model.providerModelKey].some((value) =>
+        value.toLocaleLowerCase('zh-CN').includes(term)
+      )
+    );
+  }, [connectionModels, modelSearch]);
 
   const visibleConnections = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('zh-CN');
@@ -241,6 +262,22 @@ export function ProviderManageView({
                 <div className="uc-provider-page__section-heading">
                   <div><h3 id="models-heading">模型目录</h3><p>{selectedTemplate?.displayName ?? '历史连接'}</p></div>
                   <div className="uc-provider-page__header-actions">
+                    {selectedConnection.state === 'available' && (
+                      <Button
+                        aria-controls="provider-manual-model-form"
+                        aria-expanded={manualModelOpen}
+                        aria-label={manualModelOpen ? '收起手动添加模型' : '手动添加模型'}
+                        className="uc-provider-page__icon-button"
+                        disabled={busy}
+                        onClick={() => setManualModelOpen((open) => !open)}
+                        title={manualModelOpen ? '收起手动添加模型' : '手动添加模型'}
+                        variant="ghost"
+                      >
+                        {manualModelOpen
+                          ? <LuX aria-hidden="true" />
+                          : <LuCirclePlus aria-hidden="true" />}
+                      </Button>
+                    )}
                     <Button
                       disabled={busy || selectedTemplate?.validationAction !== 'available'}
                       onClick={() => providersApi && void runAction(
@@ -268,8 +305,8 @@ export function ProviderManageView({
                   </div>
                 </div>
 
-                {selectedConnection.state === 'available' && (
-                  <form className="uc-provider-page__inline-form" onSubmit={onRegisterModel}>
+                {selectedConnection.state === 'available' && manualModelOpen && (
+                  <form className="uc-provider-page__inline-form" id="provider-manual-model-form" onSubmit={onRegisterModel}>
                     <div className="uc-provider-page__manual-model-copy">
                       <strong>手动登记模型</strong>
                       <small>目录同步失败或没有自动列出时，可填写远端模型标识直接登记。</small>
@@ -289,35 +326,60 @@ export function ProviderManageView({
                     title="模型目录为空"
                   />
                 ) : (
-                  <div className="uc-provider-page__model-list">
-                    {connectionModels.map((model) => (
-                      <div className="uc-provider-page__model" data-selected={selectedModel?.modelId === model.modelId || undefined} key={model.modelId}>
-                        <button aria-pressed={selectedModel?.modelId === model.modelId} className="uc-provider-page__model-select" onClick={() => onSelectModel(model.modelId)} type="button">
-                          <span><strong>{model.displayName}</strong><small>{model.providerModelKey}</small></span>
-                          <span>{model.profileStatus ? profileLabels[model.profileStatus] : '无功能配置'}</span>
-                        </button>
-                        <StatusPill tone={model.enabled ? 'success' : 'neutral'}>{model.enabled ? '已启用' : '已停用'}</StatusPill>
-                        <Toggle
-                          aria-label={`${model.displayName}启用状态`}
-                          checked={model.enabled}
-                          disabled={busy || selectedConnection.state === 'deleted'}
-                          onChange={() => providersApi && void runAction(
-                            () => providersApi.setModelEnabled(model.modelId, !model.enabled),
-                            model.enabled ? '模型已停用' : '模型已启用',
-                            selectedConnection.connectionId
-                          )}
-                        />
-                        <Button
-                          aria-label={`删除模型 ${model.displayName}`}
-                          disabled={busy || selectedConnection.state === 'deleted'}
-                          onClick={() => onDeleteModel(model.modelId)}
-                          variant="ghost"
-                        >
-                          <LuTrash2 aria-hidden="true" /> 删除
-                        </Button>
+                  <>
+                    <div className="uc-provider-page__model-search-row">
+                      <Input
+                        aria-label="搜索模型"
+                        className="uc-provider-page__model-search"
+                        onChange={(value) => setModelSearch(value)}
+                        placeholder="搜索模型名称或标识"
+                        type="search"
+                        value={modelSearch}
+                      />
+                      <span className="uc-provider-page__muted" role="status">
+                        {modelSearch.trim()
+                          ? `${visibleModels.length} / ${connectionModels.length} 个模型`
+                          : `${connectionModels.length} 个模型`}
+                      </span>
+                    </div>
+                    {visibleModels.length === 0 ? (
+                      <EmptyState
+                        description="请尝试模型名称或精确标识的其他关键词。"
+                        icon="型"
+                        title="没有匹配的模型"
+                      />
+                    ) : (
+                      <div className="uc-provider-page__model-list">
+                        {visibleModels.map((model) => (
+                          <div className="uc-provider-page__model" data-selected={selectedModel?.modelId === model.modelId || undefined} key={model.modelId}>
+                            <button aria-pressed={selectedModel?.modelId === model.modelId} className="uc-provider-page__model-select" onClick={() => onSelectModel(model.modelId)} type="button">
+                              <span><strong>{model.displayName}</strong><small>{model.providerModelKey}</small></span>
+                              <span>{model.profileStatus ? profileLabels[model.profileStatus] : '无功能配置'}</span>
+                            </button>
+                            <StatusPill tone={model.enabled ? 'success' : 'neutral'}>{model.enabled ? '已启用' : '已停用'}</StatusPill>
+                            <Toggle
+                              aria-label={`${model.displayName}启用状态`}
+                              checked={model.enabled}
+                              disabled={busy || selectedConnection.state === 'deleted'}
+                              onChange={() => providersApi && void runAction(
+                                () => providersApi.setModelEnabled(model.modelId, !model.enabled),
+                                model.enabled ? '模型已停用' : '模型已启用',
+                                selectedConnection.connectionId
+                              )}
+                            />
+                            <Button
+                              aria-label={`删除模型 ${model.displayName}`}
+                              disabled={busy || selectedConnection.state === 'deleted'}
+                              onClick={() => onDeleteModel(model.modelId)}
+                              variant="ghost"
+                            >
+                              <LuTrash2 aria-hidden="true" /> 删除
+                            </Button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
               </section>
             )}
@@ -366,24 +428,39 @@ export function ProviderManageView({
         )}
       </section>
 
-      <aside className="uc-provider-page__capabilities" aria-label="模型概要">
-        <div className="uc-provider-page__panel-heading"><div><h2>模型概要</h2><p>精确功能配置</p></div></div>
-        {!selectedModel ? (
-          <EmptyState description="从模型目录选择模型。" icon="模" title="未选择模型" />
-        ) : (
-          <>
-            <Card className="uc-provider-page__selected-model">
-              <div><strong>{selectedModel.displayName}</strong><small>{selectedModel.providerModelKey}</small></div>
-              <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>{selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无功能配置'}</StatusPill>
-            </Card>
-            <section className="uc-provider-page__capability-section">
-              <h3>产品功能</h3>
-              {selectedModel.productFeatures?.length ? selectedModel.productFeatures.map((feature) => (
-                <div className="uc-provider-page__capability" key={feature}><span>{productFeatureLabels[feature] ?? '其他功能'}</span><StatusPill tone="info">已配置</StatusPill></div>
-              )) : <p>没有可公开的精确功能配置。</p>}
-            </section>
-          </>
-        )}
+      <aside aria-label="模型概要" className="uc-provider-page__capabilities">
+        <div className="uc-provider-page__summary-bar">
+          <div className="uc-provider-page__summary-heading">
+            <h2>模型概要</h2>
+            {selectedModel ? (
+              <p>
+                <strong>{selectedModel.displayName}</strong>
+                {selectedModel.providerModelKey.toLocaleLowerCase('zh-CN') !==
+                  selectedModel.displayName.toLocaleLowerCase('zh-CN') && (
+                  <span>{selectedModel.providerModelKey}</span>
+                )}
+              </p>
+            ) : <p><span>从模型目录选择模型</span></p>}
+          </div>
+          <div className="uc-provider-page__summary-actions">
+            {selectedModel && (
+              <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>
+                {selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无功能配置'}
+              </StatusPill>
+            )}
+          </div>
+          <div className="uc-provider-page__summary-features" aria-label="产品功能">
+            {selectedModel?.productFeatures?.length ? selectedModel.productFeatures.map((feature) => (
+              <span className="uc-provider-page__summary-feature" key={feature}>
+                {productFeatureLabels[feature] ?? '其他功能'}
+              </span>
+            )) : (
+              <span className="uc-provider-page__muted">
+                {selectedModel ? '没有可公开的精确功能配置' : '未选择模型'}
+              </span>
+            )}
+          </div>
+        </div>
       </aside>
     </div>
   );
