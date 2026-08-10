@@ -159,7 +159,7 @@ describe('video submission task contracts', () => {
       confirmedAt
     });
     expect(task.submission.assetIds).toEqual(['asset-image-to-video-source']);
-    expect(task.submission.video.materials).toEqual([{
+    expect(task.submission.video?.materials).toEqual([{
       assetId: 'asset-image-to-video-source',
       mediaKind: 'image',
       role: 'image_to_video_source',

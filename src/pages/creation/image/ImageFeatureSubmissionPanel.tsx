@@ -596,9 +596,6 @@ export function ImageFeatureSubmissionPanel({
             Record<string, string | number | boolean | readonly string[]>
           >)
         };
-        if (parameterValues.size === undefined) {
-          parameterValues.size = QUICK_IMAGE_DEFAULT_SIZE;
-        }
         const result = await api.generateQuickImage(
           prompt,
           selectedCandidate.candidateId,
@@ -824,8 +821,6 @@ function costLabel(cost: { readonly state: string; readonly summary?: string }):
   return '未知，以服务商账单为准';
 }
 
-const QUICK_IMAGE_DEFAULT_SIZE = '1024x1024';
-
 function defaultQuickImageParameterValues(
   fields: readonly {
     readonly fieldId: string;
@@ -837,9 +832,7 @@ function defaultQuickImageParameterValues(
   const values: Record<string, string | number | boolean> = {};
   for (const field of fields) {
     if (field.fieldId === 'size' && field.options && field.options.length > 0) {
-      values.size = field.options.includes(QUICK_IMAGE_DEFAULT_SIZE)
-        ? QUICK_IMAGE_DEFAULT_SIZE
-        : (field.options[0] as string | number | boolean);
+      values.size = field.options[0] as string | number | boolean;
       continue;
     }
     const required = field.required === true || field.exposure === 'user_required';
@@ -848,10 +841,6 @@ function defaultQuickImageParameterValues(
     if (typeof first === 'string' || typeof first === 'number' || typeof first === 'boolean') {
       values[field.fieldId] = first;
     }
-  }
-  // Even if schema options are missing, quick image still needs a size for UniCompAPI.
-  if (values.size === undefined && fields.some((field) => field.fieldId === 'size')) {
-    values.size = QUICK_IMAGE_DEFAULT_SIZE;
   }
   return values;
 }

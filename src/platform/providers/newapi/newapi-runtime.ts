@@ -213,6 +213,7 @@ export class NewApiSharedRuntime {
     readonly connection: ProviderConnection;
     readonly credentials: StructuredCredentialRecord;
     readonly body: Uint8Array;
+    readonly path?: 'generations' | 'edits';
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
   }): Promise<Uint8Array> {
@@ -223,7 +224,7 @@ export class NewApiSharedRuntime {
       protocolId: NEWAPI_IMAGE_PROTOCOL_ID,
       operation: 'image_submit',
       method: 'POST',
-      pathSegments: ['images', 'generations'],
+      pathSegments: ['images', input.path ?? 'generations'],
       body: input.body,
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,

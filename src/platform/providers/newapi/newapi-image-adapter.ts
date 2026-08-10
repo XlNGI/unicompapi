@@ -4,7 +4,9 @@ import { Readable } from 'node:stream';
 import {
   createProviderUsageObservation,
   parseProviderExecutionRouteSnapshot,
+  toAssetId,
   toIsoTimestamp,
+  toProjectId,
   validateParameterSchemaV2,
   validateParameterValues,
   type IsoTimestamp,
@@ -34,6 +36,7 @@ import {
   isOpenAiCompatiblePackageId
 } from './openai-compatible-identity';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
+import type { ControlledImageMaterialPort } from '../vidu/controlled-image-material';
 
 const maximumResultBytes = 128 * 1024 * 1024;
 /** Allowlisted images/generations body fields. Edit/multi-image inputs stay excluded. */
@@ -54,7 +57,8 @@ const supportedParameterFields = new Set([
   'user_id',
   'extra_fields',
   'sequential_image_generation',
-  'sequential_image_generation_options'
+  'sequential_image_generation_options',
+  'input_fidelity'
 ]);
 
 export interface NewApiImageCredentialResolverPort {
@@ -104,6 +108,7 @@ export interface NewApiImageDispatchRequestV1 {
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly projectId: string;
   readonly prompt: string;
+  readonly assetId?: string;
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
 }
 
@@ -121,7 +126,8 @@ export class NewApiImageAdapter {
         `newapi-image-usage-${randomUUID()}` as ProviderUsageObservationId
     },
     private readonly now: () => IsoTimestamp = () =>
-      toIsoTimestamp(new Date().toISOString())
+      toIsoTimestamp(new Date().toISOString()),
+    private readonly materials?: ControlledImageMaterialPort
   ) {}
 
   async submit(input: {
@@ -140,7 +146,11 @@ export class NewApiImageAdapter {
       ]);
       const request = parseDispatchRequest(input.request, route.projectId, schema);
       attemptId = request.invocationAttemptId;
-      const body = serializeImageRequest(route.providerModelKey, request);
+      const body = await serializeImageRequest(
+        route,
+        request,
+        this.materials
+      );
       const response = await this.credentials.useCredential(
         {
           connectionId: route.connectionId,
@@ -150,6 +160,9 @@ export class NewApiImageAdapter {
           connection,
           credentials: credential,
           body,
+          path: route.productFeature === 'image_edit'
+            ? 'edits'
+            : 'generations',
           signal: input.signal,
           beforeRequestStarted: async () => {
             await input.beforeRequestStarted?.();
@@ -257,7 +270,8 @@ export class NewApiImageAdapter {
       !candidate ||
       schema.schemaId !== route.parameterSchemaId ||
       schema.revision !== route.parameterSchemaRevision ||
-      schema.productFeature !== 'text_to_image' ||
+        (schema.productFeature !== 'text_to_image' &&
+          schema.productFeature !== 'image_edit') ||
       schema.fields.some((field) => !supportedParameterFields.has(field.fieldId))
     ) {
       throw invalidRequest(
@@ -357,8 +371,11 @@ function validateRoute(value: unknown) {
     route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
     !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||
     route.endpointPolicyRevision !== 1 ||
-    route.productFeature !== 'text_to_image' ||
-    route.internalPurpose !== 'image_generation' ||
+      (route.productFeature !== 'text_to_image' &&
+        route.productFeature !== 'image_edit') ||
+      (route.productFeature === 'text_to_image'
+        ? route.internalPurpose !== 'image_generation'
+        : route.internalPurpose !== 'image_editing') ||
     route.parameterSchemaRevision !== 1 ||
     route.resultSchemaId !== NEWAPI_IMAGE_RESULT_SCHEMA_ID ||
     route.resultSchemaRevision !== 1 ||
@@ -384,7 +401,7 @@ function parseDispatchRequest(
   const item = exactRequestRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    ['taskId', 'executionId'],
+    ['taskId', 'executionId', 'assetId'],
     'NewAPI image request'
   );
   const projectId = requireOpaqueId(item.projectId, 'project ID');
@@ -397,6 +414,18 @@ function parseDispatchRequest(
   } catch {
     throw invalidRequest('newapi.invalid_request', 'The image parameter projection is invalid');
   }
+  const assetId = item.assetId === undefined
+    ? undefined
+    : requireOpaqueId(item.assetId, 'asset ID');
+  if (
+    (schema.productFeature === 'text_to_image' && assetId !== undefined) ||
+    (schema.productFeature === 'image_edit' && assetId === undefined)
+  ) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'The NewAPI image input does not match the product feature'
+    );
+  }
   return {
     invocationAttemptId: requireOpaqueId(
       item.invocationAttemptId,
@@ -404,19 +433,41 @@ function parseDispatchRequest(
     ) as ProviderInvocationAttemptId,
     projectId,
     prompt: boundedUserText(item.prompt, 'prompt', 100_000),
+    ...(assetId === undefined ? {} : { assetId }),
     parameterValues
   };
 }
 
-function serializeImageRequest(
-  providerModelKey: string,
-  request: NewApiImageDispatchRequestV1
-): Uint8Array {
+async function serializeImageRequest(
+  route: ReturnType<typeof validateRoute>,
+  request: NewApiImageDispatchRequestV1,
+  materials: ControlledImageMaterialPort | undefined
+): Promise<Uint8Array> {
   const body = {
-    model: providerModelKey,
+    model: route.providerModelKey,
     prompt: request.prompt,
     ...request.parameterValues
   };
+  if (route.productFeature === 'image_edit') {
+    if (!request.assetId || !materials) {
+      throw invalidRequest(
+        'newapi.invalid_request',
+        'Image editing requires one controlled input image'
+      );
+    }
+    const material = await materials.resolve({
+      projectId: toProjectId(request.projectId),
+      assetId: toAssetId(request.assetId)
+    });
+    if (!material || !material.mimeType.startsWith('image/')) {
+      throw invalidRequest(
+        'newapi.invalid_request',
+        'Image editing requires one controlled image asset'
+      );
+    }
+    (body as Record<string, unknown>).image =
+      `data:${material.mimeType};base64,${material.base64}`;
+  }
   const bytes = new TextEncoder().encode(JSON.stringify(body));
   if (bytes.byteLength < 1 || bytes.byteLength > 2 * 1024 * 1024) {
     throw invalidRequest('newapi.request_too_large', 'The NewAPI image request is too large');

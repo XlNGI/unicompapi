@@ -11,7 +11,8 @@ import {
   NodeProjectStorage,
   VideoReferenceMediaController,
   VideoWorkspaceMutationCoordinator,
-  projectStoragePaths
+  projectStoragePaths,
+  toProjectRelativePath
 } from '../../src/platform';
 import {
   createEmptyVideoWorkspaceDraft,
@@ -337,7 +338,7 @@ describe('VideoReferenceMediaController', () => {
     const { createHash } = await import('node:crypto');
     const fixture = await createFixture('image_to_video');
     const projectRoot = path.join(fixture.root, 'project');
-    const relativePath = 'files/results/work-result.png';
+    const relativePath = toProjectRelativePath('files/results/work-result.png');
     const absolutePath = path.join(projectRoot, relativePath);
     const bytes = pngHeader(640, 480);
     await mkdir(path.dirname(absolutePath), { recursive: true });

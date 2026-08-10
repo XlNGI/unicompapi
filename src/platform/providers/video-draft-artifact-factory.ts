@@ -7,16 +7,18 @@ import {
   toDraftId,
   toExecutionId,
   toIsoTimestamp,
-  toTaskId,
-  type ExecutionId,
-  type ProviderAccessCategory,
-  type Task,
-  type TaskId,
-  type VideoSubmissionConfirmationSnapshot,
-  type VideoWorkspaceDraft,
-  type VideoWorkspaceRepository
+  toTaskId
 } from '../../domain';
-import {
+import type {
+  ExecutionId,
+  ProviderAccessCategory,
+  Task,
+  TaskId,
+  VideoSubmissionConfirmationSnapshot,
+  VideoWorkspaceDraft,
+  VideoWorkspaceRepository
+} from '../../domain';
+import type {
   JsonExecutionRepository,
   JsonTaskRepository
 } from '../repositories';

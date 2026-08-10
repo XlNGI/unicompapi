@@ -8,7 +8,10 @@ import {
   type ProductFeature,
   type UsageSchemaV1
 } from '../../domain';
-import { routeOpenAiCompatibleImageProfilesForEnabledModels } from './newapi/openai-compatible-image-routing';
+import {
+  routeOpenAiCompatibleImageEditProfilesForEnabledModels,
+  routeOpenAiCompatibleImageProfilesForEnabledModels
+} from './newapi/openai-compatible-image-routing';
 import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/openai-compatible-video-routing';
 import type { ProviderPackageRegistry } from './provider-package-registry';
 import type { JsonProviderRegistryStore } from './provider-registry';
@@ -77,6 +80,17 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
     if (subject.productFeature === 'text_to_image') {
       const routed = await this.registry.mutate((current) => {
         const next = routeOpenAiCompatibleImageProfilesForEnabledModels(
+          current,
+          this.packages,
+          toIsoTimestamp(new Date().toISOString())
+        );
+        return { snapshot: next, result: next };
+      });
+      snapshot = routed;
+    }
+    if (subject.productFeature === 'image_edit') {
+      const routed = await this.registry.mutate((current) => {
+        const next = routeOpenAiCompatibleImageEditProfilesForEnabledModels(
           current,
           this.packages,
           toIsoTimestamp(new Date().toISOString())

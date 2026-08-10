@@ -40,7 +40,6 @@ import {
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
-  NEWAPI_PROVIDER_PACKAGE_VERSION,
   NewApiChatAdapter,
   type NewApiConnectionResolverPort,
   type NewApiConversationLifecyclePort,

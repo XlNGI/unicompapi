@@ -48,7 +48,7 @@ import {
   VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
   createViduModelContract,
   frozenViduGeminiImageModelKeys,
-  frozenViduModelKeys,
+  type FrozenViduModelKey,
   frozenViduReferenceVideoModelKeys,
   frozenViduTextVideoModelKeys
 } from '../../src/platform';
@@ -253,7 +253,7 @@ export function createUserViduRegistryRecords(): ViduUserRegistryRecords {
     (binding) => binding.id === VIDU_USER_PROTOCOL_BINDING_IDS.referenceImageV2
   )!;
   const definitions: readonly {
-    readonly providerModelKey: (typeof frozenViduModelKeys)[number];
+    readonly providerModelKey: FrozenViduModelKey;
     readonly modelId: string;
     readonly binding: ProviderProtocolBinding;
     readonly purposes: readonly ProviderOperationPurpose[];

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createModelCapabilityEvidence,
+  createProvider,
   createProviderConnection,
   createProviderModel,
   createProviderProtocolBinding,
@@ -121,6 +122,8 @@ function baseSnapshot(): ProviderRegistrySnapshot {
     connectionId,
     providerModelKey: 'video-capable-model',
     displayName: 'Video Capable',
+    protocolBindingId: toProtocolBindingId('protocol-binding-chat'),
+    mediaKind: 'unknown',
     enabled: true,
     catalogState: 'present',
     revision: 1,
@@ -151,13 +154,15 @@ function baseSnapshot(): ProviderRegistrySnapshot {
     recordedAt: now
   });
   return {
-    providers: [{
+    schemaVersion: 2,
+    providers: [createProvider({
       id: providerId,
       name: 'UniCompAPI',
-      kind: 'third_party',
+      accessCategory: 'online',
+      identityState: 'verified',
       createdAt: now,
       updatedAt: now
-    }],
+    })],
     connections: [connection],
     models: [model],
     capabilities: [capability],

@@ -66,7 +66,7 @@ import {
   VIDU_REFERENCE_IMAGE_V2_PROTOCOL_ID,
   VIDU_REFERENCE_IMAGE_V2_PROTOCOL_VERSION,
   ViduPackagedParameterSchemaResolver,
-  ViduProviderPackage,
+  type ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
   type ControlledImageMaterialPort,
   type ViduUsageObservationSinkPort
@@ -167,7 +167,10 @@ export function createImageFeatureDispatchBridge(
       credentials,
       parameterSchemas,
       noopUsage,
-      options.newApiDownloads
+      options.newApiDownloads,
+      undefined,
+      undefined,
+      options.materials
     );
     adapters.push(
       wrapMediaAdapter({

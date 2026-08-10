@@ -905,8 +905,49 @@ function serializeRequest(
   if (typeof parameters.top_p === 'number') {
     body.top_p = parameters.top_p;
   }
-  if (typeof parameters.reasoning_effort === 'string' && parameters.reasoning_effort.trim()) {
+  const modelKey = route.providerModelKey ?? '';
+  const allowReasoningEffort = !modelKey.startsWith('deepseek-') ||
+    modelKey === 'deepseek-v4-flash' || modelKey === 'deepseek-v4-pro';
+  if (
+    allowReasoningEffort &&
+    typeof parameters.reasoning_effort === 'string' &&
+    parameters.reasoning_effort.trim()
+  ) {
     body.reasoning_effort = parameters.reasoning_effort.trim();
+  }
+  for (const key of [
+    'n',
+    'presence_penalty',
+    'frequency_penalty',
+    'seed',
+    'top_k'
+  ] as const) {
+    if (typeof parameters[key] === 'number') body[key] = parameters[key];
+  }
+  for (const key of [
+    'response_format',
+    'thinking',
+    'chat_template_kwargs',
+    'metadata'
+  ] as const) {
+    if (
+      key === 'thinking' &&
+      !modelKey.startsWith('glm-') &&
+      !modelKey.startsWith('qwen3-')
+    ) continue;
+    if (key === 'chat_template_kwargs' && !modelKey.startsWith('qwen3-')) continue;
+    if (parameters[key] && typeof parameters[key] === 'object') {
+      body[key] = parameters[key];
+    }
+  }
+  if (modelKey.startsWith('qwen3-') && typeof parameters.enable_thinking === 'boolean') {
+    body.enable_thinking = parameters.enable_thinking;
+  }
+  if (typeof parameters.tool_choice === 'string' && parameters.tool_choice.trim()) {
+    body.tool_choice = parameters.tool_choice.trim();
+  }
+  if (typeof parameters.parallel_tool_calls === 'boolean') {
+    body.parallel_tool_calls = parameters.parallel_tool_calls;
   }
   if (typeof parameters.stop === 'string' && parameters.stop.trim()) {
     body.stop = parameters.stop.trim();

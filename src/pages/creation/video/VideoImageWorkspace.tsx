@@ -145,7 +145,6 @@ export function VideoImageWorkspace({
       }
     });
     // Intentionally only depends on absence of featureSelection.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.draftId, draft.featureSelection]);
 
   function changePrompt(field: 'originalInput' | 'finalPrompt', value: string) {

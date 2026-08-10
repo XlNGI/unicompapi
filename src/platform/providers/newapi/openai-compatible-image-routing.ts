@@ -16,10 +16,17 @@ import {
 import type { ProviderPackageRegistry } from '../provider-package-registry';
 import type { ProviderRegistrySnapshot } from '../provider-registry';
 import {
+  createOpenAiCompatibleDefaultImageEditDefinition,
   createOpenAiCompatibleDefaultImageDefinition,
   NEWAPI_IMAGE_ADAPTER_ID
 } from './newapi-contracts';
 import { isOpenAiCompatiblePackageId } from './openai-compatible-identity';
+import {
+  isKnownUniCompApiModel,
+  isUniCompApiPackage,
+  uniCompApiSupportsImage,
+  uniCompApiSupportsImageEdit
+} from './unicompapi-model-capabilities';
 
 /**
  * Soft image routing for OpenAI-compatible packages (NewAPI / UniCompAPI).
@@ -32,6 +39,57 @@ export function routeOpenAiCompatibleImageProfile(
   packages: ProviderPackageRegistry,
   model: ProviderModel,
   now: IsoTimestamp = toIsoTimestamp(new Date().toISOString())
+): {
+  readonly snapshot: ProviderRegistrySnapshot;
+  readonly model: ProviderModel;
+  readonly profileId?: string;
+  readonly state: 'attached' | 'already_attached' | 'skipped';
+} {
+  return routeOpenAiCompatibleImageFeatureProfile(
+    snapshot,
+    packages,
+    model,
+    'text_to_image',
+    now
+  );
+}
+
+function isUniCompApiPackageForModelFeature(
+  feature: 'text_to_image' | 'image_edit',
+  snapshot: ProviderRegistrySnapshot,
+  model: ProviderModel
+): boolean {
+  if (feature !== 'image_edit') return false;
+  const connection = snapshot.connections.find((candidate) => candidate.id === model.connectionId);
+  return Boolean(connection?.packageId && isUniCompApiPackage(connection.packageId));
+}
+
+export function routeOpenAiCompatibleImageEditProfile(
+  snapshot: ProviderRegistrySnapshot,
+  packages: ProviderPackageRegistry,
+  model: ProviderModel,
+  now: IsoTimestamp = toIsoTimestamp(new Date().toISOString())
+): {
+  readonly snapshot: ProviderRegistrySnapshot;
+  readonly model: ProviderModel;
+  readonly profileId?: string;
+  readonly state: 'attached' | 'already_attached' | 'skipped';
+} {
+  return routeOpenAiCompatibleImageFeatureProfile(
+    snapshot,
+    packages,
+    model,
+    'image_edit',
+    now
+  );
+}
+
+function routeOpenAiCompatibleImageFeatureProfile(
+  snapshot: ProviderRegistrySnapshot,
+  packages: ProviderPackageRegistry,
+  model: ProviderModel,
+  feature: 'text_to_image' | 'image_edit',
+  now: IsoTimestamp
 ): {
   readonly snapshot: ProviderRegistrySnapshot;
   readonly model: ProviderModel;
@@ -55,6 +113,19 @@ export function routeOpenAiCompatibleImageProfile(
     return { snapshot, model, state: 'skipped' };
   }
   if (
+    feature === 'image_edit' &&
+    (!isUniCompApiPackageForModelFeature(feature, snapshot, model) ||
+      !isKnownUniCompApiModel(model.providerModelKey))
+  ) {
+    return { snapshot, model, state: 'skipped' };
+  }
+  const supportsFeature = feature === 'text_to_image'
+    ? uniCompApiSupportsImage(connection.packageId, model.providerModelKey)
+    : uniCompApiSupportsImageEdit(connection.packageId, model.providerModelKey);
+  if (!supportsFeature) {
+    return { snapshot, model, state: 'skipped' };
+  }
+  if (
     connection.state !== 'available' ||
     connection.identityState !== 'verified' ||
     connection.credentialState !== 'valid'
@@ -73,10 +144,10 @@ export function routeOpenAiCompatibleImageProfile(
     candidate.modelId === model.id &&
     candidate.status === 'verified' &&
     candidate.adapterKey === NEWAPI_IMAGE_ADAPTER_ID &&
-    candidate.features.some((feature) => feature.productFeature === 'text_to_image')
+    candidate.features.some((item) => item.productFeature === feature)
   );
   if (existingImageProfile) {
-    const ensured = ensureImageGenerationCapabilityEvidence(snapshot, model, now);
+    const ensured = ensureImageCapabilityEvidence(snapshot, model, feature, now);
     const nextModel = ensured.snapshot.models.find((candidate) => candidate.id === model.id)
       ?? model;
     return {
@@ -95,7 +166,9 @@ export function routeOpenAiCompatibleImageProfile(
   }
 
   const binding = ensureImageCatalogBinding(snapshot, connection, imageAdapter, now);
-  const definition = createOpenAiCompatibleDefaultImageDefinition({
+  const definition = (feature === 'text_to_image'
+    ? createOpenAiCompatibleDefaultImageDefinition
+    : createOpenAiCompatibleDefaultImageEditDefinition)({
     packageId: connection.packageId,
     packageVersion: connection.packageVersion,
     providerModelKey: model.providerModelKey
@@ -105,12 +178,13 @@ export function routeOpenAiCompatibleImageProfile(
     return { snapshot, model, state: 'skipped' };
   }
 
-  const withEvidence = ensureImageGenerationCapabilityEvidence(
+  const withEvidence = ensureImageCapabilityEvidence(
     {
       ...snapshot,
       protocolBindings: binding.protocolBindings
     },
     model,
+    feature,
     now
   );
   const workingSnapshot = withEvidence.snapshot;
@@ -187,29 +261,50 @@ export function routeOpenAiCompatibleImageProfilesForEnabledModels(
   return working;
 }
 
-function ensureImageGenerationCapabilityEvidence(
+export function routeOpenAiCompatibleImageEditProfilesForEnabledModels(
+  snapshot: ProviderRegistrySnapshot,
+  packages: ProviderPackageRegistry,
+  now: IsoTimestamp = toIsoTimestamp(new Date().toISOString())
+): ProviderRegistrySnapshot {
+  let working = snapshot;
+  for (const model of snapshot.models) {
+    const latest = working.models.find((candidate) => candidate.id === model.id);
+    if (!latest?.enabled || (latest.catalogState ?? 'present') !== 'present') continue;
+    working = routeOpenAiCompatibleImageEditProfile(
+      working,
+      packages,
+      latest,
+      now
+    ).snapshot;
+  }
+  return working;
+}
+
+function ensureImageCapabilityEvidence(
   snapshot: ProviderRegistrySnapshot,
   model: ProviderModel,
+  feature: 'text_to_image' | 'image_edit',
   now: IsoTimestamp
 ): {
   readonly snapshot: ProviderRegistrySnapshot;
   readonly evidence: ModelCapabilityEvidence;
 } {
+  const capability = feature === 'text_to_image' ? 'image_generation' : 'image_editing';
   const existing = snapshot.capabilities.find(
     (candidate) =>
       candidate.modelId === model.id &&
-      candidate.capability === 'image_generation'
+      candidate.capability === capability
   );
   if (existing) {
     return { snapshot, evidence: existing };
   }
   const evidence = createModelCapabilityEvidence({
     id: toCapabilityEvidenceId(
-      `capability-${model.id}-image_generation-declared-v1`
+      `capability-${model.id}-${capability}-declared-v1`
     ),
     modelId: model.id,
     revision: 1,
-    capability: 'image_generation',
+    capability,
     state: 'declared_supported',
     source: 'provider_declared',
     recordedAt: now

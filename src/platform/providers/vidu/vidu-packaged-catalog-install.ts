@@ -10,10 +10,8 @@ import {
   toProviderId,
   type ConnectionId,
   type IsoTimestamp,
-  type ModelCapabilityEvidence,
   type ModelFeatureProfile,
   type ProviderModel,
-  type ProviderModelDefinition,
   type ProviderOperationPurpose,
   type ProviderProtocolBinding,
   type ProviderId

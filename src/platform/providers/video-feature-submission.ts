@@ -58,7 +58,7 @@ import {
   VIDU_TEXT_VIDEO_V2_PROTOCOL_ID,
   VIDU_TEXT_VIDEO_V2_PROTOCOL_VERSION,
   ViduPackagedParameterSchemaResolver,
-  ViduProviderPackage,
+  type ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
   type ControlledImageMaterialPort,
   type ViduUsageObservationSinkPort

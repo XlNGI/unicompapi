@@ -180,7 +180,16 @@ describe('NewAPI package and dynamic model contracts', () => {
       'max_tokens',
       'temperature',
       'top_p',
-      'stop'
+      'stop',
+      'n',
+      'presence_penalty',
+      'frequency_penalty',
+      'seed',
+      'response_format',
+      'tool_choice',
+      'parallel_tool_calls',
+      'user',
+      'metadata'
     ]);
     expect(
       newApiDefaultTextChatParameterSchema.fields.find((field) => field.fieldId === 'max_tokens')
@@ -188,7 +197,15 @@ describe('NewAPI package and dynamic model contracts', () => {
     expect(newApiDefaultTextReasoningParameterSchema.fields.map((field) => field.fieldId)).toEqual([
       'max_completion_tokens',
       'reasoning_effort',
-      'stop'
+      'stop',
+      'n',
+      'top_k',
+      'thinking',
+      'enable_thinking',
+      'chat_template_kwargs',
+      'response_format',
+      'user',
+      'metadata'
     ]);
     expect(
       newApiDefaultTextChatParameterSchema.fields.every((field) =>
@@ -268,7 +285,13 @@ describe('NewAPI package and dynamic model contracts', () => {
       'aspect_ratio',
       'audio',
       'mode',
-      'seed'
+      'seed',
+      'ratio',
+      'generate_audio',
+      'watermark',
+      'camera_fixed',
+      'return_last_frame',
+      'frames'
     ]);
   });
 

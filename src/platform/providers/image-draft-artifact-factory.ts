@@ -8,15 +8,17 @@ import {
   toDraftId,
   toExecutionId,
   toIsoTimestamp,
-  toTaskId,
-  type ExecutionId,
-  type ImageSubmissionConfirmationSnapshot,
-  type ImageWorkspaceRepository,
-  type ProviderAccessCategory,
-  type Task,
-  type TaskId
+  toTaskId
 } from '../../domain';
-import {
+import type {
+  ExecutionId,
+  ImageSubmissionConfirmationSnapshot,
+  ImageWorkspaceRepository,
+  ProviderAccessCategory,
+  Task,
+  TaskId
+} from '../../domain';
+import type {
   JsonExecutionRepository,
   JsonTaskRepository
 } from '../repositories';

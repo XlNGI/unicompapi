@@ -20,6 +20,12 @@ import {
   NEWAPI_VIDEO_ADAPTER_ID
 } from './newapi-contracts';
 import { isOpenAiCompatiblePackageId } from './openai-compatible-identity';
+import {
+  isKnownUniCompApiModel,
+  isUniCompApiDeepSeekModel,
+  isUniCompApiPackage,
+  uniCompApiVideoFeatures
+} from './unicompapi-model-capabilities';
 
 /**
  * Soft video routing for OpenAI-compatible packages (NewAPI / UniCompAPI).
@@ -51,6 +57,22 @@ export function routeOpenAiCompatibleVideoProfile(
     !connection.packageVersion ||
     !connection.templateId ||
     !isOpenAiCompatiblePackageId(connection.packageId)
+  ) {
+    return { snapshot, model, state: 'skipped' };
+  }
+  const features = isUniCompApiPackage(connection.packageId)
+    ? uniCompApiVideoFeatures(model.providerModelKey)
+    : undefined;
+  if (
+    isUniCompApiPackage(connection.packageId) &&
+    isKnownUniCompApiModel(model.providerModelKey) &&
+    (!features || features.length === 0)
+  ) {
+    return { snapshot, model, state: 'skipped' };
+  }
+  if (
+    isUniCompApiPackage(connection.packageId) &&
+    isUniCompApiDeepSeekModel(model.providerModelKey)
   ) {
     return { snapshot, model, state: 'skipped' };
   }
@@ -101,7 +123,8 @@ export function routeOpenAiCompatibleVideoProfile(
   const definition = createOpenAiCompatibleDefaultVideoDefinition({
     packageId: connection.packageId,
     packageVersion: connection.packageVersion,
-    providerModelKey: model.providerModelKey
+    providerModelKey: model.providerModelKey,
+    ...(features ? { features } : {})
   });
   const profileTemplate = definition.profileTemplates[0];
   if (!profileTemplate) {

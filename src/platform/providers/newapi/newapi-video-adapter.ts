@@ -62,7 +62,16 @@ const supportedParameterFields = new Set([
   'seed',
   'aspect_ratio',
   'aspectRatio',
+  'ratio',
   'audio',
+  'generate_audio',
+  'watermark',
+  'camera_fixed',
+  'return_last_frame',
+  'frames',
+  'callback_url',
+  'service_tier',
+  'execution_expires_after',
   // Legacy aliases remapped onto gateway wire fields.
   'width',
   'height',
@@ -693,6 +702,7 @@ function serializeVideoRequest(
       'The NewAPI image input does not match the product feature'
     );
   }
+  validateUniCompApiVideoParameters(route, values);
 
   // Match UniCompAPI script-verified JSON create shape for POST /v1/videos.
   const body: Record<string, unknown> = {
@@ -725,12 +735,36 @@ function serializeVideoRequest(
     ? values.aspect_ratio.trim()
     : typeof values.aspectRatio === 'string'
       ? values.aspectRatio.trim()
-      : '';
+      : typeof values.ratio === 'string'
+        ? values.ratio.trim()
+        : '';
   if (aspectRatio.length > 0) {
-    metadata.aspect_ratio = aspectRatio;
+    metadata[route.packageId === 'provider-package-unicompapi'
+      ? 'ratio'
+      : 'aspect_ratio'] = aspectRatio;
   }
   if (typeof values.audio === 'boolean') {
     metadata.audio = values.audio;
+  }
+  if (typeof values.generate_audio === 'boolean') {
+    metadata.generate_audio = values.generate_audio;
+  }
+  for (const key of [
+    'watermark',
+    'camera_fixed',
+    'return_last_frame'
+  ] as const) {
+    if (typeof values[key] === 'boolean') metadata[key] = values[key];
+  }
+  for (const key of [
+    'frames',
+    'callback_url',
+    'service_tier',
+    'execution_expires_after'
+  ] as const) {
+    if (typeof values[key] === 'number' || typeof values[key] === 'string') {
+      metadata[key] = values[key];
+    }
   }
   if (typeof values.seed === 'number' || typeof values.seed === 'string') {
     metadata.seed = values.seed;
@@ -759,6 +793,59 @@ function serializeVideoRequest(
     body: encoded,
     contentType: 'application/json'
   };
+}
+
+function validateUniCompApiVideoParameters(
+  route: ValidatedNewApiRoute,
+  values: Readonly<Record<string, ParameterValue>>
+): void {
+  if (route.packageId !== 'provider-package-unicompapi') return;
+  const hasSize = values.size !== undefined ||
+    values.width !== undefined || values.height !== undefined;
+  const hasResolution = typeof values.resolution === 'string' &&
+    values.resolution.trim().length > 0;
+  if (hasSize && hasResolution) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'UniCompAPI video size and resolution cannot be supplied together'
+    );
+  }
+  if (route.providerModelKey === 'kling-v3-turbo') {
+    const duration = parseVideoDuration(values);
+    if (duration !== undefined && (duration < 3 || duration > 15)) {
+      throw invalidRequest(
+        'newapi.invalid_request',
+        'Kling v3 turbo duration must be between 3 and 15 seconds'
+      );
+    }
+  }
+  if (
+    route.productFeature === 'text_to_video' &&
+    Object.prototype.hasOwnProperty.call(values, 'image')
+  ) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'Text-to-video does not accept image input'
+    );
+  }
+}
+
+function parseVideoDuration(
+  values: Readonly<Record<string, ParameterValue>>
+): number | undefined {
+  if (typeof values.duration === 'number' && Number.isSafeInteger(values.duration)) {
+    return values.duration;
+  }
+  if (typeof values.duration === 'string' && /^\d+$/u.test(values.duration.trim())) {
+    return Number(values.duration.trim());
+  }
+  if (typeof values.seconds === 'string' && /^\d+$/u.test(values.seconds.trim())) {
+    return Number(values.seconds.trim());
+  }
+  if (typeof values.seconds === 'number' && Number.isSafeInteger(values.seconds)) {
+    return values.seconds;
+  }
+  return undefined;
 }
 
 /** Accept UI variants like `1920 × 1088` and emit gateway `1920x1088`. */

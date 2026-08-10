@@ -34,8 +34,15 @@ import {
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_CHAT_PROTOCOL_ID
 } from './newapi/newapi-contracts';
-import { routeOpenAiCompatibleImageProfile } from './newapi/openai-compatible-image-routing';
+import {
+  routeOpenAiCompatibleImageEditProfile,
+  routeOpenAiCompatibleImageProfile
+} from './newapi/openai-compatible-image-routing';
 import { routeOpenAiCompatibleVideoProfile } from './newapi/openai-compatible-video-routing';
+import {
+  uniCompApiModelFeatures,
+  uniCompApiSupportsText
+} from './newapi/unicompapi-model-capabilities';
 import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
 import { VIDU_PROVIDER_PACKAGE_ID } from './vidu/vidu-contracts';
 import { installPackagedViduCatalog } from './vidu/vidu-packaged-catalog-install';
@@ -1201,6 +1208,14 @@ export class ProviderManagementFramework {
           );
           workingSnapshot = imaged.snapshot;
           currentModel = imaged.model;
+          const edited = routeOpenAiCompatibleImageEditProfile(
+            workingSnapshot,
+            this.packages,
+            currentModel,
+            now
+          );
+          workingSnapshot = edited.snapshot;
+          currentModel = edited.model;
           const videoed = routeOpenAiCompatibleVideoProfile(
             workingSnapshot,
             this.packages,
@@ -2125,10 +2140,20 @@ function resolveDefaultTextChatDefinition(input: {
     input.binding.adapterKind === NEWAPI_CHAT_ADAPTER_ID &&
     input.binding.protocolId === NEWAPI_CHAT_PROTOCOL_ID
   ) {
+    if (!uniCompApiSupportsText(input.packageId, input.providerModelKey)) {
+      return undefined;
+    }
+    const declaredFeatures = input.packageId === 'provider-package-unicompapi'
+      ? uniCompApiModelFeatures(input.providerModelKey)
+        ?.filter((feature): feature is 'text_chat' | 'text_reasoning' =>
+          feature === 'text_chat' || feature === 'text_reasoning'
+        )
+      : undefined;
     return createOpenAiCompatibleDefaultTextDefinition({
       packageId: input.packageId,
       packageVersion: input.packageVersion,
-      providerModelKey: input.providerModelKey
+      providerModelKey: input.providerModelKey,
+      ...(declaredFeatures ? { features: declaredFeatures } : {})
     });
   }
   return undefined;
