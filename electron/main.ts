@@ -221,28 +221,35 @@ app.whenReady().then(async () => {
   const registrySnapshot = await viduComposition.registry.load();
   await runtimeAuthorizationSync.reconcileConnections(registrySnapshot.connections);
   protocol.handle('unicomp-media', async (request) => {
-    const url = new URL(request.url);
-    const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
-    const entry = token ? storageLifecycle.resolveEntry(token) : undefined;
-    if (!entry) {
-      return new Response('Media handle not found', { status: 404 });
-    }
+    try {
+      const url = new URL(request.url);
+      const token = url.hostname === 'local' ? url.pathname.slice(1) : '';
+      const entry = token ? storageLifecycle.resolveEntry(token) : undefined;
+      if (!entry) {
+        return new Response('Media handle not found', { status: 404 });
+      }
 
-    const response = await net.fetch(pathToFileURL(entry.target).toString(), {
-      method: request.method,
-      headers: request.headers
-    });
-    if (!entry.mimeType) {
-      return response;
+      // Do not forward request/response headers from file:// fetches: Chromium may
+      // emit Content-Disposition with non-ASCII filenames, and undici Headers only
+      // accepts ByteString values (0-255).
+      const response = await net.fetch(pathToFileURL(entry.target).toString(), {
+        method: request.method
+      });
+      const headers = new Headers();
+      if (entry.mimeType) {
+        headers.set('content-type', entry.mimeType);
+      }
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && /^\d+$/u.test(contentLength)) {
+        headers.set('content-length', contentLength);
+      }
+      return new Response(response.body, {
+        status: response.status === 0 ? 200 : response.status,
+        headers
+      });
+    } catch {
+      return new Response('Media handle unavailable', { status: 500 });
     }
-
-    const headers = new Headers(response.headers);
-    headers.set('content-type', entry.mimeType);
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers
-    });
   });
   createMainWindow();
 
