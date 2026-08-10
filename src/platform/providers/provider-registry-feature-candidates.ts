@@ -118,7 +118,10 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
     for (const model of snapshot.models) {
       const provider = snapshot.providers.find((item) => item.id === model.providerId);
       const connection = snapshot.connections.find((item) => item.id === model.connectionId);
-      if (!provider || !connection) continue;
+      // Deleted connections may remain as history tombstones so immutable
+      // capability evidence keeps its references. They are never current
+      // creation candidates and must not leak into image/video selectors.
+      if (!provider || !connection || connection.state === 'deleted') continue;
       const profiles = (snapshot.modelProfiles ?? []).filter(
         (item) => item.modelId === model.id
       );
