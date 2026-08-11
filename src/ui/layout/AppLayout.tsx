@@ -37,7 +37,11 @@ export function AppLayout({
           onNavigate={onNavigate}
           onSecondaryNavigate={onSecondaryNavigate}
         />
-        <main className="workspace" id="main-content" tabIndex={-1}>
+        <main
+          className={`workspace${activeItemId === 'chat' ? ' workspace--chat' : ''}`}
+          id="main-content"
+          tabIndex={-1}
+        >
           {children}
         </main>
       </div>

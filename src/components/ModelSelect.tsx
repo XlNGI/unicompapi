@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { SelectPicker } from 'rsuite';
 import { EmptyState } from './EmptyState';
 
@@ -15,6 +15,8 @@ export interface ModelSelectOption {
 export interface ModelSelectProps {
   readonly label?: string;
   readonly ariaLabel?: string;
+  readonly appearance?: 'default' | 'subtle';
+  readonly className?: string;
   readonly value: string;
   readonly options: readonly ModelSelectOption[];
   readonly disabled?: boolean;
@@ -22,12 +24,23 @@ export interface ModelSelectProps {
   readonly emptyDescription?: string;
   readonly hint?: string;
   readonly reasonLabels?: Readonly<Record<string, string>>;
+  readonly placeholder?: ReactNode;
+  readonly popupClassName?: string;
+  readonly listboxMaxHeight?: number;
+  readonly searchable?: boolean;
+  readonly showEmptyState?: boolean;
+  readonly noResultsText?: string;
+  readonly listboxHeader?: ReactNode;
+  readonly renderValue?: (option: ModelSelectOption) => ReactNode;
+  readonly onClose?: () => void;
   readonly onChange: (value: string) => void;
 }
 
 export function ModelSelect({
   label = '服务商 / 连接 / 模型',
   ariaLabel = '选择模型',
+  appearance = 'default',
+  className = '',
   value,
   options,
   disabled = false,
@@ -35,6 +48,15 @@ export function ModelSelect({
   emptyDescription = '请先到「模型与服务商」添加连接并启用模型。',
   hint,
   reasonLabels = {},
+  placeholder = '请选择模型',
+  popupClassName = '',
+  listboxMaxHeight = 320,
+  searchable = true,
+  showEmptyState = true,
+  noResultsText = '没有匹配的模型',
+  listboxHeader,
+  renderValue,
+  onClose,
   onChange
 }: ModelSelectProps) {
   const [open, setOpen] = useState(false);
@@ -51,9 +73,9 @@ export function ModelSelect({
     return () => workspace.removeEventListener('scroll', handleScroll, true);
   }, [open]);
 
-  if (options.length === 0) {
+  if (options.length === 0 && showEmptyState) {
     return (
-      <div className="uc-model-select">
+      <div className={`uc-model-select${className ? ` ${className}` : ''}`}>
         <EmptyState
           description={emptyDescription}
           icon="模"
@@ -86,10 +108,11 @@ export function ModelSelect({
     .map((option) => option.id);
 
   return (
-    <div className="uc-model-select">
+    <div className={`uc-model-select${className ? ` ${className}` : ''}`}>
       <div className="uc-model-select__field">
         <span>{label}</span>
         <SelectPicker
+          appearance={appearance}
           aria-label={ariaLabel}
           block
           cleanable={false}
@@ -97,15 +120,27 @@ export function ModelSelect({
           disabled={disabled}
           disabledItemValues={disabledItemValues}
           groupBy="group"
-          listboxMaxHeight={320}
+          listboxMaxHeight={listboxMaxHeight}
+          locale={{ noResultsText }}
           onChange={(next) => onChange(next ?? '')}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            setOpen(false);
+            onClose?.();
+          }}
           onOpen={() => setOpen(true)}
           open={open}
           placement="autoVerticalStart"
-          placeholder="请选择模型"
+          placeholder={placeholder}
           preventOverflow
-          popupClassName="uc-model-select__popup"
+          popupClassName={`uc-model-select__popup${popupClassName ? ` ${popupClassName}` : ''}`}
+          renderListbox={listboxHeader
+            ? (listbox) => (
+              <div className="uc-model-select__listbox-composite">
+                {listboxHeader}
+                {listbox}
+              </div>
+            )
+            : undefined}
           renderOption={(_label, item) => (
             <ModelSelectOptionContent
               option={item as ModelSelectOption & { readonly group?: string }}
@@ -117,16 +152,18 @@ export function ModelSelect({
           )}
           renderValue={(_next, item, selectedElement) =>
             item ? (
-              <ModelSelectOptionContent
-                compact
-                option={item as ModelSelectOption & { readonly group?: string }}
-                reasonLabels={reasonLabels}
-              />
+              renderValue?.(item as ModelSelectOption & { readonly group?: string }) ?? (
+                <ModelSelectOptionContent
+                  compact
+                  option={item as ModelSelectOption & { readonly group?: string }}
+                  reasonLabels={reasonLabels}
+                />
+              )
             ) : (
               selectedElement
             )
           }
-          searchable
+          searchable={searchable}
           searchBy={(keyword, _label, item) =>
             String((item as { readonly searchText?: string }).searchText ?? '')
               .toLocaleLowerCase()

@@ -725,6 +725,12 @@ button {
   padding: 16px;
 }
 
+.workspace--chat {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
 .workspace:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: -2px;

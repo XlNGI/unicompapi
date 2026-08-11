@@ -27,7 +27,8 @@ sources.providers += '\n' + (await Promise.all([
 ].map((path) => readFile(path, 'utf8')))).join('\n');
 
 test('the desktop layout owns the only main landmark', () => {
-  assert.match(sources.layout, /<main className="workspace" id="main-content"/);
+  assert.match(sources.layout, /<main[\s\S]{0,200}id="main-content"/);
+  assert.match(sources.layout, /workspace--chat/);
   for (const name of ['projects', 'tasks', 'library', 'chat', 'providers', 'image', 'video']) {
     assert.doesNotMatch(sources[name], /<main(?:\s|>)/, `${name} must not nest a main landmark`);
   }
@@ -60,7 +61,8 @@ test('A2 pages do not branch on the renderer platform or claim fake work', () =>
       `${name} must rely on shared DTOs instead of platform branches`
     );
   }
-  assert.match(sources.chat, /运行授权关闭/);
+  assert.match(sources.chat, /runtime_not_allowed/);
+  assert.doesNotMatch(sources.chat, /运行授权关闭/);
   assert.match(sources.chat, /当前没有已登记的文本候选/);
   assert.match(sources.image, /不会伪造任务或结果/);
   assert.match(sources.video, /不会伪造进度或结果/);

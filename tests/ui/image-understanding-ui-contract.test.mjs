@@ -58,6 +58,7 @@ test('image understanding uses controlled input, region and honest preflight', (
   }
 
   assert.match(workbenchSource, /ImageUnderstandingWorkspace/);
+  assert.match(understandingSource, /<ModelSelect/);
   assert.match(workbenchSource, /analysisState === 'stale'[\s\S]*\? 'stale'/);
   assert.doesNotMatch(
     understandingSource,
