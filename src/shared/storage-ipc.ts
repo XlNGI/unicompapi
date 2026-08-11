@@ -5,6 +5,7 @@ export const storageIpcChannels = {
   restoreBackup: 'storage:restore-backup',
   rebuildIndex: 'storage:rebuild-index',
   openProject: 'storage:open-project',
+  openRecentProject: 'storage:open-recent-project',
   createProject: 'storage:create-project',
   listProjects: 'storage:list-projects',
   getLocalStorageSummary: 'storage:get-local-storage-summary',
@@ -275,6 +276,9 @@ export interface StorageApi {
   ): Promise<StorageIpcResult<StorageBackupRestoreResultDto>>;
   rebuildIndex(): Promise<StorageIpcResult<StorageIndexRebuildDto>>;
   openProject(): Promise<StorageIpcResult<StorageOpenProjectDto>>;
+  openRecentProject(
+    projectId: string
+  ): Promise<StorageIpcResult<StorageOpenProjectDto>>;
   createProject(
     name: string
   ): Promise<StorageIpcResult<StorageCreateProjectDto>>;

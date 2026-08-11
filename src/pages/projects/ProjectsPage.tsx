@@ -130,6 +130,27 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
     setBusy(false);
   }
 
+  async function handleOpenRecentProject(projectId: string) {
+    if (!storage || busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await storage.openRecentProject(projectId);
+      if (!result.ok) {
+        setMessage(describeStorageError(result.error.code, result.error.message));
+      } else if (result.value.session) {
+        setSession(result.value.session);
+        notifyProjectSessionChanged();
+        setMessage('项目已打开');
+        await refreshDashboard();
+      }
+    } catch {
+      setMessage('打开最近项目失败，请重试');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = projectName.trim();
@@ -285,13 +306,24 @@ export function ProjectsPage({ onNavigate }: ProjectsPageProps) {
             ) : (
               <div className="uc-project-center__project-grid">
                 {projects.map((project) => (
-                  <Card className="uc-project-center__project-card" key={project.projectId}>
+                  <button
+                    aria-current={session?.projectId === project.projectId ? 'true' : undefined}
+                    aria-label={`打开项目 ${project.projectName}`}
+                    className="uc-card uc-project-center__project-card"
+                    disabled={busy || project.availability !== 'available'}
+                    key={project.projectId}
+                    onClick={() => void handleOpenRecentProject(project.projectId)}
+                    title={project.availability === 'available'
+                      ? `打开项目 ${project.projectName}`
+                      : '项目位置已失效或存储设备未连接'}
+                    type="button"
+                  >
                     <StatusPill tone={project.availability === 'available' ? 'success' : 'warning'}>
                       {project.availability === 'available' ? '可用' : '失效 / 断盘'}
                     </StatusPill>
                     <h3>{project.projectName}</h3>
                     <p>最近打开：{new Date(project.lastOpenedAt).toLocaleString('zh-CN')}</p>
-                  </Card>
+                  </button>
                 ))}
               </div>
             )}

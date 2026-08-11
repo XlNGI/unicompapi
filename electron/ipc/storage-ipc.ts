@@ -417,6 +417,9 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.openProject, () =>
     projectController.openProject()
   );
+  ipcMain.handle(storageIpcChannels.openRecentProject, (_event, request: unknown) =>
+    projectController.openRecentProject(request)
+  );
   ipcMain.handle(storageIpcChannels.createProject, (_event, request: unknown) =>
     projectController.createProject(request)
   );
