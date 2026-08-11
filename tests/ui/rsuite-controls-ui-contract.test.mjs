@@ -68,5 +68,19 @@ test('shared model picker closes its portal when the workspace scrolls', () => {
   assert.match(modelSelect, /open=\{open\}/);
   assert.match(modelSelect, /placement="autoVerticalStart"/);
   assert.match(modelSelect, /preventOverflow/);
-  assert.match(modelSelect, /listboxMaxHeight=\{320\}/);
+  assert.match(modelSelect, /listboxMaxHeight = 320/);
+  assert.match(modelSelect, /listboxMaxHeight=\{listboxMaxHeight\}/);
+});
+
+test('pages reuse shared model and action menu controls', () => {
+  const actionMenu = fs.readFileSync(path.join(srcRoot, 'components/ActionMenu.tsx'), 'utf8');
+  const pageSources = sources
+    .filter(({ file }) => file.includes(`${path.sep}pages${path.sep}`))
+    .map(({ source }) => source)
+    .join('\n');
+
+  assert.match(actionMenu, /<Dropdown/);
+  assert.match(actionMenu, /placement="bottomEnd"/);
+  assert.doesNotMatch(pageSources, /<select\b/);
+  assert.doesNotMatch(pageSources, /role="(?:menu|listbox)"/);
 });

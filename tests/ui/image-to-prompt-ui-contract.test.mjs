@@ -82,6 +82,7 @@ test('image to prompt uses controlled input, preflight and derived drafts only',
   assert.match(promptSource, /\.derive\(draft\.draftId, targetMode\)/);
   assert.match(promptSource, /deriveDraft\('professional_image'\)/);
   assert.match(promptSource, /deriveDraft\('image_editing'\)/);
+  assert.match(promptSource, /<ModelSelect/);
   assert.match(workbenchSource, /ImageToPromptWorkspace/);
   assert.match(appSource, /activeSubItemId === 'image-to-prompt'/);
   assert.doesNotMatch(

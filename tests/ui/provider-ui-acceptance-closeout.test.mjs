@@ -19,10 +19,8 @@ test('secondary setup actions do not compete with the provider and chat main act
     providerManage,
     /action=\{<Button disabled=\{!providersApi\} onClick=\{onGoGallery\} variant="secondary">/
   );
-  assert.match(
-    chat,
-    /<Button[^>]+type="submit"[^>]+variant="secondary">创建项目对话<\/Button>/
-  );
+  assert.match(chat, /chat\.createConversation\(\s*conversationTitleFromMessage\(content\)/);
+  assert.doesNotMatch(chat, /创建项目对话|新建项目对话/);
 });
 
 test('draft persistence stays secondary to image submission and video export', () => {

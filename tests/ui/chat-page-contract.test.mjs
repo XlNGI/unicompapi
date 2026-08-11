@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
+const styles = await readFile('src/styles/pages.css', 'utf8');
+const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
 test('chat page uses project conversations and composer-first streaming workflow', () => {
   for (const operation of [
@@ -10,8 +12,6 @@ test('chat page uses project conversations and composer-first streaming workflow
     'createConversation',
     'copyLegacyConversation',
     'renameConversation',
-    'archiveConversation',
-    'restoreConversation',
     'deleteConversation',
     'listTextCandidates',
     'addUserMessage',
@@ -21,19 +21,58 @@ test('chat page uses project conversations and composer-first streaming workflow
     'prepareResponseSubmission',
     'submitResponse',
     'getResponseExecution',
+    'cancelAssistantResponse',
     'getConversation'
   ]) {
     assert.match(source, new RegExp(`chat\\.${operation}\\(`));
   }
-  assert.match(source, /运行授权关闭/);
   assert.match(source, /runtime_not_allowed/);
   assert.match(source, /replaceResponseParameters/);
   assert.match(source, /已截断/);
   assert.match(source, /finish\.length|输出长度限制被截断/);
-  assert.match(source, /aria-label="选择文本模型"/);
+  assert.match(source, /aria-label="搜索文本模型"/);
+  assert.match(source, /ariaLabel="模型设置"/);
+  assert.match(source, /listTextCandidates\('text_chat'\)/);
+  assert.match(source, /listTextCandidates\('text_reasoning'\)/);
+  assert.match(source, /responseFeature/);
+  assert.match(source, /普通对话/);
+  assert.match(source, /深度推理/);
+  assert.match(source, /role="radiogroup"/);
+  assert.match(source, /<ModelSelect/);
+  assert.match(source, /appearance="subtle"/);
+  assert.match(source, /listboxMaxHeight=\{250\}/);
+  assert.match(source, /<ActionMenu/);
   assert.match(source, /uc-chat-page__composer-toolbar/);
-  assert.match(source, /参数/);
-  assert.match(source, /DynamicParameterForm/);
+  assert.match(source, /uc-chat-page__model-picker-header/);
+  assert.match(styles, /uc-chat-page__model-picker-popup/);
+  assert.match(source, /<Drawer/);
+  assert.match(source, /<Drawer\.Title>对话列表<\/Drawer\.Title>/);
+  assert.match(source, /<Drawer\.Title>项目上下文<\/Drawer\.Title>/);
+  assert.match(source, /uc-chat-page__side-drawer uc-chat-page__history-drawer/);
+  assert.match(source, /uc-chat-page__side-drawer uc-chat-page__context-drawer/);
+  assert.match(source, /打开对话列表/);
+  assert.match(source, /打开项目上下文/);
+  assert.match(source, /conversationTitleFromMessage/);
+  assert.match(source, /conversationGroups/);
+  assert.match(source, /发送第一条消息后，对话会自动保存在这里/);
+  assert.match(source, /<Whisper/);
+  assert.match(source, /<Tooltip>\{conversation\.title\}<\/Tooltip>/);
+  assert.match(styles, /\.uc-chat-page__history-menu \{[\s\S]*opacity: 0;[\s\S]*pointer-events: none;/);
+  assert.match(styles, /\.uc-chat-page__history-row:hover \.uc-chat-page__history-menu/);
+  assert.match(styles, /text-overflow: ellipsis/);
+  assert.match(styles, /\.uc-chat-page__messages-inner[\s\S]*width: min\(1180px, 100%\)/);
+  assert.match(styles, /\.uc-chat-page__composer-region[\s\S]*width: min\(1180px, calc\(100% - 48px\)\)/);
+  assert.match(appSource, /setNewChatRequest\(\(request\) => request \+ 1\)/);
+  assert.match(appSource, /<ChatPage newConversationRequest=\{newChatRequest\} \/>/);
+  assert.match(source, /open=\{contextOpen\}/);
+  assert.match(source, /uc-chat-page__delete-dialog/);
+  assert.match(source, /停止生成/);
+  assert.match(source, /cancelRequested/);
+  assert.match(source, /cancelRequestedRef\.current/);
+  assert.match(source, /已发出停止请求，正在确认/);
+  assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle \{[\s\S]*border: 0;[\s\S]*border-radius: var\(--uc-radius-full\);[\s\S]*background: transparent;/);
+  assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle:hover/);
+  assert.match(source, /responseInProgress/);
   assert.match(source, /displayMessages/);
   assert.match(source, /void sendMessage\(\)/);
   assert.match(source, /confirmLeaveUnsentInput/);
@@ -43,31 +82,61 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /保存消息/);
   assert.doesNotMatch(source, /等待保存消息/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
+  assert.doesNotMatch(source, /chat\.archiveConversation\(/);
+  assert.doesNotMatch(source, /chat\.restoreConversation\(/);
+  assert.doesNotMatch(source, /新建项目对话|创建项目对话|恢复对话/);
+  assert.doesNotMatch(source, /当前项目[^\n]*条消息/);
+  assert.doesNotMatch(source, /history-resizer|history-collapsed|toggleHistorySidebar|--uc-chat-history-width/);
+  assert.doesNotMatch(source, /运行授权关闭/);
+  assert.doesNotMatch(source, /DynamicParameterForm/);
+  assert.doesNotMatch(source, /推理强度|>高级</);
+  assert.doesNotMatch(source, /回复已接收。若内容偏短/);
+  assert.doesNotMatch(source, /上下文 \{includedContextIds\.length\}/);
 });
 
-test('chat attachments remain unavailable until a controlled native port exists', () => {
-  assert.match(source, /disabled title="原生附件登记未进入本支范围"/);
+test('chat composer does not advertise unsupported attachments', () => {
   assert.doesNotMatch(source, /type="file"|FileReader|fetch\(|upload|localStorage|sessionStorage/);
+  assert.doesNotMatch(source, /原生附件登记未进入本支范围|>附件</);
 });
 
-test('project context requires completed-message selection, preview and confirmation', () => {
+test('project context uses a single explicit registration action and separates use from deletion', () => {
   for (const operation of [
     'createContextDraft',
     'addContextMessageFragment',
     'removeContextMessageFragment',
     'updateContextDraftLabels',
-    'registerContextDraft'
+    'registerContextDraft',
+    'updateProjectContext',
+    'deleteProjectContext'
   ]) {
     assert.match(source, new RegExp(`chat\\.${operation}\\(`));
   }
   assert.match(source, /message\.state === 'completed'/);
   assert.match(source, /message\.content\.length/);
   assert.match(source, /草稿预览/);
-  assert.match(source, /我已检查目标项目、消息内容和标签/);
-  assert.match(source, /确认登记到项目/);
-  assert.match(source, /查看上下文不会自动用于回复/);
+  assert.match(source, /上下文名称/);
+  assert.match(source, /添加标签（可选）/);
+  assert.match(source, /登记并用于本次回复/);
+  assert.match(source, /contextDisplayName/);
+  assert.match(source, /composeContextLabels/);
   assert.match(source, /getProjectContextRevision/);
-  assert.match(source, /disabled=\{!viewed\}/);
+  assert.match(source, /toggleContextUsage/);
+  assert.match(source, /本次使用/);
+  assert.match(source, /上下文库/);
+  assert.match(source, /从本次移除/);
+  assert.match(source, /从上下文库删除/);
+  assert.match(source, /uc-chat-page__context-card-menu/);
+  assert.match(source, /历史固定版本未被改写/);
+  assert.doesNotMatch(source, /草稿预览 · 版本|保存名称与标签|我已检查目标项目|确认登记到项目|查看固定版本|取消引用/);
+});
+
+test('chat transparency only reports observable execution state', () => {
+  assert.match(source, /正在思考/);
+  assert.match(source, /已处理/);
+  assert.match(source, /未通过公开接口返回可展示的思考正文/);
+  assert.doesNotMatch(source, /已创建回复请求/);
+  assert.doesNotMatch(source, /思维链|完整思考过程|模型内心/);
+  assert.doesNotMatch(source, /编辑并重新生成|重新生成/);
 });
 
 test('chat page does not expose creation or task submission controls', () => {

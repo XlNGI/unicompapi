@@ -201,3 +201,8 @@
   color: var(--uc-color-status-danger);
   background: var(--uc-color-status-danger-bg);
 }
+
+.uc-action-menu__item--danger,
+.uc-action-menu__item--danger > .rs-dropdown-item-content {
+  color: var(--uc-color-status-danger) !important;
+}

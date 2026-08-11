@@ -48,7 +48,7 @@ test('development window does not force open the viewport inspection overlay', (
 
 test('provides keyboard focus paths for shell and theme controls', () => {
   assert.match(layout, /className="skip-link" href="#main-content"/);
-  assert.match(layout, /<main className="workspace" id="main-content" tabIndex=\{-1\}>/);
+  assert.match(layout, /<main[\s\S]{0,240}id="main-content"[\s\S]{0,80}tabIndex=\{-1\}/);
   assert.match(styles, /\.skip-link:focus/);
   assert.match(styles, /\.workspace:focus-visible/);
   assert.match(themeSwitch, /ArrowDown/);

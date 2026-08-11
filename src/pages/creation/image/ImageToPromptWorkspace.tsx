@@ -6,10 +6,11 @@ import {
   LuShieldCheck,
   LuSparkles
 } from 'react-icons/lu';
-import { Input, SelectPicker } from 'rsuite';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
+import { ModelSelect } from '../../../components/ModelSelect';
 import { StatusPill, type StatusTone } from '../../../components/StatusPill';
 import type { ImagePreflightDto } from '../../../shared/image-submission-ipc';
 import type {
@@ -387,24 +388,21 @@ export function ImageToPromptWorkspace({
             </div>
           ) : null}
           {preflight?.candidates.length ? (
-            <div className="uc-image-quick__field">
-              <span>选择模型</span>
-              <SelectPicker
-                aria-label="选择模型"
-                block
-                data={preflight.candidates.map((candidate) => ({
-                  value: candidate.modelId,
-                  label: `${candidate.recipientName} · ${candidate.modelName}`
-                }))}
-                onChange={(value) => {
-                  setSelectedModelId(value ?? '');
-                  setConfirmations(emptyImageConfirmations);
-                }}
-                placeholder="请选择模型"
-                searchable={false}
-                value={selectedModelId}
-              />
-            </div>
+            <ModelSelect
+              ariaLabel="选择模型"
+              label="选择模型"
+              onChange={(value) => {
+                setSelectedModelId(value);
+                setConfirmations(emptyImageConfirmations);
+              }}
+              options={preflight.candidates.map((candidate) => ({
+                id: candidate.modelId,
+                label: candidate.modelName,
+                providerName: candidate.recipientName,
+                available: true
+              }))}
+              value={selectedModelId}
+            />
           ) : null}
           {selectedCandidate ? (
             <ImageSubmissionConfirmations
