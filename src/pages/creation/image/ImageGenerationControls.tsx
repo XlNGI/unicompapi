@@ -4,6 +4,7 @@ import {
   displayParameterOption,
   displayParameterDescription
 } from '../../../components/DynamicParameterForm';
+import { ModelSelect } from '../../../components/ModelSelect';
 import type {
   ImagePreflightCandidateDto,
   ImageSubmissionConfirmationDto,
@@ -183,23 +184,21 @@ function ImageModelFields({
 
   return (
     <>
-      <div className="uc-image-quick__field">
-        <span>{label || '选择模型'}</span>
-        <SelectPicker
-          aria-label="选择模型"
-          block
-          data={modelOptions.map((option) => ({
-            value: option.modelId,
-            label: `${option.label}${option.reason ? `（${option.reason}）` : ''}`,
-            disabled: Boolean(option.reason)
-          }))}
-          disabled={modelOptions.length === 0}
-          onChange={(value) => changeModel(value ?? '')}
-          placeholder="请选择模型"
-          searchable={false}
-          value={model?.modelId ?? ''}
-        />
-      </div>
+      <ModelSelect
+        ariaLabel="选择模型"
+        disabled={modelOptions.length === 0}
+        label={label || '选择模型'}
+        onChange={changeModel}
+        options={modelOptions.map((option) => ({
+          id: option.modelId,
+          label: option.modelName,
+          providerName: option.providerName,
+          connectionName: option.connectionName,
+          available: !option.reason,
+          statusLabel: option.reason ?? '可用'
+        }))}
+        value={model?.modelId ?? ''}
+      />
       {modelOptions.length === 0 ? (
         <p className="uc-image-quick__hint">
           没有符合当前用途的模型或路由；请先在“模型与服务商”页面完成配置。
@@ -276,6 +275,8 @@ interface GenerationModelOption {
   readonly modelId: string;
   readonly modelName: string;
   readonly label: string;
+  readonly providerName: string;
+  readonly connectionName: string;
   readonly evidence?: ProviderCapabilitySummaryDto;
   readonly reason?: string;
 }
@@ -340,6 +341,8 @@ function getModelOptions(
         modelId: model.modelId,
         modelName: model.displayName,
         label: `${provider?.name ?? '服务商'} · ${connection?.name ?? '连接'} · ${model.displayName}`,
+        providerName: provider?.name ?? '服务商',
+        connectionName: connection?.name ?? '连接',
         evidence,
         reason
       };

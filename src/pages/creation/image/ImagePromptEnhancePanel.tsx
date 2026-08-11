@@ -337,7 +337,9 @@ export function ImagePromptEnhancePanel({
         }}
         options={candidates.map((candidate) => ({
           id: candidate.candidateId,
-          label: `${candidate.providerName} · ${candidate.connectionName} · ${candidate.modelName}`,
+          label: candidate.modelName,
+          providerName: candidate.providerName,
+          connectionName: candidate.connectionName,
           available: candidate.available,
           unavailableReasons: candidate.unavailableReasons
         }))}

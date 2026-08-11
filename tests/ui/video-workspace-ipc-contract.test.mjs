@@ -61,8 +61,10 @@ test('keeps video workspace DTOs free of protected main-process facts', () => {
   assert.match(preloadSource, /videoWorkspaces/);
   assert.match(mainSource, /new VideoWorkspaceController/);
   assert.match(mainSource, /new VideoReferenceMediaController/);
-  assert.match(protocolSource, /headers: request\.headers/);
+  assert.doesNotMatch(protocolSource, /headers: request\.headers/);
+  assert.match(protocolSource, /const headers = new Headers\(\)/);
   assert.match(protocolSource, /headers\.set\('content-type', entry\.mimeType\)/);
+  assert.match(protocolSource, /headers\.set\('content-length', contentLength\)/);
   assert.doesNotMatch(sharedSource, /rendererPath|upload|analyze|createTask|createExecution/);
 });
 
