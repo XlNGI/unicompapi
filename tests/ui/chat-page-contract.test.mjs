@@ -50,6 +50,10 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /<Drawer\.Title>项目上下文<\/Drawer\.Title>/);
   assert.match(source, /uc-chat-page__side-drawer uc-chat-page__history-drawer/);
   assert.match(source, /uc-chat-page__side-drawer uc-chat-page__context-drawer/);
+  assert.match(source, /backdropClassName="uc-chat-page__drawer-backdrop"/);
+  assert.match(styles, /\.uc-chat-page__side-drawer\.rs-drawer[\s\S]*top: 42px;[\s\S]*height: calc\(100% - 42px\);/);
+  assert.match(styles, /\.uc-chat-page__drawer-backdrop\.rs-drawer-backdrop \{[\s\S]*top: 42px;/);
+  assert.match(styles, /\.uc-chat-page__side-drawer \.rs-drawer-header-close \{[\s\S]*width: 32px;[\s\S]*height: 32px;/);
   assert.match(source, /打开对话列表/);
   assert.match(source, /打开项目上下文/);
   assert.match(source, /conversationTitleFromMessage/);
@@ -62,8 +66,12 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /text-overflow: ellipsis/);
   assert.match(styles, /\.uc-chat-page__messages-inner[\s\S]*width: min\(1180px, 100%\)/);
   assert.match(styles, /\.uc-chat-page__composer-region[\s\S]*width: min\(1180px, calc\(100% - 48px\)\)/);
-  assert.match(appSource, /setNewChatRequest\(\(request\) => request \+ 1\)/);
-  assert.match(appSource, /<ChatPage newConversationRequest=\{newChatRequest\} \/>/);
+  assert.match(source, /uc-chat-page__composer-region[\s\S]*\{notice \? \([\s\S]*role="status"[\s\S]*uc-chat-page__composer/);
+  assert.doesNotMatch(appSource, /setNewChatRequest|newConversationRequest/);
+  assert.match(appSource, /initialConversationId=\{selectedChatConversationId\}/);
+  assert.match(appSource, /onConversationChange=\{setSelectedChatConversationId\}/);
+  assert.match(source, /onConversationChange\?\.\(selectedId\)/);
+  assert.match(source, /aria-label="新建对话"[\s\S]*onClick=\{startNewConversation\}[\s\S]*variant="ghost"[\s\S]*新对话/);
   assert.match(source, /open=\{contextOpen\}/);
   assert.match(source, /uc-chat-page__delete-dialog/);
   assert.match(source, /停止生成/);

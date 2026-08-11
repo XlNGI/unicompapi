@@ -5,6 +5,7 @@ import {
   LuCheck,
   LuChevronDown,
   LuCopy,
+  LuMessageSquarePlus,
   LuMessagesSquare,
   LuPanelRight,
   LuSquare,
@@ -195,15 +196,16 @@ type DeleteTarget =
   | { readonly kind: 'context'; readonly value: ProjectContextCandidateDto };
 
 interface ChatPageProps {
-  readonly newConversationRequest?: number;
+  readonly initialConversationId?: string;
+  readonly onConversationChange?: (conversationId?: string) => void;
 }
 
-export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
+export function ChatPage({ initialConversationId, onConversationChange }: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | undefined>(initialConversationId);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState('');
   const [renamingConversationId, setRenamingConversationId] = useState<string>();
@@ -322,7 +324,12 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
           chat.listConversations(false, false)
         ]);
         if (!active) return;
-        if (sessionResult.ok) setSession(sessionResult.value);
+        if (sessionResult.ok) {
+          setSession(sessionResult.value);
+          if (sessionResult.value) {
+            setNotice((current) => current === '请先打开项目。' ? '' : current);
+          }
+        }
         else setNotice('读取当前项目失败，请重试。');
         if (conversationResult.ok) {
           setConversations(conversationResult.value);
@@ -356,6 +363,10 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
     };
   }, [chat, storage]);
+
+  useEffect(() => {
+    onConversationChange?.(selectedId);
+  }, [onConversationChange, selectedId]);
 
   useEffect(() => {
     setRenameTitle(selected?.title ?? '');
@@ -477,8 +488,7 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [input]);
 
-  useEffect(() => {
-    if (newConversationRequest === 0) return;
+  function startNewConversation() {
     if (responseInProgress) {
       setNotice('请先停止当前回复，再开始新的对话。');
       return;
@@ -492,7 +502,7 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
     setContextDraft(undefined);
     setNotice(session ? '新的对话已准备好，发送第一条消息后自动保存。' : '请先打开项目。');
     clearResponseDraftState();
-  }, [newConversationRequest]);
+  }
 
   useEffect(() => {
     const textarea = composerRef.current;
@@ -1026,6 +1036,14 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
           </div>
           <div className="uc-chat-page__header-actions">
             <Button
+              aria-label="新建对话"
+              disabled={!session || busy}
+              onClick={startNewConversation}
+              variant="ghost"
+            >
+              <LuMessageSquarePlus aria-hidden="true" /> 新对话
+            </Button>
+            <Button
               aria-label="打开对话列表"
               aria-expanded={historyOpen}
               onClick={() => {
@@ -1151,6 +1169,11 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
         </div>
 
         <div className="uc-chat-page__composer-region">
+          {notice ? (
+            <p className="uc-chat-page__message" aria-live="polite" role="status">
+              {notice}
+            </p>
+          ) : null}
           <section className="uc-chat-page__composer" aria-labelledby="chat-composer-title">
             <h2 className="uc-visually-hidden" id="chat-composer-title">发送消息</h2>
             <textarea
@@ -1271,10 +1294,10 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
             <p className="uc-chat-page__notice">当前回复方式没有可选模型。请切换回复方式，或到「模型与服务商」添加并启用兼容模型。</p>
           ) : null}
         </div>
-        <p className="uc-chat-page__message" aria-live="polite">{notice}</p>
       </section>
 
       <Drawer
+        backdropClassName="uc-chat-page__drawer-backdrop"
         className="uc-chat-page__side-drawer uc-chat-page__history-drawer"
         onClose={() => setHistoryOpen(false)}
         open={historyOpen}
@@ -1384,6 +1407,7 @@ export function ChatPage({ newConversationRequest = 0 }: ChatPageProps) {
       </Modal>
 
       <Drawer
+        backdropClassName="uc-chat-page__drawer-backdrop"
         className="uc-chat-page__side-drawer uc-chat-page__context-drawer"
         onClose={() => setContextOpen(false)}
         open={contextOpen}

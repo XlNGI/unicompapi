@@ -70,14 +70,13 @@ export function App() {
   const [activeSubItemId, setActiveSubItemId] =
     useState<SecondaryNavigationItemId>();
   const [openedVideoDraftId, setOpenedVideoDraftId] = useState<string>();
-  const [newChatRequest, setNewChatRequest] = useState(0);
+  const [selectedChatConversationId, setSelectedChatConversationId] = useState<string>();
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
 
   function handleNavigate(itemId: NavigationItemId) {
     setOpenedVideoDraftId(undefined);
-    if (itemId === 'chat') setNewChatRequest((request) => request + 1);
     setActiveItemId(itemId);
     setActiveSubItemId(getSecondaryNavigationItems(itemId)[0]?.id);
   }
@@ -109,7 +108,10 @@ export function App() {
       onSecondaryNavigate={handleSecondaryNavigate}
     >
       {activeItemId === 'chat' && !activeSubItemId ? (
-        <ChatPage newConversationRequest={newChatRequest} />
+        <ChatPage
+          initialConversationId={selectedChatConversationId}
+          onConversationChange={setSelectedChatConversationId}
+        />
       ) : activeItemId === 'projects' && !activeSubItemId ? (
         <ProjectsPage onNavigate={handleNavigate} />
       ) : activeItemId === 'tasks' && !activeSubItemId ? (
