@@ -36,3 +36,23 @@
 - 目录同步新增模型时，需要补充能力表、Schema、路由测试后再启用。
 
 这些项目属于明确的上游契约或后续扩展，不阻断当前已声明能力的本地适配验收。
+
+## 2026-08-11 增量变更验收
+
+项目负责人最新决策已将 `qwen-image-edit-2509` 从历史 `image_edit` / `/v1/images/edits` 映射调整为：
+
+```text
+reference_to_image -> POST /v1/images/generations
+```
+
+本轮已验证：
+
+1. 模型在 UniCompAPI 精确能力表中仅发布 `reference_to_image`；
+2. 专业图片页选择“图生图”时会触发该 Profile 的软路由；
+3. 请求要求单张受控图片，并将模型名 `qwen-image-edit-2509` 原样写入请求体；
+4. 适配器实际请求路径为 `/v1/images/generations`，不再为该模型挂载新的 `image_edit` Profile；
+5. 历史注册表中的旧 `image_edit` Profile 会在候选投影阶段被当前精确能力表过滤。
+
+验证结果：TypeScript（含测试配置）、ESLint、生产构建通过；领域与平台 Vitest 121 个文件、640 项全部通过；图片相关 Node UI 合同 17 项通过。统一 `pnpm test` 仍被既有 `tests/ui/video-workspace-ipc-contract.test.mjs` 阻断，该测试要求已被 Unicode 媒体协议修复移除的 `headers: request.headers`，与本次变更无关，已记录到 `PLANS.md`。
+
+本节覆盖上文第 2—4 条以及“待确认”中与旧 `/v1/images/edits` 形态有关的描述；旧内容保留用于追溯 2026-08-10 的实施状态。

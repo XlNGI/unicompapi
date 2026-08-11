@@ -51,7 +51,9 @@ describe('UniCompAPI model capability registry', () => {
 
   it('keeps exact feature boundaries for image and video models', () => {
     expect(uniCompApiModelFeatures('qwen-image')).toEqual(['text_to_image']);
-    expect(uniCompApiModelFeatures('qwen-image-edit-2509')).toEqual(['image_edit']);
+    expect(uniCompApiModelFeatures('qwen-image-edit-2509')).toEqual([
+      'reference_to_image'
+    ]);
     expect(uniCompApiModelFeatures('viduq3-pro')).toEqual(['text_to_video']);
     expect(uniCompApiModelFeatures('viduq3-turbo')).toEqual([
       'text_to_video',

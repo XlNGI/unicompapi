@@ -1217,3 +1217,5 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
     docs/active/服务商画廊与连接编排-PR4-创作路由动态化记录.md
 
 - 2026-08-05：画廊增补 UniCompAPI 官方卡（`feature/unicompapi-official-card`，合并 `46e24fa`）。项目负责人定案：UniCompAPI 本质为 OpenAI 兼容接口，卡片名独立、baseURL 固定预置 `https://unicompapi.com/v1` 不需用户填写，其余与 OpenAI Compatible 完全一致。落地方式：新增 `provider-package-unicompapi` 包描述符（`kind: 'official'` + `baseUrlMode: 'fixed'`，端点政策 `fixedBaseUrl` 钉死、仅 https/443/`/v1`、禁环回与内网），凭证为单一 `api_key`，复用 NewAPI 三个适配器描述与全部能力；`NewApiManagementAdapter` 身份改为可按包参数化，主进程以同一运行时为 newapi 与 unicompapi 各注册一个管理端口，验证与目录发现探针完全同构；添加表单因 `fixed` 模式自动隐藏接口地址。探针决策测试钉住：模板动作 `available`/`catalog_available`、编排添加端点固定、目录同步、端点覆盖被拒（`invalid_request`）。门禁 Node + Vitest 共 594 项通过、0 失败、0 跳过；TypeScript、ESLint、清洁生产构建全部通过；真实服务商 HTTP 0 次、真实凭证 0 次、收费调用 0 次、费用 0。
+
+- 2026-08-11：`feature/qwen-image-edit-selection` 按项目负责人最新决策，将 `qwen-image-edit-2509` 从历史 `image_edit` / `/v1/images/edits` 调整为 `reference_to_image` / `/v1/images/generations`。类型检查、ESLint、生产构建、领域与平台 Vitest 640 项、图片 UI 17 项通过；统一 `pnpm test` 仍被既有 `tests/ui/video-workspace-ipc-contract.test.mjs` 阻断，该测试继续要求 Unicode 媒体协议修复已移除的 `headers: request.headers`，与本次 UniCompAPI 图片路由改动无关，待单独修正测试合同。

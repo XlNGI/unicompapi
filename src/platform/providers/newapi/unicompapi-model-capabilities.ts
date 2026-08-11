@@ -6,6 +6,7 @@ export type UniCompApiModelFeature =
   | 'text_chat'
   | 'text_reasoning'
   | 'text_to_image'
+  | 'reference_to_image'
   | 'image_edit'
   | UniCompApiVideoFeature;
 
@@ -37,7 +38,7 @@ const uniCompApiModelFeatureMap = new Map<string, readonly UniCompApiModelFeatur
   ['kimi-k2.6', ['text_chat']],
   ['kling-v3-turbo', ['text_to_video', 'image_to_video']],
   ['qwen-image', ['text_to_image']],
-  ['qwen-image-edit-2509', ['image_edit']],
+  ['qwen-image-edit-2509', ['reference_to_image']],
   ['qwen3-235b-a22b', ['text_chat', 'text_reasoning']],
   ['qwen3-32b', ['text_chat', 'text_reasoning']],
   ['viduq3', ['image_to_video']],
@@ -113,4 +114,15 @@ export function uniCompApiSupportsImageEdit(
   providerModelKey: string
 ): boolean {
   return uniCompApiSupportsFeature(packageId, providerModelKey, 'image_edit');
+}
+
+export function uniCompApiSupportsReferenceImage(
+  packageId: string,
+  providerModelKey: string
+): boolean {
+  return uniCompApiSupportsFeature(
+    packageId,
+    providerModelKey,
+    'reference_to_image'
+  );
 }
