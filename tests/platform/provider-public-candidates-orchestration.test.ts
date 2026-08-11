@@ -328,6 +328,71 @@ describe('provider public feature candidates', () => {
     );
   });
 
+  it('never publishes deleted connections while retaining disabled connections as unavailable', async () => {
+    const deleted = candidate('text_to_image', {
+      candidateId: 'candidate-deleted-connection',
+      eligibility: {
+        ...candidate().eligibility,
+        connectionState: 'deleted'
+      }
+    });
+    const disabled = candidate('text_to_image', {
+      candidateId: 'candidate-disabled-connection',
+      eligibility: {
+        ...candidate().eligibility,
+        connectionState: 'disabled'
+      }
+    });
+    const retired = candidate('text_to_image', {
+      candidateId: 'candidate-retired-model',
+      eligibility: {
+        ...candidate().eligibility,
+        catalogState: 'retired'
+      }
+    });
+    const service = candidateService({
+      getCandidates: () => [deleted, disabled, retired]
+    });
+
+    await expect(service.listFeatureCandidates(imageSubject)).resolves.toMatchObject([
+      {
+        candidateId: 'candidate-disabled-connection',
+        available: false,
+        unavailableReasons: ['connection_unavailable']
+      }
+    ]);
+    await expect(service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: deleted.candidateId
+    })).rejects.toMatchObject({ code: 'candidate_not_found' });
+  });
+
+  it('does not publish deleted connections in text-model catalogs', async () => {
+    const textSubject: FeatureCandidateSubjectV1 = {
+      kind: 'conversation_response_draft',
+      conversationId: toConversationId('conversation-deleted-candidate'),
+      conversationRevision: 1,
+      responseDraftId: toConversationResponseDraftId('response-deleted-candidate'),
+      responseDraftRevision: 1,
+      userMessageId: toMessageId('message-deleted-candidate')
+    };
+    const service = candidateService({
+      getSubject: () => subjectSnapshot(textSubject, 'text_chat'),
+      getCandidates: () => [candidate('text_chat', {
+        candidateId: 'candidate-deleted-text-connection',
+        eligibility: {
+          ...candidate('text_chat').eligibility,
+          connectionState: 'deleted'
+        }
+      })]
+    });
+
+    await expect(service.listCatalogForFeature({
+      projectId,
+      productFeature: 'text_chat'
+    })).resolves.toEqual([]);
+  });
+
   it('invalidates expired, tampered, consumed and fingerprint-stale selections', async () => {
     let clock = t0 as string;
     let strength = 5;

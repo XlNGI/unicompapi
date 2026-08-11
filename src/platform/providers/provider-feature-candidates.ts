@@ -18,6 +18,7 @@ import {
   type FeatureCandidateCostFactV1,
   type FeatureCandidateDtoV1,
   type FeatureCandidateSubjectV1,
+  type ConnectionState,
   type IsoTimestamp,
   type ParameterProjectionMode,
   type ParameterSchemaV2,
@@ -58,7 +59,7 @@ export interface FeatureSubjectResolverPort {
 export interface FeatureCandidateEligibilityV1 {
   readonly modelEnabled: boolean;
   readonly catalogState: 'present' | 'missing' | 'retired';
-  readonly connectionState: string;
+  readonly connectionState: ConnectionState;
   readonly profileStatus: 'declared' | 'verified' | 'restricted' | 'disabled';
   readonly featureSupported: boolean;
   readonly bindingAvailable: boolean;
@@ -185,7 +186,7 @@ export class ProviderFeatureCandidateService {
     subject: FeatureCandidateSubjectV1
   ): Promise<readonly FeatureCandidateDtoV1[]> {
     const resolvedSubject = await this.resolveSubject(subject);
-    const values = await this.candidates.list(resolvedSubject);
+    const values = await this.listCurrentCandidates(resolvedSubject);
     return values
       .map((candidate) => this.toDto(resolvedSubject, candidate))
       .sort((left, right) =>
@@ -224,7 +225,7 @@ export class ProviderFeatureCandidateService {
       materialReferences: [],
       contextContentHashes: []
     };
-    const values = await this.candidates.list(resolvedSubject);
+    const values = await this.listCurrentCandidates(resolvedSubject);
     return values
       .map((candidate) => this.toDto(resolvedSubject, candidate))
       .sort((left, right) =>
@@ -345,7 +346,7 @@ export class ProviderFeatureCandidateService {
     readonly candidate: ResolvedFeatureCandidateV1;
   }> {
     const resolvedSubject = await this.resolveSubject(subject);
-    const candidate = (await this.candidates.list(resolvedSubject)).find(
+    const candidate = (await this.listCurrentCandidates(resolvedSubject)).find(
       (item) => item.candidateId === candidateId
     );
     if (!candidate) {
@@ -369,6 +370,16 @@ export class ProviderFeatureCandidateService {
       subject: { ...resolvedSubject, parameterValues },
       candidate
     };
+  }
+
+  private async listCurrentCandidates(
+    subject: ResolvedFeatureSubjectV1
+  ): Promise<readonly ResolvedFeatureCandidateV1[]> {
+    return (await this.candidates.list(subject)).filter(
+      (candidate) =>
+        candidate.eligibility.connectionState !== 'deleted' &&
+        candidate.eligibility.catalogState !== 'retired'
+    );
   }
 
   private async resolveSubject(

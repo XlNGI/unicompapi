@@ -243,6 +243,11 @@ export class ProviderRegistryController {
       const liveProviders = snapshot.providers.filter((provider) =>
         liveConnections.some((connection) => connection.providerId === provider.id)
       );
+      const liveModels = snapshot.models.filter((model) =>
+        liveConnectionIds.has(String(model.connectionId)) &&
+        (model.catalogState ?? 'present') !== 'retired'
+      );
+      const liveModelIds = new Set(liveModels.map((model) => String(model.id)));
       return {
         ok: true,
         value: {
@@ -281,11 +286,7 @@ export class ProviderRegistryController {
             executionLifecycle: binding.executionLifecycle,
             supportedPurposes: binding.supportedPurposes
           })),
-          models: snapshot.models
-            .filter((model) =>
-              liveConnectionIds.has(String(model.connectionId)) &&
-              (model.catalogState ?? 'present') !== 'retired'
-            )
+          models: liveModels
             .map((model) => {
             const modelProfiles = (snapshot.modelProfiles ?? []).filter(
               (candidate) => candidate.modelId === model.id
@@ -320,7 +321,9 @@ export class ProviderRegistryController {
             productFeatures: productFeatures.length > 0 ? productFeatures : undefined
             };
           }),
-          capabilities: snapshot.capabilities.map((capability) => ({
+          capabilities: snapshot.capabilities
+            .filter((capability) => liveModelIds.has(String(capability.modelId)))
+            .map((capability) => ({
             evidenceId: capability.id,
             modelId: capability.modelId,
             revision: capability.revision,
@@ -335,13 +338,7 @@ export class ProviderRegistryController {
             recordedAt: capability.recordedAt
           })),
           routingPreferences: snapshot.routingPreferences
-            .filter((preference) =>
-              snapshot.models.some((model) =>
-                model.id === preference.modelId &&
-                liveConnectionIds.has(String(model.connectionId)) &&
-                (model.catalogState ?? 'present') !== 'retired'
-              )
-            )
+            .filter((preference) => liveModelIds.has(String(preference.modelId)))
             .map((preference) => ({
             preferenceId: preference.id,
             purpose: preference.purpose,

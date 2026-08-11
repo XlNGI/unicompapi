@@ -132,6 +132,132 @@ describe('JsonProviderRegistryStore', () => {
     expect(serialized).not.toContain('fixture_image');
   });
 
+  it('publishes only records owned by current connections after a connection is re-added', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
+    roots.push(root);
+    const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const provider = createProvider({
+      id: toProviderId('provider-readded'),
+      name: 'Re-added provider',
+      accessCategory: 'custom_remote',
+      identityState: 'verified',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const deletedConnection = createProviderConnection({
+      id: toConnectionId('connection-deleted'),
+      providerId: provider.id,
+      name: 'Deleted connection',
+      state: 'deleted',
+      identityState: 'unverified',
+      credentialState: 'deleted',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const currentConnection = createProviderConnection({
+      id: toConnectionId('connection-current'),
+      providerId: provider.id,
+      name: 'Current connection',
+      state: 'available',
+      identityState: 'verified',
+      credentialState: 'valid',
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const deletedBinding = createProviderProtocolBinding({
+      id: toProtocolBindingId('binding-deleted'),
+      providerId: provider.id,
+      connectionId: deletedConnection.id,
+      protocolId: 'fixture.image',
+      protocolVersion: '1',
+      mediaKind: 'image',
+      adapterKind: 'fixture_image',
+      authScheme: 'unknown',
+      executionLifecycle: 'synchronous_completed',
+      supportedPurposes: ['image_generation'],
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const currentBinding = createProviderProtocolBinding({
+      ...deletedBinding,
+      id: toProtocolBindingId('binding-current'),
+      connectionId: currentConnection.id
+    });
+    const deletedModel = createProviderModel({
+      id: toModelId('model-deleted'),
+      providerId: provider.id,
+      connectionId: deletedConnection.id,
+      protocolBindingId: deletedBinding.id,
+      providerModelKey: 'same-model-key',
+      mediaKind: 'image',
+      revision: 2,
+      displayName: 'Deleted model',
+      enabled: false,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+    const currentModel = createProviderModel({
+      ...deletedModel,
+      id: toModelId('model-current'),
+      connectionId: currentConnection.id,
+      protocolBindingId: currentBinding.id,
+      revision: 1,
+      displayName: 'Current model',
+      enabled: true
+    });
+    const deletedCapability = createModelCapabilityEvidence({
+      id: toCapabilityEvidenceId('capability-deleted'),
+      modelId: deletedModel.id,
+      revision: 1,
+      capability: 'image_generation',
+      state: 'declared_supported',
+      source: 'provider_declared',
+      recordedAt: timestamp
+    });
+    const currentCapability = createModelCapabilityEvidence({
+      ...deletedCapability,
+      id: toCapabilityEvidenceId('capability-current'),
+      modelId: currentModel.id
+    });
+    const deletedRoute = createRoutingPreference({
+      id: toRoutingPreferenceId('routing-deleted'),
+      purpose: 'image_generation',
+      modelId: deletedModel.id,
+      priority: 0,
+      enabled: false,
+      updatedAt: timestamp
+    });
+    const currentRoute = createRoutingPreference({
+      ...deletedRoute,
+      id: toRoutingPreferenceId('routing-current'),
+      modelId: currentModel.id,
+      enabled: true
+    });
+
+    await store.save({
+      schemaVersion: 2,
+      providers: [provider],
+      connections: [deletedConnection, currentConnection],
+      protocolBindings: [deletedBinding, currentBinding],
+      models: [deletedModel, currentModel],
+      capabilities: [deletedCapability, currentCapability],
+      routingPreferences: [deletedRoute, currentRoute]
+    });
+
+    const result = await new ProviderRegistryController(store).getRegistry();
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        connections: [{ connectionId: currentConnection.id }],
+        protocolBindings: [{ protocolBindingId: currentBinding.id }],
+        models: [{ modelId: currentModel.id, connectionId: currentConnection.id }],
+        capabilities: [{ evidenceId: currentCapability.id, modelId: currentModel.id }],
+        routingPreferences: [{ preferenceId: currentRoute.id, modelId: currentModel.id }]
+      }
+    });
+    expect(JSON.stringify(result)).not.toMatch(/connection-deleted|model-deleted|capability-deleted|routing-deleted/);
+  });
+
   it('starts with an empty registry on fresh install and persists user records only', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-providers-'));
     roots.push(root);

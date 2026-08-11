@@ -6,6 +6,9 @@ export interface ModelSelectOption {
   readonly id: string;
   readonly label: string;
   readonly available: boolean;
+  readonly providerName?: string;
+  readonly connectionName?: string;
+  readonly statusLabel?: string;
   readonly unavailableReasons?: readonly string[];
 }
 
@@ -63,12 +66,20 @@ export function ModelSelect({
   }
 
   const data = options.map((option) => ({
+    ...option,
     value: option.id,
-    label: option.available
-      ? option.label
-      : `${option.label}（${(option.unavailableReasons ?? [])
-          .map((reason) => reasonLabels[reason] ?? '其他不可用原因')
-          .join('、') || '不可用'}）`
+    label: option.label,
+    group: option.available ? '可用模型' : '暂不可用模型',
+    searchText: [
+      option.label,
+      option.providerName,
+      option.connectionName,
+      ...(option.unavailableReasons ?? []).map(
+        (reason) => reasonLabels[reason] ?? '其他不可用原因'
+      )
+    ]
+      .filter(Boolean)
+      .join(' ')
   }));
   const disabledItemValues = options
     .filter((option) => !option.available)
@@ -85,6 +96,7 @@ export function ModelSelect({
           data={data}
           disabled={disabled}
           disabledItemValues={disabledItemValues}
+          groupBy="group"
           listboxMaxHeight={320}
           onChange={(next) => onChange(next ?? '')}
           onClose={() => setOpen(false)}
@@ -93,11 +105,80 @@ export function ModelSelect({
           placement="autoVerticalStart"
           placeholder="请选择模型"
           preventOverflow
-          searchable={false}
+          popupClassName="uc-model-select__popup"
+          renderOption={(_label, item) => (
+            <ModelSelectOptionContent
+              option={item as ModelSelectOption & { readonly group?: string }}
+              reasonLabels={reasonLabels}
+            />
+          )}
+          renderOptionGroup={(title) => (
+            <span className="uc-model-select__group-title">{title}</span>
+          )}
+          renderValue={(_next, item, selectedElement) =>
+            item ? (
+              <ModelSelectOptionContent
+                compact
+                option={item as ModelSelectOption & { readonly group?: string }}
+                reasonLabels={reasonLabels}
+              />
+            ) : (
+              selectedElement
+            )
+          }
+          searchable
+          searchBy={(keyword, _label, item) =>
+            String((item as { readonly searchText?: string }).searchText ?? '')
+              .toLocaleLowerCase()
+              .includes(keyword.toLocaleLowerCase())
+          }
           value={value || null}
         />
       </div>
       {hint ? <p className="uc-model-select__hint" role="status">{hint}</p> : null}
     </div>
+  );
+}
+
+function ModelSelectOptionContent({
+  option,
+  reasonLabels,
+  compact = false
+}: {
+  readonly option: ModelSelectOption;
+  readonly reasonLabels: Readonly<Record<string, string>>;
+  readonly compact?: boolean;
+}) {
+  const reasons = (option.unavailableReasons ?? [])
+    .map((reason) => reasonLabels[reason] ?? '其他不可用原因')
+    .filter((reason, index, all) => all.indexOf(reason) === index);
+  const statusLabel =
+    option.statusLabel ??
+    (option.available ? '可用' : reasons[0] ?? '暂不可用');
+
+  return (
+    <span
+      className={`uc-model-select__option${compact ? ' uc-model-select__option--compact' : ''}`}
+      title={reasons.length > 1 ? reasons.join('、') : undefined}
+    >
+      <span className="uc-model-select__option-main">
+        <strong>{option.label}</strong>
+        <span
+          className={`uc-model-select__status uc-model-select__status--${option.available ? 'available' : 'unavailable'}`}
+        >
+          {statusLabel}
+        </span>
+      </span>
+      {option.providerName || option.connectionName ? (
+        <span className="uc-model-select__option-meta">
+          {[option.providerName, option.connectionName].filter(Boolean).join(' · ')}
+        </span>
+      ) : null}
+      {!compact && !option.available && reasons.length > 1 ? (
+        <span className="uc-model-select__option-reason">
+          {reasons.slice(1).join('、')}
+        </span>
+      ) : null}
+    </span>
   );
 }
