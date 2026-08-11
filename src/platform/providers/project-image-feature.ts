@@ -24,8 +24,10 @@ import type { ProviderFeatureContractV1 } from './provider-registry-feature-cand
 import {
   NEWAPI_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_EDIT_CONSTRAINT_SET_ID,
+  NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_RESULT_SCHEMA_ID,
   newApiDefaultImageEditParameterSchema,
+  newApiDefaultReferenceToImageParameterSchema,
   newApiDefaultTextToImageParameterSchema,
   newApiImageUsageSchema
 } from './newapi/newapi-contracts';
@@ -228,6 +230,15 @@ export function createImageProviderFeatureContracts(): readonly ProviderFeatureC
       resultSchemaRevision: 1,
       usageSchema: newApiImageUsageSchema,
       constraintSetId: NEWAPI_IMAGE_EDIT_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: newApiDefaultReferenceToImageParameterSchema,
+      resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiImageUsageSchema,
+      constraintSetId: NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID,
       constraintSetRevision: 1,
       featureMappingVersion: 1
     },

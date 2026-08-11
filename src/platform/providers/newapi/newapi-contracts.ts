@@ -35,6 +35,8 @@ export const NEWAPI_IMAGE_USAGE_SCHEMA_ID = 'usage.newapi.image-generation';
 export const NEWAPI_VIDEO_USAGE_SCHEMA_ID = 'usage.newapi.video-not-reported';
 export const NEWAPI_TEXT_CONSTRAINT_SET_ID = 'constraints.newapi.text';
 export const NEWAPI_IMAGE_CONSTRAINT_SET_ID = 'constraints.newapi.text-to-image';
+export const NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID =
+  'constraints.newapi.reference-to-image.single-image';
 export const NEWAPI_IMAGE_EDIT_CONSTRAINT_SET_ID =
   'constraints.newapi.image-edit.single-image';
 export const NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID =
@@ -47,6 +49,8 @@ export const NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID =
   'parameters.newapi.text_reasoning.default';
 export const NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.newapi.text_to_image.default';
+export const NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
+  'parameters.newapi.reference_to_image.default';
 export const NEWAPI_DEFAULT_IMAGE_EDIT_PARAMETER_SCHEMA_ID =
   'parameters.newapi.image_edit.default';
 export const NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
@@ -476,6 +480,12 @@ export const newApiDefaultImageEditParameterSchema: ParameterSchemaV2 = {
   ]
 };
 
+export const newApiDefaultReferenceToImageParameterSchema: ParameterSchemaV2 = {
+  ...newApiDefaultImageEditParameterSchema,
+  schemaId: NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  productFeature: 'reference_to_image'
+};
+
 /** Default OpenAI-compatible video schemas: optional fields only; provider defaults apply. */
 export const newApiDefaultTextToVideoParameterSchema: ParameterSchemaV2 = {
   schemaVersion: 2,
@@ -782,6 +792,57 @@ export function createOpenAiCompatibleDefaultImageEditDefinition(input: {
             resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
             usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
             constraintSetId: NEWAPI_IMAGE_EDIT_CONSTRAINT_SET_ID
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Exact single-reference image definition for OpenAI-compatible generation.
+ * Endpoint: POST /v1/images/generations with one controlled input image.
+ */
+export function createOpenAiCompatibleDefaultReferenceImageDefinition(input: {
+  readonly packageId: string;
+  readonly packageVersion: string;
+  readonly providerModelKey: string;
+}): ProviderModelDefinition {
+  const providerModelKey = requireProviderModelKey(input.providerModelKey);
+  if (input.packageId !== 'provider-package-unicompapi') {
+    throw new TypeError(
+      'OpenAI-compatible reference image definitions require the UniCompAPI package'
+    );
+  }
+  const suffix = createHash('sha256')
+    .update(canonicalJson({
+      packageId: input.packageId,
+      packageVersion: input.packageVersion,
+      providerModelKey,
+      feature: 'reference_to_image'
+    }))
+    .digest('hex')
+    .slice(0, 16);
+  return {
+    schemaVersion: 1,
+    definitionId: `definition.openai-compatible.reference-image.${suffix}`,
+    packageId: input.packageId,
+    packageVersion: input.packageVersion,
+    providerModelKey,
+    profileTemplates: [
+      {
+        templateId: `profile-template.openai-compatible.reference-image.${suffix}`,
+        adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
+        protocolDefinitionId: NEWAPI_IMAGE_PROTOCOL_ID,
+        sourceDocumentRevision: NEWAPI_SOURCE_DOCUMENT_REVISION,
+        features: [
+          {
+            productFeature: 'reference_to_image',
+            internalPurpose: 'reference_to_image',
+            parameterSchemaId: NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+            resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+            usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
+            constraintSetId: NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID
           }
         ]
       }

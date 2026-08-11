@@ -381,3 +381,14 @@ UniCompAPI 适配应采用现有代码基础上的增量重构：保留共享 Op
 - 不进行真实 HTTP、真实 Token、收费调用或生产媒体结果验收；图片编辑只接受项目受控素材，不接受任意外部 URL。
 
 详细执行证据见 `docs/active/UniCompAPI全模型适配验收记录.md`。
+
+## 14. 工程侧变更说明（2026-08-11）
+
+项目负责人最新明确决策覆盖本文件中关于 `qwen-image-edit-2509` 的旧接口与功能映射：
+
+- 模型功能由独立 `image_edit` 调整为专业图片页的 `reference_to_image`；
+- 请求接口由 `POST /v1/images/edits` 调整为 `POST /v1/images/generations`；
+- 请求仍要求单张项目受控图片，模型名 `qwen-image-edit-2509` 原封不动发送；
+- 历史 `image_edit` Profile 不再作为当前 UniCompAPI 候选，避免旧注册表记录继续暴露错误路由。
+
+本节为最新有效方案。第 4.3、6.3、8.2、11 和 13 节中与本节冲突的 `image_edit`、`/v1/images/edits` 描述仅保留为历史实施记录，不再作为当前实现依据。

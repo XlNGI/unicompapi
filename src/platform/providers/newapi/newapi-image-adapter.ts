@@ -26,9 +26,11 @@ import {
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_IMAGE_ADAPTER_ID,
   NEWAPI_IMAGE_CONSTRAINT_SET_ID,
+  NEWAPI_IMAGE_EDIT_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_RESULT_SCHEMA_ID,
   NEWAPI_IMAGE_USAGE_SCHEMA_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
+  NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID,
   newApiImageUsageSchema
 } from './newapi-contracts';
 import {
@@ -271,6 +273,7 @@ export class NewApiImageAdapter {
       schema.schemaId !== route.parameterSchemaId ||
       schema.revision !== route.parameterSchemaRevision ||
         (schema.productFeature !== 'text_to_image' &&
+          schema.productFeature !== 'reference_to_image' &&
           schema.productFeature !== 'image_edit') ||
       schema.fields.some((field) => !supportedParameterFields.has(field.fieldId))
     ) {
@@ -364,6 +367,16 @@ export function mapNewApiImageUsage(value: unknown): readonly UsageFactV1[] {
 
 function validateRoute(value: unknown) {
   const route = parseProviderExecutionRouteSnapshot(value);
+  const expectedPurpose = route.productFeature === 'text_to_image'
+    ? 'image_generation'
+    : route.productFeature === 'reference_to_image'
+      ? 'reference_to_image'
+      : 'image_editing';
+  const expectedConstraintSet = route.productFeature === 'text_to_image'
+    ? NEWAPI_IMAGE_CONSTRAINT_SET_ID
+    : route.productFeature === 'reference_to_image'
+      ? NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID
+      : NEWAPI_IMAGE_EDIT_CONSTRAINT_SET_ID;
   if (
     !isOpenAiCompatiblePackageId(route.packageId) ||
     route.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
@@ -372,16 +385,15 @@ function validateRoute(value: unknown) {
     !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||
     route.endpointPolicyRevision !== 1 ||
       (route.productFeature !== 'text_to_image' &&
+        route.productFeature !== 'reference_to_image' &&
         route.productFeature !== 'image_edit') ||
-      (route.productFeature === 'text_to_image'
-        ? route.internalPurpose !== 'image_generation'
-        : route.internalPurpose !== 'image_editing') ||
+    route.internalPurpose !== expectedPurpose ||
     route.parameterSchemaRevision !== 1 ||
     route.resultSchemaId !== NEWAPI_IMAGE_RESULT_SCHEMA_ID ||
     route.resultSchemaRevision !== 1 ||
     route.usageSchemaId !== NEWAPI_IMAGE_USAGE_SCHEMA_ID ||
     route.usageSchemaRevision !== 1 ||
-    route.constraintSetId !== NEWAPI_IMAGE_CONSTRAINT_SET_ID ||
+    route.constraintSetId !== expectedConstraintSet ||
     route.constraintSetRevision !== 1 ||
     !validProviderModelKey(route.providerModelKey)
   ) {
@@ -419,7 +431,7 @@ function parseDispatchRequest(
     : requireOpaqueId(item.assetId, 'asset ID');
   if (
     (schema.productFeature === 'text_to_image' && assetId !== undefined) ||
-    (schema.productFeature === 'image_edit' && assetId === undefined)
+    (schema.productFeature !== 'text_to_image' && assetId === undefined)
   ) {
     throw invalidRequest(
       'newapi.invalid_request',
@@ -448,11 +460,11 @@ async function serializeImageRequest(
     prompt: request.prompt,
     ...request.parameterValues
   };
-  if (route.productFeature === 'image_edit') {
+  if (route.productFeature !== 'text_to_image') {
     if (!request.assetId || !materials) {
       throw invalidRequest(
         'newapi.invalid_request',
-        'Image editing requires one controlled input image'
+        'Reference image generation requires one controlled input image'
       );
     }
     const material = await materials.resolve({
@@ -462,7 +474,7 @@ async function serializeImageRequest(
     if (!material || !material.mimeType.startsWith('image/')) {
       throw invalidRequest(
         'newapi.invalid_request',
-        'Image editing requires one controlled image asset'
+        'Reference image generation requires one controlled image asset'
       );
     }
     (body as Record<string, unknown>).image =

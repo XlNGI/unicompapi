@@ -10,9 +10,16 @@ import {
 } from '../../domain';
 import {
   routeOpenAiCompatibleImageEditProfilesForEnabledModels,
-  routeOpenAiCompatibleImageProfilesForEnabledModels
+  routeOpenAiCompatibleImageProfilesForEnabledModels,
+  routeOpenAiCompatibleReferenceImageProfilesForEnabledModels
 } from './newapi/openai-compatible-image-routing';
 import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/openai-compatible-video-routing';
+import {
+  isKnownUniCompApiModel,
+  isUniCompApiPackage,
+  uniCompApiSupportsFeature,
+  type UniCompApiModelFeature
+} from './newapi/unicompapi-model-capabilities';
 import type { ProviderPackageRegistry } from './provider-package-registry';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type {
@@ -99,6 +106,17 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
       });
       snapshot = routed;
     }
+    if (subject.productFeature === 'reference_to_image') {
+      const routed = await this.registry.mutate((current) => {
+        const next = routeOpenAiCompatibleReferenceImageProfilesForEnabledModels(
+          current,
+          this.packages,
+          toIsoTimestamp(new Date().toISOString())
+        );
+        return { snapshot: next, result: next };
+      });
+      snapshot = routed;
+    }
     if (
       subject.productFeature === 'text_to_video' ||
       subject.productFeature === 'image_to_video'
@@ -133,6 +151,11 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
         for (const feature of profile.features.filter((item) =>
           item.productFeature === subject.productFeature
         )) {
+          if (!currentUniCompFeatureSupported(
+            profile.packageId,
+            model.providerModelKey,
+            feature.productFeature
+          )) continue;
           const contract = this.contracts.resolve(feature);
           if (!contract) continue;
           if (!packagePublishesAdapter(this.packages, profile.packageId, profile.adapterKey)) {
@@ -275,6 +298,33 @@ function contractIdentity(input: {
     input.usageSchemaId ?? input.usageSchema!.id,
     input.constraintSetId
   ].join('\u0000');
+}
+
+function currentUniCompFeatureSupported(
+  packageId: string,
+  providerModelKey: string,
+  productFeature: ProductFeature
+): boolean {
+  if (!isUniCompApiPackage(packageId) || !isKnownUniCompApiModel(providerModelKey)) {
+    return true;
+  }
+  const supportedFeatures: readonly UniCompApiModelFeature[] = [
+    'text_chat',
+    'text_reasoning',
+    'text_to_image',
+    'reference_to_image',
+    'image_edit',
+    'text_to_video',
+    'image_to_video'
+  ];
+  if (!supportedFeatures.includes(productFeature as UniCompApiModelFeature)) {
+    return false;
+  }
+  return uniCompApiSupportsFeature(
+    packageId,
+    providerModelKey,
+    productFeature as UniCompApiModelFeature
+  );
 }
 
 function adapterRegistered(

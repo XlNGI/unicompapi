@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
+  toAssetId,
   toConnectionId,
   toIsoTimestamp,
   toModelId,
@@ -31,6 +32,7 @@ import {
   ProviderPackageRegistry,
   createNewApiModelContract,
   createOpenAiCompatibleDefaultImageDefinition,
+  createOpenAiCompatibleDefaultReferenceImageDefinition,
   createOpenAiCompatibleDefaultTextDefinition,
   createOpenAiCompatibleDefaultVideoDefinition,
   mapNewApiImageUsage,
@@ -38,6 +40,7 @@ import {
   newApiDefaultTextChatParameterSchema,
   newApiDefaultTextReasoningParameterSchema,
   newApiDefaultTextToImageParameterSchema,
+  newApiDefaultReferenceToImageParameterSchema,
   newApiDefaultTextToVideoParameterSchema,
   newApiProviderPackageDescriptor,
   NEWAPI_ADAPTER_VERSION,
@@ -49,6 +52,7 @@ import {
   NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_ENDPOINT_POLICY_ID,
@@ -56,6 +60,7 @@ import {
   NEWAPI_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_RESULT_SCHEMA_ID,
   NEWAPI_IMAGE_USAGE_SCHEMA_ID,
+  NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
@@ -246,6 +251,28 @@ describe('NewAPI package and dynamic model contracts', () => {
       'watermark'
     ]);
     expect(JSON.stringify(definition)).not.toMatch(/dall-e|sdxl/i);
+  });
+
+  it('publishes the qwen single-reference generations contract explicitly', () => {
+    const definition = createOpenAiCompatibleDefaultReferenceImageDefinition({
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+      providerModelKey: 'qwen-image-edit-2509'
+    });
+    expect(definition.profileTemplates[0]).toMatchObject({
+      adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
+      features: [
+        {
+          productFeature: 'reference_to_image',
+          internalPurpose: 'reference_to_image',
+          parameterSchemaId: NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+          constraintSetId: NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID
+        }
+      ]
+    });
+    expect(newApiDefaultReferenceToImageParameterSchema.productFeature).toBe(
+      'reference_to_image'
+    );
   });
 
   it('publishes an optional-field default video definition for explicit OpenAI-compatible attach', () => {
@@ -811,6 +838,69 @@ describe('NewAPI image adapter', () => {
     const stream = await adapter.openResult(outcome.results[0] as never);
     expect(await readAll(stream)).toEqual(png);
     expect(downloads.download).not.toHaveBeenCalled();
+  });
+
+  it('sends qwen-image-edit-2509 reference input to images/generations', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fixture = runtimeFixture(async () => jsonResponse({
+      data: [{ b64_json: Buffer.from(png).toString('base64') }]
+    }));
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async (schemaId: string, revision: number) =>
+          schemaId === NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID &&
+          revision === 1
+            ? newApiDefaultReferenceToImageParameterSchema
+            : undefined
+      },
+      usageSink().port,
+      { download: vi.fn() },
+      {
+        nextProviderOperationId: () => 'unicompapi-reference-image-operation-1',
+        nextProviderUsageObservationId: () =>
+          toProviderUsageObservationId('unicompapi-reference-image-usage-1')
+      },
+      () => toIsoTimestamp('2026-08-11T06:00:00.000Z'),
+      {
+        resolve: async ({ assetId }) => ({
+          assetId,
+          mimeType: 'image/png',
+          width: 1,
+          height: 1,
+          sizeBytes: png.byteLength,
+          base64: Buffer.from(png).toString('base64')
+        })
+      }
+    );
+
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiReferenceImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-qwen-image-edit-2509',
+        projectId: 'project-newapi',
+        prompt: '保留主体并调整画面',
+        assetId: toAssetId('asset-qwen-reference'),
+        parameterValues: {}
+      }
+    });
+
+    expect(outcome.kind).toBe('completed_sync');
+    expect(fixture.requests[0]?.url).toBe(
+      `${UNICOMPAPI_OFFICIAL_BASE_URL}/images/generations`
+    );
+    expect(requestJson(fixture.requests[0])).toEqual({
+      model: 'qwen-image-edit-2509',
+      prompt: '保留主体并调整画面',
+      image: `data:image/png;base64,${Buffer.from(png).toString('base64')}`
+    });
   });
 
   it('uses an injected controlled downloader for URL results', async () => {
@@ -1485,6 +1575,46 @@ function routeFor(
     runtimePolicyRevision: 1,
     runtimeAuthorizationClaimId: 'claim-newapi-synthetic',
     createdAt: toIsoTimestamp('2026-08-03T00:00:00.000Z')
+  });
+}
+
+function unicompapiReferenceImageRoute(): ProviderExecutionRouteSnapshotV1 {
+  return createProviderExecutionRouteSnapshot({
+    id: toProviderExecutionRouteSnapshotId('route-unicompapi-qwen-reference-image'),
+    projectId: toProjectId('project-newapi'),
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+    adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
+    adapterVersion: NEWAPI_ADAPTER_VERSION,
+    providerId: toProviderId('provider-unicompapi'),
+    connectionId: toConnectionId('connection-unicompapi'),
+    connectionRevision: 1,
+    connectionConfigVersionId: 'connection-config-unicompapi-1',
+    endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID,
+    endpointPolicyRevision: 1,
+    credentialVersionId: 'credential-version-unicompapi-1',
+    modelId: toModelId('model-unicompapi-qwen-image-edit-2509'),
+    providerModelKey: 'qwen-image-edit-2509',
+    modelRevision: 1,
+    profileId: 'profile-unicompapi-qwen-reference-image',
+    profileRevision: 1,
+    protocolBindingId: toProtocolBindingId('binding-unicompapi-qwen-reference-image'),
+    protocolBindingRevision: 1,
+    productFeature: 'reference_to_image',
+    internalPurpose: 'reference_to_image',
+    featureMappingVersion: 1,
+    parameterSchemaId: NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+    parameterSchemaRevision: 1,
+    resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+    resultSchemaRevision: 1,
+    usageSchemaId: toUsageSchemaId(NEWAPI_IMAGE_USAGE_SCHEMA_ID),
+    usageSchemaRevision: 1,
+    constraintSetId: NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID,
+    constraintSetRevision: 1,
+    runtimePolicyId: 'runtime.unicompapi.synthetic',
+    runtimePolicyRevision: 1,
+    runtimeAuthorizationClaimId: 'claim-unicompapi-synthetic',
+    createdAt: toIsoTimestamp('2026-08-11T06:00:00.000Z')
   });
 }
 
