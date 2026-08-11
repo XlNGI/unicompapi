@@ -32,6 +32,7 @@ import {
   RouteSelectionTokenVault,
   RuntimeAuthorizationLedger,
   type FeatureSubjectResolverPort,
+  type ResolvedFeatureCandidateV1,
   type ResolvedFeatureSubjectV1
 } from '../../src/platform';
 
@@ -218,6 +219,27 @@ describe('registry-backed feature candidates', () => {
             recordedAt: now
           })
         ]
+      },
+      result: undefined
+    }));
+
+    const values = await fixture.service.listFeatureCandidates(subject);
+    expect(values).toHaveLength(1);
+    expect(values[0]).toMatchObject({
+      connectionName: 'Official connection'
+    });
+  });
+
+  it('does not expose models retained as retired history tombstones', async () => {
+    const fixture = await candidateFixture();
+    await fixture.registry.mutate((snapshot) => ({
+      snapshot: {
+        ...snapshot,
+        models: snapshot.models.map((model) =>
+          model.id === 'model-candidate-compatible'
+            ? { ...model, enabled: false, catalogState: 'retired' as const }
+            : model
+        )
       },
       result: undefined
     }));
@@ -580,7 +602,7 @@ function definition(kind: 'official' | 'compatible') {
   };
 }
 
-function resolvedCandidate(schema: ParameterSchemaV2) {
+function resolvedCandidate(schema: ParameterSchemaV2): ResolvedFeatureCandidateV1 {
   return {
     candidateId: 'candidate-professional-reference',
     providerName: 'Professional provider',
