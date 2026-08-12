@@ -146,7 +146,7 @@ export interface StorageCallRecordSummaryDto {
   readonly invocationAttemptId: string;
   readonly projectId: string;
   readonly projectName: string;
-  readonly subjectKind: 'media' | 'conversation';
+  readonly subjectKind: 'media' | 'conversation' | 'prompt_once';
   readonly productFeature: string;
   readonly providerId: string;
   readonly connectionId: string;
@@ -184,6 +184,10 @@ export type StorageCallSubjectDto =
       readonly conversationId: string;
       readonly userMessageId: string;
       readonly responseExecutionId: string;
+    }
+  | {
+      readonly kind: 'prompt_once';
+      readonly subjectId: string;
     };
 
 export interface StorageCallTimelineEventDto {

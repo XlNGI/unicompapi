@@ -116,6 +116,7 @@ export interface NewApiSafeLogEvent {
   readonly operation?:
     | 'model_catalog'
     | 'chat_stream'
+    | 'chat_completion'
     | 'image_submit'
     | 'video_submit'
     | 'video_query'
@@ -207,6 +208,34 @@ export class NewApiSharedRuntime {
       cancel: response.cancel!,
       close: response.close!
     };
+  }
+
+  async requestChatCompletion(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly body: Uint8Array;
+    readonly signal?: AbortSignal;
+    readonly beforeRequestStarted?: () => Promise<void>;
+  }): Promise<Uint8Array> {
+    return requireBody(await this.request({
+      connection: input.connection,
+      credentials: input.credentials,
+      adapterId: NEWAPI_CHAT_ADAPTER_ID,
+      protocolId: NEWAPI_CHAT_PROTOCOL_ID,
+      operation: 'chat_completion',
+      method: 'POST',
+      pathSegments: ['chat', 'completions'],
+      body: input.body,
+      signal: input.signal,
+      beforeRequestStarted: input.beforeRequestStarted,
+      accept: 'application/json',
+      contentType: 'application/json',
+      maximumRequestBytes: 2 * 1024 * 1024,
+      maximumResponseBytes: 2 * 1024 * 1024,
+      requireReadyConnection: true,
+      expectedResponse: 'json',
+      notFoundKind: 'model'
+    }));
   }
 
   async requestImageGeneration(input: {

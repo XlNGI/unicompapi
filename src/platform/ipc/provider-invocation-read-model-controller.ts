@@ -340,7 +340,7 @@ function resultRegistration(
   worksByExecution: ReadonlyMap<string, readonly Work[]>
 ): StorageCallResultRegistrationDto {
   const subject = readModel.subject;
-  if (subject.kind === 'conversation') {
+  if (subject.kind !== 'media') {
     return { state: 'not_applicable', workIds: [] };
   }
   const works = [...(worksByExecution.get(subject.executionId) ?? [])]

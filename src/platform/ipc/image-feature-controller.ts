@@ -2,6 +2,7 @@ import {
   toDraftId,
   type DynamicParameterValue,
   type FeatureCandidateSubjectV1,
+  type ImageWorkspaceDraft,
   type ImageWorkspaceRepository,
   type SubmissionUserConfirmationV1
 } from '../../domain';
@@ -31,6 +32,7 @@ export interface ImageFeatureGenerateQuickInput {
 export interface ImageFeatureControllerRuntime {
   readonly drafts: ImageWorkspaceRepository;
   readonly candidates: ProviderFeatureCandidateService;
+  assertPromptEnhancementSatisfied?(draft: ImageWorkspaceDraft): Promise<void>;
   submit?(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
@@ -72,6 +74,7 @@ export class ImageFeatureController {
     return this.execute(async () => {
       const input = parsePrepareRequest(request);
       const resolved = await this.requireDraft(input);
+      await resolved.runtime.assertPromptEnhancementSatisfied?.(resolved.draft);
       return {
         ok: true,
         value: await resolved.runtime.candidates.prepareSubmission({
@@ -91,6 +94,7 @@ export class ImageFeatureController {
         return failure('confirmation_required', 'Explicit confirmation is required');
       }
       const resolved = await this.requireDraft(input);
+      await resolved.runtime.assertPromptEnhancementSatisfied?.(resolved.draft);
       const confirmation = {
         schemaVersion: 1 as const,
         confirmationId: input.confirmationId,
@@ -163,7 +167,7 @@ export class ImageFeatureController {
       draftId: draft.id,
       draftRevision: imageDraftRevision(draft.updatedAt)
     };
-    return { runtime, subject };
+    return { runtime, subject, draft };
   }
 
   private execute<T>(
@@ -301,7 +305,9 @@ function mapError(error: unknown): {
   if (
     error instanceof TypeError &&
     typeof error.message === 'string' &&
-    error.message.includes('capability evidence')
+    (error.message.includes('capability evidence') ||
+      error.message.includes('prompt enhancement') ||
+      error.message.includes('Project context'))
   ) {
     return {
       code: 'subject_invalid',

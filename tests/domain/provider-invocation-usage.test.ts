@@ -143,6 +143,20 @@ describe('provider invocation lifecycle contracts', () => {
       'contiguous'
     );
   });
+
+  it('accepts a prompt_once subject without creating media or conversation artifacts', () => {
+    const attempt = createProviderInvocationAttempt({
+      id: toProviderInvocationAttemptId('invocation-prompt-once-domain'),
+      projectId: toProjectId('project-prompt-once-domain'),
+      subject: { kind: 'prompt_once', subjectId: 'draft-prompt-once-domain' },
+      routeSnapshotId: toProviderExecutionRouteSnapshotId('route-prompt-once-domain'),
+      createdAt: t0
+    });
+    expect(attempt.subject).toEqual({
+      kind: 'prompt_once',
+      subjectId: 'draft-prompt-once-domain'
+    });
+  });
 });
 
 describe('provider usage and local result contracts', () => {

@@ -26,6 +26,7 @@ import {
   createImageFeatureDispatchBridge,
   createImageFeatureSubmissionIdFactory,
   createImageProviderFeatureContracts,
+  assertImagePromptEnhancementSatisfied,
   extractImageResultUrls,
   imageDraftRevision,
   type ImageFeatureSubmissionRuntimes,
@@ -125,7 +126,13 @@ export function createImageFeatureControllerRuntime(
 
   const runtime: ImageFeatureControllerRuntime = {
     drafts,
-    candidates
+    candidates,
+    assertPromptEnhancementSatisfied: (draft) =>
+      assertImagePromptEnhancementSatisfied({
+        projectId: options.session.projectId,
+        draft,
+        contexts
+      })
   };
 
   const authorization = options.submissionAuthorization;

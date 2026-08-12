@@ -21,9 +21,9 @@ import {
   type ImageFeatureApi
 } from '../src/shared/image-feature-ipc';
 import {
-  imagePromptEnhanceIpcChannels,
-  type ImagePromptEnhanceApi
-} from '../src/shared/image-prompt-enhance-ipc';
+  promptEnhanceIpcChannels,
+  type PromptEnhanceApi
+} from '../src/shared/prompt-enhance-ipc';
 import {
   videoWorkspaceIpcChannels,
   type VideoWorkspaceApi
@@ -217,28 +217,25 @@ const imageFeatures: ImageFeatureApi = {
     })
 };
 
-const imagePromptEnhance: ImagePromptEnhanceApi = {
-  listCandidates: (productFeature) =>
-    ipcRenderer.invoke(imagePromptEnhanceIpcChannels.listCandidates, {
-      productFeature
-    }),
-  prepare: (draftId, draftUpdatedAt, productFeature, candidateId, parameterValues) =>
-    ipcRenderer.invoke(imagePromptEnhanceIpcChannels.prepare, {
-      draftId,
-      draftUpdatedAt,
-      productFeature,
+const promptEnhance: PromptEnhanceApi = {
+  listCandidates: () =>
+    ipcRenderer.invoke(promptEnhanceIpcChannels.listCandidates, {}),
+  prepare: (subjectId, subjectRevision, candidateId, parameterValues) =>
+    ipcRenderer.invoke(promptEnhanceIpcChannels.prepare, {
+      subjectId,
+      subjectRevision,
       candidateId,
       parameterValues
     }),
   submit: (
-    draftId,
-    draftUpdatedAt,
+    subjectId,
+    subjectRevision,
     routeSelectionToken,
     confirmationId,
     confirmed
-  ) => ipcRenderer.invoke(imagePromptEnhanceIpcChannels.submit, {
-    draftId,
-    draftUpdatedAt,
+  ) => ipcRenderer.invoke(promptEnhanceIpcChannels.submit, {
+    subjectId,
+    subjectRevision,
     routeSelectionToken,
     confirmationId,
     confirmed
@@ -660,7 +657,8 @@ contextBridge.exposeInMainWorld('unicomp', {
   chatContexts,
   imageSubmissions,
   imageFeatures,
-  imagePromptEnhance,
+  promptEnhance,
+  imagePromptEnhance: promptEnhance,
   videoFeatures,
   imageWorkspaces,
   videoEditors,
