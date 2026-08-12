@@ -10,6 +10,8 @@ import {
   toSubmissionIntentId,
   type MessageFailureReason,
   type ParameterSchemaV2,
+  type Conversation,
+  type ConversationResponseExecutionId,
   type ProjectConversationRepository,
   type ProviderConnection,
   type StructuredCredentialRecord
@@ -56,6 +58,7 @@ import type {
   SubmissionDispatchOutcome
 } from './provider-submission-orchestrator';
 import type { ConversationResponseExecutionLifecycle } from './conversation-response-streaming';
+import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
 
 const noopUsage: DeepSeekUsageObservationSinkPort & NewApiUsageObservationSinkPort = {
   async append() {
@@ -266,49 +269,147 @@ function createConversationLinkedLifecycle(
   conversations: ProjectConversationRepository,
   now: () => string
 ): DeepSeekConversationLifecyclePort & NewApiConversationLifecyclePort {
+  const projectionFlushDelayMs = 120;
+  const queues = new Map<string, Promise<void>>();
+  const projections = new Map<string, {
+    pendingContent: string;
+    timer?: ReturnType<typeof setTimeout>;
+    tail: Promise<void>;
+  }>();
+
+  function enqueue<T>(executionId: ConversationResponseExecutionId, operation: () => Promise<T>): Promise<T> {
+    const previous = queues.get(executionId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    const completion = current.then(() => undefined, () => undefined);
+    queues.set(executionId, completion);
+    void completion.finally(() => {
+      if (queues.get(executionId) === completion) queues.delete(executionId);
+    });
+    return current;
+  }
+
+  function projectionState(executionId: ConversationResponseExecutionId) {
+    const existing = projections.get(executionId);
+    if (existing) return existing;
+    const created: {
+      pendingContent: string;
+      timer?: ReturnType<typeof setTimeout>;
+      tail: Promise<void>;
+    } = { pendingContent: '', tail: Promise.resolve() };
+    projections.set(executionId, created);
+    return created;
+  }
+
+  function queueProjection(
+    executionId: ConversationResponseExecutionId,
+    operation: (conversation: Conversation, assistantMessageId: Conversation['messages'][number]['id']) => Conversation
+  ): Promise<void> {
+    const state = projectionState(executionId);
+    const next = state.tail.catch(() => undefined).then(async () => {
+      const model = await lifecycle.readModel(executionId);
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const conversation = await conversations.get(model.conversationId);
+        if (!conversation) return;
+        const updated = operation(conversation, model.assistantMessageId);
+        try {
+          await conversations.save(updated, conversation.revision);
+          return;
+        } catch (error) {
+          if (!(error instanceof ConversationRevisionConflictError) || attempt === 3) {
+            throw error;
+          }
+        }
+      }
+    });
+    state.tail = next;
+    return next;
+  }
+
+  async function flushPending(executionId: ConversationResponseExecutionId): Promise<void> {
+    const state = projectionState(executionId);
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+    const content = state.pendingContent;
+    state.pendingContent = '';
+    if (content.length > 0) {
+      try {
+        await queueProjection(executionId, (conversation, assistantMessageId) =>
+          appendAssistantMessageChunk(
+            conversation,
+            assistantMessageId,
+            content,
+            toIsoTimestamp(now())
+          )
+        );
+      } catch (error) {
+        state.pendingContent = `${content}${state.pendingContent}`;
+        throw error;
+      }
+    }
+    await state.tail;
+    // New deltas may have arrived while the previous projection was saving.
+    if (state.pendingContent.length > 0) await flushPending(executionId);
+  }
+
+  function scheduleFlush(executionId: ConversationResponseExecutionId): void {
+    const state = projectionState(executionId);
+    if (state.timer) return;
+    state.timer = setTimeout(() => {
+      state.timer = undefined;
+      void flushPending(executionId).catch(() => undefined);
+    }, projectionFlushDelayMs);
+  }
+
+  function releaseProjection(executionId: ConversationResponseExecutionId): void {
+    const state = projections.get(executionId);
+    if (state?.timer) clearTimeout(state.timer);
+    projections.delete(executionId);
+  }
+
   return {
-    start: (executionId) => lifecycle.start(executionId),
-    async appendContent(executionId, contentDelta) {
+    start: (executionId) => enqueue(executionId, () => lifecycle.start(executionId)),
+    appendContent: (executionId, contentDelta) => enqueue(executionId, async () => {
       await lifecycle.appendContent(executionId, contentDelta);
-      const model = await lifecycle.readModel(executionId);
-      const conversation = await conversations.get(model.conversationId);
-      if (!conversation) return;
-      const updated = appendAssistantMessageChunk(
-        conversation,
-        model.assistantMessageId,
-        contentDelta,
-        toIsoTimestamp(now())
-      );
-      await conversations.save(updated, conversation.revision);
-    },
-    async complete(executionId) {
+      projectionState(executionId).pendingContent += contentDelta;
+      scheduleFlush(executionId);
+    }),
+    complete: (executionId) => enqueue(executionId, async () => {
+      await flushPending(executionId);
       await lifecycle.complete(executionId);
-      const model = await lifecycle.readModel(executionId);
-      const conversation = await conversations.get(model.conversationId);
-      if (!conversation) return;
-      const updated = completeAssistantMessage(
+      await queueProjection(executionId, (conversation, assistantMessageId) => completeAssistantMessage(
         conversation,
-        model.assistantMessageId,
+        assistantMessageId,
         toIsoTimestamp(now())
-      );
-      await conversations.save(updated, conversation.revision);
-    },
-    requestCancel: (executionId) => lifecycle.requestCancel(executionId),
-    confirmCancelled: (executionId) => lifecycle.confirmCancelled(executionId),
-    async fail(executionId, safeCode) {
+      ));
+      releaseProjection(executionId);
+    }),
+    requestCancel: (executionId) => enqueue(executionId, async () => {
+      await flushPending(executionId);
+      await lifecycle.requestCancel(executionId);
+    }),
+    confirmCancelled: (executionId) => enqueue(executionId, async () => {
+      await flushPending(executionId);
+      await lifecycle.confirmCancelled(executionId);
+      releaseProjection(executionId);
+    }),
+    fail: (executionId, safeCode) => enqueue(executionId, async () => {
+      await flushPending(executionId);
       await lifecycle.fail(executionId, safeCode);
-      const model = await lifecycle.readModel(executionId);
-      const conversation = await conversations.get(model.conversationId);
-      if (!conversation) return;
-      const updated = failAssistantMessage(
+      await queueProjection(executionId, (conversation, assistantMessageId) => failAssistantMessage(
         conversation,
-        model.assistantMessageId,
+        assistantMessageId,
         failureReasonFromSafeCode(safeCode),
         toIsoTimestamp(now())
-      );
-      await conversations.save(updated, conversation.revision);
-    },
-    interrupt: (executionId, reason) => lifecycle.interrupt(executionId, reason)
+      ));
+      releaseProjection(executionId);
+    }),
+    interrupt: (executionId, reason) => enqueue(executionId, async () => {
+      await flushPending(executionId);
+      await lifecycle.interrupt(executionId, reason);
+      releaseProjection(executionId);
+    })
   };
 }
 
