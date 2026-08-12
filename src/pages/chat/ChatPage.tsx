@@ -33,6 +33,8 @@ import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
 import '../../styles/pages.css';
 
+const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;
+
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   invalid_request: '当前操作数据无效，请刷新后重试。',
   project_not_open: '请先打开目标项目。',
@@ -439,43 +441,53 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     ) {
       return;
     }
-    const timer = window.setInterval(() => {
-      void chat.getResponseExecution(responseExecution.responseExecutionId).then((result) => {
-        if (!result.ok || cancelRequestedRef.current) return;
+    const responseExecutionId = responseExecution.responseExecutionId;
+    let active = true;
+    let polling = false;
+    async function pollResponseExecution() {
+      if (polling || !active || !chat) return;
+      polling = true;
+      try {
+        const result = await chat.getResponseExecution(responseExecutionId);
+        if (!active || !result.ok || cancelRequestedRef.current) return;
         setResponseExecution(result.value);
         if (!['pending', 'streaming'].includes(result.value.state) && selectedId) {
-          void chat.getConversation(selectedId).then((conversation) => {
-            if (!conversation.ok) return;
-            replaceConversation(conversation.value);
-            const assistant = conversation.value.messages.find(
-              (message) => message.messageId === result.value.assistantMessageId
+          const conversation = await chat.getConversation(selectedId);
+          if (!active || !conversation.ok) return;
+          replaceConversation(conversation.value);
+          const assistant = conversation.value.messages.find(
+            (message) => message.messageId === result.value.assistantMessageId
+          );
+          if (result.value.state === 'completed') {
+            setNotice('');
+          } else if (
+            result.value.state === 'failed' &&
+            assistant?.failureReason === 'truncated'
+          ) {
+            setNotice(
+              '回复因输出长度限制被截断。可在参数中提高 max_tokens 后重试，或减少勾选的上下文。'
             );
-            if (result.value.state === 'completed') {
-              setNotice('');
-            } else if (
-              result.value.state === 'failed' &&
-              assistant?.failureReason === 'truncated'
-            ) {
-              setNotice(
-                '回复因输出长度限制被截断。可在参数中提高 max_tokens 后重试，或减少勾选的上下文。'
-              );
-            } else if (result.value.state === 'failed') {
-              setNotice('回复失败，请查看任务中心调用记录。');
-            } else if (result.value.state === 'cancelled') {
-              setNotice('回复已取消。');
-            } else if (result.value.state === 'interrupted') {
-              setNotice('回复被中断，请重试。');
-            }
-          });
+          } else if (result.value.state === 'failed') {
+            setNotice('回复失败，请查看任务中心调用记录。');
+          } else if (result.value.state === 'cancelled') {
+            setNotice('回复已取消。');
+          } else if (result.value.state === 'interrupted') {
+            setNotice('回复被中断，请重试。');
+          }
         }
-      });
-      if (selectedId) {
-        void chat.getConversation(selectedId).then((result) => {
-          if (result.ok && !cancelRequestedRef.current) replaceConversation(result.value);
-        });
+      } finally {
+        polling = false;
       }
-    }, 500);
-    return () => window.clearInterval(timer);
+    }
+    void pollResponseExecution();
+    const timer = window.setInterval(
+      () => void pollResponseExecution(),
+      RESPONSE_STREAM_POLL_INTERVAL_MS
+    );
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [cancelRequested, chat, responseExecution?.responseExecutionId, responseExecution?.state, selectedId]);
 
   useEffect(() => {

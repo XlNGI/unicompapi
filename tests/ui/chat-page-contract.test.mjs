@@ -82,6 +82,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle:hover/);
   assert.match(source, /responseInProgress/);
   assert.match(source, /displayMessages/);
+  assert.match(source, /const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;/);
+  assert.match(source, /void pollResponseExecution\(\)/);
+  assert.match(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
   assert.match(source, /void sendMessage\(\)/);
   assert.match(source, /confirmLeaveUnsentInput/);
   assert.doesNotMatch(source, /首次外发前请核对/);
