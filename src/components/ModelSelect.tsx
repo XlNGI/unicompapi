@@ -28,6 +28,7 @@ export interface ModelSelectProps {
   readonly popupClassName?: string;
   readonly listboxMaxHeight?: number;
   readonly searchable?: boolean;
+  readonly searchPlaceholder?: string;
   readonly showEmptyState?: boolean;
   readonly noResultsText?: string;
   readonly listboxHeader?: ReactNode;
@@ -52,6 +53,7 @@ export function ModelSelect({
   popupClassName = '',
   listboxMaxHeight = 320,
   searchable = true,
+  searchPlaceholder = '搜索模型或服务商',
   showEmptyState = true,
   noResultsText = '没有匹配的模型',
   listboxHeader,
@@ -121,7 +123,7 @@ export function ModelSelect({
           disabledItemValues={disabledItemValues}
           groupBy="group"
           listboxMaxHeight={listboxMaxHeight}
-          locale={{ noResultsText }}
+          locale={{ noResultsText, searchPlaceholder }}
           onChange={(next) => onChange(next ?? '')}
           onClose={() => {
             setOpen(false);

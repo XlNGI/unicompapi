@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const source = await readFile('src/pages/library/LibraryPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
+const componentStyles = await readFile('src/styles/components.css', 'utf8');
 
 test('work library consumes only controlled work and file operations', () => {
   for (const call of [
@@ -54,6 +55,21 @@ test('work list keeps at least three columns and protects long names from status
   assert.match(styles, /\.uc-work-library__work-heading strong \{[\s\S]*?-webkit-line-clamp: 2/);
   assert.match(styles, /padding-right: 76px/);
   assert.match(styles, /\.uc-work-library__work-state \{[\s\S]*?position: absolute;[\s\S]*?right: 0/);
+});
+
+test('work detail status stays horizontal beside long work names', () => {
+  assert.match(
+    componentStyles,
+    /\.uc-status-pill \{[\s\S]*?flex: 0 0 auto;[\s\S]*?white-space: nowrap;/
+  );
+  assert.match(
+    styles,
+    /\.uc-work-library__details-content,\s*\.uc-work-library__details-heading > div \{[\s\S]*?min-width: 0;/
+  );
+  assert.match(
+    styles,
+    /\.uc-work-library__details-heading > div \{[\s\S]*?flex: 1 1 auto;/
+  );
 });
 
 test('work library is not a generic file manager and does not overwrite history', () => {
