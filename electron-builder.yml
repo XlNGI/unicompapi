@@ -1,0 +1,35 @@
+appId: com.unicomp.desktop
+productName: UniComp
+artifactName: UniComp-${version}-${os}-${arch}.${ext}
+directories:
+  output: release-nsis
+  buildResources: build-resources
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/tests{,/**}'
+  - '!**/docs{,/**}'
+  - '!**/.tools{,/**}'
+  - '!**/.cache{,/**}'
+  - '!**/tmp{,/**}'
+  - '!**/temp{,/**}'
+asar: true
+compression: maximum
+npmRebuild: false
+forceCodeSigning: false
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: UniComp-${version}-setup-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: UniComp
+  language: 2052

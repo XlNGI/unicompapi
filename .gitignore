@@ -42,3 +42,5 @@ temp/
 *.exe
 *.msi
 *.AppImage
+release/
+release-nsis/
