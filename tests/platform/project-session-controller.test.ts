@@ -8,8 +8,10 @@ import {
   toProjectId
 } from '../../src/domain';
 import {
+  InMemoryProjectCatalogStore,
   JsonProjectRepository,
   NodeProjectStorage,
+  ProjectCatalogService,
   ProjectSessionController,
   StorageIpcController,
   StorageProjectSessionRegistry
@@ -85,6 +87,64 @@ describe('ProjectSessionController', () => {
     });
     expect(JSON.stringify(opened)).not.toContain(root);
     expect(registry.get()?.rootDirectory).toBe(path.resolve(root));
+  });
+
+  it('opens a recent project by controlled id without invoking the directory picker', async () => {
+    const { projectId, root } = await createValidProjectRoot();
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    await catalog.remember({
+      projectId,
+      projectName: 'Session project',
+      rootDirectory: root
+    });
+    const registry = new StorageProjectSessionRegistry();
+    let pickerCalls = 0;
+    const controller = new ProjectSessionController({
+      registry,
+      chooseProjectDirectory: async () => {
+        pickerCalls += 1;
+        return undefined;
+      },
+      catalog
+    });
+
+    const opened = await controller.openRecentProject({ projectId });
+
+    expect(opened).toEqual({
+      ok: true,
+      value: {
+        cancelled: false,
+        session: { projectId, projectName: 'Session project' }
+      }
+    });
+    expect(pickerCalls).toBe(0);
+    expect(JSON.stringify(opened)).not.toContain(root);
+    expect(registry.get()?.rootDirectory).toBe(path.resolve(root));
+  });
+
+  it('rejects a recent project when its catalog id no longer matches the manifest', async () => {
+    const { root } = await createValidProjectRoot();
+    const catalogProjectId = toProjectId('project-stale-catalog');
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    await catalog.remember({
+      projectId: catalogProjectId,
+      projectName: 'Stale catalog project',
+      rootDirectory: root
+    });
+    const registry = new StorageProjectSessionRegistry();
+    const controller = new ProjectSessionController({
+      registry,
+      chooseProjectDirectory: async () => undefined,
+      catalog
+    });
+
+    await expect(controller.openRecentProject({
+      projectId: catalogProjectId
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'project_open_failed' }
+    });
+    expect(registry.get()).toBeUndefined();
   });
 
   it('preserves the current session when another directory is invalid', async () => {

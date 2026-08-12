@@ -56,6 +56,8 @@ const storage: StorageApi = {
     ipcRenderer.invoke(storageIpcChannels.restoreBackup, { fileId }),
   rebuildIndex: () => ipcRenderer.invoke(storageIpcChannels.rebuildIndex),
   openProject: () => ipcRenderer.invoke(storageIpcChannels.openProject),
+  openRecentProject: (projectId) =>
+    ipcRenderer.invoke(storageIpcChannels.openRecentProject, { projectId }),
   createProject: (name) =>
     ipcRenderer.invoke(storageIpcChannels.createProject, { name }),
   listProjects: () => ipcRenderer.invoke(storageIpcChannels.listProjects),

@@ -12,6 +12,7 @@ test('projects page uses the controlled project session API', () => {
     'listWorks',
     'createProject',
     'openProject',
+    'openRecentProject',
     'closeProject'
   ]) {
     assert.match(source, new RegExp(`storage\\.${operation}`));
@@ -19,6 +20,15 @@ test('projects page uses the controlled project session API', () => {
   assert.match(source, /projectName/);
   assert.match(source, /notifyProjectSessionChanged/);
   assert.doesNotMatch(source, /rootDirectory|absolutePath|readFile|writeFile/);
+});
+
+test('recent project cards open available projects through a controlled id', () => {
+  assert.match(source, /storage\.openRecentProject\(projectId\)/);
+  assert.match(source, /aria-label=\{`打开项目 \$\{project\.projectName\}`\}/);
+  assert.match(source, /onClick=\{\(\) => void handleOpenRecentProject\(project\.projectId\)\}/);
+  assert.match(source, /disabled=\{busy \|\| project\.availability !== 'available'\}/);
+  assert.match(source, /type="button"/);
+  assert.doesNotMatch(source, /project\.rootDirectory|project\.absolutePath/);
 });
 
 test('projects page represents loading, open, and closed session states', () => {

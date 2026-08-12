@@ -2112,7 +2112,8 @@
 }
 
 .uc-project-center__create-form input:focus-visible,
-.uc-project-center__entry-grid button:focus-visible {
+.uc-project-center__entry-grid button:focus-visible,
+.uc-project-center__project-card:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: 2px;
 }
@@ -2200,7 +2201,35 @@
 
 .uc-project-center__project-card {
   display: grid;
+  width: 100%;
+  min-width: 0;
   gap: var(--uc-space-3);
+  font: inherit;
+  text-align: left;
+}
+
+button.uc-project-center__project-card {
+  cursor: pointer;
+}
+
+button.uc-project-center__project-card:hover:not(:disabled) {
+  border-color: var(--uc-color-border-strong);
+  background: var(--uc-color-surface-raised);
+}
+
+button.uc-project-center__project-card[aria-current='true'] {
+  border-color: var(--uc-color-border-focus);
+}
+
+button.uc-project-center__project-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+}
+
+.uc-project-center__project-card h3,
+.uc-project-center__project-card p {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .uc-project-center__message {

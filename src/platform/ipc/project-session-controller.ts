@@ -59,43 +59,31 @@ export class ProjectSessionController {
         return { cancelled: true };
       }
 
-      if (!path.isAbsolute(rootDirectory)) {
-        throw new ProjectSessionError(
-          'invalid_project',
-          'Selected project directory is invalid'
-        );
-      }
-
-      const storage = new NodeProjectStorage(rootDirectory);
-      const manifest = await storage.readJson<unknown>(projectStoragePaths.manifest);
-      const projectId = readProjectId(manifest);
-      const repository = new JsonProjectRepository(storage, projectId);
-      const project = await repository.load();
-
-      if (!project) {
-        throw new ProjectSessionError(
-          'invalid_project',
-          'Selected directory does not contain a project manifest'
-        );
-      }
-
-      const session: StorageProjectSession = {
-        projectId: project.id,
-        projectName: project.name,
-        rootDirectory: path.resolve(rootDirectory)
+      return {
+        cancelled: false,
+        session: await this.openProjectDirectory(rootDirectory)
       };
-      await this.dependencies.catalog?.remember({
-        projectId: session.projectId,
-        projectName: session.projectName,
-        rootDirectory: session.rootDirectory
-      });
-      await this.dependencies.beforeSessionChange?.();
-      this.dependencies.registry.set(session);
-      await this.dependencies.afterSessionChange?.();
+    });
+  }
+
+  openRecentProject(
+    request: unknown
+  ): Promise<StorageIpcResult<StorageOpenProjectDto>> {
+    return this.execute(async () => {
+      const projectId = parseRecentProjectId(request);
+      const entries = await this.dependencies.catalog?.getEntries();
+      const entry = entries?.find((candidate) => candidate.projectId === projectId);
+
+      if (!entry) {
+        throw new ProjectSessionError(
+          'project_open_failed',
+          'The recent project could not be found'
+        );
+      }
 
       return {
         cancelled: false,
-        session: toSessionDto(session)
+        session: await this.openProjectDirectory(entry.rootDirectory, projectId)
       };
     });
   }
@@ -193,6 +181,53 @@ export class ProjectSessionController {
     };
   }
 
+  private async openProjectDirectory(
+    rootDirectory: string,
+    expectedProjectId?: string
+  ): Promise<StorageProjectSessionDto> {
+    if (!path.isAbsolute(rootDirectory)) {
+      throw new ProjectSessionError(
+        'invalid_project',
+        'Selected project directory is invalid'
+      );
+    }
+
+    const storage = new NodeProjectStorage(rootDirectory);
+    const manifest = await storage.readJson<unknown>(projectStoragePaths.manifest);
+    const projectId = readProjectId(manifest);
+    if (expectedProjectId && projectId !== expectedProjectId) {
+      throw new ProjectSessionError(
+        'project_open_failed',
+        'The recent project no longer matches its catalog entry'
+      );
+    }
+    const repository = new JsonProjectRepository(storage, projectId);
+    const project = await repository.load();
+
+    if (!project) {
+      throw new ProjectSessionError(
+        'invalid_project',
+        'Selected directory does not contain a project manifest'
+      );
+    }
+
+    const session: StorageProjectSession = {
+      projectId: project.id,
+      projectName: project.name,
+      rootDirectory: path.resolve(rootDirectory)
+    };
+    await this.dependencies.catalog?.remember({
+      projectId: session.projectId,
+      projectName: session.projectName,
+      rootDirectory: session.rootDirectory
+    });
+    await this.dependencies.beforeSessionChange?.();
+    this.dependencies.registry.set(session);
+    await this.dependencies.afterSessionChange?.();
+
+    return toSessionDto(session);
+  }
+
   private async execute<T>(
     operation: () => Promise<T>
   ): Promise<StorageIpcResult<T>> {
@@ -234,12 +269,32 @@ export class ProjectSessionController {
 
 class ProjectSessionError extends Error {
   constructor(
-    readonly code: 'invalid_project' | 'project_directory_not_empty',
+    readonly code:
+      | 'invalid_project'
+      | 'project_directory_not_empty'
+      | 'project_open_failed',
     message: string
   ) {
     super(message);
     this.name = 'ProjectSessionError';
   }
+}
+
+function parseRecentProjectId(request: unknown): string {
+  if (
+    typeof request !== 'object' ||
+    request === null ||
+    !('projectId' in request) ||
+    typeof request.projectId !== 'string' ||
+    request.projectId.trim().length === 0
+  ) {
+    throw new ProjectSessionError(
+      'invalid_project',
+      'A recent project id is required'
+    );
+  }
+
+  return request.projectId;
 }
 
 function parseProjectName(request: unknown): string {
