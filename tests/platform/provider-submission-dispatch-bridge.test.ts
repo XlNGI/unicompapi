@@ -21,6 +21,7 @@ import {
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_IMAGE_ADAPTER_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
+  NEWAPI_REQUEST_TOO_LARGE_MESSAGE,
   NEWAPI_VIDEO_ADAPTER_ID,
   ProviderPackageRegistry,
   ProviderSubmissionDispatchBridge,
@@ -159,6 +160,14 @@ describe('provider submission dispatch bridge', () => {
     })).toEqual({
       kind: 'failed_before_submission',
       safeCode: 'newapi.invalid_request'
+    });
+    expect(normalizeProviderSubmitOutcome({
+      kind: 'failed_before_submission',
+      message: NEWAPI_REQUEST_TOO_LARGE_MESSAGE,
+      retryability: 'not_retryable'
+    })).toEqual({
+      kind: 'failed_before_submission',
+      safeCode: 'newapi.request_too_large'
     });
     expect(normalizeProviderSubmitOutcome({
       kind: 'failed_before_submission',

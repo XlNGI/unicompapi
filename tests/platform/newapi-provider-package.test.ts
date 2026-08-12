@@ -60,6 +60,7 @@ import {
   NEWAPI_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_RESULT_SCHEMA_ID,
   NEWAPI_IMAGE_USAGE_SCHEMA_ID,
+  NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES,
   NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID,
   NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
@@ -901,6 +902,112 @@ describe('NewAPI image adapter', () => {
       prompt: '保留主体并调整画面',
       image: `data:image/png;base64,${Buffer.from(png).toString('base64')}`
     });
+  });
+
+  it('sends a full 15 MiB controlled reference within the shared image budget', async () => {
+    const rawBytes = Buffer.alloc(15 * 1024 * 1024);
+    const base64 = rawBytes.toString('base64');
+    const fixture = runtimeFixture(async () => jsonResponse({
+      data: [{ b64_json: 'iVBORw0KGgo=' }]
+    }));
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async () => newApiDefaultReferenceToImageParameterSchema
+      },
+      usageSink().port,
+      { download: vi.fn() },
+      undefined,
+      undefined,
+      {
+        resolve: async ({ assetId }) => ({
+          assetId,
+          mimeType: 'image/png',
+          width: 4096,
+          height: 4096,
+          sizeBytes: rawBytes.byteLength,
+          base64
+        })
+      }
+    );
+
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiReferenceImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-reference-image-15-mib',
+        projectId: 'project-newapi',
+        prompt: 'Use the full-size controlled reference',
+        assetId: toAssetId('asset-reference-image-15-mib'),
+        parameterValues: {}
+      }
+    });
+
+    expect(outcome.kind).toBe('completed_sync');
+    expect(fixture.requests).toHaveLength(1);
+    expect(fixture.requests[0].body!.byteLength).toBeGreaterThan(20 * 1024 * 1024);
+    expect(fixture.requests[0].body!.byteLength).toBeLessThan(
+      NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES
+    );
+    expect(fixture.requests[0].maxRequestBytes).toBe(
+      NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES
+    );
+  });
+
+  it('rejects an image JSON body over the shared budget before transport', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({
+      data: [{ b64_json: 'iVBORw0KGgo=' }]
+    }));
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async () => newApiDefaultReferenceToImageParameterSchema
+      },
+      usageSink().port,
+      { download: vi.fn() },
+      undefined,
+      undefined,
+      {
+        resolve: async ({ assetId }) => ({
+          assetId,
+          mimeType: 'image/png',
+          width: 4096,
+          height: 4096,
+          sizeBytes: NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES,
+          base64: 'A'.repeat(NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES)
+        })
+      }
+    );
+
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiReferenceImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-reference-image-over-budget',
+        projectId: 'project-newapi',
+        prompt: 'Reject before HTTP',
+        assetId: toAssetId('asset-reference-image-over-budget'),
+        parameterValues: {}
+      }
+    });
+
+    expect(outcome).toMatchObject({
+      kind: 'failed_before_submission',
+      message: 'The NewAPI request exceeded the allowed size'
+    });
+    expect(fixture.requests).toHaveLength(0);
   });
 
   it('uses an injected controlled downloader for URL results', async () => {
