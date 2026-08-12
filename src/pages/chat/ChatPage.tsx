@@ -475,11 +475,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       try {
         const result = await chat.getResponseExecution(responseExecutionId);
         if (!active || !result.ok || cancelRequestedRef.current) return;
-        setResponseExecution(result.value);
         if (!['pending', 'streaming'].includes(result.value.state) && selectedId) {
           const conversation = await chat.getConversation(selectedId);
           if (!active || !conversation.ok) return;
           replaceConversation(conversation.value);
+          setResponseExecution(result.value);
           const assistant = conversation.value.messages.find(
             (message) => message.messageId === result.value.assistantMessageId
           );
@@ -499,6 +499,8 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
           } else if (result.value.state === 'interrupted') {
             setNotice('回复被中断，请重试。');
           }
+        } else {
+          setResponseExecution(result.value);
         }
       } finally {
         polling = false;
@@ -691,11 +693,26 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         setConversations((items) => [targetConversation!, ...items]);
         setSelectedId(targetConversation.conversationId);
       }
-      const saved = await chat.addUserMessage(
+      let saved = await chat.addUserMessage(
         targetConversation.conversationId,
         targetConversation.revision,
         content
       );
+      if (
+        !saved.ok &&
+        saved.error.code === 'revision_conflict'
+      ) {
+        const latest = await chat.getConversation(targetConversation.conversationId);
+        if (latest.ok) {
+          targetConversation = latest.value;
+          replaceConversation(latest.value);
+          saved = await chat.addUserMessage(
+            latest.value.conversationId,
+            latest.value.revision,
+            content
+          );
+        }
+      }
       if (!saved.ok) {
         setNotice(errorMessages[saved.error.code]);
         return;
