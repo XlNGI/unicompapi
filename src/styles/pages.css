@@ -3022,6 +3022,7 @@
 }
 
 .uc-work-library__details-heading > div {
+  flex: 1 1 auto;
   gap: var(--uc-space-1);
 }
 

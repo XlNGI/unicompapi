@@ -168,6 +168,7 @@
 
 .uc-status-pill {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   width: fit-content;
   border: 1px solid var(--uc-color-status-unknown-border);
@@ -176,6 +177,7 @@
   color: var(--uc-color-status-unknown);
   background: var(--uc-color-status-unknown-bg);
   font: 500 var(--uc-font-size-caption) / var(--uc-line-height-caption) var(--uc-font-family-ui);
+  white-space: nowrap;
 }
 
 .uc-status-pill--info {
