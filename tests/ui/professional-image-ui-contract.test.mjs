@@ -14,6 +14,10 @@ const enhancePanelSource = await readFile(
   'src/pages/creation/image/ImagePromptEnhancePanel.tsx',
   'utf8'
 );
+const promptEnhanceSource = await readFile(
+  'src/components/PromptEnhancePanel.tsx',
+  'utf8'
+);
 const selectorSource = await readFile(
   'src/pages/creation/WorkspaceContextSelector.tsx',
   'utf8'
@@ -23,7 +27,11 @@ const workbenchSource = await readFile(
   'utf8'
 );
 const enhanceServiceSource = await readFile(
-  'src/platform/providers/image-prompt-enhance-submission.ts',
+  'src/platform/providers/prompt-enhance-submission.ts',
+  'utf8'
+);
+const enhanceHostSource = await readFile(
+  'src/platform/providers/image-prompt-enhance-host.ts',
   'utf8'
 );
 const pageStyles = await readFile('src/styles/pages.css', 'utf8');
@@ -106,15 +114,19 @@ test('professional image preserves prompt layers and dynamic safe parameters', (
   assert.doesNotMatch(featurePanelSource, /ProviderRegistry|CapabilityEvidence/);
 });
 
-test('professional image offers optional prompt enhance without image Task', () => {
+test('professional image hosts reusable prompt enhance without image Task', () => {
   assert.match(professionalSource, /ImagePromptEnhancePanel/);
-  assert.match(enhancePanelSource, /text_chat/);
-  assert.match(enhancePanelSource, /text_reasoning/);
-  assert.match(enhancePanelSource, /imagePromptEnhance/);
-  assert.match(enhancePanelSource, /SubmissionProgressSteps/);
-  assert.match(enhancePanelSource, /系统补充/);
-  assert.match(enhanceServiceSource, /source: 'enhancement'/);
-  assert.doesNotMatch(enhanceServiceSource, /createImageTask|ImageDraftArtifactFactory/);
+  assert.match(enhancePanelSource, /promptEnhance/);
+  assert.match(enhancePanelSource, /PromptEnhancePanel/);
+  assert.match(promptEnhanceSource, /SubmissionProgressSteps/);
+  assert.match(promptEnhanceSource, /必须：提示词增强/);
+  assert.match(promptEnhanceSource, /可选：提示词增强/);
+  assert.match(enhanceHostSource, /source: 'enhancement'/);
+  assert.match(enhanceServiceSource, /PromptEnhanceSubjectPort/);
+  assert.doesNotMatch(
+    enhanceServiceSource + enhanceHostSource,
+    /createImageTask|ImageDraftArtifactFactory/
+  );
   assert.doesNotMatch(
     enhancePanelSource,
     /createTask\(|createExecution\(|submitDraft\(/
@@ -141,15 +153,14 @@ test('professional image autosaves drafts without a manual save gate', async () 
   assert.match(workbench, /imageWorkspaces\.update\(/);
 });
 
-test('prompt enhance presents the text modes as Chinese icon cards', () => {
-  assert.match(enhancePanelSource, /LuMessageCircle/);
-  assert.match(enhancePanelSource, /LuBrainCircuit/);
-  assert.match(enhancePanelSource, /适合直接改写与日常表达/);
-  assert.match(enhancePanelSource, /适合复杂要求与深入梳理/);
-  assert.doesNotMatch(enhancePanelSource, /<small>text_(?:chat|reasoning)<\/small>/);
-  assert.doesNotMatch(enhancePanelSource, /参数 Schema|· revision/);
-  assert.match(pageStyles, /\.uc-image-prompt-enhance__modes/);
-  assert.match(pageStyles, /repeat\(auto-fit, minmax\(220px, 1fr\)\)/);
+test('prompt enhance fixes reasoning and non-stream without a mode switch', () => {
+  assert.match(promptEnhanceSource, /文本推理 · 非流式/);
+  assert.doesNotMatch(promptEnhanceSource, /LuMessageCircle|LuBrainCircuit/);
+  assert.doesNotMatch(promptEnhanceSource, /text_chat/);
+  assert.doesNotMatch(promptEnhanceSource, /aria-label="文本能力"/);
+  assert.match(enhanceServiceSource, /submitPromptOnce/);
+  assert.doesNotMatch(enhanceServiceSource, /DeepSeekChatAdapter|NewApiChatAdapter/);
+  assert.match(pageStyles, /\.uc-prompt-enhance/);
 });
 
 test('image submission keeps internal status codes out of user messages', () => {

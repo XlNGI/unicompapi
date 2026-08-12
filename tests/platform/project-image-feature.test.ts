@@ -3,6 +3,8 @@ import {
   createAsset,
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
+  promptEnhanceInputFingerprint,
+  promptEnhanceSourceReference,
   toAssetId,
   toConversationId,
   toDraftId,
@@ -19,6 +21,8 @@ import {
 } from '../../src/domain';
 import {
   ProjectImageFeatureSubjectResolver,
+  assertImagePromptEnhancementSatisfied,
+  createProjectContextContentHash,
   imageDraftRevision
 } from '../../src/platform';
 
@@ -97,6 +101,67 @@ describe('ProjectImageFeatureSubjectResolver', () => {
       revision: 1
     }]);
     expect(value.contextContentHashes).toHaveLength(1);
+  });
+
+  it('requires a current adopted enhancement when project context is selected', async () => {
+    const contextSnapshot = {
+      schemaVersion: 1 as const,
+      contextId: context.id,
+      contextRevision: 1,
+      contentHash: createProjectContextContentHash(
+        context.versions[0].contentSnapshot
+      ),
+      contentSnapshot: context.versions[0].contentSnapshot
+    };
+    const base = createImageWorkspaceDraft({
+      ...savedDraft('professional_image', 'text_to_image'),
+      contextReferences: [{
+        kind: 'project_context',
+        referenceId: context.id,
+        contextRevision: 1,
+        includeInPrompt: true
+      }]
+    });
+    await expect(assertImagePromptEnhancementSatisfied({
+      projectId,
+      draft: base,
+      contexts: contextRepository()
+    })).rejects.toThrow('requires a current prompt enhancement');
+
+    const enhancedText = 'Enhanced prompt with project context';
+    const inputFingerprint = await promptEnhanceInputFingerprint({
+      originalInput: base.prompt.originalInput,
+      contextSnapshots: [contextSnapshot]
+    });
+    const enhanced = createImageWorkspaceDraft({
+      ...base,
+      prompt: {
+        ...base.prompt,
+        finalPrompt: enhancedText,
+        systemSupplements: [{
+          source: 'enhancement',
+          content: enhancedText,
+          sourceReference: promptEnhanceSourceReference({
+            inputFingerprint,
+            executionId: 'prompt-once-fixture'
+          })
+        }]
+      }
+    });
+    await expect(assertImagePromptEnhancementSatisfied({
+      projectId,
+      draft: enhanced,
+      contexts: contextRepository()
+    })).resolves.toBeUndefined();
+
+    await expect(assertImagePromptEnhancementSatisfied({
+      projectId,
+      draft: createImageWorkspaceDraft({
+        ...enhanced,
+        prompt: { ...enhanced.prompt, originalInput: 'Changed original input' }
+      }),
+      contexts: contextRepository()
+    })).rejects.toThrow('requires a current prompt enhancement');
   });
 });
 
