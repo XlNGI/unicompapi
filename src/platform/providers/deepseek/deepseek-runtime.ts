@@ -94,7 +94,7 @@ export interface DeepSeekSafeLogEvent {
     | 'request_completed'
     | 'request_failed'
     | 'runtime_disposed';
-  readonly operation?: 'model_catalog' | 'chat_stream';
+  readonly operation?: 'model_catalog' | 'chat_stream' | 'chat_completion';
   readonly method?: 'GET' | 'POST';
   readonly status?: number;
   readonly errorCode?: DeepSeekRuntimeErrorCode;
@@ -193,6 +193,37 @@ export class DeepSeekSharedRuntime {
     };
   }
 
+  async requestChatCompletion(input: {
+    readonly credentials: StructuredCredentialRecord;
+    readonly body: Uint8Array;
+    readonly signal?: AbortSignal;
+    readonly beforeRequestStarted?: () => Promise<void>;
+  }): Promise<Uint8Array> {
+    const maximumRequestBytes =
+      this.options.defaultMaxRequestBytes ?? 2 * 1024 * 1024;
+    if (input.body.byteLength < 1 || input.body.byteLength > maximumRequestBytes) {
+      throw new DeepSeekRuntimeError('invalid_request', 'not_retryable');
+    }
+    const response = await this.request({
+      operation: 'chat_completion',
+      method: 'POST',
+      path: '/chat/completions',
+      credentials: input.credentials,
+      body: input.body,
+      signal: input.signal,
+      beforeRequestStarted: input.beforeRequestStarted,
+      accept: 'application/json',
+      contentType: 'application/json',
+      maxResponseBytes:
+        this.options.defaultMaxJsonResponseBytes ?? 2 * 1024 * 1024
+    });
+    if (response.body === undefined) {
+      throw new DeepSeekRuntimeError('invalid_response', 'not_retryable');
+    }
+    requireContentType(response.headers, 'application/json');
+    return Uint8Array.from(response.body);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -205,7 +236,7 @@ export class DeepSeekSharedRuntime {
   }
 
   private async request(input: {
-    readonly operation: 'model_catalog' | 'chat_stream';
+    readonly operation: 'model_catalog' | 'chat_stream' | 'chat_completion';
     readonly method: 'GET' | 'POST';
     readonly path: '/models' | '/chat/completions';
     readonly credentials: StructuredCredentialRecord;

@@ -1,36 +1,36 @@
 import type { ParameterValue } from '../../domain';
 import type {
-  ImagePromptEnhanceCandidateDto,
-  ImagePromptEnhanceIpcErrorCode,
-  ImagePromptEnhanceIpcResult,
-  ImagePromptEnhancePreparationDto,
-  ImagePromptEnhanceSubmissionDto
-} from '../../shared/image-prompt-enhance-ipc';
+  PromptEnhanceCandidateDto,
+  PromptEnhanceIpcErrorCode,
+  PromptEnhanceIpcResult,
+  PromptEnhancePreparationDto,
+  PromptEnhanceSubmissionDto
+} from '../../shared/prompt-enhance-ipc';
 import {
-  imagePromptEnhanceRequestParsers
-} from '../../shared/image-prompt-enhance-ipc';
+  promptEnhanceRequestParsers
+} from '../../shared/prompt-enhance-ipc';
 import {
-  ImagePromptEnhanceError,
-  type ImagePromptEnhanceService
-} from '../providers/image-prompt-enhance-submission';
+  PromptEnhanceError,
+  type PromptEnhanceService
+} from '../providers/prompt-enhance-submission';
 import type { StorageProjectSession } from './storage-ipc-controller';
 
-export interface ImagePromptEnhanceControllerDependencies {
+export interface PromptEnhanceControllerDependencies {
   getSession(): StorageProjectSession | undefined;
-  getService(session: StorageProjectSession): ImagePromptEnhanceService | undefined;
+  getService(session: StorageProjectSession): PromptEnhanceService | undefined;
   onError?(error: unknown): void;
 }
 
-export class ImagePromptEnhanceController {
+export class PromptEnhanceController {
   private readonly operations = new Set<Promise<unknown>>();
 
-  constructor(private readonly dependencies: ImagePromptEnhanceControllerDependencies) {}
+  constructor(private readonly dependencies: PromptEnhanceControllerDependencies) {}
 
   listCandidates(
     request: unknown
-  ): Promise<ImagePromptEnhanceIpcResult<readonly ImagePromptEnhanceCandidateDto[]>> {
+  ): Promise<PromptEnhanceIpcResult<readonly PromptEnhanceCandidateDto[]>> {
     return this.execute(async () => {
-      const input = imagePromptEnhanceRequestParsers.listCandidates(request);
+      const input = promptEnhanceRequestParsers.listCandidates(request);
       const service = this.requireService();
       return { ok: true, value: await service.listCandidates(input.productFeature) };
     });
@@ -38,9 +38,9 @@ export class ImagePromptEnhanceController {
 
   prepare(
     request: unknown
-  ): Promise<ImagePromptEnhanceIpcResult<ImagePromptEnhancePreparationDto>> {
+  ): Promise<PromptEnhanceIpcResult<PromptEnhancePreparationDto>> {
     return this.execute(async () => {
-      const input = imagePromptEnhanceRequestParsers.prepare(request);
+      const input = promptEnhanceRequestParsers.prepare(request);
       const service = this.requireService();
       return {
         ok: true,
@@ -54,9 +54,9 @@ export class ImagePromptEnhanceController {
 
   submit(
     request: unknown
-  ): Promise<ImagePromptEnhanceIpcResult<ImagePromptEnhanceSubmissionDto>> {
+  ): Promise<PromptEnhanceIpcResult<PromptEnhanceSubmissionDto>> {
     return this.execute(async () => {
-      const input = imagePromptEnhanceRequestParsers.submit(request);
+      const input = promptEnhanceRequestParsers.submit(request);
       const service = this.requireService();
       return { ok: true, value: await service.submit(input) };
     });
@@ -66,14 +66,14 @@ export class ImagePromptEnhanceController {
     await Promise.all([...this.operations]);
   }
 
-  private requireService(): ImagePromptEnhanceService {
+  private requireService(): PromptEnhanceService {
     const session = this.dependencies.getSession();
     if (!session) {
-      throw new ImagePromptEnhanceError('project_not_open', 'A project must be open');
+      throw new PromptEnhanceError('project_not_open', 'A project must be open');
     }
     const service = this.dependencies.getService(session);
     if (!service) {
-      throw new ImagePromptEnhanceError(
+      throw new PromptEnhanceError(
         'runtime_not_allowed',
         'Prompt enhance runtime is unavailable'
       );
@@ -82,12 +82,12 @@ export class ImagePromptEnhanceController {
   }
 
   private execute<T>(
-    operation: () => Promise<ImagePromptEnhanceIpcResult<T>>
-  ): Promise<ImagePromptEnhanceIpcResult<T>> {
-    let task!: Promise<ImagePromptEnhanceIpcResult<T>>;
+    operation: () => Promise<PromptEnhanceIpcResult<T>>
+  ): Promise<PromptEnhanceIpcResult<T>> {
+    let task!: Promise<PromptEnhanceIpcResult<T>>;
     task = operation()
-      .catch((error: unknown): ImagePromptEnhanceIpcResult<T> => {
-        if (error instanceof ImagePromptEnhanceError) {
+      .catch((error: unknown): PromptEnhanceIpcResult<T> => {
+        if (error instanceof PromptEnhanceError) {
           return failure(error.code, error.message);
         }
         if (error instanceof TypeError) {
@@ -108,8 +108,8 @@ export class ImagePromptEnhanceController {
 }
 
 function failure(
-  code: ImagePromptEnhanceIpcErrorCode,
+  code: PromptEnhanceIpcErrorCode,
   message: string
-): ImagePromptEnhanceIpcResult<never> {
+): PromptEnhanceIpcResult<never> {
   return { ok: false, error: { code, message } };
 }

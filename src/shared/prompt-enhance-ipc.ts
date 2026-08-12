@@ -1,10 +1,10 @@
-export const imagePromptEnhanceIpcChannels = {
-  listCandidates: 'image-prompt-enhance:list-candidates',
-  prepare: 'image-prompt-enhance:prepare',
-  submit: 'image-prompt-enhance:submit'
+export const promptEnhanceIpcChannels = {
+  listCandidates: 'prompt-enhance:list-candidates',
+  prepare: 'prompt-enhance:prepare',
+  submit: 'prompt-enhance:submit'
 } as const;
 
-export type ImagePromptEnhanceIpcErrorCode =
+export type PromptEnhanceIpcErrorCode =
   | 'invalid_request'
   | 'project_not_open'
   | 'draft_not_found'
@@ -26,17 +26,17 @@ export type ImagePromptEnhanceIpcErrorCode =
   | 'empty_result'
   | 'storage_error';
 
-export type ImagePromptEnhanceIpcResult<T> =
+export type PromptEnhanceIpcResult<T> =
   | { readonly ok: true; readonly value: T }
   | {
       readonly ok: false;
       readonly error: {
-        readonly code: ImagePromptEnhanceIpcErrorCode;
+        readonly code: PromptEnhanceIpcErrorCode;
         readonly message: string;
       };
     };
 
-export interface ImagePromptEnhanceCandidateDto {
+export interface PromptEnhanceCandidateDto {
   readonly schemaVersion: 1;
   readonly candidateId: string;
   readonly providerName: string;
@@ -76,7 +76,7 @@ export interface ImagePromptEnhanceCandidateDto {
   readonly unavailableReasons: readonly string[];
 }
 
-export interface ImagePromptEnhancePreparationDto {
+export interface PromptEnhancePreparationDto {
   readonly schemaVersion: 1;
   readonly routeSelectionToken: string;
   readonly expiresAt: string;
@@ -100,33 +100,32 @@ export interface ImagePromptEnhancePreparationDto {
   };
 }
 
-export interface ImagePromptEnhanceSubmissionDto {
+export interface PromptEnhanceSubmissionDto {
   readonly schemaVersion: 1;
   readonly status: 'completed' | 'failed';
-  readonly draftId: string;
-  readonly draftUpdatedAt: string;
+  readonly subjectId: string;
+  readonly subjectRevision: string;
   readonly enhancedText?: string;
   readonly safeCode?: string;
 }
 
-export interface ImagePromptEnhanceApi {
-  listCandidates(
-    productFeature: 'text_chat' | 'text_reasoning'
-  ): Promise<ImagePromptEnhanceIpcResult<readonly ImagePromptEnhanceCandidateDto[]>>;
+export interface PromptEnhanceApi {
+  listCandidates(): Promise<
+    PromptEnhanceIpcResult<readonly PromptEnhanceCandidateDto[]>
+  >;
   prepare(
-    draftId: string,
-    draftUpdatedAt: string,
-    productFeature: 'text_chat' | 'text_reasoning',
+    subjectId: string,
+    subjectRevision: string,
     candidateId: string,
     parameterValues: Readonly<Record<string, string | number | boolean | readonly string[]>>
-  ): Promise<ImagePromptEnhanceIpcResult<ImagePromptEnhancePreparationDto>>;
+  ): Promise<PromptEnhanceIpcResult<PromptEnhancePreparationDto>>;
   submit(
-    draftId: string,
-    draftUpdatedAt: string,
+    subjectId: string,
+    subjectRevision: string,
     routeSelectionToken: string,
     confirmationId: string,
     confirmed: boolean
-  ): Promise<ImagePromptEnhanceIpcResult<ImagePromptEnhanceSubmissionDto>>;
+  ): Promise<PromptEnhanceIpcResult<PromptEnhanceSubmissionDto>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -140,55 +139,47 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
-export const imagePromptEnhanceRequestParsers = {
+export const promptEnhanceRequestParsers = {
   listCandidates(value: unknown): {
-    readonly productFeature: 'text_chat' | 'text_reasoning';
+    readonly productFeature: 'text_reasoning';
   } {
     if (!isRecord(value)) throw new TypeError('Invalid enhance list request');
-    const productFeature = value.productFeature;
-    if (productFeature !== 'text_chat' && productFeature !== 'text_reasoning') {
-      throw new TypeError('productFeature must be text_chat or text_reasoning');
-    }
-    return { productFeature };
+    return { productFeature: 'text_reasoning' };
   },
   prepare(value: unknown): {
-    readonly draftId: string;
-    readonly draftUpdatedAt: string;
-    readonly productFeature: 'text_chat' | 'text_reasoning';
+    readonly subjectId: string;
+    readonly subjectRevision: string;
+    readonly productFeature: 'text_reasoning';
     readonly candidateId: string;
     readonly parameterValues: Readonly<
       Record<string, string | number | boolean | readonly string[]>
     >;
   } {
     if (!isRecord(value)) throw new TypeError('Invalid enhance prepare request');
-    const productFeature = value.productFeature;
-    if (productFeature !== 'text_chat' && productFeature !== 'text_reasoning') {
-      throw new TypeError('productFeature must be text_chat or text_reasoning');
-    }
     const parameterValues = isRecord(value.parameterValues)
       ? (value.parameterValues as Readonly<
           Record<string, string | number | boolean | readonly string[]>
         >)
       : {};
     return {
-      draftId: requireString(value.draftId, 'draftId'),
-      draftUpdatedAt: requireString(value.draftUpdatedAt, 'draftUpdatedAt'),
-      productFeature,
+      subjectId: requireString(value.subjectId, 'subjectId'),
+      subjectRevision: requireString(value.subjectRevision, 'subjectRevision'),
+      productFeature: 'text_reasoning',
       candidateId: requireString(value.candidateId, 'candidateId'),
       parameterValues
     };
   },
   submit(value: unknown): {
-    readonly draftId: string;
-    readonly draftUpdatedAt: string;
+    readonly subjectId: string;
+    readonly subjectRevision: string;
     readonly routeSelectionToken: string;
     readonly confirmationId: string;
     readonly confirmed: boolean;
   } {
     if (!isRecord(value)) throw new TypeError('Invalid enhance submit request');
     return {
-      draftId: requireString(value.draftId, 'draftId'),
-      draftUpdatedAt: requireString(value.draftUpdatedAt, 'draftUpdatedAt'),
+      subjectId: requireString(value.subjectId, 'subjectId'),
+      subjectRevision: requireString(value.subjectRevision, 'subjectRevision'),
       routeSelectionToken: requireString(value.routeSelectionToken, 'routeSelectionToken'),
       confirmationId: requireString(value.confirmationId, 'confirmationId'),
       confirmed: value.confirmed === true

@@ -19,7 +19,7 @@ export * from './conversation-controller';
 export * from './conversation-response-controller';
 export * from './image-feature-controller';
 export * from './image-feature-runtime';
-export * from './image-prompt-enhance-controller';
+export * from './prompt-enhance-controller';
 export * from './video-feature-controller';
 export * from './video-feature-runtime';
 export * from './project-context-controller';

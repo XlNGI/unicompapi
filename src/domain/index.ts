@@ -11,6 +11,7 @@ export * from './entities/project-context';
 export * from './entities/project-context-selection';
 export * from './entities/product-feature';
 export * from './entities/prompt';
+export * from './entities/prompt-enhancement';
 export * from './entities/provider';
 export * from './entities/provider-package';
 export * from './entities/provider-catalog';

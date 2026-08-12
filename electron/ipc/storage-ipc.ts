@@ -10,7 +10,7 @@ import {
   ImageLocalMediaController,
   ImageFeatureController,
   VideoFeatureController,
-  ImagePromptEnhanceController,
+  PromptEnhanceController,
   ImageSubmissionController,
   ImageWorkspaceController,
   ImageWorkspaceMutationCoordinator,
@@ -18,6 +18,7 @@ import {
   ProjectCatalogService,
   JsonProviderRegistryStore,
   JsonImageWorkspaceRepository,
+  JsonProjectContextRepository,
   LocalMediaHandleRegistry,
   NodeProjectStorage,
   StorageProjectSessionRegistry,
@@ -39,7 +40,8 @@ import {
   type VideoFeatureControllerRuntime,
   type ProviderCandidateRuntimeAuthorizationPort,
   type RuntimeAuthorizationOrchestrationPort,
-  ImagePromptEnhanceService,
+  PromptEnhanceService,
+  ImagePromptEnhanceSubjectAdapter,
   type DeepSeekSharedRuntime,
   type NewApiSharedRuntime,
   type NewApiImageDownloadPort,
@@ -54,7 +56,7 @@ import { storageIpcChannels } from '../../src/shared/storage-ipc';
 import { imageWorkspaceIpcChannels } from '../../src/shared/image-workspace-ipc';
 import { imageSubmissionIpcChannels } from '../../src/shared/image-submission-ipc';
 import { imageFeatureIpcChannels } from '../../src/shared/image-feature-ipc';
-import { imagePromptEnhanceIpcChannels } from '../../src/shared/image-prompt-enhance-ipc';
+import { promptEnhanceIpcChannels } from '../../src/shared/prompt-enhance-ipc';
 import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc';
 import { videoFeatureIpcChannels } from '../../src/shared/video-feature-ipc';
 import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
@@ -175,25 +177,30 @@ export function registerStorageIpcHandlers(options: {
     getRuntime: getImageFeatureRuntime,
     mutations: imageMutations
   });
-  let imagePromptEnhanceRuntime: {
+  let promptEnhanceRuntime: {
     readonly projectId: string;
     readonly rootDirectory: string;
-    readonly value: ImagePromptEnhanceService;
+    readonly value: PromptEnhanceService;
   } | undefined;
-  const getImagePromptEnhanceService = (session: StorageProjectSession) => {
+  const getPromptEnhanceService = (session: StorageProjectSession) => {
     if (!options.textSubmission) return undefined;
     if (
-      imagePromptEnhanceRuntime?.projectId === session.projectId &&
-      imagePromptEnhanceRuntime.rootDirectory === session.rootDirectory
+      promptEnhanceRuntime?.projectId === session.projectId &&
+      promptEnhanceRuntime.rootDirectory === session.rootDirectory
     ) {
-      return imagePromptEnhanceRuntime.value;
+      return promptEnhanceRuntime.value;
     }
     const authorization = options.runtimeAuthorization ?? denyRuntimeAuthorization;
     const storage = new NodeProjectStorage(session.rootDirectory);
     const drafts = new JsonImageWorkspaceRepository(storage, session.projectId);
-    const value = new ImagePromptEnhanceService({
+    const contexts = new JsonProjectContextRepository(storage, session.projectId);
+    const value = new PromptEnhanceService({
       projectId: session.projectId,
-      drafts,
+      subjects: new ImagePromptEnhanceSubjectAdapter({
+        projectId: session.projectId,
+        drafts,
+        contexts
+      }),
       runtimes: {
         deepSeekRuntime: options.textSubmission.deepSeekRuntime,
         newApiRuntime: options.textSubmission.newApiRuntime,
@@ -206,16 +213,16 @@ export function registerStorageIpcHandlers(options: {
         ? authorization
         : undefined
     });
-    imagePromptEnhanceRuntime = {
+    promptEnhanceRuntime = {
       projectId: session.projectId,
       rootDirectory: session.rootDirectory,
       value
     };
     return value;
   };
-  const imagePromptEnhance = new ImagePromptEnhanceController({
+  const promptEnhance = new PromptEnhanceController({
     getSession: () => sessionRegistry.get(),
-    getService: getImagePromptEnhanceService
+    getService: getPromptEnhanceService
   });
   const imageLocalMedia = new ImageLocalMediaController({
     getSession: () => sessionRegistry.get(),
@@ -381,7 +388,7 @@ export function registerStorageIpcHandlers(options: {
         controller.waitForMutations(),
         imageWorkspaces.waitForMutations(),
         imageFeatures.waitForOperations(),
-        imagePromptEnhance.waitForOperations(),
+        promptEnhance.waitForOperations(),
         videoWorkspaces.waitForMutations(),
         videoFeatures.waitForOperations(),
         videoEditors.waitForMutations(),
@@ -390,7 +397,7 @@ export function registerStorageIpcHandlers(options: {
     },
     afterSessionChange: async () => {
       imageFeatureRuntime = undefined;
-      imagePromptEnhanceRuntime = undefined;
+      promptEnhanceRuntime = undefined;
       videoFeatureRuntime = undefined;
       await videoExports.recoverExports();
       await projectStorageMonitor.sync();
@@ -522,16 +529,16 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => imageFeatures.generateQuickImage(request)
   );
   ipcMain.handle(
-    imagePromptEnhanceIpcChannels.listCandidates,
-    (_event, request: unknown) => imagePromptEnhance.listCandidates(request)
+    promptEnhanceIpcChannels.listCandidates,
+    (_event, request: unknown) => promptEnhance.listCandidates(request)
   );
   ipcMain.handle(
-    imagePromptEnhanceIpcChannels.prepare,
-    (_event, request: unknown) => imagePromptEnhance.prepare(request)
+    promptEnhanceIpcChannels.prepare,
+    (_event, request: unknown) => promptEnhance.prepare(request)
   );
   ipcMain.handle(
-    imagePromptEnhanceIpcChannels.submit,
-    (_event, request: unknown) => imagePromptEnhance.submit(request)
+    promptEnhanceIpcChannels.submit,
+    (_event, request: unknown) => promptEnhance.submit(request)
   );
   ipcMain.handle(videoWorkspaceIpcChannels.create, (_event, request: unknown) =>
     videoWorkspaces.create(request)
@@ -676,7 +683,7 @@ export function registerStorageIpcHandlers(options: {
         videoExports.interruptActiveExports('application_shutdown'),
         previewAdapter.dispose?.(),
         imageFeatures.waitForOperations(),
-        imagePromptEnhance.waitForOperations(),
+          promptEnhance.waitForOperations(),
         videoFeatures.waitForOperations()
       ]);
       await videoExports.waitForExports();
