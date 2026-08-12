@@ -239,7 +239,6 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const [, setResponseDraft] = useState<ConversationResponseDraftDto>();
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
-  const [modelSearch, setModelSearch] = useState('');
   const [activityExpanded, setActivityExpanded] = useState(false);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
@@ -279,13 +278,6 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const featureCandidates = responseCandidates.filter(
     (candidate) => candidate.parameterSchema.productFeature === responseFeature
   );
-  const filteredModelCandidates = featureCandidates.filter((candidate) => {
-    const keyword = modelSearch.trim().toLocaleLowerCase();
-    if (!keyword) return true;
-    return `${candidate.modelName} ${candidate.providerName} ${candidate.connectionName}`
-      .toLocaleLowerCase()
-      .includes(keyword);
-  });
   const completedMessages = selected?.messages.filter(
     (message) => message.state === 'completed'
   ) ?? [];
@@ -572,7 +564,6 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
 
   function changeCandidate(next: string) {
     setSelectedCandidateId(next || undefined);
-    setModelSearch('');
   }
 
   function changeResponseFeature(next: 'text_chat' | 'text_reasoning') {
@@ -588,7 +579,6 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       : undefined;
     setResponseFeature(next);
     setSelectedCandidateId(matchingCandidate?.candidateId);
-    setModelSearch('');
   }
 
   function confirmLeaveUnsentInput(): boolean {
@@ -1107,38 +1097,44 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
             <span>{session?.projectName ? `当前项目：${session.projectName}` : '尚未打开项目'}</span>
           </div>
           <div className="uc-chat-page__header-actions">
-            <Button
-              aria-label="新建对话"
-              disabled={!session || busy}
-              onClick={startNewConversation}
-              variant="ghost"
-            >
-              <LuMessageSquarePlus aria-hidden="true" /> 新对话
-            </Button>
-            <Button
-              aria-label="打开对话列表"
-              aria-expanded={historyOpen}
-              onClick={() => {
-                setContextOpen(false);
-                setHistoryOpen(true);
-              }}
-              variant="ghost"
-            >
-              <LuMessagesSquare aria-hidden="true" /> 对话列表
-            </Button>
-            <Button
-              aria-label="打开项目上下文"
-              aria-expanded={contextOpen}
-              disabled={!session}
-              onClick={() => {
-                setHistoryOpen(false);
-                setContextOpen(true);
-              }}
-              variant="ghost"
-            >
-              <LuPanelRight aria-hidden="true" /> 上下文
-              {includedContextIds.length > 0 ? <b>{includedContextIds.length}</b> : null}
-            </Button>
+            <Whisper placement="bottom" speaker={<Tooltip>新对话</Tooltip>} trigger="hover">
+              <Button
+                aria-label="新建对话"
+                disabled={!session || busy}
+                onClick={startNewConversation}
+                variant="ghost"
+              >
+                <LuMessageSquarePlus aria-hidden="true" />
+              </Button>
+            </Whisper>
+            <Whisper placement="bottom" speaker={<Tooltip>对话列表</Tooltip>} trigger="hover">
+              <Button
+                aria-label="打开对话列表"
+                aria-expanded={historyOpen}
+                onClick={() => {
+                  setContextOpen(false);
+                  setHistoryOpen(true);
+                }}
+                variant="ghost"
+              >
+                <LuMessagesSquare aria-hidden="true" />
+              </Button>
+            </Whisper>
+            <Whisper placement="bottom" speaker={<Tooltip>项目上下文</Tooltip>} trigger="hover">
+              <Button
+                aria-label="打开项目上下文"
+                aria-expanded={contextOpen}
+                disabled={!session}
+                onClick={() => {
+                  setHistoryOpen(false);
+                  setContextOpen(true);
+                }}
+                variant="ghost"
+              >
+                <LuPanelRight aria-hidden="true" />
+                {includedContextIds.length > 0 ? <b>{includedContextIds.length}</b> : null}
+              </Button>
+            </Whisper>
           </div>
         </header>
 
@@ -1232,7 +1228,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                           {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
                         </div>
                       ) : (
-                        <p>{item.content}</p>
+                        <p className="uc-chat-page__message-bubble">{item.content}</p>
                       )}
                       {item.state === 'completed' ? (
                         <div className="uc-chat-page__message-meta">
@@ -1287,7 +1283,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                   if (!responseInProgress && !cancelRequested) void sendMessage();
                 }
               }}
-              placeholder={!session ? '请先打开项目' : selectedCandidate ? '随心输入，Enter 发送，Shift + Enter 换行' : '先选择模型，再输入内容发送'}
+              placeholder={!session ? '请先打开项目' : selectedCandidate ? '询问 UniComp AI' : '选择模型后输入问题'}
               ref={composerRef}
               rows={1}
               value={input}
@@ -1332,24 +1328,15 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                           <span>选择模型</span>
                           <small>{featureCandidates.filter((candidate) => candidate.available).length} 个可用</small>
                         </div>
-                        <Input
-                          aria-label="搜索文本模型"
-                          onChange={setModelSearch}
-                          placeholder="搜索模型或服务商"
-                          value={modelSearch}
-                        />
                       </section>
                     </div>
                   )}
                   listboxMaxHeight={250}
                   noResultsText={candidatesLoading
                     ? '正在加载可用模型…'
-                    : modelSearch
-                      ? '没有匹配的模型'
-                      : `暂无支持${responseFeature === 'text_reasoning' ? '深度推理' : '普通对话'}的模型`}
+                    : '没有匹配的模型'}
                   onChange={changeCandidate}
-                  onClose={() => setModelSearch('')}
-                  options={filteredModelCandidates.map((candidate) => ({
+                  options={featureCandidates.map((candidate) => ({
                     id: candidate.candidateId,
                     label: candidate.modelName,
                     available: candidate.available,
@@ -1371,7 +1358,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                       <small>{responseFeature === 'text_reasoning' ? '推理' : '普通'}</small>
                     </span>
                   )}
-                  searchable={false}
+                  searchPlaceholder="搜索模型或服务商"
                   showEmptyState={false}
                   value={selectedCandidateId ?? ''}
                 />

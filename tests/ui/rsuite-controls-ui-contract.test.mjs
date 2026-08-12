@@ -72,6 +72,20 @@ test('shared model picker closes its portal when the workspace scrolls', () => {
   assert.match(modelSelect, /listboxMaxHeight=\{listboxMaxHeight\}/);
 });
 
+test('shared model picker owns model search for every consuming page', () => {
+  const modelSelect = fs.readFileSync(path.join(srcRoot, 'components/ModelSelect.tsx'), 'utf8');
+  const chat = fs.readFileSync(path.join(srcRoot, 'pages/chat/ChatPage.tsx'), 'utf8');
+
+  assert.match(modelSelect, /searchable = true/);
+  assert.match(modelSelect, /searchPlaceholder = '搜索模型或服务商'/);
+  assert.match(modelSelect, /locale=\{\{ noResultsText, searchPlaceholder \}\}/);
+  assert.match(modelSelect, /searchBy=\{\(keyword, _label, item\) =>/);
+  assert.match(modelSelect, /option\.providerName/);
+  assert.match(modelSelect, /option\.connectionName/);
+  assert.doesNotMatch(chat, /搜索文本模型/);
+  assert.doesNotMatch(chat, /searchable=\{false\}/);
+});
+
 test('pages reuse shared model and action menu controls', () => {
   const actionMenu = fs.readFileSync(path.join(srcRoot, 'components/ActionMenu.tsx'), 'utf8');
   const pageSources = sources

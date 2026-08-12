@@ -5,6 +5,7 @@ import test from 'node:test';
 const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
+const buttonSource = await readFile('src/components/Button.tsx', 'utf8');
 
 test('chat page uses project conversations and composer-first streaming workflow', () => {
   for (const operation of [
@@ -30,7 +31,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /replaceResponseParameters/);
   assert.match(source, /已截断/);
   assert.match(source, /finish\.length|输出长度限制被截断/);
-  assert.match(source, /aria-label="搜索文本模型"/);
+  assert.match(source, /searchPlaceholder="搜索模型或服务商"/);
   assert.match(source, /ariaLabel="模型设置"/);
   assert.match(source, /listTextCandidates\('text_chat'\)/);
   assert.match(source, /listTextCandidates\('text_reasoning'\)/);
@@ -72,7 +73,15 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(appSource, /initialConversationId=\{selectedChatConversationId\}/);
   assert.match(appSource, /onConversationChange=\{setSelectedChatConversationId\}/);
   assert.match(source, /onConversationChange\?\.\(selectedId\)/);
-  assert.match(source, /aria-label="新建对话"[\s\S]*onClick=\{startNewConversation\}[\s\S]*variant="ghost"[\s\S]*新对话/);
+  assert.match(source, /speaker=\{<Tooltip>新对话<\/Tooltip>\}[\s\S]*aria-label="新建对话"[\s\S]*onClick=\{startNewConversation\}/);
+  assert.match(source, /speaker=\{<Tooltip>对话列表<\/Tooltip>\}/);
+  assert.match(source, /speaker=\{<Tooltip>项目上下文<\/Tooltip>\}/);
+  assert.match(buttonSource, /forwardRef<HTMLButtonElement, ButtonProps>/);
+  assert.match(buttonSource, /ref=\{ref\}/);
+  assert.match(styles, /\.uc-chat-page__header-actions \.uc-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;/);
+  assert.match(styles, /\.uc-chat-page__composer \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);[\s\S]*grid-template-rows: minmax\(40px, auto\) auto;[\s\S]*min-height: 96px;/);
+  assert.match(styles, /@media \(max-width: 520px\)[\s\S]*\.uc-chat-page__composer \{[\s\S]*min-height: 92px;/);
+  assert.match(source, /询问 UniComp AI/);
   assert.match(source, /open=\{contextOpen\}/);
   assert.match(source, /uc-chat-page__delete-dialog/);
   assert.match(source, /停止生成/);
@@ -84,6 +93,13 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /responseInProgress/);
   assert.match(source, /displayMessages/);
   assert.match(source, /<MarkdownMessage/);
+  assert.match(source, /className="uc-chat-page__message-bubble"/);
+  assert.match(styles, /\.uc-chat-page__message-item--user > \.uc-chat-page__message-bubble \{[\s\S]*padding: 8px 12px;[\s\S]*background: var\(--uc-color-surface-subtle\);/);
+  assert.match(styles, /\.uc-chat-page__composer \{[\s\S]*background: var\(--uc-color-surface-raised\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
+  assert.match(styles, /\.uc-chat-page__composer-region \{[\s\S]*position: absolute;[\s\S]*bottom: 0;[\s\S]*left: 50%;[\s\S]*background: transparent;[\s\S]*pointer-events: none;/);
+  assert.match(styles, /\.uc-chat-page__messages \{[\s\S]*scroll-padding-bottom: 180px;/);
+  assert.match(styles, /\.uc-chat-page__message-list \{[\s\S]*padding-bottom: 180px;/);
+  assert.match(styles, /\.uc-chat-page__composer:focus-within \{[\s\S]*border-color: var\(--uc-color-border-default\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
   assert.match(source, /item\.state === 'completed'/);
   assert.match(source, /uc-chat-page__scroll-to-bottom/);
   assert.match(source, /failedResponseNotice/);
