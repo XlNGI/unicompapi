@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  LuArrowDown,
   LuArrowUp,
   LuBrainCircuit,
   LuCheck,
@@ -16,6 +17,7 @@ import { ActionMenu } from '../../components/ActionMenu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
+import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { ModelSelect } from '../../components/ModelSelect';
 import { StatusPill } from '../../components/StatusPill';
 import type {
@@ -91,7 +93,28 @@ function messageStatusLabel(message: MessageDto): string {
   if (message.state === 'failed' && message.failureReason === 'truncated') {
     return '已截断';
   }
+  if (message.state === 'failed' && message.content.trim()) {
+    return '已中断';
+  }
   return messageStateLabels[message.state];
+}
+
+function failedResponseNotice(message?: MessageDto): string {
+  const partial = Boolean(message?.content.trim());
+  const preserved = partial ? '，已保留接收到的内容' : '';
+  if (message?.failureReason === 'truncated') {
+    return `回答达到当前输出长度上限${preserved}。可以继续追问，或调整输出长度后重试。`;
+  }
+  if (message?.failureReason === 'interrupted') {
+    return `模型连接中断${preserved}，请检查网络后重试。`;
+  }
+  if (message?.failureReason === 'invalid_response') {
+    return `模型返回的数据格式异常${preserved}，请重试或切换模型。`;
+  }
+  if (message?.failureReason === 'unavailable') {
+    return `模型连接超时或服务暂时不可用${preserved}，请稍后重试或切换模型。`;
+  }
+  return `回答未能完整结束${preserved}，请重试。`;
 }
 
 function messageStatusTone(
@@ -217,9 +240,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
   const [modelSearch, setModelSearch] = useState('');
-  const [activityExpanded, setActivityExpanded] = useState(true);
+  const [activityExpanded, setActivityExpanded] = useState(false);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string>();
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [contextDraft, setContextDraft] = useState<ProjectContextDraftPreviewDto>();
   const [contextName, setContextName] = useState('');
   const [contextLabels, setContextLabels] = useState('');
@@ -237,7 +262,9 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const [notice, setNotice] = useState('');
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const cancelRequestedRef = useRef(false);
+  const followOutputRef = useRef(true);
 
   const selected = useMemo(
     () => conversations.find((conversation) => conversation.conversationId === selectedId),
@@ -276,6 +303,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       };
     });
   }, [selected, responseExecution]);
+  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
   const duplicateIncludedContexts = useMemo(() => {
     const included = registeredContexts.filter((context) =>
       includedContextIds.includes(context.contextId)
@@ -372,11 +400,16 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
 
   useEffect(() => {
     setRenameTitle(selected?.title ?? '');
+  }, [selected?.title]);
+
+  useEffect(() => {
     setContextDraft(undefined);
     setContextName('');
     setContextLabels('');
     clearResponseDraftState();
-  }, [selected?.conversationId, selected?.title]);
+    followOutputRef.current = true;
+    setShowScrollToBottom(false);
+  }, [selected?.conversationId]);
 
   useEffect(() => {
     let active = true;
@@ -468,7 +501,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
               '回复因输出长度限制被截断。可在参数中提高 max_tokens 后重试，或减少勾选的上下文。'
             );
           } else if (result.value.state === 'failed') {
-            setNotice('回复失败，请查看任务中心调用记录。');
+            setNotice(failedResponseNotice(assistant));
           } else if (result.value.state === 'cancelled') {
             setNotice('回复已取消。');
           } else if (result.value.state === 'interrupted') {
@@ -512,7 +545,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     setContextOpen(false);
     setIncludedContextIds([]);
     setContextDraft(undefined);
-    setNotice(session ? '新的对话已准备好，发送第一条消息后自动保存。' : '请先打开项目。');
+    setNotice(session ? '' : '请先打开项目。');
     clearResponseDraftState();
   }
 
@@ -522,6 +555,13 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
   }, [input]);
+
+  useEffect(() => {
+    const messages = messagesRef.current;
+    if (!messages || !followOutputRef.current) return;
+    messages.scrollTop = messages.scrollHeight;
+    setShowScrollToBottom(false);
+  }, [lastDisplayMessage?.content, lastDisplayMessage?.state, selectedId]);
 
   function clearResponseDraftState() {
     cancelRequestedRef.current = false;
@@ -595,11 +635,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
           setInput('');
           clearResponseDraftState();
         }
-        setNotice('对话已删除；已登记的项目上下文和历史固定版本保持不变。');
+        setNotice('');
       } else {
         replaceConversation(result.value);
         setRenamingConversationId(undefined);
-        setNotice('对话名称已更新。');
+        setNotice('');
       }
     } catch {
       setNotice('更新对话失败，请重试。');
@@ -620,7 +660,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       }
       setConversations((items) => [result.value, ...items]);
       setSelectedId(result.value.conversationId);
-      setNotice('旧对话的已完成文本消息已复制到当前项目，原记录保持只读。');
+      setNotice('');
     } catch {
       setNotice('复制旧对话失败，请重试。');
     } finally {
@@ -745,11 +785,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         return;
       }
       setResponseExecution(submitted.value);
-      setNotice('已发送，正在接收回复。');
+      setNotice('');
       const refreshed = await chat.getConversation(targetConversation.conversationId);
       if (refreshed.ok) replaceConversation(refreshed.value);
     } catch {
-      setNotice('发送失败，请重试。若状态未知，请查看任务中心调用记录。');
+      setNotice('发送失败，请检查网络和模型连接后重试。');
     } finally {
       setBusy(false);
     }
@@ -822,7 +862,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         content: assistant?.content ?? current.content,
         updatedAt: assistant?.updatedAt ?? current.updatedAt
       } : current);
-      setNotice('回复已停止，已接收的部分内容已保留。');
+      setNotice('');
     } catch {
       setNotice('停止回复失败，请重试。');
       setResponseExecution(pendingExecution);
@@ -837,10 +877,30 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   async function copyMessage(message: MessageDto) {
     try {
       await navigator.clipboard.writeText(message.content);
-      setNotice('消息内容已复制。');
+      setCopiedMessageId(message.messageId);
+      window.setTimeout(() => {
+        setCopiedMessageId((current) => current === message.messageId ? undefined : current);
+      }, 1_600);
     } catch {
       setNotice('复制失败，请手动选择消息内容。');
     }
+  }
+
+  function handleMessagesScroll() {
+    const messages = messagesRef.current;
+    if (!messages) return;
+    const distanceToBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight;
+    const nearBottom = distanceToBottom <= 72;
+    followOutputRef.current = nearBottom;
+    setShowScrollToBottom(!nearBottom);
+  }
+
+  function scrollMessagesToBottom() {
+    const messages = messagesRef.current;
+    if (!messages) return;
+    followOutputRef.current = true;
+    messages.scrollTop = messages.scrollHeight;
+    setShowScrollToBottom(false);
   }
 
   async function toggleContextUsage(
@@ -852,7 +912,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       setIncludedContextIds((current) =>
         current.filter((contextId) => contextId !== candidate.contextId)
       );
-      setNotice('已从下一次回复移除该上下文；上下文库内容保持不变。');
+      setNotice('');
       return;
     }
     setBusy(true);
@@ -867,7 +927,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       setIncludedContextIds((current) =>
         current.includes(candidate.contextId) ? current : [...current, candidate.contextId]
       );
-      setNotice('该上下文将用于下一次回复。');
+      setNotice('');
     } catch {
       setNotice('读取项目上下文失败，请重试。');
     } finally {
@@ -896,7 +956,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         delete next[candidate.contextId];
         return next;
       });
-      setNotice('项目上下文已删除；历史固定版本未被改写。');
+      setNotice('');
     } catch {
       setNotice('删除项目上下文失败，请重试。');
     } finally {
@@ -933,7 +993,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       setViewedContexts((items) => ({ ...items, [candidate.contextId]: result.value }));
       setRenamingContextId(undefined);
       setContextRename('');
-      setNotice('上下文名称已更新。');
+      setNotice('');
     } catch {
       setNotice('重命名项目上下文失败，请重试。');
     } finally {
@@ -967,7 +1027,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         return;
       }
       setContextDraft(result.value);
-      setNotice(checked ? '消息内容已加入上下文草稿。' : '消息内容已从上下文草稿移除。');
+      setNotice('');
     } catch {
       setNotice('更新上下文草稿失败，请重试。');
     } finally {
@@ -1021,7 +1081,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       setContextName('');
       setContextLabels('');
       setContextTab('selected');
-      setNotice('项目上下文已登记，并将用于下一次回复。');
+      setNotice('');
     } catch {
       setNotice('登记项目上下文失败，请重试。');
     } finally {
@@ -1091,7 +1151,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
           ) : null}
         </div>
 
-        <div className="uc-chat-page__messages" aria-live="polite">
+        <div
+          className="uc-chat-page__messages"
+          onScroll={handleMessagesScroll}
+          ref={messagesRef}
+        >
           <div className="uc-chat-page__messages-inner">
             {!selected ? (
               <div className="uc-chat-page__empty">
@@ -1117,14 +1181,14 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                   const activityLabel = cancelRequested
                     ? '正在停止'
                     : responseExecution?.state === 'pending'
-                      ? reasoningMode ? '正在思考' : '正在处理'
+                      ? reasoningMode ? '正在推理' : '正在处理'
                       : responseExecution?.state === 'streaming'
-                        ? reasoningMode ? '思考完成，正在回答' : '正在回答'
+                        ? '正在回答'
                         : responseExecution?.state === 'completed'
                           ? `已处理${executionDuration ? ` ${executionDuration}` : ''}`
                           : responseExecution?.state === 'cancelled'
                             ? '已停止'
-                            : '处理失败';
+                            : item.content ? '回答已中断' : '处理失败';
                   return (
                     <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
                       {isCurrentAssistant ? (
@@ -1145,7 +1209,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                                 {cancelRequested
                                   ? '停止请求已发送，正在确认并保留已经接收的内容。'
                                   : reasoningMode
-                                  ? '当前模型未通过公开接口返回可展示的思考正文。'
+                                  ? '已启用深度推理；当前仅展示模型接口返回的可验证状态。'
                                   : responseInProgress
                                     ? '模型正在生成回答，可点击输入框右侧按钮立即停止。'
                                     : '回答处理已经结束。'}
@@ -1154,30 +1218,54 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                           ) : null}
                         </section>
                       ) : null}
-                      <div className="uc-chat-page__message-heading">
-                        <strong>{item.role === 'user' ? '你' : '助手'}</strong>
-                        {item.state !== 'completed' ? (
+                      {item.state !== 'completed' && !isCurrentAssistant ? (
+                        <div className="uc-chat-page__message-heading">
+                          <strong>{item.role === 'user' ? '你' : '助手'}</strong>
                           <StatusPill tone={messageStatusTone(item)}>{messageStatusLabel(item)}</StatusPill>
-                        ) : null}
-                      </div>
-                      <p>
-                        {item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
-                        {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
-                      </p>
-                      <div className="uc-chat-page__message-meta">
-                        <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time>
-                        {item.content ? (
-                          <button aria-label="复制消息" onClick={() => void copyMessage(item)} title="复制" type="button">
-                            <LuCopy aria-hidden="true" />
-                          </button>
-                        ) : null}
-                      </div>
+                        </div>
+                      ) : null}
+                      {item.role === 'assistant' ? (
+                        <div className="uc-chat-page__message-content">
+                          <MarkdownMessage
+                            content={item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                          />
+                          {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
+                        </div>
+                      ) : (
+                        <p>{item.content}</p>
+                      )}
+                      {item.state === 'completed' ? (
+                        <div className="uc-chat-page__message-meta">
+                          <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time>
+                          {item.content ? (
+                            <Button
+                              aria-label={copiedMessageId === item.messageId ? '已复制' : '复制消息'}
+                              onClick={() => void copyMessage(item)}
+                              title={copiedMessageId === item.messageId ? '已复制' : '复制'}
+                              variant="ghost"
+                            >
+                              {copiedMessageId === item.messageId ? <LuCheck aria-hidden="true" /> : <LuCopy aria-hidden="true" />}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}
               </ol>
             )}
           </div>
+          {showScrollToBottom ? (
+            <Button
+              aria-label="回到最新消息"
+              className="uc-chat-page__scroll-to-bottom"
+              onClick={scrollMessagesToBottom}
+              title="回到最新消息"
+              variant="secondary"
+            >
+              <LuArrowDown aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
 
         <div className="uc-chat-page__composer-region">

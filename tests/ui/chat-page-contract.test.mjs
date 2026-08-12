@@ -64,8 +64,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__history-menu \{[\s\S]*opacity: 0;[\s\S]*pointer-events: none;/);
   assert.match(styles, /\.uc-chat-page__history-row:hover \.uc-chat-page__history-menu/);
   assert.match(styles, /text-overflow: ellipsis/);
-  assert.match(styles, /\.uc-chat-page__messages-inner[\s\S]*width: min\(1180px, 100%\)/);
-  assert.match(styles, /\.uc-chat-page__composer-region[\s\S]*width: min\(1180px, calc\(100% - 48px\)\)/);
+  assert.match(styles, /--uc-chat-content-width: 860px/);
+  assert.match(styles, /\.uc-chat-page__messages-inner[\s\S]*width: min\(var\(--uc-chat-content-width\), 100%\)/);
+  assert.match(styles, /\.uc-chat-page__composer-region[\s\S]*width: min\(var\(--uc-chat-content-width\), calc\(100% - 48px\)\)/);
   assert.match(source, /uc-chat-page__composer-region[\s\S]*\{notice \? \([\s\S]*role="status"[\s\S]*uc-chat-page__composer/);
   assert.doesNotMatch(appSource, /setNewChatRequest|newConversationRequest/);
   assert.match(appSource, /initialConversationId=\{selectedChatConversationId\}/);
@@ -82,6 +83,10 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle:hover/);
   assert.match(source, /responseInProgress/);
   assert.match(source, /displayMessages/);
+  assert.match(source, /<MarkdownMessage/);
+  assert.match(source, /item\.state === 'completed'/);
+  assert.match(source, /uc-chat-page__scroll-to-bottom/);
+  assert.match(source, /failedResponseNotice/);
   assert.match(source, /const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;/);
   assert.match(source, /void pollResponseExecution\(\)/);
   assert.match(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
@@ -102,6 +107,9 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /DynamicParameterForm/);
   assert.doesNotMatch(source, /推理强度|>高级</);
   assert.doesNotMatch(source, /回复已接收。若内容偏短/);
+  assert.doesNotMatch(source, /新的对话已准备好/);
+  assert.doesNotMatch(source, /请查看任务中心调用记录/);
+  assert.doesNotMatch(source, /消息内容已复制/);
   assert.doesNotMatch(source, /上下文 \{includedContextIds\.length\}/);
 });
 
@@ -137,14 +145,14 @@ test('project context uses a single explicit registration action and separates u
   assert.match(source, /从本次移除/);
   assert.match(source, /从上下文库删除/);
   assert.match(source, /uc-chat-page__context-card-menu/);
-  assert.match(source, /历史固定版本未被改写/);
+  assert.match(source, /引用版本不会被改写/);
   assert.doesNotMatch(source, /草稿预览 · 版本|保存名称与标签|我已检查目标项目|确认登记到项目|查看固定版本|取消引用/);
 });
 
 test('chat transparency only reports observable execution state', () => {
-  assert.match(source, /正在思考/);
+  assert.match(source, /正在推理/);
   assert.match(source, /已处理/);
-  assert.match(source, /未通过公开接口返回可展示的思考正文/);
+  assert.match(source, /仅展示模型接口返回的可验证状态/);
   assert.doesNotMatch(source, /已创建回复请求/);
   assert.doesNotMatch(source, /思维链|完整思考过程|模型内心/);
   assert.doesNotMatch(source, /编辑并重新生成|重新生成/);
