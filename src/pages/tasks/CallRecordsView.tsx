@@ -405,7 +405,7 @@ function CallDetails({
         <div><dt>连接</dt><dd>{details.connectionName ?? '提交时显示名不可用'}</dd></div>
         <div><dt>模型</dt><dd>{details.modelName ?? '提交时显示名不可用'}</dd></div>
         <div><dt>总耗时</dt><dd>{formatDuration(details.durationMs)}</dd></div>
-        <div><dt>调用对象</dt><dd>{details.subject.kind === 'media' ? '媒体任务' : '项目对话'}</dd></div>
+        <div><dt>调用对象</dt><dd>{callSubjectLabel(details.subject.kind)}</dd></div>
         <div><dt>重试归属</dt><dd>{details.retryOfInvocationAttemptId ?? '首次调用'}</dd></div>
       </dl>
 
@@ -504,6 +504,12 @@ function CallDetails({
       </div>
     </div>
   );
+}
+
+function callSubjectLabel(kind: 'media' | 'conversation' | 'prompt_once'): string {
+  if (kind === 'media') return '媒体任务';
+  if (kind === 'conversation') return '项目对话';
+  return '一次性提示词增强';
 }
 
 function RegisteredWorkResultCard({

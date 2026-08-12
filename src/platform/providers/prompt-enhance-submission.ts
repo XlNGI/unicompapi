@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
+  createProviderInvocationAttempt,
+  createProviderInvocationEvent,
+  createProviderUsageObservation,
   createProviderExecutionRouteSnapshot,
   parseSubmissionConfirmationDto,
   toConversationId,
@@ -8,10 +11,16 @@ import {
   toMessageId,
   toProjectId,
   toProviderExecutionRouteSnapshotId,
+  toProviderInvocationAttemptId,
+  toProviderInvocationEventId,
+  toProviderUsageObservationId,
   promptEnhanceInputFingerprint,
   promptEnhanceSourceReference,
   type ParameterValue,
-  type ProjectContextOutboundSnapshotV1
+  type ProjectContextOutboundSnapshotV1,
+  type ProviderExecutionRouteSnapshotRepository,
+  type ProviderInvocationRepository,
+  type ProviderUsageObservationRepository
 } from '../../domain';
 import type {
   PromptEnhanceCandidateDto,
@@ -95,7 +104,25 @@ interface EnhancePreparationRecord {
   readonly inputFingerprint: string;
   readonly contextSnapshots: readonly ProjectContextOutboundSnapshotV1[];
   readonly candidate: ResolvedFeatureCandidateV1;
-  consumed?: boolean;
+  state: 'ready' | 'submitting' | 'consumed';
+}
+
+export function claimPromptEnhancePreparation(record: {
+  state: EnhancePreparationRecord['state'];
+}): void {
+  if (record.state !== 'ready') {
+    throw new PromptEnhanceError(
+      'route_selection_consumed',
+      'Enhance preparation token was already used'
+    );
+  }
+  record.state = 'submitting';
+}
+
+export interface PromptEnhanceAuditRepositories {
+  readonly routes: ProviderExecutionRouteSnapshotRepository;
+  readonly invocations: ProviderInvocationRepository;
+  readonly usage: ProviderUsageObservationRepository;
 }
 
 export class PromptEnhanceService {
@@ -111,6 +138,7 @@ export class PromptEnhanceService {
       readonly runtimes: PromptEnhanceSubmissionRuntimes;
       readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort;
       readonly submissionAuthorization?: RuntimeAuthorizationOrchestrationPort;
+      readonly audit?: PromptEnhanceAuditRepositories;
       now?: () => string;
     }
   ) {
@@ -238,7 +266,8 @@ export class PromptEnhanceService {
       outboundText,
       inputFingerprint,
       contextSnapshots,
-      candidate: resolved
+      candidate: resolved,
+      state: 'ready'
     });
     return {
       schemaVersion: 1,
@@ -269,12 +298,6 @@ export class PromptEnhanceService {
         'Enhance preparation token is invalid'
       );
     }
-    if (preparation.consumed) {
-      throw new PromptEnhanceError(
-        'route_selection_consumed',
-        'Enhance preparation token was already used'
-      );
-    }
     if (Date.parse(this.now()) >= Date.parse(preparation.expiresAt)) {
       throw new PromptEnhanceError(
         'route_selection_expired',
@@ -296,6 +319,7 @@ export class PromptEnhanceService {
         'Subject revision changed since preparation'
       );
     }
+    claimPromptEnhancePreparation(preparation);
     const subject = await this.options.subjects.load(input);
     const currentFingerprint = await promptEnhanceInputFingerprint({
       originalInput: subject.originalInput,
@@ -331,6 +355,46 @@ export class PromptEnhanceService {
       runtimeAuthorizationClaimId: claimId,
       createdAt: toIsoTimestamp(this.now())
     });
+    const invocationAttemptId = toProviderInvocationAttemptId(
+      `invocation-enhance-${randomUUID()}`
+    );
+    let eventSequence = 1;
+    const appendAuditEvent = async (
+      type: Parameters<typeof createProviderInvocationEvent>[0]['type'],
+      safeCode?: string
+    ) => {
+      if (!this.options.audit) return;
+      const sequence = eventSequence + 1;
+      await this.options.audit.invocations.appendEvent(createProviderInvocationEvent({
+        id: toProviderInvocationEventId(`event-enhance-${randomUUID()}`),
+        invocationAttemptId,
+        sequence,
+        type,
+        ...(safeCode ? { safeCode } : {}),
+        occurredAt: toIsoTimestamp(this.now())
+      }));
+      eventSequence = sequence;
+    };
+    if (this.options.audit) {
+      const createdAt = toIsoTimestamp(this.now());
+      await this.options.audit.routes.save(routeSnapshot);
+      await this.options.audit.invocations.create(
+        createProviderInvocationAttempt({
+          id: invocationAttemptId,
+          projectId: toProjectId(this.options.projectId),
+          subject: { kind: 'prompt_once', subjectId: preparation.subjectId },
+          routeSnapshotId: routeSnapshot.id,
+          createdAt
+        }),
+        createProviderInvocationEvent({
+          id: toProviderInvocationEventId(`event-enhance-${randomUUID()}`),
+          invocationAttemptId,
+          sequence: 1,
+          type: 'submission_started',
+          occurredAt: createdAt
+        })
+      );
+    }
 
     try {
       await authorization.claimSubmission({
@@ -344,13 +408,15 @@ export class PromptEnhanceService {
         now: this.now()
       });
     } catch {
+      preparation.state = 'consumed';
+      await appendAuditEvent('submission_failed_before_request', 'authorization_not_claimed')
+        .catch(() => undefined);
       throw new PromptEnhanceError(
         'authorization_not_claimed',
         'Runtime authorization could not be claimed'
       );
     }
 
-    preparation.consumed = true;
     let requestStarted = false;
     const beforeRequestStarted = async () => {
       if (requestStarted) return;
@@ -370,6 +436,21 @@ export class PromptEnhanceService {
       if (!enhancedText) {
         throw new PromptEnhanceError('empty_result', 'Enhance returned empty text');
       }
+      await appendAuditEvent('provider_accepted');
+      if (this.options.audit) {
+        await this.options.audit.usage.append(createProviderUsageObservation({
+          id: toProviderUsageObservationId(`usage-enhance-${randomUUID()}`),
+          invocationAttemptId,
+          usageSchemaId: result.usageSchema.id,
+          usageSchemaRevision: result.usageSchema.revision,
+          sourceEventKey: `enhance_${randomUUID().replace(/-/gu, '')}`,
+          sequence: 1,
+          status: result.usageStatus,
+          sourceStage: 'result',
+          facts: result.usageFacts,
+          observedAt: toIsoTimestamp(this.now())
+        }, result.usageSchema), result.usageSchema);
+      }
       const persisted = await this.options.subjects.saveEnhancement({
         subject,
         enhancedText,
@@ -380,6 +461,8 @@ export class PromptEnhanceService {
         updatedAt: toIsoTimestamp(this.now())
       });
       await authorization.recordOutcome?.(claimId, this.now()).catch(() => undefined);
+      await appendAuditEvent('completed');
+      preparation.state = 'consumed';
       return {
         schemaVersion: 1,
         status: 'completed',
@@ -388,8 +471,11 @@ export class PromptEnhanceService {
         enhancedText
       };
     } catch (error) {
+      preparation.state = 'consumed';
       if (!requestStarted) {
         await authorization.releaseBeforeRequest?.(claimId, this.now()).catch(() => undefined);
+        await appendAuditEvent('submission_failed_before_request', 'prompt_once.failed_before_request')
+          .catch(() => undefined);
         if (error instanceof PromptEnhanceError) throw error;
         throw new PromptEnhanceError(
           'submission_failed_before_request',
@@ -397,6 +483,8 @@ export class PromptEnhanceService {
         );
       }
       await authorization.recordOutcome?.(claimId, this.now()).catch(() => undefined);
+      await appendAuditEvent('outcome_unknown', 'prompt_once.outcome_unknown')
+        .catch(() => undefined);
       if (error instanceof PromptEnhanceError) throw error;
       throw new PromptEnhanceError(
         'submission_outcome_unknown',

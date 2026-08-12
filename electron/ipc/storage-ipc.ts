@@ -19,6 +19,9 @@ import {
   JsonProviderRegistryStore,
   JsonImageWorkspaceRepository,
   JsonProjectContextRepository,
+  JsonProviderExecutionRouteSnapshotRepository,
+  JsonProviderInvocationRepository,
+  JsonProviderUsageObservationRepository,
   LocalMediaHandleRegistry,
   NodeProjectStorage,
   StorageProjectSessionRegistry,
@@ -194,6 +197,11 @@ export function registerStorageIpcHandlers(options: {
     const storage = new NodeProjectStorage(session.rootDirectory);
     const drafts = new JsonImageWorkspaceRepository(storage, session.projectId);
     const contexts = new JsonProjectContextRepository(storage, session.projectId);
+    const audit = {
+      routes: new JsonProviderExecutionRouteSnapshotRepository(storage, session.projectId),
+      invocations: new JsonProviderInvocationRepository(storage, session.projectId),
+      usage: new JsonProviderUsageObservationRepository(storage)
+    };
     const value = new PromptEnhanceService({
       projectId: session.projectId,
       subjects: new ImagePromptEnhanceSubjectAdapter({
@@ -211,7 +219,8 @@ export function registerStorageIpcHandlers(options: {
       runtimeAuthorization: authorization,
       submissionAuthorization: hasSubmissionAuthorization(authorization)
         ? authorization
-        : undefined
+        : undefined,
+      audit
     });
     promptEnhanceRuntime = {
       projectId: session.projectId,

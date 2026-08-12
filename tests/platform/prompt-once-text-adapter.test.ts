@@ -33,6 +33,7 @@ import {
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
   newApiDefaultTextReasoningParameterSchema,
+  parsePromptOnceCompletion,
   parsePromptOnceResponse,
   serializePromptOnceRequest,
   validatePromptOnceRoute
@@ -93,6 +94,32 @@ describe('prompt_once text adapter contract', () => {
       })),
       'deepseek-v4-flash'
     )).toThrow('finish reason is invalid');
+  });
+
+  it('maps ordinary JSON usage without retaining the raw response', () => {
+    const completion = parsePromptOnceCompletion(
+      new TextEncoder().encode(JSON.stringify({
+        object: 'chat.completion',
+        model: 'reasoning-model',
+        choices: [{
+          index: 0,
+          finish_reason: 'stop',
+          message: { role: 'assistant', content: 'Enhanced prompt' }
+        }],
+        usage: { prompt_tokens: 8, completion_tokens: 5, total_tokens: 13 }
+      })),
+      'reasoning-model',
+      'openai_compatible'
+    );
+    expect(completion).toEqual({
+      content: 'Enhanced prompt',
+      usageStatus: 'reported',
+      usageFacts: [
+        { metricId: 'completion_tokens', quantity: '5', unit: 'token', source: 'provider_body' },
+        { metricId: 'prompt_tokens', quantity: '8', unit: 'token', source: 'provider_body' },
+        { metricId: 'total_tokens', quantity: '13', unit: 'token', source: 'provider_body' }
+      ]
+    });
   });
 
   it('rejects route identity and response contract changes before dispatch', () => {

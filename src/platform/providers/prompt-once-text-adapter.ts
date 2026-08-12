@@ -6,7 +6,9 @@ import {
   type ParameterValue,
   type ProviderConnection,
   type ProviderExecutionRouteSnapshotV1,
-  type StructuredCredentialRecord
+  type StructuredCredentialRecord,
+  type UsageFactV1,
+  type UsageSchemaV1
 } from '../../domain';
 import type { SecureCredentialVault } from './credential-vault';
 import {
@@ -22,7 +24,9 @@ import {
   DEEPSEEK_RESULT_SCHEMA_ID,
   DEEPSEEK_USAGE_SCHEMA_ID,
   deepSeekReasoningParameterSchema,
+  deepSeekUsageSchema,
   isDeepSeekModelKey,
+  mapDeepSeekUsage,
   type DeepSeekSharedRuntime
 } from './deepseek';
 import {
@@ -36,6 +40,8 @@ import {
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_TEXT_CONSTRAINT_SET_ID,
   matchOpenAiCompatiblePackage,
+  mapNewApiUsage,
+  newApiChatUsageSchema,
   newApiDefaultTextReasoningParameterSchema,
   type NewApiSharedRuntime
 } from './newapi';
@@ -67,7 +73,13 @@ export async function submitPromptOnce(input: {
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
   readonly beforeRequestStarted: () => Promise<void>;
   readonly signal?: AbortSignal;
-}): Promise<{ readonly content: string; readonly providerOperationId: string }> {
+}): Promise<{
+  readonly content: string;
+  readonly providerOperationId: string;
+  readonly usageSchema: UsageSchemaV1;
+  readonly usageStatus: 'reported' | 'not_reported';
+  readonly usageFacts: readonly UsageFactV1[];
+}> {
   const route = validatePromptOnceRoute(input.routeSnapshot);
   const providerOperationId = `prompt-once-${randomUUID()}`;
   const registry = await input.runtimes.providerRegistry.load();
@@ -92,9 +104,19 @@ export async function submitPromptOnce(input: {
       signal: input.signal
     })
   );
+  const completion = parsePromptOnceCompletion(
+    response,
+    route.providerModelKey ?? '',
+    route.packageId === DEEPSEEK_PROVIDER_PACKAGE_ID ? 'deepseek' : 'openai_compatible'
+  );
   return {
-    content: parsePromptOnceResponse(response, route.providerModelKey ?? ''),
-    providerOperationId
+    content: completion.content,
+    providerOperationId,
+    usageSchema: route.packageId === DEEPSEEK_PROVIDER_PACKAGE_ID
+      ? deepSeekUsageSchema
+      : newApiChatUsageSchema,
+    usageStatus: completion.usageStatus,
+    usageFacts: completion.usageFacts
   };
 }
 
@@ -277,6 +299,18 @@ async function dispatchPromptOnce(input: {
 }
 
 export function parsePromptOnceResponse(body: Uint8Array, expectedModel: string): string {
+  return parsePromptOnceCompletion(body, expectedModel, 'openai_compatible').content;
+}
+
+export function parsePromptOnceCompletion(
+  body: Uint8Array,
+  expectedModel: string,
+  usageContract: 'deepseek' | 'openai_compatible'
+): {
+  readonly content: string;
+  readonly usageStatus: 'reported' | 'not_reported';
+  readonly usageFacts: readonly UsageFactV1[];
+} {
   let value: unknown;
   try {
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
@@ -303,7 +337,18 @@ export function parsePromptOnceResponse(body: Uint8Array, expectedModel: string)
   if (typeof content !== 'string' || !content.trim() || content.length > 1_000_000) {
     throw new PromptOnceTextAdapterError('prompt_once.invalid_response', 'Prompt once content is invalid');
   }
-  return content.trim();
+  const usageFacts = value.usage === undefined || value.usage === null
+    ? []
+    : usageContract === 'deepseek'
+      ? mapDeepSeekUsage(value.usage)
+      : mapNewApiUsage(value.usage);
+  return {
+    content: content.trim(),
+    usageStatus: value.usage === undefined || value.usage === null
+      ? 'not_reported'
+      : 'reported',
+    usageFacts
+  };
 }
 
 function parameterSchema(route: ProviderExecutionRouteSnapshotV1): ParameterSchemaV2 {

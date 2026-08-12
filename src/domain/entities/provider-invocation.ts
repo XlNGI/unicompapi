@@ -65,6 +65,10 @@ export type ProviderInvocationSubjectV1 =
       readonly conversationId: ConversationId;
       readonly userMessageId: MessageId;
       readonly responseExecutionId: ConversationResponseExecutionId;
+    }
+  | {
+      readonly kind: 'prompt_once';
+      readonly subjectId: string;
     };
 
 export interface ProviderInvocationAttemptV1 {
@@ -319,6 +323,13 @@ function parseProviderInvocationSubject(value: unknown): ProviderInvocationSubje
       responseExecutionId: toConversationResponseExecutionId(
         nonBlank(item.responseExecutionId, 'subject.responseExecutionId')
       )
+    };
+  }
+  if (item.kind === 'prompt_once') {
+    requireExactKeys(item, ['kind', 'subjectId'], 'prompt once invocation subject');
+    return {
+      kind: 'prompt_once',
+      subjectId: nonBlank(item.subjectId, 'subject.subjectId')
     };
   }
   throw new InvariantViolationError('provider invocation subject kind is invalid');

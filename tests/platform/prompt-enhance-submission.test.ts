@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { toProjectContextId } from '../../src/domain';
-import { buildEnhancePrompt } from '../../src/platform';
+import {
+  buildEnhancePrompt,
+  claimPromptEnhancePreparation
+} from '../../src/platform';
 
 describe('prompt enhancement composition', () => {
   it('combines system rules, pinned context content, and original input once', () => {
@@ -21,5 +24,18 @@ describe('prompt enhancement composition', () => {
     const prompt = buildEnhancePrompt('Create a simple icon.', []);
     expect(prompt).toContain('（无项目上下文）');
     expect(prompt).toContain('Create a simple icon.');
+  });
+});
+
+describe('prompt enhancement preparation consumption', () => {
+  it('allows only one concurrent claimant to consume a prepared token', async () => {
+    const preparation = { state: 'ready' as 'ready' | 'submitting' | 'consumed' };
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => claimPromptEnhancePreparation(preparation)),
+      Promise.resolve().then(() => claimPromptEnhancePreparation(preparation))
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(preparation.state).toBe('submitting');
   });
 });

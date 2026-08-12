@@ -257,8 +257,13 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
             disabled={busy}
             emptyHint="当前模型没有需要用户填写的参数。"
             fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
-            onChange={(fieldId, value) =>
-              setParameterValues((current) => ({ ...current, [fieldId]: value }))}
+            onChange={(fieldId, value) => {
+              setParameterValues((current) => ({ ...current, [fieldId]: value }));
+              setPreparation(undefined);
+              setPreparedSubject(undefined);
+              setConfirmed(false);
+              setProgressPhase('idle');
+            }}
             values={parameterValues}
           />
         </>

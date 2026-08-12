@@ -158,6 +158,10 @@ test('prompt enhance fixes reasoning and non-stream without a mode switch', () =
   assert.doesNotMatch(promptEnhanceSource, /LuMessageCircle|LuBrainCircuit/);
   assert.doesNotMatch(promptEnhanceSource, /text_chat/);
   assert.doesNotMatch(promptEnhanceSource, /aria-label="文本能力"/);
+  assert.match(
+    promptEnhanceSource,
+    /setParameterValues[\s\S]*setPreparation\(undefined\)[\s\S]*setPreparedSubject\(undefined\)/
+  );
   assert.match(enhanceServiceSource, /submitPromptOnce/);
   assert.doesNotMatch(enhanceServiceSource, /DeepSeekChatAdapter|NewApiChatAdapter/);
   assert.match(pageStyles, /\.uc-prompt-enhance/);

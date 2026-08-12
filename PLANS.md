@@ -4,7 +4,7 @@
 
 当前状态：阶段 8 已正式收口；阶段 9 B1-B4、A1-A4、C1 与 C2 流程 1-8 已全部完成，并在 Windows x64 必需目标、macOS `required=false` 延期目标边界内正式收口。最终门禁为 Node 178 项与 Vitest 388 项，共 566 项通过，0 失败、0 跳过；Windows 九类套件全部 `passed`，Electron 4/4 响应且残留 0。macOS 保持 `not_run/deferred`，不声明已支持。Vidu 两项真实收费预算已用尽，Image V1 未决协议不晋级。阶段 10、服务商优化、安装包、签名、公证、生产更新、生产媒体分发、SBOM 和正式发布准入均未启动。
 
-2026-08-12 工程补充：`feature/prompt-enhance-generalization` 已按批准的 PR1 → PR6 计划完成提示词增强通用化与非流式改造，分支职责是承载通用领域/IPC/UI、`prompt_once`、固定版本项目上下文、强制增强生成门禁和专业生图首个宿主适配，不修改会话 SSE。实际门禁为 Node/UI 249 项与 Vitest 656 项，共 905 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。未调用真实服务商与 Vidu，未进入阶段 10，当前待合并 `develop` 并保留本地/远程功能分支。记录见 `docs/active/提示词增强通用化与非流式改造验收记录.md`。
+2026-08-12 工程补充：`feature/prompt-enhance-generalization` 在 PR1 → PR6 基础上完成提示词增强一次性令牌并发消费修复、`prompt_once` route/invocation/usage 审计接线和调用记录 `prompt_once` 主体扩展；模型/参数变化会在 UI 侧立即作废准备令牌，不伪造临时草稿状态参与结果指纹。实际完整门禁为 Node/UI 249 项与 Vitest 659 项，共 908 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。未调用真实服务商与 Vidu，未进入阶段 10，当前待合并 `develop` 并保留本地/远程功能分支。记录见 `docs/active/提示词增强通用化与非流式改造验收记录.md`。
 
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
