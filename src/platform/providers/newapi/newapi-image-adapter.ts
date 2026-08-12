@@ -37,7 +37,12 @@ import {
   isOpenAiCompatibleEndpointPolicyId,
   isOpenAiCompatiblePackageId
 } from './openai-compatible-identity';
-import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
+import {
+  NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES,
+  NEWAPI_REQUEST_TOO_LARGE_MESSAGE,
+  NewApiRuntimeError,
+  type NewApiSharedRuntime
+} from './newapi-runtime';
 import type { ControlledImageMaterialPort } from '../vidu/controlled-image-material';
 
 const maximumResultBytes = 128 * 1024 * 1024;
@@ -481,8 +486,14 @@ async function serializeImageRequest(
       `data:${material.mimeType};base64,${material.base64}`;
   }
   const bytes = new TextEncoder().encode(JSON.stringify(body));
-  if (bytes.byteLength < 1 || bytes.byteLength > 2 * 1024 * 1024) {
-    throw invalidRequest('newapi.request_too_large', 'The NewAPI image request is too large');
+  if (
+    bytes.byteLength < 1 ||
+    bytes.byteLength > NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES
+  ) {
+    throw invalidRequest(
+      'newapi.request_too_large',
+      NEWAPI_REQUEST_TOO_LARGE_MESSAGE
+    );
   }
   return bytes;
 }

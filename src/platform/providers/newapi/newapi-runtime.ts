@@ -19,6 +19,11 @@ import {
   matchOpenAiCompatiblePackage
 } from './openai-compatible-identity';
 
+// A 15 MiB controlled image expands to 20 MiB in Base64; keep room for JSON fields.
+export const NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES = 24 * 1024 * 1024;
+export const NEWAPI_REQUEST_TOO_LARGE_MESSAGE =
+  'The NewAPI request exceeded the allowed size';
+
 export const newApiRuntimeErrorCodes = [
   'invalid_request',
   'protocol_mismatch',
@@ -259,7 +264,7 @@ export class NewApiSharedRuntime {
       beforeRequestStarted: input.beforeRequestStarted,
       accept: 'application/json',
       contentType: 'application/json',
-      maximumRequestBytes: 2 * 1024 * 1024,
+      maximumRequestBytes: NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES,
       maximumResponseBytes: 64 * 1024 * 1024,
       requireReadyConnection: true,
       expectedResponse: 'json',
@@ -909,7 +914,7 @@ function messageForCode(code: NewApiRuntimeErrorCode): string {
     provider_unavailable: 'NewAPI is temporarily unavailable',
     timeout: 'The NewAPI request timed out',
     cancelled: 'The NewAPI request was cancelled',
-    request_too_large: 'The NewAPI request exceeded the allowed size',
+    request_too_large: NEWAPI_REQUEST_TOO_LARGE_MESSAGE,
     response_too_large: 'The NewAPI response exceeded the allowed size',
     redirect_not_allowed: 'The NewAPI response redirected unexpectedly',
     invalid_response: 'The NewAPI response was invalid',

@@ -12,6 +12,7 @@ import type {
   SubmissionDispatchOutcome,
   SubmissionDispatchPort
 } from './provider-submission-orchestrator';
+import { NEWAPI_REQUEST_TOO_LARGE_MESSAGE } from './newapi/newapi-runtime';
 
 export interface ProviderSubmissionAdapterPort {
   readonly packageId: string;
@@ -209,7 +210,7 @@ export function safeCodeForProviderMessage(
   if (message === 'The NewAPI request was cancelled') {
     return 'newapi.cancelled';
   }
-  if (message === 'The NewAPI request exceeded the allowed size') {
+  if (message === NEWAPI_REQUEST_TOO_LARGE_MESSAGE) {
     return 'newapi.request_too_large';
   }
   if (message === 'The NewAPI response exceeded the allowed size') {
