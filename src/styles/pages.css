@@ -4851,6 +4851,11 @@ button.uc-project-center__project-card:disabled {
   height: 15px;
 }
 
+.uc-chat-page__copy-feedback {
+  color: var(--uc-color-status-danger);
+  white-space: nowrap;
+}
+
 .uc-chat-page__activity {
   display: grid;
   gap: var(--uc-space-2);
@@ -4992,8 +4997,8 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-chat-page__scroll-to-bottom {
-  position: sticky;
-  bottom: 124px;
+  position: absolute;
+  top: 0;
   left: 50%;
   z-index: 2;
   display: grid;
@@ -5001,11 +5006,11 @@ button.uc-project-center__project-card:disabled {
   min-width: 36px;
   height: 36px;
   min-height: 36px;
-  margin: var(--uc-space-3) 0 0;
+  margin: 0;
   padding: 0;
   place-items: center;
   border-radius: var(--uc-radius-full);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   box-shadow: var(--uc-shadow-sm);
 }
 

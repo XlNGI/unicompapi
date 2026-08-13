@@ -37,6 +37,27 @@ import '../../styles/pages.css';
 
 const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;
 
+function copyTextWithDomFallback(content: string): boolean {
+  const activeElement = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = content;
+  textarea.readOnly = true;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    if (activeElement instanceof HTMLElement) activeElement.focus({ preventScroll: true });
+  }
+}
+
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   invalid_request: '当前操作数据无效，请刷新后重试。',
   project_not_open: '请先打开目标项目。',
@@ -243,6 +264,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string>();
+  const [copyFailedMessageId, setCopyFailedMessageId] = useState<string>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [contextDraft, setContextDraft] = useState<ProjectContextDraftPreviewDto>();
   const [contextName, setContextName] = useState('');
@@ -889,15 +911,23 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   }
 
   async function copyMessage(message: MessageDto) {
+    setCopiedMessageId(undefined);
+    setCopyFailedMessageId(undefined);
     try {
       await navigator.clipboard.writeText(message.content);
-      setCopiedMessageId(message.messageId);
-      window.setTimeout(() => {
-        setCopiedMessageId((current) => current === message.messageId ? undefined : current);
-      }, 1_600);
     } catch {
-      setNotice('复制失败，请手动选择消息内容。');
+      if (!copyTextWithDomFallback(message.content)) {
+        setCopyFailedMessageId(message.messageId);
+        window.setTimeout(() => {
+          setCopyFailedMessageId((current) => current === message.messageId ? undefined : current);
+        }, 2_400);
+        return;
+      }
     }
+    setCopiedMessageId(message.messageId);
+    window.setTimeout(() => {
+      setCopiedMessageId((current) => current === message.messageId ? undefined : current);
+    }, 1_600);
   }
 
   function handleMessagesScroll() {
@@ -1279,6 +1309,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                       {item.state === 'completed' ? (
                         <div className="uc-chat-page__message-meta">
                           <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time>
+                          {copyFailedMessageId === item.messageId ? (
+                            <span className="uc-chat-page__copy-feedback" role="status">
+                              复制失败，请手动选择内容
+                            </span>
+                          ) : null}
                           {item.content ? (
                             <Button
                               aria-label={copiedMessageId === item.messageId ? '已复制' : '复制消息'}
@@ -1297,6 +1332,9 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
               </ol>
             )}
           </div>
+        </div>
+
+        <div className="uc-chat-page__composer-region">
           {showScrollToBottom ? (
             <Button
               aria-label="回到最新消息"
@@ -1308,9 +1346,6 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
               <LuArrowDown aria-hidden="true" />
             </Button>
           ) : null}
-        </div>
-
-        <div className="uc-chat-page__composer-region">
           {notice ? (
             <p className="uc-chat-page__message" aria-live="polite" role="status">
               {notice}

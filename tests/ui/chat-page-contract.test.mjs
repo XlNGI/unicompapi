@@ -101,7 +101,14 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__message-list \{[\s\S]*padding-bottom: 180px;/);
   assert.match(styles, /\.uc-chat-page__composer:focus-within \{[\s\S]*border-color: var\(--uc-color-border-default\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
   assert.match(source, /item\.state === 'completed'/);
-  assert.match(source, /uc-chat-page__scroll-to-bottom/);
+  assert.match(source, /copyTextWithDomFallback/);
+  assert.match(source, /document\.execCommand\('copy'\)/);
+  assert.match(source, /copyFailedMessageId === item\.messageId[\s\S]*uc-chat-page__copy-feedback[\s\S]*role="status"/);
+  assert.doesNotMatch(source, /setNotice\('复制失败，请手动选择消息内容。'\)/);
+  assert.match(source, /uc-chat-page__composer-region[\s\S]*uc-chat-page__scroll-to-bottom[\s\S]*\{notice \? \(/);
+  assert.doesNotMatch(source, /uc-chat-page__messages[\s\S]*uc-chat-page__scroll-to-bottom[\s\S]*<\/div>\s*\n\s*<div className="uc-chat-page__composer-region">/);
+  assert.match(styles, /\.uc-chat-page__scroll-to-bottom \{[^}]*position: absolute;[^}]*top: 0;[^}]*transform: translate\(-50%, -50%\);/);
+  assert.doesNotMatch(styles, /\.uc-chat-page__scroll-to-bottom \{[^}]*position: sticky;/);
   assert.match(source, /failedResponseNotice/);
   assert.match(source, /const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;/);
   assert.match(source, /void pollResponseExecution\(\)/);
