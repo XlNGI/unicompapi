@@ -18,6 +18,10 @@ const protocolSource = await readFile(
   new URL('../../electron/main.ts', import.meta.url),
   'utf8'
 );
+const localMediaResponseSource = await readFile(
+  new URL('../../electron/ipc/local-media-response.ts', import.meta.url),
+  'utf8'
+);
 const domainSource = await readFile(
   new URL('../../src/domain/entities/video-workspace.ts', import.meta.url),
   'utf8'
@@ -62,9 +66,12 @@ test('keeps video workspace DTOs free of protected main-process facts', () => {
   assert.match(mainSource, /new VideoWorkspaceController/);
   assert.match(mainSource, /new VideoReferenceMediaController/);
   assert.doesNotMatch(protocolSource, /headers: request\.headers/);
-  assert.match(protocolSource, /const headers = new Headers\(\)/);
-  assert.match(protocolSource, /headers\.set\('content-type', entry\.mimeType\)/);
-  assert.match(protocolSource, /headers\.set\('content-length', contentLength\)/);
+  assert.match(protocolSource, /createLocalMediaResponse\(/);
+  assert.doesNotMatch(protocolSource, /net\.fetch\(pathToFileURL/);
+  assert.match(localMediaResponseSource, /createReadStream\(target\)/);
+  assert.match(localMediaResponseSource, /headers\.set\('content-type', mimeType\)/);
+  assert.match(localMediaResponseSource, /headers\.set\('content-length', String\(metadata\.size\)\)/);
+  assert.doesNotMatch(localMediaResponseSource, /content-disposition|pathToFileURL|net\.fetch/);
   assert.doesNotMatch(sharedSource, /rendererPath|upload|analyze|createTask|createExecution/);
 });
 

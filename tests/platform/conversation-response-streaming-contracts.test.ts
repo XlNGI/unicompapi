@@ -55,6 +55,7 @@ function execution(input: {
   readonly attemptId?: string;
   readonly assistantMessageId?: string;
   readonly state?: ConversationResponseExecutionState;
+  readonly productFeature?: 'text_chat' | 'text_reasoning';
   readonly retryOfExecutionId?: ConversationResponseExecutionId;
   readonly ownerProjectId?: typeof projectId;
 } = {}) {
@@ -77,7 +78,7 @@ function execution(input: {
         assistantMessageId: toMessageId(
           input.assistantMessageId ?? 'message-assistant-platform'
         ),
-        productFeature: 'text_chat' as const,
+        productFeature: input.productFeature ?? 'text_chat',
         routeSnapshotId: toProviderExecutionRouteSnapshotId('route-response-platform'),
         candidate: {
           schemaVersion: 1 as const,
@@ -209,7 +210,7 @@ describe('conversation response execution repository', () => {
 describe('controlled conversation response stream lifecycle', () => {
   it('applies bounded backpressure and supports replay after renderer disconnect', async () => {
     const { repository } = await fixture();
-    const item = execution();
+    const item = execution({ productFeature: 'text_reasoning' });
     await repository.create(item, createdEvent(item.id));
     const channel = new ControlledConversationResponseStreamChannel();
     const received: number[] = [];
@@ -228,13 +229,19 @@ describe('controlled conversation response stream lifecycle', () => {
       () => t1
     );
     await lifecycle.start(item.id);
+    await lifecycle.appendReasoning(item.id, '真实推理增量');
     await lifecycle.appendContent(item.id, '不会丢失');
     expect(received).toEqual([2]);
     expect(disconnected).toEqual(['backpressure_exceeded']);
     await expect(lifecycle.replayControlledEvents(item.id, 1)).resolves.toMatchObject([
       { sequence: 2, type: 'stream_started' },
-      { sequence: 3, type: 'content_delta', contentDelta: '不会丢失' }
+      { sequence: 3, type: 'reasoning_delta', reasoningDelta: '真实推理增量' },
+      { sequence: 4, type: 'content_delta', contentDelta: '不会丢失' }
     ]);
+    await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({
+      reasoningContent: '真实推理增量',
+      content: '不会丢失'
+    });
   });
 
   it('interrupts active streams on application shutdown and resumes only explicitly', async () => {

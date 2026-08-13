@@ -40,6 +40,15 @@ test('video submission binds exact revision, token and confirmation', () => {
   assert.doesNotMatch(panel, /localStorage|sessionStorage|console\./);
 });
 
+test('video submission prepares and submits without a second outbound confirmation action', () => {
+  assert.doesNotMatch(panel, /<fieldset className="uc-image-quick__confirmations"/);
+  assert.doesNotMatch(panel, /<Checkbox|setConfirmed|确认并提交/);
+  assert.match(
+    panel,
+    /api\.prepareSubmission\([\s\S]*await submitPrepared\(saved, result\.value\)/
+  );
+});
+
 test('video submission returns local work identity for in-page preview', () => {
   assert.match(shared, /readonly workId\?: string/);
   assert.match(shared, /readonly resultVideoUrls\?: readonly string\[\]/);
@@ -55,4 +64,13 @@ test('video feature panel uses shared model select and dynamic parameter form', 
   assert.match(form, /ObjectParameterField/);
   assert.match(form, /JSON\.parse\(text\)/);
   assert.match(form, /请输入有效的 JSON 对象/);
+});
+
+test('video candidate loading is stable across parent callback renders', () => {
+  assert.match(panel, /onDraftPersistedRef\.current/);
+  assert.match(panel, /onMessageRef\.current/);
+  assert.doesNotMatch(
+    panel,
+    /featureSelection\.productFeature,[\s\S]*onDraftPersisted,[\s\S]*onMessage,[\s\S]*videoWorkspaces/
+  );
 });

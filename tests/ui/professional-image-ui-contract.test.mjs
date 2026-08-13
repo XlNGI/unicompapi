@@ -89,10 +89,7 @@ test('professional image shows in-page four-step submit progress', () => {
   assert.match(progressStepsSource, /完成/);
   assert.match(progressStepsSource, /准备已完成/);
   assert.match(featurePanelSource, /busyRef/);
-  assert.match(
-    featurePanelSource,
-    /Do NOT clear it on draft\.updatedAt \/ autosave/
-  );
+  assert.match(featurePanelSource, /await submitPrepared\(saved, result\.value\)/);
 });
 
 test('professional image preserves prompt layers and dynamic safe parameters', () => {
@@ -101,7 +98,7 @@ test('professional image preserves prompt layers and dynamic safe parameters', (
     '系统补充内容',
     '最终提交提示词',
     '没有真实增强结果',
-    '服务、参数与确认'
+    '服务与参数'
   ]) {
     assert.match(source, new RegExp(text));
   }
@@ -151,6 +148,17 @@ test('professional image autosaves drafts without a manual save gate', async () 
   assert.match(workbench, /已自动保存/);
   assert.match(workbench, /isProfessionalImage/);
   assert.match(workbench, /imageWorkspaces\.update\(/);
+  assert.match(workbench, /autoSaveRevisionRef\.current !== revision/);
+  assert.doesNotMatch(
+    workbench,
+    /\[dirty, imageWorkspaces, isProfessionalImage, session, currentDraft\]/
+  );
+  assert.match(featurePanelSource, /onDraftPersistedRef\.current/);
+  assert.match(featurePanelSource, /onMessageRef\.current/);
+  assert.doesNotMatch(
+    featurePanelSource,
+    /featureSelection\.productFeature,[\s\S]*onDraftPersisted,[\s\S]*onMessage,[\s\S]*oneShot/
+  );
 });
 
 test('prompt enhance fixes reasoning and non-stream without a mode switch', () => {

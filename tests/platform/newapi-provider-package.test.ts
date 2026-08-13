@@ -534,6 +534,7 @@ describe('NewAPI chat adapter', () => {
       state: 'completed', usageAvailability: 'reported'
     });
     expect(lifecycle.content).toBe('Hello');
+    expect(lifecycle.reasoningContent).toBe('');
     expect(usage.observations[0].facts).toEqual([
       tokenFact('completion_tokens', 2),
       tokenFact('prompt_tokens', 4),
@@ -690,7 +691,7 @@ describe('NewAPI chat adapter', () => {
       }
     );
     const handle = await adapter.submit({
-      routeSnapshot: routeFor('text_chat'),
+      routeSnapshot: routeFor('text_reasoning'),
       request: {
         responseExecutionId: 'response-execution-gateway',
         invocationAttemptId: 'attempt-chat-gateway',
@@ -703,6 +704,7 @@ describe('NewAPI chat adapter', () => {
       finishReason: 'stop'
     });
     expect(lifecycle.content).toBe('汕头在粤东。');
+    expect(lifecycle.reasoningContent).toBe('思考');
   });
 
   it('rejects unknown JSON and mismatched schemas before HTTP', async () => {
@@ -1740,12 +1742,17 @@ function usageSink() {
 
 function lifecycleFixture() {
   let content = '';
+  let reasoningContent = '';
   const states: string[] = [];
   return {
     get content() { return content; },
+    get reasoningContent() { return reasoningContent; },
     states,
     port: {
       start: async (_id: ConversationResponseExecutionId) => { states.push('started'); },
+      appendReasoning: async (_id: ConversationResponseExecutionId, delta: string) => {
+        reasoningContent += delta;
+      },
       appendContent: async (_id: ConversationResponseExecutionId, delta: string) => {
         content += delta;
       },

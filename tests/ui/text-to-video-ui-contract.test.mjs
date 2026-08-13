@@ -39,7 +39,7 @@ test('text-to-video keeps prompt and shot planning local', () => {
   assert.doesNotMatch(bundle, /fetch\(|upload\(|analy[sz]e\(|absolutePath/);
 });
 
-test('text-to-video uses only the unified candidate and confirmation panel', () => {
+test('text-to-video uses only the unified candidate and submission panel', () => {
   assert.match(source, /VideoFeatureSubmissionPanel/);
   assert.match(source, /showProgressSteps/);
   assert.match(source, /GenerationResultPreview/);

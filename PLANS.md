@@ -6,6 +6,10 @@
 
 2026-08-12 工程补充：`feature/prompt-enhance-generalization` 在 PR1 → PR6 基础上完成提示词增强一次性令牌并发消费修复、`prompt_once` route/invocation/usage 审计接线和调用记录 `prompt_once` 主体扩展；模型/参数变化会在 UI 侧立即作废准备令牌，不伪造临时草稿状态参与结果指纹。实际完整门禁为 Node/UI 249 项与 Vitest 659 项，共 908 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。未调用真实服务商与 Vidu，未进入阶段 10，当前待合并 `develop` 并保留本地/远程功能分支。记录见 `docs/active/提示词增强通用化与非流式改造验收记录.md`。
 
+2026-08-13 工程补充：`feature/remove-outbound-reconfirmation` 按项目负责人最新决策，将专业生图、文生视频与图生视频的“准备生成 → 确认本次外发 → 确认并提交”合并为单次“生成”操作；动态参数填写完成后，页面自动保存草稿、准备并校验外发事实快照后立即提交，不再要求用户二次确认。IPC DTO、一次性选择令牌、`confirmationId`、主进程快照匹配与过期/篡改校验保持不变。实际完整门禁为 Node/UI 254 项与 Vitest 661 项，共 915 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。未调用真实服务商或 Vidu，未进入阶段 10。
+
+2026-08-13 工程补充：`feature/remove-outbound-reconfirmation` 按项目负责人“真实渲染效果”决策，将推理模型服务商流式响应中实际返回的公开 `reasoning_content` 独立投影为 `reasoningContent`，通过受控 `reasoning_delta` 事件实时渲染“模型返回的思考内容”，并在正常完成或失败终态持久化到 assistant 历史消息；最终回答仍只来自 `content`。普通 `text_chat` 即使收到网关非预期推理字段也不接受、不持久化、不展示；服务商未返回该字段时 UI 不模拟、不补写。历史消息使用可折叠安全 Markdown 展示，旧版对话 JSON 无需迁移且 user 消息禁止携带该字段。完整门禁为 Node/UI 254 项与 Vitest 662 项，共 916 项通过，0 失败、0 跳过；typecheck、lint、build 和 `git diff --check` 通过。未调用真实服务商、未读取真实凭证、未产生收费调用，阶段 10 与 macOS 延期边界不变。
+
 仓库原始状态为空仓库，已开始建立工程基线，并已归档产品经理交接资料。
 
 项目边界已确认：本仓库承接完整 UniComp 桌面应用，技术栈采用 Electron + React + TypeScript。已有后台服务作为外部依赖接入，本仓库不重做后台。
@@ -1046,7 +1050,7 @@ M3 第二支 `feature/provider-invocation-read-model` 已从 `develop@0eec911` �
 
 M3 第三支 `feature/deepseek-chat-adapter` 已从 `develop@e284644` 建立，实现提交为 `eff72e5`。该支新增版本化 DeepSeek Package、官方固定 HTTPS Origin、结构化 API Key CredentialSchema、精确 Adapter/Protocol/Model Definition、普通文本与推理 ParameterSchema、六项 token UsageSchema、`GET /models` 管理适配器、`POST /chat/completions` 流式文本适配器和安全 Runtime。
 
-普通文本固定关闭 thinking，只接受可选 `max_tokens`、`temperature` 或 `top_p` 且禁止同时发送两种采样字段；推理固定开启 thinking，只接受可选 `max_tokens` 与 `reasoning_effort=low|high|max`。所有请求固定流式并请求最终 usage，不发送 tools、user ID、response format、未知 JSON 或隐私标识。SSE 只接受 data-only event，`reasoning_content` 仅验证后丢弃，远端响应 ID 只做流内一致性校验；非 stop finish reason、HTTP/协议/流错误均明确失败且不自动重试或切换服务商。取消保存 `not_reported`，应用退出中断保存 `unknown_outcome`，畸形 usage 保存 `invalid_response`，恢复只允许本地重放并要求用户显式创建新 attempt。
+普通文本固定关闭 thinking，只接受可选 `max_tokens`、`temperature` 或 `top_p` 且禁止同时发送两种采样字段；推理固定开启 thinking，只接受可选 `max_tokens` 与 `reasoning_effort=low|high|max`。所有请求固定流式并请求最终 usage，不发送 tools、user ID、response format、未知 JSON 或隐私标识。SSE 只接受 data-only event；`reasoning_content` 经验证后仅在 `text_reasoning` 中独立持久化与展示，普通 `text_chat` 仍丢弃；远端响应 ID 只做流内一致性校验。非 stop finish reason、HTTP/协议/流错误均明确失败且不自动重试或切换服务商。取消保存 `not_reported`，应用退出中断保存 `unknown_outcome`，畸形 usage 保存 `invalid_response`，恢复只允许本地重放并要求用户显式创建新 attempt。
 
 第三支完整门禁为 Node 179 项与 Vitest 485 项，共 664 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、259 文件平台审计、50 项交接校验、27 个权威资源、恢复审计、运行时集成、安全存储、阶段 9 关闭门禁、差异检查和 9 个范围内文件敏感信息扫描全部通过。该支未修改 Electron、preload 或 UI，不触发新增可见 Electron 烟测；真实 HTTP 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0。macOS 保持 `not_run/deferred`，阶段 10 未启动。官方证据与工程记录见：
 
@@ -1225,3 +1229,7 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
 - 2026-08-12：`feature/fix-newapi-reference-image-request-size` 修复 UniCompAPI/NewAPI 图生图在发送前被遗留 2 MiB JSON 上限拦截的问题。素材层仍保持单图 15 MiB；图像适配器与共享运行时统一使用 24 MiB 序列化请求预算，覆盖 15 MiB 原图转换成约 20 MiB Base64 后的数据 URL、最长提示词及 JSON 开销，聊天与视频预算不变。请求超限文案改为共享稳定常量，编排层继续通过精确白名单映射为 `newapi.request_too_large`。回归测试覆盖完整 15 MiB 参考图进入合成传输、超过预算时零 HTTP 请求，以及具体安全错误码传播。目标测试 40 项、全量 Node/UI 253 项与 Vitest 661 项共 914 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建与 `git diff --check` 通过。真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0；真实 UniCompAPI 网关接收上限仍需在获批的非收费验证中确认，阶段 10 与 macOS 延期边界不变。
 
 - 2026-08-12：`feature/windows-packaging-baseline` 新增 Electron Builder Windows x64 NSIS 打包命令 `pnpm package:win` 与目录烟测命令 `pnpm package:win:dir`。配置只纳入 `dist`、`dist-electron` 和运行所需生产依赖，明确排除 `.tools`、测试、文档与本地运行数据；当前生成未签名安装包，未启用自动更新、公证或生产媒体组件分发。阶段 10 的签名、安装升级、生产 FFmpeg 分发、SBOM 与正式发布准入仍未宣称完成。
+
+- 2026-08-13：`feature/remove-outbound-reconfirmation` 修复专业生图第一次成功后第二次生成持续卡在“正在自动保存”的竞态。父工作台自动保存改用真实编辑 revision 判断请求是否被新输入取代，不再把保存结果造成的草稿对象引用变化误判为新编辑；专业生图候选读取在父工作台保存完成后启动，图片与视频候选 effect 均通过 ref 使用最新回调，避免父组件内联回调变更反复取消读取。新增 UI 合同钉住自动保存依赖和回调稳定性。目标 Node/UI 27 项、图片领域与控制器 Vitest 19 项通过；全量 Node/UI 254 项与 Vitest 662 项，共 916 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建与 `git diff --check` 通过。未执行真实服务商第二次收费生成；当前会话没有可用的 Electron 浏览器控制运行时，仍需在现有开发窗口人工连续生成两次，确认第二次恢复为“已自动保存”、模型候选可选且生成按钮启用。阶段 10 与 macOS 延期边界不变。
+
+- 2026-08-13：修复 Windows 中文项目路径下展示本地生成结果时的 Electron 主进程 ByteString 崩溃。根因不是 API Key：旧 `unicomp-media` 协议通过 `net.fetch(file://...)` 读取本地文件，Chromium 会先为中文文件名构造含非 ASCII 字符的 `Content-Disposition`，异常发生在代码过滤响应头之前。协议现改为 Node 文件流直接响应，仅设置经约束的 `content-type` 与数字 `content-length`，不再经过 `file://` 网络栈。新增“中文项目/自动生成图片.png”真实流测试并更新图片、视频协议合同。全量 Node/UI 254 项与 Vitest 664 项，共 918 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建与 `git diff --check` 通过。现有 Electron 主进程必须完整退出后重启才能加载修复；未产生真实服务商请求或费用，阶段 10 与 macOS 延期边界不变。

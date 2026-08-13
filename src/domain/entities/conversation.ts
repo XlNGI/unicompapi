@@ -60,6 +60,7 @@ interface MessageBase {
   readonly revision: number;
   readonly role: MessageRole;
   readonly content: string;
+  readonly reasoningContent?: string;
   readonly attachments: readonly ConversationAttachmentReference[];
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
@@ -370,7 +371,8 @@ export function appendAssistantMessageChunk(
 export function completeAssistantMessage(
   conversation: Conversation,
   messageId: MessageId,
-  completedAt: IsoTimestamp
+  completedAt: IsoTimestamp,
+  reasoningContent?: string
 ): ActiveConversation {
   return replaceAssistantMessage(conversation, messageId, completedAt, (message) => {
     if (message.state !== 'streaming') {
@@ -384,6 +386,7 @@ export function completeAssistantMessage(
       ...rest,
       revision: message.revision + 1,
       state: 'completed',
+      ...(reasoningContent ? { reasoningContent } : {}),
       completedAt,
       updatedAt: completedAt
     });
@@ -394,7 +397,8 @@ export function failAssistantMessage(
   conversation: Conversation,
   messageId: MessageId,
   failureReason: MessageFailureReason,
-  failedAt: IsoTimestamp
+  failedAt: IsoTimestamp,
+  reasoningContent?: string
 ): ActiveConversation {
   return replaceAssistantMessage(conversation, messageId, failedAt, (message) => {
     if (message.state !== 'pending' && message.state !== 'streaming') {
@@ -410,6 +414,7 @@ export function failAssistantMessage(
       revision: message.revision + 1,
       state: 'failed',
       content,
+      ...(reasoningContent ? { reasoningContent } : {}),
       streamSequence,
       failureReason,
       failedAt,
@@ -421,7 +426,8 @@ export function failAssistantMessage(
 export function cancelAssistantMessage(
   conversation: Conversation,
   messageId: MessageId,
-  cancelledAt: IsoTimestamp
+  cancelledAt: IsoTimestamp,
+  reasoningContent?: string
 ): ActiveConversation {
   return replaceAssistantMessage(conversation, messageId, cancelledAt, (message) => {
     if (message.state !== 'pending' && message.state !== 'streaming') {
@@ -437,6 +443,7 @@ export function cancelAssistantMessage(
       revision: message.revision + 1,
       state: 'cancelled',
       content,
+      ...(reasoningContent ? { reasoningContent } : {}),
       streamSequence,
       cancelledAt,
       updatedAt: cancelledAt
@@ -519,6 +526,10 @@ export function parseConversation(value: unknown): Conversation {
 export function parseMessage(value: unknown): Message {
   const record = requireRecord(value, 'message');
   const state = oneOf(record.state, messageStates, 'message.state');
+  const hasReasoningContent = Object.prototype.hasOwnProperty.call(
+    record,
+    'reasoningContent'
+  );
   const stateKeys: Record<MessageState, readonly string[]> = {
     pending: [],
     streaming: ['startedAt', 'streamSequence'],
@@ -526,7 +537,15 @@ export function parseMessage(value: unknown): Message {
     failed: ['failedAt', 'failureReason', 'streamSequence'],
     cancelled: ['cancelledAt', 'streamSequence']
   };
-  requireExactKeys(record, [...messageBaseKeys, ...stateKeys[state]], 'message');
+  requireExactKeys(
+    record,
+    [
+      ...messageBaseKeys,
+      ...(hasReasoningContent ? ['reasoningContent'] : []),
+      ...stateKeys[state]
+    ],
+    'message'
+  );
   if (record.schemaVersion !== 1) {
     throw new TypeError('message.schemaVersion must be 1');
   }
@@ -539,6 +558,15 @@ export function parseMessage(value: unknown): Message {
   const content = requireString(record.content, 'message.content');
   if (content.length > 1_000_000) {
     throw new TypeError('message.content exceeds the maximum length');
+  }
+  const reasoningContent = hasReasoningContent
+    ? requireString(record.reasoningContent, 'message.reasoningContent')
+    : undefined;
+  if (
+    reasoningContent !== undefined &&
+    (reasoningContent.trim().length === 0 || reasoningContent.length > 1_000_000)
+  ) {
+    throw new TypeError('message.reasoningContent is invalid');
   }
   if (!Array.isArray(record.attachments)) {
     throw new TypeError('message.attachments must be an array');
@@ -555,12 +583,16 @@ export function parseMessage(value: unknown): Message {
     revision,
     role,
     content,
+    ...(reasoningContent !== undefined ? { reasoningContent } : {}),
     attachments,
     createdAt,
     updatedAt
   };
   if (role === 'assistant' && attachments.length > 0) {
     throw new TypeError('assistant messages cannot persist input attachments');
+  }
+  if (role !== 'assistant' && reasoningContent !== undefined) {
+    throw new TypeError('only assistant messages can persist reasoning content');
   }
   if (state === 'pending') {
     if (role !== 'assistant' || content !== '') {

@@ -387,6 +387,7 @@ function toResponseExecutionDto(
     productFeature: execution.productFeature,
     state: execution.state,
     streamSequence: execution.streamSequence,
+    reasoningContent: execution.reasoningContent,
     content: execution.content,
     createdAt: execution.createdAt,
     updatedAt: execution.updatedAt

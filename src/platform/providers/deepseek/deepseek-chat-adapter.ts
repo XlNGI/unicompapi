@@ -57,6 +57,10 @@ export interface DeepSeekCredentialResolverPort {
 
 export interface DeepSeekConversationLifecyclePort {
   start(executionId: ConversationResponseExecutionId): Promise<unknown>;
+  appendReasoning(
+    executionId: ConversationResponseExecutionId,
+    reasoningDelta: string
+  ): Promise<unknown>;
   appendContent(
     executionId: ConversationResponseExecutionId,
     contentDelta: string
@@ -155,6 +159,7 @@ interface ActiveOperation {
   readonly providerOperationId: string;
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
   readonly session: DeepSeekEventStreamSession;
   readonly removeExternalAbort: () => void;
   cancelReason?: 'user' | 'application_shutdown';
@@ -297,6 +302,9 @@ export class DeepSeekChatAdapter {
       providerOperationId,
       responseExecutionId: request.responseExecutionId,
       invocationAttemptId: request.invocationAttemptId,
+      productFeature: route.productFeature === 'text_reasoning'
+        ? 'text_reasoning'
+        : 'text_chat',
       session,
       removeExternalAbort
     };
@@ -353,6 +361,14 @@ export class DeepSeekChatAdapter {
             operation.responseExecutionId,
             contentDelta
           );
+        },
+        async (reasoningDelta) => {
+          if (operation.productFeature === 'text_reasoning') {
+            await this.lifecycle.appendReasoning(
+              operation.responseExecutionId,
+              reasoningDelta
+            );
+          }
         }
       );
       const observation = createUsageObservation({
@@ -573,7 +589,8 @@ export function deepSeekChatRecoveryDecision(
 async function consumeDeepSeekStream(
   stream: AsyncIterable<Uint8Array>,
   expectedModel: string,
-  onContent: (delta: string) => Promise<void>
+  onContent: (delta: string) => Promise<void>,
+  onReasoning: (delta: string) => Promise<void>
 ): Promise<{
   readonly finishReason: DeepSeekFinishReason;
   readonly contentLength: number;
@@ -612,6 +629,9 @@ async function consumeDeepSeekStream(
     if (chunk.usage) {
       if (usage) throw invalidStream('DeepSeek stream reported usage more than once');
       usage = chunk.usage;
+    }
+    if (chunk.reasoningDelta) {
+      await onReasoning(chunk.reasoningDelta);
     }
     if (chunk.contentDelta) {
       contentLength += chunk.contentDelta.length;
@@ -667,6 +687,7 @@ type DeepSeekFinishReason =
 function parseStreamChunk(data: string): {
   readonly id: string;
   readonly model: string;
+  readonly reasoningDelta?: string;
   readonly contentDelta?: string;
   readonly finishReason?: DeepSeekFinishReason;
   readonly usage?: readonly UsageFactV1[];
@@ -726,13 +747,17 @@ function parseStreamChunk(data: string): {
   }
   // Official message/delta content fields are nullable; treat null as absent.
   const contentDelta = optionalDeltaText(delta.content, 'DeepSeek content delta');
-  optionalDeltaText(delta.reasoning_content, 'DeepSeek reasoning delta');
+  const reasoningDelta = optionalDeltaText(
+    delta.reasoning_content,
+    'DeepSeek reasoning delta'
+  );
   const finishReason = choice.finish_reason === null
     ? undefined
     : parseFinishReason(choice.finish_reason);
   return {
     id,
     model,
+    ...(reasoningDelta ? { reasoningDelta } : {}),
     ...(contentDelta ? { contentDelta } : {}),
     ...(finishReason ? { finishReason } : {}),
     ...(usage ? { usage } : {})

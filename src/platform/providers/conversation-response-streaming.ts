@@ -43,6 +43,13 @@ export class ConversationResponseExecutionLifecycle {
     return this.append(executionId, 'content_delta', { contentDelta });
   }
 
+  appendReasoning(
+    executionId: ConversationResponseExecutionId,
+    reasoningDelta: string
+  ): Promise<ConversationResponseStreamEventV1> {
+    return this.append(executionId, 'reasoning_delta', { reasoningDelta });
+  }
+
   complete(
     executionId: ConversationResponseExecutionId
   ): Promise<ConversationResponseStreamEventV1> {
@@ -117,6 +124,7 @@ export class ConversationResponseExecutionLifecycle {
     executionId: ConversationResponseExecutionId,
     type: ConversationResponseStreamEventType,
     details: {
+      readonly reasoningDelta?: string;
       readonly contentDelta?: string;
       readonly safeCode?: string;
       readonly interruptionReason?: ConversationResponseInterruptionReason;

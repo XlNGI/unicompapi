@@ -94,6 +94,7 @@ export interface MessageDto {
   readonly role: 'user' | 'assistant';
   readonly state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled';
   readonly content: string;
+  readonly reasoningContent?: string;
   readonly attachments: readonly ConversationAttachmentDto[];
   readonly streamSequence?: number;
   readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'truncated' | 'unknown';
@@ -313,6 +314,7 @@ export interface ConversationResponseExecutionDto {
   readonly productFeature: 'text_chat' | 'text_reasoning';
   readonly state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   readonly streamSequence: number;
+  readonly reasoningContent: string;
   readonly content: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -324,9 +326,10 @@ export interface ConversationResponseStreamEventDto {
   readonly conversationId: string;
   readonly assistantMessageId: string;
   readonly sequence: number;
-  readonly type: 'execution_created' | 'stream_started' | 'content_delta' |
+  readonly type: 'execution_created' | 'stream_started' | 'reasoning_delta' | 'content_delta' |
     'cancel_requested' | 'stream_completed' | 'stream_failed' |
     'stream_cancelled' | 'stream_interrupted' | 'stream_resumed';
+  readonly reasoningDelta?: string;
   readonly contentDelta?: string;
   readonly safeCode?: string;
   readonly interruptionReason?: 'provider_disconnected' | 'transport_interrupted' | 'application_shutdown';

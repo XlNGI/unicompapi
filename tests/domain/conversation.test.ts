@@ -131,14 +131,16 @@ describe('message lifecycle', () => {
     const completed = completeAssistantMessage(
       chunkedAgain,
       toMessageId('assistant-complete'),
-      toIsoTimestamp('2026-07-28T00:05:00.000Z')
+      toIsoTimestamp('2026-07-28T00:05:00.000Z'),
+      '模型实际返回的分析'
     );
 
     expect(completed.messages[0]).toMatchObject({
       state: 'completed',
       revision: 4,
       streamSequence: 2,
-      content: '第一段 第二段'
+      content: '第一段 第二段',
+      reasoningContent: '模型实际返回的分析'
     });
     expect(() => appendAssistantMessageChunk(
       completed,
@@ -157,11 +159,13 @@ describe('message lifecycle', () => {
       pendingFailure,
       toMessageId('assistant-failed'),
       'unavailable',
-      t2
+      t2,
+      '失败前返回的分析'
     );
     expect(failed.messages[0]).toMatchObject({
       state: 'failed',
       failureReason: 'unavailable',
+      reasoningContent: '失败前返回的分析',
       streamSequence: 0
     });
 
@@ -183,13 +187,34 @@ describe('message lifecycle', () => {
     const cancelled = cancelAssistantMessage(
       chunked,
       toMessageId('assistant-cancelled'),
-      t4
+      t4,
+      '取消前返回的分析'
     );
     expect(cancelled.messages[0]).toMatchObject({
       state: 'cancelled',
       content: '保留的部分结果',
+      reasoningContent: '取消前返回的分析',
       streamSequence: 1
     });
+  });
+
+  it('accepts persisted reasoning only on assistant messages', () => {
+    const userConversation = addUserMessage(conversation(), {
+      id: toMessageId('message-user-reasoning'),
+      content: '用户输入',
+      createdAt: t1
+    });
+    expect(() => parseConversation({
+      ...userConversation,
+      messages: userConversation.messages.map((message) => ({
+        ...message,
+        reasoningContent: '不允许的字段'
+      }))
+    })).toThrow('only assistant messages can persist reasoning content');
+
+    expect(parseConversation(userConversation).messages[0]).not.toHaveProperty(
+      'reasoningContent'
+    );
   });
 
   it('keeps completed user messages immutable and rejects direct state shortcuts', () => {

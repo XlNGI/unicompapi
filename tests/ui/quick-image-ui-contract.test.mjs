@@ -56,8 +56,12 @@ test('quick image uses the safe feature DTO and one business submission action',
   }
   assert.match(featurePanelSource, /DynamicParameterForm/);
   assert.match(featurePanelSource, /服务商 \/ 连接 \/ 模型/);
-  assert.match(featurePanelSource, /确认本次外发/);
-  assert.match(featurePanelSource, /确认并提交/);
+  assert.doesNotMatch(featurePanelSource, /<fieldset className="uc-image-quick__confirmations"/);
+  assert.doesNotMatch(featurePanelSource, /<Checkbox|setConfirmed|确认并提交/);
+  assert.match(
+    featurePanelSource,
+    /api\.prepareSubmission\([\s\S]*await submitPrepared\(saved, result\.value\)/
+  );
   assert.doesNotMatch(featurePanelSource, /defaultParameterValues|ImageGenerationModelFields/);
   assert.doesNotMatch(
     source,
