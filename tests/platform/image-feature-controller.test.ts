@@ -24,7 +24,10 @@ import {
   RouteSelectionTokenVault,
   type ResolvedFeatureCandidateV1
 } from '../../src/platform';
-import type { ImageFeatureSubmissionDto } from '../../src/shared/image-feature-ipc';
+import type {
+  ImageFeatureRecoveryDto,
+  ImageFeatureSubmissionDto
+} from '../../src/shared/image-feature-ipc';
 
 const projectId = toProjectId('project-image-feature-controller');
 const createdAt = toIsoTimestamp('2026-08-03T12:00:00.000Z');
@@ -198,6 +201,35 @@ describe('ImageFeatureController', () => {
       }
     });
   });
+
+  it('recovers an existing image result without submitting a new generation', async () => {
+    let submissions = 0;
+    const fixture = createFixture({
+      async submit() {
+        submissions += 1;
+        throw new Error('not expected');
+      },
+      async recoverResult(taskId) {
+        return {
+          schemaVersion: 1,
+          taskId,
+          executionId: 'execution-image-existing',
+          workId: 'work-image-existing'
+        };
+      }
+    });
+
+    await expect(fixture.controller.recoverResult({ taskId: 'task-image-existing' }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: {
+          taskId: 'task-image-existing',
+          executionId: 'execution-image-existing',
+          workId: 'work-image-existing'
+        }
+      });
+    expect(submissions).toBe(0);
+  });
 });
 
 function createFixture(options?: {
@@ -206,6 +238,7 @@ function createFixture(options?: {
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
   }) => Promise<ImageFeatureSubmissionDto>;
+  recoverResult?: (taskId: string) => Promise<ImageFeatureRecoveryDto>;
 }) {
   let draft: ImageWorkspaceDraft = createImageWorkspaceDraft({
     ...createEmptyImageWorkspaceDraft({
@@ -257,7 +290,8 @@ function createFixture(options?: {
     getRuntime: () => ({
       drafts,
       candidates,
-      ...(options?.submit ? { submit: options.submit } : {})
+      ...(options?.submit ? { submit: options.submit } : {}),
+      ...(options?.recoverResult ? { recoverResult: options.recoverResult } : {})
     }),
     mutations: new ImageWorkspaceMutationCoordinator()
   });

@@ -2,7 +2,8 @@ export const imageFeatureIpcChannels = {
   listCandidates: 'image-feature:list-candidates',
   prepareSubmission: 'image-feature:prepare-submission',
   submitDraft: 'image-feature:submit-draft',
-  generateQuickImage: 'image-feature:generate-quick-image'
+  generateQuickImage: 'image-feature:generate-quick-image',
+  recoverResult: 'image-feature:recover-result'
 } as const;
 
 export type ImageFeatureIpcErrorCode =
@@ -145,6 +146,13 @@ export interface ImageFeatureGenerateQuickDto {
   readonly submission: ImageFeatureSubmissionDto;
 }
 
+export interface ImageFeatureRecoveryDto {
+  readonly schemaVersion: 1;
+  readonly taskId: string;
+  readonly executionId: string;
+  readonly workId: string;
+}
+
 export interface ImageFeatureApi {
   listCandidates(
     draftId: string,
@@ -167,4 +175,7 @@ export interface ImageFeatureApi {
     candidateId: string,
     parameterValues: Readonly<Record<string, string | number | boolean | readonly string[]>>
   ): Promise<ImageFeatureIpcResult<ImageFeatureGenerateQuickDto>>;
+  recoverResult(
+    taskId: string
+  ): Promise<ImageFeatureIpcResult<ImageFeatureRecoveryDto>>;
 }

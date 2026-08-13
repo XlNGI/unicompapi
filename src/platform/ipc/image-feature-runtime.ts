@@ -3,15 +3,20 @@ import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
   createLocalResultObservation,
+  recoverRemoteCompletedExecution,
   toDraftId,
   toIsoTimestamp,
   toLocalResultObservationId,
   toProviderOperationRecordId,
+  toTaskId,
   transitionExecution,
   type FeatureCandidateSubjectV1,
   type SubmissionUserConfirmationV1
 } from '../../domain';
-import type { ImageFeatureSubmissionDto } from '../../shared/image-feature-ipc';
+import type {
+  ImageFeatureRecoveryDto,
+  ImageFeatureSubmissionDto
+} from '../../shared/image-feature-ipc';
 import {
   ImageDraftArtifactFactory,
   ProviderExecutionLifecycleService,
@@ -134,6 +139,71 @@ export function createImageFeatureControllerRuntime(
         contexts
       })
   };
+
+  const recoveryResultReceiver = options.resultReceiver;
+  if (recoveryResultReceiver) {
+    runtime.recoverResult = async (taskId): Promise<ImageFeatureRecoveryDto> => {
+      const task = await tasks.get(toTaskId(taskId));
+      if (!task || task.projectId !== options.session.projectId) {
+        throw new Error('Image task not found in the open project');
+      }
+      const execution = [...await executions.list(task.id)]
+        .filter((item) => task.executionIds.includes(item.id))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+      if (
+        task.submission.kind !== 'image_generation' ||
+        !execution ||
+        execution.state !== 'failed' ||
+        execution.failure?.stage !== 'downloading' ||
+        execution.failure.retryability !== 'retryable' ||
+        execution.submissionOutcome !== 'completed_sync' ||
+        !execution.providerOperationRecordId
+      ) {
+        throw new Error('This task does not have a recoverable image result download');
+      }
+      const operation = await operations.get(execution.providerOperationRecordId);
+      if (
+        !operation ||
+        operation.taskId !== task.id ||
+        operation.executionId !== execution.id ||
+        operation.mediaKind !== 'image' ||
+        operation.outcome.kind !== 'completed_sync'
+      ) {
+        throw new Error('The original image result reference is unavailable');
+      }
+      const attempt = (await invocations.list()).find(
+        (item) =>
+          item.subject.kind === 'media' &&
+          item.subject.taskId === task.id &&
+          item.subject.executionId === execution.id
+      );
+      const recovered = recoverRemoteCompletedExecution(
+        execution,
+        toIsoTimestamp(now())
+      );
+      await executions.save(recovered);
+      const received = await recoveryResultReceiver.receive(recovered.id);
+      if (!received.ok) throw new Error(received.error.message);
+      if (attempt) {
+        await localResults.append(
+          createLocalResultObservation({
+            id: toLocalResultObservationId(`local-result-${randomUUID()}`),
+            invocationAttemptId: attempt.id,
+            mediaKind: 'image',
+            outputCount: 1,
+            validationState: 'valid',
+            observedAt: toIsoTimestamp(now())
+          })
+        );
+      }
+      return {
+        schemaVersion: 1,
+        taskId: task.id,
+        executionId: recovered.id,
+        workId: received.value.workId
+      };
+    };
+  }
 
   const authorization = options.submissionAuthorization;
   const imageSubmission = options.imageSubmission;

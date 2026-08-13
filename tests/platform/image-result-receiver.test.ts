@@ -25,6 +25,7 @@ import {
   JsonTaskRepository,
   JsonWorkRepository,
   LocalImageResultReceiver,
+  ImageResultPortError,
   NodeProjectStorage
 } from '../../src/platform';
 
@@ -50,6 +51,7 @@ function pngBytes(width: number, height: number) {
 async function createFixture(options: {
   readonly badChecksum?: boolean;
   readonly diskFull?: boolean;
+  readonly downloadFailure?: boolean;
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-result-'));
   roots.push(root);
@@ -134,6 +136,9 @@ async function createFixture(options: {
           : undefined
       }),
       download: async (_remoteOperationId, destinationPath) => {
+        if (options.downloadFailure) {
+          throw new ImageResultPortError('retryable', 'Temporary image download failure');
+        }
         await writeFile(destinationPath, bytes);
       }
     },
@@ -231,6 +236,24 @@ describe('LocalImageResultReceiver', () => {
     expect(execution).toMatchObject({
       state: 'failed',
       failure: { stage: 'writing' }
+    });
+  });
+
+  it('preserves retryability when the remote image download can be retried', async () => {
+    const fixture = await createFixture({ downloadFailure: true });
+
+    await expect(fixture.receiver.receive('execution-image-result'))
+      .resolves.toMatchObject({
+        ok: false,
+        error: { code: 'download_failed' }
+      });
+    await expect(
+      new JsonExecutionRepository(fixture.storage).get(
+        toExecutionId('execution-image-result')
+      )
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failure: { stage: 'downloading', retryability: 'retryable' }
     });
   });
 });

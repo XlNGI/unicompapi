@@ -44,3 +44,18 @@ test('task center provides filters, details, source navigation, and honest issue
 test('task center does not invent execution metrics or write operations', () => {
   assert.doesNotMatch(source, /百分比|排队时间|费用|预计剩余|retryTask|cancelTask/);
 });
+
+test('task center recovers only an existing remote video result without resubmission', () => {
+  assert.match(source, /details\.canRecoverVideoResult/);
+  assert.match(source, /window\.unicomp\?\.videoFeatures/);
+  assert.match(source, /features\.recoverResult\(taskId\)/);
+  assert.match(source, /重新接收结果/);
+  assert.doesNotMatch(source, /recoverResult[\s\S]*submitDraft\(/);
+});
+
+test('task center recovers an existing image result without resubmission', () => {
+  assert.match(source, /details\.canRecoverImageResult/);
+  assert.match(source, /window\.unicomp\?\.imageFeatures/);
+  assert.match(source, /features\.recoverResult\(taskId\)/);
+  assert.doesNotMatch(source, /recoverResult[\s\S]*submitDraft\(/);
+});

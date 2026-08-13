@@ -31,13 +31,16 @@ import {
   JsonExecutionRepository,
   JsonFileReferenceRepository,
   JsonProviderOperationRepository,
+  JsonProviderRegistryStore,
   JsonTaskRepository,
   JsonWorkRepository,
   LocalImageResultReceiver,
   NodeProjectStorage,
+  ProviderPackageRegistry,
   SecureCredentialVault,
   ViduImmediateImageResultPort,
   ViduSharedRuntime,
+  createImageFeatureControllerRuntime,
   type CredentialProtector,
   type ViduHttpTransport,
   type ViduHttpTransportRequest,
@@ -184,7 +187,169 @@ describe('synchronous image receipt integration', () => {
       new JsonExecutionRepository(fixture.storage).get(fixture.execution.id)
     ).resolves.toMatchObject({ state: 'completed', workId: 'work-sync-image' });
   });
+
+  it('recovers a persisted failed download after runtime reconstruction', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-recovery-'));
+    roots.push(root);
+    await mkdir(path.join(root, 'tmp'), { recursive: true });
+    const storage = new NodeProjectStorage(root);
+    const projectId = toProjectId('project-image-recovery');
+    const task = createRecoveryTask(projectId);
+    const recordId = toProviderOperationRecordId('provider-operation-recovery');
+    const created = createExecution({
+      id: toExecutionId('execution-image-recovery'),
+      taskId: task.id,
+      createdAt: timestamp
+    });
+    const submitting = transitionExecution(created, 'submitting', timestamp);
+    const remoteCompleted = transitionExecution(
+      submitting,
+      'remote_completed',
+      timestamp,
+      {
+        providerOperationRecordId: recordId,
+        submissionOutcome: 'completed_sync'
+      }
+    );
+    const downloading = transitionExecution(
+      remoteCompleted,
+      'downloading',
+      timestamp
+    );
+    const failed = transitionExecution(downloading, 'failed', timestamp, {
+      failure: {
+        stage: 'downloading',
+        message: 'Temporary result download failure',
+        retryability: 'retryable'
+      }
+    });
+    await new JsonTaskRepository(storage, projectId).save(
+      addExecutionToTask(task, failed)
+    );
+    await new JsonExecutionRepository(storage).save(failed);
+    await new JsonProviderOperationRepository(storage).save(
+      createProviderOperationRecord({
+        id: recordId,
+        taskId: task.id,
+        executionId: failed.id,
+        mediaKind: 'image',
+        executionLifecycle: 'synchronous_completed',
+        outcome: {
+          kind: 'completed_sync',
+          providerOperationId: 'persisted-image-result',
+          results: [{
+            kind: 'base64',
+            value: pngBytes(16, 9).toString('base64'),
+            mimeType: 'image/png'
+          }]
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    );
+
+    const vault = new SecureCredentialVault(
+      path.join(root, 'credentials.json'),
+      reversibleProtector()
+    );
+    const resultPort = new ViduImmediateImageResultPort({
+      operations: new JsonProviderOperationRepository(storage),
+      runtime: new ViduSharedRuntime({
+        credentialVault: vault,
+        transport: new FixtureTransport()
+      })
+    });
+    const mutations = new ImageWorkspaceMutationCoordinator();
+    const session = {
+      projectId,
+      projectName: 'Image recovery project',
+      rootDirectory: root
+    };
+    const receiver = new LocalImageResultReceiver({
+      getSession: () => session,
+      mutations,
+      port: resultPort,
+      now: () => '2026-07-29T03:00:00.000Z'
+    });
+    const runtime = createImageFeatureControllerRuntime({
+      session,
+      providerRegistry: new JsonProviderRegistryStore(
+        path.join(root, 'provider-registry.json')
+      ),
+      providerPackages: new ProviderPackageRegistry([]),
+      runtimeAuthorization: {
+        async checkAccess() {
+          return {
+            allowed: false,
+            operation: 'submit' as const,
+            reason: 'no_matching_policy' as const
+          };
+        }
+      },
+      resultReceiver: receiver,
+      mutations,
+      now: () => '2026-07-29T03:00:00.000Z'
+    });
+
+    await expect(runtime.recoverResult?.(task.id)).resolves.toMatchObject({
+      taskId: task.id,
+      executionId: failed.id,
+      workId: expect.stringMatching(/^work-result-/)
+    });
+    const completed = await new JsonExecutionRepository(storage).get(failed.id);
+    expect(completed).toMatchObject({
+      id: failed.id,
+      state: 'completed'
+    });
+    expect(completed).not.toHaveProperty('failure');
+    const works = await new JsonWorkRepository(storage, projectId).list(projectId);
+    expect(works).toHaveLength(1);
+    expect(works[0]?.sourceExecutionId).toBe(failed.id);
+  });
 });
+
+function createRecoveryTask(projectId: ReturnType<typeof toProjectId>) {
+  const draft = createEmptyImageWorkspaceDraft({
+    id: toDraftId('draft-image-recovery'),
+    projectId,
+    mode: 'quick_image',
+    createdAt: timestamp
+  });
+  return createImageTask({
+    id: toTaskId('task-image-recovery'),
+    draft: {
+      ...draft,
+      prompt: {
+        originalInput: 'recover image',
+        systemSupplements: [],
+        finalPrompt: 'recover image'
+      }
+    },
+    confirmation: {
+      mode: 'quick_image',
+      purpose: 'image_generation',
+      modelId: toModelId('model-image-recovery'),
+      capabilityEvidenceId: toCapabilityEvidenceId('evidence-image-recovery'),
+      providerId: toProviderId('provider-image-recovery'),
+      connectionId: toConnectionId('connection-image-recovery'),
+      recipientName: 'Image provider',
+      accessCategory: 'online',
+      outboundScope: 'external_service',
+      costState: 'unknown',
+      privacyState: 'unknown',
+      regionState: 'unknown',
+      parameters: {},
+      confirmations: {
+        recipient: true,
+        outboundScope: true,
+        cost: true,
+        finalPrompt: true,
+        model: true
+      }
+    },
+    confirmedAt: timestamp
+  });
+}
 
 async function createPortFixture(
   result: ProviderImmediateResultReference

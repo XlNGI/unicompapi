@@ -68,7 +68,7 @@ const allowedTransitions: Record<ExecutionState, readonly ExecutionState[]> = {
   needs_user_action: ['queued', 'cancelled', 'failed'],
   interrupted: ['recovery_required', 'failed'],
   recovery_required: ['queued', 'failed', 'cancelled'],
-  failed: [],
+  failed: ['remote_completed'],
   expired: []
 };
 
@@ -130,6 +130,21 @@ export function transitionExecution(
     execution.updatedAt,
     'execution.updatedAt'
   );
+
+  if (
+    execution.state === 'failed' &&
+    nextState === 'remote_completed' &&
+    (
+      execution.failure?.stage !== 'downloading' ||
+      execution.failure.retryability !== 'retryable' ||
+      !execution.providerOperationRecordId ||
+      (!execution.remoteOperationId && execution.submissionOutcome !== 'completed_sync')
+    )
+  ) {
+    throw new RetryNotAllowedError(
+      'only a retryable failed result download can resume remote completion'
+    );
+  }
 
   if (nextState === 'failed' && !context.failure) {
     throw new InvariantViolationError(
@@ -254,4 +269,23 @@ export function createRetryExecution(
     createdAt,
     exportPlanId: previous.exportPlanId
   });
+}
+
+export function recoverRemoteCompletedExecution(
+  execution: Execution,
+  updatedAt: IsoTimestamp
+): Execution {
+  if (
+    execution.state !== 'failed' ||
+    execution.failure?.stage !== 'downloading' ||
+    execution.failure.retryability !== 'retryable' ||
+    !execution.providerOperationRecordId ||
+    (!execution.remoteOperationId && execution.submissionOutcome !== 'completed_sync')
+  ) {
+    throw new RetryNotAllowedError(
+      'only a retryable failed result download can resume remote completion'
+    );
+  }
+
+  return transitionExecution(execution, 'remote_completed', updatedAt);
 }
