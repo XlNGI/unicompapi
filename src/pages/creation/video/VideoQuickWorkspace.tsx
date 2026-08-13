@@ -121,7 +121,7 @@ export function VideoQuickWorkspace({
             <span aria-hidden="true">1</span>
             <div>
               <h2>输入一句话生成视频</h2>
-              <p>快速视频固定为纯文生视频；选模型、填参数后确认提交，与文生/图生共用流程。</p>
+              <p>快速视频固定为纯文生视频；选模型、填参数后直接生成，与文生/图生共用流程。</p>
             </div>
           </header>
           <label className="uc-image-quick__field">
@@ -165,8 +165,8 @@ export function VideoQuickWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
-              <h2>服务与提交确认</h2>
-              <p>选择模型后由后台锁定 API；快速视频使用服务默认参数，确认后即可提交。</p>
+              <h2>服务与提交</h2>
+              <p>选择模型后由后台锁定 API；快速视频使用服务默认参数，可直接生成。</p>
             </div>
           </header>
           <VideoFeatureSubmissionPanel

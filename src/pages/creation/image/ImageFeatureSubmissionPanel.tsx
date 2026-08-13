@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LuSend, LuShieldCheck } from 'react-icons/lu';
-import { Checkbox } from 'rsuite';
+import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -98,8 +97,6 @@ export function ImageFeatureSubmissionPanel({
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const notifications = useGlobalNotifications();
   const [candidates, setCandidates] = useState<readonly ImageFeatureCandidateDto[]>([]);
-  const [preparation, setPreparation] = useState<ImageFeaturePreparationDto>();
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
@@ -127,9 +124,12 @@ export function ImageFeatureSubmissionPanel({
   const selectedCandidate = candidates.find(
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
-  const parameterSignature = JSON.stringify(featureSelection.parameterValues ?? {});
   const busyRef = useRef(false);
+  const onDraftPersistedRef = useRef(onDraftPersisted);
+  const onMessageRef = useRef(onMessage);
   busyRef.current = busy;
+  onDraftPersistedRef.current = onDraftPersisted;
+  onMessageRef.current = onMessage;
   const generationNotificationId = `image-generation:${draft.draftId}`;
 
   function showGenerationProgress(
@@ -233,24 +233,6 @@ export function ImageFeatureSubmissionPanel({
     );
   }
 
-  // Only invalidate a prepared confirmation when route-binding facts change.
-  // Do NOT clear it on draft.updatedAt / autosave, or prepare appears stuck.
-  useEffect(() => {
-    if (busyRef.current) return;
-    setPreparation(undefined);
-    setConfirmed(false);
-    setProgressPhase((phase) =>
-      phase === 'ready' ? 'idle' : phase
-    );
-  }, [
-    awaitingFeatureChoice,
-    blockedReason,
-    draft.draftId,
-    featureSelection.candidateId,
-    featureSelection.productFeature,
-    parameterSignature
-  ]);
-
   useEffect(() => {
     let active = true;
     if (awaitingFeatureChoice) {
@@ -272,6 +254,11 @@ export function ImageFeatureSubmissionPanel({
     // Avoid racing prepare/submit: autosave + listCandidates must not run mid-flight.
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
+    if (draft.mode === 'professional_image' && needsSave) {
+      setCandidates([]);
+      setLoadState('idle');
+      return;
+    }
     const delayMs = needsSave ? 350 : 0;
     setLoadState('loading');
     const timer = window.setTimeout(() => {
@@ -288,12 +275,12 @@ export function ImageFeatureSubmissionPanel({
           if (!saved.ok) {
             setCandidates([]);
             setLoadState('loaded');
-            onMessage(errorMessages[saved.error.code] ?? '保存图片草稿失败，请重试。');
+            onMessageRef.current(errorMessages[saved.error.code] ?? '保存图片草稿失败，请重试。');
             return;
           }
           draftId = saved.value.draftId;
           draftUpdatedAt = saved.value.updatedAt;
-          onDraftPersisted?.(saved.value as GenerationImageDraftDto);
+          onDraftPersistedRef.current?.(saved.value as GenerationImageDraftDto);
         }
         if (busyRef.current) return;
         const result = await api.listCandidates(draftId, draftUpdatedAt);
@@ -301,7 +288,7 @@ export function ImageFeatureSubmissionPanel({
         if (!result.ok) {
           setCandidates([]);
           setLoadState('loaded');
-          onMessage(errorMessages[result.error.code]);
+          onMessageRef.current(errorMessages[result.error.code]);
           return;
         }
         setCandidates(result.value);
@@ -310,7 +297,7 @@ export function ImageFeatureSubmissionPanel({
         if (!active || busyRef.current) return;
         setCandidates([]);
         setLoadState('loaded');
-        onMessage('读取图片服务候选失败，请重试。');
+        onMessageRef.current('读取图片服务候选失败，请重试。');
       });
     }, delayMs);
     return () => {
@@ -328,8 +315,6 @@ export function ImageFeatureSubmissionPanel({
     draft.updatedAt,
     featureSelection.productFeature,
     imageWorkspaces,
-    onDraftPersisted,
-    onMessage,
     oneShot
   ]);
 
@@ -439,18 +424,8 @@ export function ImageFeatureSubmissionPanel({
         }
         return;
       }
-      setPreparation(result.value);
-      setConfirmed(oneShot);
-      showGenerationProgress(
-        oneShot
-          ? '提交信息已准备完成，正在继续生成。'
-          : '准备完成，请确认外发事实后点击「确认并提交」。',
-        oneShot ? '图片提交中' : '等待确认提交'
-      );
-      if (showProgressSteps && !oneShot) setProgressPhase('ready');
-      if (oneShot) {
-        await submitPrepared(saved, result.value);
-      }
+      showGenerationProgress('提交信息已准备完成，正在继续生成。', '图片提交中');
+      await submitPrepared(saved, result.value);
     } catch {
       showSubmissionError('准备图片提交失败，请重试。');
       if (showProgressSteps) {
@@ -528,32 +503,6 @@ export function ImageFeatureSubmissionPanel({
       }
     }
     onSubmissionComplete?.(result.value);
-    setPreparation(undefined);
-    setConfirmed(false);
-  }
-
-  async function submit() {
-    if (!api || !preparation || (!confirmed && !oneShot) || busy) return;
-    setBusy(true);
-    busyRef.current = true;
-    showGenerationProgress('正在保存当前草稿并准备提交。', '图片提交准备中');
-    try {
-      const saved = await ensureSavedDraft();
-      if (!saved) {
-        if (showProgressSteps) setProgressPhase('submission_failed');
-        return;
-      }
-      await submitPrepared(saved, preparation);
-    } catch {
-      showSubmissionError('图片提交失败，请重试。');
-      if (showProgressSteps) {
-        setProgressFailure('图片提交失败，请重试。');
-        setProgressPhase('submission_failed');
-      }
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
   }
 
   async function generateOneShot() {
@@ -729,27 +678,6 @@ export function ImageFeatureSubmissionPanel({
         </p>
       ) : null}
 
-      {!oneShot && preparation ? (
-        <fieldset className="uc-image-quick__confirmations">
-          <legend>确认本次外发</legend>
-          <dl className="uc-image-feature-panel__confirmation-facts">
-            <div><dt>接收方</dt><dd>{preparation.confirmation.recipientName}</dd></div>
-            <div><dt>服务路由</dt><dd>{preparation.confirmation.providerName} / {preparation.confirmation.connectionName} / {preparation.confirmation.modelName}</dd></div>
-            <div><dt>外发范围</dt><dd>{outboundScopeLabel(preparation.confirmation.outboundScope)}</dd></div>
-            <div><dt>内容</dt><dd>{preparation.confirmation.contentCategories.join('、') || '无'}</dd></div>
-            <div><dt>数量</dt><dd>{preparation.confirmation.parameterFieldCount} 个参数 · {preparation.confirmation.materialCount} 份素材 · {preparation.confirmation.contextCount} 份上下文</dd></div>
-            <div><dt>费用</dt><dd>{costLabel(preparation.confirmation.cost)}</dd></div>
-          </dl>
-          <Checkbox
-            checked={confirmed}
-            className="uc-image-quick__checkbox"
-            onChange={(_value, checked) => setConfirmed(checked)}
-          >
-            <span>我已核对并确认以上接收方、外发范围、内容与费用事实。</span>
-          </Checkbox>
-        </fieldset>
-      ) : null}
-
       {showProgressSteps ? (
         <SubmissionProgressSteps
           failureMessage={progressFailure}
@@ -764,25 +692,14 @@ export function ImageFeatureSubmissionPanel({
             ? busy
             : Boolean(blockedReason) ||
               busy ||
-              !selectedCandidate?.available ||
-              (Boolean(preparation) && !confirmed)
+              !selectedCandidate?.available
         }
         onClick={() => void (oneShot
           ? generateOneShot()
-          : preparation
-            ? submit()
-            : prepare())}
+          : prepare())}
       >
-        {oneShot || preparation
-          ? <LuSend aria-hidden="true" />
-          : <LuShieldCheck aria-hidden="true" />}
-        {busy
-          ? '处理中'
-          : oneShot
-            ? '生成'
-            : preparation
-              ? '确认并提交'
-              : '准备生成'}
+        <LuSend aria-hidden="true" />
+        {busy ? '处理中' : '生成'}
       </Button>
       {oneShot ? (
         <p className="uc-image-feature-panel__action-hint" role="status">
@@ -845,11 +762,4 @@ function defaultQuickImageParameterValues(
     }
   }
   return values;
-}
-
-function outboundScopeLabel(scope: ImageFeaturePreparationDto['confirmation']['outboundScope']) {
-  if (scope === 'local_device') return '仅在本机';
-  if (scope === 'local_network') return '局域网';
-  if (scope === 'external_service') return '外部服务';
-  return '未知';
 }

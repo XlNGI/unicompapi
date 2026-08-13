@@ -54,6 +54,7 @@ export type ConversationResponseExecutionState =
 export const conversationResponseStreamEventTypes = [
   'execution_created',
   'stream_started',
+  'reasoning_delta',
   'content_delta',
   'cancel_requested',
   'stream_completed',
@@ -120,6 +121,7 @@ export interface ConversationResponseStreamEventV1 {
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly sequence: number;
   readonly type: ConversationResponseStreamEventType;
+  readonly reasoningDelta?: string;
   readonly contentDelta?: string;
   readonly safeCode?: string;
   readonly interruptionReason?: ConversationResponseInterruptionReason;
@@ -141,6 +143,7 @@ export interface ConversationResponseExecutionReadModelV1 {
   readonly retryOfExecutionId?: ConversationResponseExecutionId;
   readonly state: ConversationResponseExecutionState;
   readonly streamSequence: number;
+  readonly reasoningContent: string;
   readonly content: string;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
@@ -153,6 +156,7 @@ export interface ControlledConversationResponseStreamEventDtoV1 {
   readonly assistantMessageId: string;
   readonly sequence: number;
   readonly type: ConversationResponseStreamEventType;
+  readonly reasoningDelta?: string;
   readonly contentDelta?: string;
   readonly safeCode?: string;
   readonly interruptionReason?: ConversationResponseInterruptionReason;
@@ -377,6 +381,7 @@ export function parseConversationResponseStreamEvent(
   const typeFields: Record<ConversationResponseStreamEventType, readonly string[]> = {
     execution_created: [],
     stream_started: [],
+    reasoning_delta: ['reasoningDelta'],
     content_delta: ['contentDelta'],
     cancel_requested: [],
     stream_completed: [],
@@ -410,6 +415,9 @@ export function parseConversationResponseStreamEvent(
     ),
     sequence: positiveInteger(item.sequence, 'event.sequence'),
     type,
+    ...(type === 'reasoning_delta'
+      ? { reasoningDelta: streamContentDelta(item.reasoningDelta, 'event.reasoningDelta', 65_536) }
+      : {}),
     ...(type === 'content_delta'
       ? { contentDelta: streamContentDelta(item.contentDelta, 'event.contentDelta', 65_536) }
       : {}),
@@ -456,6 +464,7 @@ export function projectConversationResponseExecution(input: {
       : {}),
     state: projected.state,
     streamSequence: projected.streamSequence,
+    reasoningContent: projected.reasoningContent,
     content: projected.content,
     createdAt: execution.createdAt,
     updatedAt: projected.updatedAt
@@ -478,6 +487,7 @@ function projectConversationResponseTimeline(
 ): {
   readonly state: ConversationResponseExecutionState;
   readonly streamSequence: number;
+  readonly reasoningContent: string;
   readonly content: string;
   readonly updatedAt: IsoTimestamp;
 } {
@@ -489,6 +499,7 @@ function projectConversationResponseTimeline(
     throw new InvariantViolationError('conversation response stream timeline is incomplete');
   }
   let state: ConversationResponseExecutionState = 'pending';
+  let reasoningContent = '';
   let content = '';
   let previousAt = execution.createdAt;
   const eventIds = new Set<string>();
@@ -519,6 +530,21 @@ function projectConversationResponseTimeline(
     if (event.type === 'stream_started') {
       if (state !== 'pending') invalidTransition(state, event.type);
       state = 'streaming';
+      continue;
+    }
+    if (event.type === 'reasoning_delta') {
+      if (state !== 'streaming') invalidTransition(state, event.type);
+      if (execution.snapshot.productFeature !== 'text_reasoning') {
+        throw new InvariantViolationError(
+          'conversation response reasoning content requires text_reasoning'
+        );
+      }
+      reasoningContent += event.reasoningDelta;
+      if (reasoningContent.length > 1_000_000) {
+        throw new InvariantViolationError(
+          'conversation response reasoning content exceeds the maximum length'
+        );
+      }
       continue;
     }
     if (event.type === 'content_delta') {
@@ -562,6 +588,7 @@ function projectConversationResponseTimeline(
   return {
     state,
     streamSequence: events.length,
+    reasoningContent,
     content,
     updatedAt: events[events.length - 1].occurredAt
   };
@@ -583,6 +610,7 @@ export function toControlledConversationResponseStreamEventDto(input: {
     assistantMessageId: execution.snapshot.assistantMessageId,
     sequence: event.sequence,
     type: event.type,
+    ...(event.reasoningDelta !== undefined ? { reasoningDelta: event.reasoningDelta } : {}),
     ...(event.contentDelta !== undefined ? { contentDelta: event.contentDelta } : {}),
     ...(event.safeCode !== undefined ? { safeCode: event.safeCode } : {}),
     ...(event.interruptionReason !== undefined

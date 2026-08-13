@@ -289,7 +289,8 @@ describe('DeepSeek chat adapter', () => {
   it('maps text_reasoning without unsupported sampling fields and accepts length finishes with content', async () => {
     const fixture = chatFixture();
     fixture.transport.responses.push(streamResponse([
-      chunk({ delta: { role: 'assistant', content: 'Partial answer' } }),
+      chunk({ delta: { role: 'assistant', reasoning_content: 'Verified reasoning' } }),
+      chunk({ delta: { content: 'Partial answer' } }),
       chunk({ delta: {}, finishReason: 'length' }),
       usageChunk({ completion_tokens: 4, prompt_tokens: 6, total_tokens: 10 }),
       '[DONE]'
@@ -312,6 +313,7 @@ describe('DeepSeek chat adapter', () => {
     });
     expect(body).not.toHaveProperty('temperature');
     expect(body).not.toHaveProperty('top_p');
+    expect(fixture.lifecycle.events).toContain('reasoning:Verified reasoning');
     expect(fixture.lifecycle.events.at(-1)).toBe(
       'complete:response-execution-deepseek'
     );
@@ -527,6 +529,9 @@ class RecordingLifecycle implements DeepSeekConversationLifecyclePort {
   readonly events: string[] = [];
   async start(executionId: ConversationResponseExecutionId) {
     this.events.push(`start:${executionId}`);
+  }
+  async appendReasoning(_executionId: ConversationResponseExecutionId, delta: string) {
+    this.events.push(`reasoning:${delta}`);
   }
   async appendContent(_executionId: ConversationResponseExecutionId, delta: string) {
     this.events.push(`content:${delta}`);

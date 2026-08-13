@@ -291,6 +291,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       return {
         ...message,
         state,
+        reasoningContent: responseExecution.reasoningContent || message.reasoningContent,
         content: responseExecution.content || message.content
       };
     });
@@ -555,7 +556,12 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     if (!messages || !followOutputRef.current) return;
     messages.scrollTop = messages.scrollHeight;
     setShowScrollToBottom(false);
-  }, [lastDisplayMessage?.content, lastDisplayMessage?.state, selectedId]);
+  }, [
+    lastDisplayMessage?.content,
+    lastDisplayMessage?.reasoningContent,
+    lastDisplayMessage?.state,
+    selectedId
+  ]);
 
   function clearResponseDraftState() {
     cancelRequestedRef.current = false;
@@ -792,6 +798,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         return;
       }
       setResponseExecution(submitted.value);
+      setActivityExpanded(responseFeature === 'text_reasoning');
       setNotice('');
       const refreshed = await chat.getConversation(targetConversation.conversationId);
       if (refreshed.ok) replaceConversation(refreshed.value);
@@ -1191,12 +1198,15 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                     ? formatExecutionDuration(responseExecution.createdAt, responseExecution.updatedAt)
                     : '';
                   const reasoningMode = responseExecution?.productFeature === 'text_reasoning';
+                  const reasoningContent = item.role === 'assistant'
+                    ? item.reasoningContent
+                    : undefined;
                   const activityLabel = cancelRequested
                     ? '正在停止'
                     : responseExecution?.state === 'pending'
                       ? reasoningMode ? '正在推理' : '正在处理'
                       : responseExecution?.state === 'streaming'
-                        ? '正在回答'
+                        ? reasoningContent && !item.content ? '正在思考' : '正在回答'
                         : responseExecution?.state === 'completed'
                           ? `已处理${executionDuration ? ` ${executionDuration}` : ''}`
                           : responseExecution?.state === 'cancelled'
@@ -1217,16 +1227,24 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                           </button>
                           {activityExpanded ? (
                             <div className="uc-chat-page__activity-detail">
-                              <span>{reasoningMode ? '推理模式' : '普通对话'}</span>
-                              <p>
-                                {cancelRequested
-                                  ? '停止请求已发送，正在确认并保留已经接收的内容。'
-                                  : reasoningMode
-                                  ? '已启用深度推理；当前仅展示模型接口返回的可验证状态。'
-                                  : responseInProgress
-                                    ? '模型正在生成回答，可点击输入框右侧按钮立即停止。'
-                                    : '回答处理已经结束。'}
-                              </p>
+                              <span>
+                                {reasoningContent
+                                  ? '模型返回的思考内容'
+                                  : reasoningMode ? '推理模式' : '普通对话'}
+                              </span>
+                              {reasoningContent ? (
+                                <MarkdownMessage content={reasoningContent} />
+                              ) : (
+                                <p>
+                                  {cancelRequested
+                                    ? '停止请求已发送，正在确认并保留已经接收的内容。'
+                                    : reasoningMode
+                                      ? '正在等待模型接口返回可展示的思考内容。'
+                                      : responseInProgress
+                                        ? '模型正在生成回答，可点击输入框右侧按钮立即停止。'
+                                        : '回答处理已经结束。'}
+                                </p>
+                              )}
                             </div>
                           ) : null}
                         </section>
@@ -1236,6 +1254,17 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                           <strong>{item.role === 'user' ? '你' : '助手'}</strong>
                           <StatusPill tone={messageStatusTone(item)}>{messageStatusLabel(item)}</StatusPill>
                         </div>
+                      ) : null}
+                      {item.role === 'assistant' && reasoningContent && !isCurrentAssistant ? (
+                        <details className="uc-chat-page__reasoning">
+                          <summary>
+                            <LuBrainCircuit aria-hidden="true" />
+                            <span>模型返回的思考内容</span>
+                          </summary>
+                          <div className="uc-chat-page__reasoning-content">
+                            <MarkdownMessage content={reasoningContent} />
+                          </div>
+                        </details>
                       ) : null}
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">

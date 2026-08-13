@@ -5,6 +5,10 @@ import test from 'node:test';
 const preloadSource = await readFile('electron/preload.ts', 'utf8');
 const handlerSource = await readFile('electron/ipc/storage-ipc.ts', 'utf8');
 const mainSource = await readFile('electron/main.ts', 'utf8');
+const localMediaResponseSource = await readFile(
+  'electron/ipc/local-media-response.ts',
+  'utf8'
+);
 const sharedSource = await readFile(
   'src/shared/image-workspace-ipc.ts',
   'utf8'
@@ -49,5 +53,9 @@ test('exposes only the controlled local image workspace operations', () => {
     /upload|generateImage|analyzeImage|submitTask|createTask|rendererPath/
   );
   assert.match(mainSource, /resolveEntry\(token\)/);
-  assert.match(mainSource, /headers\.set\('content-type', entry\.mimeType\)/);
+  assert.match(mainSource, /createLocalMediaResponse\(/);
+  assert.doesNotMatch(mainSource, /net\.fetch\(pathToFileURL/);
+  assert.match(localMediaResponseSource, /createReadStream\(target\)/);
+  assert.match(localMediaResponseSource, /headers\.set\('content-type', mimeType\)/);
+  assert.doesNotMatch(localMediaResponseSource, /content-disposition|pathToFileURL|net\.fetch/);
 });

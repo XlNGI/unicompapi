@@ -168,9 +168,11 @@ test('project context uses a single explicit registration action and separates u
 test('chat transparency only reports observable execution state', () => {
   assert.match(source, /正在推理/);
   assert.match(source, /已处理/);
-  assert.match(source, /仅展示模型接口返回的可验证状态/);
+  assert.match(source, /模型返回的思考内容/);
+  assert.match(source, /reasoningContent/);
+  assert.match(source, /<MarkdownMessage content=\{reasoningContent\}/);
   assert.doesNotMatch(source, /已创建回复请求/);
-  assert.doesNotMatch(source, /思维链|完整思考过程|模型内心/);
+  assert.doesNotMatch(source, /完整思考过程|模型内心|模拟思考|伪造思考/);
   assert.doesNotMatch(source, /编辑并重新生成|重新生成/);
 });
 

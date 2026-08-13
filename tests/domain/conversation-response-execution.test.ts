@@ -96,11 +96,13 @@ describe('conversation response execution contract', () => {
     const events = [
       event(1, 'execution_created', t0),
       event(2, 'stream_started', t1),
-      event(3, 'content_delta', t1, { contentDelta: '第一段' }),
-      event(4, 'stream_interrupted', t2, { interruptionReason: 'provider_disconnected' }),
-      event(5, 'stream_resumed', t2),
-      event(6, 'content_delta', t3, { contentDelta: '第二段' }),
-      event(7, 'stream_completed', t3)
+      event(3, 'reasoning_delta', t1, { reasoningDelta: '先分析' }),
+      event(4, 'content_delta', t1, { contentDelta: '第一段' }),
+      event(5, 'stream_interrupted', t2, { interruptionReason: 'provider_disconnected' }),
+      event(6, 'stream_resumed', t2),
+      event(7, 'reasoning_delta', t3, { reasoningDelta: '再核对' }),
+      event(8, 'content_delta', t3, { contentDelta: '第二段' }),
+      event(9, 'stream_completed', t3)
     ];
     const readModel = projectConversationResponseExecution({
       execution: execution('completed'),
@@ -108,14 +110,15 @@ describe('conversation response execution contract', () => {
     });
     expect(readModel).toMatchObject({
       state: 'completed',
-      streamSequence: 7,
+      streamSequence: 9,
+      reasoningContent: '先分析再核对',
       content: '第一段第二段',
       runtimeSource: 'official_direct'
     });
 
     const controlled = toControlledConversationResponseStreamEventDto({
       execution: execution('completed'),
-      event: events[2]
+      event: events[3]
     });
     expect(controlled).toMatchObject({
       type: 'content_delta',
@@ -125,6 +128,14 @@ describe('conversation response execution contract', () => {
     expect(JSON.stringify(controlled)).not.toMatch(
       /routeSnapshot|outboundUserText|contentHash|profileId|protocolBinding/i
     );
+
+    expect(toControlledConversationResponseStreamEventDto({
+      execution: execution('completed'),
+      event: events[2]
+    })).toMatchObject({
+      type: 'reasoning_delta',
+      reasoningDelta: '先分析'
+    });
   });
 
   it('accepts whitespace-only content deltas such as markdown newlines', () => {
@@ -143,6 +154,22 @@ describe('conversation response execution contract', () => {
     expect(readModel.content).toBe('标题\n\n正文');
     expect(() => event(7, 'content_delta', t3, { contentDelta: '' })).toThrow('contentDelta');
     expect(() => event(7, 'content_delta', t3, { contentDelta: '   ' })).not.toThrow();
+    expect(() => projectConversationResponseExecution({
+      execution: {
+        ...execution('completed'),
+        snapshot: {
+          ...execution('completed').snapshot,
+          productFeature: 'text_chat'
+        }
+      },
+      events: [
+        event(1, 'execution_created', t0),
+        event(2, 'stream_started', t1),
+        event(3, 'reasoning_delta', t2, { reasoningDelta: '不应公开' }),
+        event(4, 'content_delta', t3, { contentDelta: '回答' }),
+        event(5, 'stream_completed', t3)
+      ]
+    })).toThrow('requires text_reasoning');
   });
 
   it('rejects media features, hidden provider fields and invalid stream transitions', () => {

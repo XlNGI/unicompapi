@@ -282,6 +282,9 @@ function toMessageDto(message: Message): MessageDto {
     role: message.role,
     state: message.state,
     content: message.content,
+    ...(message.reasoningContent !== undefined
+      ? { reasoningContent: message.reasoningContent }
+      : {}),
     attachments: message.attachments.map((attachment) =>
       attachment.kind === 'asset'
         ? {

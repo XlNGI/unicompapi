@@ -2,14 +2,12 @@ import {
   app,
   BrowserWindow,
   ipcMain,
-  net,
   powerMonitor,
   powerSaveBlocker,
   protocol,
   shell
 } from 'electron';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
@@ -33,6 +31,7 @@ import {
 import { ElectronViduComposition } from './ipc/vidu-composition';
 import { createLiveProviderManagementComposition } from './ipc/management-adapters';
 import { LedgerRuntimeAuthorizationSync } from './ipc/runtime-authorization-sync';
+import { createLocalMediaResponse } from './ipc/local-media-response';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -229,24 +228,11 @@ app.whenReady().then(async () => {
         return new Response('Media handle not found', { status: 404 });
       }
 
-      // Do not forward request/response headers from file:// fetches: Chromium may
-      // emit Content-Disposition with non-ASCII filenames, and undici Headers only
-      // accepts ByteString values (0-255).
-      const response = await net.fetch(pathToFileURL(entry.target).toString(), {
-        method: request.method
-      });
-      const headers = new Headers();
-      if (entry.mimeType) {
-        headers.set('content-type', entry.mimeType);
-      }
-      const contentLength = response.headers.get('content-length');
-      if (contentLength && /^\d+$/u.test(contentLength)) {
-        headers.set('content-length', contentLength);
-      }
-      return new Response(response.body, {
-        status: response.status === 0 ? 200 : response.status,
-        headers
-      });
+      return await createLocalMediaResponse(
+        entry.target,
+        entry.mimeType,
+        request.method
+      );
     } catch {
       return new Response('Media handle unavailable', { status: 500 });
     }

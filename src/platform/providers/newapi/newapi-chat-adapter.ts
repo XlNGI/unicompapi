@@ -65,6 +65,10 @@ export interface NewApiParameterSchemaResolverPort {
 
 export interface NewApiConversationLifecyclePort {
   start(executionId: ConversationResponseExecutionId): Promise<unknown>;
+  appendReasoning(
+    executionId: ConversationResponseExecutionId,
+    reasoningDelta: string
+  ): Promise<unknown>;
   appendContent(
     executionId: ConversationResponseExecutionId,
     contentDelta: string
@@ -163,6 +167,7 @@ interface ActiveOperation {
   readonly providerOperationId: string;
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
   readonly session: NewApiEventStreamSession;
   readonly removeExternalAbort: () => void;
   cancelReason?: 'user' | 'application_shutdown';
@@ -335,6 +340,9 @@ export class NewApiChatAdapter {
       providerOperationId,
       responseExecutionId: request.responseExecutionId,
       invocationAttemptId: request.invocationAttemptId,
+      productFeature: route.productFeature === 'text_reasoning'
+        ? 'text_reasoning'
+        : 'text_chat',
       session,
       removeExternalAbort
     };
@@ -391,6 +399,14 @@ export class NewApiChatAdapter {
             operation.responseExecutionId,
             contentDelta
           );
+        },
+        async (reasoningDelta) => {
+          if (operation.productFeature === 'text_reasoning') {
+            await this.lifecycle.appendReasoning(
+              operation.responseExecutionId,
+              reasoningDelta
+            );
+          }
         }
       );
       const observation = createUsageObservation({
@@ -614,7 +630,8 @@ export function newApiChatRecoveryDecision(
 async function consumeNewApiStream(
   stream: AsyncIterable<Uint8Array>,
   expectedModel: string,
-  onContent: (delta: string) => Promise<void>
+  onContent: (delta: string) => Promise<void>,
+  onReasoning: (delta: string) => Promise<void>
 ): Promise<{
   readonly finishReason: NewApiFinishReason;
   readonly contentLength: number;
@@ -649,6 +666,9 @@ async function consumeNewApiStream(
     if (chunk.usage) {
       if (usage) throw invalidStream('NewApi stream reported usage more than once');
       usage = chunk.usage;
+    }
+    if (chunk.reasoningDelta) {
+      await onReasoning(chunk.reasoningDelta);
     }
     if (chunk.contentDelta) {
       contentLength += chunk.contentDelta.length;
@@ -704,6 +724,7 @@ type NewApiFinishReason =
 function parseStreamChunk(data: string): {
   readonly id: string;
   readonly model: string;
+  readonly reasoningDelta?: string;
   readonly contentDelta?: string;
   readonly finishReason?: NewApiFinishReason;
   readonly usage?: readonly UsageFactV1[];
@@ -758,13 +779,17 @@ function parseStreamChunk(data: string): {
     throw invalidStream('NewApi stream role is invalid');
   }
   const contentDelta = optionalDeltaText(delta.content, 'NewApi content delta');
-  optionalDeltaText(delta.reasoning_content, 'NewApi reasoning delta');
+  const reasoningDelta = optionalDeltaText(
+    delta.reasoning_content,
+    'NewApi reasoning delta'
+  );
   const finishReason = choice.finish_reason === undefined || choice.finish_reason === null
     ? undefined
     : parseFinishReason(choice.finish_reason);
   return {
     id,
     model,
+    ...(reasoningDelta ? { reasoningDelta } : {}),
     ...(contentDelta ? { contentDelta } : {}),
     ...(finishReason ? { finishReason } : {}),
     ...(usage ? { usage } : {})

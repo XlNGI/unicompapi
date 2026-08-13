@@ -302,7 +302,11 @@ function createConversationLinkedLifecycle(
 
   function queueProjection(
     executionId: ConversationResponseExecutionId,
-    operation: (conversation: Conversation, assistantMessageId: Conversation['messages'][number]['id']) => Conversation
+    operation: (
+      conversation: Conversation,
+      assistantMessageId: Conversation['messages'][number]['id'],
+      reasoningContent: string
+    ) => Conversation
   ): Promise<void> {
     const state = projectionState(executionId);
     const next = state.tail.catch(() => undefined).then(async () => {
@@ -310,7 +314,11 @@ function createConversationLinkedLifecycle(
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const conversation = await conversations.get(model.conversationId);
         if (!conversation) return;
-        const updated = operation(conversation, model.assistantMessageId);
+        const updated = operation(
+          conversation,
+          model.assistantMessageId,
+          model.reasoningContent
+        );
         try {
           await conversations.save(updated, conversation.revision);
           return;
@@ -370,6 +378,10 @@ function createConversationLinkedLifecycle(
 
   return {
     start: (executionId) => enqueue(executionId, () => lifecycle.start(executionId)),
+    appendReasoning: (executionId, reasoningDelta) => enqueue(
+      executionId,
+      () => lifecycle.appendReasoning(executionId, reasoningDelta)
+    ),
     appendContent: (executionId, contentDelta) => enqueue(executionId, async () => {
       await lifecycle.appendContent(executionId, contentDelta);
       projectionState(executionId).pendingContent += contentDelta;
@@ -378,10 +390,11 @@ function createConversationLinkedLifecycle(
     complete: (executionId) => enqueue(executionId, async () => {
       await flushPending(executionId);
       await lifecycle.complete(executionId);
-      await queueProjection(executionId, (conversation, assistantMessageId) => completeAssistantMessage(
+      await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => completeAssistantMessage(
         conversation,
         assistantMessageId,
-        toIsoTimestamp(now())
+        toIsoTimestamp(now()),
+        reasoningContent || undefined
       ));
       releaseProjection(executionId);
     }),
@@ -397,11 +410,12 @@ function createConversationLinkedLifecycle(
     fail: (executionId, safeCode) => enqueue(executionId, async () => {
       await flushPending(executionId);
       await lifecycle.fail(executionId, safeCode);
-      await queueProjection(executionId, (conversation, assistantMessageId) => failAssistantMessage(
+      await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
         conversation,
         assistantMessageId,
         failureReasonFromSafeCode(safeCode),
-        toIsoTimestamp(now())
+        toIsoTimestamp(now()),
+        reasoningContent || undefined
       ));
       releaseProjection(executionId);
     }),

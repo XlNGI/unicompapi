@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LuSend, LuShieldCheck } from 'react-icons/lu';
-import { Checkbox } from 'rsuite';
+import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -120,8 +119,6 @@ export function VideoFeatureSubmissionPanel({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const notifications = useGlobalNotifications();
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
-  const [preparation, setPreparation] = useState<VideoFeaturePreparationDto>();
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
@@ -135,11 +132,14 @@ export function VideoFeatureSubmissionPanel({
   const selectedCandidate = candidates.find(
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
-  const parameterSignature = JSON.stringify(featureSelection.parameterValues ?? {});
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
+  const onDraftPersistedRef = useRef(onDraftPersisted);
+  const onMessageRef = useRef(onMessage);
   busyRef.current = busy;
   draftRef.current = draft;
+  onDraftPersistedRef.current = onDraftPersisted;
+  onMessageRef.current = onMessage;
   const generationNotificationId = `video-generation:${draft.draftId}`;
 
   function showGenerationProgress(
@@ -239,23 +239,6 @@ export function VideoFeatureSubmissionPanel({
     );
   }
 
-  // Only invalidate a prepared confirmation when route-binding facts change.
-  // Do NOT clear it on draft.updatedAt / autosave, or prepare appears stuck.
-  useEffect(() => {
-    if (busyRef.current) return;
-    setPreparation(undefined);
-    setConfirmed(false);
-    setProgressPhase((phase) =>
-      phase === 'ready' ? 'idle' : phase
-    );
-  }, [
-    blockedReason,
-    draft.draftId,
-    featureSelection.candidateId,
-    featureSelection.productFeature,
-    parameterSignature
-  ]);
-
   useEffect(() => {
     let active = true;
     if (!api) return;
@@ -284,7 +267,7 @@ export function VideoFeatureSubmissionPanel({
           if (!saved.ok) {
             setCandidates([]);
             setLoadState('loaded');
-            onMessage(describeWorkspacePersistError(saved.error));
+            onMessageRef.current(describeWorkspacePersistError(saved.error));
             return;
           }
           const latest = draftRef.current;
@@ -293,7 +276,7 @@ export function VideoFeatureSubmissionPanel({
           if (!superseded) {
             draftId = saved.value.draftId;
             draftUpdatedAt = saved.value.updatedAt;
-            onDraftPersisted?.(saved.value);
+            onDraftPersistedRef.current?.(saved.value);
           } else {
             draftId = latest.draftId;
             draftUpdatedAt = latest.updatedAt;
@@ -307,12 +290,12 @@ export function VideoFeatureSubmissionPanel({
               if (!again.ok) {
                 setCandidates([]);
                 setLoadState('loaded');
-                onMessage(describeWorkspacePersistError(again.error));
+                onMessageRef.current(describeWorkspacePersistError(again.error));
                 return;
               }
               draftId = again.value.draftId;
               draftUpdatedAt = again.value.updatedAt;
-              onDraftPersisted?.(again.value);
+              onDraftPersistedRef.current?.(again.value);
             }
           }
         }
@@ -322,7 +305,7 @@ export function VideoFeatureSubmissionPanel({
         if (!result.ok) {
           setCandidates([]);
           setLoadState('loaded');
-          onMessage(describeVideoFeatureError(result.error));
+          onMessageRef.current(describeVideoFeatureError(result.error));
           return;
         }
         setCandidates(result.value);
@@ -331,7 +314,7 @@ export function VideoFeatureSubmissionPanel({
         if (!active || busyRef.current) return;
         setCandidates([]);
         setLoadState('loaded');
-        onMessage('读取视频服务候选失败，请重试。');
+        onMessageRef.current('读取视频服务候选失败，请重试。');
       });
     }, delayMs);
     return () => {
@@ -346,8 +329,6 @@ export function VideoFeatureSubmissionPanel({
     draft.state,
     draft.updatedAt,
     featureSelection.productFeature,
-    onDraftPersisted,
-    onMessage,
     videoWorkspaces
   ]);
 
@@ -461,13 +442,8 @@ export function VideoFeatureSubmissionPanel({
         }
         return;
       }
-      setPreparation(result.value);
-      setConfirmed(false);
-      showGenerationProgress(
-        '准备完成，请确认外发事实后点击「确认并提交」。',
-        '等待确认提交'
-      );
-      if (showProgressSteps) setProgressPhase('ready');
+      showGenerationProgress('提交信息已准备完成，正在继续生成。', '视频提交中');
+      await submitPrepared(saved, result.value);
     } catch {
       showSubmissionError('准备视频提交失败，请重试。');
       if (showProgressSteps) {
@@ -538,32 +514,6 @@ export function VideoFeatureSubmissionPanel({
       }
     }
     onSubmissionComplete?.(result.value);
-    setPreparation(undefined);
-    setConfirmed(false);
-  }
-
-  async function submit() {
-    if (!api || !preparation || !confirmed || busy) return;
-    setBusy(true);
-    busyRef.current = true;
-    showGenerationProgress('正在保存当前草稿并准备提交。', '视频提交准备中');
-    try {
-      const saved = await ensureSavedDraft();
-      if (!saved) {
-        if (showProgressSteps) setProgressPhase('submission_failed');
-        return;
-      }
-      await submitPrepared(saved, preparation);
-    } catch {
-      showSubmissionError('视频提交失败，请重试。');
-      if (showProgressSteps) {
-        setProgressFailure('视频提交失败，请重试。');
-        setProgressPhase('submission_failed');
-      }
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
   }
 
   return (
@@ -637,27 +587,6 @@ export function VideoFeatureSubmissionPanel({
         </div>
       ) : null}
 
-      {preparation ? (
-        <fieldset className="uc-image-quick__confirmations">
-          <legend>确认本次外发</legend>
-          <dl className="uc-image-feature-panel__confirmation-facts">
-            <div><dt>接收方</dt><dd>{preparation.confirmation.recipientName}</dd></div>
-            <div><dt>服务路由</dt><dd>{preparation.confirmation.providerName} / {preparation.confirmation.connectionName} / {preparation.confirmation.modelName}</dd></div>
-            <div><dt>外发范围</dt><dd>{outboundScopeLabel(preparation.confirmation.outboundScope)}</dd></div>
-            <div><dt>内容</dt><dd>{preparation.confirmation.contentCategories.join('、') || '无'}</dd></div>
-            <div><dt>数量</dt><dd>{preparation.confirmation.parameterFieldCount} 个参数 · {preparation.confirmation.materialCount} 份素材 · {preparation.confirmation.contextCount} 份上下文</dd></div>
-            <div><dt>费用</dt><dd>{costLabel(preparation.confirmation.cost)}</dd></div>
-          </dl>
-          <Checkbox
-            checked={confirmed}
-            className="uc-image-quick__checkbox"
-            onChange={(_value, checked) => setConfirmed(checked)}
-          >
-            <span>我已核对并确认以上接收方、外发范围、内容与费用事实。</span>
-          </Checkbox>
-        </fieldset>
-      ) : null}
-
       {showProgressSteps ? (
         <SubmissionProgressSteps
           failureMessage={progressFailure}
@@ -670,13 +599,12 @@ export function VideoFeatureSubmissionPanel({
         disabled={
           Boolean(blockedReason) ||
           busy ||
-          !selectedCandidate?.available ||
-          (Boolean(preparation) && !confirmed)
+          !selectedCandidate?.available
         }
-        onClick={() => void (preparation ? submit() : prepare())}
+        onClick={() => void prepare()}
       >
-        {preparation ? <LuSend aria-hidden="true" /> : <LuShieldCheck aria-hidden="true" />}
-        {busy ? '处理中' : preparation ? '确认并提交' : '准备生成'}
+        <LuSend aria-hidden="true" />
+        {busy ? '处理中' : '生成'}
       </Button>
       {showProgressSteps ? (
         <p className="uc-image-feature-panel__action-hint" role="status">
@@ -684,13 +612,9 @@ export function VideoFeatureSubmissionPanel({
             ? '下一步：选择可用模型；后台会按模型锁定接口与参数配置。'
             : !selectedCandidate.available
               ? '所选模型当前不可用，请换一个或到「模型与服务商」检查连接授权。'
-              : preparation && !confirmed
-                ? '下一步：核对外发事实并勾选确认。'
-                : preparation
-                  ? '就绪：点击「确认并提交」发起请求。'
-                  : busy
-                    ? '正在处理…'
-                    : '下一步：填写参数后点击「准备生成」。'}
+              : busy
+                ? '正在处理…'
+                : '下一步：填写参数后点击「生成」。'}
         </p>
       ) : null}
     </div>
@@ -724,12 +648,6 @@ function costLabel(cost: { readonly state: string; readonly summary?: string }):
   return '未知，以服务商账单为准';
 }
 
-function outboundScopeLabel(scope: VideoFeaturePreparationDto['confirmation']['outboundScope']) {
-  if (scope === 'local_device') return '仅在本机';
-  if (scope === 'local_network') return '局域网';
-  if (scope === 'external_service') return '外部服务';
-  return '未知';
-}
 
 function resetGeneration(): VideoWorkspaceDraftDto['generation'] {
   return {

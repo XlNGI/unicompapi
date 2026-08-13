@@ -433,7 +433,7 @@ export function ImageProfessionalWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
             <div>
-              <h2>服务、参数与确认</h2>
+              <h2>服务与参数</h2>
               <p>
                 {productFeature
                   ? '候选只基于当前生图方式和已保存草稿事实。'
@@ -461,7 +461,7 @@ export function ImageProfessionalWorkspace({
       <Card className="uc-image-workbench__notice" role="status">
         <StatusPill tone="warning">在线运行未授权</StatusPill>
         <p>
-          候选、参数、图片、上下文和外发确认相互独立；任何事实变化都会使旧选择令牌失效。
+          填写参数后可直接生成；提交时会自动锁定候选、参数、图片、上下文和外发事实快照。
         </p>
       </Card>
     </>

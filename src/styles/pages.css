@@ -4904,6 +4904,43 @@ button.uc-project-center__project-card:disabled {
   line-height: var(--uc-line-height-caption);
 }
 
+.uc-chat-page__activity-detail .uc-markdown-message,
+.uc-chat-page__reasoning-content .uc-markdown-message {
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  line-height: 1.65;
+}
+
+.uc-chat-page__reasoning {
+  margin: 0 0 var(--uc-space-2);
+  color: var(--uc-color-text-secondary);
+}
+
+.uc-chat-page__reasoning > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--uc-space-2);
+  width: fit-content;
+  cursor: pointer;
+  font-size: var(--uc-font-size-caption);
+  font-weight: 500;
+  list-style: none;
+}
+
+.uc-chat-page__reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+
+.uc-chat-page__reasoning > summary svg {
+  width: 16px;
+  height: 16px;
+}
+
+.uc-chat-page__reasoning-content {
+  margin-top: var(--uc-space-2);
+  padding-left: 24px;
+}
+
 .uc-chat-page__composer-region {
   position: absolute;
   bottom: 0;

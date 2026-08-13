@@ -80,6 +80,7 @@ export function ImageWorkbenchPage({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [autoSaveRevision, setAutoSaveRevision] = useState(0);
   const [autoSaving, setAutoSaving] = useState(false);
   const [message, setMessage] = useState('');
   const currentDraft = drafts[drafts.length - 1];
@@ -92,6 +93,8 @@ export function ImageWorkbenchPage({
   const currentDraftRef = useRef(currentDraft);
   currentDraftRef.current = currentDraft;
   const autoSaveGeneration = useRef(0);
+  const autoSaveRevisionRef = useRef(autoSaveRevision);
+  autoSaveRevisionRef.current = autoSaveRevision;
 
   useEffect(() => {
     let active = true;
@@ -226,11 +229,15 @@ export function ImageWorkbenchPage({
       items.map((item) => (item.draftId === draft.draftId ? draft : item))
     );
     setDirty(hasUnsavedChanges);
+    if (hasUnsavedChanges) {
+      setAutoSaveRevision((revision) => revision + 1);
+    }
   }
 
   useEffect(() => {
     if (!isProfessionalImage || !dirty || !imageWorkspaces || !session) return;
     const generation = ++autoSaveGeneration.current;
+    const revision = autoSaveRevisionRef.current;
     const timer = window.setTimeout(() => {
       void (async () => {
         const snapshot = currentDraftRef.current;
@@ -248,9 +255,8 @@ export function ImageWorkbenchPage({
           }
           const latest = currentDraftRef.current;
           const superseded =
-            latest !== undefined &&
-            latest.draftId === snapshot.draftId &&
-            latest !== snapshot;
+            autoSaveRevisionRef.current !== revision ||
+            (latest !== undefined && latest.draftId !== snapshot.draftId);
           if (superseded) return;
           setDrafts((items) =>
             items.map((draft) =>
@@ -272,7 +278,7 @@ export function ImageWorkbenchPage({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [dirty, imageWorkspaces, isProfessionalImage, session, currentDraft]);
+  }, [autoSaveRevision, dirty, imageWorkspaces, isProfessionalImage, session]);
 
   const projectStatus = loading
     ? '正在读取'
