@@ -71,6 +71,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
   const [stateFilter, setStateFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [message, setMessage] = useState('');
   const storage = window.unicomp?.storage;
 
@@ -144,6 +145,36 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
     ))
   );
   const projects = Array.from(new Map(tasks.map((task) => [task.projectId, task.projectName])));
+
+  async function recoverResult(taskId: string, mediaKind: 'image' | 'video') {
+    const features = mediaKind === 'image'
+      ? window.unicomp?.imageFeatures
+      : window.unicomp?.videoFeatures;
+    if (!features || recovering) return;
+    setRecovering(true);
+    setMessage(`正在重新接收已生成的${mediaKind === 'image' ? '图片' : '视频'}结果…`);
+    try {
+      const result = await features.recoverResult(taskId);
+      if (!result.ok) {
+        setMessage(`重新接收失败：${result.error.message}`);
+        return;
+      }
+      setMessage(`${mediaKind === 'image' ? '图片' : '视频'}结果已下载、校验并登记到作品库。`);
+      const [taskList, taskDetails] = await Promise.all([
+        storage?.listTasks(),
+        storage?.getTaskDetails(taskId)
+      ]);
+      if (taskList?.ok) {
+        setTasks(taskList.value.items);
+        setIssues(taskList.value.issues);
+      }
+      if (taskDetails?.ok) setDetails(taskDetails.value);
+    } catch {
+      setMessage('重新接收失败，请稍后重试。');
+    } finally {
+      setRecovering(false);
+    }
+  }
 
   return (
     <section className="uc-task-center" aria-labelledby="tasks-page-title">
@@ -292,7 +323,15 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
             {detailsLoading ? (
               <p className="uc-task-center__muted" role="status">正在读取任务详情…</p>
             ) : details ? (
-              <TaskDetails details={details} onNavigate={onNavigate} />
+              <TaskDetails
+                details={details}
+                onNavigate={onNavigate}
+                onRecoverResult={() => void recoverResult(
+                  details.taskId,
+                  details.canRecoverImageResult ? 'image' : 'video'
+                )}
+                recovering={recovering}
+              />
             ) : (
               <p className="uc-task-center__muted">选择左侧任务查看提交内容和真实状态。</p>
             )}
@@ -311,10 +350,14 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
 
 function TaskDetails({
   details,
-  onNavigate
+  onNavigate,
+  onRecoverResult,
+  recovering
 }: {
   details: StorageTaskDetailsDto;
   onNavigate?: TasksPageProps['onNavigate'];
+  onRecoverResult: () => void;
+  recovering: boolean;
 }) {
   const state = taskState(details.latestExecutionState);
   const retryability = details.retryability === 'retryable'
@@ -347,6 +390,15 @@ function TaskDetails({
         <p>{details.finalPrompt}</p>
       </div>
       <div className="uc-task-center__actions">
+        {(details.canRecoverImageResult || details.canRecoverVideoResult) && (
+          <Button
+            disabled={recovering}
+            loading={recovering}
+            onClick={onRecoverResult}
+          >
+            重新接收结果
+          </Button>
+        )}
         <Button onClick={() => onNavigate?.('projects')} variant="secondary">返回来源项目</Button>
         <Button onClick={() => onNavigate?.('library')} variant="secondary">查看已登记作品</Button>
       </div>

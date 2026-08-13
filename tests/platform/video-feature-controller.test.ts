@@ -102,9 +102,23 @@ describe('VideoFeatureController', () => {
       error: { code: 'stale_route_selection' }
     });
   });
+
+  it('exposes controlled result recovery without submitting a new generation', async () => {
+    const fixture = createFixture(true);
+    await expect(fixture.controller.recoverResult({ taskId: 'task-video-existing' }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: {
+          taskId: 'task-video-existing',
+          executionId: 'execution-video-existing',
+          workId: 'work-video-existing'
+        }
+      });
+    expect(fixture.submissionCount()).toBe(0);
+  });
 });
 
-function createFixture() {
+function createFixture(withRecovery = false) {
   let draft: VideoWorkspaceDraft = createVideoWorkspaceDraft({
     ...createEmptyVideoWorkspaceDraft({
       id: toDraftId('draft-video-feature-controller'),
@@ -156,6 +170,18 @@ function createFixture() {
     getRuntime: () => ({
       drafts,
       candidates,
+      ...(withRecovery
+        ? {
+            async recoverResult(taskId: string) {
+              return {
+                schemaVersion: 1 as const,
+                taskId,
+                executionId: 'execution-video-existing',
+                workId: 'work-video-existing'
+              };
+            }
+          }
+        : {}),
       ...(submissions > 0
         ? { async submit() {
             submissions += 1;

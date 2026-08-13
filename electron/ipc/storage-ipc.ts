@@ -538,6 +538,10 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => imageFeatures.generateQuickImage(request)
   );
   ipcMain.handle(
+    imageFeatureIpcChannels.recoverResult,
+    (_event, request: unknown) => imageFeatures.recoverResult(request)
+  );
+  ipcMain.handle(
     promptEnhanceIpcChannels.listCandidates,
     (_event, request: unknown) => promptEnhance.listCandidates(request)
   );
@@ -573,6 +577,10 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(
     videoFeatureIpcChannels.submitDraft,
     (_event, request: unknown) => videoFeatures.submitDraft(request)
+  );
+  ipcMain.handle(
+    videoFeatureIpcChannels.recoverResult,
+    (_event, request: unknown) => videoFeatures.recoverResult(request)
   );
   ipcMain.handle(
     videoWorkspaceIpcChannels.createFromImageWork,

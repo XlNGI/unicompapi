@@ -214,7 +214,9 @@ const imageFeatures: ImageFeatureApi = {
       prompt,
       candidateId,
       parameterValues
-    })
+    }),
+  recoverResult: (taskId) =>
+    ipcRenderer.invoke(imageFeatureIpcChannels.recoverResult, { taskId })
 };
 
 const promptEnhance: PromptEnhanceApi = {
@@ -266,7 +268,9 @@ const videoFeatures: VideoFeatureApi = {
     routeSelectionToken,
     confirmationId,
     confirmed
-  })
+  }),
+  recoverResult: (taskId) =>
+    ipcRenderer.invoke(videoFeatureIpcChannels.recoverResult, { taskId })
 };
 
 const videoWorkspaces: VideoWorkspaceApi = {

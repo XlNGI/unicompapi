@@ -38,6 +38,7 @@ import type {
   ImageResultOperationReference,
   ImageResultPort
 } from './image-result-port';
+import { ImageResultPortError } from './image-result-port';
 
 export interface LocalImageResultReceiverDependencies {
   getSession(): StorageProjectSession | undefined;
@@ -515,6 +516,7 @@ function retryabilityForError(
   if (error instanceof ImageResultReceiverError) {
     return error.code === 'download_failed' ? 'retryable' : 'not_retryable';
   }
+  if (error instanceof ImageResultPortError) return error.retryability;
   return 'unknown';
 }
 

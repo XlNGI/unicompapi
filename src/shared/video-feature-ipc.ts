@@ -1,7 +1,8 @@
 export const videoFeatureIpcChannels = {
   listCandidates: 'video-feature:list-candidates',
   prepareSubmission: 'video-feature:prepare-submission',
-  submitDraft: 'video-feature:submit-draft'
+  submitDraft: 'video-feature:submit-draft',
+  recoverResult: 'video-feature:recover-result'
 } as const;
 
 export type VideoFeatureIpcErrorCode =
@@ -133,6 +134,13 @@ export interface VideoFeatureSubmissionDto {
   readonly safeCode?: string;
 }
 
+export interface VideoFeatureRecoveryDto {
+  readonly schemaVersion: 1;
+  readonly taskId: string;
+  readonly executionId: string;
+  readonly workId: string;
+}
+
 export interface VideoFeatureApi {
   listCandidates(
     draftId: string,
@@ -150,4 +158,7 @@ export interface VideoFeatureApi {
     confirmationId: string,
     confirmed: boolean
   ): Promise<VideoFeatureIpcResult<VideoFeatureSubmissionDto>>;
+  recoverResult(
+    taskId: string
+  ): Promise<VideoFeatureIpcResult<VideoFeatureRecoveryDto>>;
 }

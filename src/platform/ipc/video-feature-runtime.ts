@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   createLocalResultObservation,
+  recoverRemoteCompletedExecution,
+  toTaskId,
   toIsoTimestamp,
   toLocalResultObservationId,
   toProviderOperationRecordId,
@@ -8,6 +10,7 @@ import {
   type ProviderProtocolBinding
 } from '../../domain';
 import type { VideoFeatureSubmissionDto } from '../../shared/video-feature-ipc';
+import type { VideoFeatureRecoveryDto } from '../../shared/video-feature-ipc';
 import {
   NEWAPI_VIDEO_ADAPTER_ID,
   ProviderAsyncOperationCoordinator,
@@ -148,6 +151,76 @@ export function createVideoFeatureControllerRuntime(
     drafts,
     candidates
   };
+
+  const recoveryResultReceiver = options.resultReceiver;
+  const recoveryAttachNewApi = options.attachNewApiVideoOperation;
+  if (recoveryResultReceiver && recoveryAttachNewApi) {
+    runtime.recoverResult = async (taskId): Promise<VideoFeatureRecoveryDto> => {
+      const task = await tasks.get(toTaskId(taskId));
+      if (!task || task.projectId !== options.session.projectId) {
+        throw new Error('Video task not found in the open project');
+      }
+      const execution = [...await executions.list(task.id)]
+        .filter((item) => task.executionIds.includes(item.id))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+      if (
+        task.submission.kind !== 'video_generation' ||
+        !execution ||
+        execution.state !== 'failed' ||
+        execution.failure?.stage !== 'downloading' ||
+        execution.failure.retryability !== 'retryable' ||
+        !execution.remoteOperationId
+      ) {
+        throw new Error('This task does not have a recoverable video result download');
+      }
+      const attempt = (await invocations.list()).find(
+        (item) =>
+          item.subject.kind === 'media' &&
+          item.subject.taskId === task.id &&
+          item.subject.executionId === execution.id
+      );
+      const route = attempt ? await routes.get(attempt.routeSnapshotId) : undefined;
+      if (!attempt || !route || route.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID) {
+        throw new Error('The original NewAPI video route is unavailable');
+      }
+      await attachVideoOperationContext({
+        providerOperationId: execution.remoteOperationId,
+        routeSnapshot: route,
+        invocationAttemptId: attempt.id,
+        providerRegistry: options.providerRegistry,
+        attachNewApi: recoveryAttachNewApi
+      });
+      const recovered = recoverRemoteCompletedExecution(
+        execution,
+        toIsoTimestamp(now())
+      );
+      await executions.save(recovered);
+      const received = await recoveryResultReceiver.receive(recovered.id);
+      if (!received.ok || !received.value.works[0]) {
+        throw new Error(
+          received.ok
+            ? 'The recovered video result did not register a work'
+            : received.error.message
+        );
+      }
+      await localResults.append(
+        createLocalResultObservation({
+          id: toLocalResultObservationId(`local-result-${randomUUID()}`),
+          invocationAttemptId: attempt.id,
+          mediaKind: 'video',
+          outputCount: received.value.works.length,
+          validationState: 'valid',
+          observedAt: toIsoTimestamp(now())
+        })
+      );
+      return {
+        schemaVersion: 1,
+        taskId: task.id,
+        executionId: received.value.executionId,
+        workId: received.value.works[0].workId
+      };
+    };
+  }
 
   const authorization = options.submissionAuthorization;
   const videoSubmission = options.videoSubmission;

@@ -127,6 +127,8 @@ export interface StorageTaskDetailsDto extends StorageTaskSummaryDto {
   readonly sourceDraftId: string;
   readonly originalInput: string;
   readonly finalPrompt: string;
+  readonly canRecoverImageResult: boolean;
+  readonly canRecoverVideoResult: boolean;
 }
 
 export interface StorageCallRecordFilterDto {

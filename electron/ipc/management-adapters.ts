@@ -35,6 +35,11 @@ import {
   type VolcengineHttpTransportResponse
 } from '../../src/platform';
 import type { ProxyMode } from '../../src/domain';
+import {
+  downloadImageWithNativeRequest,
+  NativeBinaryRequestFailure,
+  requestBinaryWithNativeRequest
+} from './native-binary-request';
 
 export interface LiveProviderManagementComposition {
   readonly adapters: readonly ProviderManagementAdapterPort[];
@@ -143,6 +148,20 @@ class ElectronDeepSeekHttpTransport implements DeepSeekHttpTransport {
 class ElectronNewApiHttpTransport implements NewApiHttpTransport {
   async send(request: NewApiHttpTransportRequest): Promise<NewApiHttpTransportResponse> {
     try {
+      if (isNewApiVideoResultRequest(request)) {
+        return await requestBinaryWithNativeRequest({
+          url: request.url,
+          headers: request.headers,
+          maximumResponseBytes: request.maxResponseBytes,
+          signal: request.signal,
+          createRequest: (url) => net.request({
+            method: request.method,
+            url,
+            credentials: 'omit',
+            redirect: 'error'
+          })
+        });
+      }
       const response = await net.fetch(request.url, {
         method: request.method,
         headers: request.headers,
@@ -181,10 +200,18 @@ class ElectronNewApiHttpTransport implements NewApiHttpTransport {
       if (request.signal.aborted || isAbortError(error)) {
         throw new NewApiTransportFailure('cancelled');
       }
+      if (error instanceof NativeBinaryRequestFailure) {
+        throw new NewApiTransportFailure(error.code);
+      }
       if (error instanceof NewApiTransportFailure) throw error;
       throw new NewApiTransportFailure('network');
     }
   }
+}
+
+function isNewApiVideoResultRequest(request: NewApiHttpTransportRequest): boolean {
+  const accept = request.headers.accept ?? request.headers.Accept ?? '';
+  return request.method === 'GET' && accept.toLowerCase() === 'video/mp4';
 }
 
 class ElectronKlingHttpTransport implements KlingHttpTransport {
@@ -375,27 +402,30 @@ function createElectronNewApiImageDownloadPort(): NewApiImageDownloadPort {
         throw new NewApiTransportFailure('network');
       }
       try {
-        const response = await net.fetch(parsed.toString(), {
-          method: 'GET',
-          headers: { accept: 'image/*' },
+        return await downloadImageWithNativeRequest({
+          url: parsed.toString(),
+          maximumResponseBytes: input.maximumResponseBytes,
           signal: input.signal,
-          redirect: 'error'
+          createRequest: (url) => net.request({
+            method: 'GET',
+            url,
+            credentials: 'omit',
+            redirect: 'error'
+          })
         });
-        if (response.status < 200 || response.status >= 300) {
-          throw new NewApiTransportFailure('network');
-        }
-        const body = await readBoundedResponse(
-          response,
-          input.maximumResponseBytes,
-          () => new NewApiTransportFailure('response_too_large')
-        );
-        return {
-          body,
-          contentType: response.headers.get('content-type') ?? undefined
-        };
       } catch (error) {
-        if (input.signal?.aborted || isAbortError(error)) {
+        if (
+          input.signal?.aborted ||
+          isAbortError(error) ||
+          (error instanceof NativeBinaryRequestFailure && error.code === 'cancelled')
+        ) {
           throw new NewApiTransportFailure('cancelled');
+        }
+        if (
+          error instanceof NativeBinaryRequestFailure &&
+          error.code === 'response_too_large'
+        ) {
+          throw new NewApiTransportFailure('response_too_large');
         }
         if (error instanceof NewApiTransportFailure) throw error;
         throw new NewApiTransportFailure('network');

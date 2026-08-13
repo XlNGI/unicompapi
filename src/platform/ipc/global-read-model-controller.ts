@@ -14,6 +14,7 @@ import type {
 import {
   JsonExecutionRepository,
   JsonFileReferenceRepository,
+  JsonProviderOperationRepository,
   JsonTaskRepository,
   JsonWorkRepository
 } from '../repositories';
@@ -120,9 +121,35 @@ export class GlobalReadModelController {
             task,
             await context.executions.list(task.id)
           );
+          const latest = [...executions].sort((a, b) =>
+            b.updatedAt.localeCompare(a.updatedAt)
+          )[0];
+          let hasRecoverableImageOperation = false;
+          if (latest?.providerOperationRecordId) {
+            try {
+              const operation = await context.operations.get(
+                latest.providerOperationRecordId
+              );
+              hasRecoverableImageOperation = Boolean(
+                operation &&
+                operation.taskId === task.id &&
+                operation.executionId === latest.id &&
+                operation.mediaKind === 'image' &&
+                operation.outcome.kind === 'completed_sync'
+              );
+            } catch {
+              // A missing or damaged result reference disables recovery only.
+            }
+          }
           return {
             ok: true,
-            value: toTaskDetails(entry, task, executions)
+            value: toTaskDetails(
+              entry,
+              task,
+              executions,
+              this.getCurrentProject()?.projectId,
+              hasRecoverableImageOperation
+            )
           };
         } catch {
           continue;
@@ -270,6 +297,7 @@ function createContext(entry: ProjectCatalogEntry) {
   return {
     tasks: new JsonTaskRepository(storage, entry.projectId),
     executions: new JsonExecutionRepository(storage),
+    operations: new JsonProviderOperationRepository(storage),
     works: new JsonWorkRepository(storage, entry.projectId),
     files: new JsonFileReferenceRepository(storage, entry.projectId)
   };
@@ -299,9 +327,14 @@ function toTaskSummary(
 function toTaskDetails(
   entry: ProjectCatalogEntry,
   task: Task,
-  executions: readonly Execution[]
+  executions: readonly Execution[],
+  currentProjectId?: string,
+  hasRecoverableImageOperation = false
 ): StorageTaskDetailsDto {
   const summary = toTaskSummary(entry, task, executions);
+  const latest = [...executions].sort((a, b) =>
+    b.updatedAt.localeCompare(a.updatedAt)
+  )[0];
   return {
     ...summary,
     sourceDraftId: task.sourceDraftId,
@@ -310,7 +343,22 @@ function toTaskDetails(
       : task.submission.prompt.originalInput,
     finalPrompt: task.submission.kind === 'video_editing'
       ? `本地视频导出，草稿版本 ${task.submission.videoEditing.draftRevision}`
-      : task.submission.prompt.finalPrompt
+      : task.submission.prompt.finalPrompt,
+    canRecoverImageResult:
+      entry.projectId === currentProjectId &&
+      task.submission.kind === 'image_generation' &&
+      summary.latestExecutionState === 'failed' &&
+      summary.retryability === 'retryable' &&
+      latest?.failure?.stage === 'downloading' &&
+      latest.submissionOutcome === 'completed_sync' &&
+      Boolean(latest.providerOperationRecordId) &&
+      hasRecoverableImageOperation,
+    canRecoverVideoResult:
+      entry.projectId === currentProjectId &&
+      task.submission.kind === 'video_generation' &&
+      summary.latestExecutionState === 'failed' &&
+      summary.retryability === 'retryable' &&
+      latest?.failure?.stage === 'downloading'
   };
 }
 

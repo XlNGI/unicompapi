@@ -11,7 +11,7 @@ const panel = await readFile(
 );
 
 test('video feature IPC is the only generation submission surface', () => {
-  for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
+  for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft', 'recoverResult']) {
     assert.match(shared, new RegExp(`${operation}\\(`));
     assert.match(preload, new RegExp(`${operation}:`));
     assert.match(handlers, new RegExp(`videoFeatureIpcChannels\\.${operation}`));

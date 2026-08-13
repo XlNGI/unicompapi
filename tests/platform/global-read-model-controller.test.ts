@@ -3,11 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  createProviderOperationRecord,
   toDraftId,
   toExecutionId,
   toFileReferenceId,
   toIsoTimestamp,
   toProjectId,
+  toProviderOperationRecordId,
   toTaskId,
   toWorkId,
   type Execution,
@@ -20,6 +22,7 @@ import {
   InMemoryProjectCatalogStore,
   JsonExecutionRepository,
   JsonFileReferenceRepository,
+  JsonProviderOperationRepository,
   JsonTaskRepository,
   JsonWorkRepository,
   NodeProjectStorage,
@@ -172,7 +175,11 @@ describe('GlobalReadModelController', () => {
     });
     expect(taskDetails).toMatchObject({
       ok: true,
-      value: { originalInput: 'Original prompt', finalPrompt: 'Final prompt' }
+      value: {
+        originalInput: 'Original prompt',
+        finalPrompt: 'Final prompt',
+        canRecoverVideoResult: false
+      }
     });
     expect(workDetails).toMatchObject({
       ok: true,
@@ -219,6 +226,93 @@ describe('GlobalReadModelController', () => {
         issues: [{ projectId: 'project-corrupt', reason: 'invalid_data' }]
       }
     });
+  });
+
+  it('offers image recovery only for a persisted completed result in the open project', async () => {
+    const root = await createRoot('unicomp-read-model-image-recovery-');
+    const projectId = toProjectId('project-image-recovery-read-model');
+    const storage = new NodeProjectStorage(root);
+    const task: Task = {
+      schemaVersion: 1,
+      id: toTaskId('task-image-recovery-read-model'),
+      projectId,
+      sourceDraftId: toDraftId('draft-image-recovery-read-model'),
+      submission: {
+        kind: 'image_generation',
+        prompt: {
+          originalInput: 'Recover original image',
+          systemSupplements: [],
+          finalPrompt: 'Recover final image'
+        },
+        assetIds: [],
+        confirmedAt: t0
+      },
+      executionIds: [toExecutionId('execution-image-recovery-read-model')],
+      createdAt: t0
+    };
+    const operationId = toProviderOperationRecordId(
+      'provider-operation-image-recovery-read-model'
+    );
+    const execution: Execution = {
+      schemaVersion: 1,
+      id: task.executionIds[0],
+      taskId: task.id,
+      attempt: 1,
+      state: 'failed',
+      providerOperationRecordId: operationId,
+      submissionOutcome: 'completed_sync',
+      failure: {
+        stage: 'downloading',
+        message: 'Temporary image download failure',
+        retryability: 'retryable'
+      },
+      createdAt: t0,
+      updatedAt: t1
+    };
+    await new JsonTaskRepository(storage, projectId).save(task);
+    await new JsonExecutionRepository(storage).save(execution);
+    await new JsonProviderOperationRepository(storage).save(
+      createProviderOperationRecord({
+        id: operationId,
+        taskId: task.id,
+        executionId: execution.id,
+        mediaKind: 'image',
+        executionLifecycle: 'synchronous_completed',
+        outcome: {
+          kind: 'completed_sync',
+          providerOperationId: 'persisted-image-result',
+          results: [{
+            kind: 'remote_url',
+            value: 'https://files.example.test/result.png'
+          }]
+        },
+        createdAt: t0,
+        updatedAt: t1
+      })
+    );
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    await catalog.remember({
+      projectId,
+      projectName: 'Image recovery project',
+      rootDirectory: root
+    });
+    const openController = new GlobalReadModelController(catalog, () => ({
+      projectId,
+      projectName: 'Image recovery project',
+      rootDirectory: root
+    }));
+    const closedController = new GlobalReadModelController(catalog);
+
+    await expect(openController.getTaskDetails({ taskId: task.id }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: { canRecoverImageResult: true }
+      });
+    await expect(closedController.getTaskDetails({ taskId: task.id }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: { canRecoverImageResult: false }
+      });
   });
 
   it('reports all project usage and free space for the current project disk without paths', async () => {

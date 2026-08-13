@@ -114,3 +114,23 @@ test('management adapter composition registers the evidence-backed probes', () =
   assert.match(managementAdapters, /readStreamingResponse/);
   assert.doesNotMatch(managementAdapters, /api[_-]?key\s*[:=]\s*['"][^'"]+['"]/i);
 });
+
+test('image result downloads avoid Web Headers conversion for provider filenames', () => {
+  const downloadPort = managementAdapters.slice(
+    managementAdapters.indexOf('function createElectronNewApiImageDownloadPort'),
+    managementAdapters.indexOf('function isAbortError')
+  );
+  assert.match(downloadPort, /downloadImageWithNativeRequest/);
+  assert.match(downloadPort, /net\.request\(/);
+  assert.doesNotMatch(downloadPort, /net\.fetch\(/);
+});
+
+test('video result downloads avoid Web Headers conversion for provider filenames', () => {
+  const transport = managementAdapters.slice(
+    managementAdapters.indexOf('class ElectronNewApiHttpTransport'),
+    managementAdapters.indexOf('class ElectronKlingHttpTransport')
+  );
+  assert.match(transport, /isNewApiVideoResultRequest/);
+  assert.match(transport, /requestBinaryWithNativeRequest/);
+  assert.match(transport, /net\.request\(/);
+});

@@ -10,8 +10,8 @@ const panel = await readFile(
   'utf8'
 );
 
-test('image feature IPC exposes candidate, preparation and confirmed submission only', () => {
-  for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
+test('image feature IPC exposes controlled submission and result recovery', () => {
+  for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft', 'recoverResult']) {
     assert.match(shared, new RegExp(`${operation}\\(`));
     assert.match(preload, new RegExp(`${operation}:`));
     assert.match(handlers, new RegExp(`imageFeatureIpcChannels\\.${operation}`));

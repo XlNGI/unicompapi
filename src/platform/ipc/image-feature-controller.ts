@@ -12,6 +12,7 @@ import type {
   ImageFeatureIpcErrorCode,
   ImageFeatureIpcResult,
   ImageFeaturePreparationDto,
+  ImageFeatureRecoveryDto,
   ImageFeatureSubmissionDto
 } from '../../shared/image-feature-ipc';
 import {
@@ -41,6 +42,7 @@ export interface ImageFeatureControllerRuntime {
   generateQuickImage?(
     input: ImageFeatureGenerateQuickInput
   ): Promise<ImageFeatureGenerateQuickDto>;
+  recoverResult?(taskId: string): Promise<ImageFeatureRecoveryDto>;
 }
 
 export interface ImageFeatureControllerDependencies {
@@ -140,6 +142,22 @@ export class ImageFeatureController {
         ok: true,
         value: await runtime.generateQuickImage(input)
       };
+    });
+  }
+
+  recoverResult(
+    request: unknown
+  ): Promise<ImageFeatureIpcResult<ImageFeatureRecoveryDto>> {
+    return this.execute(async () => {
+      const taskId = parseTaskRequest(request);
+      await this.dependencies.mutations.wait();
+      const session = this.dependencies.getSession();
+      if (!session) return failure('project_not_open', 'A project must be open');
+      const runtime = this.dependencies.getRuntime(session);
+      if (!runtime.recoverResult) {
+        return failure('runtime_not_allowed', 'Image result recovery is unavailable');
+      }
+      return { ok: true, value: await runtime.recoverResult(taskId) };
     });
   }
 
@@ -266,6 +284,11 @@ function parseGenerateQuickRequest(request: unknown): ImageFeatureGenerateQuickI
     candidateId: nonBlank(item.candidateId),
     parameterValues: item.parameterValues as ImageFeatureGenerateQuickInput['parameterValues']
   };
+}
+
+function parseTaskRequest(request: unknown): string {
+  if (!exact(request, ['taskId'])) throw invalidRequest();
+  return nonBlank(request.taskId);
 }
 
 class ImageFeatureControllerError extends Error {

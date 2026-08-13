@@ -9,6 +9,7 @@ import type {
   VideoFeatureIpcErrorCode,
   VideoFeatureIpcResult,
   VideoFeaturePreparationDto,
+  VideoFeatureRecoveryDto,
   VideoFeatureSubmissionDto
 } from '../../shared/video-feature-ipc';
 import {
@@ -28,6 +29,7 @@ export interface VideoFeatureControllerRuntime {
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
   }): Promise<VideoFeatureSubmissionDto>;
+  recoverResult?(taskId: string): Promise<VideoFeatureRecoveryDto>;
 }
 
 export interface VideoFeatureControllerDependencies {
@@ -104,6 +106,22 @@ export class VideoFeatureController {
           confirmation
         })
       };
+    });
+  }
+
+  recoverResult(
+    request: unknown
+  ): Promise<VideoFeatureIpcResult<VideoFeatureRecoveryDto>> {
+    return this.execute(async () => {
+      const taskId = parseTaskRequest(request);
+      await this.dependencies.mutations.wait();
+      const session = this.dependencies.getSession();
+      if (!session) return failure('project_not_open', 'A project must be open');
+      const runtime = this.dependencies.getRuntime(session);
+      if (!runtime.recoverResult) {
+        return failure('runtime_not_allowed', 'Video result recovery is unavailable');
+      }
+      return { ok: true, value: await runtime.recoverResult(taskId) };
     });
   }
 
@@ -196,6 +214,11 @@ function parseSubmitRequest(request: unknown): DraftRequest & {
     confirmationId: nonBlank(request.confirmationId),
     confirmed: request.confirmed
   };
+}
+
+function parseTaskRequest(request: unknown): string {
+  if (!exact(request, ['taskId'])) throw invalidRequest();
+  return nonBlank(request.taskId);
 }
 
 class VideoFeatureControllerError extends Error {

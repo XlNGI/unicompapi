@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   createRetryExecution,
+  recoverRemoteCompletedExecution,
   InvalidStateTransitionError,
   RetryNotAllowedError,
   toExecutionId,
+  toProviderOperationRecordId,
   transitionExecution
 } from '../../src/domain';
 import {
@@ -95,6 +97,48 @@ describe('execution state machine', () => {
     expect(failed).toMatchObject({
       state: 'failed',
       failure: { stage: 'remote_completed', retryability: 'retryable' }
+    });
+  });
+
+  it('resumes only a retryable failed download without creating a new execution', () => {
+    const { execution } = createLinkedExecutionFixture();
+    const submitting = transitionExecution(execution, 'submitting', t3);
+    const queued = transitionExecution(submitting, 'queued', t4, {
+      remoteOperationId: 'remote-video-1',
+      providerOperationRecordId: toProviderOperationRecordId('provider-operation-1'),
+      submissionOutcome: 'accepted_async'
+    });
+    const remoteCompleted = transitionExecution(queued, 'remote_completed', t5);
+    const downloading = transitionExecution(remoteCompleted, 'downloading', t6);
+    const failed = transitionExecution(downloading, 'failed', t7, {
+      failure: {
+        stage: 'downloading',
+        message: 'Temporary download failure',
+        retryability: 'retryable'
+      }
+    });
+
+    expect(recoverRemoteCompletedExecution(failed, t7)).toMatchObject({
+      id: failed.id,
+      state: 'remote_completed',
+      failure: undefined,
+      remoteOperationId: 'remote-video-1'
+    });
+    expect(() => transitionExecution(
+      { ...failed, failure: { ...failed.failure!, stage: 'processing' } },
+      'remote_completed',
+      t7
+    )).toThrow(RetryNotAllowedError);
+
+    const synchronousImage = {
+      ...failed,
+      remoteOperationId: undefined,
+      submissionOutcome: 'completed_sync' as const
+    };
+    expect(recoverRemoteCompletedExecution(synchronousImage, t7)).toMatchObject({
+      id: failed.id,
+      state: 'remote_completed',
+      providerOperationRecordId: 'provider-operation-1'
     });
   });
 
