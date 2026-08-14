@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -485,15 +485,202 @@ describe('DeepSeek runtime and usage safety', () => {
       'complete:response-execution-deepseek'
     ]);
   });
+
+  it('keeps an active stream open beyond the legacy timeout while chunks continue arriving', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new SyntheticTransport();
+      transport.responses.push(delayedByteStreamResponse([
+        { afterMs: 80, value: 'first' },
+        { afterMs: 80, value: 'second' },
+        { afterMs: 80, value: 'third' }
+      ]));
+      const runtime = new DeepSeekSharedRuntime({
+        transport,
+        defaultTimeoutMs: 100,
+        defaultStreamTotalTimeoutMs: 1_000
+      });
+      const session = await runtime.openChatStream({
+        credentials: credential,
+        body: new TextEncoder().encode('{}')
+      });
+      const received: string[] = [];
+      const completion = (async () => {
+        for await (const bytes of session.stream) {
+          received.push(new TextDecoder().decode(bytes));
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(80);
+      await vi.advanceTimersByTimeAsync(80);
+      await vi.advanceTimersByTimeAsync(80);
+      await completion;
+
+      expect(received).toEqual(['first', 'second', 'third']);
+      expect(runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count local chunk processing time as upstream stream idle time', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new SyntheticTransport();
+      transport.responses.push(delayedByteStreamResponse([
+        { afterMs: 0, value: 'first' },
+        { afterMs: 0, value: 'second' }
+      ]));
+      const runtime = new DeepSeekSharedRuntime({
+        transport,
+        defaultStreamIdleTimeoutMs: 100,
+        defaultStreamTotalTimeoutMs: 1_000
+      });
+      const session = await runtime.openChatStream({
+        credentials: credential,
+        body: new TextEncoder().encode('{}')
+      });
+      const received: string[] = [];
+      const completion = (async () => {
+        for await (const bytes of session.stream) {
+          received.push(new TextDecoder().decode(bytes));
+          if (received.length === 1) {
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(150);
+      await vi.advanceTimersByTimeAsync(1);
+      await completion;
+
+      expect(received).toEqual(['first', 'second']);
+      expect(runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('times out when the upstream connection never returns response headers', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport: DeepSeekHttpTransport = {
+        send: (request) => new Promise((_resolve, reject) => {
+          const fail = () => reject(new DeepSeekTransportFailure('cancelled'));
+          if (request.signal.aborted) fail();
+          else request.signal.addEventListener('abort', fail, { once: true });
+        })
+      };
+      const runtime = new DeepSeekSharedRuntime({
+        transport,
+        defaultConnectionTimeoutMs: 100,
+        defaultStreamIdleTimeoutMs: 500,
+        defaultStreamTotalTimeoutMs: 1_000
+      });
+      const opening = runtime.openChatStream({
+        credentials: credential,
+        body: new TextEncoder().encode('{}')
+      });
+      const openingExpectation = expect(opening).rejects.toMatchObject({
+        code: 'timeout'
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await openingExpectation;
+      expect(runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('times out only after the upstream stream becomes idle and preserves accepted content', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = chatFixture({
+        defaultStreamIdleTimeoutMs: 100,
+        defaultStreamTotalTimeoutMs: 1_000
+      });
+      fixture.transport.responses.push(stalledStreamResponse(
+        chunk({ delta: { content: 'Preserved partial answer' } })
+      ));
+      const handle = await fixture.adapter.submit({
+        routeSnapshot: routeSnapshot('text_chat'),
+        request: dispatchRequest({})
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.lifecycle.events).toContain(
+        'content:Preserved partial answer'
+      );
+      await vi.advanceTimersByTimeAsync(101);
+
+      await expect(handle.completion).resolves.toEqual({
+        state: 'failed',
+        providerOperationId: 'deepseek-operation-1',
+        safeCode: 'deepseek.timeout'
+      });
+      expect(fixture.lifecycle.events).toEqual([
+        'start:response-execution-deepseek',
+        'content:Preserved partial answer',
+        'fail:deepseek.timeout'
+      ]);
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains a bounded total stream duration as the final safety cap', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = new SyntheticTransport();
+      transport.responses.push(delayedByteStreamResponse([
+        { afterMs: 80, value: 'first' },
+        { afterMs: 80, value: 'second' },
+        { afterMs: 80, value: 'third' }
+      ]));
+      const runtime = new DeepSeekSharedRuntime({
+        transport,
+        defaultStreamIdleTimeoutMs: 100,
+        defaultStreamTotalTimeoutMs: 210
+      });
+      const session = await runtime.openChatStream({
+        credentials: credential,
+        body: new TextEncoder().encode('{}')
+      });
+      let receivedChunks = 0;
+      const completion = (async () => {
+        for await (const bytes of session.stream) {
+          if (bytes.byteLength > 0) receivedChunks += 1;
+        }
+      })();
+      const completionExpectation = expect(completion).rejects.toMatchObject({
+        code: 'timeout'
+      });
+
+      await vi.advanceTimersByTimeAsync(210);
+      await completionExpectation;
+      expect(receivedChunks).toBe(2);
+      expect(runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
-function chatFixture() {
+function chatFixture(timeoutOptions: {
+  readonly defaultTimeoutMs?: number;
+  readonly defaultConnectionTimeoutMs?: number;
+  readonly defaultStreamIdleTimeoutMs?: number;
+  readonly defaultStreamTotalTimeoutMs?: number;
+} = {}) {
   const transport = new SyntheticTransport();
   const logs: DeepSeekSafeLogEvent[] = [];
   const runtime = new DeepSeekSharedRuntime({
     transport,
     logger: (event) => logs.push(event),
-    defaultTimeoutMs: 10_000
+    defaultTimeoutMs: 10_000,
+    ...timeoutOptions
   });
   const lifecycle = new RecordingLifecycle();
   const usage = new RecordingUsageSink();
@@ -747,6 +934,36 @@ function cancellableStreamResponse(): DeepSeekHttpTransportResponse {
   };
 }
 
+function delayedByteStreamResponse(
+  chunks: readonly { readonly afterMs: number; readonly value: string }[]
+): DeepSeekHttpTransportResponse {
+  return {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        for (const item of chunks) {
+          await waitForSyntheticStream(item.afterMs);
+          yield new TextEncoder().encode(item.value);
+        }
+      }
+    }
+  };
+}
+
+function stalledStreamResponse(initialEvent: string): DeepSeekHttpTransportResponse {
+  return {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        yield new TextEncoder().encode(`data: ${initialEvent}\n\n`);
+        await waitForSyntheticStream(60 * 60_000);
+      }
+    }
+  };
+}
+
 let latestRequestForCancellableStream: DeepSeekHttpTransportRequest | undefined;
 
 function currentSyntheticRequest(): DeepSeekHttpTransportRequest {
@@ -754,6 +971,26 @@ function currentSyntheticRequest(): DeepSeekHttpTransportRequest {
     throw new Error('Synthetic cancellable request is unavailable');
   }
   return latestRequestForCancellableStream;
+}
+
+function waitForSyntheticStream(milliseconds: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const request = currentSyntheticRequest();
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      request.signal.removeEventListener('abort', abort);
+      operation();
+    };
+    const abort = () => finish(() => reject(
+      new DeepSeekTransportFailure('cancelled')
+    ));
+    const timeout = setTimeout(() => finish(resolve), milliseconds);
+    if (request.signal.aborted) abort();
+    else request.signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 async function* splitBytes(

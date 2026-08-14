@@ -478,6 +478,82 @@ describe('NewAPI management and runtime safety', () => {
       credentials: credential()
     })).rejects.toMatchObject({ code: 'invalid_response' });
   });
+
+  it('keeps UniCompAPI streams active beyond the legacy fixed timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = runtimeFixture(
+        async (request) => delayedStreamResponse(request, [
+          { afterMs: 80, value: 'first' },
+          { afterMs: 80, value: 'second' },
+          { afterMs: 80, value: 'third' }
+        ]),
+        [],
+        {
+          defaultTimeoutMs: 100,
+          defaultStreamTotalTimeoutMs: 1_000
+        }
+      );
+      const session = await fixture.runtime.openChatStream({
+        connection: unicompapiConnection(),
+        credentials: unicompapiCredential(),
+        body: new TextEncoder().encode('{}')
+      });
+      const received: string[] = [];
+      const completion = (async () => {
+        for await (const bytes of session.stream) {
+          received.push(new TextDecoder().decode(bytes));
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(80);
+      await vi.advanceTimersByTimeAsync(80);
+      await vi.advanceTimersByTimeAsync(80);
+      await completion;
+
+      expect(received).toEqual(['first', 'second', 'third']);
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('times out a NewAPI stream only after upstream byte delivery stalls', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = runtimeFixture(
+        async (request) => stalledStreamResponse(request, 'first'),
+        [],
+        {
+          defaultStreamIdleTimeoutMs: 100,
+          defaultStreamTotalTimeoutMs: 1_000
+        }
+      );
+      const session = await fixture.runtime.openChatStream({
+        connection: connection(),
+        credentials: credential(),
+        body: new TextEncoder().encode('{}')
+      });
+      const received: string[] = [];
+      const completion = (async () => {
+        for await (const bytes of session.stream) {
+          received.push(new TextDecoder().decode(bytes));
+        }
+      })();
+      const completionExpectation = expect(completion).rejects.toMatchObject({
+        code: 'timeout'
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(received).toEqual(['first']);
+      await vi.advanceTimersByTimeAsync(101);
+      await completionExpectation;
+
+      expect(fixture.runtime.activeRequestCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('NewAPI chat adapter', () => {
@@ -705,6 +781,169 @@ describe('NewAPI chat adapter', () => {
     });
     expect(lifecycle.content).toBe('汕头在粤东。');
     expect(lifecycle.reasoningContent).toBe('思考');
+  });
+
+  it('uses the documented UniCompAPI DeepSeek V4 reasoning effort and persists reasoning', async () => {
+    const deepSeekModelKey = 'deepseek-v4-flash';
+    const fixture = runtimeFixture(async () => streamResponse([
+      event({
+        id: 'chatcmpl-unicomp-deepseek-reasoning',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: deepSeekModelKey,
+        choices: [{
+          index: 0,
+          delta: { reasoning_content: '先分析问题。', content: '' }
+        }]
+      }),
+      event({
+        id: 'chatcmpl-unicomp-deepseek-reasoning',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: deepSeekModelKey,
+        choices: [{ index: 0, delta: { content: '这是答案。' } }]
+      }),
+      event({
+        id: 'chatcmpl-unicomp-deepseek-reasoning',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: deepSeekModelKey,
+        choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }]
+      }),
+      'data: [DONE]\n\n'
+    ].join('')));
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      { get: async () => unicompapiConnection() },
+      defaultTextSchemaResolver(),
+      lifecycle.port,
+      usageSink().port
+    );
+
+    const handle = await adapter.submit({
+      routeSnapshot: unicompapiTextRoute('text_reasoning', deepSeekModelKey),
+      request: {
+        responseExecutionId: 'response-execution-unicomp-deepseek-reasoning',
+        invocationAttemptId: 'attempt-unicomp-deepseek-reasoning',
+        messages: [{ role: 'user', content: '请分析' }],
+        parameterValues: {}
+      }
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(requestJson(fixture.requests[0])).toMatchObject({
+      model: deepSeekModelKey,
+      reasoning_effort: 'medium'
+    });
+    expect(requestJson(fixture.requests[0])).not.toHaveProperty('thinking');
+    expect(lifecycle.reasoningContent).toBe('先分析问题。');
+    expect(lifecycle.content).toBe('这是答案。');
+  });
+
+  it('preserves an explicit UniCompAPI DeepSeek V4 reasoning effort', async () => {
+    const deepSeekModelKey = 'deepseek-v4-pro';
+    const fixture = runtimeFixture(async () => streamResponse([
+      event({
+        id: 'chatcmpl-unicomp-deepseek-explicit-effort',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: deepSeekModelKey,
+        choices: [{ index: 0, delta: { content: '完成。' }, finish_reason: 'stop' }]
+      }),
+      'data: [DONE]\n\n'
+    ].join('')));
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      { get: async () => unicompapiConnection() },
+      defaultTextSchemaResolver(),
+      lifecycleFixture().port,
+      usageSink().port
+    );
+
+    const handle = await adapter.submit({
+      routeSnapshot: unicompapiTextRoute('text_reasoning', deepSeekModelKey),
+      request: {
+        responseExecutionId: 'response-execution-unicomp-deepseek-explicit-effort',
+        invocationAttemptId: 'attempt-unicomp-deepseek-explicit-effort',
+        messages: [{ role: 'user', content: '深入分析' }],
+        parameterValues: { reasoning_effort: 'high' }
+      }
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(requestJson(fixture.requests[0])).toMatchObject({
+      model: deepSeekModelKey,
+      reasoning_effort: 'high'
+    });
+    expect(requestJson(fixture.requests[0])).not.toHaveProperty('thinking');
+  });
+
+  it('does not enable or retain reasoning for UniCompAPI DeepSeek ordinary chat', async () => {
+    const deepSeekModelKey = 'deepseek-v4-flash';
+    const fixture = runtimeFixture(async () => streamResponse([
+      event({
+        id: 'chatcmpl-unicomp-deepseek-chat',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: deepSeekModelKey,
+        choices: [{
+          index: 0,
+          delta: { reasoning_content: '不应进入普通对话。', content: '普通回答。' }
+        }]
+      }),
+      event({
+        id: 'chatcmpl-unicomp-deepseek-chat',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: deepSeekModelKey,
+        choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }]
+      }),
+      'data: [DONE]\n\n'
+    ].join('')));
+    const lifecycle = lifecycleFixture();
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      { get: async () => unicompapiConnection() },
+      defaultTextSchemaResolver(),
+      lifecycle.port,
+      usageSink().port
+    );
+
+    const handle = await adapter.submit({
+      routeSnapshot: unicompapiTextRoute('text_chat', deepSeekModelKey),
+      request: {
+        responseExecutionId: 'response-execution-unicomp-deepseek-chat',
+        invocationAttemptId: 'attempt-unicomp-deepseek-chat',
+        messages: [{ role: 'user', content: '直接回答' }],
+        parameterValues: {}
+      }
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    const body = requestJson(fixture.requests[0]);
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('reasoning_effort');
+    expect(lifecycle.reasoningContent).toBe('');
+    expect(lifecycle.content).toBe('普通回答。');
   });
 
   it('rejects unknown JSON and mismatched schemas before HTTP', async () => {
@@ -1470,7 +1709,13 @@ describe('NewAPI video adapter', () => {
 
 function runtimeFixture(
   handler: (request: NewApiHttpTransportRequest) => Promise<NewApiHttpTransportResponse>,
-  logs: unknown[] = []
+  logs: unknown[] = [],
+  timeoutOptions: {
+    readonly defaultTimeoutMs?: number;
+    readonly defaultConnectionTimeoutMs?: number;
+    readonly defaultStreamIdleTimeoutMs?: number;
+    readonly defaultStreamTotalTimeoutMs?: number;
+  } = {}
 ) {
   const requests: NewApiHttpTransportRequest[] = [];
   const transport: NewApiHttpTransport = {
@@ -1484,7 +1729,8 @@ function runtimeFixture(
     runtime: new NewApiSharedRuntime({
       transport,
       logger: (event) => logs.push(event),
-      defaultTimeoutMs: 10_000
+      defaultTimeoutMs: 10_000,
+      ...timeoutOptions
     })
   };
 }
@@ -1607,6 +1853,19 @@ function schemaResolver() {
   };
 }
 
+function defaultTextSchemaResolver() {
+  const schemas = [
+    newApiDefaultTextChatParameterSchema,
+    newApiDefaultTextReasoningParameterSchema
+  ];
+  return {
+    get: async (schemaId: string, revision: number) =>
+      schemas.find(
+        (schema) => schema.schemaId === schemaId && schema.revision === revision
+      )
+  };
+}
+
 function schemaFor(feature: ParameterSchemaV2['productFeature']): ParameterSchemaV2 {
   const schema = modelContract.parameterSchemas.find(
     (candidate) => candidate.productFeature === feature
@@ -1684,6 +1943,52 @@ function routeFor(
     runtimePolicyRevision: 1,
     runtimeAuthorizationClaimId: 'claim-newapi-synthetic',
     createdAt: toIsoTimestamp('2026-08-03T00:00:00.000Z')
+  });
+}
+
+function unicompapiTextRoute(
+  feature: 'text_chat' | 'text_reasoning',
+  providerModelKey: string
+): ProviderExecutionRouteSnapshotV1 {
+  const schema = feature === 'text_reasoning'
+    ? newApiDefaultTextReasoningParameterSchema
+    : newApiDefaultTextChatParameterSchema;
+  return createProviderExecutionRouteSnapshot({
+    id: toProviderExecutionRouteSnapshotId(`route-unicompapi-${feature}`),
+    projectId: toProjectId('project-newapi'),
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+    adapterKey: NEWAPI_CHAT_ADAPTER_ID,
+    adapterVersion: NEWAPI_ADAPTER_VERSION,
+    providerId: toProviderId('provider-unicompapi'),
+    connectionId: toConnectionId('connection-unicompapi'),
+    connectionRevision: 1,
+    connectionConfigVersionId: 'connection-config-unicompapi-1',
+    endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID,
+    endpointPolicyRevision: 1,
+    credentialVersionId: 'credential-version-unicompapi-1',
+    modelId: toModelId(`model-unicompapi-${feature}`),
+    providerModelKey,
+    modelRevision: 1,
+    profileId: `profile-unicompapi-${feature}`,
+    profileRevision: 1,
+    protocolBindingId: toProtocolBindingId(`binding-unicompapi-${feature}`),
+    protocolBindingRevision: 1,
+    productFeature: feature,
+    internalPurpose: 'text_execution',
+    featureMappingVersion: 1,
+    parameterSchemaId: schema.schemaId,
+    parameterSchemaRevision: schema.revision,
+    resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
+    resultSchemaRevision: 1,
+    usageSchemaId: toUsageSchemaId(NEWAPI_CHAT_USAGE_SCHEMA_ID),
+    usageSchemaRevision: 1,
+    constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID,
+    constraintSetRevision: 1,
+    runtimePolicyId: 'runtime.unicompapi.synthetic',
+    runtimePolicyRevision: 1,
+    runtimeAuthorizationClaimId: 'claim-unicompapi-synthetic',
+    createdAt: toIsoTimestamp('2026-08-14T06:00:00.000Z')
   });
 }
 
@@ -1841,6 +2146,62 @@ function streamResponse(value: string): NewApiHttpTransportResponse {
       yield new TextEncoder().encode(value);
     })()
   };
+}
+
+function delayedStreamResponse(
+  request: NewApiHttpTransportRequest,
+  chunks: readonly { readonly afterMs: number; readonly value: string }[]
+): NewApiHttpTransportResponse {
+  return {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        for (const item of chunks) {
+          await waitForStreamRequest(request, item.afterMs);
+          yield new TextEncoder().encode(item.value);
+        }
+      }
+    }
+  };
+}
+
+function stalledStreamResponse(
+  request: NewApiHttpTransportRequest,
+  initialValue: string
+): NewApiHttpTransportResponse {
+  return {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        yield new TextEncoder().encode(initialValue);
+        await waitForStreamRequest(request, 60 * 60_000);
+      }
+    }
+  };
+}
+
+function waitForStreamRequest(
+  request: NewApiHttpTransportRequest,
+  milliseconds: number
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      request.signal.removeEventListener('abort', abort);
+      operation();
+    };
+    const abort = () => finish(() => reject(
+      new NewApiTransportFailure('cancelled')
+    ));
+    const timeout = setTimeout(() => finish(resolve), milliseconds);
+    if (request.signal.aborted) abort();
+    else request.signal.addEventListener('abort', abort, { once: true });
+  });
 }
 
 function event(value: unknown): string {

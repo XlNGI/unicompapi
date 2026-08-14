@@ -40,6 +40,9 @@ import {
   isOpenAiCompatiblePackageId
 } from './openai-compatible-identity';
 import {
+  isUniCompApiPackage
+} from './unicompapi-model-capabilities';
+import {
   NewApiRuntimeError,
   type NewApiEventStreamSession,
   type NewApiSharedRuntime
@@ -931,14 +934,23 @@ function serializeRequest(
     body.top_p = parameters.top_p;
   }
   const modelKey = route.providerModelKey ?? '';
+  const isUniCompApiDeepSeekV4 = isUniCompApiPackage(route.packageId) &&
+    (modelKey === 'deepseek-v4-flash' || modelKey === 'deepseek-v4-pro');
   const allowReasoningEffort = !modelKey.startsWith('deepseek-') ||
     modelKey === 'deepseek-v4-flash' || modelKey === 'deepseek-v4-pro';
+  const reasoningEffort = typeof parameters.reasoning_effort === 'string'
+    ? parameters.reasoning_effort.trim()
+    : '';
   if (
     allowReasoningEffort &&
-    typeof parameters.reasoning_effort === 'string' &&
-    parameters.reasoning_effort.trim()
+    reasoningEffort
   ) {
-    body.reasoning_effort = parameters.reasoning_effort.trim();
+    body.reasoning_effort = reasoningEffort;
+  } else if (
+    route.productFeature === 'text_reasoning' &&
+    isUniCompApiDeepSeekV4
+  ) {
+    body.reasoning_effort = 'medium';
   }
   for (const key of [
     'n',
