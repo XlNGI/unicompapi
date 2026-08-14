@@ -4,6 +4,14 @@
 
 当前状态：阶段 8 已正式收口；阶段 9 B1-B4、A1-A4、C1 与 C2 流程 1-8 已全部完成，并在 Windows x64 必需目标、macOS `required=false` 延期目标边界内正式收口。最终门禁为 Node 178 项与 Vitest 388 项，共 566 项通过，0 失败、0 跳过；Windows 九类套件全部 `passed`，Electron 4/4 响应且残留 0。macOS 保持 `not_run/deferred`，不声明已支持。Vidu 两项真实收费预算已用尽，Image V1 未决协议不晋级。阶段 10、服务商优化、安装包、签名、公证、生产更新、生产媒体分发、SBOM 和正式发布准入均未启动。
 
+2026-08-14 工程补充：`feature/text-stream-timeout-policy` 将文本模型流式超时统一为公共策略，并接入 DeepSeek、NewAPI、UniCompAPI 及其他经 NewAPI 运行时承载的 OpenAI 兼容文本模型。统一策略包含默认 60 秒响应头连接超时、只在等待上游下一分片时运行的 60 秒空闲超时，以及默认 15 分钟最终安全上限；本地解析、事件投影和保存当前分片的时间不计入上游空闲。配置采用公共默认值加服务商覆盖，`defaultTimeoutMs` 保持普通请求行为并作为连接/空闲配置兼容回退。图片、视频和轮询请求保持原有独立策略。实际完整门禁为 Node/UI 259 项与 Vitest 680 项，共 939 项通过，0 失败、0 跳过；typecheck、lint、build、平台审计、交接包校验和差异检查通过。未调用真实服务商、未读取真实凭证、未产生收费请求。记录见 `docs/active/文本模型流式超时统一化验收记录.md`。
+
+2026-08-14 工程补充：同一 `feature/text-stream-timeout-policy` 继续修复文本流逐分片同步重写 execution JSON 导致的本地阻塞。共享 linked lifecycle 新增 execution 级有界批处理：相邻同类增量按 120ms 或 8KB UTF-8 合并持久化，未完成写入达到 256KB 时恢复上游背压，终态前 seal 并 drain，写入失败不得静默完成；DTO、IPC、仓储 Schema 和图片/视频调用语义不变。真实 JSON 仓储集成测试证明 100 个连续小正文分片只产生 1 个增量事件，并保持连续 sequence 与终态顺序。完整门禁为 Node/UI 260 项与 Vitest 688 项，共 948 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、331 文件平台审计、50 项交接校验和差异检查通过。未调用真实服务商、未读取真实凭证、未产生收费请求。记录见 `docs/active/文本流增量持久化批处理验收记录.md`。
+
+2026-08-14 工程补充：同一分支修正 UniCompAPI DeepSeek V4 推理请求回归。第一次实现错误地注入未出现在 UniCompAPI 公开 Chat Completions 合同中的 `thinking.type=enabled`；时间线确认 14:12 成功调用属于旧进程且只有正文、无思考分片，14:39 新进程首次请求以 `newapi.invalid_response` 失败。现按 UniCompAPI 官方 Apifox 合同改为仅对 `provider-package-unicompapi` 的 `deepseek-v4-flash/pro` 推理路由发送 `reasoning_effort`，空参数默认 `medium`，用户显式值优先；普通对话不注入，返回端继续只持久化真实 `reasoning_content`。聚焦测试 41 项通过；完整门禁为 Node/UI 260 项与 Vitest 691 项，共 951 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建、331 文件平台审计、50 项交接校验和差异检查通过。未由工程验证发起真实收费调用、未读取真实凭证。记录见 `docs/active/UniCompAPI-DeepSeek思考链修复验收记录.md`。
+
+2026-08-14 工程补充：按项目负责人最新决策，模型与服务商画廊将 UniCompAPI 作为推荐供应商突出展示。推荐语义集中在本地品牌展示配置，不按供应商显示名称分支；画廊将推荐卡稳定排在首位，并以“推荐使用”标识、主题强调边框、轻量强调底色和独立品牌头像层级区别于普通卡片。连接、验证、模型目录和凭证业务逻辑保持不变。供应商页面合同测试新增推荐语义、排序、样式与名称解耦约束；浏览器真实 React 渲染覆盖 `1440x900` 深色与 `800x720` 浅色，UniCompAPI 名称无裁切、卡片与页面无横向溢出、按钮无重叠。实际完整门禁为 Node/UI 260 项与 Vitest 680 项，共 940 项通过，0 失败、0 跳过；typecheck、目标 ESLint、生产构建和差异检查通过。未调用真实服务商、未读取真实凭证、未产生收费请求，阶段 10 与 macOS 延期边界不变。
+
 2026-08-12 工程补充：`feature/prompt-enhance-generalization` 在 PR1 → PR6 基础上完成提示词增强一次性令牌并发消费修复、`prompt_once` route/invocation/usage 审计接线和调用记录 `prompt_once` 主体扩展；模型/参数变化会在 UI 侧立即作废准备令牌，不伪造临时草稿状态参与结果指纹。实际完整门禁为 Node/UI 249 项与 Vitest 659 项，共 908 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。未调用真实服务商与 Vidu，未进入阶段 10，当前待合并 `develop` 并保留本地/远程功能分支。记录见 `docs/active/提示词增强通用化与非流式改造验收记录.md`。
 
 2026-08-13 工程补充：`feature/remove-outbound-reconfirmation` 按项目负责人最新决策，将专业生图、文生视频与图生视频的“准备生成 → 确认本次外发 → 确认并提交”合并为单次“生成”操作；动态参数填写完成后，页面自动保存草稿、准备并校验外发事实快照后立即提交，不再要求用户二次确认。IPC DTO、一次性选择令牌、`confirmationId`、主进程快照匹配与过期/篡改校验保持不变。实际完整门禁为 Node/UI 254 项与 Vitest 661 项，共 915 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。未调用真实服务商或 Vidu，未进入阶段 10。
