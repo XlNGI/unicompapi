@@ -5,6 +5,15 @@ import type {
   StructuredCredentialRecord
 } from '../../../domain';
 import {
+  boundProviderByteStream,
+  createProviderStreamTimeoutController,
+  isPositiveTimeoutMs,
+  isValidProviderStreamTimeoutPolicy,
+  resolveTextStreamTimeoutPolicy,
+  type ProviderStreamTimeoutController,
+  type ProviderStreamTimeoutOptions
+} from '../provider-stream-timeout';
+import {
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_CHAT_PROTOCOL_ID,
@@ -138,10 +147,9 @@ export interface NewApiEventStreamSession {
   readonly close: () => void;
 }
 
-export interface NewApiSharedRuntimeOptions {
+export interface NewApiSharedRuntimeOptions extends ProviderStreamTimeoutOptions {
   readonly transport: NewApiHttpTransport;
   readonly proxy?: () => ProxyMode;
-  readonly defaultTimeoutMs?: number;
   readonly logger?: (event: NewApiSafeLogEvent) => void;
   readonly now?: () => number;
 }
@@ -399,8 +407,15 @@ export class NewApiSharedRuntime {
     const credential = parseCredential(input.credentials);
     const url = resolvePath(baseUrl, input.pathSegments);
     validateBounds(input.body, input.maximumRequestBytes, input.maximumResponseBytes);
-    const timeoutMs = this.options.defaultTimeoutMs ?? 120_000;
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    const requestTimeoutMs = this.options.defaultTimeoutMs ?? 120_000;
+    const streamTimeoutPolicy = input.expectedResponse === 'stream'
+      ? resolveTextStreamTimeoutPolicy(this.options)
+      : undefined;
+    if (
+      (!streamTimeoutPolicy && !isPositiveTimeoutMs(requestTimeoutMs)) ||
+      (streamTimeoutPolicy &&
+        !isValidProviderStreamTimeoutPolicy(streamTimeoutPolicy))
+    ) {
       throw new NewApiRuntimeError('invalid_request', 'not_retryable');
     }
     const controller = new AbortController();
@@ -410,14 +425,23 @@ export class NewApiSharedRuntime {
     let timedOut = false;
     let requestStarted = false;
     const startedAt = this.now();
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
+    let requestTimeout: ReturnType<typeof setTimeout> | undefined;
+    const streamTimeout: ProviderStreamTimeoutController | undefined =
+      streamTimeoutPolicy
+        ? createProviderStreamTimeoutController({
+            policy: streamTimeoutPolicy,
+            abort: () => controller.abort()
+          })
+        : undefined;
+    const hasTimedOut = () => streamTimeout?.timedOut ?? timedOut;
     const close = () => {
       if (closed) return;
       closed = true;
-      clearTimeout(timeout);
+      if (requestTimeout !== undefined) {
+        clearTimeout(requestTimeout);
+        requestTimeout = undefined;
+      }
+      streamTimeout?.close();
       removeExternalAbort();
       this.active.delete(controller);
     };
@@ -428,6 +452,14 @@ export class NewApiSharedRuntime {
       await input.beforeRequestStarted?.();
       requestStarted = true;
       this.log({ event: 'request_started', operation: input.operation, method: input.method });
+      if (streamTimeout) {
+        streamTimeout.start();
+      } else {
+        requestTimeout = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, requestTimeoutMs);
+      }
       const response = await this.options.transport.send({
         method: input.method,
         url: url.toString(),
@@ -438,7 +470,8 @@ export class NewApiSharedRuntime {
         },
         ...(input.body ? { body: Uint8Array.from(input.body) } : {}),
         signal: controller.signal,
-        timeoutMs,
+        timeoutMs:
+          streamTimeoutPolicy?.connectionTimeoutMs ?? requestTimeoutMs,
         maxRequestBytes: input.maximumRequestBytes,
         maxResponseBytes: input.maximumResponseBytes,
         proxy: this.options.proxy?.() ?? { kind: 'system_default' },
@@ -449,6 +482,7 @@ export class NewApiSharedRuntime {
           dnsRebindingProtection: 'required'
         }
       });
+      streamTimeout?.connected();
       validateDeclaredResponseSize(response.headers, input.maximumResponseBytes);
       if (response.status >= 300 && response.status < 400) {
         throw new NewApiRuntimeError('redirect_not_allowed', 'not_retryable');
@@ -474,12 +508,22 @@ export class NewApiSharedRuntime {
         return {
           status: response.status,
           headers,
-          stream: boundStream(
-            response.stream,
-            input.maximumResponseBytes,
+          stream: boundProviderByteStream({
+            stream: response.stream,
+            maximumBytes: input.maximumResponseBytes,
+            timeout: streamTimeout!,
             close,
-            (error) => mapRuntimeFailure(error, controller.signal, timedOut, this.disposed)
-          ),
+            invalidResponse: () =>
+              new NewApiRuntimeError('invalid_response', 'not_retryable'),
+            responseTooLarge: () =>
+              new NewApiRuntimeError('response_too_large', 'not_retryable'),
+            mapFailure: (error) => mapRuntimeFailure(
+              error,
+              controller.signal,
+              hasTimedOut(),
+              this.disposed
+            )
+          }),
           cancel: () => controller.abort(),
           close: () => {
             controller.abort();
@@ -500,7 +544,12 @@ export class NewApiSharedRuntime {
     } catch (error) {
       close();
       if (!requestStarted && !(error instanceof NewApiRuntimeError)) throw error;
-      const mapped = mapRuntimeFailure(error, controller.signal, timedOut, this.disposed);
+      const mapped = mapRuntimeFailure(
+        error,
+        controller.signal,
+        hasTimedOut(),
+        this.disposed
+      );
       this.log({
         event: 'request_failed', operation: input.operation, method: input.method,
         errorCode: mapped.code, elapsedMs: Math.max(0, this.now() - startedAt)
@@ -515,32 +564,6 @@ export class NewApiSharedRuntime {
 
   private now(): number {
     return this.options.now?.() ?? Date.now();
-  }
-}
-
-async function* boundStream(
-  stream: AsyncIterable<Uint8Array>,
-  maximumBytes: number,
-  close: () => void,
-  mapFailure: (error: unknown) => NewApiRuntimeError
-): AsyncGenerator<Uint8Array> {
-  let total = 0;
-  try {
-    for await (const chunk of stream) {
-      if (!(chunk instanceof Uint8Array)) {
-        throw new NewApiRuntimeError('invalid_response', 'not_retryable');
-      }
-      total += chunk.byteLength;
-      if (total > maximumBytes) {
-        throw new NewApiRuntimeError('response_too_large', 'not_retryable');
-      }
-      yield Uint8Array.from(chunk);
-    }
-  } catch (error) {
-    if (error instanceof NewApiRuntimeError) throw error;
-    throw mapFailure(error);
-  } finally {
-    close();
   }
 }
 

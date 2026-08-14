@@ -4,6 +4,15 @@ import type {
   StructuredCredentialRecord
 } from '../../../domain';
 import {
+  boundProviderByteStream,
+  createProviderStreamTimeoutController,
+  isPositiveTimeoutMs,
+  isValidProviderStreamTimeoutPolicy,
+  resolveTextStreamTimeoutPolicy,
+  type ProviderStreamTimeoutController,
+  type ProviderStreamTimeoutOptions
+} from '../provider-stream-timeout';
+import {
   DEEPSEEK_CREDENTIAL_SCHEMA_ID,
   DEEPSEEK_OFFICIAL_BASE_URL,
   DEEPSEEK_OFFICIAL_TEMPLATE_ID,
@@ -107,11 +116,10 @@ export interface DeepSeekEventStreamSession {
   readonly close: () => void;
 }
 
-export interface DeepSeekSharedRuntimeOptions {
+export interface DeepSeekSharedRuntimeOptions extends ProviderStreamTimeoutOptions {
   readonly transport: DeepSeekHttpTransport;
   readonly baseUrl?: string;
   readonly proxy?: () => ProxyMode;
-  readonly defaultTimeoutMs?: number;
   readonly defaultMaxRequestBytes?: number;
   readonly defaultMaxJsonResponseBytes?: number;
   readonly defaultMaxStreamBytes?: number;
@@ -256,10 +264,14 @@ export class DeepSeekSharedRuntime {
     }
     const credential = parseCredential(input.credentials);
     const url = resolvePath(this.baseUrl, input.path);
-    const timeoutMs = this.options.defaultTimeoutMs ?? 60_000;
+    const requestTimeoutMs = this.options.defaultTimeoutMs ?? 60_000;
+    const streamTimeoutPolicy = input.keepOpen
+      ? resolveTextStreamTimeoutPolicy(this.options)
+      : undefined;
     if (
-      !Number.isSafeInteger(timeoutMs) ||
-      timeoutMs < 1 ||
+      (!input.keepOpen && !isPositiveTimeoutMs(requestTimeoutMs)) ||
+      (streamTimeoutPolicy &&
+        !isValidProviderStreamTimeoutPolicy(streamTimeoutPolicy)) ||
       !Number.isSafeInteger(input.maxResponseBytes) ||
       input.maxResponseBytes < 1
     ) {
@@ -272,14 +284,23 @@ export class DeepSeekSharedRuntime {
     let timedOut = false;
     let requestStarted = false;
     const startedAt = this.now();
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
+    let requestTimeout: ReturnType<typeof setTimeout> | undefined;
+    const streamTimeout: ProviderStreamTimeoutController | undefined =
+      streamTimeoutPolicy
+        ? createProviderStreamTimeoutController({
+            policy: streamTimeoutPolicy,
+            abort: () => controller.abort()
+          })
+        : undefined;
+    const hasTimedOut = () => streamTimeout?.timedOut ?? timedOut;
     const close = () => {
       if (closed) return;
       closed = true;
-      clearTimeout(timeout);
+      if (requestTimeout !== undefined) {
+        clearTimeout(requestTimeout);
+        requestTimeout = undefined;
+      }
+      streamTimeout?.close();
       removeExternalAbort();
       this.active.delete(controller);
     };
@@ -294,6 +315,14 @@ export class DeepSeekSharedRuntime {
         operation: input.operation,
         method: input.method
       });
+      if (streamTimeout) {
+        streamTimeout.start();
+      } else {
+        requestTimeout = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, requestTimeoutMs);
+      }
       const headers: Record<string, string> = {
         accept: input.accept,
         authorization: `Bearer ${credential}`
@@ -305,11 +334,13 @@ export class DeepSeekSharedRuntime {
         headers,
         ...(input.body ? { body: Uint8Array.from(input.body) } : {}),
         signal: controller.signal,
-        timeoutMs,
+        timeoutMs:
+          streamTimeoutPolicy?.connectionTimeoutMs ?? requestTimeoutMs,
         maxResponseBytes: input.maxResponseBytes,
         proxy: this.options.proxy?.() ?? { kind: 'system_default' },
         redirect: 'manual'
       });
+      streamTimeout?.connected();
       validateDeclaredResponseSize(response.headers, input.maxResponseBytes);
       if (response.status >= 300 && response.status < 400) {
         throw new DeepSeekRuntimeError('redirect_not_allowed', 'not_retryable');
@@ -339,17 +370,22 @@ export class DeepSeekSharedRuntime {
       if (!input.keepOpen) {
         throw new DeepSeekRuntimeError('invalid_response', 'not_retryable');
       }
-      const stream = boundStream(
-        response.stream,
-        input.maxResponseBytes,
+      const stream = boundProviderByteStream({
+        stream: response.stream,
+        maximumBytes: input.maxResponseBytes,
+        timeout: streamTimeout!,
         close,
-        (error) => mapRuntimeFailure(
+        invalidResponse: () =>
+          new DeepSeekRuntimeError('invalid_response', 'not_retryable'),
+        responseTooLarge: () =>
+          new DeepSeekRuntimeError('response_too_large', 'not_retryable'),
+        mapFailure: (error) => mapRuntimeFailure(
           error,
           controller.signal.aborted,
-          timedOut,
+          hasTimedOut(),
           this.disposed
         )
-      );
+      });
       return {
         status: response.status,
         headers: headersResult,
@@ -368,7 +404,7 @@ export class DeepSeekSharedRuntime {
       const mapped = mapRuntimeFailure(
         error,
         controller.signal.aborted,
-        timedOut,
+        hasTimedOut(),
         this.disposed
       );
       this.log({
@@ -388,32 +424,6 @@ export class DeepSeekSharedRuntime {
 
   private now(): number {
     return this.options.now?.() ?? Date.now();
-  }
-}
-
-async function* boundStream(
-  stream: AsyncIterable<Uint8Array>,
-  maximumBytes: number,
-  close: () => void,
-  mapFailure: (error: unknown) => DeepSeekRuntimeError
-): AsyncGenerator<Uint8Array> {
-  let total = 0;
-  try {
-    for await (const chunk of stream) {
-      if (!(chunk instanceof Uint8Array)) {
-        throw new DeepSeekRuntimeError('invalid_response', 'not_retryable');
-      }
-      total += chunk.byteLength;
-      if (total > maximumBytes) {
-        throw new DeepSeekRuntimeError('response_too_large', 'not_retryable');
-      }
-      yield Uint8Array.from(chunk);
-    }
-  } catch (error) {
-    if (error instanceof DeepSeekRuntimeError) throw error;
-    throw mapFailure(error);
-  } finally {
-    close();
   }
 }
 

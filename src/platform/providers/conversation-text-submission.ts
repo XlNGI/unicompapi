@@ -58,6 +58,10 @@ import type {
   SubmissionDispatchOutcome
 } from './provider-submission-orchestrator';
 import type { ConversationResponseExecutionLifecycle } from './conversation-response-streaming';
+import {
+  ConversationStreamDeltaBatcher,
+  type ConversationStreamDeltaSegment
+} from './conversation-stream-delta-batcher';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
 
 const noopUsage: DeepSeekUsageObservationSinkPort & NewApiUsageObservationSinkPort = {
@@ -271,6 +275,7 @@ function createConversationLinkedLifecycle(
 ): DeepSeekConversationLifecyclePort & NewApiConversationLifecyclePort {
   const projectionFlushDelayMs = 120;
   const queues = new Map<string, Promise<void>>();
+  const deltaBatches = new Map<string, ConversationStreamDeltaBatcher>();
   const projections = new Map<string, {
     pendingContent: string;
     timer?: ReturnType<typeof setTimeout>;
@@ -370,60 +375,106 @@ function createConversationLinkedLifecycle(
     }, projectionFlushDelayMs);
   }
 
+  function deltaBatch(
+    executionId: ConversationResponseExecutionId
+  ): ConversationStreamDeltaBatcher {
+    const existing = deltaBatches.get(executionId);
+    if (existing) return existing;
+    const created = new ConversationStreamDeltaBatcher({
+      persist: (segments) => enqueue(executionId, () =>
+        persistDeltaSegments(executionId, segments)
+      )
+    });
+    deltaBatches.set(executionId, created);
+    return created;
+  }
+
+  async function persistDeltaSegments(
+    executionId: ConversationResponseExecutionId,
+    segments: readonly ConversationStreamDeltaSegment[]
+  ): Promise<void> {
+    for (const segment of segments) {
+      if (segment.kind === 'reasoning') {
+        await lifecycle.appendReasoning(executionId, segment.delta);
+        continue;
+      }
+      await lifecycle.appendContent(executionId, segment.delta);
+      projectionState(executionId).pendingContent += segment.delta;
+      scheduleFlush(executionId);
+    }
+  }
+
+  async function sealAndDrainDeltas(
+    executionId: ConversationResponseExecutionId
+  ): Promise<void> {
+    await deltaBatches.get(executionId)?.sealAndDrain();
+  }
+
   function releaseProjection(executionId: ConversationResponseExecutionId): void {
     const state = projections.get(executionId);
     if (state?.timer) clearTimeout(state.timer);
     projections.delete(executionId);
+    deltaBatches.delete(executionId);
   }
 
   return {
     start: (executionId) => enqueue(executionId, () => lifecycle.start(executionId)),
-    appendReasoning: (executionId, reasoningDelta) => enqueue(
-      executionId,
-      () => lifecycle.appendReasoning(executionId, reasoningDelta)
-    ),
-    appendContent: (executionId, contentDelta) => enqueue(executionId, async () => {
-      await lifecycle.appendContent(executionId, contentDelta);
-      projectionState(executionId).pendingContent += contentDelta;
-      scheduleFlush(executionId);
-    }),
-    complete: (executionId) => enqueue(executionId, async () => {
-      await flushPending(executionId);
-      await lifecycle.complete(executionId);
-      await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => completeAssistantMessage(
-        conversation,
-        assistantMessageId,
-        toIsoTimestamp(now()),
-        reasoningContent || undefined
-      ));
-      releaseProjection(executionId);
-    }),
-    requestCancel: (executionId) => enqueue(executionId, async () => {
-      await flushPending(executionId);
-      await lifecycle.requestCancel(executionId);
-    }),
-    confirmCancelled: (executionId) => enqueue(executionId, async () => {
-      await flushPending(executionId);
-      await lifecycle.confirmCancelled(executionId);
-      releaseProjection(executionId);
-    }),
-    fail: (executionId, safeCode) => enqueue(executionId, async () => {
-      await flushPending(executionId);
-      await lifecycle.fail(executionId, safeCode);
-      await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
-        conversation,
-        assistantMessageId,
-        failureReasonFromSafeCode(safeCode),
-        toIsoTimestamp(now()),
-        reasoningContent || undefined
-      ));
-      releaseProjection(executionId);
-    }),
-    interrupt: (executionId, reason) => enqueue(executionId, async () => {
-      await flushPending(executionId);
-      await lifecycle.interrupt(executionId, reason);
-      releaseProjection(executionId);
-    })
+    appendReasoning: (executionId, reasoningDelta) =>
+      deltaBatch(executionId).append('reasoning', reasoningDelta),
+    appendContent: (executionId, contentDelta) =>
+      deltaBatch(executionId).append('content', contentDelta),
+    complete: async (executionId) => {
+      await sealAndDrainDeltas(executionId);
+      await enqueue(executionId, async () => {
+        await flushPending(executionId);
+        await lifecycle.complete(executionId);
+        await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => completeAssistantMessage(
+          conversation,
+          assistantMessageId,
+          toIsoTimestamp(now()),
+          reasoningContent || undefined
+        ));
+        releaseProjection(executionId);
+      });
+    },
+    requestCancel: async (executionId) => {
+      await sealAndDrainDeltas(executionId);
+      await enqueue(executionId, async () => {
+        await flushPending(executionId);
+        await lifecycle.requestCancel(executionId);
+      });
+    },
+    confirmCancelled: async (executionId) => {
+      await sealAndDrainDeltas(executionId);
+      await enqueue(executionId, async () => {
+        await flushPending(executionId);
+        await lifecycle.confirmCancelled(executionId);
+        releaseProjection(executionId);
+      });
+    },
+    fail: async (executionId, safeCode) => {
+      await sealAndDrainDeltas(executionId);
+      await enqueue(executionId, async () => {
+        await flushPending(executionId);
+        await lifecycle.fail(executionId, safeCode);
+        await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
+          conversation,
+          assistantMessageId,
+          failureReasonFromSafeCode(safeCode),
+          toIsoTimestamp(now()),
+          reasoningContent || undefined
+        ));
+        releaseProjection(executionId);
+      });
+    },
+    interrupt: async (executionId, reason) => {
+      await sealAndDrainDeltas(executionId);
+      await enqueue(executionId, async () => {
+        await flushPending(executionId);
+        await lifecycle.interrupt(executionId, reason);
+        releaseProjection(executionId);
+      });
+    }
   };
 }
 

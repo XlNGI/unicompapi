@@ -31,7 +31,7 @@ test('provider page splits into gallery and manage views under one first-level p
 });
 
 test('gallery shows only adapted templates as cards with a request-adapter entry', () => {
-  assert.match(gallery, /templates\.map/);
+  assert.match(gallery, /displayedTemplates\.map/);
   assert.match(gallery, /template\.providerName/);
   assert.match(gallery, /connection\.state !== 'deleted'/);
   assert.match(gallery, /onAddConnection/);
@@ -42,6 +42,19 @@ test('gallery shows only adapted templates as cards with a request-adapter entry
   assert.match(gallery, /保存时验证/);
   assert.doesNotMatch(gallery, /保存后待验证/);
   assert.match(gallery, /validationAction !== 'available'/);
+});
+
+test('gallery promotes the recommended provider without coupling to its display name', () => {
+  assert.match(brandIcon, /recommended: true/);
+  assert.match(brandIcon, /isRecommendedProviderPackage/);
+  assert.match(gallery, /isRecommendedProviderPackage\(right\.packageId\)/);
+  assert.match(gallery, /isRecommendedProviderPackage\(template\.packageId\)/);
+  assert.match(gallery, /推荐使用/);
+  assert.match(gallery, /LuSparkles/);
+  assert.match(gallery, /uc-provider-gallery__card--recommended/);
+  assert.match(pageStyles, /\.uc-provider-gallery__card--recommended \{/);
+  assert.match(pageStyles, /border-color: var\(--uc-color-border-focus\)/);
+  assert.doesNotMatch(gallery, /template\.providerName\s*===/);
 });
 
 test('provider cards and connections use local brand icons with a safe fallback', () => {
