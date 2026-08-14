@@ -8,9 +8,18 @@ const providerBrands = {
   'provider-package-volcengine': { name: 'volcengine', icon: SiBytedance },
   'provider-package-kling': { name: 'kling', icon: SiKuaishou },
   'provider-package-newapi': { name: 'openai', icon: TbBrandOpenai },
-  'provider-package-unicompapi': { name: 'unicomp', image: unicompApiLogo },
+  'provider-package-unicompapi': {
+    name: 'unicomp',
+    image: unicompApiLogo,
+    recommended: true
+  },
   'provider-package-vidu-v1': { name: 'vidu', image: viduLogo }
 } as const;
+
+export function isRecommendedProviderPackage(packageId: string): boolean {
+  const brand = providerBrands[packageId as keyof typeof providerBrands];
+  return Boolean(brand && 'recommended' in brand && brand.recommended);
+}
 
 export function ProviderBrandIcon({
   className,

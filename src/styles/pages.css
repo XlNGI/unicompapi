@@ -6951,6 +6951,51 @@ button.uc-project-center__project-card:disabled {
   gap: var(--uc-space-3);
 }
 
+.uc-provider-gallery__card--recommended {
+  border-color: var(--uc-color-border-focus);
+  background: color-mix(
+    in srgb,
+    var(--uc-color-accent-subtle) 44%,
+    var(--uc-color-surface-panel)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--uc-color-border-focus) 32%, transparent),
+    var(--uc-shadow-md);
+}
+
+.uc-provider-gallery__card--recommended .uc-provider-gallery__card-heading {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.uc-provider-gallery__card--recommended .uc-provider-gallery__avatar {
+  grid-row: 1 / span 2;
+}
+
+.uc-provider-gallery__card--recommended .uc-status-pill {
+  grid-column: 2;
+}
+
+.uc-provider-gallery__recommendation {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: var(--uc-space-1);
+  min-height: 24px;
+  padding: 2px var(--uc-space-2);
+  border: 1px solid color-mix(in srgb, var(--uc-color-border-focus) 58%, transparent);
+  border-radius: var(--uc-radius-8);
+  color: var(--uc-color-text-accent);
+  background: var(--uc-color-accent-subtle);
+  font-size: var(--uc-font-size-caption);
+  font-weight: 700;
+}
+
+.uc-provider-gallery__recommendation svg {
+  width: 14px;
+  height: 14px;
+}
+
 .uc-provider-gallery__card-heading {
   display: flex;
   align-items: center;
@@ -7023,6 +7068,15 @@ button.uc-project-center__project-card:disabled {
 .uc-provider-page__connection-icon[data-provider-brand='unicomp'] {
   color: var(--uc-color-text-primary);
   background: var(--uc-color-surface-subtle);
+}
+
+.uc-provider-gallery__card--recommended .uc-provider-gallery__avatar[data-provider-brand='unicomp'] {
+  background: var(--uc-color-accent-fill);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uc-color-accent-fill) 20%, transparent);
+}
+
+.uc-provider-gallery__card--recommended .uc-provider-gallery__avatar[data-provider-brand='unicomp'] img {
+  filter: invert(1);
 }
 
 .uc-provider-gallery__avatar[data-provider-brand='vidu'],

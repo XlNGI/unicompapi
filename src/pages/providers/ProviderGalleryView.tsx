@@ -1,4 +1,4 @@
-import { LuCirclePlus, LuInbox } from 'react-icons/lu';
+import { LuCirclePlus, LuInbox, LuSparkles } from 'react-icons/lu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { StatusPill } from '../../components/StatusPill';
@@ -6,7 +6,7 @@ import type {
   ProviderConnectionSummaryDto,
   ProviderTemplateSummaryDto
 } from '../../shared/provider-ipc';
-import { ProviderBrandIcon } from './ProviderBrandIcon';
+import { isRecommendedProviderPackage, ProviderBrandIcon } from './ProviderBrandIcon';
 import { templateKeyOf } from './provider-page-shared';
 
 interface ProviderGalleryViewProps {
@@ -42,10 +42,17 @@ export function ProviderGalleryView({
   onManageTemplate,
   onRequestAdapter
 }: ProviderGalleryViewProps) {
+  const displayedTemplates = [...templates].sort(
+    (left, right) =>
+      Number(isRecommendedProviderPackage(right.packageId)) -
+      Number(isRecommendedProviderPackage(left.packageId))
+  );
+
   return (
     <div className="uc-provider-gallery" aria-label="供应商画廊">
-      {templates.map((template) => {
+      {displayedTemplates.map((template) => {
         const templateKey = templateKeyOf(template);
+        const recommended = isRecommendedProviderPackage(template.packageId);
         const liveConnections = connections.filter(
           (connection) =>
             connection.packageId === template.packageId &&
@@ -53,7 +60,16 @@ export function ProviderGalleryView({
             connection.state !== 'deleted'
         );
         return (
-          <Card className="uc-provider-gallery__card" key={templateKey}>
+          <Card
+            className={`uc-provider-gallery__card${recommended ? ' uc-provider-gallery__card--recommended' : ''}`}
+            key={templateKey}
+          >
+            {recommended && (
+              <div className="uc-provider-gallery__recommendation">
+                <LuSparkles aria-hidden="true" />
+                <span>推荐使用</span>
+              </div>
+            )}
             <div className="uc-provider-gallery__card-heading">
               <ProviderBrandIcon
                 className="uc-provider-gallery__avatar"
