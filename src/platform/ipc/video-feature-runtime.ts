@@ -153,8 +153,9 @@ export function createVideoFeatureControllerRuntime(
   };
 
   const recoveryResultReceiver = options.resultReceiver;
+  const recoveryRemember = options.rememberVideoOperation;
   const recoveryAttachNewApi = options.attachNewApiVideoOperation;
-  if (recoveryResultReceiver && recoveryAttachNewApi) {
+  if (recoveryResultReceiver && (recoveryRemember || recoveryAttachNewApi)) {
     runtime.recoverResult = async (taskId): Promise<VideoFeatureRecoveryDto> => {
       const task = await tasks.get(toTaskId(taskId));
       if (!task || task.projectId !== options.session.projectId) {
@@ -180,16 +181,20 @@ export function createVideoFeatureControllerRuntime(
           item.subject.executionId === execution.id
       );
       const route = attempt ? await routes.get(attempt.routeSnapshotId) : undefined;
-      if (!attempt || !route || route.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID) {
-        throw new Error('The original NewAPI video route is unavailable');
+      if (!attempt || !route) {
+        throw new Error('The original video route is unavailable');
       }
-      await attachVideoOperationContext({
+      const attached = await attachVideoOperationContext({
         providerOperationId: execution.remoteOperationId,
         routeSnapshot: route,
         invocationAttemptId: attempt.id,
         providerRegistry: options.providerRegistry,
+        remember: recoveryRemember,
         attachNewApi: recoveryAttachNewApi
       });
+      if (!attached) {
+        throw new Error('The original video route cannot be restored');
+      }
       const recovered = recoverRemoteCompletedExecution(
         execution,
         toIsoTimestamp(now())
@@ -498,17 +503,17 @@ async function attachVideoOperationContext(input: {
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly remember?: VideoFeatureRuntimeOptions['rememberVideoOperation'];
   readonly attachNewApi?: VideoFeatureRuntimeOptions['attachNewApiVideoOperation'];
-}): Promise<void> {
+}): Promise<boolean> {
   if (input.routeSnapshot.adapterKey === NEWAPI_VIDEO_ADAPTER_ID) {
-    if (!input.attachNewApi) return;
+    if (!input.attachNewApi) return false;
     await input.attachNewApi({
       routeSnapshot: input.routeSnapshot,
       providerOperationId: input.providerOperationId,
       invocationAttemptId: input.invocationAttemptId
     });
-    return;
+    return true;
   }
-  if (!input.remember) return;
+  if (!input.remember) return false;
   const snapshot = await input.providerRegistry.load();
   const binding =
     snapshot.protocolBindings.find(
@@ -519,11 +524,12 @@ async function attachVideoOperationContext(input: {
         item.connectionId === input.routeSnapshot.connectionId &&
         item.adapterKind === input.routeSnapshot.adapterKey
     );
-  if (!binding) return;
+  if (!binding) return false;
   input.remember(input.providerOperationId, {
     connectionId: binding.connectionId,
     binding
   });
+  return true;
 }
 
 function userFacingSubmissionFeedback(
