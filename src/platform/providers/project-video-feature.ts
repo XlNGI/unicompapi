@@ -1,5 +1,6 @@
 import {
   parseFeatureCandidateSubject,
+  evaluatePromptEnhanceRequirement,
   toAssetId,
   toProjectContextId,
   type AssetRepository,
@@ -12,6 +13,7 @@ import {
   type VideoWorkspaceDraft,
   type VideoWorkspaceRepository
 } from '../../domain';
+import { composeVideoPromptEnhancementInput } from '../../shared/prompt-enhancement-input';
 import {
   freezeProjectContextOutboundSnapshots,
   pinProjectContextSelection
@@ -160,6 +162,59 @@ export function videoDraftRevision(updatedAt: string): number {
     throw new TypeError('Video draft timestamp cannot form a stable revision');
   }
   return revision;
+}
+
+export async function assertVideoPromptEnhancementSatisfied(input: {
+  readonly projectId: ProjectId;
+  readonly draft: VideoWorkspaceDraft;
+  readonly contexts: ProjectContextRepository;
+}): Promise<void> {
+  const references = input.draft.contextReferences.filter(
+    (reference) => reference.kind === 'project_context' && reference.includeInPrompt === true
+  );
+  const structuredInput = composeVideoPromptEnhancementInput(input.draft).text;
+  if (references.length === 0 && structuredInput.trim().length === 0) return;
+
+  const contexts = [];
+  const selections = [];
+  for (const reference of references) {
+    if (reference.contextRevision === undefined) {
+      throw new TypeError('Project context must be selected again before prompt enhancement');
+    }
+    const context = await input.contexts.get(toProjectContextId(reference.referenceId));
+    if (!context) throw new TypeError('Selected project context is unavailable');
+    contexts.push(context);
+    selections.push(pinProjectContextSelection(
+      context,
+      reference.contextRevision,
+      true
+    ));
+  }
+  const contextSnapshots = freezeProjectContextOutboundSnapshots({
+    projectId: input.projectId,
+    surface: input.draft.mode === 'quick_video' ? 'quick' : 'professional',
+    contexts,
+    selections
+  });
+  const enhancement = [...input.draft.prompt.systemSupplements]
+    .reverse()
+    .find((supplement) => supplement.source === 'enhancement');
+  const requirement = await evaluatePromptEnhanceRequirement({
+    policy: {
+      allowWithoutContext: true,
+      requireWhenContextExists: true
+    },
+    originalInput: input.draft.prompt.originalInput,
+    structuredInput,
+    contextSnapshots,
+    enhancementSourceReferences: enhancement ? [enhancement.sourceReference] : []
+  });
+  if (!requirement.satisfied) {
+    throw new TypeError('Current prompt content requires a current prompt enhancement');
+  }
+  if (input.draft.prompt.finalPrompt.trim() !== enhancement?.content.trim()) {
+    throw new TypeError('The current prompt enhancement must be used as the final prompt');
+  }
 }
 
 export function createVideoProviderFeatureContracts(): readonly ProviderFeatureContractV1[] {

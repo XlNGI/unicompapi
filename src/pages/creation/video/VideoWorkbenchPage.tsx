@@ -158,6 +158,27 @@ export function VideoWorkbenchPage({
     }
   }
 
+  async function clearUiAfterGeneration() {
+    if (!videoWorkspaces || !session || !workspaceMode || busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await videoWorkspaces.create(workspaceMode);
+      if (!result.ok) {
+        setMessage(workspaceErrorMessages[result.error.code]);
+        return;
+      }
+      setDrafts((items) => [...items, result.value]);
+      setSelectedDraftId(result.value.draftId);
+      setDirty(false);
+      setMessage('生成已完成；当前输入已清空，原草稿和结果已保留。');
+    } catch {
+      setMessage('生成后创建新草稿失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveDraft() {
     if (!videoWorkspaces || !currentDraft || busy) return;
     setBusy(true);
@@ -290,6 +311,7 @@ export function VideoWorkbenchPage({
         <VideoQuickWorkspace
           dirty={dirty}
           draft={currentDraft}
+          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
@@ -300,6 +322,7 @@ export function VideoWorkbenchPage({
         <VideoTextWorkspace
           dirty={dirty}
           draft={currentDraft}
+          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
@@ -308,6 +331,7 @@ export function VideoWorkbenchPage({
         <VideoImageWorkspace
           dirty={dirty}
           draft={currentDraft}
+          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}

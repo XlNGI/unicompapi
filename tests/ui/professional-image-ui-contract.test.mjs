@@ -92,16 +92,13 @@ test('professional image shows in-page four-step submit progress', () => {
   assert.match(featurePanelSource, /await submitPrepared\(saved, result\.value\)/);
 });
 
-test('professional image preserves prompt layers and dynamic safe parameters', () => {
-  for (const text of [
-    '用户原始输入',
-    '系统补充内容',
-    '最终提交提示词',
-    '没有真实增强结果',
-    '服务与参数'
-  ]) {
+test('professional image shows only the final prompt and dynamic safe parameters', () => {
+  for (const text of ['最终提交提示词', '服务与参数']) {
     assert.match(source, new RegExp(text));
   }
+  assert.doesNotMatch(professionalSource, /用户原始输入/);
+  assert.doesNotMatch(professionalSource, /系统补充内容/);
+  assert.doesNotMatch(professionalSource, /没有真实增强结果/);
   assert.match(professionalSource, /systemSupplements/);
   assert.match(professionalSource, /finalPrompt/);
   assert.match(

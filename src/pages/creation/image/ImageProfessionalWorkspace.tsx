@@ -11,6 +11,7 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
+import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
@@ -20,25 +21,16 @@ import { ImagePromptEnhancePanel } from './ImagePromptEnhancePanel';
 interface ImageProfessionalWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
+  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
 
-const supplementSourceLabels: Readonly<Record<string, string>> = {
-  project_context: '项目上下文',
-  selected_context: '已选上下文',
-  style: '风格补充',
-  structure: '结构补充',
-  constraint: '约束补充',
-  translation: '翻译补充',
-  model_format: '模型格式',
-  enhancement: '提示词增强'
-};
-
 export function ImageProfessionalWorkspace({
   dirty,
   draft,
+  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onMessage
@@ -59,6 +51,14 @@ export function ImageProfessionalWorkspace({
       reference.contextRevision === undefined ||
       reference.includeInPrompt === undefined
   );
+  const enhancementInput = composeImagePromptEnhancementInput(draft);
+  const enhancementContent = [...draft.prompt.systemSupplements]
+    .reverse()
+    .find((supplement) => supplement.source === 'enhancement')?.content;
+  const enhancementSatisfied =
+    !enhancementInput.required ||
+    (Boolean(enhancementContent) &&
+      draft.prompt.finalPrompt.trim() === enhancementContent?.trim());
   const blockedReason = !productFeature
     ? '请先明确选择文生图或图生图。'
     : productFeature === 'text_to_image' && draft.input
@@ -67,6 +67,8 @@ export function ImageProfessionalWorkspace({
         ? '图生图必须选择恰好一张图片。'
         : unsupportedContexts.length > 0
           ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
+          : !enhancementSatisfied
+            ? '已填写结构化提示词内容，请先完成提示词增强并确认最终提示词。'
           : undefined;
 
   useEffect(() => {
@@ -338,30 +340,11 @@ export function ImageProfessionalWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
-              <h2>提示词增强对比</h2>
-              <p>原始输入、系统补充和最终提示词互不覆盖。</p>
+              <h2>最终提示词</h2>
+              <p>增强结果自动写入最终提示词；最终提示词是本次外发的唯一文本事实。</p>
             </div>
           </header>
           <div className="uc-image-professional__prompt-columns">
-            <section>
-              <StatusPill tone="info">用户原始输入</StatusPill>
-              <p>{draft.prompt.originalInput || '尚未填写原始创作需求。'}</p>
-            </section>
-            <section>
-              <StatusPill tone="neutral">系统补充内容</StatusPill>
-              {draft.prompt.systemSupplements.length ? (
-                <ul>
-                  {draft.prompt.systemSupplements.map((supplement, index) => (
-                    <li key={`${supplement.source}-${index}`}>
-                      <small>{supplementSourceLabels[supplement.source] ?? supplement.source}</small>
-                      <span>{supplement.content}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>没有真实增强结果；系统不会自动编造补充内容。</p>
-              )}
-            </section>
             <section>
               <StatusPill tone="success">最终提交提示词</StatusPill>
               <Input
@@ -381,7 +364,9 @@ export function ImageProfessionalWorkspace({
           <ImagePromptEnhancePanel
             dirty={dirty}
             draft={draft}
-            onDraftPersisted={onDraftPersisted}
+            onDraftPersisted={(next) =>
+              onDraftPersisted(next as GenerationImageDraftDto)
+            }
             onMessage={onMessage}
           />
           <div className="uc-image-quick__result-actions">
@@ -451,6 +436,12 @@ export function ImageProfessionalWorkspace({
             onSubmissionComplete={(submission) => {
               setResultWorkId(submission.workId);
               setResultUrls(submission.resultImageUrls ?? []);
+              if (
+                submission.status === 'completed' ||
+                submission.status === 'provider_accepted'
+              ) {
+                onClearUi?.();
+              }
             }}
             requireExplicitFeature
             showProgressSteps

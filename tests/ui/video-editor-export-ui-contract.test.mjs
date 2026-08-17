@@ -54,7 +54,8 @@ test('A4 gates success, playback and file actions on a registered Work', () => {
   assert.match(editorSource, /作品已登记/);
   assert.match(editorSource, /onNavigate\('library'\)/);
   assert.match(editorSource, /onNavigate\('tasks'\)/);
-  assert.match(appSource, /<VideoEditingPage onNavigate=\{handleNavigate\}/);
+  assert.match(appSource, /onNavigate=\{handleNavigate\}/);
+  assert.match(appSource, /preferredDraftId=\{openedVideoDraftId\}/);
 });
 
 test('A4 keeps its dense export controls scoped and responsive', () => {

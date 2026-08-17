@@ -75,7 +75,9 @@ export interface PromptEnhanceSubjectSnapshot {
   readonly subjectId: string;
   readonly subjectRevision: string;
   readonly originalInput: string;
+  readonly additionalPromptContent: string;
   readonly contextSnapshots: readonly ProjectContextOutboundSnapshotV1[];
+  readonly kind: 'image_workspace' | 'video_workspace';
 }
 
 export interface PromptEnhanceSubjectPort {
@@ -198,13 +200,23 @@ export class PromptEnhanceService {
   }): Promise<PromptEnhancePreparationDto> {
     const subject = await this.options.subjects.load(input);
     const originalInput = subject.originalInput.trim();
-    if (!originalInput) {
+    const additionalPromptContent = subject.additionalPromptContent.trim();
+    if (
+      !originalInput &&
+      !additionalPromptContent &&
+      subject.contextSnapshots.length === 0
+    ) {
       throw new PromptEnhanceError('empty_prompt', 'Original prompt is empty');
     }
     const contextSnapshots = subject.contextSnapshots;
-    const outboundText = buildEnhancePrompt(originalInput, contextSnapshots);
+    const outboundText = buildEnhancePrompt(
+      originalInput,
+      contextSnapshots,
+      additionalPromptContent
+    );
     const inputFingerprint = await promptEnhanceInputFingerprint({
       originalInput,
+      structuredInput: additionalPromptContent,
       contextSnapshots
     });
     const resolvedSubject = catalogSubject({
@@ -323,6 +335,7 @@ export class PromptEnhanceService {
     const subject = await this.options.subjects.load(input);
     const currentFingerprint = await promptEnhanceInputFingerprint({
       originalInput: subject.originalInput,
+      structuredInput: subject.additionalPromptContent,
       contextSnapshots: subject.contextSnapshots
     });
     if (currentFingerprint !== preparation.inputFingerprint) {
@@ -526,7 +539,8 @@ function catalogSubject(input: {
 
 export function buildEnhancePrompt(
   originalInput: string,
-  contextSnapshots: readonly ProjectContextOutboundSnapshotV1[]
+  contextSnapshots: readonly ProjectContextOutboundSnapshotV1[],
+  additionalPromptContent = ''
 ): string {
   const contexts = contextSnapshots.length === 0
     ? '（无项目上下文）'
@@ -546,11 +560,21 @@ export function buildEnhancePrompt(
     originalInput,
     '</user_input>'
   ].join('\n');
-  if (prompt.length > 500_000) {
+  const structured = additionalPromptContent.trim();
+  const composed = structured
+    ? [
+        prompt,
+        '',
+        '<structured_input>',
+        structured,
+        '</structured_input>'
+      ].join('\n')
+    : prompt;
+  if (composed.length > 500_000) {
     throw new PromptEnhanceError(
       'subject_invalid',
       'Prompt enhance input is too large'
     );
   }
-  return prompt;
+  return composed;
 }

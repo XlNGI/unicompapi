@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
+const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
 test('task center consumes controlled global task read models', () => {
   assert.match(source, /storage\.listTasks\(\)/);
@@ -58,4 +59,15 @@ test('task center recovers an existing image result without resubmission', () =>
   assert.match(source, /window\.unicomp\?\.imageFeatures/);
   assert.match(source, /features\.recoverResult\(taskId\)/);
   assert.doesNotMatch(source, /recoverResult[\s\S]*submitDraft\(/);
+});
+
+test('task center reuses the original draft parameters within the same project', () => {
+  assert.match(source, /复用参数/);
+  assert.match(source, /onReuseParameters/);
+  assert.match(source, /不可跨项目复制参数/);
+  assert.match(source, /window\.unicomp\?\.imageWorkspaces\?\.list\(\)/);
+  assert.match(source, /window\.unicomp\?\.videoWorkspaces\?\.list\(\)/);
+  assert.match(appSource, /onReuseParameters=\{handleReuseParameters\}/);
+  assert.match(appSource, /preferredDraftId=\{openedImageDraftId\}/);
+  assert.match(appSource, /preferredDraftId=\{openedVideoDraftId\}/);
 });

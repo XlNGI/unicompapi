@@ -3,6 +3,8 @@ import {
   createAsset,
   createEmptyVideoWorkspaceDraft,
   createVideoWorkspaceDraft,
+  promptEnhanceInputFingerprint,
+  promptEnhanceSourceReference,
   toAssetId,
   toConversationId,
   toDraftId,
@@ -17,7 +19,9 @@ import {
   type VideoWorkspaceDraft,
   type VideoWorkspaceRepository
 } from '../../src/domain';
+import { composeVideoPromptEnhancementInput } from '../../src/shared/prompt-enhancement-input';
 import {
+  assertVideoPromptEnhancementSatisfied,
   ProjectVideoFeatureSubjectResolver,
   createVideoProviderFeatureContracts,
   videoDraftRevision
@@ -129,6 +133,52 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
     expect(contracts.some((contract) =>
       contract.parameterSchema.schemaId === 'parameters.newapi.image_to_video.default'
     )).toBe(true);
+  });
+
+  it('requires a current adopted enhancement for structured video prompt content', async () => {
+    const base = createVideoWorkspaceDraft({
+      ...savedDraft('image_to_video'),
+      imageToVideo: {
+        ...(savedDraft('image_to_video') as Extract<VideoWorkspaceDraft, {
+          mode: 'image_to_video'
+        }>).imageToVideo,
+        subjectAction: '转身看向镜头',
+        cameraMovement: '缓慢推进'
+      }
+    });
+    await expect(assertVideoPromptEnhancementSatisfied({
+      projectId,
+      draft: base,
+      contexts: contextRepository()
+    })).rejects.toThrow('requires a current prompt enhancement');
+
+    const content = composeVideoPromptEnhancementInput(base);
+    const inputFingerprint = await promptEnhanceInputFingerprint({
+      originalInput: base.prompt.originalInput,
+      structuredInput: content.text,
+      contextSnapshots: []
+    });
+    const enhancedText = 'Enhanced video prompt with camera movement';
+    const enhanced = createVideoWorkspaceDraft({
+      ...base,
+      prompt: {
+        ...base.prompt,
+        finalPrompt: enhancedText,
+        systemSupplements: [{
+          source: 'enhancement',
+          content: enhancedText,
+          sourceReference: promptEnhanceSourceReference({
+            inputFingerprint,
+            executionId: 'prompt-once-structured-video'
+          })
+        }]
+      }
+    });
+    await expect(assertVideoPromptEnhancementSatisfied({
+      projectId,
+      draft: enhanced,
+      contexts: contextRepository()
+    })).resolves.toBeUndefined();
   });
 });
 

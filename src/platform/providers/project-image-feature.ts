@@ -13,6 +13,7 @@ import {
   type ProjectContextRepository,
   type ProjectId
 } from '../../domain';
+import { composeImagePromptEnhancementInput } from '../../shared/prompt-enhancement-input';
 import {
   freezeProjectContextOutboundSnapshots,
   pinProjectContextSelection
@@ -156,7 +157,8 @@ export async function assertImagePromptEnhancementSatisfied(input: {
   const references = input.draft.contextReferences.filter(
     (reference) => reference.kind === 'project_context' && reference.includeInPrompt === true
   );
-  if (references.length === 0) return;
+  const structuredInput = composeImagePromptEnhancementInput(input.draft).text;
+  if (references.length === 0 && structuredInput.trim().length === 0) return;
   const contexts = [];
   const selections = [];
   for (const reference of references) {
@@ -187,11 +189,12 @@ export async function assertImagePromptEnhancementSatisfied(input: {
       requireWhenContextExists: true
     },
     originalInput: input.draft.prompt.originalInput,
+    structuredInput,
     contextSnapshots,
     enhancementSourceReferences: enhancement ? [enhancement.sourceReference] : []
   });
   if (!requirement.satisfied) {
-    throw new TypeError('Project context requires a current prompt enhancement');
+    throw new TypeError('Current prompt content requires a current prompt enhancement');
   }
   if (input.draft.prompt.finalPrompt.trim() !== enhancement?.content.trim()) {
     throw new TypeError('The current prompt enhancement must be used as the final prompt');

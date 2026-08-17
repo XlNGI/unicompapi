@@ -12,6 +12,7 @@ import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
 interface ImageQuickWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
+  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -21,6 +22,7 @@ interface ImageQuickWorkspaceProps {
 export function ImageQuickWorkspace({
   dirty,
   draft,
+  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onMessage,
@@ -177,6 +179,12 @@ export function ImageQuickWorkspace({
             onSubmissionComplete={(submission) => {
               setResultUrls(submission.resultImageUrls ?? []);
               setWorkId(submission.workId);
+              if (
+                submission.status === 'completed' ||
+                submission.status === 'provider_accepted'
+              ) {
+                onClearUi?.();
+              }
             }}
             oneShot
           />

@@ -84,6 +84,7 @@ type InspectorTab = 'clip' | 'canvas' | 'audio' | 'text' | 'cover' | 'export';
 
 interface VideoEditingPageProps {
   readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
+  readonly preferredDraftId?: string;
 }
 
 interface TimelineSegment {
@@ -113,7 +114,10 @@ const saveStateTones: Record<SaveState, StatusTone> = {
   conflict: 'danger'
 };
 
-export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
+export function VideoEditingPage({
+  onNavigate,
+  preferredDraftId
+}: VideoEditingPageProps) {
   const storage = window.unicomp?.storage;
   const videoEditors = window.unicomp?.videoEditors;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -190,7 +194,10 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
       }
       const sorted = sortDrafts(listResult.value);
       setDrafts(sorted);
-      acceptDraft(sorted[0]);
+      const preferred = preferredDraftId
+        ? sorted.find((draft) => draft.draftId === preferredDraftId)
+        : undefined;
+      acceptDraft(preferred ?? sorted[0]);
     }
 
     void load().catch(() => {
@@ -202,7 +209,7 @@ export function VideoEditingPage({ onNavigate }: VideoEditingPageProps) {
     return () => {
       active = false;
     };
-  }, [storage, videoEditors]);
+  }, [preferredDraftId, storage, videoEditors]);
 
   useEffect(() => {
     let active = true;

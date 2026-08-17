@@ -12,9 +12,11 @@ import type {
   VideoWorkspaceMaterialPreviewDto,
   VideoWorkspaceMaterialSelectionDto
 } from '../../../shared/video-workspace-ipc';
+import { composeVideoPromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 import { VideoFeatureSubmissionPanel } from './VideoFeatureSubmissionPanel';
+import { VideoPromptEnhancePanel } from './VideoPromptEnhancePanel';
 
 const workspaceErrorMessages: Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
   project_not_open: '请先在“项目”页面新建或打开一个项目。',
@@ -50,6 +52,7 @@ const imageSourceTarget = { kind: 'image_source' } as const;
 interface VideoImageWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: ImageVideoDraftDto;
+  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: ImageVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: ImageVideoDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -58,6 +61,7 @@ interface VideoImageWorkspaceProps {
 export function VideoImageWorkspace({
   dirty,
   draft,
+  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onMessage
@@ -80,6 +84,14 @@ export function VideoImageWorkspace({
       reference.contextRevision === undefined ||
       reference.includeInPrompt === undefined
   );
+  const enhancementInput = composeVideoPromptEnhancementInput(draft);
+  const enhancementContent = [...draft.prompt.systemSupplements]
+    .reverse()
+    .find((supplement) => supplement.source === 'enhancement')?.content;
+  const enhancementSatisfied =
+    !enhancementInput.required ||
+    (Boolean(enhancementContent) &&
+      draft.prompt.finalPrompt.trim() === enhancementContent?.trim());
   const blockedReason =
     draft.featureSelection != null &&
     draft.featureSelection.productFeature !== 'image_to_video'
@@ -89,8 +101,10 @@ export function VideoImageWorkspace({
         : !draft.imageToVideo.source || draft.imageToVideo.source.mediaKind !== 'image'
           ? '图生视频必须选择恰好一张受控图片。'
           : unsupportedContexts.length > 0
-            ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
-            : undefined;
+          ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
+          : !enhancementSatisfied
+            ? '已填写结构化提示词内容，请先完成提示词增强并确认最终提示词。'
+          : undefined;
 
   useEffect(() => {
     let active = true;
@@ -280,8 +294,8 @@ export function VideoImageWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
-              <h2>唯一图片与项目上下文</h2>
-              <p>图生视频只接收一张已完成本地校验的图片，可显式选择固定上下文。</p>
+              <h2>唯一图片、项目上下文与运动约束</h2>
+              <p>图生视频只接收一张已完成本地校验的图片，并在第一步整理运动与变化约束。</p>
             </div>
           </header>
           <section className="uc-image-quick__reference">
@@ -342,46 +356,6 @@ export function VideoImageWorkspace({
             projectContextsOnly
             references={draft.contextReferences}
           />
-          {unsupportedContexts.length > 0 ? (
-            <div className="uc-image-quick__preflight" role="status">
-              <strong>发现旧上下文</strong>
-              <span>图生视频只接受固定版本的项目上下文。</span>
-              <Button onClick={removeUnsupportedContexts} variant="secondary">
-                <LuTrash2 aria-hidden="true" />
-                明确移除旧上下文
-              </Button>
-            </div>
-          ) : null}
-        </Card>
-
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
-          <header className="uc-image-workbench__panel-heading">
-            <span aria-hidden="true">2</span>
-            <div>
-              <h2>运动描述与约束</h2>
-              <p>最终提示词与保持、允许、禁止项共同保存在当前草稿。</p>
-            </div>
-          </header>
-          <label className="uc-image-quick__field">
-            <span>原始需求</span>
-            <Input
-              as="textarea"
-              maxLength={3000}
-              onChange={(value) => changePrompt('originalInput', value)}
-              rows={5}
-              value={draft.prompt.originalInput}
-            />
-          </label>
-          <label className="uc-image-quick__field">
-            <span>最终提示词</span>
-            <Input
-              as="textarea"
-              maxLength={5000}
-              onChange={(value) => changePrompt('finalPrompt', value)}
-              rows={7}
-              value={draft.prompt.finalPrompt}
-            />
-          </label>
           <div className="uc-image-quick__parameters">
             <TextField
               label="主体动作"
@@ -440,6 +414,52 @@ export function VideoImageWorkspace({
             })}
             value={draft.imageToVideo.prohibited}
           />
+          {unsupportedContexts.length > 0 ? (
+            <div className="uc-image-quick__preflight" role="status">
+              <strong>发现旧上下文</strong>
+              <span>图生视频只接受固定版本的项目上下文。</span>
+              <Button onClick={removeUnsupportedContexts} variant="secondary">
+                <LuTrash2 aria-hidden="true" />
+                明确移除旧上下文
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
+          <header className="uc-image-workbench__panel-heading">
+            <span aria-hidden="true">2</span>
+            <div>
+              <h2>提示词与生成结果</h2>
+              <p>原始需求、最终提示词与真实生成结果在第二步确认。</p>
+            </div>
+          </header>
+          <label className="uc-image-quick__field">
+            <span>原始需求</span>
+            <Input
+              as="textarea"
+              maxLength={3000}
+              onChange={(value) => changePrompt('originalInput', value)}
+              rows={5}
+              value={draft.prompt.originalInput}
+            />
+          </label>
+          <label className="uc-image-quick__field">
+            <span>最终提示词</span>
+            <Input
+              as="textarea"
+              maxLength={5000}
+              onChange={(value) => changePrompt('finalPrompt', value)}
+              rows={7}
+              value={draft.prompt.finalPrompt}
+            />
+          </label>
+          <VideoPromptEnhancePanel
+            dirty={dirty}
+            draft={draft}
+            onDraftPersisted={(next) => onDraftPersisted(next as ImageVideoDraftDto)}
+            onMessage={onMessage}
+          />
           <GenerationResultPreview
             mediaKind="video"
             remoteUrls={resultUrls}
@@ -465,6 +485,12 @@ export function VideoImageWorkspace({
             onSubmissionComplete={(submission) => {
               setResultWorkId(submission.workId);
               setResultUrls(submission.resultVideoUrls ?? []);
+              if (
+                submission.status === 'completed' ||
+                submission.status === 'provider_accepted'
+              ) {
+                onClearUi?.();
+              }
             }}
             showProgressSteps
           />

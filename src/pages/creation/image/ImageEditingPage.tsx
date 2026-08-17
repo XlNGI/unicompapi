@@ -4,10 +4,12 @@ import { ImageWorkbenchPage } from './ImageWorkbenchPage';
 
 export function ImageEditingPage({
   onNavigateToImageMode,
-  onVideoDraftCreated
+  onVideoDraftCreated,
+  preferredDraftId
 }: {
   readonly onNavigateToImageMode?: (mode: ImageWorkspaceDtoMode) => void;
   readonly onVideoDraftCreated?: (draftId: string) => void;
+  readonly preferredDraftId?: string;
 }) {
   const mode = imageCreationModes[3];
   return (
@@ -15,6 +17,7 @@ export function ImageEditingPage({
       mode={mode}
       onNavigateToImageMode={onNavigateToImageMode}
       onVideoDraftCreated={onVideoDraftCreated}
+      preferredDraftId={preferredDraftId}
     />
   );
 }
