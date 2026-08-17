@@ -231,7 +231,8 @@ app.whenReady().then(async () => {
       return await createLocalMediaResponse(
         entry.target,
         entry.mimeType,
-        request.method
+        request.method,
+        request.headers.get('range') ?? undefined
       );
     } catch {
       return new Response('Media handle unavailable', { status: 500 });
@@ -267,6 +268,7 @@ app.on('before-quit', (event) => {
   cleanupStarted = true;
   void Promise.all([
     storageLifecycle.dispose(),
+    chatContextLifecycle.interruptActiveResponses(),
     chatContextLifecycle.waitForMutations()
   ]).finally(() => {
     viduComposition.dispose();

@@ -13,6 +13,7 @@ import {
 import { chatContextIpcChannels } from '../../src/shared/chat-context-ipc';
 
 export interface ChatContextIpcLifecycle {
+  interruptActiveResponses(): Promise<number>;
   waitForMutations(): Promise<void>;
 }
 
@@ -38,6 +39,7 @@ export function registerChatContextIpcHandlers(options: {
   });
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;
+  const responseSubscriptionOwners = new Map<string, number>();
 
   ipcMain.handle(chatContextIpcChannels.createConversation, (_event, request: unknown) =>
     conversations.create(request)
@@ -96,10 +98,49 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.replayResponseEvents, (_event, request: unknown) =>
     runtime.responses.replayEvents(request)
   );
-  ipcMain.handle(
-    chatContextIpcChannels.cancelAssistantResponse,
-    (_event, request: unknown) => conversations.cancelAssistantResponse(request)
+  ipcMain.handle(chatContextIpcChannels.cancelResponseExecution, (_event, request: unknown) =>
+    runtime.responses.cancelExecution(request)
   );
+  ipcMain.handle(
+    chatContextIpcChannels.subscribeResponseEvents,
+    (event, request: unknown) => {
+      const subscriberId = typeof request === 'object' && request !== null
+        ? (request as { subscriberId?: unknown }).subscriberId
+        : undefined;
+      if (typeof subscriberId !== 'string') {
+        return Promise.resolve({ ok: false, error: { code: 'invalid_request', message: 'Response event subscription is invalid' } });
+      }
+      const ownerId = event.sender.id;
+      return runtime.responses.subscribeEvents(
+        { responseExecutionId: (request as { responseExecutionId?: unknown }).responseExecutionId },
+        subscriberId,
+        (responseEvent) => {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send(chatContextIpcChannels.responseEvent, { subscriberId, event: responseEvent });
+          }
+        },
+        () => { responseSubscriptionOwners.delete(subscriberId); }
+      ).then((result) => {
+        if (result.ok) responseSubscriptionOwners.set(subscriberId, ownerId);
+        return result;
+      });
+    }
+  );
+  ipcMain.on(chatContextIpcChannels.acknowledgeResponseEvents, (event, request: unknown) => {
+    const value = request as { subscriberId?: unknown; sequence?: unknown };
+    if (typeof value?.subscriberId === 'string' && responseSubscriptionOwners.get(value.subscriberId) === event.sender.id && typeof value.sequence === 'number' && Number.isSafeInteger(value.sequence)) {
+      runtime.responses.acknowledgeEvents(value.subscriberId, value.sequence);
+    }
+  });
+  ipcMain.on(chatContextIpcChannels.unsubscribeResponseEvents, (event, request: unknown) => {
+    const subscriberId = request && typeof request === 'object'
+      ? (request as { subscriberId?: unknown }).subscriberId
+      : undefined;
+    if (typeof subscriberId === 'string' && responseSubscriptionOwners.get(subscriberId) === event.sender.id) {
+      responseSubscriptionOwners.delete(subscriberId);
+      runtime.responses.unsubscribeEvents(subscriberId);
+    }
+  });
   ipcMain.handle(chatContextIpcChannels.createContextDraft, (_event, request: unknown) =>
     contexts.createDraft(request)
   );
@@ -146,5 +187,8 @@ export function registerChatContextIpcHandlers(options: {
     contexts.getSourceStatus(request)
   );
 
-  return { waitForMutations: runtime.waitForMutations };
+  return {
+    interruptActiveResponses: runtime.interruptActiveResponses,
+    waitForMutations: runtime.waitForMutations
+  };
 }

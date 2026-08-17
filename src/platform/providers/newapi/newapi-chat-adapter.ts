@@ -554,21 +554,22 @@ export class NewApiChatAdapter {
 }
 
 export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
-  const usage = exactRecord(
-    value,
-    ['completion_tokens', 'prompt_tokens', 'total_tokens'],
-    [
-      'prompt_tokens_details',
-      'completion_tokens_details'
-    ],
-    'NewAPI usage'
-  );
+  if (!isRecord(value)) {
+    throw invalidStream('NewAPI usage must be an object');
+  }
+  // Compatible gateways may add token-detail metrics over time. Validate the
+  // accounting fields we consume and ignore unknown forward-compatible keys.
+  for (const key of ['completion_tokens', 'prompt_tokens', 'total_tokens'] as const) {
+    if (!(key in value)) {
+      throw invalidStream('NewAPI usage is missing required fields');
+    }
+  }
   const completionTokens = nonNegativeInteger(
-    usage.completion_tokens,
+    value.completion_tokens,
     'completion_tokens'
   );
-  const promptTokens = nonNegativeInteger(usage.prompt_tokens, 'prompt_tokens');
-  const totalTokens = nonNegativeInteger(usage.total_tokens, 'total_tokens');
+  const promptTokens = nonNegativeInteger(value.prompt_tokens, 'prompt_tokens');
+  const totalTokens = nonNegativeInteger(value.total_tokens, 'total_tokens');
   if (totalTokens !== promptTokens + completionTokens) {
     throw invalidStream('NewAPI total token usage is inconsistent');
   }
@@ -577,15 +578,12 @@ export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
     tokenFact('prompt_tokens', promptTokens),
     tokenFact('total_tokens', totalTokens)
   ];
-  if (usage.prompt_tokens_details !== undefined) {
-    const details = exactRecord(
-      usage.prompt_tokens_details,
-      [],
-      ['cached_tokens'],
-      'NewAPI prompt token details'
-    );
+  if (value.prompt_tokens_details !== undefined) {
+    if (!isRecord(value.prompt_tokens_details)) {
+      throw invalidStream('NewAPI prompt token details must be an object');
+    }
     const cachedTokens = optionalNonNegativeInteger(
-      details.cached_tokens,
+      value.prompt_tokens_details.cached_tokens,
       'cached_tokens'
     );
     if (cachedTokens !== undefined) {
@@ -595,15 +593,12 @@ export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
       facts.push(tokenFact('cached_tokens', cachedTokens));
     }
   }
-  if (usage.completion_tokens_details !== undefined) {
-    const details = exactRecord(
-      usage.completion_tokens_details,
-      [],
-      ['reasoning_tokens'],
-      'NewAPI completion token details'
-    );
+  if (value.completion_tokens_details !== undefined) {
+    if (!isRecord(value.completion_tokens_details)) {
+      throw invalidStream('NewAPI completion token details must be an object');
+    }
     const reasoningTokens = optionalNonNegativeInteger(
-      details.reasoning_tokens,
+      value.completion_tokens_details.reasoning_tokens,
       'reasoning_tokens'
     );
     if (reasoningTokens !== undefined) {
@@ -650,9 +645,14 @@ async function consumeNewApiStream(
   let contentLength = 0;
 
   const processEvent = async (eventText: string) => {
-    if (eventText.trim().length === 0) return;
+    // Ignore blank events and SSE comment/keep-alive lines. These are transport
+    // framing, not model response fields.
+    const dataLines = eventText
+      .split('\n')
+      .filter((line) => line.length > 0 && !line.startsWith(':'));
+    if (dataLines.length === 0) return;
     if (done) throw invalidStream('NewApi streamed data after the terminal marker');
-    const data = parseDataOnlyEvent(eventText);
+    const data = parseDataOnlyEvent(dataLines.join('\n'));
     if (data === '[DONE]') {
       if (!terminalReason) {
         throw invalidStream('NewApi stream ended before a finish reason');
@@ -663,7 +663,11 @@ async function consumeNewApiStream(
     const chunk = parseStreamChunk(data);
     responseId ??= chunk.id;
     responseModel ??= chunk.model;
-    if (chunk.id !== responseId || chunk.model !== responseModel || chunk.model !== expectedModel) {
+    if (
+      chunk.id !== responseId ||
+      !sameProviderModelKey(chunk.model, responseModel) ||
+      !sameProviderModelKey(chunk.model, expectedModel)
+    ) {
       throw invalidStream('NewApi stream identity changed');
     }
     if (chunk.usage) {
@@ -715,6 +719,10 @@ async function consumeNewApiStream(
     contentLength,
     ...(usage ? { usage } : {})
   };
+}
+
+function sameProviderModelKey(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 type NewApiFinishReason =
@@ -1029,7 +1037,11 @@ function createUsageObservation(input: {
 }
 
 function parseDataOnlyEvent(eventText: string): string {
-  const lines = eventText.split('\n');
+  // A stream may end with a single line break after the final `data:` field
+  // rather than an empty SSE event (`\n\n`). Ignore those framing-only lines.
+  const lines = eventText
+    .split('\n')
+    .filter((line) => line.length > 0);
   if (lines.some((line) => !line.startsWith('data:'))) {
     throw invalidStream('NewApi SSE contains unsupported fields');
   }

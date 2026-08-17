@@ -91,6 +91,7 @@ export interface ViduSharedRuntimeOptions {
   readonly baseUrl?: string;
   readonly proxy?: () => ProxyMode;
   readonly defaultTimeoutMs?: number;
+  readonly defaultResultDownloadTimeoutMs?: number;
   readonly defaultMaxRequestBytes?: number;
   readonly defaultMaxResponseBytes?: number;
   readonly logger?: (event: ViduSafeLogEvent) => void;
@@ -303,7 +304,8 @@ export class ViduSharedRuntime {
       throw new ViduRuntimeError('runtime_shutting_down', 'not_retryable');
     }
     const url = parseResultUrl(input.url);
-    const timeoutMs = input.timeoutMs ?? this.options.defaultTimeoutMs ?? 30_000;
+    const timeoutMs =
+      input.timeoutMs ?? this.options.defaultResultDownloadTimeoutMs ?? 5 * 60_000;
     const maxResponseBytes = input.maxResponseBytes ?? 20 * 1024 * 1024;
     if (
       !Number.isInteger(timeoutMs) ||

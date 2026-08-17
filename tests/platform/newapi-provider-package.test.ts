@@ -557,11 +557,69 @@ describe('NewAPI management and runtime safety', () => {
 });
 
 describe('NewAPI chat adapter', () => {
+  it('accepts a terminal DONE event ending with a single CRLF', async () => {
+    const sse = [
+      event({
+        id: 'chatcmpl-crlf-done', object: 'chat.completion.chunk', created: 1,
+        model: modelKey,
+        choices: [{ index: 0, delta: { content: 'OK' }, finish_reason: null }]
+      }),
+      event({
+        id: 'chatcmpl-crlf-done', object: 'chat.completion.chunk', created: 1,
+        model: modelKey,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+      }),
+      event({
+        id: 'chatcmpl-crlf-done', object: 'chat.completion.chunk', created: 1,
+        model: modelKey,
+        choices: [],
+        usage: {
+          prompt_tokens: 2,
+          completion_tokens: 1,
+          total_tokens: 3,
+          prompt_cache_hit_tokens: 0,
+          prompt_tokens_details: { cached_tokens: 0, audio_tokens: 0 },
+          completion_tokens_details: {
+            reasoning_tokens: 0,
+            accepted_prediction_tokens: 0
+          }
+        }
+      }),
+      ': keep-alive\r\n\r\n',
+      'data: [DONE]\r\n'
+    ].join('');
+    const fixture = runtimeFixture(async () => streamResponse(sse));
+    const lifecycle = lifecycleFixture();
+    const usage = usageSink();
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      credentialResolver(),
+      connectionResolver(),
+      schemaResolver(),
+      lifecycle.port,
+      usage.port
+    );
+
+    const handle = await adapter.submit({
+      routeSnapshot: routeFor('text_chat'),
+      request: {
+        responseExecutionId: 'response-execution-crlf-done',
+        invocationAttemptId: 'attempt-crlf-done',
+        messages: [{ role: 'user', content: 'Hi' }],
+        parameterValues: {}
+      }
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(lifecycle.content).toBe('OK');
+    expect(usage.observations[0].status).toBe('reported');
+  });
+
   it('streams controlled text, persists final token usage, and sends only whitelisted JSON', async () => {
     const sse = [
       event({
         id: 'chatcmpl-1', object: 'chat.completion.chunk', created: 1,
-        model: modelKey,
+        model: 'TENANT-DEPLOYMENT-42',
         choices: [{ index: 0, delta: { role: 'assistant', content: 'Hello' }, finish_reason: null, logprobs: null }]
       }),
       event({

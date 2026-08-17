@@ -55,7 +55,7 @@ test('exposes only the controlled local image workspace operations', () => {
   assert.match(mainSource, /resolveEntry\(token\)/);
   assert.match(mainSource, /createLocalMediaResponse\(/);
   assert.doesNotMatch(mainSource, /net\.fetch\(pathToFileURL/);
-  assert.match(localMediaResponseSource, /createReadStream\(target\)/);
+  assert.match(localMediaResponseSource, /createReadStream\(target/);
   assert.match(localMediaResponseSource, /headers\.set\('content-type', mimeType\)/);
   assert.doesNotMatch(localMediaResponseSource, /content-disposition|pathToFileURL|net\.fetch/);
 });

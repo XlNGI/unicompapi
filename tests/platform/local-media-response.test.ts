@@ -37,4 +37,61 @@ describe('createLocalMediaResponse', () => {
 
     expect(response).toBeInstanceOf(Error);
   });
+
+  it('serves a requested byte range for video playback and seeking', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-media-response-'));
+    roots.push(root);
+    const target = path.join(root, 'clip.mp4');
+    await writeFile(target, '0123456789', 'utf8');
+
+    const response = await createLocalMediaResponse(
+      target,
+      'video/mp4',
+      'GET',
+      'bytes=2-5'
+    );
+
+    expect(response.status).toBe(206);
+    expect(response.headers.get('accept-ranges')).toBe('bytes');
+    expect(response.headers.get('content-length')).toBe('4');
+    expect(response.headers.get('content-range')).toBe('bytes 2-5/10');
+    await expect(response.text()).resolves.toBe('2345');
+  });
+
+  it('returns a range response without a body for HEAD', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-media-response-'));
+    roots.push(root);
+    const target = path.join(root, 'clip.mp4');
+    await writeFile(target, '0123456789', 'utf8');
+
+    const response = await createLocalMediaResponse(
+      target,
+      'video/mp4',
+      'HEAD',
+      'bytes=-3'
+    );
+
+    expect(response.status).toBe(206);
+    expect(response.headers.get('content-length')).toBe('3');
+    expect(response.headers.get('content-range')).toBe('bytes 7-9/10');
+    await expect(response.text()).resolves.toBe('');
+  });
+
+  it('rejects unsatisfiable byte ranges without exposing file content', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-media-response-'));
+    roots.push(root);
+    const target = path.join(root, 'clip.mp4');
+    await writeFile(target, '0123456789', 'utf8');
+
+    const response = await createLocalMediaResponse(
+      target,
+      'video/mp4',
+      'GET',
+      'bytes=10-12'
+    );
+
+    expect(response.status).toBe(416);
+    expect(response.headers.get('content-range')).toBe('bytes */10');
+    await expect(response.text()).resolves.toBe('');
+  });
 });

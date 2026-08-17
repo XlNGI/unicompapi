@@ -13,6 +13,8 @@ test('chat page uses project conversations and composer-first streaming workflow
     'createConversation',
     'copyLegacyConversation',
     'renameConversation',
+    'archiveConversation',
+    'restoreConversation',
     'deleteConversation',
     'listTextCandidates',
     'addUserMessage',
@@ -21,8 +23,8 @@ test('chat page uses project conversations and composer-first streaming workflow
     'replaceResponseParameters',
     'prepareResponseSubmission',
     'submitResponse',
-    'getResponseExecution',
-    'cancelAssistantResponse',
+    'subscribeResponseEvents',
+    'cancelResponseExecution',
     'getConversation'
   ]) {
     assert.match(source, new RegExp(`chat\\.${operation}\\(`));
@@ -30,7 +32,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /runtime_not_allowed/);
   assert.match(source, /replaceResponseParameters/);
   assert.match(source, /已截断/);
-  assert.match(source, /finish\.length|输出长度限制被截断/);
+  assert.match(source, /回答达到当前输出长度上限/);
   assert.match(source, /searchPlaceholder="搜索模型或服务商"/);
   assert.match(source, /ariaLabel="模型设置"/);
   assert.match(source, /listTextCandidates\('text_chat'\)/);
@@ -88,6 +90,8 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /cancelRequested/);
   assert.match(source, /cancelRequestedRef\.current/);
   assert.match(source, /已发出停止请求，正在确认/);
+  assert.doesNotMatch(source, /chat\.cancelAssistantResponse\(/);
+  assert.doesNotMatch(source, /state:\s*'cancelled'/);
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle \{[\s\S]*border: 0;[\s\S]*border-radius: var\(--uc-radius-full\);[\s\S]*background: transparent;/);
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle:hover/);
   assert.match(source, /responseInProgress/);
@@ -103,9 +107,11 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /item\.state === 'completed'/);
   assert.match(source, /uc-chat-page__scroll-to-bottom/);
   assert.match(source, /failedResponseNotice/);
-  assert.match(source, /const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;/);
-  assert.match(source, /void pollResponseExecution\(\)/);
-  assert.match(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
+  assert.match(source, /failedResponseNotice\(assistant, event\.safeCode\)/);
+  assert.match(source, /模型请求未正常完成/);
+  assert.match(source, /chat\.subscribeResponseEvents\(/);
+  assert.match(source, /event\.sequence <= latestSequence/);
+  assert.doesNotMatch(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
   assert.match(source, /void sendMessage\(\)/);
   assert.match(source, /confirmLeaveUnsentInput/);
   assert.doesNotMatch(source, /首次外发前请核对/);
@@ -114,9 +120,10 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /保存消息/);
   assert.doesNotMatch(source, /等待保存消息/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
-  assert.doesNotMatch(source, /chat\.archiveConversation\(/);
-  assert.doesNotMatch(source, /chat\.restoreConversation\(/);
-  assert.doesNotMatch(source, /新建项目对话|创建项目对话|恢复对话/);
+  assert.match(source, /chat\.listConversations\(true, false\)/);
+  assert.match(source, /key: 'archive'/);
+  assert.match(source, /key: 'restore'/);
+  assert.doesNotMatch(source, /新建项目对话|创建项目对话/);
   assert.doesNotMatch(source, /当前项目[^\n]*条消息/);
   assert.doesNotMatch(source, /history-resizer|history-collapsed|toggleHistorySidebar|--uc-chat-history-width/);
   assert.doesNotMatch(source, /运行授权关闭/);

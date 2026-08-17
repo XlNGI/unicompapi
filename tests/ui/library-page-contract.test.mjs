@@ -35,7 +35,12 @@ test('work library exposes filters, provenance, version and controlled preview',
   assert.match(source, /sourceExecutionId/);
   assert.match(source, /parentWorkId/);
   assert.match(source, /<img alt=/);
-  assert.match(source, /<video controls/);
+  assert.match(source, /<video[\s\S]{0,180}?\scontrols/);
+  assert.match(source, /controlsList="nofullscreen"/);
+  assert.match(source, /className="uc-work-library__preview-video"/);
+  assert.match(source, /previewExpanded/);
+  assert.match(source, /event\.key === 'Escape'/);
+  assert.match(source, /document\.body\.style\.overflow = 'hidden'/);
   assert.match(source, /<audio controls/);
 });
 
@@ -70,6 +75,12 @@ test('work detail status stays horizontal beside long work names', () => {
     styles,
     /\.uc-work-library__details-heading > div \{[\s\S]*?flex: 1 1 auto;/
   );
+});
+
+test('work detail video preview has a controlled fullscreen fallback', () => {
+  assert.match(styles, /\.uc-work-library__preview--expanded \{[\s\S]*?position: fixed;/);
+  assert.match(styles, /\.uc-work-library__preview-fullscreen \{[\s\S]*?position: absolute;/);
+  assert.match(styles, /\.uc-work-library__preview-video::\-webkit-media-controls-fullscreen-button \{[\s\S]*?display: none !important;/);
 });
 
 test('work library is not a generic file manager and does not overwrite history', () => {

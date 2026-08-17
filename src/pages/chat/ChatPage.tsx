@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  LuArchive,
+  LuArchiveRestore,
   LuArrowDown,
   LuArrowUp,
   LuBrainCircuit,
@@ -35,8 +37,6 @@ import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
 import '../../styles/pages.css';
 
-const RESPONSE_STREAM_POLL_INTERVAL_MS = 200;
-
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   invalid_request: '当前操作数据无效，请刷新后重试。',
   project_not_open: '请先打开目标项目。',
@@ -48,6 +48,8 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   legacy_conversation_read_only: '旧应用级对话保持只读，请在当前项目新建对话。',
   response_draft_not_found: '本次回复草稿已失效，请重新发送。',
   response_execution_not_found: '本次文本执行记录不存在。',
+  response_execution_not_active: '当前回复没有可控制的活动请求，请刷新后确认状态。',
+  response_execution_in_progress: '该会话已有回复正在进行，请等待完成或先停止。',
   candidate_not_found: '所选服务商、连接或模型候选已不存在。',
   candidate_unavailable: '所选候选当前不可用于文本回复。',
   route_selection_invalid: '本次候选选择已失效，请重新选择。',
@@ -99,9 +101,19 @@ function messageStatusLabel(message: MessageDto): string {
   return messageStateLabels[message.state];
 }
 
-function failedResponseNotice(message?: MessageDto): string {
+function failedResponseNotice(message?: MessageDto, safeCode?: string): string {
   const partial = Boolean(message?.content.trim());
   const preserved = partial ? '，已保留接收到的内容' : '';
+  const diagnostic = safeCode ? `（${safeCode}）` : '';
+  if (safeCode?.includes('finish.content_filter')) {
+    return `回答被模型安全策略提前结束${diagnostic}${preserved}。请调整问题后重试。`;
+  }
+  if (safeCode?.includes('finish.tool_calls')) {
+    return `模型请求调用工具，但当前会话未配置该工具${diagnostic}${preserved}。请调整问题后重试。`;
+  }
+  if (safeCode?.includes('finish.insufficient_system_resource')) {
+    return `模型服务资源不足${diagnostic}${preserved}。请稍后重试或切换模型。`;
+  }
   if (message?.failureReason === 'truncated') {
     return `回答达到当前输出长度上限${preserved}。可以继续追问，或调整输出长度后重试。`;
   }
@@ -114,7 +126,7 @@ function failedResponseNotice(message?: MessageDto): string {
   if (message?.failureReason === 'unavailable') {
     return `模型连接超时或服务暂时不可用${preserved}，请稍后重试或切换模型。`;
   }
-  return `回答未能完整结束${preserved}，请重试。`;
+  return `模型请求未正常完成${diagnostic}${preserved}，请重试。`;
 }
 
 function messageStatusTone(
@@ -344,7 +356,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       try {
         const [sessionResult, conversationResult] = await Promise.all([
           storage.getProjectSession(),
-          chat.listConversations(false, false)
+          chat.listConversations(true, false)
         ]);
         if (!active) return;
         if (sessionResult.ok) {
@@ -459,64 +471,47 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   }, [chat, session, selected?.conversationId, selected?.readOnly, selected?.status]);
 
   useEffect(() => {
-    if (
-      !chat ||
-      !responseExecution ||
-      cancelRequested ||
-      !['pending', 'streaming'].includes(responseExecution.state)
-    ) {
+    if (!chat || !responseExecution || !['pending', 'streaming'].includes(responseExecution.state)) {
       return;
     }
-    const responseExecutionId = responseExecution.responseExecutionId;
     let active = true;
-    let polling = false;
-    async function pollResponseExecution() {
-      if (polling || !active || !chat) return;
-      polling = true;
-      try {
-        const result = await chat.getResponseExecution(responseExecutionId);
-        if (!active || !result.ok || cancelRequestedRef.current) return;
-        if (!['pending', 'streaming'].includes(result.value.state) && selectedId) {
-          const conversation = await chat.getConversation(selectedId);
-          if (!active || !conversation.ok) return;
-          replaceConversation(conversation.value);
-          setResponseExecution(result.value);
-          const assistant = conversation.value.messages.find(
-            (message) => message.messageId === result.value.assistantMessageId
+    let latestSequence = responseExecution.streamSequence;
+    const executionId = responseExecution.responseExecutionId;
+    const unsubscribe = chat.subscribeResponseEvents(executionId, (event) => {
+      if (!active || event.responseExecutionId !== executionId || event.sequence <= latestSequence) return;
+      latestSequence = event.sequence;
+      setResponseExecution((current) => {
+        if (!current || current.responseExecutionId !== executionId) return current;
+        const state = event.type === 'stream_completed' ? 'completed'
+          : event.type === 'stream_cancelled' ? 'cancelled'
+            : event.type === 'stream_failed' ? 'failed'
+              : event.type === 'stream_interrupted' ? 'interrupted'
+                : event.type === 'stream_started' ? 'streaming' : current.state;
+        return {
+          ...current,
+          state,
+          streamSequence: event.sequence,
+          reasoningContent: `${current.reasoningContent}${event.reasoningDelta ?? ''}`,
+          content: `${current.content}${event.contentDelta ?? ''}`,
+          updatedAt: event.occurredAt
+        };
+      });
+      if (['stream_completed', 'stream_cancelled', 'stream_failed', 'stream_interrupted'].includes(event.type) && selectedId) {
+        void chat.getConversation(selectedId).then((result) => {
+          if (!active || !result.ok) return;
+          replaceConversation(result.value);
+          const assistant = result.value.messages.find(
+            (message) => message.messageId === event.assistantMessageId
           );
-          if (result.value.state === 'completed') {
-            setNotice('');
-          } else if (
-            result.value.state === 'failed' &&
-            assistant?.failureReason === 'truncated'
-          ) {
-            setNotice(
-              '回复因输出长度限制被截断。可在参数中提高 max_tokens 后重试，或减少勾选的上下文。'
-            );
-          } else if (result.value.state === 'failed') {
-            setNotice(failedResponseNotice(assistant));
-          } else if (result.value.state === 'cancelled') {
-            setNotice('回复已取消。');
-          } else if (result.value.state === 'interrupted') {
-            setNotice('回复被中断，请重试。');
-          }
-        } else {
-          setResponseExecution(result.value);
-        }
-      } finally {
-        polling = false;
+          if (event.type === 'stream_completed') setNotice('');
+          else if (event.type === 'stream_cancelled') setNotice('回复已取消。');
+          else if (event.type === 'stream_interrupted') setNotice('回复被中断，请重试。');
+          else setNotice(failedResponseNotice(assistant, event.safeCode));
+        });
       }
-    }
-    void pollResponseExecution();
-    const timer = window.setInterval(
-      () => void pollResponseExecution(),
-      RESPONSE_STREAM_POLL_INTERVAL_MS
-    );
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [cancelRequested, chat, responseExecution?.responseExecutionId, responseExecution?.state, selectedId]);
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [chat, responseExecution?.responseExecutionId, responseExecution?.state, selectedId]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -610,7 +605,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
 
   async function mutateConversation(
     conversation: ConversationDto,
-    operation: 'rename' | 'delete'
+    operation: 'rename' | 'archive' | 'restore' | 'delete'
   ) {
     if (!chat || conversation.readOnly || busy) return;
     const nextTitle = renameTitle.trim();
@@ -620,7 +615,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     try {
       const result = operation === 'rename'
         ? await chat.renameConversation(conversation.conversationId, conversation.revision, nextTitle)
-        : await chat.deleteConversation(conversation.conversationId, conversation.revision);
+        : operation === 'archive'
+          ? await chat.archiveConversation(conversation.conversationId, conversation.revision)
+          : operation === 'restore'
+            ? await chat.restoreConversation(conversation.conversationId, conversation.revision)
+            : await chat.deleteConversation(conversation.conversationId, conversation.revision);
       if (!result.ok) {
         setNotice(errorMessages[result.error.code]);
         return;
@@ -636,7 +635,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         setNotice('');
       } else {
         replaceConversation(result.value);
-        setRenamingConversationId(undefined);
+        if (operation === 'rename') setRenamingConversationId(undefined);
         setNotice('');
       }
     } catch {
@@ -819,67 +818,31 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       cancelRequested
     ) return;
     const pendingExecution = responseExecution;
-    const cancelledAt = new Date().toISOString();
     cancelRequestedRef.current = true;
     setCancelRequested(true);
-    setResponseExecution({
-      ...pendingExecution,
-      state: 'cancelled',
-      updatedAt: cancelledAt
-    });
-    setConversations((items) => items.map((conversation) =>
-      conversation.conversationId === selected.conversationId
-        ? {
-            ...conversation,
-            messages: conversation.messages.map((message) =>
-              message.messageId === pendingExecution.assistantMessageId
-                ? { ...message, state: 'cancelled', updatedAt: cancelledAt }
-                : message
-            )
-          }
-        : conversation
-    ));
     setNotice('已发出停止请求，正在确认…');
     try {
-      let expectedRevision = selected.revision;
-      let result = await chat.cancelAssistantResponse(
-        selected.conversationId,
-        pendingExecution.assistantMessageId,
-        expectedRevision
+      const result = await chat.cancelResponseExecution(
+        pendingExecution.responseExecutionId
       );
-      if (
-        !result.ok &&
-        result.error.code === 'revision_conflict' &&
-        result.error.currentRevision !== undefined
-      ) {
-        expectedRevision = result.error.currentRevision;
-        result = await chat.cancelAssistantResponse(
-          selected.conversationId,
-          pendingExecution.assistantMessageId,
-          expectedRevision
-        );
-      }
       if (!result.ok) {
         setNotice(describeChatError(result.error));
-        setResponseExecution(pendingExecution);
         const refreshed = await chat.getConversation(selected.conversationId);
         if (refreshed.ok) replaceConversation(refreshed.value);
         return;
       }
-      replaceConversation(result.value);
-      const assistant = result.value.messages.find(
-        (message) => message.messageId === pendingExecution.assistantMessageId
+      setResponseExecution(result.value);
+      const refreshed = await chat.getConversation(selected.conversationId);
+      if (refreshed.ok) replaceConversation(refreshed.value);
+      setNotice(
+        result.value.state === 'cancelled'
+          ? ''
+          : result.value.state === 'completed'
+            ? '回复已完成。'
+            : '停止请求未能确认，请重试。'
       );
-      setResponseExecution((current) => current ? {
-        ...current,
-        state: 'cancelled',
-        content: assistant?.content ?? current.content,
-        updatedAt: assistant?.updatedAt ?? current.updatedAt
-      } : current);
-      setNotice('');
     } catch {
       setNotice('停止回复失败，请重试。');
-      setResponseExecution(pendingExecution);
       const refreshed = await chat.getConversation(selected.conversationId);
       if (refreshed.ok) replaceConversation(refreshed.value);
     } finally {
@@ -1478,6 +1441,17 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                           className="uc-chat-page__history-menu"
                           items={[
                             { key: 'rename', label: '重命名' },
+                            ...(conversation.status === 'active'
+                              ? [{
+                                key: 'archive',
+                                label: '归档',
+                                icon: <LuArchive aria-hidden="true" />
+                              }]
+                              : [{
+                                key: 'restore',
+                                label: '恢复对话',
+                                icon: <LuArchiveRestore aria-hidden="true" />
+                              }]),
                             {
                               key: 'delete',
                               label: '删除',
@@ -1490,6 +1464,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                             if (eventKey === 'rename') {
                               setRenameTitle(conversation.title);
                               setRenamingConversationId(conversation.conversationId);
+                              return;
+                            }
+                            if (eventKey === 'archive' || eventKey === 'restore') {
+                              void mutateConversation(conversation, eventKey);
                               return;
                             }
                             if (eventKey === 'delete') {

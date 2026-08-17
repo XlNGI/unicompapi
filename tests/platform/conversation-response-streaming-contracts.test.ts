@@ -208,6 +208,32 @@ describe('conversation response execution repository', () => {
 });
 
 describe('controlled conversation response stream lifecycle', () => {
+  it('persists a failed terminal event before publishing it to the renderer', async () => {
+    const { repository } = await fixture();
+    const item = execution({ id: 'response-execution-deferred-failure' });
+    await repository.create(item, createdEvent(item.id, 'event-created-deferred-failure'));
+    const channel = new ControlledConversationResponseStreamChannel();
+    const received: string[] = [];
+    channel.subscribe({
+      subscriberId: 'renderer-deferred-failure',
+      executionId: item.id,
+      onEvent: (event) => received.push(`${event.type}:${event.safeCode ?? ''}`)
+    });
+    const lifecycle = new ConversationResponseExecutionLifecycle(
+      repository,
+      ids(),
+      channel,
+      () => t1
+    );
+
+    const event = await lifecycle.failDeferredPublish(item.id, 'newapi.invalid_response');
+    await expect(repository.get(item.id)).resolves.toMatchObject({ state: 'failed' });
+    expect(received).toEqual([]);
+
+    await lifecycle.publish(event);
+    expect(received).toEqual(['stream_failed:newapi.invalid_response']);
+  });
+
   it('applies bounded backpressure and supports replay after renderer disconnect', async () => {
     const { repository } = await fixture();
     const item = execution({ productFeature: 'text_reasoning' });
@@ -268,6 +294,46 @@ describe('controlled conversation response stream lifecycle', () => {
     await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({
       state: 'streaming',
       content: '恢复后的内容'
+    });
+  });
+
+  it('recovers both pending and streaming executions after a process restart', async () => {
+    const { repository } = await fixture();
+    const pending = execution({ id: 'response-execution-recovery-pending' });
+    const streaming = execution({
+      id: 'response-execution-recovery-streaming',
+      attemptId: 'attempt-response-recovery-streaming',
+      assistantMessageId: 'message-assistant-recovery-streaming'
+    });
+    await repository.create(pending, createdEvent(pending.id, 'event-recovery-pending'));
+    await repository.create(streaming, createdEvent(streaming.id, 'event-recovery-streaming'));
+    const initialLifecycle = new ConversationResponseExecutionLifecycle(
+      repository,
+      ids(),
+      undefined,
+      () => t1
+    );
+    await initialLifecycle.start(streaming.id);
+
+    const restartedLifecycle = new ConversationResponseExecutionLifecycle(
+      repository,
+      {
+        nextConversationResponseStreamEventId: (() => {
+          let sequence = 0;
+          return () => toConversationResponseStreamEventId(`event-recovery-restart-${++sequence}`);
+        })()
+      },
+      undefined,
+      () => t2
+    );
+    await expect(restartedLifecycle.interruptActiveForApplicationShutdown()).resolves.toBe(2);
+    await expect(restartedLifecycle.readModel(pending.id)).resolves.toMatchObject({
+      state: 'interrupted',
+      streamSequence: 2
+    });
+    await expect(restartedLifecycle.readModel(streaming.id)).resolves.toMatchObject({
+      state: 'interrupted',
+      streamSequence: 3
     });
   });
 });

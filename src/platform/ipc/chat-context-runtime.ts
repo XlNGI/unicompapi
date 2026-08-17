@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
   ConversationApplicationService,
-  ConversationStreamingService,
   ProjectContextRegistryService,
   type ConversationIdFactory,
   type ProjectContextIdFactory
@@ -13,6 +12,7 @@ import {
   beginAssistantMessage,
   completeAssistantMessage,
   createConversation,
+  createProviderInvocationEvent,
   startAssistantMessageStreaming,
   toConversationId,
   toConversationResponseStreamEventId,
@@ -21,6 +21,7 @@ import {
   toProjectContextDraftId,
   toProjectContextFragmentId,
   toProjectContextId,
+  transitionSubmissionIntent,
   type Conversation,
   type ProjectId
 } from '../../domain';
@@ -28,6 +29,7 @@ import {
   JsonConversationRepository,
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
+  JsonProviderUsageObservationRepository,
   JsonProjectConversationRepository,
   JsonProjectContextRepository
 } from '../repositories';
@@ -42,6 +44,8 @@ import { ProjectContextController } from './project-context-controller';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import {
   ConversationResponseArtifactFactory,
+  ConversationExecutionCoordinator,
+  ControlledConversationResponseStreamChannel,
   ConversationResponseExecutionLifecycle,
   createConversationTextDispatchBridge,
   createConversationTextSubmissionIdFactory,
@@ -87,7 +91,7 @@ export interface ChatContextRuntimeDependencies {
     Partial<RuntimeAuthorizationOrchestrationPort>;
   readonly textSubmission?: Omit<
     ConversationTextSubmissionRuntimes,
-    'providerRegistry' | 'providerPackages'
+    'providerRegistry' | 'providerPackages' | 'usage'
   >;
   now?: () => string;
   conversationIds?: ConversationIdFactory;
@@ -99,6 +103,7 @@ export interface ChatContextRuntime {
   readonly conversations: ConversationControllerPort;
   readonly responses: ConversationResponseController;
   readonly projectContexts: ProjectContextController;
+  interruptActiveResponses(): Promise<number>;
   waitForMutations(): Promise<void>;
 }
 
@@ -114,7 +119,6 @@ export interface ConversationControllerPort {
   addUserMessage(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   copyLegacyConversation(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   requestAssistantResponse(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
-  cancelAssistantResponse(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   waitForOperations(): Promise<void>;
 }
 
@@ -175,11 +179,6 @@ export function createChatContextRuntime(
       conversationIds,
       now
     );
-    const streaming = new ConversationStreamingService(
-      projectConversations,
-      conversationIds,
-      now
-    );
     const contextRepository = new JsonProjectContextRepository(
       storage,
       session.projectId,
@@ -223,15 +222,21 @@ export function createChatContextRuntime(
       new RouteSelectionTokenVault(),
       now
     );
+    const streamChannel = new ControlledConversationResponseStreamChannel();
     const responseLifecycle = new ConversationResponseExecutionLifecycle(
       responseExecutions,
       {
         nextConversationResponseStreamEventId: () =>
           toConversationResponseStreamEventId(`response-stream-${randomUUID()}`)
       },
-      undefined,
+      streamChannel,
       () => toIsoTimestamp(now())
     );
+    const executionCoordinator = new ConversationExecutionCoordinator();
+    // After a process restart no in-memory adapter exists to resume these streams.
+    const responseRecovery = responseLifecycle
+      .interruptActiveForApplicationShutdown()
+      .then(() => undefined);
     const authorization = dependencies.runtimeAuthorization;
     const textSubmission = dependencies.textSubmission;
     const canSubmit = Boolean(
@@ -247,7 +252,10 @@ export function createChatContextRuntime(
       drafts: responseDrafts,
       contexts: contextRepository,
       candidates: candidateService,
-      executions: responseLifecycle
+      executions: responseLifecycle,
+      executionCoordinator,
+      streamChannel,
+      ready: responseRecovery
     };
     if (canSubmit && textSubmission && authorization) {
       const acceptances = new ProjectSubmissionAcceptanceStore(
@@ -268,6 +276,13 @@ export function createChatContextRuntime(
         providerPackages,
         lifecycle: responseLifecycle,
         conversations: projectConversations,
+        coordinator: executionCoordinator,
+        usage: new JsonProviderUsageObservationRepository(storage),
+        terminalObserver: createConversationTerminalObserver(
+          acceptances,
+          authorization as RuntimeAuthorizationOrchestrationPort,
+          now
+        ),
         now
       });
       const orchestrator = new ProviderSubmissionOrchestrator(
@@ -301,7 +316,6 @@ export function createChatContextRuntime(
       rootDirectory: session.rootDirectory,
       conversations: new ConversationController({
         service,
-        streaming,
         getSession: dependencies.getSession,
         projectRequired: true,
         storageScope: 'current_project',
@@ -416,9 +430,6 @@ export function createChatContextRuntime(
     requestAssistantResponse: (request) =>
       requireProjectController()?.requestAssistantResponse(request) ??
       Promise.resolve(failure('project_not_open', 'A project must be open')),
-    cancelAssistantResponse: (request) =>
-      requireProjectController()?.cancelAssistantResponse(request) ??
-      Promise.resolve(failure('project_not_open', 'A project must be open')),
     waitForOperations: async () => {
       await Promise.all([...runtimes].map((runtime) =>
         runtime.conversations.waitForOperations()
@@ -443,6 +454,22 @@ export function createChatContextRuntime(
     conversations,
     responses,
     projectContexts,
+    interruptActiveResponses: async () => {
+      const interrupted = await Promise.all([...runtimes].map(async (runtime) => {
+        // Adapter completion owns the terminal transition. Only persisted handles
+        // left without a live adapter are marked interrupted directly.
+        const cancelled = await runtime.responses.executionCoordinator.cancelAll();
+        const orphaned = await runtime.responses.executions.listActive();
+        for (const execution of orphaned) {
+          await runtime.responses.executions.interrupt(
+            execution.responseExecutionId,
+            'application_shutdown'
+          );
+        }
+        return cancelled + orphaned.length;
+      }));
+      return interrupted.reduce((total, count) => total + count, 0);
+    },
     waitForMutations: async () => {
       await Promise.all([
         conversations.waitForOperations(),
@@ -450,6 +477,56 @@ export function createChatContextRuntime(
         projectContexts.waitForMutations()
       ]);
     }
+  };
+}
+
+function createConversationTerminalObserver(
+  acceptances: ProjectSubmissionAcceptanceStore,
+  authorization: RuntimeAuthorizationOrchestrationPort,
+  now: () => string
+) {
+  const advance = async (
+    input: {
+      readonly providerOperationId: string;
+      readonly invocationAttemptId: string;
+      readonly safeCode?: string;
+    },
+    status: 'completed' | 'failed' | 'cancelled' | 'unknown_outcome',
+    eventType: 'completed' | 'failed' | 'cancelled' | 'outcome_unknown'
+  ): Promise<void> => {
+    const acceptance = await acceptances.getByInvocationAttemptId(
+      input.invocationAttemptId as never
+    );
+    if (!acceptance || ['completed', 'failed', 'cancelled', 'unknown_outcome'].includes(acceptance.intent.status)) {
+      return;
+    }
+    const occurredAt = toIsoTimestamp(now());
+    const intent = transitionSubmissionIntent(acceptance.intent, status, occurredAt, {
+      providerOperationId: input.providerOperationId,
+      ...(input.safeCode ? { safeCode: input.safeCode } : {})
+    });
+    await acceptances.advance({
+      intent,
+      invocationEvent: createProviderInvocationEvent({
+        id: `conversation-terminal-${randomUUID()}` as never,
+        invocationAttemptId: acceptance.invocationAttempt.id,
+        sequence: acceptance.invocationEvents.length + 1,
+        type: eventType,
+        ...(input.safeCode ? { safeCode: input.safeCode } : {}),
+        occurredAt
+      })
+    });
+    await authorization.recordOutcome(acceptance.intent.authorizationClaimId, occurredAt);
+  };
+  return {
+    completed: (input: { providerOperationId: string; invocationAttemptId: string }) =>
+      advance(input, 'completed', 'completed').catch(() => undefined),
+    failed: (input: { providerOperationId: string; invocationAttemptId: string; safeCode: string }) =>
+      advance(input, 'failed', 'failed').catch(() => undefined),
+    cancelled: (input: { providerOperationId: string; invocationAttemptId: string }) =>
+      advance(input, 'cancelled', 'cancelled').catch(() => undefined),
+    interrupted: (input: { providerOperationId: string; invocationAttemptId: string }) =>
+      advance(input, 'unknown_outcome', 'outcome_unknown').catch(() => undefined)
   };
 }
 

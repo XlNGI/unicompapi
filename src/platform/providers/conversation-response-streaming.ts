@@ -75,6 +75,19 @@ export class ConversationResponseExecutionLifecycle {
     return this.append(executionId, 'stream_failed', { safeCode });
   }
 
+  /** Persists a terminal failure before its dependent conversation projection. */
+  failDeferredPublish(
+    executionId: ConversationResponseExecutionId,
+    safeCode: string
+  ): Promise<ConversationResponseStreamEventV1> {
+    return this.append(executionId, 'stream_failed', { safeCode }, false);
+  }
+
+  async publish(event: ConversationResponseStreamEventV1): Promise<void> {
+    const execution = await this.requireExecution(event.responseExecutionId);
+    this.channel?.publish(toControlledConversationResponseStreamEventDto({ execution, event }));
+  }
+
   interrupt(
     executionId: ConversationResponseExecutionId,
     interruptionReason: ConversationResponseInterruptionReason
@@ -105,6 +118,16 @@ export class ConversationResponseExecutionLifecycle {
     return projectConversationResponseExecution({ execution, events });
   }
 
+  async listActive(conversationId?: string) {
+    const executions = await this.repository.list();
+    return Promise.all(executions
+      .filter((execution) =>
+        (execution.state === 'pending' || execution.state === 'streaming') &&
+        (!conversationId || execution.snapshot.conversationId === conversationId)
+      )
+      .map((execution) => this.readModel(execution.id)));
+  }
+
   async replayControlledEvents(
     executionId: ConversationResponseExecutionId,
     afterSequence = 0
@@ -128,7 +151,8 @@ export class ConversationResponseExecutionLifecycle {
       readonly contentDelta?: string;
       readonly safeCode?: string;
       readonly interruptionReason?: ConversationResponseInterruptionReason;
-    } = {}
+    } = {},
+    publish = true
   ): Promise<ConversationResponseStreamEventV1> {
     const execution = await this.requireExecution(executionId);
     const events = await this.repository.listEvents(executionId);
@@ -141,7 +165,9 @@ export class ConversationResponseExecutionLifecycle {
       occurredAt: this.now()
     });
     await this.repository.appendEvent(event);
-    this.channel?.publish(toControlledConversationResponseStreamEventDto({ execution, event }));
+    if (publish) {
+      this.channel?.publish(toControlledConversationResponseStreamEventDto({ execution, event }));
+    }
     return event;
   }
 

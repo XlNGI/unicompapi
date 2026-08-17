@@ -184,6 +184,27 @@ describe('ViduSharedRuntime', () => {
     ).rejects.toMatchObject({ code: 'runtime_shutting_down' });
   });
 
+  it('uses an independent timeout for media result downloads', async () => {
+    const fixture = await createFixture();
+    fixture.transport.responses.push({
+      status: 200,
+      headers: { 'content-type': 'video/mp4', 'content-length': '1' },
+      body: new Uint8Array([1])
+    });
+    const runtime = runtimeFor(fixture, { defaultTimeoutMs: 30_000 });
+
+    await expect(runtime.downloadResult({
+      url: 'https://results.synthetic.invalid/generated.mp4',
+      accept: 'video/*'
+    })).resolves.toMatchObject({ body: new Uint8Array([1]) });
+
+    expect(fixture.transport.requests[0]).toMatchObject({
+      timeoutMs: 5 * 60_000,
+      redirect: 'manual',
+      dnsRebindingProtection: 'required'
+    });
+  });
+
   it('rejects redirects and oversized responses and preserves rate-limit facts', async () => {
     const fixture = await createFixture();
     const runtime = runtimeFor(fixture);
@@ -422,6 +443,8 @@ async function createStructuredFixture() {
 function runtimeFor(
   fixture: Awaited<ReturnType<typeof createFixture>>,
   overrides: Partial<{
+    readonly defaultResultDownloadTimeoutMs: number;
+    readonly defaultTimeoutMs: number;
     readonly logger: (event: ViduSafeLogEvent) => void;
     readonly proxy: () => ProxyMode;
   }> = {}

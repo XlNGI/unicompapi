@@ -42,7 +42,8 @@ import {
 } from '../src/shared/settings-ipc';
 import {
   chatContextIpcChannels,
-  type ChatContextApi
+  type ChatContextApi,
+  type ConversationResponseStreamEventDto
 } from '../src/shared/chat-context-ipc';
 
 const storage: StorageApi = {
@@ -472,6 +473,20 @@ const settings: SettingsApi = {
     })
 };
 
+let responseSubscriptionSequence = 0;
+const responseSubscriptions = new Map<string, (event: ConversationResponseStreamEventDto) => void>();
+ipcRenderer.on(chatContextIpcChannels.responseEvent, (_event, payload: unknown) => {
+  if (!payload || typeof payload !== 'object') return;
+  const { subscriberId, event } = payload as { subscriberId?: unknown; event?: unknown };
+  if (typeof subscriberId !== 'string' || !event || typeof event !== 'object') return;
+  const listener = responseSubscriptions.get(subscriberId);
+  if (!listener) return;
+  const sequence = (event as { sequence?: unknown }).sequence;
+  if (!Number.isSafeInteger(sequence) || Number(sequence) < 1) return;
+  listener(event as ConversationResponseStreamEventDto);
+  ipcRenderer.send(chatContextIpcChannels.acknowledgeResponseEvents, { subscriberId, sequence });
+});
+
 const chatContexts: ChatContextApi = {
   createConversation: (title, bindToCurrentProject) =>
     ipcRenderer.invoke(chatContextIpcChannels.createConversation, {
@@ -580,12 +595,40 @@ const chatContexts: ChatContextApi = {
       responseExecutionId,
       afterSequence
     }),
-  cancelAssistantResponse: (conversationId, messageId, expectedRevision) =>
-    ipcRenderer.invoke(chatContextIpcChannels.cancelAssistantResponse, {
-      conversationId,
-      messageId,
-      expectedRevision
+  cancelResponseExecution: (responseExecutionId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.cancelResponseExecution, {
+      responseExecutionId
     }),
+  subscribeResponseEvents: (responseExecutionId, onEvent) => {
+    const subscriberId = `response-subscription-${++responseSubscriptionSequence}`;
+    responseSubscriptions.set(subscriberId, onEvent);
+    void ipcRenderer.invoke(chatContextIpcChannels.subscribeResponseEvents, {
+      responseExecutionId,
+      subscriberId
+    }).then((result) => {
+      if (!result?.ok) {
+        responseSubscriptions.delete(subscriberId);
+        return;
+      }
+      return ipcRenderer.invoke(chatContextIpcChannels.replayResponseEvents, {
+        responseExecutionId,
+        afterSequence: 0
+      }).then((replay) => {
+        if (!replay?.ok || responseSubscriptions.get(subscriberId) !== onEvent) return;
+        for (const event of replay.value) {
+          onEvent(event);
+          ipcRenderer.send(chatContextIpcChannels.acknowledgeResponseEvents, {
+            subscriberId,
+            sequence: event.sequence
+          });
+        }
+      });
+    }).catch(() => responseSubscriptions.delete(subscriberId));
+    return () => {
+      responseSubscriptions.delete(subscriberId);
+      ipcRenderer.send(chatContextIpcChannels.unsubscribeResponseEvents, { subscriberId });
+    };
+  },
   createContextDraft: (conversationId) =>
     ipcRenderer.invoke(chatContextIpcChannels.createContextDraft, { conversationId }),
   getContextDraftPreview: (draftId) =>
