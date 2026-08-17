@@ -12,6 +12,7 @@ import {
   type ParameterSchemaV2,
   type Conversation,
   type ConversationResponseExecutionId,
+  type ProviderUsageObservationRepository,
   type ProjectConversationRepository,
   type ProviderConnection,
   type StructuredCredentialRecord
@@ -27,8 +28,8 @@ import {
   DeepSeekChatAdapter,
   type DeepSeekConversationLifecyclePort,
   type DeepSeekCredentialResolverPort,
+  type DeepSeekChatTerminalObserverPort,
   type DeepSeekSharedRuntime,
-  type DeepSeekUsageObservationSinkPort
 } from './deepseek';
 import {
   NEWAPI_ADAPTER_VERSION,
@@ -41,9 +42,9 @@ import {
   type NewApiConnectionResolverPort,
   type NewApiConversationLifecyclePort,
   type NewApiCredentialResolverPort,
+  type NewApiChatTerminalObserverPort,
   type NewApiParameterSchemaResolverPort,
   type NewApiSharedRuntime,
-  type NewApiUsageObservationSinkPort
 } from './newapi';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_PROVIDER_PACKAGE_VERSION } from './newapi/unicompapi-contracts';
 import { createTextProviderFeatureContracts } from './project-text-feature';
@@ -58,17 +59,12 @@ import type {
   SubmissionDispatchOutcome
 } from './provider-submission-orchestrator';
 import type { ConversationResponseExecutionLifecycle } from './conversation-response-streaming';
+import type { ConversationExecutionCoordinator } from './conversation-execution-coordinator';
 import {
   ConversationStreamDeltaBatcher,
   type ConversationStreamDeltaSegment
 } from './conversation-stream-delta-batcher';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
-
-const noopUsage: DeepSeekUsageObservationSinkPort & NewApiUsageObservationSinkPort = {
-  async append() {
-    return;
-  }
-};
 
 export interface ConversationTextSubmissionRuntimes {
   readonly deepSeekRuntime: DeepSeekSharedRuntime;
@@ -76,6 +72,8 @@ export interface ConversationTextSubmissionRuntimes {
   readonly credentialVault: SecureCredentialVault;
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
+  readonly usage: ProviderUsageObservationRepository;
+  readonly terminalObserver?: DeepSeekChatTerminalObserverPort & NewApiChatTerminalObserverPort;
 }
 
 export function createConversationTextSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
@@ -96,6 +94,7 @@ export function createConversationTextDispatchBridge(
   options: ConversationTextSubmissionRuntimes & {
     readonly lifecycle: ConversationResponseExecutionLifecycle;
     readonly conversations: ProjectConversationRepository;
+    readonly coordinator: ConversationExecutionCoordinator;
     now?: () => string;
   }
 ): ProviderSubmissionDispatchBridge {
@@ -115,7 +114,9 @@ export function createConversationTextDispatchBridge(
     options.deepSeekRuntime,
     credentials,
     linkedLifecycle,
-    noopUsage
+    options.usage,
+    undefined,
+    options.terminalObserver
   );
   const newApiAdapter = new NewApiChatAdapter(
     options.newApiRuntime,
@@ -123,7 +124,9 @@ export function createConversationTextDispatchBridge(
     connections,
     parameterSchemas,
     linkedLifecycle,
-    noopUsage
+    options.usage,
+    undefined,
+    options.terminalObserver
   );
   return new ProviderSubmissionDispatchBridge(options.providerPackages, [
     wrapChatAdapter({
@@ -133,7 +136,9 @@ export function createConversationTextDispatchBridge(
       adapterVersion: DEEPSEEK_CHAT_ADAPTER_VERSION,
       protocolId: DEEPSEEK_CHAT_PROTOCOL_ID,
       protocolVersion: DEEPSEEK_CHAT_PROTOCOL_VERSION,
-      submit: (input) => deepSeekAdapter.submit(input)
+      submit: (input) => deepSeekAdapter.submit(input),
+      cancel: (providerOperationId) => deepSeekAdapter.cancel(providerOperationId),
+      coordinator: options.coordinator
     }),
     wrapChatAdapter({
       packageId: NEWAPI_PROVIDER_PACKAGE_ID,
@@ -146,7 +151,9 @@ export function createConversationTextDispatchBridge(
       adapterVersion: NEWAPI_ADAPTER_VERSION,
       protocolId: NEWAPI_CHAT_PROTOCOL_ID,
       protocolVersion: NEWAPI_PROTOCOL_VERSION,
-      submit: (input) => newApiAdapter.submit(input)
+      submit: (input) => newApiAdapter.submit(input),
+      cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
+      coordinator: options.coordinator
     })
   ]);
 }
@@ -163,7 +170,9 @@ function wrapChatAdapter(input: {
     readonly routeSnapshot: unknown;
     readonly request: unknown;
     readonly beforeRequestStarted: () => Promise<void>;
-  }): Promise<{ readonly providerOperationId: string }>;
+  }): Promise<{ readonly providerOperationId: string; readonly completion: Promise<unknown> }>;
+  cancel(providerOperationId: string): Promise<boolean>;
+  readonly coordinator: ConversationExecutionCoordinator;
 }): ProviderSubmissionAdapterPort {
   return {
     packageId: input.packageId,
@@ -180,6 +189,18 @@ function wrapChatAdapter(input: {
           request: request.request,
           beforeRequestStarted: request.beforeRequestStarted
         });
+        const responseExecutionId = responseExecutionIdFromDispatchRequest(request.request);
+        try {
+          input.coordinator.register({
+            responseExecutionId,
+            providerOperationId: handle.providerOperationId,
+            cancel: () => input.cancel(handle.providerOperationId),
+            completion: handle.completion
+          });
+        } catch (error) {
+          await input.cancel(handle.providerOperationId).catch(() => undefined);
+          throw error;
+        }
         return {
           kind: 'accepted_async',
           providerOperationId: handle.providerOperationId
@@ -192,6 +213,17 @@ function wrapChatAdapter(input: {
       }
     }
   };
+}
+
+function responseExecutionIdFromDispatchRequest(value: unknown): ConversationResponseExecutionId {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Conversation dispatch request is invalid');
+  }
+  const responseExecutionId = (value as { responseExecutionId?: unknown }).responseExecutionId;
+  if (typeof responseExecutionId !== 'string' || responseExecutionId.trim().length === 0) {
+    throw new Error('Conversation dispatch request is missing its response execution ID');
+  }
+  return responseExecutionId as ConversationResponseExecutionId;
 }
 
 function dispatchFailureSafeCode(adapterKey: string, error: unknown): string {
@@ -456,15 +488,19 @@ function createConversationLinkedLifecycle(
       await sealAndDrainDeltas(executionId);
       await enqueue(executionId, async () => {
         await flushPending(executionId);
-        await lifecycle.fail(executionId, safeCode);
-        await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
-          conversation,
-          assistantMessageId,
-          failureReasonFromSafeCode(safeCode),
-          toIsoTimestamp(now()),
-          reasoningContent || undefined
-        ));
-        releaseProjection(executionId);
+        const event = await lifecycle.failDeferredPublish(executionId, safeCode);
+        try {
+          await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
+            conversation,
+            assistantMessageId,
+            failureReasonFromSafeCode(safeCode),
+            toIsoTimestamp(now()),
+            reasoningContent || undefined
+          ));
+        } finally {
+          releaseProjection(executionId);
+          await lifecycle.publish(event);
+        }
       });
     },
     interrupt: async (executionId, reason) => {

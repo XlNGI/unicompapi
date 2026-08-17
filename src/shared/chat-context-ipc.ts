@@ -18,7 +18,11 @@ export const chatContextIpcChannels = {
   submitResponse: 'chat-context:submit-response',
   getResponseExecution: 'chat-context:get-response-execution',
   replayResponseEvents: 'chat-context:replay-response-events',
-  cancelAssistantResponse: 'chat-context:cancel-assistant-response',
+  cancelResponseExecution: 'chat-context:cancel-response-execution',
+  subscribeResponseEvents: 'chat-context:subscribe-response-events',
+  acknowledgeResponseEvents: 'chat-context:acknowledge-response-events',
+  unsubscribeResponseEvents: 'chat-context:unsubscribe-response-events',
+  responseEvent: 'chat-context:response-event',
   createContextDraft: 'chat-context:create-context-draft',
   getContextDraftPreview: 'chat-context:get-context-draft-preview',
   addContextMessageFragment: 'chat-context:add-context-message-fragment',
@@ -45,6 +49,8 @@ export type ChatContextIpcErrorCode =
   | 'legacy_conversation_read_only'
   | 'response_draft_not_found'
   | 'response_execution_not_found'
+  | 'response_execution_not_active'
+  | 'response_execution_in_progress'
   | 'candidate_not_found'
   | 'candidate_unavailable'
   | 'route_selection_invalid'
@@ -382,11 +388,6 @@ export interface ReplayResponseEventsRequest extends ResponseExecutionRequest {
   readonly afterSequence: number;
 }
 
-export interface CancelAssistantResponseRequest
-  extends ConversationRevisionRequest {
-  readonly messageId: string;
-}
-
 export interface DraftIdRequest {
   readonly draftId: string;
 }
@@ -608,18 +609,6 @@ export const chatContextRequestParsers = {
       afterSequence: revision(record.afterSequence, 'afterSequence')
     };
   },
-  cancelAssistantResponse(value: unknown): CancelAssistantResponseRequest {
-    const record = exactRecord(value, [
-      'conversationId',
-      'messageId',
-      'expectedRevision'
-    ]);
-    return {
-      conversationId: controlledId(record.conversationId, 'conversationId'),
-      messageId: controlledId(record.messageId, 'messageId'),
-      expectedRevision: revision(record.expectedRevision, 'expectedRevision')
-    };
-  },
   createContextDraft(value: unknown): ConversationIdRequest {
     return this.conversationId(value);
   },
@@ -808,11 +797,13 @@ export interface ChatContextApi {
     responseExecutionId: string,
     afterSequence: number
   ): Promise<ChatContextIpcResult<readonly ConversationResponseStreamEventDto[]>>;
-  cancelAssistantResponse(
-    conversationId: string,
-    messageId: string,
-    expectedRevision: number
-  ): Promise<ChatContextIpcResult<ConversationDto>>;
+  cancelResponseExecution(
+    responseExecutionId: string
+  ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
+  subscribeResponseEvents(
+    responseExecutionId: string,
+    onEvent: (event: ConversationResponseStreamEventDto) => void
+  ): () => void;
   createContextDraft(
     conversationId: string
   ): Promise<ChatContextIpcResult<ProjectContextDraftPreviewDto>>;

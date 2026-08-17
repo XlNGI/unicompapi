@@ -623,7 +623,11 @@ async function consumeDeepSeekStream(
     const chunk = parseStreamChunk(data);
     responseId ??= chunk.id;
     responseModel ??= chunk.model;
-    if (chunk.id !== responseId || chunk.model !== responseModel || chunk.model !== expectedModel) {
+    if (
+      chunk.id !== responseId ||
+      !sameProviderModelKey(chunk.model, responseModel) ||
+      !sameProviderModelKey(chunk.model, expectedModel)
+    ) {
       throw invalidStream('DeepSeek stream identity changed');
     }
     if (chunk.usage) {
@@ -675,6 +679,10 @@ async function consumeDeepSeekStream(
     contentLength,
     ...(usage ? { usage } : {})
   };
+}
+
+function sameProviderModelKey(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 type DeepSeekFinishReason =

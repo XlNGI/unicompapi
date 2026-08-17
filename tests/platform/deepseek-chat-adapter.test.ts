@@ -224,7 +224,7 @@ describe('DeepSeek chat adapter', () => {
     fixture.transport.responses.push(streamResponse([
       chunk({ delta: { role: 'assistant', content: '' }, usage: null }),
       chunk({ delta: { reasoning_content: 'private synthetic reasoning' } }),
-      chunk({ delta: { content: 'Hello ' } }),
+      chunk({ delta: { content: 'Hello ' }, model: 'DeepSeek-V4-Flash' }),
       chunk({ delta: { content: 'world' } }),
       chunk({ delta: { content: '' }, finishReason: 'stop' }),
       usageChunk({
@@ -1010,6 +1010,7 @@ function chunk(input: {
   readonly delta: Record<string, unknown>;
   readonly finishReason?: string;
   readonly usage?: unknown;
+  readonly model?: string;
 }): string {
   return JSON.stringify({
     id: 'remote-stream-id-not-public',
@@ -1020,7 +1021,7 @@ function chunk(input: {
       logprobs: null
     }],
     created: 1,
-    model: 'deepseek-v4-flash',
+    model: input.model ?? 'deepseek-v4-flash',
     object: 'chat.completion.chunk',
     ...(input.usage !== undefined ? { usage: input.usage } : {})
   });

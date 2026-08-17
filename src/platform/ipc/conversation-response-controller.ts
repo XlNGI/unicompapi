@@ -30,6 +30,8 @@ import {
 } from '../../shared/chat-context-ipc';
 import type {
   ConversationResponseExecutionLifecycle,
+  ControlledConversationResponseStreamChannel,
+  ConversationExecutionCoordinator,
   ProviderFeatureCandidateService
 } from '../providers';
 import { pinProjectContextSelection } from '../repositories';
@@ -42,6 +44,10 @@ export interface ConversationResponseControllerRuntime {
   readonly contexts: ProjectContextRepository;
   readonly candidates: ProviderFeatureCandidateService;
   readonly executions: ConversationResponseExecutionLifecycle;
+  readonly executionCoordinator: ConversationExecutionCoordinator;
+  readonly streamChannel: ControlledConversationResponseStreamChannel;
+  /** Completes startup recovery before this project accepts response operations. */
+  readonly ready: Promise<void>;
   submit?(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
@@ -65,7 +71,7 @@ export class ConversationResponseController {
   createDraft(request: unknown): Promise<ChatContextIpcResult<ConversationResponseDraftDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.createResponseDraft(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       const conversation = await runtime.conversations.get(
         toConversationId(input.conversationId)
       );
@@ -111,7 +117,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.replaceResponseContexts(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       const draft = await this.requireDraft(
         runtime,
         input.responseDraftId,
@@ -145,7 +151,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<ConversationResponseDraftDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.replaceResponseParameters(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       const draft = await this.requireDraft(
         runtime,
         input.responseDraftId,
@@ -167,7 +173,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.responseDraftRevision(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       const draft = await this.requireDraft(
         runtime,
         input.responseDraftId,
@@ -186,7 +192,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.listTextCandidates(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       return {
         ok: true,
         value: await runtime.candidates.listCatalogForFeature({
@@ -202,7 +208,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<ConversationResponsePreparationDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.prepareResponseSubmission(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       const draft = await this.requireDraft(
         runtime,
         input.responseDraftId,
@@ -227,13 +233,20 @@ export class ConversationResponseController {
       if (!input.confirmed) {
         return failure('explicit_confirmation_required', 'Explicit confirmation is required');
       }
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       const draft = await this.requireDraft(
         runtime,
         input.responseDraftId,
         input.expectedRevision
       );
       if (!draft.ok) return draft;
+      const active = await runtime.executions.listActive(draft.value.conversationId);
+      if (active.length > 0) {
+        return failure(
+          'response_execution_in_progress',
+          'The conversation already has an active response execution'
+        );
+      }
       const confirmation = {
         schemaVersion: 1 as const,
         confirmationId: input.confirmationId,
@@ -266,7 +279,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.responseExecution(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       return {
         ok: true,
         value: toResponseExecutionDto(await runtime.executions.readModel(
@@ -281,7 +294,7 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<readonly ConversationResponseStreamEventDto[]>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.replayResponseEvents(request);
-      const runtime = this.requireRuntime();
+      const runtime = await this.requireRuntime();
       return {
         ok: true,
         value: await runtime.executions.replayControlledEvents(
@@ -292,14 +305,88 @@ export class ConversationResponseController {
     });
   }
 
+  cancelExecution(
+    request: unknown
+  ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.responseExecution(request);
+      const runtime = await this.requireRuntime();
+      const executionId = toConversationResponseExecutionId(input.responseExecutionId);
+      const current = await runtime.executions.readModel(executionId);
+      const conversation = await runtime.conversations.get(toConversationId(current.conversationId));
+      if (!conversation || conversation.projectId !== runtime.conversations.projectId) {
+        return failure('response_execution_not_found', 'The response execution does not exist');
+      }
+      if (!isActiveExecutionState(current.state)) {
+        return { ok: true, value: toResponseExecutionDto(current) };
+      }
+      const accepted = await runtime.executionCoordinator.cancel(executionId);
+      const updated = await runtime.executions.readModel(executionId);
+      if (!accepted && isActiveExecutionState(updated.state)) {
+        return failure(
+          'response_execution_not_active',
+          'The response execution has no active provider operation'
+        );
+      }
+      return { ok: true, value: toResponseExecutionDto(updated) };
+    });
+  }
+
+  subscribeEvents(
+    request: unknown,
+    subscriberId: string,
+    onEvent: (event: ConversationResponseStreamEventDto) => void,
+    onDisconnect: () => void
+  ): Promise<ChatContextIpcResult<true>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.responseExecution(request);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(subscriberId)) {
+        return failure('invalid_request', 'Response event subscription is invalid');
+      }
+      const runtime = await this.requireRuntime();
+      const execution = await runtime.executions.readModel(
+        toConversationResponseExecutionId(input.responseExecutionId)
+      );
+      const conversation = await runtime.conversations.get(toConversationId(execution.conversationId));
+      if (!conversation || conversation.projectId !== runtime.conversations.projectId) {
+        return failure('response_execution_not_found', 'The response execution does not exist');
+      }
+      runtime.streamChannel.subscribe({
+        subscriberId,
+        executionId: toConversationResponseExecutionId(input.responseExecutionId),
+        onEvent,
+        onDisconnect: () => onDisconnect()
+      });
+      return { ok: true, value: true };
+    });
+  }
+
+  acknowledgeEvents(subscriberId: string, sequence: number): void {
+    if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(subscriberId)) {
+      void this.requireRuntime().then((runtime) => {
+        runtime.streamChannel.acknowledge(subscriberId, sequence);
+      }).catch((error) => this.dependencies.onError?.(error));
+    }
+  }
+
+  unsubscribeEvents(subscriberId: string): void {
+    if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(subscriberId)) {
+      void this.requireRuntime().then((runtime) => {
+        runtime.streamChannel.disconnect(subscriberId);
+      }).catch((error) => this.dependencies.onError?.(error));
+    }
+  }
+
   async waitForOperations(): Promise<void> {
     await Promise.all([...this.operations]);
   }
 
-  private requireRuntime(): ConversationResponseControllerRuntime {
+  private async requireRuntime(): Promise<ConversationResponseControllerRuntime> {
     const session = this.dependencies.getSession();
     if (!session) throw new ProjectNotOpenError();
-    return this.dependencies.getRuntime(session);
+    const runtime = this.dependencies.getRuntime(session);
+    await runtime.ready;
+    return runtime;
   }
 
   private async requireDraft(
@@ -392,4 +479,8 @@ function toResponseExecutionDto(
     createdAt: execution.createdAt,
     updatedAt: execution.updatedAt
   };
+}
+
+function isActiveExecutionState(state: ConversationResponseExecutionReadModelV1['state']): boolean {
+  return state === 'pending' || state === 'streaming';
 }

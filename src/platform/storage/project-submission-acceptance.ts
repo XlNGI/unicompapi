@@ -78,6 +78,14 @@ export class ProjectSubmissionAcceptanceStore {
     );
   }
 
+  async getByInvocationAttemptId(
+    providerInvocationAttemptId: ProviderInvocationAttemptV1['id']
+  ): Promise<ProjectSubmissionAcceptanceV1 | undefined> {
+    return (await this.list()).find(
+      (acceptance) => acceptance.invocationAttempt.id === providerInvocationAttemptId
+    );
+  }
+
   async scanRecovery(): Promise<readonly ProjectSubmissionRecoveryDecision[]> {
     const decisions: ProjectSubmissionRecoveryDecision[] = [];
     for (const acceptance of await this.list()) {

@@ -27,7 +27,8 @@ const operations = [
   'submitResponse',
   'getResponseExecution',
   'replayResponseEvents',
-  'cancelAssistantResponse',
+  'cancelResponseExecution',
+  'subscribeResponseEvents',
   'createContextDraft',
   'getContextDraftPreview',
   'addContextMessageFragment',
@@ -51,6 +52,9 @@ test('exposes only the named chat and project-context IPC whitelist', () => {
   }
   assert.match(preloadSource, /chatContexts,/);
   assert.match(mainSource, /registerChatContextIpcHandlers/);
+  assert.doesNotMatch(sharedSource, /cancelAssistantResponse/);
+  assert.doesNotMatch(preloadSource, /cancelAssistantResponse/);
+  assert.doesNotMatch(registrationSource, /cancelAssistantResponse/);
   assert.doesNotMatch(sharedSource, /send\(|invoke\(|ipcRenderer|ipcMain/);
 });
 

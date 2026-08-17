@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LuMaximize2, LuMinimize2 } from 'react-icons/lu';
 import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -315,6 +316,7 @@ export function LibraryPage({ onNavigate }: LibraryPageProps) {
               <WorkDetails
                 busy={busy}
                 details={details}
+                key={details.workId}
                 media={media}
                 onNavigate={onNavigate}
                 onRelink={handleRelink}
@@ -407,14 +409,48 @@ function WorkDetails({
 }) {
   const state = fileState(details.fileState);
   const canPreview = details.fileState === 'available' && media;
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!previewExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewExpanded(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [previewExpanded]);
 
   return (
     <div className="uc-work-library__details-content">
-      <div className="uc-work-library__preview">
+      <div className={`uc-work-library__preview${previewExpanded ? ' uc-work-library__preview--expanded' : ''}`}>
         {canPreview && details.mediaKind === 'image' ? (
           <img alt={details.name} src={media.url} />
         ) : canPreview && details.mediaKind === 'video' ? (
-          <video controls src={media.url} />
+          <>
+            <video
+              className="uc-work-library__preview-video"
+              controls
+              controlsList="nofullscreen"
+              playsInline
+              preload="metadata"
+              src={media.url}
+            />
+            <button
+              aria-label={previewExpanded ? '退出视频全屏预览' : '全屏预览视频'}
+              aria-pressed={previewExpanded}
+              className="uc-work-library__preview-fullscreen"
+              onClick={() => setPreviewExpanded((value) => !value)}
+              title={previewExpanded ? '退出全屏' : '全屏预览'}
+              type="button"
+            >
+              {previewExpanded ? <LuMinimize2 aria-hidden="true" /> : <LuMaximize2 aria-hidden="true" />}
+            </button>
+          </>
         ) : canPreview && details.mediaKind === 'audio' ? (
           <audio controls src={media.url} />
         ) : (

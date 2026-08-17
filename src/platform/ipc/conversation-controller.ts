@@ -1,10 +1,6 @@
-import type {
-  ConversationApplicationService,
-  ConversationStreamingService
-} from '../../application';
+import type { ConversationApplicationService } from '../../application';
 import {
   toConversationId,
-  toMessageId,
   type Conversation,
   type ConversationStatus,
   type Message
@@ -21,7 +17,6 @@ import { chatContextFailure, failure } from './chat-context-errors';
 
 export interface ConversationControllerDependencies {
   readonly service: ConversationApplicationService;
-  readonly streaming: ConversationStreamingService;
   getSession(): StorageProjectSession | undefined;
   readonly projectRequired?: boolean;
   readonly storageScope?: ConversationDto['storageScope'];
@@ -170,21 +165,6 @@ export class ConversationController {
         'adapter_unavailable',
         'No conversation response adapter is available'
       );
-    });
-  }
-
-  cancelAssistantResponse(
-    request: unknown
-  ): Promise<ChatContextIpcResult<ConversationDto>> {
-    if (this.dependencies.readOnly) return this.readOnlyFailure();
-    return this.execute(async () => {
-      const input = chatContextRequestParsers.cancelAssistantResponse(request);
-      const conversation = await this.dependencies.streaming.cancel({
-        conversationId: toConversationId(input.conversationId),
-        messageId: toMessageId(input.messageId),
-        expectedRevision: input.expectedRevision
-      });
-      return { ok: true, value: this.toDto(conversation) };
     });
   }
 
