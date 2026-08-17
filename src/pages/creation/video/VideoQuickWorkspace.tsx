@@ -19,6 +19,7 @@ type QuickVideoDraftDto = Extract<
 interface VideoQuickWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: QuickVideoDraftDto;
+  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: QuickVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: QuickVideoDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -44,6 +45,7 @@ function describeWorkspaceError(error: {
 export function VideoQuickWorkspace({
   dirty,
   draft,
+  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onMessage,
@@ -180,6 +182,12 @@ export function VideoQuickWorkspace({
             onSubmissionComplete={(submission) => {
               setResultWorkId(submission.workId);
               setResultUrls(submission.resultVideoUrls ?? []);
+              if (
+                submission.status === 'completed' ||
+                submission.status === 'provider_accepted'
+              ) {
+                onClearUi?.();
+              }
             }}
             showProgressSteps
           />

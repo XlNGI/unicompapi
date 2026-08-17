@@ -1,22 +1,23 @@
 import { PromptEnhancePanel } from '../../../components/PromptEnhancePanel';
-import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
-import type { ImageWorkspaceDraftDto } from '../../../shared/image-workspace-ipc';
+import { composeVideoPromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
+import type { VideoWorkspaceDraftDto } from '../../../shared/video-workspace-ipc';
+import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 
-interface ImagePromptEnhancePanelProps {
+interface VideoPromptEnhancePanelProps {
   readonly dirty: boolean;
-  readonly draft: ImageWorkspaceDraftDto;
-  readonly onDraftPersisted: (draft: ImageWorkspaceDraftDto) => void;
+  readonly draft: VideoWorkspaceDraftDto;
+  readonly onDraftPersisted: (draft: VideoWorkspaceDraftDto) => void;
   readonly onMessage: (message: string) => void;
 }
 
-export function ImagePromptEnhancePanel({
+export function VideoPromptEnhancePanel({
   dirty,
   draft,
   onDraftPersisted,
   onMessage
-}: ImagePromptEnhancePanelProps) {
-  const imageWorkspaces = window.unicomp?.imageWorkspaces;
-  const content = composeImagePromptEnhancementInput(draft);
+}: VideoPromptEnhancePanelProps) {
+  const videoWorkspaces = window.unicomp?.videoWorkspaces;
+  const content = composeVideoPromptEnhancementInput(draft);
   const contextCount = draft.contextReferences.filter(
     (reference) =>
       reference.kind === 'project_context' && reference.includeInPrompt === true
@@ -44,13 +45,17 @@ export function ImagePromptEnhancePanel({
         }),
         dirty,
         async ensureSaved() {
-          if (!imageWorkspaces) return undefined;
+          if (!videoWorkspaces) return undefined;
           if (!dirty && draft.state === 'saved') {
             return { subjectId: draft.draftId, subjectRevision: draft.updatedAt };
           }
-          const result = await imageWorkspaces.update({ ...draft, state: 'saved' });
+          const result = await persistVideoWorkspaceDraft(
+            videoWorkspaces,
+            draft,
+            'saved'
+          );
           if (!result.ok) {
-            onMessage('保存图片草稿失败，请重试。');
+            onMessage('保存视频草稿失败，请重试。');
             return undefined;
           }
           const saved = result.value;
@@ -58,7 +63,7 @@ export function ImagePromptEnhancePanel({
           return { subjectId: saved.draftId, subjectRevision: saved.updatedAt };
         },
         async refreshResult(input) {
-          const refreshed = await imageWorkspaces?.get(input.subjectId);
+          const refreshed = await videoWorkspaces?.get(input.subjectId);
           if (refreshed?.ok && refreshed.value) {
             onDraftPersisted(refreshed.value);
             return;

@@ -24,7 +24,9 @@ export interface PromptEnhanceHost {
   readonly subjectId: string;
   readonly subjectRevision: string;
   readonly originalInput: string;
+  readonly inputText: string;
   readonly contextCount: number;
+  readonly required: boolean;
   readonly inputSignature: string;
   readonly dirty: boolean;
   ensureSaved(): Promise<{ readonly subjectId: string; readonly subjectRevision: string } | undefined>;
@@ -195,7 +197,7 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
       setPreparedSubject(undefined);
       setConfirmed(false);
       setProgressPhase('completed');
-      onMessage('提示词增强完成，结果已写入系统补充；请确认后合并到最终提示词。');
+      onMessage('提示词增强完成，结果已写入最终提示词并可直接编辑。');
     } catch {
       const message = '提示词增强失败，请重试。';
       onMessage(message);
@@ -207,7 +209,7 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
     }
   }
 
-  const required = host.contextCount > 0;
+  const required = host.required;
   return (
     <section className="uc-prompt-enhance" aria-label="提示词增强">
       <header className="uc-prompt-enhance__heading">
@@ -215,7 +217,9 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
         <div>
           <strong>{required ? '必须：提示词增强' : '可选：提示词增强'}</strong>
           <p>{required
-            ? `已选择 ${host.contextCount} 份项目上下文，必须增强并采用结果后才能生成。`
+            ? host.contextCount > 0
+              ? `已选择 ${host.contextCount} 份项目上下文或结构化提示词内容，必须增强并采用结果后才能生成。`
+              : '已填写结构化提示词内容，必须增强并采用结果后才能生成。'
             : '使用文本推理模型改写原始需求；结果不会自动创建生成任务。'}</p>
         </div>
       </header>
@@ -286,7 +290,7 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
 
       <SubmissionProgressSteps failureMessage={progressFailure} phase={progressPhase} />
       <Button
-        disabled={busy || !selectedCandidate?.available || !host.originalInput.trim() ||
+        disabled={busy || !selectedCandidate?.available || !host.inputText.trim() ||
           (Boolean(preparation) && !confirmed)}
         onClick={() => void (preparation ? submit() : prepare())}
       >

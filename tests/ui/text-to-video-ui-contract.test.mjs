@@ -35,6 +35,10 @@ test('text-to-video keeps prompt and shot planning local', () => {
   for (const fact of ['originalInput', 'finalPrompt', 'sourceKind', 'shots', '添加镜头']) {
     assert.match(source, new RegExp(fact));
   }
+  assert.ok(
+    source.indexOf('添加镜头') < source.indexOf('<h2>最终提示词</h2>'),
+    'shot planning should appear before the final prompt step'
+  );
   assert.match(source, /emptyStoryboard/);
   assert.doesNotMatch(bundle, /fetch\(|upload\(|analy[sz]e\(|absolutePath/);
 });

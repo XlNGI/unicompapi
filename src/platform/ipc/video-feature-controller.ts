@@ -2,6 +2,7 @@ import {
   toDraftId,
   type FeatureCandidateSubjectV1,
   type SubmissionUserConfirmationV1,
+  type VideoWorkspaceDraft,
   type VideoWorkspaceRepository
 } from '../../domain';
 import type {
@@ -24,6 +25,7 @@ import type { VideoWorkspaceMutationCoordinator } from './video-workspace-mutati
 export interface VideoFeatureControllerRuntime {
   readonly drafts: VideoWorkspaceRepository;
   readonly candidates: ProviderFeatureCandidateService;
+  assertPromptEnhancementSatisfied?(draft: VideoWorkspaceDraft): Promise<void>;
   submit?(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
@@ -63,6 +65,7 @@ export class VideoFeatureController {
     return this.execute(async () => {
       const input = parsePrepareRequest(request);
       const resolved = await this.requireDraft(input);
+      await resolved.runtime.assertPromptEnhancementSatisfied?.(resolved.draft);
       return {
         ok: true,
         value: await resolved.runtime.candidates.prepareSubmission({
@@ -82,6 +85,7 @@ export class VideoFeatureController {
         return failure('confirmation_required', 'Explicit confirmation is required');
       }
       const resolved = await this.requireDraft(input);
+      await resolved.runtime.assertPromptEnhancementSatisfied?.(resolved.draft);
       const confirmation = {
         schemaVersion: 1 as const,
         confirmationId: input.confirmationId,
@@ -149,7 +153,7 @@ export class VideoFeatureController {
       draftId: draft.id,
       draftRevision: videoDraftRevision(draft.updatedAt)
     };
-    return { runtime, subject };
+    return { runtime, subject, draft };
   }
 
   private execute<T>(

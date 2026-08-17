@@ -6,6 +6,7 @@ import {
   type ImageWorkspaceRepository,
   type ProjectContextRepository
 } from '../../domain';
+import { composeImagePromptEnhancementInput } from '../../shared/prompt-enhancement-input';
 import { freezeProjectContextOutboundSnapshots, pinProjectContextSelection } from '../repositories';
 import {
   PromptEnhanceError,
@@ -72,6 +73,8 @@ export class ImagePromptEnhanceSubjectAdapter implements PromptEnhanceSubjectPor
       subjectId: draft.id,
       subjectRevision: draft.updatedAt,
       originalInput: draft.prompt.originalInput,
+      additionalPromptContent: composeImagePromptEnhancementInput(draft).text,
+      kind: 'image_workspace',
       contextSnapshots: freezeProjectContextOutboundSnapshots({
         projectId: toProjectId(this.options.projectId),
         surface: 'professional',
@@ -96,6 +99,7 @@ export class ImagePromptEnhanceSubjectAdapter implements PromptEnhanceSubjectPor
       state: 'saved',
       prompt: {
         ...current.prompt,
+        finalPrompt: input.enhancedText,
         systemSupplements: [
           ...current.prompt.systemSupplements.filter((item) => item.source !== 'enhancement'),
           {

@@ -13,6 +13,7 @@ export interface PromptEnhanceInputSnapshotV1 {
   readonly executionMode: PromptEnhanceExecutionMode;
   readonly productFeature: 'text_reasoning';
   readonly originalInput: string;
+  readonly structuredInput?: string;
   readonly contextSnapshots: readonly ProjectContextOutboundSnapshotV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
 }
@@ -25,6 +26,7 @@ export interface PromptEnhanceRequirement {
 
 export async function promptEnhanceInputFingerprint(input: {
   readonly originalInput: string;
+  readonly structuredInput?: string;
   readonly contextSnapshots: readonly ProjectContextOutboundSnapshotV1[];
 }): Promise<string> {
   const value = JSON.stringify({
@@ -33,7 +35,10 @@ export async function promptEnhanceInputFingerprint(input: {
       contextId: context.contextId,
       contextRevision: context.contextRevision,
       contentHash: context.contentHash
-    }))
+    })),
+    ...(input.structuredInput?.trim()
+      ? { structuredInput: input.structuredInput.trim() }
+      : {})
   });
   const digest = await globalThis.crypto.subtle.digest(
     'SHA-256',
@@ -62,11 +67,15 @@ export function parsePromptEnhanceSourceReference(
 export async function evaluatePromptEnhanceRequirement(input: {
   readonly policy: PromptEnhancePolicy;
   readonly originalInput: string;
+  readonly structuredInput?: string;
   readonly contextSnapshots: readonly ProjectContextOutboundSnapshotV1[];
   readonly enhancementSourceReferences: readonly (string | undefined)[];
 }): Promise<PromptEnhanceRequirement> {
   const inputFingerprint = await promptEnhanceInputFingerprint(input);
-  const required = input.contextSnapshots.length > 0
+  const hasStructuredContent =
+    (input.structuredInput?.trim().length ?? 0) > 0 ||
+    input.contextSnapshots.length > 0;
+  const required = hasStructuredContent
     ? input.policy.requireWhenContextExists
     : !input.policy.allowWithoutContext;
   const satisfied = input.enhancementSourceReferences.some(

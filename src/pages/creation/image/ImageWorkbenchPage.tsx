@@ -56,6 +56,7 @@ const modePresentation: Record<
 
 interface ImageWorkbenchPageProps {
   mode: ImageCreationMode;
+  preferredDraftId?: string;
   onNavigateToProfessional?: () => void;
   onVideoDraftCreated?: (draftId: string) => void;
   onNavigateToImageMode?: (
@@ -65,6 +66,7 @@ interface ImageWorkbenchPageProps {
 
 export function ImageWorkbenchPage({
   mode,
+  preferredDraftId,
   onNavigateToProfessional,
   onVideoDraftCreated,
   onNavigateToImageMode
@@ -83,7 +85,10 @@ export function ImageWorkbenchPage({
   const [autoSaveRevision, setAutoSaveRevision] = useState(0);
   const [autoSaving, setAutoSaving] = useState(false);
   const [message, setMessage] = useState('');
-  const currentDraft = drafts[drafts.length - 1];
+  const [selectedDraftId, setSelectedDraftId] = useState(preferredDraftId);
+  const currentDraft =
+    drafts.find((draft) => draft.draftId === selectedDraftId) ??
+    drafts[drafts.length - 1];
   const isQuickImage = mode.workspaceMode === 'quick_image';
   const isProfessionalImage = mode.workspaceMode === 'professional_image';
   const isGenerationImage =
@@ -142,6 +147,15 @@ export function ImageWorkbenchPage({
           }
         }
         setDrafts(modeDrafts);
+        setSelectedDraftId((current) =>
+          preferredDraftId &&
+          modeDrafts.some((draft) => draft.draftId === preferredDraftId)
+            ? preferredDraftId
+            : current &&
+                modeDrafts.some((draft) => draft.draftId === current)
+              ? current
+              : modeDrafts[modeDrafts.length - 1]?.draftId
+        );
 
         if (providers) {
           const registryResult = await providers
@@ -166,7 +180,7 @@ export function ImageWorkbenchPage({
     return () => {
       active = false;
     };
-  }, [imageWorkspaces, mode.workspaceMode, providers, storage]);
+  }, [imageWorkspaces, mode.workspaceMode, preferredDraftId, providers, storage]);
 
   async function createDraft() {
     if (!imageWorkspaces || !session || busy) return;
@@ -179,10 +193,32 @@ export function ImageWorkbenchPage({
         return;
       }
       setDrafts((items) => [...items, result.value]);
+      setSelectedDraftId(result.value.draftId);
       setDirty(false);
       setMessage('本地草稿已创建；没有上传图片，也没有创建任务。');
     } catch {
       setMessage('创建本地草稿失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearUiAfterGeneration() {
+    if (!imageWorkspaces || !session || busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await imageWorkspaces.create(mode.workspaceMode);
+      if (!result.ok) {
+        setMessage(workspaceErrorMessages[result.error.code]);
+        return;
+      }
+      setDrafts((items) => [...items, result.value]);
+      setSelectedDraftId(result.value.draftId);
+      setDirty(false);
+      setMessage('生成已完成；当前输入已清空，原草稿和结果已保留。');
+    } catch {
+      setMessage('生成后创建新草稿失败，请重试。');
     } finally {
       setBusy(false);
     }
@@ -373,6 +409,7 @@ export function ImageWorkbenchPage({
         <ImageQuickWorkspace
           dirty={dirty}
           draft={currentDraft}
+          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}
@@ -382,6 +419,7 @@ export function ImageWorkbenchPage({
         <ImageProfessionalWorkspace
           dirty={dirty}
           draft={currentDraft}
+          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}

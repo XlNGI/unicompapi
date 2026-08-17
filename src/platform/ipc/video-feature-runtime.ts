@@ -20,6 +20,7 @@ import {
   ProviderSubmissionOrchestrator,
   ProjectImageMaterialResolver,
   ProjectVideoFeatureSubjectResolver,
+  assertVideoPromptEnhancementSatisfied,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
   SubmissionOrchestrationError,
@@ -149,7 +150,13 @@ export function createVideoFeatureControllerRuntime(
 
   const runtime: VideoFeatureControllerRuntime = {
     drafts,
-    candidates
+    candidates,
+    assertPromptEnhancementSatisfied: (draft) =>
+      assertVideoPromptEnhancementSatisfied({
+        projectId: options.session.projectId,
+        draft,
+        contexts
+      })
   };
 
   const recoveryResultReceiver = options.resultReceiver;

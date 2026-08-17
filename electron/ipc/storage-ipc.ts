@@ -18,6 +18,7 @@ import {
   ProjectCatalogService,
   JsonProviderRegistryStore,
   JsonImageWorkspaceRepository,
+  JsonVideoWorkspaceRepository,
   JsonProjectContextRepository,
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
@@ -45,6 +46,8 @@ import {
   type RuntimeAuthorizationOrchestrationPort,
   PromptEnhanceService,
   ImagePromptEnhanceSubjectAdapter,
+  VideoPromptEnhanceSubjectAdapter,
+  WorkspacePromptEnhanceSubjectAdapter,
   type DeepSeekSharedRuntime,
   type NewApiSharedRuntime,
   type NewApiImageDownloadPort,
@@ -195,7 +198,8 @@ export function registerStorageIpcHandlers(options: {
     }
     const authorization = options.runtimeAuthorization ?? denyRuntimeAuthorization;
     const storage = new NodeProjectStorage(session.rootDirectory);
-    const drafts = new JsonImageWorkspaceRepository(storage, session.projectId);
+    const imageDrafts = new JsonImageWorkspaceRepository(storage, session.projectId);
+    const videoDrafts = new JsonVideoWorkspaceRepository(storage, session.projectId);
     const contexts = new JsonProjectContextRepository(storage, session.projectId);
     const audit = {
       routes: new JsonProviderExecutionRouteSnapshotRepository(storage, session.projectId),
@@ -204,11 +208,18 @@ export function registerStorageIpcHandlers(options: {
     };
     const value = new PromptEnhanceService({
       projectId: session.projectId,
-      subjects: new ImagePromptEnhanceSubjectAdapter({
-        projectId: session.projectId,
-        drafts,
-        contexts
-      }),
+      subjects: new WorkspacePromptEnhanceSubjectAdapter(
+        new ImagePromptEnhanceSubjectAdapter({
+          projectId: session.projectId,
+          drafts: imageDrafts,
+          contexts
+        }),
+        new VideoPromptEnhanceSubjectAdapter({
+          projectId: session.projectId,
+          drafts: videoDrafts,
+          contexts
+        })
+      ),
       runtimes: {
         deepSeekRuntime: options.textSubmission.deepSeekRuntime,
         newApiRuntime: options.textSubmission.newApiRuntime,

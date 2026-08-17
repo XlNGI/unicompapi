@@ -25,6 +25,28 @@ describe('prompt enhancement composition', () => {
     expect(prompt).toContain('（无项目上下文）');
     expect(prompt).toContain('Create a simple icon.');
   });
+
+  it('includes structured prompt content in the enhancement request', () => {
+    const prompt = buildEnhancePrompt(
+      'Create a launch video.',
+      [],
+      '主体动作：转身看向镜头\n镜头运动：缓慢推进'
+    );
+    expect(prompt).toContain('<structured_input>');
+    expect(prompt).toContain('主体动作：转身看向镜头');
+  });
+
+  it('supports context-only enhancement without a basic prompt', () => {
+    const prompt = buildEnhancePrompt('', [{
+      schemaVersion: 1,
+      contextId: toProjectContextId('context-only'),
+      contextRevision: 1,
+      contentHash: 'c'.repeat(64),
+      contentSnapshot: 'Registered brand palette.'
+    }]);
+    expect(prompt).toContain('Registered brand palette.');
+    expect(prompt).not.toContain('empty');
+  });
 });
 
 describe('prompt enhancement preparation consumption', () => {

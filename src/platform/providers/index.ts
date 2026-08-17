@@ -24,6 +24,8 @@ export * from './image-draft-artifact-factory';
 export * from './image-feature-submission';
 export * from './prompt-enhance-submission';
 export * from './image-prompt-enhance-host';
+export * from './video-prompt-enhance-host';
+export * from './workspace-prompt-enhance-host';
 export * from './prompt-once-text-adapter';
 export * from './video-draft-artifact-factory';
 export * from './video-feature-submission';

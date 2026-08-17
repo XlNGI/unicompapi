@@ -18,6 +18,8 @@ import { SettingsPage } from '../pages/settings/SettingsPage';
 import { TasksPage } from '../pages/tasks/TasksPage';
 import { VideoCreationPage } from '../pages/video-creation/VideoCreationPage';
 import type { ImageWorkspaceDtoMode } from '../shared/image-workspace-ipc';
+import type { VideoWorkspaceDtoMode } from '../shared/video-workspace-ipc';
+import type { TaskReuseTarget } from '../shared/task-reuse';
 import { AppLayout } from './layout/AppLayout';
 import {
   defaultNavigationItemId,
@@ -63,6 +65,15 @@ const imageModeNavigationIds: Record<
   image_to_prompt: 'image-to-prompt'
 };
 
+const videoModeNavigationIds: Record<
+  VideoWorkspaceDtoMode,
+  SecondaryNavigationItemId
+> = {
+  quick_video: 'quick-video',
+  text_to_video: 'text-to-video',
+  image_to_video: 'image-to-video'
+};
+
 export function App() {
   const [activeItemId, setActiveItemId] = useState<NavigationItemId>(
     defaultNavigationItemId
@@ -70,6 +81,7 @@ export function App() {
   const [activeSubItemId, setActiveSubItemId] =
     useState<SecondaryNavigationItemId>();
   const [openedVideoDraftId, setOpenedVideoDraftId] = useState<string>();
+  const [openedImageDraftId, setOpenedImageDraftId] = useState<string>();
   const [selectedChatConversationId, setSelectedChatConversationId] = useState<string>();
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
@@ -77,6 +89,7 @@ export function App() {
 
   function handleNavigate(itemId: NavigationItemId) {
     setOpenedVideoDraftId(undefined);
+    setOpenedImageDraftId(undefined);
     setActiveItemId(itemId);
     setActiveSubItemId(getSecondaryNavigationItems(itemId)[0]?.id);
   }
@@ -86,6 +99,7 @@ export function App() {
     subItemId: SecondaryNavigationItemId
   ) {
     setOpenedVideoDraftId(undefined);
+    setOpenedImageDraftId(undefined);
     setActiveItemId(itemId);
     setActiveSubItemId(subItemId);
   }
@@ -95,9 +109,32 @@ export function App() {
   }
 
   function handleVideoDraftCreated(draftId: string) {
+    setOpenedImageDraftId(undefined);
     setOpenedVideoDraftId(draftId);
     setActiveItemId('video-creation');
     setActiveSubItemId('image-to-video');
+  }
+
+  function handleReuseParameters(target: TaskReuseTarget) {
+    if (target.mediaKind === 'video') {
+      setOpenedImageDraftId(undefined);
+      setOpenedVideoDraftId(target.draftId);
+      setActiveItemId('video-creation');
+      if (target.mode === 'video_editing') {
+        setActiveSubItemId('video-editing');
+        return;
+      }
+      setActiveSubItemId(
+        videoModeNavigationIds[target.mode as VideoWorkspaceDtoMode] ?? 'quick-video'
+      );
+      return;
+    }
+    setOpenedVideoDraftId(undefined);
+    setOpenedImageDraftId(target.draftId);
+    setActiveItemId('image-creation');
+    setActiveSubItemId(
+      imageModeNavigationIds[target.mode as ImageWorkspaceDtoMode] ?? 'quick-image'
+    );
   }
 
   return (
@@ -115,12 +152,16 @@ export function App() {
       ) : activeItemId === 'projects' && !activeSubItemId ? (
         <ProjectsPage onNavigate={handleNavigate} />
       ) : activeItemId === 'tasks' && !activeSubItemId ? (
-        <TasksPage onNavigate={handleNavigate} />
+        <TasksPage
+          onNavigate={handleNavigate}
+          onReuseParameters={handleReuseParameters}
+        />
       ) : activeItemId === 'library' && !activeSubItemId ? (
         <LibraryPage onNavigate={handleNavigate} />
       ) : activeSubItemId === 'quick-image' ? (
         <ImageQuickPage
           onVideoDraftCreated={handleVideoDraftCreated}
+          preferredDraftId={openedImageDraftId}
           onNavigateToProfessional={() =>
             handleSecondaryNavigate('image-creation', 'professional-image')
           }
@@ -128,31 +169,41 @@ export function App() {
       ) : activeSubItemId === 'professional-image' ? (
         <ImageProfessionalPage
           onVideoDraftCreated={handleVideoDraftCreated}
+          preferredDraftId={openedImageDraftId}
         />
       ) : activeSubItemId === 'image-understanding' ? (
         <ImageUnderstandingPage
           onNavigateToImageMode={handleImageModeNavigate}
+          preferredDraftId={openedImageDraftId}
         />
       ) : activeSubItemId === 'image-editing' ? (
         <ImageEditingPage
           onNavigateToImageMode={handleImageModeNavigate}
           onVideoDraftCreated={handleVideoDraftCreated}
+          preferredDraftId={openedImageDraftId}
         />
       ) : activeSubItemId === 'image-to-prompt' ? (
         <ImageToPromptPage
           onNavigateToImageMode={handleImageModeNavigate}
+          preferredDraftId={openedImageDraftId}
         />
       ) : activeSubItemId === 'quick-video' ? (
         <VideoQuickPage
+          preferredDraftId={openedVideoDraftId}
           onNavigateToImageToVideo={handleVideoDraftCreated}
           onNavigateToTextToVideo={() =>
             handleSecondaryNavigate('video-creation', 'text-to-video')
           }
         />
+      ) : activeSubItemId === 'text-to-video' ? (
+        <TextToVideoPage preferredDraftId={openedVideoDraftId} />
       ) : activeSubItemId === 'image-to-video' ? (
         <ImageToVideoPage preferredDraftId={openedVideoDraftId} />
       ) : activeSubItemId === 'video-editing' ? (
-        <VideoEditingPage onNavigate={handleNavigate} />
+        <VideoEditingPage
+          onNavigate={handleNavigate}
+          preferredDraftId={openedVideoDraftId}
+        />
       ) : (
         <ActivePage />
       )}

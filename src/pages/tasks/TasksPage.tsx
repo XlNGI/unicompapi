@@ -10,11 +10,13 @@ import type {
   StorageTaskDetailsDto,
   StorageTaskSummaryDto
 } from '../../shared/storage-ipc';
+import type { TaskReuseTarget } from '../../shared/task-reuse';
 import '../../styles/pages.css';
 import { CallRecordsView } from './CallRecordsView';
 
 interface TasksPageProps {
   onNavigate?: (itemId: 'projects' | 'library') => void;
+  onReuseParameters?: (target: TaskReuseTarget) => void;
 }
 
 const taskStates: Record<string, { label: string; tone: StatusTone }> = {
@@ -60,7 +62,7 @@ function taskState(state?: string) {
   };
 }
 
-export function TasksPage({ onNavigate }: TasksPageProps) {
+export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   const [view, setView] = useState<'tasks' | 'calls'>('tasks');
   const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>([]);
   const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
@@ -72,6 +74,7 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
+  const [reusingParameters, setReusingParameters] = useState(false);
   const [message, setMessage] = useState('');
   const storage = window.unicomp?.storage;
 
@@ -173,6 +176,70 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
       setMessage('重新接收失败，请稍后重试。');
     } finally {
       setRecovering(false);
+    }
+  }
+
+  async function reuseParameters(details: StorageTaskDetailsDto) {
+    if (!storage || reusingParameters) return;
+    setReusingParameters(true);
+    setMessage('');
+    try {
+      const sessionResult = await storage.getProjectSession();
+      if (!sessionResult.ok || !sessionResult.value) {
+        setMessage('当前没有打开项目，无法复制参数。');
+        return;
+      }
+      if (sessionResult.value.projectId !== details.projectId) {
+        setMessage('不可跨项目复制参数：请先打开该任务所属项目。');
+        return;
+      }
+      const imageResult = await window.unicomp?.imageWorkspaces?.list();
+      if (imageResult?.ok) {
+        const draft = imageResult.value.find(
+          (item) => item.draftId === details.sourceDraftId
+        );
+        if (draft) {
+          onReuseParameters?.({
+            mediaKind: 'image',
+            draftId: draft.draftId,
+            mode: draft.mode
+          });
+          return;
+        }
+      }
+      const videoResult = await window.unicomp?.videoWorkspaces?.list();
+      if (videoResult?.ok) {
+        const draft = videoResult.value.find(
+          (item) => item.draftId === details.sourceDraftId
+        );
+        if (draft) {
+          onReuseParameters?.({
+            mediaKind: 'video',
+            draftId: draft.draftId,
+            mode: draft.mode
+          });
+          return;
+        }
+      }
+      const editorResult = await window.unicomp?.videoEditors?.list();
+      if (editorResult?.ok) {
+        const draft = editorResult.value.find(
+          (item) => item.draftId === details.sourceDraftId
+        );
+        if (draft) {
+          onReuseParameters?.({
+            mediaKind: 'video',
+            draftId: draft.draftId,
+            mode: 'video_editing'
+          });
+          return;
+        }
+      }
+      setMessage('该任务对应的原草稿已不存在，无法复制参数。');
+    } catch {
+      setMessage('读取原草稿失败，无法复制参数。');
+    } finally {
+      setReusingParameters(false);
     }
   }
 
@@ -331,6 +398,8 @@ export function TasksPage({ onNavigate }: TasksPageProps) {
                   details.canRecoverImageResult ? 'image' : 'video'
                 )}
                 recovering={recovering}
+                reusingParameters={reusingParameters}
+                onReuseParameters={() => void reuseParameters(details)}
               />
             ) : (
               <p className="uc-task-center__muted">选择左侧任务查看提交内容和真实状态。</p>
@@ -352,12 +421,16 @@ function TaskDetails({
   details,
   onNavigate,
   onRecoverResult,
-  recovering
+  recovering,
+  reusingParameters,
+  onReuseParameters
 }: {
   details: StorageTaskDetailsDto;
   onNavigate?: TasksPageProps['onNavigate'];
   onRecoverResult: () => void;
   recovering: boolean;
+  reusingParameters: boolean;
+  onReuseParameters: () => void;
 }) {
   const state = taskState(details.latestExecutionState);
   const retryability = details.retryability === 'retryable'
@@ -390,6 +463,14 @@ function TaskDetails({
         <p>{details.finalPrompt}</p>
       </div>
       <div className="uc-task-center__actions">
+        <Button
+          disabled={reusingParameters}
+          loading={reusingParameters}
+          onClick={onReuseParameters}
+          variant="secondary"
+        >
+          复用参数
+        </Button>
         {(details.canRecoverImageResult || details.canRecoverVideoResult) && (
           <Button
             disabled={recovering}

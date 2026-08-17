@@ -16,6 +16,7 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
+import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import type { ImagePreflightDto } from '../../../shared/image-submission-ipc';
 import type {
   ImageWorkspaceInputAssetDto
@@ -29,6 +30,7 @@ import {
   type EditingImageDraftDto
 } from './ImageGenerationControls';
 import { ImageRegionFields } from './ImageRegionFields';
+import { ImagePromptEnhancePanel } from './ImagePromptEnhancePanel';
 import { useImageSubmissionFlow } from './useImageSubmissionFlow';
 
 type EditingTargetMode = 'professional_image' | 'image_to_prompt';
@@ -106,6 +108,14 @@ export function ImageEditingWorkspace({
     onVideoDraftCreated,
     errorMessages: editingErrorMessages
   });
+  const enhancementInput = composeImagePromptEnhancementInput(draft);
+  const enhancementContent = [...draft.prompt.systemSupplements]
+    .reverse()
+    .find((supplement) => supplement.source === 'enhancement')?.content;
+  const enhancementSatisfied =
+    !enhancementInput.required ||
+    (Boolean(enhancementContent) &&
+      draft.prompt.finalPrompt.trim() === enhancementContent?.trim());
 
   useEffect(() => {
     let active = true;
@@ -193,6 +203,10 @@ export function ImageEditingWorkspace({
   }
 
   async function checkEditing() {
+    if (!enhancementSatisfied) {
+      onMessage('已填写结构化提示词内容，请先完成提示词增强并确认最终提示词。');
+      return;
+    }
     if (!imageSubmissions || dirty || busy) return;
     setBusy(true);
     onMessage('');
@@ -289,6 +303,12 @@ export function ImageEditingWorkspace({
               />
             </label>
           ))}
+          <ImagePromptEnhancePanel
+            dirty={dirty}
+            draft={draft}
+            onDraftPersisted={(next) => onDraftPersisted(next as EditingImageDraftDto)}
+            onMessage={onMessage}
+          />
           {dirty ? (
             <p className="uc-image-quick__hint" role="status">
               请先点击页面顶部“保存本地草稿”，再更换原图或检查编辑条件。
