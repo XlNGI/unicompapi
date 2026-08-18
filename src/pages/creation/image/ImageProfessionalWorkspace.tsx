@@ -68,6 +68,20 @@ export function ImageProfessionalWorkspace({
     submissionProgress.phase === 'submission_failed' ||
     submissionProgress.phase === 'uncertain' ||
     submissionProgress.phase === 'submission_uncertain';
+  const generationPreviewCopy = submissionProgress.phase === 'preparing'
+    ? {
+        title: '正在准备图片生成',
+        description: '正在锁定本次参数、素材与提交事实。'
+      }
+    : submissionProgress.phase === 'requesting'
+      ? {
+          title: '正在提交生成请求',
+          description: '请求正在安全提交，请保持应用运行。'
+        }
+      : {
+          title: '正在生成图片',
+          description: '服务商正在处理，完成后将校验并登记到本地。'
+        };
 
   useEffect(() => {
     setResultWorkId(undefined);
@@ -547,6 +561,7 @@ export function ImageProfessionalWorkspace({
             />
 
             <GenerationResultPreview
+              animateResult
               emptyDescription={
                 submissionProgress.phase === 'idle'
                   ? '完成左侧配置并点击“生成”后，这里显示生成过程和作品。'
@@ -557,6 +572,9 @@ export function ImageProfessionalWorkspace({
                   ? '等待提交'
                   : '暂时没有可展示的作品'
               }
+              loading={generationInFlight}
+              loadingDescription={generationPreviewCopy.description}
+              loadingTitle={generationPreviewCopy.title}
               mediaKind="image"
               remoteUrls={resultUrls}
               workId={resultWorkId}
