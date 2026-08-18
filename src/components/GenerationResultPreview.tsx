@@ -7,6 +7,10 @@ export interface GenerationResultPreviewProps {
   readonly remoteUrls?: readonly string[];
   readonly emptyTitle?: string;
   readonly emptyDescription?: string;
+  readonly loading?: boolean;
+  readonly loadingTitle?: string;
+  readonly loadingDescription?: string;
+  readonly animateResult?: boolean;
 }
 
 /**
@@ -18,7 +22,11 @@ export function GenerationResultPreview({
   mediaKind,
   remoteUrls = [],
   emptyTitle = '尚无真实生成结果',
-  emptyDescription = '结果必须经过本地文件校验后才会登记为作品。'
+  emptyDescription = '结果必须经过本地文件校验后才会登记为作品。',
+  loading = false,
+  loadingTitle = '正在生成',
+  loadingDescription = '完成后将校验结果并登记到本地。',
+  animateResult = false
 }: GenerationResultPreviewProps) {
   const storage = window.unicomp?.storage;
   const [localUrl, setLocalUrl] = useState<string>();
@@ -48,6 +56,38 @@ export function GenerationResultPreview({
     };
   }, [storage, workId]);
 
+  if (loading) {
+    return (
+      <div className="uc-image-quick__result-list">
+        <article className="uc-image-quick__result-item uc-generation-result-preview">
+          <strong>本地作品预览</strong>
+          <div
+            aria-live="polite"
+            className="uc-generation-result-preview__loading"
+            role="status"
+          >
+            <span
+              aria-hidden="true"
+              className="uc-generation-result-preview__scan-line"
+            />
+            <div className="uc-generation-result-preview__loading-content">
+              <span
+                aria-hidden="true"
+                className="uc-generation-result-preview__indicator"
+              >
+                <span className="uc-generation-result-preview__ring" />
+              </span>
+              <div>
+                <strong>{loadingTitle}</strong>
+                <span>{loadingDescription}</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    );
+  }
+
   if (!workId && remoteUrls.length === 0) {
     return (
       <EmptyState
@@ -62,7 +102,13 @@ export function GenerationResultPreview({
   return (
     <div className="uc-image-quick__result-list">
       {localUrl ? (
-        <article className="uc-image-quick__result-item">
+        <article
+          className={[
+            'uc-image-quick__result-item',
+            'uc-generation-result-preview',
+            animateResult ? 'uc-generation-result-preview--animated' : ''
+          ].filter(Boolean).join(' ')}
+        >
           <strong>本地作品预览</strong>
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" src={localUrl} />
@@ -72,7 +118,14 @@ export function GenerationResultPreview({
         </article>
       ) : null}
       {!localUrl && remoteUrls.map((url) => (
-        <article key={url} className="uc-image-quick__result-item">
+        <article
+          className={[
+            'uc-image-quick__result-item',
+            'uc-generation-result-preview',
+            animateResult ? 'uc-generation-result-preview--animated' : ''
+          ].filter(Boolean).join(' ')}
+          key={url}
+        >
           <strong>{mediaKind === 'image' ? '图片链接' : '视频链接'}</strong>
           <a href={url} rel="noreferrer" target="_blank">{url}</a>
           {mediaKind === 'image' ? (
