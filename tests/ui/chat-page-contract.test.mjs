@@ -69,7 +69,13 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(appSource, /setNewChatRequest|newConversationRequest/);
   assert.match(appSource, /initialConversationId=\{selectedChatConversationId\}/);
   assert.match(appSource, /onConversationChange=\{setSelectedChatConversationId\}/);
+  assert.match(appSource, /initialCandidateId=\{selectedChatCandidateId\}/);
+  assert.match(appSource, /onCandidateChange=\{setSelectedChatCandidateId\}/);
   assert.match(source, /onConversationChange\?\.\(selectedId\)/);
+  assert.match(source, /onCandidateChange\?\.\(selectedCandidateId\)/);
+  assert.match(source, /initialCandidateId\?: string/);
+  assert.match(source, /onCandidateChange\?: \(candidateId\?: string\) => void/);
+  assert.match(source, /candidate\?\.available \? candidate\.candidateId : undefined/);
   assert.match(source, /speaker=\{<Tooltip>新对话<\/Tooltip>\}[\s\S]*aria-label="新建对话"[\s\S]*onClick=\{startNewConversation\}/);
   assert.match(source, /speaker=\{<Tooltip>对话列表<\/Tooltip>\}/);
   assert.match(source, /speaker=\{<Tooltip>项目上下文<\/Tooltip>\}/);

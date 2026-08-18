@@ -78,6 +78,10 @@ const progressStepsSource = await readFile(
   'src/components/SubmissionProgressSteps.tsx',
   'utf8'
 );
+const resultPreviewSource = await readFile(
+  'src/components/GenerationResultPreview.tsx',
+  'utf8'
+);
 
 test('professional image reports four-step submit progress to the result pane', () => {
   assert.match(professionalSource, /onProgressChange={handleProgressChange}/);
@@ -116,6 +120,22 @@ test('professional image uses a scrollable preparation pane and stable result pa
   const serviceStep = professionalSource.indexOf('<h2>服务与参数</h2>');
   assert.ok(inputStep >= 0 && inputStep < promptStep);
   assert.ok(promptStep < serviceStep);
+});
+
+test('professional image shows an honest animated loading state inside the result preview', () => {
+  assert.match(professionalSource, /loading={generationInFlight}/);
+  assert.match(professionalSource, /正在准备图片生成/);
+  assert.match(professionalSource, /正在提交生成请求/);
+  assert.match(professionalSource, /正在生成图片/);
+  assert.match(resultPreviewSource, /uc-generation-result-preview__loading/);
+  assert.match(resultPreviewSource, /role="status"/);
+  assert.match(resultPreviewSource, /uc-generation-result-preview__ring/);
+  assert.match(resultPreviewSource, /uc-generation-result-preview__scan-line/);
+  assert.match(pageStyles, /\.uc-generation-result-preview__loading\s*{[\s\S]*min-height: 320px;/);
+  assert.match(pageStyles, /@keyframes uc-generation-result-preview-breathe/);
+  assert.match(pageStyles, /@keyframes uc-generation-result-preview-scan/);
+  assert.match(pageStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.uc-generation-result-preview__scan-line/);
+  assert.doesNotMatch(resultPreviewSource, /\d+%/);
 });
 
 test('professional image preserves the current result after submission', () => {

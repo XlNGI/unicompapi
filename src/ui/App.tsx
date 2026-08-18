@@ -83,6 +83,7 @@ export function App() {
   const [openedVideoDraftId, setOpenedVideoDraftId] = useState<string>();
   const [openedImageDraftId, setOpenedImageDraftId] = useState<string>();
   const [selectedChatConversationId, setSelectedChatConversationId] = useState<string>();
+  const [selectedChatCandidateId, setSelectedChatCandidateId] = useState<string>();
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
@@ -147,7 +148,9 @@ export function App() {
       {activeItemId === 'chat' && !activeSubItemId ? (
         <ChatPage
           initialConversationId={selectedChatConversationId}
+          initialCandidateId={selectedChatCandidateId}
           onConversationChange={setSelectedChatConversationId}
+          onCandidateChange={setSelectedChatCandidateId}
         />
       ) : activeItemId === 'projects' && !activeSubItemId ? (
         <ProjectsPage onNavigate={handleNavigate} />
