@@ -73,6 +73,11 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   storage_error: '本地保存失败，请检查存储状态后重试。'
 };
 
+function rendererTrace(message: string, detail?: unknown): void {
+  if (!import.meta.env.DEV) return;
+  console.info('[chat-page]', message, detail ?? '');
+}
+
 function describeChatError(error: {
   readonly code: ChatContextIpcErrorCode;
   readonly message: string;
@@ -440,11 +445,23 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   }, [selected?.title]);
 
   useEffect(() => {
-    setContextDraft(undefined);
-    setContextName('');
-    setContextLabels('');
-    setEditingMessageId(undefined);
-    clearResponseDraftState();
+    const activeConversationId = responseExecutionSnapshotRef.current?.conversationId;
+    const keepActiveResponse = Boolean(
+      activeConversationId &&
+      activeConversationId === selected?.conversationId
+    );
+    rendererTrace('effect:conversation-change', {
+      selectedConversationId: selected?.conversationId,
+      activeConversationId,
+      keepActiveResponse
+    });
+    if (!keepActiveResponse) {
+      setContextDraft(undefined);
+      setContextName('');
+      setContextLabels('');
+      setEditingMessageId(undefined);
+      clearResponseDraftState();
+    }
     followOutputRef.current = true;
     setShowScrollToBottom(false);
   }, [selected?.conversationId]);
@@ -508,6 +525,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     if (!chat || !execution || !['pending', 'streaming'].includes(execution.state)) {
       return;
     }
+    rendererTrace('effect:response-subscription-setup', {
+      executionId: execution.responseExecutionId,
+      state: execution.state,
+      streamSequence: execution.streamSequence
+    });
     let active = true;
     let terminalReceived = false;
     let animationFrame: number | undefined;
@@ -523,6 +545,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       if (!active || queuedEvents.length === 0) return;
       const events = queuedEvents;
       queuedEvents = [];
+      rendererTrace('flushEvents', {
+        count: events.length,
+        sequences: events.map((event) => event.sequence)
+      });
       setResponseExecution((current) => {
         if (!current || current.responseExecutionId !== executionId) return current;
         return events.reduce<ConversationResponseExecutionDto>((next, event) => {
@@ -547,6 +573,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
 
     const handleTerminalEvent = (event: ConversationResponseStreamEventDto) => {
       terminalReceived = true;
+      rendererTrace('terminalEvent', {
+        sequence: event.sequence,
+        type: event.type,
+        safeCode: event.safeCode
+      });
       if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
       flushEvents();
       unsubscribe?.();
@@ -575,6 +606,12 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         event.responseExecutionId !== executionId ||
         event.sequence <= latestSequence
       ) return;
+      rendererTrace('onEvent', {
+        sequence: event.sequence,
+        type: event.type,
+        contentDeltaLength: event.contentDelta?.length ?? 0,
+        reasoningDeltaLength: event.reasoningDelta?.length ?? 0
+      });
       latestSequence = event.sequence;
       queuedEvents.push(event);
       if (['stream_completed', 'stream_cancelled', 'stream_failed', 'stream_interrupted'].includes(event.type)) {
@@ -589,6 +626,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     unsubscribe = chat.subscribeResponseEvents(executionId, latestSequence, onEvent);
     if (terminalReceived) unsubscribe();
     return () => {
+      rendererTrace('effect:response-subscription-cleanup', {
+        executionId,
+        hadUnsubscribe: Boolean(unsubscribe)
+      });
       active = false;
       if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
       unsubscribe?.();
@@ -642,6 +683,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   ]);
 
   function clearResponseDraftState() {
+    rendererTrace('clearResponseDraftState', {
+      clearedExecutionId: responseExecutionSnapshotRef.current?.responseExecutionId,
+      clearedConversationId: responseExecutionSnapshotRef.current?.conversationId
+    });
     cancelRequestedRef.current = false;
     setCancelRequested(false);
     setResponseExecution(undefined);
@@ -802,6 +847,12 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     ) {
       return;
     }
+    rendererTrace('sendMessage:start', {
+      selectedId,
+      editingMessageId,
+      productFeature: responseFeature,
+      candidateId: selectedCandidateId
+    });
     setResponseStarting(true);
     setNotice('正在准备回复…');
     clearResponseDraftState();
@@ -835,6 +886,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         confirmed: true
       });
       if (!started.ok) {
+        rendererTrace('sendMessage:startResponse-error', {
+          code: started.error.code,
+          message: started.error.message
+        });
         cancelAfterStartRef.current = false;
         cancelRequestedRef.current = false;
         setCancelRequested(false);
@@ -845,6 +900,12 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         }
         return;
       }
+      rendererTrace('sendMessage:startResponse-ok', {
+        conversationId: started.value.conversation.conversationId,
+        executionId: started.value.execution.responseExecutionId,
+        executionState: started.value.execution.state,
+        selectedIdChanged: selectedId !== started.value.conversation.conversationId
+      });
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);

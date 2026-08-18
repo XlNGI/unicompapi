@@ -483,12 +483,27 @@ interface ResponseSubscription {
 
 const responseSubscriptions = new Map<string, ResponseSubscription>();
 
+function subscriptionTrace(message: string, detail?: unknown): void {
+  if (
+    process.env.UNICOMP_RENDERER_TRACE !== '1' &&
+    !process.env.VITE_DEV_SERVER_URL
+  ) {
+    return;
+  }
+  console.info('[preload-subscription]', message, detail ?? '');
+}
+
 function deliverResponseEvent(
   subscriberId: string,
   subscription: ResponseSubscription,
   event: ConversationResponseStreamEventDto
 ): void {
   if (event.sequence <= subscription.latestSequence) return;
+  subscriptionTrace('deliver', {
+    subscriberId,
+    sequence: event.sequence,
+    type: event.type
+  });
   subscription.latestSequence = event.sequence;
   subscription.onEvent(event);
   ipcRenderer.send(chatContextIpcChannels.acknowledgeResponseEvents, {
@@ -506,6 +521,12 @@ ipcRenderer.on(chatContextIpcChannels.responseEvent, (_event, payload: unknown) 
   const sequence = (event as { sequence?: unknown }).sequence;
   if (!Number.isSafeInteger(sequence) || Number(sequence) < 1) return;
   const responseEvent = event as ConversationResponseStreamEventDto;
+  subscriptionTrace('responseEvent', {
+    subscriberId,
+    sequence: responseEvent.sequence,
+    type: responseEvent.type,
+    replaying: subscription.replaying
+  });
   if (subscription.replaying) {
     subscription.bufferedEvents.push(responseEvent);
     return;
@@ -636,6 +657,11 @@ const chatContexts: ChatContextApi = {
     }),
   subscribeResponseEvents: (responseExecutionId, afterSequence, onEvent) => {
     const subscriberId = `response-subscription-${++responseSubscriptionSequence}`;
+    subscriptionTrace('subscribe:create', {
+      subscriberId,
+      responseExecutionId,
+      afterSequence
+    });
     const subscription: ResponseSubscription = {
       onEvent,
       bufferedEvents: [],
@@ -644,6 +670,7 @@ const chatContexts: ChatContextApi = {
     };
     responseSubscriptions.set(subscriberId, subscription);
     const disconnect = () => {
+      subscriptionTrace('disconnect', { subscriberId });
       if (!responseSubscriptions.delete(subscriberId)) return;
       ipcRenderer.send(chatContextIpcChannels.unsubscribeResponseEvents, { subscriberId });
     };
@@ -651,6 +678,10 @@ const chatContexts: ChatContextApi = {
       responseExecutionId,
       subscriberId
     }).then((result) => {
+      subscriptionTrace('subscribe:registered', {
+        subscriberId,
+        ok: Boolean(result?.ok)
+      });
       if (!result?.ok) {
         disconnect();
         return;
@@ -659,6 +690,12 @@ const chatContexts: ChatContextApi = {
         responseExecutionId,
         afterSequence
       }).then((replay) => {
+        subscriptionTrace('replay:result', {
+          subscriberId,
+          ok: Boolean(replay?.ok),
+          replayCount: replay?.ok ? replay.value.length : 0,
+          bufferedCount: subscription.bufferedEvents.length
+        });
         if (!replay?.ok) {
           disconnect();
           return;

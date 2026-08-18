@@ -112,6 +112,8 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /subscribeResponseEvents\(executionId, latestSequence, onEvent\)/);
   assert.match(source, /event\.sequence <= latestSequence/);
   assert.match(source, /window\.requestAnimationFrame\(flushEvents\)/);
+  assert.match(source, /const keepActiveResponse = Boolean\([\s\S]*activeConversationId === selected\?\.conversationId/);
+  assert.match(source, /if \(!keepActiveResponse\) \{[\s\S]*clearResponseDraftState\(\);/);
   assert.match(markdownSource, /memo\(function MarkdownMessage/);
   assert.match(markdownSource, /const markdownComponents/);
   assert.doesNotMatch(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
