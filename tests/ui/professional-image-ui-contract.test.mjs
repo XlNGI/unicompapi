@@ -166,9 +166,13 @@ test('professional image hosts reusable prompt enhance without image Task', () =
   assert.match(professionalSource, /ImagePromptEnhancePanel/);
   assert.match(enhancePanelSource, /promptEnhance/);
   assert.match(enhancePanelSource, /PromptEnhancePanel/);
-  assert.match(promptEnhanceSource, /SubmissionProgressSteps/);
-  assert.match(promptEnhanceSource, /必须：提示词增强/);
-  assert.match(promptEnhanceSource, /可选：提示词增强/);
+  assert.match(promptEnhanceSource, /<ModelSelect/);
+  assert.match(promptEnhanceSource, /确认增强/);
+  assert.match(promptEnhanceSource, /host\.originalInput\.trim\(\)/);
+  assert.match(promptEnhanceSource, /setOpen\(false\)/);
+  assert.doesNotMatch(promptEnhanceSource, /SubmissionProgressSteps|DynamicParameterForm|Checkbox/);
+  assert.doesNotMatch(promptEnhanceSource, /准备增强|确认本次提示词增强外发/);
+  assert.doesNotMatch(professionalSource, /合并增强到最终提示词/);
   assert.match(enhanceHostSource, /source: 'enhancement'/);
   assert.match(enhanceServiceSource, /PromptEnhanceSubjectPort/);
   assert.doesNotMatch(
@@ -212,15 +216,16 @@ test('professional image autosaves drafts without a manual save gate', async () 
   );
 });
 
-test('prompt enhance fixes reasoning and non-stream without a mode switch', () => {
-  assert.match(promptEnhanceSource, /文本推理 · 非流式/);
+test('prompt enhance keeps model selection and one-click confirmation', () => {
+  assert.match(promptEnhanceSource, /api\.prepare\(/);
+  assert.match(promptEnhanceSource, /api\.submit\(/);
+  assert.match(promptEnhanceSource, /result\.value\.confirmation\.confirmationId/);
+  assert.match(promptEnhanceSource, /true\s*\n\s*\)/);
   assert.doesNotMatch(promptEnhanceSource, /LuMessageCircle|LuBrainCircuit/);
   assert.doesNotMatch(promptEnhanceSource, /text_chat/);
   assert.doesNotMatch(promptEnhanceSource, /aria-label="文本能力"/);
-  assert.match(
-    promptEnhanceSource,
-    /setParameterValues[\s\S]*setPreparation\(undefined\)[\s\S]*setPreparedSubject\(undefined\)/
-  );
+  assert.match(enhanceServiceSource, /拼接好的结构化文案/);
+  assert.match(enhanceServiceSource, /根据语义进行优化/);
   assert.match(enhanceServiceSource, /submitPromptOnce/);
   assert.doesNotMatch(enhanceServiceSource, /DeepSeekChatAdapter|NewApiChatAdapter/);
   assert.match(pageStyles, /\.uc-prompt-enhance/);
