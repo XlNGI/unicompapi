@@ -116,9 +116,13 @@ test('professional image uses a scrollable preparation pane and stable result pa
   assert.match(pageStyles, /\.uc-image-professional__workspace\s*{\s*height: auto;/);
 
   const inputStep = professionalSource.indexOf('<h2>创作方式与输入</h2>');
+  const enhanceEntry = professionalSource.indexOf('<ImagePromptEnhancePanel');
   const promptStep = professionalSource.indexOf('<h2>最终提示词</h2>');
   const serviceStep = professionalSource.indexOf('<h2>服务与参数</h2>');
-  assert.ok(inputStep >= 0 && inputStep < promptStep);
+  assert.match(professionalSource, /enhancementContent \? \(/);
+  assert.match(professionalSource, /enhancementContent \? '3' : '2'/);
+  assert.ok(inputStep >= 0 && inputStep < enhanceEntry);
+  assert.ok(enhanceEntry < promptStep);
   assert.ok(promptStep < serviceStep);
 });
 
