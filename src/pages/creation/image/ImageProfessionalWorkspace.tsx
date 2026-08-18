@@ -3,7 +3,6 @@ import {
   LuFileImage,
   LuImagePlus,
   LuRotateCcw,
-  LuSparkles,
   LuTrash2,
   LuType
 } from 'react-icons/lu';
@@ -12,10 +11,7 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
-import {
-  SubmissionProgressSteps,
-  type SubmissionProgressPhase
-} from '../../../components/SubmissionProgressSteps';
+import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
@@ -63,11 +59,6 @@ export function ImageProfessionalWorkspace({
     submissionProgress.phase === 'preparing' ||
     submissionProgress.phase === 'requesting' ||
     submissionProgress.phase === 'waiting';
-  const generationStopped =
-    submissionProgress.phase === 'failed' ||
-    submissionProgress.phase === 'submission_failed' ||
-    submissionProgress.phase === 'uncertain' ||
-    submissionProgress.phase === 'submission_uncertain';
   const generationPreviewCopy = submissionProgress.phase === 'preparing'
     ? {
         title: '正在准备图片生成',
@@ -517,7 +508,6 @@ export function ImageProfessionalWorkspace({
         <Card
           aria-label="生成过程与作品区域"
           className="uc-image-professional__after-pane"
-          data-phase={submissionProgress.phase}
         >
           <header className="uc-image-professional__pane-heading">
             <span aria-hidden="true">2</span>
@@ -528,38 +518,6 @@ export function ImageProfessionalWorkspace({
           </header>
 
           <div className="uc-image-professional__stage">
-            {submissionProgress.phase !== 'idle' ? (
-              <section
-                aria-live="polite"
-                className="uc-image-professional__generation-state"
-              >
-                <div aria-hidden="true" className="uc-image-professional__generation-icon">
-                  <LuSparkles />
-                </div>
-                <div>
-                  <strong>
-                    {generationInFlight
-                      ? '图片生成中'
-                      : generationStopped
-                        ? '生成未完成'
-                        : '生成已完成'}
-                  </strong>
-                  <span>
-                    {generationInFlight
-                      ? '服务商正在处理，当前配置与外发事实已固定。'
-                      : generationStopped
-                        ? '请根据下方状态处理，结果未知时不会自动重试。'
-                        : '结果已返回，正在展示可用的本地作品或结果链接。'}
-                  </span>
-                </div>
-              </section>
-            ) : null}
-
-            <SubmissionProgressSteps
-              failureMessage={submissionProgress.failureMessage}
-              phase={submissionProgress.phase}
-            />
-
             <GenerationResultPreview
               animateResult
               emptyDescription={
