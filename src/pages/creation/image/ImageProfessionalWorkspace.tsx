@@ -386,8 +386,18 @@ export function ImageProfessionalWorkspace({
               </Button>
             </div>
           ) : null}
+
+          <ImagePromptEnhancePanel
+            dirty={dirty}
+            draft={draft}
+            onDraftPersisted={(next) =>
+              onDraftPersisted(next as GenerationImageDraftDto)
+            }
+            onMessage={onMessage}
+          />
         </Card>
 
+        {enhancementContent ? (
         <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
@@ -413,14 +423,6 @@ export function ImageProfessionalWorkspace({
               <small>{draft.prompt.finalPrompt.length} / 2000</small>
             </section>
           </div>
-          <ImagePromptEnhancePanel
-            dirty={dirty}
-            draft={draft}
-            onDraftPersisted={(next) =>
-              onDraftPersisted(next as GenerationImageDraftDto)
-            }
-            onMessage={onMessage}
-          />
           <div className="uc-image-quick__result-actions">
             <Button
               disabled={draft.prompt.finalPrompt === draft.prompt.originalInput}
@@ -435,10 +437,11 @@ export function ImageProfessionalWorkspace({
             </Button>
           </div>
         </Card>
+        ) : null}
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
           <header className="uc-image-workbench__panel-heading">
-            <span aria-hidden="true">3</span>
+            <span aria-hidden="true">{enhancementContent ? '3' : '2'}</span>
             <div>
               <h2>服务与参数</h2>
               <p>
