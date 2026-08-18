@@ -262,9 +262,16 @@ type DeleteTarget =
 interface ChatPageProps {
   readonly initialConversationId?: string;
   readonly onConversationChange?: (conversationId?: string) => void;
+  readonly initialCandidateId?: string;
+  readonly onCandidateChange?: (candidateId?: string) => void;
 }
 
-export function ChatPage({ initialConversationId, onConversationChange }: ChatPageProps) {
+export function ChatPage({
+  initialConversationId,
+  onConversationChange,
+  initialCandidateId,
+  onCandidateChange
+}: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
@@ -276,7 +283,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const [input, setInput] = useState('');
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | undefined>(initialCandidateId);
   const [activityExpanded, setActivityExpanded] = useState(false);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [responseStarting, setResponseStarting] = useState(false);
@@ -441,6 +448,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   }, [onConversationChange, selectedId]);
 
   useEffect(() => {
+    onCandidateChange?.(selectedCandidateId);
+  }, [onCandidateChange, selectedCandidateId]);
+
+  useEffect(() => {
     setRenameTitle(selected?.title ?? '');
   }, [selected?.title]);
 
@@ -499,11 +510,12 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         });
         const distinctCandidates = [...candidatesById.values()];
         setResponseCandidates(distinctCandidates);
-        setSelectedCandidateId((current) =>
-          current && distinctCandidates.some((item) => item.candidateId === current)
-            ? current
-            : undefined
-        );
+        setSelectedCandidateId((current) => {
+          const candidate = current
+            ? distinctCandidates.find((item) => item.candidateId === current)
+            : undefined;
+          return candidate?.available ? candidate.candidateId : undefined;
+        });
         if (distinctCandidates.length === 0) {
           setNotice('当前没有已登记的文本候选，请到「模型与服务商」页完成连接和模型配置。');
         }
