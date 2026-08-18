@@ -125,47 +125,65 @@ export class JsonConversationResponseExecutionRepository
   }
 
   async appendEvent(event: ConversationResponseStreamEventV1): Promise<void> {
-    const validatedEvent = parseConversationResponseStreamEvent(event);
+    await this.appendEvents([event]);
+  }
+
+  async appendEvents(events: readonly ConversationResponseStreamEventV1[]): Promise<void> {
+    if (events.length === 0) return;
+    const validatedEvents = events.map(parseConversationResponseStreamEvent);
+    const executionId = validatedEvents[0].responseExecutionId;
+    if (validatedEvents.some((event) => event.responseExecutionId !== executionId)) {
+      throw new ConversationResponseExecutionRepositoryDataError(
+        'A conversation response event batch must belong to one execution'
+      );
+    }
     await this.storage.mutateJsonAtomically(
       projectStoragePaths.entities.conversationResponseExecutions,
       (current) => {
         const document = parseConversationResponseExecutionDocument(current, this.projectId);
         const executionIndex = document.executions.findIndex(
-          (execution) => execution.id === validatedEvent.responseExecutionId
+          (execution) => execution.id === executionId
         );
         if (executionIndex < 0) {
           throw new ConversationResponseExecutionRepositoryDataError(
             'Conversation response event references an unknown execution'
           );
         }
-        const duplicateId = document.events.find((item) => item.id === validatedEvent.id);
-        if (duplicateId) {
-          if (sameJson(duplicateId, validatedEvent)) return document;
-          throw new ConversationResponseExecutionRepositoryDataError(
-            'Conversation response event ID conflict'
-          );
-        }
         const executionEvents = document.events
-          .filter((item) => item.responseExecutionId === validatedEvent.responseExecutionId)
+          .filter((item) => item.responseExecutionId === executionId)
           .sort((left, right) => left.sequence - right.sequence);
-        const duplicateSequence = executionEvents.find(
-          (item) => item.sequence === validatedEvent.sequence
-        );
-        if (duplicateSequence) {
-          if (sameJson(duplicateSequence, validatedEvent)) return document;
-          throw new ConversationResponseExecutionRepositoryDataError(
-            'Conversation response event sequence conflict'
+        const accepted: ConversationResponseStreamEventV1[] = [];
+        for (const event of validatedEvents) {
+          const duplicateId = [...document.events, ...accepted].find(
+            (item) => item.id === event.id
           );
-        }
-        if (validatedEvent.sequence !== executionEvents.length + 1) {
-          throw new ConversationResponseExecutionRepositoryDataError(
-            'Conversation response event sequence must be contiguous'
+          if (duplicateId) {
+            if (sameJson(duplicateId, event)) continue;
+            throw new ConversationResponseExecutionRepositoryDataError(
+              'Conversation response event ID conflict'
+            );
+          }
+          const duplicateSequence = [...executionEvents, ...accepted].find(
+            (item) => item.sequence === event.sequence
           );
+          if (duplicateSequence) {
+            if (sameJson(duplicateSequence, event)) continue;
+            throw new ConversationResponseExecutionRepositoryDataError(
+              'Conversation response event sequence conflict'
+            );
+          }
+          if (event.sequence !== executionEvents.length + accepted.length + 1) {
+            throw new ConversationResponseExecutionRepositoryDataError(
+              'Conversation response event sequence must be contiguous'
+            );
+          }
+          accepted.push(event);
         }
+        if (accepted.length === 0) return document;
         const currentExecution = document.executions[executionIndex];
         const state = projectConversationResponseExecutionState(
           currentExecution,
-          [...executionEvents, validatedEvent]
+          [...executionEvents, ...accepted]
         );
         const executions = [...document.executions];
         executions[executionIndex] = { ...currentExecution, state };
@@ -173,7 +191,7 @@ export class JsonConversationResponseExecutionRepository
           schemaVersion: 1,
           revision: document.revision + 1,
           executions,
-          events: [...document.events, validatedEvent]
+          events: [...document.events, ...accepted]
         } satisfies ConversationResponseExecutionDocumentV1;
       },
       { backup: true }

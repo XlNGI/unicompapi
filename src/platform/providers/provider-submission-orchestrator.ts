@@ -112,6 +112,12 @@ export interface SubmissionOrchestrationResultV1 {
   readonly retryAllowed: false;
 }
 
+export interface ConversationSubmissionStartV1 {
+  readonly accepted: SubmissionOrchestrationResultV1;
+  readonly subjectArtifacts: SubmissionSubjectArtifactsV1;
+  readonly completion: Promise<SubmissionOrchestrationResultV1>;
+}
+
 export type SubmissionOrchestrationErrorCode =
   | 'subject_kind_mismatch'
   | 'authorization_not_claimed'
@@ -173,14 +179,52 @@ export class ProviderSubmissionOrchestrator {
     return this.submit({ ...input, subject });
   }
 
+  async beginConversationResponse(input: {
+    readonly subject: FeatureCandidateSubjectV1;
+    readonly routeSelectionToken: string;
+    readonly confirmation: SubmissionUserConfirmationV1;
+  }): Promise<ConversationSubmissionStartV1> {
+    const subject = parseFeatureCandidateSubject(input.subject);
+    if (subject.kind !== 'conversation_response_draft') {
+      throw new SubmissionOrchestrationError(
+        'subject_kind_mismatch',
+        'Conversation response submission requires a response draft subject'
+      );
+    }
+    let resolveAccepted!: (value: {
+      readonly accepted: SubmissionOrchestrationResultV1;
+      readonly subjectArtifacts: SubmissionSubjectArtifactsV1;
+    }) => void;
+    let rejectAccepted!: (reason: unknown) => void;
+    const accepted = new Promise<{
+      readonly accepted: SubmissionOrchestrationResultV1;
+      readonly subjectArtifacts: SubmissionSubjectArtifactsV1;
+    }>((resolve, reject) => {
+      resolveAccepted = resolve;
+      rejectAccepted = reject;
+    });
+    const completion = this.submit(
+      { ...input, subject },
+      (acceptance) => resolveAccepted({
+        accepted: result(acceptance),
+        subjectArtifacts: acceptance.subjectArtifacts
+      })
+    );
+    void completion.catch(rejectAccepted);
+    return { ...(await accepted), completion };
+  }
+
   private async submit(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
-  }): Promise<SubmissionOrchestrationResultV1> {
+  }, onAccepted?: (acceptance: ProjectSubmissionAcceptanceV1) => void): Promise<SubmissionOrchestrationResultV1> {
     const inspected = this.candidates.inspectPreparedSubmission(input.routeSelectionToken);
     const existing = await this.acceptances.getByIdempotencyKey(inspected.idempotencyKey);
-    if (existing) return result(existing);
+    if (existing) {
+      onAccepted?.(existing);
+      return result(existing);
+    }
 
     const prepared = await this.candidates.validatePreparedSubmission({
       subject: input.subject,
@@ -263,6 +307,7 @@ export class ProviderSubmissionOrchestrator {
       throw error;
     }
     await this.appendJournal(intent, 'intent_recorded');
+    onAccepted?.(acceptance);
 
     try {
       await this.authorization.claimSubmission({

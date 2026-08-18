@@ -74,7 +74,7 @@ export interface DeepSeekConversationLifecyclePort {
   ): Promise<unknown>;
   interrupt(
     executionId: ConversationResponseExecutionId,
-    reason: 'application_shutdown'
+    reason: 'transport_interrupted' | 'application_shutdown'
   ): Promise<unknown>;
 }
 
@@ -112,7 +112,7 @@ export interface DeepSeekChatTerminalObserverPort {
     readonly providerOperationId: string;
     readonly responseExecutionId: ConversationResponseExecutionId;
     readonly invocationAttemptId: ProviderInvocationAttemptId;
-    readonly reason: 'application_shutdown';
+    readonly reason: 'transport_interrupted' | 'application_shutdown';
   }): Promise<void>;
 }
 
@@ -163,6 +163,7 @@ interface ActiveOperation {
   readonly session: DeepSeekEventStreamSession;
   readonly removeExternalAbort: () => void;
   cancelReason?: 'user' | 'application_shutdown';
+  cancelRequest?: Promise<unknown>;
   completion?: Promise<DeepSeekChatTerminalResult>;
 }
 
@@ -321,13 +322,10 @@ export class DeepSeekChatAdapter {
     if (!operation) return false;
     if (!operation.cancelReason) {
       operation.cancelReason = 'user';
-      try {
-        await this.lifecycle.requestCancel(operation.responseExecutionId);
-      } finally {
-        operation.session.cancel();
-      }
+      operation.cancelRequest = this.lifecycle.requestCancel(operation.responseExecutionId);
+      void operation.cancelRequest.catch(() => undefined);
+      operation.session.cancel();
     }
-    await operation.completion;
     return true;
   }
 
@@ -431,6 +429,7 @@ export class DeepSeekChatAdapter {
       };
     } catch (error) {
       if (operation.cancelReason === 'user') {
+        await operation.cancelRequest?.catch(() => undefined);
         if (!usagePersisted) {
           await this.persistUsageStatus(operation, 'not_reported').catch(() => undefined);
         }

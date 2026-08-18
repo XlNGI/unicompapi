@@ -17,6 +17,11 @@ export interface ConversationResponseStreamEventIdFactory {
   nextConversationResponseStreamEventId(): ConversationResponseStreamEventId;
 }
 
+export interface ConversationResponseDeltaSegment {
+  readonly kind: 'reasoning' | 'content';
+  readonly delta: string;
+}
+
 export class ConversationResponseExecutionLifecycleError extends Error {
   constructor(message: string, readonly cause?: unknown) {
     super(message);
@@ -48,6 +53,17 @@ export class ConversationResponseExecutionLifecycle {
     reasoningDelta: string
   ): Promise<ConversationResponseStreamEventV1> {
     return this.append(executionId, 'reasoning_delta', { reasoningDelta });
+  }
+
+  async appendDeltas(
+    executionId: ConversationResponseExecutionId,
+    segments: readonly ConversationResponseDeltaSegment[]
+  ): Promise<readonly ConversationResponseStreamEventV1[]> {
+    return this.appendMany(executionId, segments.map((segment) =>
+      segment.kind === 'reasoning'
+        ? { type: 'reasoning_delta' as const, reasoningDelta: segment.delta }
+        : { type: 'content_delta' as const, contentDelta: segment.delta }
+    ));
   }
 
   complete(
@@ -154,21 +170,36 @@ export class ConversationResponseExecutionLifecycle {
     } = {},
     publish = true
   ): Promise<ConversationResponseStreamEventV1> {
+    return (await this.appendMany(executionId, [{ type, ...details }], publish))[0];
+  }
+
+  private async appendMany(
+    executionId: ConversationResponseExecutionId,
+    inputs: readonly ({ readonly type: ConversationResponseStreamEventType } & {
+      readonly reasoningDelta?: string;
+      readonly contentDelta?: string;
+      readonly safeCode?: string;
+      readonly interruptionReason?: ConversationResponseInterruptionReason;
+    })[],
+    publish = true
+  ): Promise<readonly ConversationResponseStreamEventV1[]> {
+    if (inputs.length === 0) return [];
     const execution = await this.requireExecution(executionId);
     const events = await this.repository.listEvents(executionId);
-    const event = createConversationResponseStreamEvent({
+    const appended = inputs.map((input, index) => createConversationResponseStreamEvent({
       id: this.ids.nextConversationResponseStreamEventId(),
       responseExecutionId: executionId,
-      sequence: events.length + 1,
-      type,
-      ...details,
+      sequence: events.length + index + 1,
+      ...input,
       occurredAt: this.now()
-    });
-    await this.repository.appendEvent(event);
+    }));
+    await this.repository.appendEvents(appended);
     if (publish) {
-      this.channel?.publish(toControlledConversationResponseStreamEventDto({ execution, event }));
+      for (const event of appended) {
+        this.channel?.publish(toControlledConversationResponseStreamEventDto({ execution, event }));
+      }
     }
-    return event;
+    return appended;
   }
 
   private async requireExecution(

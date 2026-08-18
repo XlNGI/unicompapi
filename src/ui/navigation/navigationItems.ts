@@ -7,14 +7,14 @@ import {
 
 export const navigationItems = [
   {
-    id: 'chat',
-    label: '对话',
-    description: '用于独立问答、分析、整理和上下文沉淀。'
-  },
-  {
     id: 'projects',
     label: '项目',
     description: '用于管理素材、上下文、草稿、任务和作品。'
+  },
+  {
+    id: 'chat',
+    label: '对话',
+    description: '用于独立问答、分析、整理和上下文沉淀。'
   },
   {
     id: 'image-creation',

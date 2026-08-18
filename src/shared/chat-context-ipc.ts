@@ -8,6 +8,7 @@ export const chatContextIpcChannels = {
   restoreConversation: 'chat-context:restore-conversation',
   deleteConversation: 'chat-context:delete-conversation',
   addUserMessage: 'chat-context:add-user-message',
+  editCancelledUserMessage: 'chat-context:edit-cancelled-user-message',
   copyLegacyConversation: 'chat-context:copy-legacy-conversation',
   createResponseDraft: 'chat-context:create-response-draft',
   replaceResponseContexts: 'chat-context:replace-response-contexts',
@@ -16,6 +17,7 @@ export const chatContextIpcChannels = {
   listTextCandidates: 'chat-context:list-text-candidates',
   prepareResponseSubmission: 'chat-context:prepare-response-submission',
   submitResponse: 'chat-context:submit-response',
+  startResponse: 'chat-context:start-response',
   getResponseExecution: 'chat-context:get-response-execution',
   replayResponseEvents: 'chat-context:replay-response-events',
   cancelResponseExecution: 'chat-context:cancel-response-execution',
@@ -63,6 +65,7 @@ export type ChatContextIpcErrorCode =
   | 'context_not_found'
   | 'message_not_found'
   | 'message_not_completed'
+  | 'message_not_editable'
   | 'message_revision_changed'
   | 'selection_out_of_range'
   | 'revision_conflict'
@@ -227,6 +230,10 @@ export interface AddUserMessageRequest extends ConversationRevisionRequest {
   readonly content: string;
 }
 
+export interface EditCancelledUserMessageRequest extends AddUserMessageRequest {
+  readonly messageId: string;
+}
+
 export interface ConversationResponseDraftDto {
   readonly responseDraftId: string;
   readonly revision: number;
@@ -326,6 +333,11 @@ export interface ConversationResponseExecutionDto {
   readonly updatedAt: string;
 }
 
+export interface ConversationResponseStartDto {
+  readonly conversation: ConversationDto;
+  readonly execution: ConversationResponseExecutionDto;
+}
+
 export interface ConversationResponseStreamEventDto {
   readonly schemaVersion: 1;
   readonly responseExecutionId: string;
@@ -377,6 +389,28 @@ export interface PrepareResponseSubmissionRequest extends ResponseDraftRevisionR
 export interface SubmitResponseRequest extends ResponseDraftRevisionRequest {
   readonly routeSelectionToken: string;
   readonly confirmationId: string;
+  readonly confirmed: boolean;
+}
+
+export interface StartResponseRequest {
+  readonly clientCommandId: string;
+  readonly conversation: {
+    readonly conversationId: string;
+    readonly expectedRevision: number;
+    readonly editedMessageId: string | null;
+  } | null;
+  readonly title: string;
+  readonly content: string;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
+  readonly candidateId: string;
+  readonly contextSelections: readonly {
+    readonly contextId: string;
+    readonly contextRevision: number;
+    readonly includeInPrompt: boolean;
+  }[];
+  readonly parameterValues: Readonly<Record<string, string | number | boolean | readonly unknown[] | {
+    readonly [key: string]: unknown;
+  }>>;
   readonly confirmed: boolean;
 }
 
@@ -484,6 +518,20 @@ export const chatContextRequestParsers = {
       content: boundedText(record.content, 'content', 1_000_000, false)
     };
   },
+  editCancelledUserMessage(value: unknown): EditCancelledUserMessageRequest {
+    const record = exactRecord(value, [
+      'conversationId',
+      'expectedRevision',
+      'messageId',
+      'content'
+    ]);
+    return {
+      conversationId: controlledId(record.conversationId, 'conversationId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision'),
+      messageId: controlledId(record.messageId, 'messageId'),
+      content: boundedText(record.content, 'content', 1_000_000, false)
+    };
+  },
   createResponseDraft(value: unknown): CreateResponseDraftRequest {
     const record = exactRecord(value, [
       'conversationId',
@@ -587,6 +635,67 @@ export const chatContextRequestParsers = {
         false
       ),
       confirmationId: controlledId(record.confirmationId, 'confirmationId'),
+      confirmed: booleanValue(record.confirmed, 'confirmed')
+    };
+  },
+  startResponse(value: unknown): StartResponseRequest {
+    const record = exactRecord(value, [
+      'clientCommandId',
+      'conversation',
+      'title',
+      'content',
+      'productFeature',
+      'candidateId',
+      'contextSelections',
+      'parameterValues',
+      'confirmed'
+    ]);
+    if (record.productFeature !== 'text_chat' && record.productFeature !== 'text_reasoning') {
+      throw new TypeError('productFeature is invalid');
+    }
+    const conversation = record.conversation === null
+      ? null
+      : exactRecord(record.conversation, [
+          'conversationId',
+          'expectedRevision',
+          'editedMessageId'
+        ]);
+    const editedMessageId = !conversation || conversation.editedMessageId === null
+      ? null
+      : controlledId(conversation.editedMessageId, 'editedMessageId');
+    if (!Array.isArray(record.contextSelections) || record.contextSelections.length > 100) {
+      throw new TypeError('contextSelections are invalid');
+    }
+    const contextSelections = record.contextSelections.map((selection) => {
+      const item = exactRecord(selection, [
+        'contextId',
+        'contextRevision',
+        'includeInPrompt'
+      ]);
+      return {
+        contextId: controlledId(item.contextId, 'contextId'),
+        contextRevision: positiveRevision(item.contextRevision, 'contextRevision'),
+        includeInPrompt: booleanValue(item.includeInPrompt, 'includeInPrompt')
+      };
+    });
+    if (new Set(contextSelections.map((selection) => selection.contextId)).size !== contextSelections.length) {
+      throw new TypeError('contextSelections contain duplicate contexts');
+    }
+    return {
+      clientCommandId: controlledId(record.clientCommandId, 'clientCommandId'),
+      conversation: conversation
+        ? {
+            conversationId: controlledId(conversation.conversationId, 'conversationId'),
+            expectedRevision: revision(conversation.expectedRevision, 'expectedRevision'),
+            editedMessageId
+          }
+        : null,
+      title: boundedText(record.title, 'title', 200, false),
+      content: boundedText(record.content, 'content', 1_000_000, false),
+      productFeature: record.productFeature,
+      candidateId: controlledId(record.candidateId, 'candidateId'),
+      contextSelections,
+      parameterValues: parameterValuesRecord(record.parameterValues),
       confirmed: booleanValue(record.confirmed, 'confirmed')
     };
   },
@@ -746,6 +855,12 @@ export interface ChatContextApi {
     expectedRevision: number,
     content: string
   ): Promise<ChatContextIpcResult<ConversationDto>>;
+  editCancelledUserMessage(
+    conversationId: string,
+    expectedRevision: number,
+    messageId: string,
+    content: string
+  ): Promise<ChatContextIpcResult<ConversationDto>>;
   copyLegacyConversation(
     conversationId: string
   ): Promise<ChatContextIpcResult<ConversationDto>>;
@@ -790,6 +905,9 @@ export interface ChatContextApi {
     confirmationId: string,
     confirmed: true
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
+  startResponse(
+    request: StartResponseRequest
+  ): Promise<ChatContextIpcResult<ConversationResponseStartDto>>;
   getResponseExecution(
     responseExecutionId: string
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
@@ -802,6 +920,7 @@ export interface ChatContextApi {
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
   subscribeResponseEvents(
     responseExecutionId: string,
+    afterSequence: number,
     onEvent: (event: ConversationResponseStreamEventDto) => void
   ): () => void;
   createContextDraft(

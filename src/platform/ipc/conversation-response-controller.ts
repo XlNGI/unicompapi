@@ -17,16 +17,19 @@ import {
   type ProjectConversationRepository,
   type SubmissionUserConfirmationV1
 } from '../../domain';
+import type { ConversationApplicationService } from '../../application';
 import type {
   ChatContextIpcResult,
   ConversationResponseCandidateDto,
   ConversationResponseDraftDto,
   ConversationResponseExecutionDto,
   ConversationResponsePreparationDto,
+  ConversationResponseStartDto,
   ConversationResponseStreamEventDto
 } from '../../shared/chat-context-ipc';
 import {
-  chatContextRequestParsers
+  chatContextRequestParsers,
+  type StartResponseRequest
 } from '../../shared/chat-context-ipc';
 import type {
   ConversationResponseExecutionLifecycle,
@@ -37,8 +40,10 @@ import type {
 import { pinProjectContextSelection } from '../repositories';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { chatContextFailure, failure } from './chat-context-errors';
+import { toConversationDto } from './conversation-controller';
 
 export interface ConversationResponseControllerRuntime {
+  readonly conversationService: ConversationApplicationService;
   readonly conversations: ProjectConversationRepository;
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
@@ -49,6 +54,11 @@ export interface ConversationResponseControllerRuntime {
   /** Completes startup recovery before this project accepts response operations. */
   readonly ready: Promise<void>;
   submit?(input: {
+    readonly subject: FeatureCandidateSubjectV1;
+    readonly routeSelectionToken: string;
+    readonly confirmation: SubmissionUserConfirmationV1;
+  }): Promise<ConversationResponseExecutionReadModelV1>;
+  start?(input: {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
@@ -65,6 +75,10 @@ export interface ConversationResponseControllerDependencies {
 
 export class ConversationResponseController {
   private readonly operations = new Set<Promise<unknown>>();
+  private readonly startCommands = new Map<
+    string,
+    Promise<ChatContextIpcResult<ConversationResponseStartDto>>
+  >();
 
   constructor(private readonly dependencies: ConversationResponseControllerDependencies) {}
 
@@ -274,6 +288,23 @@ export class ConversationResponseController {
     });
   }
 
+  start(request: unknown): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.startResponse(request);
+      const runtime = await this.requireRuntime();
+      const commandKey = `${runtime.conversations.projectId}:${input.clientCommandId}`;
+      const existing = this.startCommands.get(commandKey);
+      if (existing) return existing;
+      if (this.startCommands.size >= 256) {
+        const oldest = this.startCommands.keys().next().value as string | undefined;
+        if (oldest) this.startCommands.delete(oldest);
+      }
+      const operation = this.startValidated(runtime, input);
+      this.startCommands.set(commandKey, operation);
+      return operation;
+    });
+  }
+
   getExecution(
     request: unknown
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>> {
@@ -312,15 +343,34 @@ export class ConversationResponseController {
       const input = chatContextRequestParsers.responseExecution(request);
       const runtime = await this.requireRuntime();
       const executionId = toConversationResponseExecutionId(input.responseExecutionId);
+      const interruptOnTimeout = () => runtime.executions
+        .interrupt(executionId, 'transport_interrupted')
+        .then(() => undefined);
+      if (runtime.executionCoordinator.has(executionId)) {
+        const accepted = await runtime.executionCoordinator.cancel(
+          executionId,
+          interruptOnTimeout
+        );
+        const updated = await runtime.executions.readModel(executionId);
+        if (!accepted && isActiveExecutionState(updated.state)) {
+          return failure(
+            'response_execution_not_active',
+            'The response execution has no active provider operation'
+          );
+        }
+        return { ok: true, value: toResponseExecutionDto(updated) };
+      }
       const current = await runtime.executions.readModel(executionId);
-      const conversation = await runtime.conversations.get(toConversationId(current.conversationId));
-      if (!conversation || conversation.projectId !== runtime.conversations.projectId) {
+      if (current.projectId !== runtime.conversations.projectId) {
         return failure('response_execution_not_found', 'The response execution does not exist');
       }
       if (!isActiveExecutionState(current.state)) {
         return { ok: true, value: toResponseExecutionDto(current) };
       }
-      const accepted = await runtime.executionCoordinator.cancel(executionId);
+      const accepted = await runtime.executionCoordinator.cancel(
+        executionId,
+        interruptOnTimeout
+      );
       const updated = await runtime.executions.readModel(executionId);
       if (!accepted && isActiveExecutionState(updated.state)) {
         return failure(
@@ -379,6 +429,128 @@ export class ConversationResponseController {
 
   async waitForOperations(): Promise<void> {
     await Promise.all([...this.operations]);
+  }
+
+  private async startValidated(
+    runtime: ConversationResponseControllerRuntime,
+    input: StartResponseRequest
+  ): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
+    if (!input.confirmed) {
+      return failure('explicit_confirmation_required', 'Explicit confirmation is required');
+    }
+    if (!runtime.start) {
+      return failure(
+        'runtime_not_allowed',
+        'Conversation provider runtime access is not approved'
+      );
+    }
+    if (input.conversation) {
+      const active = await runtime.executions.listActive(input.conversation.conversationId);
+      if (active.length > 0) {
+        return failure(
+          'response_execution_in_progress',
+          'The conversation already has an active response execution'
+        );
+      }
+    }
+    let conversation = input.conversation
+      ? await runtime.conversationService.get(
+          toConversationId(input.conversation.conversationId)
+        )
+      : await runtime.conversationService.create({
+          title: input.title,
+          projectId: runtime.conversations.projectId
+        });
+    if (input.conversation) {
+      conversation = input.conversation.editedMessageId
+        ? await runtime.conversationService.editCancelledUserMessage({
+            conversationId: conversation.id,
+            expectedRevision: input.conversation.expectedRevision,
+            messageId: toMessageId(input.conversation.editedMessageId),
+            content: input.content
+          })
+        : await runtime.conversationService.addUserMessage({
+            conversationId: conversation.id,
+            expectedRevision: input.conversation.expectedRevision,
+            content: input.content
+          });
+    } else {
+      conversation = await runtime.conversationService.addUserMessage({
+        conversationId: conversation.id,
+        expectedRevision: conversation.revision,
+        content: input.content
+      });
+    }
+    const userMessage = input.conversation?.editedMessageId
+      ? conversation.messages.find(
+          (message) => message.id === toMessageId(input.conversation!.editedMessageId!)
+        )
+      : [...conversation.messages].reverse().find((message) => message.role === 'user');
+    if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
+      return failure('message_not_completed', 'The selected user message is not complete');
+    }
+    let draft = createConversationResponseDraft({
+      id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
+      projectId: runtime.conversations.projectId,
+      conversationId: conversation.id,
+      conversationRevision: conversation.revision,
+      userMessageId: userMessage.id,
+      userMessageRevision: userMessage.revision,
+      productFeature: input.productFeature,
+      createdAt: toIsoTimestamp(this.now())
+    });
+    await runtime.drafts.create(draft);
+    if (Object.keys(input.parameterValues).length > 0) {
+      const parameterized = replaceConversationResponseParameterValues(
+        draft,
+        input.parameterValues as Readonly<Record<string, ParameterValue>>,
+        toIsoTimestamp(this.now())
+      );
+      await runtime.drafts.save(parameterized, draft.revision);
+      draft = parameterized;
+    }
+    if (input.contextSelections.length > 0) {
+      const selections = [];
+      for (const item of input.contextSelections) {
+        const context = await runtime.contexts.get(toProjectContextId(item.contextId));
+        if (!context || context.projectId !== runtime.contexts.projectId) {
+          return failure('context_not_found', 'The selected project context does not exist');
+        }
+        selections.push(pinProjectContextSelection(
+          context,
+          item.contextRevision,
+          item.includeInPrompt
+        ));
+      }
+      const contextualized = replaceConversationResponseContextSelections(
+        draft,
+        selections,
+        toIsoTimestamp(this.now())
+      );
+      await runtime.drafts.save(contextualized, draft.revision);
+      draft = contextualized;
+    }
+    const prepared = await runtime.candidates.prepareSubmission({
+      subject: subject(draft),
+      candidateId: input.candidateId
+    });
+    const execution = await runtime.start({
+      subject: subject(draft),
+      routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: {
+        schemaVersion: 1,
+        confirmationId: prepared.confirmation.confirmationId,
+        confirmed: true
+      }
+    });
+    const latest = await runtime.conversationService.get(conversation.id);
+    return {
+      ok: true,
+      value: {
+        conversation: toConversationDto(latest),
+        execution: toResponseExecutionDto(execution)
+      }
+    };
   }
 
   private async requireRuntime(): Promise<ConversationResponseControllerRuntime> {

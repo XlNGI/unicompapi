@@ -419,7 +419,6 @@ export function ImageWorkbenchPage({
         <ImageProfessionalWorkspace
           dirty={dirty}
           draft={currentDraft}
-          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onMessage={setMessage}

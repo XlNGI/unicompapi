@@ -18,7 +18,7 @@ const pageFiles = [
 ];
 
 test('keeps the eight required top-level navigation labels in order', () => {
-  const labels = ['对话', '项目', '图片创作', '视频创作', '任务中心', '作品库', '模型与服务商', '本地设置'];
+  const labels = ['项目', '对话', '图片创作', '视频创作', '任务中心', '作品库', '模型与服务商', '本地设置'];
   let previousIndex = -1;
   for (const label of labels) {
     const index = navigationSource.indexOf(`label: '${label}'`);

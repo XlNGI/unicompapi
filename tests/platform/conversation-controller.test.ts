@@ -131,6 +131,76 @@ describe('ConversationController', () => {
     expect(JSON.stringify(invalid)).not.toContain('C:\\private');
   });
 
+  it('edits the last user message only after its response is cancelled', async () => {
+    const value = await fixture();
+    value.openProject();
+    const created = await value.controller.create({
+      title: 'Edit after stop',
+      bindToCurrentProject: true
+    });
+    if (!created.ok) throw new Error('fixture creation failed');
+    const withMessage = await value.controller.addUserMessage({
+      conversationId: created.value.conversationId,
+      expectedRevision: created.value.revision,
+      content: 'original request'
+    });
+    if (!withMessage.ok) throw new Error('fixture message failed');
+    const userMessage = withMessage.value.messages[0];
+
+    await expect(value.controller.editCancelledUserMessage({
+      conversationId: withMessage.value.conversationId,
+      expectedRevision: withMessage.value.revision,
+      messageId: userMessage.messageId,
+      content: 'too early'
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'message_not_editable' }
+    });
+
+    const repository = new JsonProjectConversationRepository(
+      new NodeProjectStorage(value.projectRoot),
+      toProjectId('project-chat')
+    );
+    const streaming = new ConversationStreamingService(
+      repository,
+      value.ids,
+      () => withMessage.value.updatedAt
+    );
+    const started = await streaming.start({
+      conversationId: toConversationId(withMessage.value.conversationId),
+      expectedRevision: withMessage.value.revision
+    });
+    const cancelled = await streaming.cancel({
+      conversationId: toConversationId(withMessage.value.conversationId),
+      messageId: started.messageId,
+      expectedRevision: started.conversation.revision
+    });
+    const edited = await value.controller.editCancelledUserMessage({
+      conversationId: withMessage.value.conversationId,
+      expectedRevision: cancelled.revision,
+      messageId: userMessage.messageId,
+      content: 'edited request'
+    });
+
+    expect(edited).toMatchObject({
+      ok: true,
+      value: {
+        revision: cancelled.revision + 1,
+        messages: [
+          { messageId: userMessage.messageId, revision: 1, content: 'edited request' },
+          { state: 'cancelled' }
+        ]
+      }
+    });
+    await expect(value.controller.editCancelledUserMessage({
+      conversationId: withMessage.value.conversationId,
+      expectedRevision: cancelled.revision + 1,
+      messageId: userMessage.messageId,
+      content: 'invalid request',
+      absolutePath: 'C:\\private\\chat.txt'
+    })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+  });
+
   it('lists only current-project safe conversation candidates without message content', async () => {
     const value = await fixture();
     expect(await value.controller.listCandidates()).toMatchObject({

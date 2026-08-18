@@ -474,17 +474,43 @@ const settings: SettingsApi = {
 };
 
 let responseSubscriptionSequence = 0;
-const responseSubscriptions = new Map<string, (event: ConversationResponseStreamEventDto) => void>();
+interface ResponseSubscription {
+  readonly onEvent: (event: ConversationResponseStreamEventDto) => void;
+  readonly bufferedEvents: ConversationResponseStreamEventDto[];
+  replaying: boolean;
+  latestSequence: number;
+}
+
+const responseSubscriptions = new Map<string, ResponseSubscription>();
+
+function deliverResponseEvent(
+  subscriberId: string,
+  subscription: ResponseSubscription,
+  event: ConversationResponseStreamEventDto
+): void {
+  if (event.sequence <= subscription.latestSequence) return;
+  subscription.latestSequence = event.sequence;
+  subscription.onEvent(event);
+  ipcRenderer.send(chatContextIpcChannels.acknowledgeResponseEvents, {
+    subscriberId,
+    sequence: event.sequence
+  });
+}
+
 ipcRenderer.on(chatContextIpcChannels.responseEvent, (_event, payload: unknown) => {
   if (!payload || typeof payload !== 'object') return;
   const { subscriberId, event } = payload as { subscriberId?: unknown; event?: unknown };
   if (typeof subscriberId !== 'string' || !event || typeof event !== 'object') return;
-  const listener = responseSubscriptions.get(subscriberId);
-  if (!listener) return;
+  const subscription = responseSubscriptions.get(subscriberId);
+  if (!subscription) return;
   const sequence = (event as { sequence?: unknown }).sequence;
   if (!Number.isSafeInteger(sequence) || Number(sequence) < 1) return;
-  listener(event as ConversationResponseStreamEventDto);
-  ipcRenderer.send(chatContextIpcChannels.acknowledgeResponseEvents, { subscriberId, sequence });
+  const responseEvent = event as ConversationResponseStreamEventDto;
+  if (subscription.replaying) {
+    subscription.bufferedEvents.push(responseEvent);
+    return;
+  }
+  deliverResponseEvent(subscriberId, subscription, responseEvent);
 });
 
 const chatContexts: ChatContextApi = {
@@ -527,6 +553,13 @@ const chatContexts: ChatContextApi = {
     ipcRenderer.invoke(chatContextIpcChannels.addUserMessage, {
       conversationId,
       expectedRevision,
+      content
+    }),
+  editCancelledUserMessage: (conversationId, expectedRevision, messageId, content) =>
+    ipcRenderer.invoke(chatContextIpcChannels.editCancelledUserMessage, {
+      conversationId,
+      expectedRevision,
+      messageId,
       content
     }),
   copyLegacyConversation: (conversationId) =>
@@ -586,6 +619,8 @@ const chatContexts: ChatContextApi = {
       confirmationId,
       confirmed
     }),
+  startResponse: (request) =>
+    ipcRenderer.invoke(chatContextIpcChannels.startResponse, request),
   getResponseExecution: (responseExecutionId) =>
     ipcRenderer.invoke(chatContextIpcChannels.getResponseExecution, {
       responseExecutionId
@@ -599,35 +634,46 @@ const chatContexts: ChatContextApi = {
     ipcRenderer.invoke(chatContextIpcChannels.cancelResponseExecution, {
       responseExecutionId
     }),
-  subscribeResponseEvents: (responseExecutionId, onEvent) => {
+  subscribeResponseEvents: (responseExecutionId, afterSequence, onEvent) => {
     const subscriberId = `response-subscription-${++responseSubscriptionSequence}`;
-    responseSubscriptions.set(subscriberId, onEvent);
+    const subscription: ResponseSubscription = {
+      onEvent,
+      bufferedEvents: [],
+      replaying: true,
+      latestSequence: afterSequence
+    };
+    responseSubscriptions.set(subscriberId, subscription);
+    const disconnect = () => {
+      if (!responseSubscriptions.delete(subscriberId)) return;
+      ipcRenderer.send(chatContextIpcChannels.unsubscribeResponseEvents, { subscriberId });
+    };
     void ipcRenderer.invoke(chatContextIpcChannels.subscribeResponseEvents, {
       responseExecutionId,
       subscriberId
     }).then((result) => {
       if (!result?.ok) {
-        responseSubscriptions.delete(subscriberId);
+        disconnect();
         return;
       }
       return ipcRenderer.invoke(chatContextIpcChannels.replayResponseEvents, {
         responseExecutionId,
-        afterSequence: 0
+        afterSequence
       }).then((replay) => {
-        if (!replay?.ok || responseSubscriptions.get(subscriberId) !== onEvent) return;
-        for (const event of replay.value) {
-          onEvent(event);
-          ipcRenderer.send(chatContextIpcChannels.acknowledgeResponseEvents, {
-            subscriberId,
-            sequence: event.sequence
-          });
+        if (!replay?.ok) {
+          disconnect();
+          return;
+        }
+        if (responseSubscriptions.get(subscriberId) !== subscription) return;
+        const events = [...replay.value, ...subscription.bufferedEvents]
+          .sort((left, right) => left.sequence - right.sequence);
+        subscription.bufferedEvents.length = 0;
+        subscription.replaying = false;
+        for (const event of events) {
+          deliverResponseEvent(subscriberId, subscription, event);
         }
       });
-    }).catch(() => responseSubscriptions.delete(subscriberId));
-    return () => {
-      responseSubscriptions.delete(subscriberId);
-      ipcRenderer.send(chatContextIpcChannels.unsubscribeResponseEvents, { subscriberId });
-    };
+    }).catch(disconnect);
+    return disconnect;
   },
   createContextDraft: (conversationId) =>
     ipcRenderer.invoke(chatContextIpcChannels.createContextDraft, { conversationId }),

@@ -151,6 +151,12 @@ export interface AddUserMessageInput {
   readonly createdAt: IsoTimestamp;
 }
 
+export interface EditCancelledUserMessageInput {
+  readonly messageId: MessageId;
+  readonly content: string;
+  readonly editedAt: IsoTimestamp;
+}
+
 export interface BeginAssistantMessageInput {
   readonly id: MessageId;
   readonly createdAt: IsoTimestamp;
@@ -302,6 +308,42 @@ export function addUserMessage(
     completedAt: input.createdAt
   });
   return appendMessage(conversation, message, input.createdAt);
+}
+
+export function editUserMessageAfterCancelledResponse(
+  conversation: Conversation,
+  input: EditCancelledUserMessageInput
+): ActiveConversation {
+  assertConversationActive(conversation, 'edit messages');
+  const index = conversation.messages.findIndex((message) => message.id === input.messageId);
+  const message = conversation.messages[index];
+  const following = conversation.messages.slice(index + 1);
+  if (
+    !message ||
+    message.role !== 'user' ||
+    message.state !== 'completed' ||
+    following.length === 0 ||
+    following.some((item) => item.role !== 'assistant' || item.state !== 'cancelled')
+  ) {
+    throw new InvalidStateTransitionError(
+      'message',
+      message ? `${message.role}:${message.state}` : 'missing',
+      'edited_after_cancelled_response'
+    );
+  }
+  const messages = [...conversation.messages];
+  messages[index] = parseMessage({
+    ...message,
+    revision: message.revision + 1,
+    content: input.content,
+    completedAt: input.editedAt,
+    updatedAt: input.editedAt
+  });
+  return updateConversation(
+    conversation,
+    { messages },
+    input.editedAt
+  ) as ActiveConversation;
 }
 
 export function beginAssistantMessage(

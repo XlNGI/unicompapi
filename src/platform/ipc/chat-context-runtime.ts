@@ -13,6 +13,7 @@ import {
   completeAssistantMessage,
   createConversation,
   createProviderInvocationEvent,
+  failAssistantMessage,
   startAssistantMessageStreaming,
   toConversationId,
   toConversationResponseStreamEventId,
@@ -31,7 +32,8 @@ import {
   JsonConversationResponseExecutionRepository,
   JsonProviderUsageObservationRepository,
   JsonProjectConversationRepository,
-  JsonProjectContextRepository
+  JsonProjectContextRepository,
+  ConversationRevisionConflictError
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import { ConversationController } from './conversation-controller';
@@ -58,6 +60,7 @@ import {
   ProviderFeatureContractRegistry,
   ProviderPackageRegistry,
   ProviderSubmissionOrchestrator,
+  SubmissionOrchestrationError,
   RegistryFeatureCandidateSource,
   RouteSelectionTokenVault,
   type ConversationTextSubmissionRuntimes,
@@ -117,6 +120,7 @@ export interface ConversationControllerPort {
   restore(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   delete(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   addUserMessage(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
+  editCancelledUserMessage(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   copyLegacyConversation(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   requestAssistantResponse(request: unknown): Promise<ChatContextIpcResult<ConversationDto>>;
   waitForOperations(): Promise<void>;
@@ -248,6 +252,7 @@ export function createChatContextRuntime(
       typeof authorization.recordOutcome === 'function'
     );
     const responses: ConversationResponseControllerRuntime = {
+      conversationService: service,
       conversations: projectConversations,
       drafts: responseDrafts,
       contexts: contextRepository,
@@ -309,6 +314,50 @@ export function createChatContextRuntime(
         return responseLifecycle.readModel(
           acceptance.subjectArtifacts.responseExecution.id
         );
+      };
+      responses.start = async (input) => {
+        const started = await orchestrator.beginConversationResponse(input);
+        if (started.subjectArtifacts.kind !== 'conversation') {
+          throw new Error('Conversation response acceptance artifacts are missing');
+        }
+        const executionId = started.subjectArtifacts.responseExecution.id;
+        void started.completion.catch(async (error: unknown) => {
+          dependencies.onError?.(error);
+          try {
+            const current = await responseLifecycle.readModel(executionId);
+            if (current.state !== 'pending' && current.state !== 'streaming') return;
+            const event = await responseLifecycle.failDeferredPublish(
+              executionId,
+              backgroundSubmissionSafeCode(error)
+            );
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+              const conversation = await projectConversations.get(
+                toConversationId(current.conversationId)
+              );
+              if (!conversation) break;
+              try {
+                await projectConversations.save(
+                  failAssistantMessage(
+                    conversation,
+                    toMessageId(current.assistantMessageId),
+                    'unavailable',
+                    toIsoTimestamp(now())
+                  ),
+                  conversation.revision
+                );
+                break;
+              } catch (saveError) {
+                if (!(saveError instanceof ConversationRevisionConflictError) || attempt === 3) {
+                  throw saveError;
+                }
+              }
+            }
+            await responseLifecycle.publish(event);
+          } catch (terminalError) {
+            dependencies.onError?.(terminalError);
+          }
+        });
+        return responseLifecycle.readModel(executionId);
       };
     }
     cached = {
@@ -408,6 +457,9 @@ export function createChatContextRuntime(
     delete: (request) => requireProjectController()?.delete(request) ??
       Promise.resolve(failure('project_not_open', 'A project must be open')),
     addUserMessage: (request) => requireProjectController()?.addUserMessage(request) ??
+      Promise.resolve(failure('project_not_open', 'A project must be open')),
+    editCancelledUserMessage: (request) =>
+      requireProjectController()?.editCancelledUserMessage(request) ??
       Promise.resolve(failure('project_not_open', 'A project must be open')),
     copyLegacyConversation: (request) => safeConversationOperation(async () => {
       const session = dependencies.getSession();
@@ -528,6 +580,12 @@ function createConversationTerminalObserver(
     interrupted: (input: { providerOperationId: string; invocationAttemptId: string }) =>
       advance(input, 'unknown_outcome', 'outcome_unknown').catch(() => undefined)
   };
+}
+
+function backgroundSubmissionSafeCode(error: unknown): string {
+  return error instanceof SubmissionOrchestrationError
+    ? `conversation.${error.code}`
+    : 'conversation.background_submission_failed';
 }
 
 function createLegacyConversationCopy(

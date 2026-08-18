@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
@@ -41,6 +42,12 @@ interface ImageFeatureSubmissionPanelProps {
   readonly requireExplicitFeature?: boolean;
   /** Professional image: show in-page 准备 → 提交中 → 生成中 → 完成 progress. */
   readonly showProgressSteps?: boolean;
+  /** Optional fixed action host used by the professional two-pane workspace. */
+  readonly actionHost?: HTMLElement | null;
+  readonly onProgressChange?: (
+    phase: SubmissionProgressPhase,
+    failureMessage?: string
+  ) => void;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -88,9 +95,11 @@ export function ImageFeatureSubmissionPanel({
   oneShot = false,
   requireExplicitFeature = false,
   showProgressSteps = false,
+  actionHost,
   onDraftChange,
   onDraftPersisted,
   onMessage,
+  onProgressChange,
   onSubmissionComplete
 }: ImageFeatureSubmissionPanelProps) {
   const api = window.unicomp?.imageFeatures;
@@ -101,6 +110,7 @@ export function ImageFeatureSubmissionPanel({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
+  const trackProgress = showProgressSteps || Boolean(onProgressChange);
   const explicitFeature =
     draft.featureSelection?.productFeature === 'text_to_image' ||
     draft.featureSelection?.productFeature === 'reference_to_image'
@@ -131,6 +141,16 @@ export function ImageFeatureSubmissionPanel({
   onDraftPersistedRef.current = onDraftPersisted;
   onMessageRef.current = onMessage;
   const generationNotificationId = `image-generation:${draft.draftId}`;
+
+  useEffect(() => {
+    onProgressChange?.(progressPhase, progressFailure);
+  }, [onProgressChange, progressFailure, progressPhase]);
+
+  useEffect(() => {
+    if (!trackProgress) return;
+    setProgressFailure(undefined);
+    setProgressPhase('idle');
+  }, [draft.draftId, trackProgress]);
 
   function showGenerationProgress(
     description: string,
@@ -387,14 +407,14 @@ export function ImageFeatureSubmissionPanel({
     setBusy(true);
     busyRef.current = true;
     showGenerationProgress('正在保存当前草稿并准备安全提交信息。', '图片提交准备中');
-    if (showProgressSteps) {
+    if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('preparing');
     }
     try {
       let saved = await ensureSavedDraft();
       if (!saved) {
-        if (showProgressSteps) setProgressPhase('submission_failed');
+        if (trackProgress) setProgressPhase('submission_failed');
         return;
       }
       showGenerationProgress('正在向主进程准备安全提交信息。', '图片提交准备中');
@@ -418,7 +438,7 @@ export function ImageFeatureSubmissionPanel({
       }
       if (!result.ok) {
         showSubmissionError(errorMessages[result.error.code]);
-        if (showProgressSteps) {
+        if (trackProgress) {
           setProgressFailure(errorMessages[result.error.code]);
           setProgressPhase('submission_failed');
         }
@@ -428,7 +448,7 @@ export function ImageFeatureSubmissionPanel({
       await submitPrepared(saved, result.value);
     } catch {
       showSubmissionError('准备图片提交失败，请重试。');
-      if (showProgressSteps) {
+      if (trackProgress) {
         setProgressFailure('准备图片提交失败，请重试。');
         setProgressPhase('submission_failed');
       }
@@ -444,7 +464,7 @@ export function ImageFeatureSubmissionPanel({
   ) {
     if (!api) return;
     showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
-    if (showProgressSteps) {
+    if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');
     }
@@ -465,7 +485,7 @@ export function ImageFeatureSubmissionPanel({
       } else {
         showSubmissionError(message);
       }
-      if (showProgressSteps) {
+      if (trackProgress) {
         setProgressFailure(uncertain ? describeUnconfirmedGenerationOutcome() : message);
         setProgressPhase(uncertain ? 'submission_uncertain' : 'submission_failed');
       }
@@ -485,7 +505,7 @@ export function ImageFeatureSubmissionPanel({
         ? '图片提交未完成，请检查任务状态。'
         : '图片提交已受理。';
     showSubmissionOutcome(result.value);
-    if (showProgressSteps) {
+    if (trackProgress) {
       if (uncertain) {
         setProgressFailure(describeUnconfirmedGenerationOutcome(result.value.safeCode));
         setProgressPhase('uncertain');
@@ -592,6 +612,25 @@ export function ImageFeatureSubmissionPanel({
     }
   }
 
+  const primaryAction = (
+    <Button
+      className="uc-image-feature-panel__primary"
+      disabled={
+        oneShot
+          ? busy
+          : Boolean(blockedReason) ||
+            busy ||
+            !selectedCandidate?.available
+      }
+      onClick={() => void (oneShot
+        ? generateOneShot()
+        : prepare())}
+    >
+      <LuSend aria-hidden="true" />
+      {busy ? '处理中' : '生成'}
+    </Button>
+  );
+
   return (
     <div className="uc-image-feature-panel">
       {awaitingFeatureChoice ? (
@@ -685,22 +724,7 @@ export function ImageFeatureSubmissionPanel({
         />
       ) : null}
 
-      <Button
-        className="uc-image-feature-panel__primary"
-        disabled={
-          oneShot
-            ? busy
-            : Boolean(blockedReason) ||
-              busy ||
-              !selectedCandidate?.available
-        }
-        onClick={() => void (oneShot
-          ? generateOneShot()
-          : prepare())}
-      >
-        <LuSend aria-hidden="true" />
-        {busy ? '处理中' : '生成'}
-      </Button>
+      {actionHost ? createPortal(primaryAction, actionHost) : primaryAction}
       {oneShot ? (
         <p className="uc-image-feature-panel__action-hint" role="status">
           {!selectedCandidate

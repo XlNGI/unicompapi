@@ -10,6 +10,7 @@ import {
   completeAssistantMessage,
   createConversation,
   deleteConversation,
+  editUserMessageAfterCancelledResponse,
   failAssistantMessage,
   parseConversation,
   renameConversation,
@@ -238,6 +239,51 @@ describe('message lifecycle', () => {
       toMessageId('assistant-shortcut'),
       t2
     )).toThrow(InvalidStateTransitionError);
+  });
+
+  it('edits only the last user turn after every following response is cancelled', () => {
+    const withUser = addUserMessage(conversation(), {
+      id: toMessageId('editable-user'),
+      content: 'original request',
+      createdAt: t1
+    });
+    const firstPending = beginAssistantMessage(withUser, {
+      id: toMessageId('cancelled-first'),
+      createdAt: t2
+    });
+    const firstCancelled = cancelAssistantMessage(
+      firstPending,
+      toMessageId('cancelled-first'),
+      t3
+    );
+    const secondPending = beginAssistantMessage(firstCancelled, {
+      id: toMessageId('cancelled-second'),
+      createdAt: t3
+    });
+    const secondCancelled = cancelAssistantMessage(
+      secondPending,
+      toMessageId('cancelled-second'),
+      t4
+    );
+    const edited = editUserMessageAfterCancelledResponse(secondCancelled, {
+      messageId: toMessageId('editable-user'),
+      content: 'edited request',
+      editedAt: t4
+    });
+
+    expect(edited).toMatchObject({
+      revision: secondCancelled.revision + 1,
+      messages: [
+        { id: 'editable-user', revision: 1, content: 'edited request', completedAt: t4 },
+        { id: 'cancelled-first', state: 'cancelled' },
+        { id: 'cancelled-second', state: 'cancelled' }
+      ]
+    });
+    expect(() => editUserMessageAfterCancelledResponse(withUser, {
+      messageId: toMessageId('editable-user'),
+      content: 'not allowed yet',
+      editedAt: t2
+    })).toThrow(InvalidStateTransitionError);
   });
 });
 

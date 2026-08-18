@@ -19,7 +19,8 @@ test('secondary setup actions do not compete with the provider and chat main act
     providerManage,
     /action=\{<Button disabled=\{!providersApi\} onClick=\{onGoGallery\} variant="secondary">/
   );
-  assert.match(chat, /chat\.createConversation\(\s*conversationTitleFromMessage\(content\)/);
+  assert.match(chat, /chat\.startResponse\(\{/);
+  assert.match(chat, /title:\s*conversationTitleFromMessage\(commandContent\)/);
   assert.doesNotMatch(chat, /创建项目对话|新建项目对话/);
 });
 

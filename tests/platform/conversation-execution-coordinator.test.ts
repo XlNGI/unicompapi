@@ -6,7 +6,7 @@ import {
 } from '../../src/platform';
 
 describe('ConversationExecutionCoordinator', () => {
-  it('waits for the real provider completion before resolving a cancellation', async () => {
+  it('acknowledges cancellation without waiting for provider completion', async () => {
     const coordinator = new ConversationExecutionCoordinator();
     const executionId = toConversationResponseExecutionId('response-execution-cancel');
     let finish!: () => void;
@@ -19,19 +19,44 @@ describe('ConversationExecutionCoordinator', () => {
       completion
     });
 
-    let settled = false;
-    const cancellation = coordinator.cancel(executionId).then((value) => {
-      settled = true;
-      return value;
-    });
-    await Promise.resolve();
+    let completed = false;
+    void completion.then(() => { completed = true; });
+    const cancellation = coordinator.cancel(executionId);
     expect(cancel).toHaveBeenCalledTimes(1);
-    expect(settled).toBe(false);
+    await expect(cancellation).resolves.toBe(true);
+    expect(completed).toBe(false);
 
     finish();
-    await expect(cancellation).resolves.toBe(true);
     await Promise.resolve();
     expect(coordinator.has(executionId)).toBe(false);
+  });
+
+  it('runs the bounded timeout fallback when provider completion stalls', async () => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = new ConversationExecutionCoordinator(25);
+      const executionId = toConversationResponseExecutionId('response-execution-timeout');
+      let finish!: () => void;
+      const completion = new Promise<void>((resolve) => { finish = resolve; });
+      const onCancellationTimeout = vi.fn(async () => undefined);
+      coordinator.register({
+        responseExecutionId: executionId,
+        providerOperationId: 'provider-operation-timeout',
+        cancel: async () => true,
+        completion,
+        onCancellationTimeout
+      });
+
+      await expect(coordinator.cancel(executionId)).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(24);
+      expect(onCancellationTimeout).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onCancellationTimeout).toHaveBeenCalledTimes(1);
+      finish();
+      await Promise.resolve();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('deduplicates concurrent cancellation and rejects duplicate active registration', async () => {
@@ -53,6 +78,50 @@ describe('ConversationExecutionCoordinator', () => {
       coordinator.cancel(executionId)
     ])).resolves.toEqual([true, true]);
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('queues cancellation until a provider handle is registered', async () => {
+    const coordinator = new ConversationExecutionCoordinator();
+    const executionId = toConversationResponseExecutionId('response-execution-pending-cancel');
+    const cancel = vi.fn(async () => true);
+    const completion = new Promise<void>(() => undefined);
+
+    await expect(coordinator.cancel(executionId)).resolves.toBe(true);
+    coordinator.register({
+      responseExecutionId: executionId,
+      providerOperationId: 'provider-operation-pending-cancel',
+      cancel,
+      completion
+    });
+
+    await Promise.resolve();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a timed-out pending cancellation effective for a late provider handle', async () => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = new ConversationExecutionCoordinator(25);
+      const executionId = toConversationResponseExecutionId('response-execution-late-cancel');
+      const cancel = vi.fn(async () => true);
+      const onCancellationTimeout = vi.fn(async () => undefined);
+      const completion = new Promise<void>(() => undefined);
+
+      await expect(coordinator.cancel(executionId, onCancellationTimeout)).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(25);
+      expect(onCancellationTimeout).toHaveBeenCalledTimes(1);
+
+      coordinator.register({
+        responseExecutionId: executionId,
+        providerOperationId: 'provider-operation-late-cancel',
+        cancel,
+        completion
+      });
+      await Promise.resolve();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('waits for every registered provider completion during application shutdown', async () => {

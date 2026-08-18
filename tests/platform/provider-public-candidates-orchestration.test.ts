@@ -284,6 +284,68 @@ function mediaArtifacts(): SubmissionArtifactFactoryPort {
   };
 }
 
+function conversationArtifacts(
+  textCandidate: ResolvedFeatureCandidateV1,
+  responseExecutionId = 'response-execution-public',
+  responseEventId = 'response-event-public'
+): SubmissionArtifactFactoryPort {
+  return {
+    async create(input) {
+      if (input.subject.subject.kind !== 'conversation_response_draft') {
+        throw new Error('conversation artifact fixture received a non-conversation subject');
+      }
+      const conversationSubject = input.subject.subject;
+      const responseExecution = createConversationResponseExecution({
+        id: toConversationResponseExecutionId(responseExecutionId),
+        projectId,
+        providerInvocationAttemptId: input.invocationAttemptId,
+        snapshot: {
+          schemaVersion: 1,
+          responseDraftId: conversationSubject.responseDraftId,
+          responseDraftRevision: conversationSubject.responseDraftRevision,
+          conversationId: conversationSubject.conversationId,
+          conversationRevision: conversationSubject.conversationRevision,
+          userMessageId: conversationSubject.userMessageId,
+          userMessageRevision: 0,
+          assistantMessageId: toMessageId('message-assistant-public'),
+          productFeature: 'text_chat',
+          routeSnapshotId: input.routeSnapshotId,
+          candidate: {
+            schemaVersion: 1,
+            providerId: textCandidate.routeTemplate.providerId,
+            connectionId: textCandidate.routeTemplate.connectionId,
+            connectionRevision: textCandidate.routeTemplate.connectionRevision,
+            modelId: textCandidate.routeTemplate.modelId,
+            modelRevision: textCandidate.routeTemplate.modelRevision,
+            profileId: textCandidate.routeTemplate.profileId,
+            profileRevision: textCandidate.routeTemplate.profileRevision,
+            protocolBindingId: textCandidate.routeTemplate.protocolBindingId,
+            protocolBindingRevision: textCandidate.routeTemplate.protocolBindingRevision,
+            runtimeSource: 'official_direct'
+          },
+          outboundUserTextSnapshot: input.subject.outboundTextSnapshot,
+          contextSnapshots: []
+        },
+        createdAt: input.createdAt
+      });
+      return {
+        subjectArtifacts: {
+          kind: 'conversation' as const,
+          responseExecution,
+          responseStreamEvents: [createConversationResponseStreamEvent({
+            id: toConversationResponseStreamEventId(responseEventId),
+            responseExecutionId: responseExecution.id,
+            sequence: 1,
+            type: 'execution_created',
+            occurredAt: input.createdAt
+          })]
+        },
+        dispatchRequest: { text: input.subject.outboundTextSnapshot }
+      };
+    }
+  };
+}
+
 async function approvedLedger(ledger: RuntimeAuthorizationLedger) {
   await ledger.upsertPolicy({
     policyId: 'policy-public',
@@ -677,57 +739,7 @@ describe('provider submission orchestration', () => {
     });
     const fixture = await storageFixture();
     await approvedLedger(fixture.ledger);
-    const artifacts: SubmissionArtifactFactoryPort = {
-      async create(input) {
-        const responseExecution = createConversationResponseExecution({
-          id: toConversationResponseExecutionId('response-execution-public'),
-          projectId,
-          providerInvocationAttemptId: input.invocationAttemptId,
-          snapshot: {
-            schemaVersion: 1,
-            responseDraftId: toConversationResponseDraftId('response-draft-public'),
-            responseDraftRevision: 1,
-            conversationId: toConversationId('conversation-public'),
-            conversationRevision: 2,
-            userMessageId: toMessageId('message-user-public'),
-            userMessageRevision: 0,
-            assistantMessageId: toMessageId('message-assistant-public'),
-            productFeature: 'text_chat',
-            routeSnapshotId: input.routeSnapshotId,
-            candidate: {
-              schemaVersion: 1,
-              providerId: textCandidate.routeTemplate.providerId,
-              connectionId: textCandidate.routeTemplate.connectionId,
-              connectionRevision: textCandidate.routeTemplate.connectionRevision,
-              modelId: textCandidate.routeTemplate.modelId,
-              modelRevision: textCandidate.routeTemplate.modelRevision,
-              profileId: textCandidate.routeTemplate.profileId,
-              profileRevision: textCandidate.routeTemplate.profileRevision,
-              protocolBindingId: textCandidate.routeTemplate.protocolBindingId,
-              protocolBindingRevision: textCandidate.routeTemplate.protocolBindingRevision,
-              runtimeSource: 'official_direct'
-            },
-            outboundUserTextSnapshot: input.subject.outboundTextSnapshot,
-            contextSnapshots: []
-          },
-          createdAt: input.createdAt
-        });
-        return {
-          subjectArtifacts: {
-            kind: 'conversation' as const,
-            responseExecution,
-            responseStreamEvents: [createConversationResponseStreamEvent({
-              id: toConversationResponseStreamEventId('response-event-public'),
-              responseExecutionId: responseExecution.id,
-              sequence: 1,
-              type: 'execution_created',
-              occurredAt: input.createdAt
-            })]
-          },
-          dispatchRequest: { text: input.subject.outboundTextSnapshot }
-        };
-      }
-    };
+    const artifacts = conversationArtifacts(textCandidate);
     const orchestrator = new ProviderSubmissionOrchestrator(
       service,
       fixture.acceptances,
@@ -767,6 +779,128 @@ describe('provider submission orchestration', () => {
         confirmed: true
       }
     })).toThrow(SubmissionOrchestrationError);
+  });
+
+  it('returns conversation acceptance before provider dispatch completes', async () => {
+    const conversationSubject: FeatureCandidateSubjectV1 = {
+      kind: 'conversation_response_draft',
+      conversationId: toConversationId('conversation-start'),
+      conversationRevision: 2,
+      responseDraftId: toConversationResponseDraftId('response-draft-start'),
+      responseDraftRevision: 1,
+      userMessageId: toMessageId('message-user-start')
+    };
+    const textCandidate = candidate('text_chat', {
+      candidateId: 'candidate-text-start',
+      contentCategories: ['conversation_text']
+    });
+    const service = candidateService({
+      now: () => t0,
+      getSubject: () => subjectSnapshot(conversationSubject, 'text_chat'),
+      getCandidates: () => [textCandidate]
+    });
+    const prepared = await service.prepareSubmission({
+      subject: conversationSubject,
+      candidateId: textCandidate.candidateId
+    });
+    const fixture = await storageFixture();
+    await approvedLedger(fixture.ledger);
+    let releaseDispatch!: () => void;
+    const dispatchGate = new Promise<void>((resolve) => { releaseDispatch = resolve; });
+    const orchestrator = new ProviderSubmissionOrchestrator(
+      service,
+      fixture.acceptances,
+      fixture.ledger,
+      fixture.journal,
+      conversationArtifacts(textCandidate, 'response-execution-start', 'response-event-start'),
+      {
+        async submit(input) {
+          await input.beforeRequestStarted();
+          await dispatchGate;
+          return { kind: 'accepted_async', providerOperationId: 'text-operation-start' };
+        }
+      },
+      idFactory(),
+      () => t1
+    );
+
+    const started = await orchestrator.beginConversationResponse({
+      subject: conversationSubject,
+      routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: {
+        schemaVersion: 1,
+        confirmationId: prepared.confirmation.confirmationId,
+        confirmed: true
+      }
+    });
+    expect(started.accepted).toMatchObject({
+      status: 'authorization_pending',
+      retryAllowed: false
+    });
+
+    let completionSettled = false;
+    void started.completion.finally(() => { completionSettled = true; });
+    await Promise.resolve();
+    expect(completionSettled).toBe(false);
+
+    releaseDispatch();
+    await expect(started.completion).resolves.toMatchObject({ status: 'provider_accepted' });
+  });
+
+  it('keeps an accepted execution fact when background dispatch fails before request', async () => {
+    const conversationSubject: FeatureCandidateSubjectV1 = {
+      kind: 'conversation_response_draft',
+      conversationId: toConversationId('conversation-start-failed'),
+      conversationRevision: 2,
+      responseDraftId: toConversationResponseDraftId('response-draft-start-failed'),
+      responseDraftRevision: 1,
+      userMessageId: toMessageId('message-user-start-failed')
+    };
+    const textCandidate = candidate('text_chat', {
+      candidateId: 'candidate-text-start-failed',
+      contentCategories: ['conversation_text']
+    });
+    const service = candidateService({
+      now: () => t0,
+      getSubject: () => subjectSnapshot(conversationSubject, 'text_chat'),
+      getCandidates: () => [textCandidate]
+    });
+    const prepared = await service.prepareSubmission({
+      subject: conversationSubject,
+      candidateId: textCandidate.candidateId
+    });
+    const fixture = await storageFixture();
+    await approvedLedger(fixture.ledger);
+    const orchestrator = new ProviderSubmissionOrchestrator(
+      service,
+      fixture.acceptances,
+      fixture.ledger,
+      fixture.journal,
+      conversationArtifacts(textCandidate, 'response-execution-start-failed', 'response-event-start-failed'),
+      {
+        async submit() {
+          return { kind: 'failed_before_submission', safeCode: 'transport.offline' };
+        }
+      },
+      idFactory(),
+      () => t1
+    );
+
+    const started = await orchestrator.beginConversationResponse({
+      subject: conversationSubject,
+      routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: {
+        schemaVersion: 1,
+        confirmationId: prepared.confirmation.confirmationId,
+        confirmed: true
+      }
+    });
+    await expect(started.completion).rejects.toMatchObject({
+      code: 'submission_failed_before_request',
+      result: { status: 'failed_before_submission' }
+    });
+    const [acceptance] = await fixture.acceptances.list();
+    expect(acceptance.intent.status).toBe('failed_before_submission');
   });
 });
 
