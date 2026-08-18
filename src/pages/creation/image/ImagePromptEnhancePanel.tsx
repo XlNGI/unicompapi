@@ -17,10 +17,6 @@ export function ImagePromptEnhancePanel({
 }: ImagePromptEnhancePanelProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const content = composeImagePromptEnhancementInput(draft);
-  const contextCount = draft.contextReferences.filter(
-    (reference) =>
-      reference.kind === 'project_context' && reference.includeInPrompt === true
-  ).length;
   return (
     <PromptEnhancePanel
       api={window.unicomp?.promptEnhance}
@@ -28,15 +24,6 @@ export function ImagePromptEnhancePanel({
         subjectId: draft.draftId,
         subjectRevision: draft.updatedAt,
         originalInput: draft.prompt.originalInput,
-        inputText: [
-          draft.prompt.originalInput,
-          content.text,
-          contextCount > 0 ? `已选择 ${contextCount} 份项目上下文` : ''
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        contextCount,
-        required: content.required,
         inputSignature: JSON.stringify({
           originalInput: draft.prompt.originalInput,
           structuredInput: content.text,

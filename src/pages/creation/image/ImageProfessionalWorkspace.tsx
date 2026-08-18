@@ -423,30 +423,6 @@ export function ImageProfessionalWorkspace({
           />
           <div className="uc-image-quick__result-actions">
             <Button
-              disabled={
-                draft.prompt.systemSupplements.every(
-                  (item) => item.source !== 'enhancement'
-                )
-              }
-              onClick={() => {
-                const enhanced = [...draft.prompt.systemSupplements]
-                  .reverse()
-                  .find((item) => item.source === 'enhancement');
-                if (!enhanced) return;
-                changeDraft({
-                  ...draft,
-                  prompt: {
-                    ...draft.prompt,
-                    finalPrompt: enhanced.content
-                  }
-                });
-                onMessage('已将系统补充中的增强结果合并到最终提示词。');
-              }}
-              variant="secondary"
-            >
-              合并增强到最终提示词
-            </Button>
-            <Button
               disabled={draft.prompt.finalPrompt === draft.prompt.originalInput}
               onClick={() => changeDraft({
                 ...draft,

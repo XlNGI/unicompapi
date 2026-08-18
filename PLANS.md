@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-19 工程补充：`feature/simplify-prompt-enhancement-ui` 精简提示词增强交互，默认隐藏增强流程，仅保留模型选择与“确认增强”；原始创作需求为空时禁用，增强结果自动写入可编辑的最终提示词，后端继续提交原始需求、拼接结构化文案与语义优化指令。全量门禁为 Node/UI 265 项与 Vitest 725 项，共 990 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。工程记录见 `docs/active/提示词增强交互精简记录.md`。
+
 2026-08-19 工程补充：`feature/remove-professional-image-status-summary` 按 UI 反馈移除专业生图右侧状态摘要卡与四步进度条，仅保留“本地作品预览”及其真实阶段加载动画；内部提交状态机不变。全量门禁为 Node/UI 265 项与 Vitest 725 项，共 990 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。工程记录见 `docs/active/专业生图状态摘要移除记录.md`。
 
 当前状态：阶段 8 已正式收口；阶段 9 B1-B4、A1-A4、C1 与 C2 流程 1-8 已全部完成，并在 Windows x64 必需目标、macOS `required=false` 延期目标边界内正式收口。最终门禁为 Node 178 项与 Vitest 388 项，共 566 项通过，0 失败、0 跳过；Windows 九类套件全部 `passed`，Electron 4/4 响应且残留 0。macOS 保持 `not_run/deferred`，不声明已支持。Vidu 两项真实收费预算已用尽，Image V1 未决协议不晋级。阶段 10、服务商优化、安装包、签名、公证、生产更新、生产媒体分发、SBOM 和正式发布准入均未启动。

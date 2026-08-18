@@ -1723,24 +1723,6 @@
   border-top: 1px solid var(--uc-color-border-subtle);
 }
 
-.uc-prompt-enhance__heading {
-  display: flex;
-  gap: var(--uc-space-3);
-  align-items: flex-start;
-}
-
-.uc-prompt-enhance__heading svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--uc-color-accent-fill);
-}
-
-.uc-prompt-enhance__heading p {
-  margin: var(--uc-space-1) 0 0;
-  color: var(--uc-color-text-secondary);
-  font-size: var(--uc-font-size-caption);
-}
-
 .uc-image-professional__prompt-columns > section {
   display: grid;
   flex: 1 1 auto;

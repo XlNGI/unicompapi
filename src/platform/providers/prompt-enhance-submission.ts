@@ -49,7 +49,7 @@ import {
 import type { RuntimeAuthorizationOrchestrationPort } from './provider-submission-orchestrator';
 
 const ENHANCE_SYSTEM_INSTRUCTION =
-  '你是创作提示词优化器。请根据项目上下文和用户原始需求，生成清晰、具体、可直接执行的最终提示词。保留用户核心意图，合理吸收上下文，不得编造不存在的事实；删除重复、冲突和无法执行的表达。只输出最终提示词正文，不要解释、标题、前后缀或 Markdown。';
+  '你是创作提示词优化器。请将用户原始创作需求与系统拼接好的结构化文案结合，根据语义进行优化，生成清晰、具体、可直接执行的最终提示词。保留用户核心意图，合理吸收项目上下文，不得编造不存在的事实；删除重复、冲突和无法执行的表达。只输出最终提示词正文，不要解释、标题、前后缀或 Markdown。';
 
 export interface PromptEnhanceSubmissionRuntimes {
   readonly deepSeekRuntime: DeepSeekSharedRuntime;
