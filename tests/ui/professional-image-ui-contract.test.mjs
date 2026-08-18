@@ -79,9 +79,13 @@ const progressStepsSource = await readFile(
   'utf8'
 );
 
-test('professional image shows in-page four-step submit progress', () => {
-  assert.match(professionalSource, /showProgressSteps/);
+test('professional image reports four-step submit progress to the result pane', () => {
+  assert.match(professionalSource, /onProgressChange={handleProgressChange}/);
+  assert.match(professionalSource, /<SubmissionProgressSteps/);
+  assert.match(professionalSource, /phase={submissionProgress\.phase}/);
   assert.match(featurePanelSource, /showProgressSteps = false/);
+  assert.match(featurePanelSource, /trackProgress = showProgressSteps \|\| Boolean\(onProgressChange\)/);
+  assert.match(featurePanelSource, /onProgressChange\?\.\(progressPhase, progressFailure\)/);
   assert.match(featurePanelSource, /SubmissionProgressSteps/);
   assert.match(progressStepsSource, /准备/);
   assert.match(progressStepsSource, /提交中/);
@@ -90,6 +94,36 @@ test('professional image shows in-page four-step submit progress', () => {
   assert.match(progressStepsSource, /准备已完成/);
   assert.match(featurePanelSource, /busyRef/);
   assert.match(featurePanelSource, /await submitPrepared\(saved, result\.value\)/);
+});
+
+test('professional image uses a scrollable preparation pane and stable result pane', () => {
+  assert.match(professionalSource, /aria-label="提交前准备区域"/);
+  assert.match(professionalSource, /第一步 · 提交前准备/);
+  assert.match(professionalSource, /uc-image-professional__before-scroll/);
+  assert.match(professionalSource, /uc-image-professional__submit-bar/);
+  assert.match(professionalSource, /actionHost={actionHost}/);
+  assert.match(featurePanelSource, /createPortal\(primaryAction, actionHost\)/);
+  assert.match(professionalSource, /aria-label="生成过程与作品区域"/);
+  assert.match(professionalSource, /第二步 · 生成过程与作品/);
+  assert.match(professionalSource, /<GenerationResultPreview/);
+  assert.match(pageStyles, /\.uc-image-professional__workspace\s*{[\s\S]*grid-template-columns:[^;]+;/);
+  assert.match(pageStyles, /\.uc-image-professional__before-scroll\s*{[\s\S]*overflow-y: auto;/);
+  assert.match(pageStyles, /\.uc-image-professional__before-pane\s*{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;/);
+  assert.match(pageStyles, /\.uc-image-professional__workspace\s*{\s*height: auto;/);
+
+  const inputStep = professionalSource.indexOf('<h2>创作方式与输入</h2>');
+  const promptStep = professionalSource.indexOf('<h2>最终提示词</h2>');
+  const serviceStep = professionalSource.indexOf('<h2>服务与参数</h2>');
+  assert.ok(inputStep >= 0 && inputStep < promptStep);
+  assert.ok(promptStep < serviceStep);
+});
+
+test('professional image preserves the current result after submission', () => {
+  assert.doesNotMatch(professionalSource, /onClearUi/);
+  const start = workbenchSource.indexOf('<ImageProfessionalWorkspace');
+  const end = workbenchSource.indexOf('/>', start);
+  const invocation = workbenchSource.slice(start, end);
+  assert.doesNotMatch(invocation, /onClearUi=/);
 });
 
 test('professional image shows only the final prompt and dynamic safe parameters', () => {

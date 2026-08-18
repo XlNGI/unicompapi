@@ -6,23 +6,18 @@ const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 const buttonSource = await readFile('src/components/Button.tsx', 'utf8');
+const markdownSource = await readFile('src/components/MarkdownMessage.tsx', 'utf8');
 
 test('chat page uses project conversations and composer-first streaming workflow', () => {
   for (const operation of [
     'listConversations',
-    'createConversation',
     'copyLegacyConversation',
     'renameConversation',
     'archiveConversation',
     'restoreConversation',
     'deleteConversation',
     'listTextCandidates',
-    'addUserMessage',
-    'createResponseDraft',
-    'replaceResponseContexts',
-    'replaceResponseParameters',
-    'prepareResponseSubmission',
-    'submitResponse',
+    'startResponse',
     'subscribeResponseEvents',
     'cancelResponseExecution',
     'getConversation'
@@ -30,7 +25,7 @@ test('chat page uses project conversations and composer-first streaming workflow
     assert.match(source, new RegExp(`chat\\.${operation}\\(`));
   }
   assert.match(source, /runtime_not_allowed/);
-  assert.match(source, /replaceResponseParameters/);
+  assert.match(source, /parameterValues:\s*\{\}/);
   assert.match(source, /已截断/);
   assert.match(source, /回答达到当前输出长度上限/);
   assert.match(source, /searchPlaceholder="搜索模型或服务商"/);
@@ -89,6 +84,10 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /停止生成/);
   assert.match(source, /cancelRequested/);
   assert.match(source, /cancelRequestedRef\.current/);
+  assert.match(source, /editingMessageId/);
+  assert.match(source, /编辑并重新发送/);
+  assert.match(source, /restoreCancelledInput/);
+  assert.match(source, /editedMessageId:\s*commandEditingMessageId \?\? null/);
   assert.match(source, /已发出停止请求，正在确认/);
   assert.doesNotMatch(source, /chat\.cancelAssistantResponse\(/);
   assert.doesNotMatch(source, /state:\s*'cancelled'/);
@@ -110,7 +109,11 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /failedResponseNotice\(assistant, event\.safeCode\)/);
   assert.match(source, /模型请求未正常完成/);
   assert.match(source, /chat\.subscribeResponseEvents\(/);
+  assert.match(source, /subscribeResponseEvents\(executionId, latestSequence, onEvent\)/);
   assert.match(source, /event\.sequence <= latestSequence/);
+  assert.match(source, /window\.requestAnimationFrame\(flushEvents\)/);
+  assert.match(markdownSource, /memo\(function MarkdownMessage/);
+  assert.match(markdownSource, /const markdownComponents/);
   assert.doesNotMatch(source, /RESPONSE_STREAM_POLL_INTERVAL_MS/);
   assert.match(source, /void sendMessage\(\)/);
   assert.match(source, /confirmLeaveUnsentInput/);

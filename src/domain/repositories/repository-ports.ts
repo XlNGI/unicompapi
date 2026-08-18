@@ -112,6 +112,7 @@ export interface ConversationResponseExecutionRepository {
     initialEvent: ConversationResponseStreamEventV1
   ): Promise<void>;
   appendEvent(event: ConversationResponseStreamEventV1): Promise<void>;
+  appendEvents(events: readonly ConversationResponseStreamEventV1[]): Promise<void>;
 }
 
 export interface ProviderInvocationRepository {

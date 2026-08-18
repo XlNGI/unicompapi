@@ -4,8 +4,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   addUserMessage,
+  beginAssistantMessage,
+  cancelAssistantMessage,
   createConversationResponseDraft,
   createProjectConversation,
+  editUserMessageAfterCancelledResponse,
   toConnectionId,
   toConversationId,
   toConversationResponseDraftId,
@@ -103,7 +106,7 @@ function textCandidate(): ResolvedFeatureCandidateV1 {
 }
 
 describe('ConversationResponseArtifactFactory', () => {
-  it('persists pending then streaming assistant turns without revision double-bump', async () => {
+  it('persists one pending assistant turn before provider dispatch starts', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-artifacts-'));
     roots.push(root);
     const storage = new NodeProjectStorage(root);
@@ -181,14 +184,115 @@ describe('ConversationResponseArtifactFactory', () => {
 
     expect(created.subjectArtifacts.kind).toBe('conversation');
     const saved = await conversations.get(conversation.id);
-    expect(saved?.revision).toBe(conversation.revision + 2);
+    expect(saved?.revision).toBe(conversation.revision + 1);
     expect(saved?.messages.find((message) => message.id === assistantMessageId)).toMatchObject({
       role: 'assistant',
-      state: 'streaming'
+      state: 'pending'
     });
     if (created.subjectArtifacts.kind !== 'conversation') {
       throw new Error('expected conversation artifacts');
     }
     expect(created.subjectArtifacts.responseExecution.id).toBe('response-execution-artifact');
+  });
+
+  it('sends only edited text and excludes cancelled assistant attempts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-edit-artifacts-'));
+    roots.push(root);
+    const storage = new NodeProjectStorage(root);
+    const conversations = new JsonProjectConversationRepository(storage, projectId, () => t1);
+    const drafts = new JsonConversationResponseDraftRepository(storage, projectId, () => t1);
+    const contexts = new JsonProjectContextRepository(storage, projectId, () => t1);
+    const executions = new JsonConversationResponseExecutionRepository(storage, projectId);
+
+    let conversation = createProjectConversation({
+      id: toConversationId('conversation-edit-artifact'),
+      projectId,
+      title: 'edited artifact',
+      createdAt: t0
+    });
+    await conversations.create(conversation);
+    const userMessageId = toMessageId('message-user-edit-artifact');
+    let updated = addUserMessage(conversation, {
+      id: userMessageId,
+      content: 'old request must not be sent',
+      createdAt: t0
+    });
+    await conversations.save(updated, conversation.revision);
+    conversation = updated;
+    updated = beginAssistantMessage(conversation, {
+      id: toMessageId('message-cancelled-artifact'),
+      createdAt: t0
+    });
+    await conversations.save(updated, conversation.revision);
+    conversation = updated;
+    updated = cancelAssistantMessage(
+      conversation,
+      toMessageId('message-cancelled-artifact'),
+      t1
+    );
+    await conversations.save(updated, conversation.revision);
+    conversation = updated;
+    updated = editUserMessageAfterCancelledResponse(conversation, {
+      messageId: userMessageId,
+      content: 'edited request sent once',
+      editedAt: t1
+    });
+    await conversations.save(updated, conversation.revision);
+    conversation = updated;
+
+    const draft = createConversationResponseDraft({
+      id: toConversationResponseDraftId('response-draft-edit-artifact'),
+      projectId,
+      conversationId: conversation.id,
+      conversationRevision: conversation.revision,
+      userMessageId,
+      userMessageRevision: 1,
+      productFeature: 'text_chat',
+      createdAt: t1
+    });
+    await drafts.create(draft);
+    const factory = new ConversationResponseArtifactFactory({
+      conversations,
+      drafts,
+      contexts,
+      executions,
+      nextMessageId: () => toMessageId('message-new-assistant-artifact'),
+      nextExecutionId: () => 'response-execution-edit-artifact',
+      nextStreamEventId: () => 'response-stream-edit-artifact',
+      now: () => t1
+    });
+
+    const created = await factory.create({
+      subject: {
+        projectId,
+        subject: {
+          kind: 'conversation_response_draft',
+          conversationId: conversation.id,
+          conversationRevision: conversation.revision,
+          responseDraftId: draft.id,
+          responseDraftRevision: draft.revision,
+          userMessageId
+        },
+        productFeature: 'text_chat',
+        surface: 'conversation',
+        imageCount: 0,
+        videoCount: 0,
+        contextCount: 0,
+        parameterValues: {},
+        outboundTextSnapshot: 'edited request sent once',
+        materialReferences: [],
+        contextContentHashes: []
+      },
+      candidate: textCandidate(),
+      routeSnapshotId: toProviderExecutionRouteSnapshotId('route-edit-artifact'),
+      invocationAttemptId: toProviderInvocationAttemptId('attempt-edit-artifact'),
+      authorizationClaimId: 'claim-edit-artifact',
+      createdAt: t1
+    });
+
+    expect(created.dispatchRequest).toMatchObject({
+      messages: [{ role: 'user', content: 'edited request sent once' }]
+    });
+    expect(JSON.stringify(created.dispatchRequest)).not.toContain('old request must not be sent');
   });
 });

@@ -7,7 +7,9 @@ import {
   completeAssistantMessage,
   createConversation,
   deleteConversation,
+  editUserMessageAfterCancelledResponse,
   failAssistantMessage,
+  InvalidStateTransitionError,
   renameConversation,
   restoreConversation,
   startAssistantMessageStreaming,
@@ -23,6 +25,7 @@ import {
 
 export type ConversationApplicationErrorCode =
   | 'conversation_not_found'
+  | 'message_not_editable'
   | 'revision_conflict';
 
 export class ConversationApplicationError extends Error {
@@ -119,6 +122,31 @@ export class ConversationApplicationService {
         createdAt: toIsoTimestamp(this.now())
       })
     );
+  }
+
+  async editCancelledUserMessage(input: {
+    readonly conversationId: ConversationId;
+    readonly expectedRevision: number;
+    readonly messageId: MessageId;
+    readonly content: string;
+  }): Promise<Conversation> {
+    try {
+      return await this.update(input, (conversation) =>
+        editUserMessageAfterCancelledResponse(conversation, {
+          messageId: input.messageId,
+          content: input.content,
+          editedAt: toIsoTimestamp(this.now())
+        })
+      );
+    } catch (error) {
+      if (error instanceof InvalidStateTransitionError) {
+        throw new ConversationApplicationError(
+          'message_not_editable',
+          'Only the last user message with cancelled responses can be edited'
+        );
+      }
+      throw error;
+    }
   }
 
   private async update(

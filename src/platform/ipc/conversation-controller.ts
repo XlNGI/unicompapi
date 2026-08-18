@@ -1,6 +1,7 @@
 import type { ConversationApplicationService } from '../../application';
 import {
   toConversationId,
+  toMessageId,
   type Conversation,
   type ConversationStatus,
   type Message
@@ -140,6 +141,22 @@ export class ConversationController {
       const conversation = await this.dependencies.service.addUserMessage({
         conversationId: toConversationId(input.conversationId),
         expectedRevision: input.expectedRevision,
+        content: input.content
+      });
+      return { ok: true, value: this.toDto(conversation) };
+    });
+  }
+
+  editCancelledUserMessage(
+    request: unknown
+  ): Promise<ChatContextIpcResult<ConversationDto>> {
+    if (this.dependencies.readOnly) return this.readOnlyFailure();
+    return this.execute(async () => {
+      const input = chatContextRequestParsers.editCancelledUserMessage(request);
+      const conversation = await this.dependencies.service.editCancelledUserMessage({
+        conversationId: toConversationId(input.conversationId),
+        expectedRevision: input.expectedRevision,
+        messageId: toMessageId(input.messageId),
         content: input.content
       });
       return { ok: true, value: this.toDto(conversation) };

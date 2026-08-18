@@ -3,6 +3,7 @@ import {
   appendAssistantMessageChunk,
   completeAssistantMessage,
   failAssistantMessage,
+  startAssistantMessageStreaming,
   toIsoTimestamp,
   toProviderExecutionRouteSnapshotId,
   toProviderInvocationAttemptId,
@@ -138,7 +139,10 @@ export function createConversationTextDispatchBridge(
       protocolVersion: DEEPSEEK_CHAT_PROTOCOL_VERSION,
       submit: (input) => deepSeekAdapter.submit(input),
       cancel: (providerOperationId) => deepSeekAdapter.cancel(providerOperationId),
-      coordinator: options.coordinator
+      coordinator: options.coordinator,
+      onCancellationTimeout: async (responseExecutionId) => {
+        await linkedLifecycle.interrupt(responseExecutionId, 'transport_interrupted');
+      }
     }),
     wrapChatAdapter({
       packageId: NEWAPI_PROVIDER_PACKAGE_ID,
@@ -153,7 +157,10 @@ export function createConversationTextDispatchBridge(
       protocolVersion: NEWAPI_PROTOCOL_VERSION,
       submit: (input) => newApiAdapter.submit(input),
       cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
-      coordinator: options.coordinator
+      coordinator: options.coordinator,
+      onCancellationTimeout: async (responseExecutionId) => {
+        await linkedLifecycle.interrupt(responseExecutionId, 'transport_interrupted');
+      }
     })
   ]);
 }
@@ -173,6 +180,9 @@ function wrapChatAdapter(input: {
   }): Promise<{ readonly providerOperationId: string; readonly completion: Promise<unknown> }>;
   cancel(providerOperationId: string): Promise<boolean>;
   readonly coordinator: ConversationExecutionCoordinator;
+  onCancellationTimeout(
+    responseExecutionId: ConversationResponseExecutionId
+  ): Promise<void>;
 }): ProviderSubmissionAdapterPort {
   return {
     packageId: input.packageId,
@@ -195,7 +205,8 @@ function wrapChatAdapter(input: {
             responseExecutionId,
             providerOperationId: handle.providerOperationId,
             cancel: () => input.cancel(handle.providerOperationId),
-            completion: handle.completion
+            completion: handle.completion,
+            onCancellationTimeout: () => input.onCancellationTimeout(responseExecutionId)
           });
         } catch (error) {
           await input.cancel(handle.providerOperationId).catch(() => undefined);
@@ -425,14 +436,12 @@ function createConversationLinkedLifecycle(
     executionId: ConversationResponseExecutionId,
     segments: readonly ConversationStreamDeltaSegment[]
   ): Promise<void> {
+    await lifecycle.appendDeltas(executionId, segments);
     for (const segment of segments) {
-      if (segment.kind === 'reasoning') {
-        await lifecycle.appendReasoning(executionId, segment.delta);
-        continue;
+      if (segment.kind === 'content') {
+        projectionState(executionId).pendingContent += segment.delta;
+        scheduleFlush(executionId);
       }
-      await lifecycle.appendContent(executionId, segment.delta);
-      projectionState(executionId).pendingContent += segment.delta;
-      scheduleFlush(executionId);
     }
   }
 
@@ -450,7 +459,16 @@ function createConversationLinkedLifecycle(
   }
 
   return {
-    start: (executionId) => enqueue(executionId, () => lifecycle.start(executionId)),
+    start: (executionId) => enqueue(executionId, async () => {
+      await lifecycle.start(executionId);
+      await queueProjection(executionId, (conversation, assistantMessageId) =>
+        startAssistantMessageStreaming(
+          conversation,
+          assistantMessageId,
+          toIsoTimestamp(now())
+        )
+      );
+    }),
     appendReasoning: (executionId, reasoningDelta) =>
       deltaBatch(executionId).append('reasoning', reasoningDelta),
     appendContent: (executionId, contentDelta) =>

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   LuFileImage,
   LuImagePlus,
   LuRotateCcw,
+  LuSparkles,
   LuTrash2,
   LuType
 } from 'react-icons/lu';
@@ -11,6 +12,10 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
+import {
+  SubmissionProgressSteps,
+  type SubmissionProgressPhase
+} from '../../../components/SubmissionProgressSteps';
 import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
@@ -21,7 +26,6 @@ import { ImagePromptEnhancePanel } from './ImagePromptEnhancePanel';
 interface ImageProfessionalWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
-  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -30,7 +34,6 @@ interface ImageProfessionalWorkspaceProps {
 export function ImageProfessionalWorkspace({
   dirty,
   draft,
-  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onMessage
@@ -41,6 +44,36 @@ export function ImageProfessionalWorkspace({
   const [busy, setBusy] = useState(false);
   const [resultWorkId, setResultWorkId] = useState<string>();
   const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
+  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
+  const [submissionProgress, setSubmissionProgress] = useState<{
+    readonly phase: SubmissionProgressPhase;
+    readonly failureMessage?: string;
+  }>({ phase: 'idle' });
+  const handleProgressChange = useCallback((
+    phase: SubmissionProgressPhase,
+    failureMessage?: string
+  ) => {
+    if (phase === 'preparing') {
+      setResultWorkId(undefined);
+      setResultUrls([]);
+    }
+    setSubmissionProgress({ phase, failureMessage });
+  }, []);
+  const generationInFlight =
+    submissionProgress.phase === 'preparing' ||
+    submissionProgress.phase === 'requesting' ||
+    submissionProgress.phase === 'waiting';
+  const generationStopped =
+    submissionProgress.phase === 'failed' ||
+    submissionProgress.phase === 'submission_failed' ||
+    submissionProgress.phase === 'uncertain' ||
+    submissionProgress.phase === 'submission_uncertain';
+
+  useEffect(() => {
+    setResultWorkId(undefined);
+    setResultUrls([]);
+    setSubmissionProgress({ phase: 'idle' });
+  }, [draft.draftId]);
   const productFeature = draft.featureSelection?.productFeature === 'text_to_image' ||
     draft.featureSelection?.productFeature === 'reference_to_image'
     ? draft.featureSelection.productFeature
@@ -222,6 +255,20 @@ export function ImageProfessionalWorkspace({
   return (
     <>
       <div className="uc-image-professional__workspace">
+        <section
+          aria-label="提交前准备区域"
+          className="uc-image-professional__before-pane"
+        >
+          <header className="uc-image-professional__pane-heading">
+            <span aria-hidden="true">1</span>
+            <div>
+              <h2>第一步 · 提交前准备</h2>
+              <p>按顺序完成创作输入、提示词增强、服务与参数设置。</p>
+            </div>
+            <StatusPill tone="info">独立滚动</StatusPill>
+          </header>
+
+          <div className="uc-image-professional__before-scroll">
         <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
@@ -406,12 +453,6 @@ export function ImageProfessionalWorkspace({
               恢复原始输入
             </Button>
           </div>
-          <GenerationResultPreview
-            emptyDescription="只有通过安全路由提交并完成本地文件校验后，结果才会登记为作品。"
-            mediaKind="image"
-            remoteUrls={resultUrls}
-            workId={resultWorkId}
-          />
         </Card>
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
@@ -427,25 +468,100 @@ export function ImageProfessionalWorkspace({
             </div>
           </header>
           <ImageFeatureSubmissionPanel
+            actionHost={actionHost}
             blockedReason={blockedReason}
             dirty={dirty}
             draft={draft}
             onDraftChange={onDraftChange}
             onDraftPersisted={onDraftPersisted}
             onMessage={onMessage}
+            onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
               setResultWorkId(submission.workId);
               setResultUrls(submission.resultImageUrls ?? []);
-              if (
-                submission.status === 'completed' ||
-                submission.status === 'provider_accepted'
-              ) {
-                onClearUi?.();
-              }
             }}
             requireExplicitFeature
-            showProgressSteps
           />
+        </Card>
+          </div>
+
+          <footer className="uc-image-professional__submit-bar">
+            <span>
+              {generationInFlight
+                ? '请求处理中，请在右侧查看进度'
+                : dirty || draft.state !== 'saved'
+                  ? '正在保存当前配置'
+                  : '草稿已保存，可以提交'}
+            </span>
+            <div
+              className="uc-image-professional__submit-action"
+              ref={setActionHost}
+            />
+          </footer>
+        </section>
+
+        <Card
+          aria-label="生成过程与作品区域"
+          className="uc-image-professional__after-pane"
+          data-phase={submissionProgress.phase}
+        >
+          <header className="uc-image-professional__pane-heading">
+            <span aria-hidden="true">2</span>
+            <div>
+              <h2>第二步 · 生成过程与作品</h2>
+              <p>提交状态与通过本地校验的作品会保留在这里。</p>
+            </div>
+          </header>
+
+          <div className="uc-image-professional__stage">
+            {submissionProgress.phase !== 'idle' ? (
+              <section
+                aria-live="polite"
+                className="uc-image-professional__generation-state"
+              >
+                <div aria-hidden="true" className="uc-image-professional__generation-icon">
+                  <LuSparkles />
+                </div>
+                <div>
+                  <strong>
+                    {generationInFlight
+                      ? '图片生成中'
+                      : generationStopped
+                        ? '生成未完成'
+                        : '生成已完成'}
+                  </strong>
+                  <span>
+                    {generationInFlight
+                      ? '服务商正在处理，当前配置与外发事实已固定。'
+                      : generationStopped
+                        ? '请根据下方状态处理，结果未知时不会自动重试。'
+                        : '结果已返回，正在展示可用的本地作品或结果链接。'}
+                  </span>
+                </div>
+              </section>
+            ) : null}
+
+            <SubmissionProgressSteps
+              failureMessage={submissionProgress.failureMessage}
+              phase={submissionProgress.phase}
+            />
+
+            <GenerationResultPreview
+              emptyDescription={
+                submissionProgress.phase === 'idle'
+                  ? '完成左侧配置并点击“生成”后，这里显示生成过程和作品。'
+                  : '只有完成本地文件校验后，生成结果才会登记为正式作品。'
+              }
+              emptyTitle={
+                submissionProgress.phase === 'idle'
+                  ? '等待提交'
+                  : '暂时没有可展示的作品'
+              }
+              mediaKind="image"
+              remoteUrls={resultUrls}
+              workId={resultWorkId}
+            />
+          </div>
         </Card>
       </div>
 

@@ -17,6 +17,7 @@ const operations = [
   'restoreConversation',
   'deleteConversation',
   'addUserMessage',
+  'editCancelledUserMessage',
   'copyLegacyConversation',
   'createResponseDraft',
   'replaceResponseContexts',
@@ -25,6 +26,7 @@ const operations = [
   'listTextCandidates',
   'prepareResponseSubmission',
   'submitResponse',
+  'startResponse',
   'getResponseExecution',
   'replayResponseEvents',
   'cancelResponseExecution',
@@ -51,6 +53,8 @@ test('exposes only the named chat and project-context IPC whitelist', () => {
     assert.match(registrationSource, new RegExp(`chatContextIpcChannels\\.${operation}`));
   }
   assert.match(preloadSource, /chatContexts,/);
+  assert.match(preloadSource, /afterSequence\s*\n?\s*\}\)\.then/);
+  assert.doesNotMatch(preloadSource, /afterSequence:\s*0/);
   assert.match(mainSource, /registerChatContextIpcHandlers/);
   assert.doesNotMatch(sharedSource, /cancelAssistantResponse/);
   assert.doesNotMatch(preloadSource, /cancelAssistantResponse/);

@@ -11,8 +11,10 @@ import {
   LuMessageSquarePlus,
   LuMessagesSquare,
   LuPanelRight,
+  LuPencil,
   LuSquare,
-  LuTrash2
+  LuTrash2,
+  LuX
 } from 'react-icons/lu';
 import { Checkbox, Drawer, Input, Modal, Tooltip, Whisper } from 'rsuite';
 import { ActionMenu } from '../../components/ActionMenu';
@@ -26,8 +28,8 @@ import type {
   ChatContextIpcErrorCode,
   ConversationDto,
   ConversationResponseCandidateDto,
-  ConversationResponseDraftDto,
   ConversationResponseExecutionDto,
+  ConversationResponseStreamEventDto,
   MessageDto,
   ProjectContextCandidateDto,
   ProjectContextDetailDto,
@@ -62,6 +64,7 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   context_not_found: '项目上下文已不存在。',
   message_not_found: '所选消息已不存在。',
   message_not_completed: '只有已完成的消息才能登记。',
+  message_not_editable: '只有最后一次已停止回复对应的用户消息可以编辑。',
   message_revision_changed: '消息内容已变化，请重新选择。',
   selection_out_of_range: '所选消息范围已经失效。',
   revision_conflict: '内容已在其他位置更新，请刷新后重试。',
@@ -212,6 +215,25 @@ function conversationTitleFromMessage(message: string): string {
     : normalized;
 }
 
+function findEditableCancelledUserMessage(
+  conversation?: ConversationDto
+): MessageDto | undefined {
+  if (!conversation || conversation.readOnly || conversation.status !== 'active') {
+    return undefined;
+  }
+  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+    const message = conversation.messages[index];
+    if (message.role !== 'user') continue;
+    const following = conversation.messages.slice(index + 1);
+    return message.state === 'completed' &&
+      following.length > 0 &&
+      following.every((item) => item.role === 'assistant' && item.state === 'cancelled')
+      ? message
+      : undefined;
+  }
+  return undefined;
+}
+
 function conversationGroupLabel(updatedAt: string): string {
   const updated = new Date(updatedAt);
   if (Number.isNaN(updated.getTime())) return '更早';
@@ -248,12 +270,13 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const [renamingConversationId, setRenamingConversationId] = useState<string>();
   const [input, setInput] = useState('');
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
-  const [, setResponseDraft] = useState<ConversationResponseDraftDto>();
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>();
   const [activityExpanded, setActivityExpanded] = useState(false);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
+  const [responseStarting, setResponseStarting] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string>();
   const [copiedMessageId, setCopiedMessageId] = useState<string>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [contextDraft, setContextDraft] = useState<ProjectContextDraftPreviewDto>();
@@ -275,7 +298,11 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const cancelRequestedRef = useRef(false);
+  const cancelAfterStartRef = useRef(false);
+  const inputValueRef = useRef('');
   const followOutputRef = useRef(true);
+  const responseExecutionSnapshotRef = useRef(responseExecution);
+  responseExecutionSnapshotRef.current = responseExecution;
 
   const selected = useMemo(
     () => conversations.find((conversation) => conversation.conversationId === selectedId),
@@ -286,6 +313,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   );
   const selectedCandidate = responseCandidates.find(
     (candidate) => candidate.candidateId === selectedCandidateId
+  );
+  const editableCancelledUserMessage = useMemo(
+    () => findEditableCancelledUserMessage(selected),
+    [selected]
   );
   const featureCandidates = responseCandidates.filter(
     (candidate) => candidate.parameterSchema.productFeature === responseFeature
@@ -338,7 +369,8 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     return [...groups.entries()];
   }, [conversations]);
   const responseInProgress = Boolean(
-    responseExecution && ['pending', 'streaming'].includes(responseExecution.state)
+    responseStarting ||
+    (responseExecution && ['pending', 'streaming'].includes(responseExecution.state))
   );
   const canCompose = Boolean(
     session && (!selected || (!selected.readOnly && selected.status === 'active'))
@@ -411,6 +443,7 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     setContextDraft(undefined);
     setContextName('');
     setContextLabels('');
+    setEditingMessageId(undefined);
     clearResponseDraftState();
     followOutputRef.current = true;
     setShowScrollToBottom(false);
@@ -471,47 +504,96 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   }, [chat, session, selected?.conversationId, selected?.readOnly, selected?.status]);
 
   useEffect(() => {
-    if (!chat || !responseExecution || !['pending', 'streaming'].includes(responseExecution.state)) {
+    const execution = responseExecutionSnapshotRef.current;
+    if (!chat || !execution || !['pending', 'streaming'].includes(execution.state)) {
       return;
     }
     let active = true;
-    let latestSequence = responseExecution.streamSequence;
-    const executionId = responseExecution.responseExecutionId;
-    const unsubscribe = chat.subscribeResponseEvents(executionId, (event) => {
-      if (!active || event.responseExecutionId !== executionId || event.sequence <= latestSequence) return;
-      latestSequence = event.sequence;
+    let terminalReceived = false;
+    let animationFrame: number | undefined;
+    let unsubscribe: (() => void) | undefined;
+    let queuedEvents: ConversationResponseStreamEventDto[] = [];
+    let latestSequence = execution.streamSequence;
+    const executionId = execution.responseExecutionId;
+    const conversationId = execution.conversationId;
+    const userMessageId = execution.userMessageId;
+
+    const flushEvents = () => {
+      animationFrame = undefined;
+      if (!active || queuedEvents.length === 0) return;
+      const events = queuedEvents;
+      queuedEvents = [];
       setResponseExecution((current) => {
         if (!current || current.responseExecutionId !== executionId) return current;
-        const state = event.type === 'stream_completed' ? 'completed'
-          : event.type === 'stream_cancelled' ? 'cancelled'
-            : event.type === 'stream_failed' ? 'failed'
-              : event.type === 'stream_interrupted' ? 'interrupted'
-                : event.type === 'stream_started' ? 'streaming' : current.state;
-        return {
-          ...current,
-          state,
-          streamSequence: event.sequence,
-          reasoningContent: `${current.reasoningContent}${event.reasoningDelta ?? ''}`,
-          content: `${current.content}${event.contentDelta ?? ''}`,
-          updatedAt: event.occurredAt
-        };
+        return events.reduce<ConversationResponseExecutionDto>((next, event) => {
+          const state = event.type === 'stream_completed' ? 'completed'
+            : event.type === 'stream_cancelled' ? 'cancelled'
+              : event.type === 'stream_failed' ? 'failed'
+                : event.type === 'stream_interrupted' ? 'interrupted'
+                  : event.type === 'stream_started' || event.type === 'stream_resumed'
+                    ? 'streaming'
+                    : next.state;
+          return {
+            ...next,
+            state,
+            streamSequence: event.sequence,
+            reasoningContent: `${next.reasoningContent}${event.reasoningDelta ?? ''}`,
+            content: `${next.content}${event.contentDelta ?? ''}`,
+            updatedAt: event.occurredAt
+          };
+        }, current);
       });
-      if (['stream_completed', 'stream_cancelled', 'stream_failed', 'stream_interrupted'].includes(event.type) && selectedId) {
-        void chat.getConversation(selectedId).then((result) => {
-          if (!active || !result.ok) return;
-          replaceConversation(result.value);
-          const assistant = result.value.messages.find(
-            (message) => message.messageId === event.assistantMessageId
-          );
-          if (event.type === 'stream_completed') setNotice('');
-          else if (event.type === 'stream_cancelled') setNotice('回复已取消。');
-          else if (event.type === 'stream_interrupted') setNotice('回复被中断，请重试。');
-          else setNotice(failedResponseNotice(assistant, event.safeCode));
-        });
+    };
+
+    const handleTerminalEvent = (event: ConversationResponseStreamEventDto) => {
+      terminalReceived = true;
+      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+      flushEvents();
+      unsubscribe?.();
+      cancelRequestedRef.current = false;
+      setCancelRequested(false);
+      void chat.getConversation(conversationId).then((result) => {
+        if (!active || !result.ok) return;
+        replaceConversation(result.value);
+        const assistant = result.value.messages.find(
+          (message) => message.messageId === event.assistantMessageId
+        );
+        if (event.type === 'stream_completed') setNotice('');
+        else if (event.type === 'stream_cancelled') {
+          setNotice('回复已停止。');
+          restoreCancelledInput(result.value, userMessageId);
+        }
+        else if (event.type === 'stream_interrupted') setNotice('回复被中断，请重试。');
+        else setNotice(failedResponseNotice(assistant, event.safeCode));
+      });
+    };
+
+    const onEvent = (event: ConversationResponseStreamEventDto) => {
+      if (
+        !active ||
+        terminalReceived ||
+        event.responseExecutionId !== executionId ||
+        event.sequence <= latestSequence
+      ) return;
+      latestSequence = event.sequence;
+      queuedEvents.push(event);
+      if (['stream_completed', 'stream_cancelled', 'stream_failed', 'stream_interrupted'].includes(event.type)) {
+        handleTerminalEvent(event);
+        return;
       }
-    });
-    return () => { active = false; unsubscribe(); };
-  }, [chat, responseExecution?.responseExecutionId, responseExecution?.state, selectedId]);
+      if (animationFrame === undefined) {
+        animationFrame = window.requestAnimationFrame(flushEvents);
+      }
+    };
+
+    unsubscribe = chat.subscribeResponseEvents(executionId, latestSequence, onEvent);
+    if (terminalReceived) unsubscribe();
+    return () => {
+      active = false;
+      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+      unsubscribe?.();
+    };
+  }, [chat, responseExecution?.responseExecutionId]);
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -530,7 +612,8 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     }
     if (!confirmLeaveUnsentInput()) return;
     setSelectedId(undefined);
-    setInput('');
+    updateInput('');
+    setEditingMessageId(undefined);
     setHistoryOpen(false);
     setContextOpen(false);
     setIncludedContextIds([]);
@@ -561,8 +644,42 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   function clearResponseDraftState() {
     cancelRequestedRef.current = false;
     setCancelRequested(false);
-    setResponseDraft(undefined);
     setResponseExecution(undefined);
+  }
+
+  function updateInput(value: string) {
+    inputValueRef.current = value;
+    setInput(value);
+  }
+
+  function focusComposer() {
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function startEditingCancelledMessage(message: MessageDto) {
+    if (responseInProgress || cancelRequested || busy) return;
+    if (inputValueRef.current.trim() && !confirmLeaveUnsentInput()) return;
+    setEditingMessageId(message.messageId);
+    updateInput(message.content);
+    setNotice('');
+    focusComposer();
+  }
+
+  function restoreCancelledInput(
+    conversation: ConversationDto,
+    userMessageId: string
+  ) {
+    const message = findEditableCancelledUserMessage(conversation);
+    if (message?.messageId !== userMessageId || inputValueRef.current.trim()) return;
+    setEditingMessageId(message.messageId);
+    updateInput(message.content);
+    focusComposer();
+  }
+
+  function cancelMessageEditing() {
+    setEditingMessageId(undefined);
+    updateInput('');
+    focusComposer();
   }
 
   function changeCandidate(next: string) {
@@ -592,15 +709,20 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
   function selectConversation(conversationId: string) {
     if (conversationId === selectedId) return;
     if (!confirmLeaveUnsentInput()) return;
-    setInput('');
+    updateInput('');
+    setEditingMessageId(undefined);
     setSelectedId(conversationId);
     setHistoryOpen(false);
   }
 
   function replaceConversation(conversation: ConversationDto) {
-    setConversations((items) => items.map((item) =>
-      item.conversationId === conversation.conversationId ? conversation : item
-    ));
+    setConversations((items) => items.some(
+      (item) => item.conversationId === conversation.conversationId
+    )
+      ? items.map((item) =>
+          item.conversationId === conversation.conversationId ? conversation : item
+        )
+      : [conversation, ...items]);
   }
 
   async function mutateConversation(
@@ -629,7 +751,8 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
         setConversations(remaining);
         if (selectedId === conversation.conversationId) {
           setSelectedId(undefined);
-          setInput('');
+          updateInput('');
+          setEditingMessageId(undefined);
           clearResponseDraftState();
         }
         setNotice('');
@@ -679,136 +802,86 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
     ) {
       return;
     }
-    setBusy(true);
-    setNotice('');
+    setResponseStarting(true);
+    setNotice('正在准备回复…');
     clearResponseDraftState();
-    const content = input.trim();
+    const commandContent = input.trim();
+    const commandEditingMessageId = editingMessageId;
     try {
-      let targetConversation = selected;
-      if (!targetConversation) {
-        const createdConversation = await chat.createConversation(
-          conversationTitleFromMessage(content),
-          true
-        );
-        if (!createdConversation.ok) {
-          setNotice(errorMessages[createdConversation.error.code]);
-          return;
+      const started = await chat.startResponse({
+        clientCommandId: `chat-start-${crypto.randomUUID()}`,
+        conversation: selected
+          ? {
+              conversationId: selected.conversationId,
+              expectedRevision: selected.revision,
+              editedMessageId: commandEditingMessageId ?? null
+            }
+          : null,
+        title: conversationTitleFromMessage(commandContent),
+        content: commandContent,
+        productFeature: responseFeature,
+        candidateId: selectedCandidateId,
+        contextSelections: includedContextIds.flatMap((contextId) => {
+          const context = viewedContexts[contextId];
+          return context
+            ? [{
+                contextId,
+                contextRevision: context.revision,
+                includeInPrompt: true
+              }]
+            : [];
+        }),
+        parameterValues: {},
+        confirmed: true
+      });
+      if (!started.ok) {
+        cancelAfterStartRef.current = false;
+        cancelRequestedRef.current = false;
+        setCancelRequested(false);
+        setNotice(describeChatError(started.error));
+        if (selected) {
+          const refreshed = await chat.getConversation(selected.conversationId);
+          if (refreshed.ok) replaceConversation(refreshed.value);
         }
-        targetConversation = createdConversation.value;
-        setConversations((items) => [targetConversation!, ...items]);
-        setSelectedId(targetConversation.conversationId);
-      }
-      let saved = await chat.addUserMessage(
-        targetConversation.conversationId,
-        targetConversation.revision,
-        content
-      );
-      if (
-        !saved.ok &&
-        saved.error.code === 'revision_conflict'
-      ) {
-        const latest = await chat.getConversation(targetConversation.conversationId);
-        if (latest.ok) {
-          targetConversation = latest.value;
-          replaceConversation(latest.value);
-          saved = await chat.addUserMessage(
-            latest.value.conversationId,
-            latest.value.revision,
-            content
-          );
-        }
-      }
-      if (!saved.ok) {
-        setNotice(errorMessages[saved.error.code]);
         return;
       }
-      replaceConversation(saved.value);
-      setInput('');
-      const userMessage = [...saved.value.messages].reverse().find((message) => message.role === 'user');
-      if (!userMessage) {
-        setNotice('消息已写入，但未能建立回复草稿。');
-        return;
-      }
-      const created = await chat.createResponseDraft(
-        saved.value.conversationId,
-        saved.value.revision,
-        userMessage.messageId,
-        responseFeature
-      );
-      if (!created.ok) {
-        setNotice(describeChatError(created.error));
-        return;
-      }
-      let draft = created.value;
-      const parameterized = await chat.replaceResponseParameters(
-        draft.responseDraftId,
-        draft.revision,
-        {}
-      );
-      if (!parameterized.ok) {
-        setNotice(describeChatError(parameterized.error));
-        return;
-      }
-      draft = parameterized.value;
-      if (includedContextIds.length > 0) {
-        const replaced = await chat.replaceResponseContexts(
-          draft.responseDraftId,
-          draft.revision,
-          includedContextIds.flatMap((contextId) => {
-            const context = viewedContexts[contextId];
-            return context
-              ? [{
-                  contextId,
-                  contextRevision: context.revision,
-                  includeInPrompt: true
-                }]
-              : [];
-          })
-        );
-        if (!replaced.ok) {
-          setResponseDraft(draft);
-          setNotice(describeChatError(replaced.error));
-          return;
-        }
-        draft = replaced.value;
-      }
-      setResponseDraft(draft);
-      if (duplicateIncludedContexts) {
-        setNotice('已勾选内容重复的上下文，可能挤占输出长度。');
-      }
-      const prepared = await chat.prepareResponseSubmission(
-        draft.responseDraftId,
-        draft.revision,
-        selectedCandidateId
-      );
-      if (!prepared.ok) {
-        setNotice(describeChatError(prepared.error));
-        return;
-      }
-      const submitted = await chat.submitResponse(
-        draft.responseDraftId,
-        draft.revision,
-        prepared.value.routeSelectionToken,
-        prepared.value.confirmation.confirmationId,
-        true
-      );
-      if (!submitted.ok) {
-        setNotice(describeChatError(submitted.error));
-        return;
-      }
-      setResponseExecution(submitted.value);
+      replaceConversation(started.value.conversation);
+      setSelectedId(started.value.conversation.conversationId);
+      setResponseExecution(started.value.execution);
       setActivityExpanded(responseFeature === 'text_reasoning');
+      updateInput('');
+      setEditingMessageId(undefined);
       setNotice('');
-      const refreshed = await chat.getConversation(targetConversation.conversationId);
-      if (refreshed.ok) replaceConversation(refreshed.value);
+      if (cancelAfterStartRef.current) {
+        cancelAfterStartRef.current = false;
+        setResponseStarting(false);
+        await requestResponseCancellation(
+          started.value.execution,
+          started.value.conversation
+        );
+      }
+      return;
     } catch {
-      setNotice('发送失败，请检查网络和模型连接后重试。');
+      cancelAfterStartRef.current = false;
+      cancelRequestedRef.current = false;
+      setCancelRequested(false);
+      setNotice(errorMessages.storage_error);
+      return;
     } finally {
-      setBusy(false);
+      setResponseStarting(false);
     }
+
   }
 
   async function cancelResponse() {
+    if (responseStarting) {
+      if (cancelRequested) return;
+      cancelAfterStartRef.current = true;
+      cancelRequestedRef.current = true;
+      setCancelRequested(true);
+      setNotice('已发出停止请求，正在等待执行建立…');
+      return;
+    }
     if (
       !chat ||
       !selected ||
@@ -817,37 +890,56 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
       busy ||
       cancelRequested
     ) return;
-    const pendingExecution = responseExecution;
+    await requestResponseCancellation(responseExecution, selected);
+  }
+
+  async function requestResponseCancellation(
+    pendingExecution: ConversationResponseExecutionDto,
+    conversation: ConversationDto
+  ) {
+    if (!chat) return;
     cancelRequestedRef.current = true;
     setCancelRequested(true);
     setNotice('已发出停止请求，正在确认…');
+    let awaitingTerminalEvent = false;
     try {
       const result = await chat.cancelResponseExecution(
         pendingExecution.responseExecutionId
       );
       if (!result.ok) {
         setNotice(describeChatError(result.error));
-        const refreshed = await chat.getConversation(selected.conversationId);
+        const refreshed = await chat.getConversation(conversation.conversationId);
         if (refreshed.ok) replaceConversation(refreshed.value);
         return;
       }
       setResponseExecution(result.value);
-      const refreshed = await chat.getConversation(selected.conversationId);
-      if (refreshed.ok) replaceConversation(refreshed.value);
+      if (['pending', 'streaming'].includes(result.value.state)) {
+        awaitingTerminalEvent = true;
+        return;
+      }
+      const refreshed = await chat.getConversation(conversation.conversationId);
+      if (refreshed.ok) {
+        replaceConversation(refreshed.value);
+        if (result.value.state === 'cancelled') {
+          restoreCancelledInput(refreshed.value, pendingExecution.userMessageId);
+        }
+      }
       setNotice(
         result.value.state === 'cancelled'
-          ? ''
+          ? '回复已停止。'
           : result.value.state === 'completed'
             ? '回复已完成。'
             : '停止请求未能确认，请重试。'
       );
     } catch {
       setNotice('停止回复失败，请重试。');
-      const refreshed = await chat.getConversation(selected.conversationId);
+      const refreshed = await chat.getConversation(conversation.conversationId);
       if (refreshed.ok) replaceConversation(refreshed.value);
     } finally {
-      cancelRequestedRef.current = false;
-      setCancelRequested(false);
+      if (!awaitingTerminalEvent) {
+        cancelRequestedRef.current = false;
+        setCancelRequested(false);
+      }
     }
   }
 
@@ -1164,6 +1256,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                   const reasoningContent = item.role === 'assistant'
                     ? item.reasoningContent
                     : undefined;
+                  const canEditCancelledMessage = item.role === 'user' &&
+                    item.messageId === editableCancelledUserMessage?.messageId &&
+                    !responseInProgress &&
+                    !cancelRequested;
                   const activityLabel = cancelRequested
                     ? '正在停止'
                     : responseExecution?.state === 'pending'
@@ -1242,6 +1338,17 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
                       {item.state === 'completed' ? (
                         <div className="uc-chat-page__message-meta">
                           <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time>
+                          {canEditCancelledMessage ? (
+                            <Button
+                              aria-label="编辑并重新发送"
+                              disabled={busy}
+                              onClick={() => startEditingCancelledMessage(item)}
+                              title="编辑并重新发送"
+                              variant="ghost"
+                            >
+                              <LuPencil aria-hidden="true" />
+                            </Button>
+                          ) : null}
                           {item.content ? (
                             <Button
                               aria-label={copiedMessageId === item.messageId ? '已复制' : '复制消息'}
@@ -1282,10 +1389,10 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
           <section className="uc-chat-page__composer" aria-labelledby="chat-composer-title">
             <h2 className="uc-visually-hidden" id="chat-composer-title">发送消息</h2>
             <textarea
-              aria-label="对话输入"
+              aria-label={editingMessageId ? '编辑已停止的消息' : '对话输入'}
               disabled={!canCompose}
               maxLength={8000}
-              onChange={(event) => setInput(event.currentTarget.value)}
+              onChange={(event) => updateInput(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
@@ -1299,6 +1406,18 @@ export function ChatPage({ initialConversationId, onConversationChange }: ChatPa
             />
             <div className="uc-chat-page__composer-toolbar">
               <div className="uc-chat-page__composer-actions">
+                {editingMessageId ? (
+                  <Button
+                    aria-label="取消编辑"
+                    className="uc-chat-page__cancel-edit"
+                    disabled={busy || cancelRequested || responseInProgress}
+                    onClick={cancelMessageEditing}
+                    title="取消编辑"
+                    variant="ghost"
+                  >
+                    <LuX aria-hidden="true" />
+                  </Button>
+                ) : null}
                 <ModelSelect
                   appearance="subtle"
                   ariaLabel="模型设置"

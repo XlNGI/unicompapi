@@ -68,6 +68,9 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.addUserMessage, (_event, request: unknown) =>
     conversations.addUserMessage(request)
   );
+  ipcMain.handle(chatContextIpcChannels.editCancelledUserMessage, (_event, request: unknown) =>
+    conversations.editCancelledUserMessage(request)
+  );
   ipcMain.handle(chatContextIpcChannels.copyLegacyConversation, (_event, request: unknown) =>
     conversations.copyLegacyConversation(request)
   );
@@ -91,6 +94,9 @@ export function registerChatContextIpcHandlers(options: {
   );
   ipcMain.handle(chatContextIpcChannels.submitResponse, (_event, request: unknown) =>
     runtime.responses.submit(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.startResponse, (_event, request: unknown) =>
+    runtime.responses.start(request)
   );
   ipcMain.handle(chatContextIpcChannels.getResponseExecution, (_event, request: unknown) =>
     runtime.responses.getExecution(request)

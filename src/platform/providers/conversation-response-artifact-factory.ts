@@ -3,7 +3,6 @@ import {
   beginAssistantMessage,
   createConversationResponseExecution,
   createConversationResponseStreamEvent,
-  startAssistantMessageStreaming,
   toConversationResponseExecutionId,
   toConversationResponseStreamEventId,
   toIsoTimestamp,
@@ -90,8 +89,6 @@ export class ConversationResponseArtifactFactory
     ];
     const createdAt = toIsoTimestamp(input.createdAt);
     const assistantMessageId = this.nextMessageId();
-    // Each domain transition bumps conversation.revision once; repository.save
-    // requires exactly +1 per call (same pattern as ConversationStreamingService).
     const pendingConversation = beginAssistantMessage(conversation, {
       id: assistantMessageId,
       createdAt
@@ -99,15 +96,6 @@ export class ConversationResponseArtifactFactory
     await this.dependencies.conversations.save(
       pendingConversation,
       conversation.revision
-    );
-    const nextConversation = startAssistantMessageStreaming(
-      pendingConversation,
-      assistantMessageId,
-      createdAt
-    );
-    await this.dependencies.conversations.save(
-      nextConversation,
-      pendingConversation.revision
     );
 
     const responseExecution = createConversationResponseExecution({
