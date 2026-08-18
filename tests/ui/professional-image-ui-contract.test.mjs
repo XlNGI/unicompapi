@@ -83,10 +83,10 @@ const resultPreviewSource = await readFile(
   'utf8'
 );
 
-test('professional image reports four-step submit progress to the result pane', () => {
+test('professional image tracks submit progress for the result preview loading state', () => {
   assert.match(professionalSource, /onProgressChange={handleProgressChange}/);
-  assert.match(professionalSource, /<SubmissionProgressSteps/);
-  assert.match(professionalSource, /phase={submissionProgress\.phase}/);
+  assert.doesNotMatch(professionalSource, /<SubmissionProgressSteps/);
+  assert.doesNotMatch(professionalSource, /uc-image-professional__generation-state/);
   assert.match(featurePanelSource, /showProgressSteps = false/);
   assert.match(featurePanelSource, /trackProgress = showProgressSteps \|\| Boolean\(onProgressChange\)/);
   assert.match(featurePanelSource, /onProgressChange\?\.\(progressPhase, progressFailure\)/);

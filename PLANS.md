@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-19 工程补充：`feature/remove-professional-image-status-summary` 按 UI 反馈移除专业生图右侧状态摘要卡与四步进度条，仅保留“本地作品预览”及其真实阶段加载动画；内部提交状态机不变。全量门禁为 Node/UI 265 项与 Vitest 725 项，共 990 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。工程记录见 `docs/active/专业生图状态摘要移除记录.md`。
+
 当前状态：阶段 8 已正式收口；阶段 9 B1-B4、A1-A4、C1 与 C2 流程 1-8 已全部完成，并在 Windows x64 必需目标、macOS `required=false` 延期目标边界内正式收口。最终门禁为 Node 178 项与 Vitest 388 项，共 566 项通过，0 失败、0 跳过；Windows 九类套件全部 `passed`，Electron 4/4 响应且残留 0。macOS 保持 `not_run/deferred`，不声明已支持。Vidu 两项真实收费预算已用尽，Image V1 未决协议不晋级。阶段 10、服务商优化、安装包、签名、公证、生产更新、生产媒体分发、SBOM 和正式发布准入均未启动。
 
 2026-08-18 工程补充：`feature/chat-renderer-diagnostics` 修复新建会话首条消息正文不出现的问题。根因是发送成功后新会话 `selectedId` 变化触发会话切换 effect，无条件 `clearResponseDraftState()` 清空刚建立的 `responseExecution`，流式订阅随后被 cleanup 取消；后端事件正常持久化，但 renderer 不再接收。修复后仅在活动执行不属于当前选中会话时清理回复状态，并新增仅开发环境启用的 ChatPage/preload 打点及主进程 console 转发（`userData/logs/renderer-trace.log`）。Electron + Vite 本地探针复现并验证：修复前 subscribe 后立即 unsubscribe、正文始终为“正在接收…”，修复后订阅保持到终态、正文正常渲染。完整门禁为 Node/UI 264 项与 Vitest 725 项，共 989 项通过，0 失败、0 跳过；typecheck、lint、build、平台审计、交接校验和差异检查通过。未调用真实服务商、未读取真实凭据、未产生收费请求。记录见 `docs/active/chat-renderer-diagnostics-验收记录.md`。

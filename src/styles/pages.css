@@ -773,8 +773,7 @@
 }
 
 .uc-image-professional__pane-heading p,
-.uc-image-professional__submit-bar > span,
-.uc-image-professional__generation-state span {
+.uc-image-professional__submit-bar > span {
   color: var(--uc-color-text-secondary);
   font-size: var(--uc-font-size-caption);
   line-height: var(--uc-line-height-caption);
@@ -821,53 +820,6 @@
   padding: var(--uc-space-4);
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-.uc-image-professional__generation-state {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--uc-space-3);
-  padding: var(--uc-space-3);
-  border: 1px solid var(--uc-color-border-subtle);
-  border-radius: var(--uc-radius-8);
-  background: var(--uc-color-surface-base);
-}
-
-.uc-image-professional__generation-state > div:last-child {
-  display: grid;
-  gap: var(--uc-space-1);
-}
-
-.uc-image-professional__generation-icon {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border-radius: var(--uc-radius-8);
-  color: var(--uc-color-text-accent);
-  background: var(--uc-color-accent-subtle);
-}
-
-.uc-image-professional__generation-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.uc-image-professional__after-pane[data-phase="preparing"] .uc-image-professional__generation-icon,
-.uc-image-professional__after-pane[data-phase="requesting"] .uc-image-professional__generation-icon,
-.uc-image-professional__after-pane[data-phase="waiting"] .uc-image-professional__generation-icon {
-  animation: uc-image-professional-generation 1.4s ease-in-out infinite;
-}
-
-.uc-image-professional__after-pane[data-phase="failed"] .uc-image-professional__generation-state,
-.uc-image-professional__after-pane[data-phase="submission_failed"] .uc-image-professional__generation-state {
-  border-color: var(--uc-color-danger, #b42318);
-}
-
-.uc-image-professional__after-pane[data-phase="uncertain"] .uc-image-professional__generation-state,
-.uc-image-professional__after-pane[data-phase="submission_uncertain"] .uc-image-professional__generation-state {
-  border-color: var(--uc-color-status-warning);
 }
 
 .uc-image-professional__stage .uc-empty-state {
@@ -946,13 +898,6 @@
 
 .uc-generation-result-preview--animated img {
   animation: uc-generation-result-preview-reveal 280ms var(--uc-easing-standard) both;
-}
-
-@keyframes uc-image-professional-generation {
-  50% {
-    opacity: 0.48;
-    transform: scale(0.94);
-  }
 }
 
 @keyframes uc-generation-result-preview-spin {
@@ -2325,10 +2270,6 @@
   .uc-image-professional__submit-action,
   .uc-image-professional__submit-action .uc-image-feature-panel__primary {
     width: 100%;
-  }
-
-  .uc-image-professional__generation-state {
-    grid-template-columns: 1fr;
   }
 
   .uc-video-editor__header,
@@ -6041,7 +5982,6 @@ button.uc-project-center__project-card:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .uc-image-professional__generation-icon,
   .uc-generation-result-preview__indicator,
   .uc-generation-result-preview__ring,
   .uc-generation-result-preview--animated img {
