@@ -7,6 +7,7 @@ import {
   protocol,
   shell
 } from 'electron';
+import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
@@ -35,6 +36,13 @@ import { createLocalMediaResponse } from './ipc/local-media-response';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
+const rendererTraceEnabled = isDev || process.env.UNICOMP_RENDERER_TRACE === '1';
+
+async function appendRendererTraceLine(line: string): Promise<void> {
+  const logsDirectory = path.join(app.getPath('userData'), 'logs');
+  await mkdir(logsDirectory, { recursive: true });
+  await appendFile(path.join(logsDirectory, 'renderer-trace.log'), `${line}\n`, 'utf8');
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -184,6 +192,21 @@ function createMainWindow(): BrowserWindow {
     void openTrustedExternalUrl(url);
     return { action: 'deny' };
   });
+  if (rendererTraceEnabled) {
+    mainWindow.webContents.on('console-message', (_event, ...args: unknown[]) => {
+      const first = args[0];
+      const details = first && typeof first === 'object'
+        ? first as { level?: unknown; source?: unknown; lineNumber?: unknown; message?: unknown }
+        : undefined;
+      const level = details?.level ?? args[0] ?? '';
+      const message = details?.message ?? args[1] ?? '';
+      const source = details?.source ?? 'console-api';
+      const line = details?.lineNumber ?? args[2] ?? 0;
+      const lineText = `[renderer-console] ${level}:${source}:${line} ${message}`;
+      console.log(lineText);
+      void appendRendererTraceLine(lineText).catch(() => undefined);
+    });
+  }
 
   const sendMaximizedState = () => {
     mainWindow.webContents.send('window:maximized-changed', mainWindow.isMaximized());
