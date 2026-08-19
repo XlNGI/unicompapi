@@ -10,6 +10,14 @@ const modesSource = await readFile(
   'src/pages/creation/creationModes.ts',
   'utf8'
 );
+const autosaveStatusSource = await readFile(
+  'src/components/AutosaveStatus.tsx',
+  'utf8'
+);
+const autosaveSource = await readFile(
+  'src/application/latest-snapshot-autosave.ts',
+  'utf8'
+);
 const videoPages = await Promise.all(
   [
     'VideoQuickPage.tsx',
@@ -66,7 +74,7 @@ test('all three generation pages reuse the shared shell and mode source', () => 
 
 test('saving a generation draft stays separate from submission', () => {
   assert.match(workbenchSource, /新建本地草稿/);
-  assert.match(workbenchSource, /已自动保存/);
+  assert.match(autosaveStatusSource, /已自动保存/);
   assert.match(workbenchSource, /没有创建或提交任务/);
   assert.doesNotMatch(workbenchSource, /共用同一套流程/);
   assert.match(workbenchSource, /usesFlowAutosave/);
@@ -74,4 +82,8 @@ test('saving a generation draft stays separate from submission', () => {
   assert.match(workbenchSource, /workspaceMode === 'text_to_video'/);
   assert.match(workbenchSource, /workspaceMode === 'image_to_video'/);
   assert.match(workbenchSource, /persistVideoWorkspaceDraft/);
+  assert.match(workbenchSource, /useLatestSnapshotAutosave/);
+  assert.match(workbenchSource, /debounceMs: 1_000/);
+  assert.match(autosaveSource, /private inFlight\?/);
+  assert.match(autosaveSource, /private pending\?/);
 });

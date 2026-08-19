@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../../../components/Button';
+import { AutosaveStatus } from '../../../components/AutosaveStatus';
 import { Card } from '../../../components/Card';
 import { FloatingStatusBar } from '../../../components/FloatingStatusBar';
 import { EmptyState } from '../../../components/EmptyState';
@@ -7,9 +8,11 @@ import { StatusPill } from '../../../components/StatusPill';
 import type { StorageProjectSessionDto } from '../../../shared/storage-ipc';
 import type {
   VideoWorkspaceDraftDto,
-  VideoWorkspaceIpcErrorCode
+  VideoWorkspaceIpcErrorCode,
+  VideoWorkspaceIpcResult
 } from '../../../shared/video-workspace-ipc';
 import '../../../styles/pages.css';
+import { useLatestSnapshotAutosave } from '../../../ui/use-latest-snapshot-autosave';
 import type { VideoCreationMode } from '../creationModes';
 import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 import { VideoQuickWorkspace } from './VideoQuickWorkspace';
@@ -40,6 +43,11 @@ interface VideoWorkbenchPageProps {
   readonly preferredDraftId?: string;
 }
 
+type VideoWorkspaceError = Extract<
+  VideoWorkspaceIpcResult<unknown>,
+  { readonly ok: false }
+>['error'];
+
 export function VideoWorkbenchPage({
   mode,
   onNavigateToTextToVideo,
@@ -50,7 +58,7 @@ export function VideoWorkbenchPage({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const workspaceMode =
     'workspaceMode' in mode ? mode.workspaceMode : undefined;
-  // Quick / text / image video share one persist path via FeatureSubmissionPanel.
+  // Quick / text / image video share one page-owned autosave coordinator.
   const usesFlowAutosave =
     workspaceMode === 'quick_video' ||
     workspaceMode === 'text_to_video' ||
@@ -65,6 +73,62 @@ export function VideoWorkbenchPage({
   const currentDraft =
     drafts.find((draft) => draft.draftId === selectedDraftId) ??
     drafts[drafts.length - 1];
+  const autosave = useLatestSnapshotAutosave<
+    VideoWorkspaceDraftDto,
+    VideoWorkspaceError
+  >({
+    debounceMs: 1_000,
+    diagnostics: {
+      surface: 'video_generation',
+      getDraftId: (snapshot) => snapshot.draftId
+    },
+    save: async (snapshot) => {
+      if (!videoWorkspaces) {
+        return {
+          ok: false,
+          error: {
+            code: 'workspace_storage_error',
+            message: 'Video workspace IPC is unavailable'
+          }
+        };
+      }
+      return videoWorkspaces.update({ ...snapshot, state: 'saved' });
+    },
+    rebase: (pending, persisted) => ({
+      ...pending,
+      updatedAt: persisted.updatedAt,
+      state: 'editing'
+    }),
+    classifyError: (error) =>
+      error.code === 'draft_conflict'
+        ? 'conflict'
+        : error.code === 'workspace_storage_error'
+          ? 'retryable'
+          : 'terminal',
+    onPersisted: (persisted, rebasedPending) => {
+      const next = rebasedPending ?? persisted;
+      setDrafts((items) => items.map((draft) =>
+        draft.draftId === next.draftId ? next : draft
+      ));
+      setDirty(rebasedPending !== undefined);
+      if (!rebasedPending) setMessage('');
+    },
+    onError: (error, phase) => {
+      if (phase === 'retrying') {
+        setMessage('本地视频草稿暂时无法写入，正在自动重试；当前修改仍保留。');
+        return;
+      }
+      if (phase === 'conflict') {
+        setMessage('视频草稿出现真实版本冲突；当前修改仍保留，请重新载入或另存为新草稿。');
+        return;
+      }
+      setMessage(
+        'code' in error && error.code in workspaceErrorMessages
+          ? workspaceErrorMessages[error.code as VideoWorkspaceIpcErrorCode]
+          : '自动保存视频草稿失败；当前修改仍保留，可以重试。'
+      );
+    }
+  });
 
   useEffect(() => {
     let active = true;
@@ -75,6 +139,7 @@ export function VideoWorkbenchPage({
       setSession(undefined);
       setDrafts([]);
       setDirty(false);
+      autosave.reset();
 
       if (!storage) {
         setMessage('当前运行环境未连接桌面项目工作区。');
@@ -133,6 +198,7 @@ export function VideoWorkbenchPage({
 
   async function createDraft() {
     if (!videoWorkspaces || !session || !workspaceMode || busy) return;
+    if (usesFlowAutosave && !(await autosave.flush())) return;
     setBusy(true);
     setMessage('');
     try {
@@ -144,6 +210,7 @@ export function VideoWorkbenchPage({
       setDrafts((items) => [...items, result.value]);
       setSelectedDraftId(result.value.draftId);
       setDirty(false);
+      autosave.reset();
       setMessage('本地视频草稿已创建；没有上传素材，也没有创建任务。');
     } catch {
       setMessage('创建本地视频草稿失败，请重试。');
@@ -154,6 +221,7 @@ export function VideoWorkbenchPage({
 
   async function clearUiAfterGeneration() {
     if (!videoWorkspaces || !session || !workspaceMode || busy) return;
+    if (usesFlowAutosave && !(await autosave.flush())) return;
     setBusy(true);
     setMessage('');
     try {
@@ -165,6 +233,7 @@ export function VideoWorkbenchPage({
       setDrafts((items) => [...items, result.value]);
       setSelectedDraftId(result.value.draftId);
       setDirty(false);
+      autosave.reset();
       setMessage('生成已完成；当前输入已清空，原草稿和结果已保留。');
     } catch {
       setMessage('生成后创建新草稿失败，请重试。');
@@ -193,6 +262,7 @@ export function VideoWorkbenchPage({
         )
       );
       setDirty(false);
+      autosave.reset();
       setMessage('视频草稿已保存到当前项目；没有创建或提交任务。');
     } catch {
       setMessage('保存本地视频草稿失败，请重试。');
@@ -209,6 +279,63 @@ export function VideoWorkbenchPage({
       items.map((item) => (item.draftId === draft.draftId ? draft : item))
     );
     setDirty(hasUnsavedChanges);
+    if (hasUnsavedChanges && usesFlowAutosave) autosave.queue(draft);
+    if (!hasUnsavedChanges) autosave.reset();
+  }
+
+  async function reloadConflictedDraft() {
+    if (!videoWorkspaces || !currentDraft || busy) return;
+    setBusy(true);
+    try {
+      const result = await videoWorkspaces.get(currentDraft.draftId);
+      if (!result.ok || !result.value) {
+        setMessage(result.ok
+          ? '视频草稿已不存在，无法重新载入。'
+          : workspaceErrorMessages[result.error.code]);
+        return;
+      }
+      setDrafts((items) => items.map((draft) =>
+        draft.draftId === result.value?.draftId ? result.value : draft
+      ));
+      setDirty(false);
+      autosave.reset();
+      setMessage('已重新载入磁盘中的最新视频草稿。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveConflictAsNewDraft() {
+    if (!videoWorkspaces || !currentDraft || busy) return;
+    setBusy(true);
+    try {
+      const created = await videoWorkspaces.create(currentDraft.mode);
+      if (!created.ok) {
+        setMessage(workspaceErrorMessages[created.error.code]);
+        return;
+      }
+      const copy = {
+        ...currentDraft,
+        draftId: created.value.draftId,
+        projectId: created.value.projectId,
+        origin: created.value.origin,
+        createdAt: created.value.createdAt,
+        updatedAt: created.value.updatedAt,
+        state: 'saved' as const
+      };
+      const saved = await videoWorkspaces.update(copy);
+      if (!saved.ok) {
+        setMessage(workspaceErrorMessages[saved.error.code]);
+        return;
+      }
+      setDrafts((items) => [...items, saved.value]);
+      setSelectedDraftId(saved.value.draftId);
+      setDirty(false);
+      autosave.reset();
+      setMessage('当前修改已另存为新的视频草稿。');
+    } finally {
+      setBusy(false);
+    }
   }
 
   const projectStatus = loading
@@ -245,9 +372,13 @@ export function VideoWorkbenchPage({
               {busy ? '请稍候…' : '新建本地草稿'}
             </Button>
             {usesFlowAutosave ? (
-              <StatusPill tone={dirty ? 'info' : 'success'}>
-                {dirty ? '正在自动保存…' : '已自动保存'}
-              </StatusPill>
+              <AutosaveStatus
+                busy={busy}
+                onReload={() => void reloadConflictedDraft()}
+                onRetry={() => void autosave.retry()}
+                onSaveCopy={() => void saveConflictAsNewDraft()}
+                phase={autosave.phase}
+              />
             ) : (
               <Button
                 disabled={
@@ -274,6 +405,7 @@ export function VideoWorkbenchPage({
           onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onFlushDraft={() => autosave.flush()}
           onMessage={setMessage}
           onNavigateToImageToVideo={onNavigateToImageToVideo}
           onNavigateToTextToVideo={onNavigateToTextToVideo}
@@ -285,6 +417,7 @@ export function VideoWorkbenchPage({
           onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onFlushDraft={() => autosave.flush()}
           onMessage={setMessage}
         />
       ) : currentDraft?.mode === 'image_to_video' ? (
@@ -294,6 +427,7 @@ export function VideoWorkbenchPage({
           onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onFlushDraft={() => autosave.flush()}
           onMessage={setMessage}
         />
       ) : (

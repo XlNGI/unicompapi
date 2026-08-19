@@ -391,3 +391,15 @@
 .uc-markdown-message th {
   background: var(--uc-color-surface-subtle);
 }
+.uc-autosave-status {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--uc-space-2);
+}
+
+.uc-autosave-status .uc-status-pill {
+  white-space: nowrap;
+}

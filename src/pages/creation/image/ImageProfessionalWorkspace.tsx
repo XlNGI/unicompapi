@@ -25,6 +25,7 @@ interface ImageProfessionalWorkspaceProps {
   readonly draft: GenerationImageDraftDto;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
 }
 
@@ -33,6 +34,7 @@ export function ImageProfessionalWorkspace({
   draft,
   onDraftChange,
   onDraftPersisted,
+  onFlushDraft,
   onMessage
 }: ImageProfessionalWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
@@ -179,6 +181,15 @@ export function ImageProfessionalWorkspace({
   async function ensureSavedDraft(): Promise<GenerationImageDraftDto | undefined> {
     if (!imageWorkspaces) return undefined;
     if (!dirty && draft.state === 'saved') return draft;
+    if (onFlushDraft) {
+      if (!(await onFlushDraft())) return undefined;
+      const refreshed = await imageWorkspaces.get(draft.draftId);
+      if (!refreshed.ok || !refreshed.value) {
+        onMessage('无法读取刚刚保存的图片草稿，请重试。');
+        return undefined;
+      }
+      return refreshed.value as GenerationImageDraftDto;
+    }
     const result = await imageWorkspaces.update({
       ...draft,
       state: 'saved'
@@ -432,6 +443,7 @@ export function ImageProfessionalWorkspace({
           <ImagePromptEnhancePanel
             dirty={dirty}
             draft={draft}
+            onFlushDraft={onFlushDraft}
             onDraftPersisted={(next) =>
               onDraftPersisted(next as GenerationImageDraftDto)
             }
@@ -500,6 +512,7 @@ export function ImageProfessionalWorkspace({
             draft={draft}
             onDraftChange={onDraftChange}
             onDraftPersisted={onDraftPersisted}
+            onFlushDraft={onFlushDraft}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {

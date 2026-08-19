@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   LuFilePlus2,
   LuImagePlus,
@@ -6,6 +6,7 @@ import {
   LuShieldCheck
 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
+import { AutosaveStatus } from '../../../components/AutosaveStatus';
 import { Card } from '../../../components/Card';
 import { FloatingStatusBar } from '../../../components/FloatingStatusBar';
 import { EmptyState } from '../../../components/EmptyState';
@@ -13,11 +14,13 @@ import { StatusPill } from '../../../components/StatusPill';
 import type {
   ImageWorkspaceDraftDto,
   ImageWorkspaceIpcErrorCode,
+  ImageWorkspaceIpcResult,
   ImageWorkspaceDtoMode
 } from '../../../shared/image-workspace-ipc';
 import type { ProviderRegistryDto } from '../../../shared/provider-ipc';
 import type { StorageProjectSessionDto } from '../../../shared/storage-ipc';
 import '../../../styles/pages.css';
+import { useLatestSnapshotAutosave } from '../../../ui/use-latest-snapshot-autosave';
 import type { ImageCreationMode } from '../creationModes';
 import { ImageEditingWorkspace } from './ImageEditingWorkspace';
 import { ImageProfessionalWorkspace } from './ImageProfessionalWorkspace';
@@ -65,6 +68,11 @@ interface ImageWorkbenchPageProps {
   ) => void;
 }
 
+type ImageWorkspaceError = Extract<
+  ImageWorkspaceIpcResult<unknown>,
+  { readonly ok: false }
+>['error'];
+
 export function ImageWorkbenchPage({
   mode,
   preferredDraftId,
@@ -83,8 +91,6 @@ export function ImageWorkbenchPage({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [autoSaveRevision, setAutoSaveRevision] = useState(0);
-  const [autoSaving, setAutoSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedDraftId, setSelectedDraftId] = useState(preferredDraftId);
   const currentDraft =
@@ -96,11 +102,62 @@ export function ImageWorkbenchPage({
     isQuickImage ||
     isProfessionalImage;
   const presentation = modePresentation[mode.workspaceMode];
-  const currentDraftRef = useRef(currentDraft);
-  currentDraftRef.current = currentDraft;
-  const autoSaveGeneration = useRef(0);
-  const autoSaveRevisionRef = useRef(autoSaveRevision);
-  autoSaveRevisionRef.current = autoSaveRevision;
+  const autosave = useLatestSnapshotAutosave<
+    ImageWorkspaceDraftDto,
+    ImageWorkspaceError
+  >({
+    debounceMs: 1_000,
+    diagnostics: {
+      surface: 'image_generation',
+      getDraftId: (snapshot) => snapshot.draftId
+    },
+    save: async (snapshot) => {
+      if (!imageWorkspaces) {
+        return {
+          ok: false,
+          error: {
+            code: 'workspace_storage_error',
+            message: 'Image workspace IPC is unavailable'
+          }
+        };
+      }
+      return imageWorkspaces.update({ ...snapshot, state: 'saved' });
+    },
+    rebase: (pending, persisted) => ({
+      ...pending,
+      updatedAt: persisted.updatedAt,
+      state: 'editing'
+    }),
+    classifyError: (error) =>
+      error.code === 'draft_conflict'
+        ? 'conflict'
+        : error.code === 'workspace_storage_error'
+          ? 'retryable'
+          : 'terminal',
+    onPersisted: (persisted, rebasedPending) => {
+      const next = rebasedPending ?? persisted;
+      setDrafts((items) =>
+        items.map((draft) => draft.draftId === next.draftId ? next : draft)
+      );
+      setDirty(rebasedPending !== undefined);
+      if (!rebasedPending) setMessage('');
+    },
+    onError: (error, phase) => {
+      if (phase === 'retrying') {
+        setMessage('本地草稿暂时无法写入，正在自动重试；当前修改仍保留。');
+        return;
+      }
+      if (phase === 'conflict') {
+        setMessage('草稿出现真实版本冲突；当前修改仍保留，请重新载入或另存为新草稿。');
+        return;
+      }
+      setMessage(
+        'code' in error && error.code in workspaceErrorMessages
+          ? workspaceErrorMessages[error.code as ImageWorkspaceIpcErrorCode]
+          : '自动保存失败；当前修改仍保留，可以重试。'
+      );
+    }
+  });
 
   useEffect(() => {
     let active = true;
@@ -113,6 +170,7 @@ export function ImageWorkbenchPage({
       setEnabledModelCount(undefined);
       setProviderRegistry(undefined);
       setDirty(false);
+      autosave.reset();
 
       if (!storage || !imageWorkspaces) {
         setMessage('当前运行环境未连接桌面图片工作区。');
@@ -185,6 +243,7 @@ export function ImageWorkbenchPage({
 
   async function createDraft() {
     if (!imageWorkspaces || !session || busy) return;
+    if (isGenerationImage && !(await autosave.flush())) return;
     setBusy(true);
     setMessage('');
     try {
@@ -196,6 +255,7 @@ export function ImageWorkbenchPage({
       setDrafts((items) => [...items, result.value]);
       setSelectedDraftId(result.value.draftId);
       setDirty(false);
+      autosave.reset();
       setMessage('本地草稿已创建；没有上传图片，也没有创建任务。');
     } catch {
       setMessage('创建本地草稿失败，请重试。');
@@ -206,6 +266,7 @@ export function ImageWorkbenchPage({
 
   async function clearUiAfterGeneration() {
     if (!imageWorkspaces || !session || busy) return;
+    if (isGenerationImage && !(await autosave.flush())) return;
     setBusy(true);
     setMessage('');
     try {
@@ -217,6 +278,7 @@ export function ImageWorkbenchPage({
       setDrafts((items) => [...items, result.value]);
       setSelectedDraftId(result.value.draftId);
       setDirty(false);
+      autosave.reset();
       setMessage('生成已完成；当前输入已清空，原草稿和结果已保留。');
     } catch {
       setMessage('生成后创建新草稿失败，请重试。');
@@ -250,6 +312,7 @@ export function ImageWorkbenchPage({
         )
       );
       setDirty(false);
+      autosave.reset();
       setMessage('草稿已保存到当前项目；没有创建或提交任务。');
     } catch {
       setMessage('保存本地草稿失败，请重试。');
@@ -266,56 +329,64 @@ export function ImageWorkbenchPage({
       items.map((item) => (item.draftId === draft.draftId ? draft : item))
     );
     setDirty(hasUnsavedChanges);
-    if (hasUnsavedChanges) {
-      setAutoSaveRevision((revision) => revision + 1);
+    if (hasUnsavedChanges && isGenerationImage) autosave.queue(draft);
+    if (!hasUnsavedChanges) autosave.reset();
+  }
+
+  async function reloadConflictedDraft() {
+    if (!imageWorkspaces || !currentDraft || busy) return;
+    setBusy(true);
+    try {
+      const result = await imageWorkspaces.get(currentDraft.draftId);
+      if (!result.ok || !result.value) {
+        setMessage(result.ok
+          ? '草稿已不存在，无法重新载入。'
+          : workspaceErrorMessages[result.error.code]);
+        return;
+      }
+      setDrafts((items) => items.map((draft) =>
+        draft.draftId === result.value?.draftId ? result.value : draft
+      ));
+      setDirty(false);
+      autosave.reset();
+      setMessage('已重新载入磁盘中的最新草稿。');
+    } finally {
+      setBusy(false);
     }
   }
 
-  useEffect(() => {
-    if (!isProfessionalImage || !dirty || !imageWorkspaces || !session) return;
-    const generation = ++autoSaveGeneration.current;
-    const revision = autoSaveRevisionRef.current;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        const snapshot = currentDraftRef.current;
-        if (!snapshot || snapshot.mode !== 'professional_image') return;
-        setAutoSaving(true);
-        try {
-          const result = await imageWorkspaces.update({
-            ...snapshot,
-            state: 'saved'
-          });
-          if (generation !== autoSaveGeneration.current) return;
-          if (!result.ok) {
-            setMessage(workspaceErrorMessages[result.error.code]);
-            return;
-          }
-          const latest = currentDraftRef.current;
-          const superseded =
-            autoSaveRevisionRef.current !== revision ||
-            (latest !== undefined && latest.draftId !== snapshot.draftId);
-          if (superseded) return;
-          setDrafts((items) =>
-            items.map((draft) =>
-              draft.draftId === result.value.draftId ? result.value : draft
-            )
-          );
-          setDirty(false);
-        } catch {
-          if (generation === autoSaveGeneration.current) {
-            setMessage('自动保存草稿失败，请稍后重试。');
-          }
-        } finally {
-          if (generation === autoSaveGeneration.current) {
-            setAutoSaving(false);
-          }
-        }
-      })();
-    }, 400);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [autoSaveRevision, dirty, imageWorkspaces, isProfessionalImage, session]);
+  async function saveConflictAsNewDraft() {
+    if (!imageWorkspaces || !currentDraft || busy) return;
+    setBusy(true);
+    try {
+      const created = await imageWorkspaces.create(currentDraft.mode);
+      if (!created.ok) {
+        setMessage(workspaceErrorMessages[created.error.code]);
+        return;
+      }
+      const copy = {
+        ...currentDraft,
+        draftId: created.value.draftId,
+        projectId: created.value.projectId,
+        origin: created.value.origin,
+        createdAt: created.value.createdAt,
+        updatedAt: created.value.updatedAt,
+        state: 'saved' as const
+      };
+      const saved = await imageWorkspaces.update(copy);
+      if (!saved.ok) {
+        setMessage(workspaceErrorMessages[saved.error.code]);
+        return;
+      }
+      setDrafts((items) => [...items, saved.value]);
+      setSelectedDraftId(saved.value.draftId);
+      setDirty(false);
+      autosave.reset();
+      setMessage('当前修改已另存为新的本地草稿。');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const projectStatus = loading
     ? '正在读取'
@@ -360,20 +431,25 @@ export function ImageWorkbenchPage({
           <p className="uc-page-skeleton__description">{mode.description}</p>
         </div>
         <div className="uc-image-workbench__header-actions">
-          {isQuickImage ? null : (
           <div className="uc-image-workbench__draft-actions">
-          <Button
-            disabled={!session || busy}
-            onClick={() => void createDraft()}
-            variant="secondary"
-          >
-            <LuFilePlus2 aria-hidden="true" />
-            {busy ? '请稍候…' : '新建本地草稿'}
-          </Button>
-          {isProfessionalImage ? (
-            <StatusPill tone={autoSaving || dirty ? 'info' : 'success'}>
-              {autoSaving || dirty ? '正在自动保存…' : '已自动保存'}
-            </StatusPill>
+          {isQuickImage ? null : (
+            <Button
+              disabled={!session || busy}
+              onClick={() => void createDraft()}
+              variant="secondary"
+            >
+              <LuFilePlus2 aria-hidden="true" />
+              {busy ? '请稍候…' : '新建本地草稿'}
+            </Button>
+          )}
+          {isGenerationImage ? (
+            <AutosaveStatus
+              busy={busy}
+              onReload={() => void reloadConflictedDraft()}
+              onRetry={() => void autosave.retry()}
+              onSaveCopy={() => void saveConflictAsNewDraft()}
+              phase={autosave.phase}
+            />
           ) : (
             <Button
               disabled={
@@ -392,7 +468,6 @@ export function ImageWorkbenchPage({
             </Button>
           )}
           </div>
-          )}
         </div>
       </header>
 
@@ -403,6 +478,7 @@ export function ImageWorkbenchPage({
           onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onFlushDraft={() => autosave.flush()}
           onMessage={setMessage}
           onNavigateToProfessional={onNavigateToProfessional}
         />
@@ -412,6 +488,7 @@ export function ImageWorkbenchPage({
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
+          onFlushDraft={() => autosave.flush()}
           onMessage={setMessage}
         />
       ) : currentDraft?.mode === 'image_understanding' ? (

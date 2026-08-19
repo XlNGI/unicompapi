@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { flushRegisteredAutosaves } from '../autosave-flush-registry';
 
 export function WindowControls() {
   const controls = window.unicomp?.windowControls;
   const [isMaximized, setIsMaximized] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   useEffect(() => {
     if (!controls) {
@@ -44,7 +46,15 @@ export function WindowControls() {
         className="window-control window-control--close"
         aria-label="关闭窗口"
         title="关闭"
-        onClick={controls.close}
+        disabled={closing}
+        onClick={() => {
+          if (closing) return;
+          setClosing(true);
+          void flushRegisteredAutosaves(3_000).then((saved) => {
+            if (saved) controls.close();
+            else setClosing(false);
+          });
+        }}
       >
         <span className="windows-caption-icon" aria-hidden="true">&#xE8BB;</span>
       </button>

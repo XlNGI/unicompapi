@@ -19,6 +19,10 @@ const previewSource = await readFile(
   'src/components/GenerationResultPreview.tsx',
   'utf8'
 );
+const autosaveSource = await readFile(
+  'src/application/latest-snapshot-autosave.ts',
+  'utf8'
+);
 const source = `${quickSource}\n${featurePanelSource}`;
 
 test('quick image is pure text-to-image with no material or context entry', () => {
@@ -91,14 +95,14 @@ test('quick image loads model candidates before prompt entry', () => {
   assert.match(featurePanelSource, /if \(prompt\.length === 0\) \{[\s\S]*showGenerationError/);
 });
 
-test('quick image autosave ignores stale responses during prompt edits', () => {
-  assert.match(featurePanelSource, /const draftRef = useRef\(draft\)/);
-  assert.match(featurePanelSource, /draftRef\.current = draft/);
-  assert.match(
-    featurePanelSource,
-    /if \(draftRef\.current !== snapshot\) return;/
-  );
-  assert.match(featurePanelSource, /draft\.prompt\.originalInput/);
+test('quick image autosave coalesces edits behind one in-flight save', () => {
+  assert.match(workbenchSource, /useLatestSnapshotAutosave/);
+  assert.match(workbenchSource, /debounceMs: 1_000/);
+  assert.match(autosaveSource, /private inFlight\?/);
+  assert.match(autosaveSource, /private pending\?/);
+  assert.match(autosaveSource, /snapshot: this\.options\.rebase\(pending\.snapshot, result\.value\)/);
+  assert.doesNotMatch(featurePanelSource, /draftRef\.current !== snapshot/);
+  assert.match(featurePanelSource, /if \(needsSave\) \{[\s\S]*setLoadState\('idle'\);[\s\S]*return;/);
 });
 
 test('quick image keeps input, model, and result areas in workflow order', () => {

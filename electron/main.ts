@@ -33,6 +33,10 @@ import { ElectronViduComposition } from './ipc/vidu-composition';
 import { createLiveProviderManagementComposition } from './ipc/management-adapters';
 import { LedgerRuntimeAuthorizationSync } from './ipc/runtime-authorization-sync';
 import { createLocalMediaResponse } from './ipc/local-media-response';
+import {
+  autosaveDiagnosticsIpcChannel,
+  isAutosaveDiagnosticsEvent
+} from '../src/shared/autosave-diagnostics-ipc';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -43,6 +47,22 @@ async function appendRendererTraceLine(line: string): Promise<void> {
   await mkdir(logsDirectory, { recursive: true });
   await appendFile(path.join(logsDirectory, 'renderer-trace.log'), `${line}\n`, 'utf8');
 }
+
+let autosaveLogQueue: Promise<void> = Promise.resolve();
+ipcMain.on(autosaveDiagnosticsIpcChannel, (_event, value: unknown) => {
+  if (!isAutosaveDiagnosticsEvent(value)) return;
+  const line = `${JSON.stringify({
+    at: new Date().toISOString(),
+    category: 'autosave',
+    level: value.phase === 'failed' || value.phase === 'conflict' ? 'error' : 'info',
+    ...value
+  })}\n`;
+  autosaveLogQueue = autosaveLogQueue.then(async () => {
+    const logsDirectory = path.join(app.getPath('userData'), 'logs');
+    await mkdir(logsDirectory, { recursive: true });
+    await appendFile(path.join(logsDirectory, 'autosave.log'), line, 'utf8');
+  }).catch(() => undefined);
+});
 
 protocol.registerSchemesAsPrivileged([
   {

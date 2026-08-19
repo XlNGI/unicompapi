@@ -35,6 +35,14 @@ const enhanceHostSource = await readFile(
   'utf8'
 );
 const pageStyles = await readFile('src/styles/pages.css', 'utf8');
+const autosaveSource = await readFile(
+  'src/application/latest-snapshot-autosave.ts',
+  'utf8'
+);
+const autosaveStatusSource = await readFile(
+  'src/components/AutosaveStatus.tsx',
+  'utf8'
+);
 const source = `${professionalSource}\n${featurePanelSource}\n${selectorSource}\n${enhancePanelSource}`;
 
 test('professional image requires an explicit text or reference feature', () => {
@@ -202,21 +210,18 @@ test('professional image autosaves drafts without a manual save gate', async () 
     'src/pages/creation/image/ImageWorkbenchPage.tsx',
     'utf8'
   );
-  assert.match(workbench, /正在自动保存/);
-  assert.match(workbench, /已自动保存/);
-  assert.match(workbench, /isProfessionalImage/);
+  assert.match(workbench, /useLatestSnapshotAutosave/);
+  assert.match(workbench, /debounceMs: 1_000/);
   assert.match(workbench, /imageWorkspaces\.update\(/);
-  assert.match(workbench, /autoSaveRevisionRef\.current !== revision/);
-  assert.doesNotMatch(
-    workbench,
-    /\[dirty, imageWorkspaces, isProfessionalImage, session, currentDraft\]/
-  );
-  assert.match(featurePanelSource, /onDraftPersistedRef\.current/);
+  assert.match(workbench, /onFlushDraft=\{\(\) => autosave\.flush\(\)\}/);
+  assert.match(autosaveSource, /private inFlight\?/);
+  assert.match(autosaveSource, /private pending\?/);
+  assert.match(autosaveSource, /this\.pending = \{ sequence: \+\+this\.sequence, snapshot \}/);
+  assert.match(autosaveStatusSource, /有未保存修改/);
+  assert.match(autosaveStatusSource, /正在保存/);
+  assert.match(autosaveStatusSource, /保存失败，修改已保留/);
+  assert.doesNotMatch(featurePanelSource, /if \(needsSave && imageWorkspaces\)/);
   assert.match(featurePanelSource, /onMessageRef\.current/);
-  assert.doesNotMatch(
-    featurePanelSource,
-    /featureSelection\.productFeature,[\s\S]*onDraftPersisted,[\s\S]*onMessage,[\s\S]*oneShot/
-  );
 });
 
 test('prompt enhance keeps model selection and one-click confirmation', () => {
