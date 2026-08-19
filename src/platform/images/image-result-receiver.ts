@@ -49,7 +49,17 @@ export interface LocalImageResultReceiverDependencies {
   publishFile?(temporaryPath: string, finalPath: string): Promise<void>;
   now?(): string;
   onError?(error: unknown): void;
+  downloadRetry?: {
+    readonly maxAttempts?: number;
+    readonly backoffMs?: readonly number[];
+    readonly sleep?: (delayMs: number) => Promise<void>;
+  };
 }
+
+const defaultDownloadRetry = Object.freeze({
+  maxAttempts: 3,
+  backoffMs: [250, 750] as const
+});
 
 export class LocalImageResultReceiver {
   constructor(
@@ -201,10 +211,7 @@ export class LocalImageResultReceiver {
           temporaryName
         );
         await mkdir(path.dirname(temporaryPath), { recursive: true });
-        await this.dependencies.port.download(
-          operation,
-          temporaryPath
-        );
+        await this.downloadWithRetry(operation, temporaryPath);
 
         const downloadedMetadata = await lstat(temporaryPath);
         if (!downloadedMetadata.isFile() || downloadedMetadata.isSymbolicLink()) {
@@ -363,6 +370,35 @@ export class LocalImageResultReceiver {
     };
   }
 
+  private async downloadWithRetry(
+    operation: ImageResultOperationReference,
+    destinationPath: string
+  ): Promise<void> {
+    const configured = this.dependencies.downloadRetry;
+    const maxAttempts = Math.max(
+      1,
+      Math.min(5, configured?.maxAttempts ?? defaultDownloadRetry.maxAttempts)
+    );
+    const backoffMs = configured?.backoffMs ?? defaultDownloadRetry.backoffMs;
+    const sleep = configured?.sleep ?? ((delayMs: number) => new Promise<void>((resolve) => {
+      setTimeout(resolve, delayMs);
+    }));
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      await rm(destinationPath, { force: true });
+      try {
+        await this.dependencies.port.download(operation, destinationPath);
+        return;
+      } catch (error) {
+        if (attempt >= maxAttempts || !isRetryableDownloadError(error)) {
+          throw error;
+        }
+        const delayMs = Math.max(0, backoffMs[attempt - 1] ?? backoffMs.at(-1) ?? 0);
+        if (delayMs > 0) await sleep(delayMs);
+      }
+    }
+  }
+
   private createFileId() {
     return toFileReferenceId(
       this.dependencies.createFileId?.() ?? `file-result-${randomUUID()}`
@@ -518,6 +554,10 @@ function retryabilityForError(
   }
   if (error instanceof ImageResultPortError) return error.retryability;
   return 'unknown';
+}
+
+function isRetryableDownloadError(error: unknown): boolean {
+  return error instanceof ImageResultPortError && error.retryability === 'retryable';
 }
 
 function receiverError(

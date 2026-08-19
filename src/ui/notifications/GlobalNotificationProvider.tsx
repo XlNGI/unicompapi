@@ -122,21 +122,28 @@ export function GlobalNotificationProvider({ children }: { readonly children: Re
               description: `任务中心确认${mediaLabel}任务已完成。`
             });
           } else if (terminalFailureStates.has(state ?? '')) {
+            const details = await storage.getTaskDetails(task.taskId);
             const failure = await findTrackedFailureSafeCode(storage, task);
             if (!active) continue;
             const safeCode = failure?.safeCode;
+            const recoverableImageResult =
+              details.ok && details.value?.canRecoverImageResult === true;
             const uncertain = isUnconfirmedGenerationOutcome(state, safeCode);
             const submissionFailed = failure?.state === 'failed_before_submission';
             show({
               id: notification.id,
-              kind: uncertain ? 'warning' : 'error',
-              title: uncertain
-                ? `${mediaLabel}生成状态待确认`
+              kind: uncertain || recoverableImageResult ? 'warning' : 'error',
+              title: recoverableImageResult
+                ? '图片已完成，等待接收'
+                : uncertain
+                  ? `${mediaLabel}生成状态待确认`
                 : submissionFailed
                   ? `${mediaLabel}提交失败`
                   : `${mediaLabel}生成失败`,
-              description: uncertain
-                ? describeUnconfirmedGenerationOutcome(safeCode)
+              description: recoverableImageResult
+                ? '远端生成已完成，但本地文件尚未接收。请在任务中心打开详情，点击“重新接收结果”；不会重新生成或重复扣费。'
+                : uncertain
+                  ? describeUnconfirmedGenerationOutcome(safeCode)
                 : taskFailureDescription(state, safeCode)
             });
           } else {

@@ -501,6 +501,10 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => imageLocalMedia.selectInput(request)
   );
   ipcMain.handle(
+    imageWorkspaceIpcChannels.importInput,
+    (_event, request: unknown) => imageLocalMedia.importInput(request)
+  );
+  ipcMain.handle(
     imageWorkspaceIpcChannels.clearInput,
     (_event, request: unknown) => imageLocalMedia.clearInput(request)
   );
@@ -680,6 +684,10 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(
     videoWorkspaceIpcChannels.selectMaterial,
     (_event, request: unknown) => videoReferenceMedia.selectMaterial(request)
+  );
+  ipcMain.handle(
+    videoWorkspaceIpcChannels.importMaterial,
+    (_event, request: unknown) => videoReferenceMedia.importMaterial(request)
   );
   ipcMain.handle(
     videoWorkspaceIpcChannels.getMaterial,

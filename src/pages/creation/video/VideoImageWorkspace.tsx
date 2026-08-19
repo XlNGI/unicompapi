@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LuImagePlus, LuTrash2 } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { ControlledImageDropZone } from '../../../components/ControlledImageDropZone';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
+import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import type {
   VideoWorkspaceDraftDto,
   VideoWorkspaceIpcErrorCode,
@@ -72,6 +74,21 @@ export function VideoImageWorkspace({
   const [busy, setBusy] = useState(false);
   const [resultWorkId, setResultWorkId] = useState<string>();
   const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
+  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
+  const [submissionProgress, setSubmissionProgress] = useState<SubmissionProgressPhase>('idle');
+  const handleProgressChange = useCallback((phase: SubmissionProgressPhase) => {
+    if (phase === 'preparing') {
+      setResultWorkId(undefined);
+      setResultUrls([]);
+    }
+    setSubmissionProgress(phase);
+  }, []);
+  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(submissionProgress);
+  const generationPreviewCopy = submissionProgress === 'preparing'
+    ? { title: '正在准备视频生成', description: '正在锁定本次参数、素材与提交事实。' }
+    : submissionProgress === 'requesting'
+      ? { title: '正在提交生成请求', description: '请求正在安全提交，请保持应用运行。' }
+      : { title: '正在生成视频', description: '服务商正在处理，完成后将校验并登记到本地。' };
   const legacySelections = useMemo(
     () => draft.imageToVideo.materials?.slots.flatMap(
       (slot) => slot.selection ? [slot.selection] : []
@@ -222,6 +239,44 @@ export function VideoImageWorkspace({
     }
   }
 
+  async function importImage(file: File, dropToken?: string) {
+    if (!videoWorkspaces || busy) return;
+    setBusy(true);
+    onMessage('');
+    try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      const result = await videoWorkspaces.importMaterial(
+        saved.draftId,
+        imageSourceTarget,
+        'image',
+        dropToken ?? file
+      );
+      if (!result.ok) {
+        onMessage(describeWorkspaceError(result.error));
+        return;
+      }
+      if (result.value.cancelled || !result.value.draft) return;
+      onDraftPersisted(result.value.draft as ImageVideoDraftDto);
+      setMaterial(result.value.material);
+      const previewResult = await videoWorkspaces.createMaterialPreview(
+        result.value.draft.draftId,
+        imageSourceTarget
+      );
+      if (!previewResult.ok) {
+        setPreview(undefined);
+        onMessage(describeWorkspaceError(previewResult.error));
+        return;
+      }
+      setPreview(previewResult.value);
+      onMessage('图片已完成本地校验并登记到草稿。');
+    } catch {
+      onMessage('拖入图片失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function clearImage() {
     if (!videoWorkspaces || busy || !draft.imageToVideo.source) return;
     setBusy(true);
@@ -289,7 +344,17 @@ export function VideoImageWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-video-image__workspace">
+      <div className="uc-image-workbench__workspace uc-video-image__workspace uc-generation-two-pane">
+        <section aria-label="提交前准备区域" className="uc-generation-two-pane__controls uc-generation-two-pane__preparation">
+          <header className="uc-image-professional__pane-heading">
+            <span aria-hidden="true">1</span>
+            <div>
+              <h2>第一步 · 提交前准备</h2>
+              <p>整理图片、创作要求、提示词、服务与参数后再生成。</p>
+            </div>
+          </header>
+          <div className="uc-generation-two-pane__preparation-scroll uc-scrollbar">
+          <div className="uc-generation-two-pane__preparation-flow">
         <Card className="uc-image-workbench__panel uc-video-image__source">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
@@ -298,6 +363,12 @@ export function VideoImageWorkspace({
               <p>图生视频只接收一张已完成本地校验的图片，并在第一步整理运动与变化约束。</p>
             </div>
           </header>
+          <ControlledImageDropZone
+            disabled={!videoWorkspaces || busy}
+            hasImage={Boolean(draft.imageToVideo.source)}
+            onDropFile={(file, dropToken) => void importImage(file, dropToken)}
+            onReject={onMessage}
+          >
           <section className="uc-image-quick__reference">
             <div>
               <strong>图片输入</strong>
@@ -333,6 +404,7 @@ export function VideoImageWorkspace({
               <img alt={`图生视频输入：${material?.name ?? '本地图片'}`} src={preview.url} />
             </div>
           ) : null}
+          </ControlledImageDropZone>
           {draft.imageToVideo.materials ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧动态素材槽位</strong>
@@ -426,12 +498,12 @@ export function VideoImageWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
+        <Card className="uc-image-workbench__panel uc-video-image__prompt">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
-              <h2>提示词与生成结果</h2>
-              <p>原始需求、最终提示词与真实生成结果在第二步确认。</p>
+                <h2>提示词参数</h2>
+                <p>原始需求与最终提示词在左侧参数区确认。</p>
             </div>
           </header>
           <label className="uc-image-quick__field">
@@ -460,11 +532,6 @@ export function VideoImageWorkspace({
             onDraftPersisted={(next) => onDraftPersisted(next as ImageVideoDraftDto)}
             onMessage={onMessage}
           />
-          <GenerationResultPreview
-            mediaKind="video"
-            remoteUrls={resultUrls}
-            workId={resultWorkId}
-          />
         </Card>
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-image__submit">
@@ -476,25 +543,57 @@ export function VideoImageWorkspace({
             </div>
           </header>
           <VideoFeatureSubmissionPanel
+            actionHost={actionHost}
             blockedReason={blockedReason}
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as ImageVideoDraftDto)}
             onDraftPersisted={(next) => onDraftPersisted(next as ImageVideoDraftDto)}
             onMessage={onMessage}
+            onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
               setResultWorkId(submission.workId);
               setResultUrls(submission.resultVideoUrls ?? []);
-              if (
-                submission.status === 'completed' ||
-                submission.status === 'provider_accepted'
-              ) {
+              if (submission.status === 'completed') {
                 onClearUi?.();
               }
             }}
             showProgressSteps
           />
         </Card>
+          </div>
+          </div>
+          <footer className="uc-image-professional__submit-bar">
+            <span>
+              {generationInFlight
+                ? '请求处理中，请在右侧查看进度'
+                : dirty || draft.state !== 'saved'
+                  ? '正在保存当前配置'
+                  : '草稿已保存，可以提交'}
+            </span>
+            <div className="uc-image-professional__submit-action" ref={setActionHost} />
+          </footer>
+        </section>
+
+        <section aria-label="生成过程与作品区域" className="uc-generation-two-pane__result uc-generation-two-pane__output">
+          <header className="uc-image-professional__pane-heading">
+            <span aria-hidden="true">2</span>
+            <div>
+              <h2>第二步 · 生成过程与作品</h2>
+              <p>提交状态与通过本地校验的作品会保留在这里。</p>
+            </div>
+          </header>
+          <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
+            <GenerationResultPreview
+              loading={generationInFlight}
+              loadingDescription={generationPreviewCopy.description}
+              loadingTitle={generationPreviewCopy.title}
+              mediaKind="video"
+              remoteUrls={resultUrls}
+              workId={resultWorkId}
+            />
+          </Card>
+        </section>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">

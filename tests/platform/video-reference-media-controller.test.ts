@@ -215,6 +215,24 @@ describe('VideoReferenceMediaController', () => {
     })).resolves.toEqual({ ok: true, value: selected.value.material });
   });
 
+  it('registers a dropped image as the single image-to-video source', async () => {
+    const fixture = await createFixture('image_to_video');
+    const result = await fixture.controller.importMaterial({
+      draftId: fixture.draft.id,
+      target: { kind: 'image_source' },
+      mediaKind: 'image',
+      sourcePath: fixture.selectedImage
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        cancelled: false,
+        material: { mediaKind: 'image', mimeType: 'image/png' },
+        draft: { imageToVideo: { source: { mediaKind: 'image' } } }
+      }
+    });
+  });
+
   it('registers a verified external video without exposing its path or hash', async () => {
     const fixture = await createFixture();
     const result = await fixture.controller.selectMaterial({

@@ -124,6 +124,11 @@ export class GlobalReadModelController {
           const latest = [...executions].sort((a, b) =>
             b.updatedAt.localeCompare(a.updatedAt)
           )[0];
+          const hasRegisteredImageWork = latest
+            ? (await context.works.list(entry.projectId)).some(
+                (work) => work.sourceExecutionId === latest.id
+              )
+            : false;
           let hasRecoverableImageOperation = false;
           if (latest?.providerOperationRecordId) {
             try {
@@ -148,7 +153,8 @@ export class GlobalReadModelController {
               task,
               executions,
               this.getCurrentProject()?.projectId,
-              hasRecoverableImageOperation
+              hasRecoverableImageOperation,
+              hasRegisteredImageWork
             )
           };
         } catch {
@@ -329,7 +335,8 @@ function toTaskDetails(
   task: Task,
   executions: readonly Execution[],
   currentProjectId?: string,
-  hasRecoverableImageOperation = false
+  hasRecoverableImageOperation = false,
+  hasRegisteredImageWork = false
 ): StorageTaskDetailsDto {
   const summary = toTaskSummary(entry, task, executions);
   const latest = [...executions].sort((a, b) =>
@@ -347,11 +354,10 @@ function toTaskDetails(
     canRecoverImageResult:
       entry.projectId === currentProjectId &&
       task.submission.kind === 'image_generation' &&
-      summary.latestExecutionState === 'failed' &&
-      summary.retryability === 'retryable' &&
-      latest?.failure?.stage === 'downloading' &&
-      latest.submissionOutcome === 'completed_sync' &&
-      Boolean(latest.providerOperationRecordId) &&
+      !hasRegisteredImageWork &&
+      canRecoverImageLocalReceipt(latest) &&
+      latest?.submissionOutcome === 'completed_sync' &&
+      Boolean(latest?.providerOperationRecordId) &&
       hasRecoverableImageOperation,
     canRecoverVideoResult:
       entry.projectId === currentProjectId &&
@@ -360,6 +366,14 @@ function toTaskDetails(
       summary.retryability === 'retryable' &&
       latest?.failure?.stage === 'downloading'
   };
+}
+
+function canRecoverImageLocalReceipt(execution: Execution | undefined): boolean {
+  if (!execution) return false;
+  if (execution.state === 'remote_completed') return true;
+  return execution.state === 'failed' &&
+    ['downloading', 'writing'].includes(execution.failure?.stage ?? '') &&
+    execution.failure?.retryability !== 'not_retryable';
 }
 
 function filterLinkedExecutions(

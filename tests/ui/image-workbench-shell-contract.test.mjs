@@ -6,6 +6,10 @@ const workbenchSource = await readFile(
   'src/pages/creation/image/ImageWorkbenchPage.tsx',
   'utf8'
 );
+const videoWorkbenchSource = await readFile(
+  'src/pages/creation/video/VideoWorkbenchPage.tsx',
+  'utf8'
+);
 const modesSource = await readFile(
   'src/pages/creation/creationModes.ts',
   'utf8'
@@ -72,6 +76,13 @@ test('all five image pages reuse the shared shell and single mode source', () =>
   ]) {
     assert.match(modesSource, new RegExp(`workspaceMode: '${mode}'`));
   }
+});
+
+test('image workbench omits the redundant project summary strip', () => {
+  assert.doesNotMatch(workbenchSource, /uc-image-workbench__project-strip/);
+  assert.doesNotMatch(workbenchSource, /uc-image-workbench__project-fact/);
+  assert.doesNotMatch(videoWorkbenchSource, /uc-image-workbench__project-strip/);
+  assert.doesNotMatch(videoWorkbenchSource, /uc-image-workbench__project-fact/);
 });
 
 test('saving a draft stays separate from task submission', () => {

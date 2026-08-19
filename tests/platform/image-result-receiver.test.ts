@@ -52,6 +52,7 @@ async function createFixture(options: {
   readonly badChecksum?: boolean;
   readonly diskFull?: boolean;
   readonly downloadFailure?: boolean;
+  readonly downloadFailuresBeforeSuccess?: number;
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-result-'));
   roots.push(root);
@@ -120,6 +121,7 @@ async function createFixture(options: {
     '2026-07-23T06:07:00.000Z'
   ];
   const bytes = pngBytes(320, 200);
+  let downloadAttempts = 0;
   const receiver = new LocalImageResultReceiver({
     getSession: () => ({
       projectId,
@@ -136,7 +138,11 @@ async function createFixture(options: {
           : undefined
       }),
       download: async (_remoteOperationId, destinationPath) => {
-        if (options.downloadFailure) {
+        downloadAttempts += 1;
+        if (
+          options.downloadFailure ||
+          downloadAttempts <= (options.downloadFailuresBeforeSuccess ?? 0)
+        ) {
           throw new ImageResultPortError('retryable', 'Temporary image download failure');
         }
         await writeFile(destinationPath, bytes);
@@ -154,7 +160,7 @@ async function createFixture(options: {
       : undefined,
     now: () => times.shift() ?? '2026-07-23T06:59:00.000Z'
   });
-  return { projectId, receiver, root, storage };
+  return { projectId, receiver, root, storage, getDownloadAttempts: () => downloadAttempts };
 }
 
 describe('LocalImageResultReceiver', () => {
@@ -255,5 +261,20 @@ describe('LocalImageResultReceiver', () => {
       state: 'failed',
       failure: { stage: 'downloading', retryability: 'retryable' }
     });
+  });
+
+  it('retries a transient remote download before failing the local receipt', async () => {
+    const fixture = await createFixture({ downloadFailuresBeforeSuccess: 1 });
+
+    await expect(fixture.receiver.receive('execution-image-result')).resolves.toMatchObject({
+      ok: true,
+      value: { workId: 'work-image-result' }
+    });
+    expect(fixture.getDownloadAttempts()).toBe(2);
+    await expect(
+      new JsonExecutionRepository(fixture.storage).get(
+        toExecutionId('execution-image-result')
+      )
+    ).resolves.toMatchObject({ state: 'completed' });
   });
 });

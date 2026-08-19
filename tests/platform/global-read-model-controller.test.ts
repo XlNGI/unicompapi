@@ -313,6 +313,18 @@ describe('GlobalReadModelController', () => {
         ok: true,
         value: { canRecoverImageResult: false }
       });
+
+    await new JsonExecutionRepository(storage).save({
+      ...execution,
+      state: 'remote_completed',
+      failure: undefined,
+      updatedAt: toIsoTimestamp('2026-08-11T08:03:00.000Z')
+    });
+    await expect(openController.getTaskDetails({ taskId: task.id }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: { canRecoverImageResult: true }
+      });
   });
 
   it('reports all project usage and free space for the current project disk without paths', async () => {

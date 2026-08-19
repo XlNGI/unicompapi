@@ -94,7 +94,7 @@ export class VideoReferenceMediaController {
         const mediaKind = parsed.mediaKind;
         const context = this.createContext();
         const draft = await requireDraft(context.workspaceRepository, parsed.draftId);
-        const binding = resolveTarget(draft, parsed.target, mediaKind);
+        resolveTarget(draft, parsed.target, mediaKind);
         const selectedPath = await this.dependencies.chooseMediaFile(
           mediaKind
         );
@@ -102,64 +102,28 @@ export class VideoReferenceMediaController {
         if (!selectedPath) {
           return { cancelled: true };
         }
+        return this.registerMaterial({ ...parsed, mediaKind }, selectedPath);
+      })
+    );
+  }
 
-        const before = await this.inspect(selectedPath, mediaKind);
-        const createdAt = this.now();
-        const locator = locatorForSelectedFile(
-          context.session.rootDirectory,
-          selectedPath
-        );
-        const reusable = locator.kind === 'project'
-          ? await findReusableProjectFile(context, locator.relativePath)
-          : undefined;
-        const provisional = reusable ?? createFileReference({
-          id: this.createFileId(),
-          projectId: context.session.projectId,
-          locator,
-          createdAt
-        });
-        const verifier = new NodeSha256FileVerifier(
-          context.session.rootDirectory
-        );
-        const verification = await verifier.verify({ file: provisional });
-        const after = await this.inspect(selectedPath, mediaKind);
-
-        if (!sameInspection(before, after, verification.sizeBytes)) {
+  importMaterial(
+    request: unknown
+  ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceMaterialSelectionResultDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const parsed = parseMaterialRequest(request, true);
+        const mediaKind = parsed.mediaKind;
+        if (!mediaKind) {
           throw mediaError(
-            'media_changed_during_selection',
-            'The selected media changed while it was being verified'
+            'invalid_request',
+            'A supported material media kind is required'
           );
         }
-
-        const file = refreshAvailableFile(provisional, verification);
-        const asset = createMediaAsset({
-          id: this.createAssetId(),
-          projectId: context.session.projectId,
-          file,
-          selectedPath,
-          role: binding.role,
-          inspection: after,
-          createdAt: verification.verifiedAt
-        });
-        const updated = attachSelection(
-          draft,
-          parsed.target,
-          asset,
-          verification.verifiedAt
+        return this.registerMaterial(
+          { ...parsed, mediaKind },
+          parseDroppedFilePath(request)
         );
-
-        await context.fileRepository.save(file);
-        await context.assetRepository.save(asset);
-        await context.workspaceRepository.save(updated);
-        if (file.locator.kind === 'project' && !reusable) {
-          await registerProjectFileIndex(context, file);
-        }
-
-        return {
-          cancelled: false,
-          draft: toVideoWorkspaceDto(updated),
-          material: toMaterialDto(asset, file)
-        };
       })
     );
   }
@@ -279,6 +243,70 @@ export class VideoReferenceMediaController {
       : this.videoInspector.inspect(target);
   }
 
+  private async registerMaterial(
+    parsed: ParsedMaterialRequest & { readonly mediaKind: VideoMaterialKind },
+    selectedPath: string
+  ): Promise<VideoWorkspaceMaterialSelectionResultDto> {
+    const context = this.createContext();
+    const draft = await requireDraft(context.workspaceRepository, parsed.draftId);
+    const binding = resolveTarget(draft, parsed.target, parsed.mediaKind);
+    const before = await this.inspect(selectedPath, parsed.mediaKind);
+    const createdAt = this.now();
+    const locator = locatorForSelectedFile(
+      context.session.rootDirectory,
+      selectedPath
+    );
+    const reusable = locator.kind === 'project'
+      ? await findReusableProjectFile(context, locator.relativePath)
+      : undefined;
+    const provisional = reusable ?? createFileReference({
+      id: this.createFileId(),
+      projectId: context.session.projectId,
+      locator,
+      createdAt
+    });
+    const verifier = new NodeSha256FileVerifier(context.session.rootDirectory);
+    const verification = await verifier.verify({ file: provisional });
+    const after = await this.inspect(selectedPath, parsed.mediaKind);
+
+    if (!sameInspection(before, after, verification.sizeBytes)) {
+      throw mediaError(
+        'media_changed_during_selection',
+        'The selected media changed while it was being verified'
+      );
+    }
+
+    const file = refreshAvailableFile(provisional, verification);
+    const asset = createMediaAsset({
+      id: this.createAssetId(),
+      projectId: context.session.projectId,
+      file,
+      selectedPath,
+      role: binding.role,
+      inspection: after,
+      createdAt: verification.verifiedAt
+    });
+    const updated = attachSelection(
+      draft,
+      parsed.target,
+      asset,
+      verification.verifiedAt
+    );
+
+    await context.fileRepository.save(file);
+    await context.assetRepository.save(asset);
+    await context.workspaceRepository.save(updated);
+    if (file.locator.kind === 'project' && !reusable) {
+      await registerProjectFileIndex(context, file);
+    }
+
+    return {
+      cancelled: false,
+      draft: toVideoWorkspaceDto(updated),
+      material: toMaterialDto(asset, file)
+    };
+  }
+
   private createAssetId() {
     return toAssetId(
       this.dependencies.createAssetId?.() ?? `asset-video-material-${randomUUID()}`
@@ -379,6 +407,17 @@ function parseMaterialRequest(
       ? mediaKind
       : undefined
   };
+}
+
+function parseDroppedFilePath(request: unknown): string {
+  if (
+    !isRecord(request) ||
+    typeof request.sourcePath !== 'string' ||
+    !path.isAbsolute(request.sourcePath)
+  ) {
+    throw mediaError('invalid_request', 'A local dropped media file is required');
+  }
+  return request.sourcePath;
 }
 
 function parseTarget(value: unknown): VideoWorkspaceMaterialTargetDto {

@@ -53,7 +53,7 @@ test('image-to-video preserves separate prompt, requirements and context facts',
     assert.match(source, new RegExp(field));
   }
   assert.ok(
-    source.indexOf('主体动作') < source.indexOf('提示词与生成结果'),
+    source.indexOf('主体动作') < source.indexOf('提示词参数'),
     'motion and constraint fields should appear in the first step'
   );
   assert.match(source, /projectContextsOnly/);

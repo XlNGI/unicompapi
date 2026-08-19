@@ -31,6 +31,7 @@ import {
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 
 interface ImageFeatureSubmissionPanelProps {
+  readonly className?: string;
   readonly dirty: boolean;
   readonly draft: GenerationImageDraftDto;
   readonly blockedReason?: string;
@@ -60,7 +61,7 @@ const errorMessages: Record<ImageFeatureIpcErrorCode, string> &
   project_not_open: '当前没有打开的项目。',
   draft_not_found: '当前图片草稿已不存在。',
   draft_revision_changed: '草稿已变化，请重新选择服务和参数。',
-  subject_invalid: '当前提示词、素材或上下文不符合所选生图方式。',
+  subject_invalid: '当前输入不适用于所选模型，请修改提示词或切换模型。',
   candidate_not_found: '所选服务候选已不存在，请重新选择。',
   candidate_unavailable: '所选服务当前不可用，没有发出请求。',
   route_selection_invalid: '本次服务选择已失效，请重新准备。',
@@ -89,6 +90,7 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
 };
 
 export function ImageFeatureSubmissionPanel({
+  className = '',
   dirty,
   draft,
   blockedReason,
@@ -135,9 +137,11 @@ export function ImageFeatureSubmissionPanel({
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
   const busyRef = useRef(false);
+  const draftRef = useRef(draft);
   const onDraftPersistedRef = useRef(onDraftPersisted);
   const onMessageRef = useRef(onMessage);
   busyRef.current = busy;
+  draftRef.current = draft;
   onDraftPersistedRef.current = onDraftPersisted;
   onMessageRef.current = onMessage;
   const generationNotificationId = `image-generation:${draft.draftId}`;
@@ -266,11 +270,6 @@ export function ImageFeatureSubmissionPanel({
       setLoadState('idle');
       return;
     }
-    if (oneShot && draft.prompt.finalPrompt.trim().length === 0) {
-      setCandidates([]);
-      setLoadState('idle');
-      return;
-    }
     // Avoid racing prepare/submit: autosave + listCandidates must not run mid-flight.
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
@@ -284,11 +283,12 @@ export function ImageFeatureSubmissionPanel({
     const timer = window.setTimeout(() => {
       void (async () => {
         if (busyRef.current) return;
-        let draftId = draft.draftId;
-        let draftUpdatedAt = draft.updatedAt;
+        const snapshot = draft;
+        let draftId = snapshot.draftId;
+        let draftUpdatedAt = snapshot.updatedAt;
         if (needsSave && imageWorkspaces) {
           const saved = await imageWorkspaces.update({
-            ...draft,
+            ...snapshot,
             state: 'saved'
           });
           if (!active || busyRef.current) return;
@@ -298,6 +298,9 @@ export function ImageFeatureSubmissionPanel({
             onMessageRef.current(errorMessages[saved.error.code] ?? '保存图片草稿失败，请重试。');
             return;
           }
+          // A newer keystroke may have arrived while this save was in flight.
+          // Do not publish the stale response back into the controlled form.
+          if (draftRef.current !== snapshot) return;
           draftId = saved.value.draftId;
           draftUpdatedAt = saved.value.updatedAt;
           onDraftPersistedRef.current?.(saved.value as GenerationImageDraftDto);
@@ -330,7 +333,8 @@ export function ImageFeatureSubmissionPanel({
     blockedReason,
     dirty,
     draft.draftId,
-    draft.prompt.finalPrompt,
+    draft.featureSelection?.candidateId,
+    draft.prompt.originalInput,
     draft.state,
     draft.updatedAt,
     featureSelection.productFeature,
@@ -351,6 +355,7 @@ export function ImageFeatureSubmissionPanel({
           ...defaultQuickImageParameterValues(candidate?.parameterSchema.fields ?? []),
           ...(sameSchema ? featureSelection.parameterValues : {})
         };
+    onMessage('');
     onDraftChange({
       ...draft,
       state: 'editing',
@@ -557,6 +562,10 @@ export function ImageFeatureSubmissionPanel({
     busyRef.current = true;
     setBusy(true);
     showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
+    if (trackProgress) {
+      setProgressFailure(undefined);
+      setProgressPhase('requesting');
+    }
     try {
       if (api.generateQuickImage) {
         const parameterValues: Record<string, string | number | boolean | readonly string[]> = {
@@ -577,6 +586,15 @@ export function ImageFeatureSubmissionPanel({
             showSubmissionError(
               errorMessages[result.error.code] || '图片提交失败，请重试。'
             );
+          }
+          if (trackProgress) {
+            const uncertain = result.error.code === 'submission_outcome_unknown';
+            setProgressFailure(
+              uncertain
+                ? describeUnconfirmedGenerationOutcome()
+                : errorMessages[result.error.code] || '图片提交失败，请重试。'
+            );
+            setProgressPhase(uncertain ? 'submission_uncertain' : 'submission_failed');
           }
           return;
         }
@@ -600,12 +618,33 @@ export function ImageFeatureSubmissionPanel({
         } as GenerationImageDraftDto);
         const submission = result.value.submission;
         showSubmissionOutcome(submission);
+        if (trackProgress) {
+          const uncertain = isUnconfirmedGenerationOutcome(
+            submission.status,
+            submission.safeCode
+          );
+          if (uncertain) {
+            setProgressFailure(describeUnconfirmedGenerationOutcome(submission.safeCode));
+            setProgressPhase('uncertain');
+          } else if (submission.status === 'provider_accepted') {
+            setProgressPhase('waiting');
+          } else if (submission.status === 'completed') {
+            setProgressPhase('completed');
+          } else {
+            setProgressFailure('图片提交未完成，请检查任务状态。');
+            setProgressPhase('failed');
+          }
+        }
         onSubmissionComplete?.(submission);
         return;
       }
       await prepare();
     } catch {
       showSubmissionError('图片提交失败，请重试。');
+      if (trackProgress) {
+        setProgressFailure('图片提交失败，请重试。');
+        setProgressPhase('submission_failed');
+      }
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -632,7 +671,7 @@ export function ImageFeatureSubmissionPanel({
   );
 
   return (
-    <div className="uc-image-feature-panel">
+    <div className={`uc-image-feature-panel${className ? ` ${className}` : ''}`}>
       {awaitingFeatureChoice ? (
         <p className="uc-image-quick__hint" role="status">
           请先在上方选择文生图或图生图；选定功能后才会显示可用模型与参数。
@@ -644,11 +683,9 @@ export function ImageFeatureSubmissionPanel({
         emptyDescription={
           loadState === 'loading'
             ? '正在读取安全候选。'
-            : oneShot && draft.prompt.finalPrompt.trim().length === 0
-              ? '请先填写提示词，再读取可选模型。'
-              : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
+            : '先在“模型与服务商”添加并启用图像模型，再回到这里选择。'
         }
-        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
+        emptyTitle={loadState === 'loading' ? '正在读取模型' : '尚未配置可用模型'}
         hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
         onChange={changeCandidate}
         options={candidates.map((candidate) => ({
@@ -711,10 +748,6 @@ export function ImageFeatureSubmissionPanel({
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>
         </div>
-      ) : oneShot && draft.prompt.finalPrompt.trim().length === 0 ? (
-        <p className="uc-image-quick__hint" role="status">
-          请先填写提示词，再选择模型并生成。
-        </p>
       ) : null}
 
       {showProgressSteps ? (

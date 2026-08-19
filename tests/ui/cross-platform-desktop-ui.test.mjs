@@ -63,8 +63,6 @@ test('keeps the approved 800 by 720 compact desktop minimum usable', () => {
   assert.match(styles, /@media \(max-width: 900px\)/);
   assert.match(styles, /grid-template-columns: 200px minmax\(0, 1fr\)/);
   assert.match(styles, /\.nav-subitem > span:last-child \{[\s\S]*?white-space: nowrap/);
-  assert.match(pageStyles, /@media \(max-width: 1180px\)[\s\S]*?\.uc-image-workbench__project-strip \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(pageStyles, /\.uc-image-workbench__project-strip > p \{[\s\S]*?grid-column: 1 \/ -1/);
 });
 
 test('uses native platform font fallbacks and accessibility media preferences', () => {

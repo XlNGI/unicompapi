@@ -35,6 +35,7 @@ test('exposes only controlled local video workspace operations', () => {
     'list',
     'derive',
     'selectMaterial',
+    'importMaterial',
     'getMaterial',
     'clearMaterial',
     'createMaterialPreview'

@@ -9,6 +9,7 @@ import {
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { ControlledImageDropZone } from '../../../components/ControlledImageDropZone';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
@@ -221,6 +222,40 @@ export function ImageProfessionalWorkspace({
     }
   }
 
+  async function importReference(file: File, dropToken?: string) {
+    if (
+      !imageWorkspaces ||
+      productFeature !== 'reference_to_image' ||
+      busy
+    ) return;
+    setBusy(true);
+    onMessage('');
+    try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      const result = await imageWorkspaces.importInput(
+        saved.draftId,
+        dropToken ?? file
+      );
+      if (!result.ok) {
+        onMessage('拖入图片失败，请重试。');
+        return;
+      }
+      if (result.value.cancelled || !result.value.draft) return;
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
+      setInput(result.value.input);
+      const preview = await imageWorkspaces.createInputPreview(
+        result.value.draft.draftId
+      );
+      setPreviewUrl(preview.ok ? preview.value.url : '');
+      onMessage('图片已完成本地校验并登记到当前项目。');
+    } catch {
+      onMessage('拖入图片失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function clearReference() {
     if (!imageWorkspaces || !draft.input || busy) return;
     setBusy(true);
@@ -259,7 +294,7 @@ export function ImageProfessionalWorkspace({
 
   return (
     <>
-      <div className="uc-image-professional__workspace">
+      <div className="uc-image-professional__workspace uc-generation-two-pane">
         <section
           aria-label="提交前准备区域"
           className="uc-image-professional__before-pane"
@@ -273,7 +308,7 @@ export function ImageProfessionalWorkspace({
             <StatusPill tone="info">独立滚动</StatusPill>
           </header>
 
-          <div className="uc-image-professional__before-scroll">
+          <div className="uc-image-professional__before-scroll uc-scrollbar">
         <Card className="uc-image-workbench__panel">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
@@ -318,6 +353,12 @@ export function ImageProfessionalWorkspace({
           </label>
 
           {productFeature === 'reference_to_image' ? (
+            <ControlledImageDropZone
+              disabled={!imageWorkspaces || busy}
+              hasImage={Boolean(draft.input)}
+              onDropFile={(file, dropToken) => void importReference(file, dropToken)}
+              onReject={onMessage}
+            >
             <section className="uc-image-professional__reference">
               <div className="uc-image-quick__reference">
                 <div>
@@ -364,6 +405,7 @@ export function ImageProfessionalWorkspace({
                 />
               </label>
             </section>
+            </ControlledImageDropZone>
           ) : null}
 
           <WorkspaceContextSelector

@@ -25,7 +25,7 @@ export function AppLayout({
   onSecondaryNavigate
 }: AppLayoutProps) {
   return (
-    <div className="app-shell">
+    <div className="app-shell app-shell--compact">
       <a className="skip-link" href="#main-content">
         跳到主要内容
       </a>
@@ -38,7 +38,7 @@ export function AppLayout({
           onSecondaryNavigate={onSecondaryNavigate}
         />
         <main
-          className={`workspace${activeItemId === 'chat' ? ' workspace--chat' : ''}`}
+          className={`workspace uc-scrollbar${activeItemId === 'chat' ? ' workspace--chat' : ''}${activeItemId === 'tasks' ? ' workspace--tasks' : ''}`}
           id="main-content"
           tabIndex={-1}
         >

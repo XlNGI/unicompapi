@@ -13,6 +13,7 @@ import type {
 import type { TaskReuseTarget } from '../../shared/task-reuse';
 import '../../styles/pages.css';
 import { CallRecordsView } from './CallRecordsView';
+import { TaskCenterWorkspace } from './TaskCenterWorkspace';
 
 interface TasksPageProps {
   onNavigate?: (itemId: 'projects' | 'library') => void;
@@ -356,56 +357,61 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
           icon="任"
         />
       ) : (
-        <div className="uc-task-center__workspace">
-          <section className="uc-task-center__list" aria-labelledby="task-list-title">
-            <h2 id="task-list-title">任务列表（{filteredTasks.length}）</h2>
-            {filteredTasks.length === 0 ? (
-              <p className="uc-task-center__muted">没有符合当前筛选条件的任务。</p>
-            ) : (
-              filteredTasks.map((task) => {
-                const state = taskState(task.latestExecutionState);
-                return (
-                  <button
-                    aria-pressed={selectedTaskId === task.taskId}
-                    className="uc-task-center__task"
-                    key={task.taskId}
-                    onClick={() => setSelectedTaskId(task.taskId)}
-                    type="button"
-                  >
-                    <span>
-                      <strong>{taskKinds[task.kind] ?? '其他任务'}</strong>
-                      <small>{task.projectName}</small>
-                    </span>
-                    <StatusPill tone={state.tone}>{state.label}</StatusPill>
-                    <small>{new Date(task.createdAt).toLocaleString('zh-CN')}</small>
-                    <small>{task.executionCount} 次执行</small>
-                  </button>
-                );
-              })
-            )}
-          </section>
-
-          <section className="uc-task-center__details" aria-labelledby="task-details-title">
-            <h2 id="task-details-title">任务详情</h2>
-            {detailsLoading ? (
-              <p className="uc-task-center__muted" role="status">正在读取任务详情…</p>
-            ) : details ? (
-              <TaskDetails
-                details={details}
-                onNavigate={onNavigate}
-                onRecoverResult={() => void recoverResult(
-                  details.taskId,
-                  details.canRecoverImageResult ? 'image' : 'video'
-                )}
-                recovering={recovering}
-                reusingParameters={reusingParameters}
-                onReuseParameters={() => void reuseParameters(details)}
-              />
-            ) : (
-              <p className="uc-task-center__muted">选择左侧任务查看提交内容和真实状态。</p>
-            )}
-          </section>
-        </div>
+        <TaskCenterWorkspace
+          details={(
+            <>
+              <h2 id="task-details-title">任务详情</h2>
+              {detailsLoading ? (
+                <p className="uc-task-center__muted" role="status">正在读取任务详情…</p>
+              ) : details ? (
+                <TaskDetails
+                  details={details}
+                  onNavigate={onNavigate}
+                  onRecoverResult={() => void recoverResult(
+                    details.taskId,
+                    details.canRecoverImageResult ? 'image' : 'video'
+                  )}
+                  recovering={recovering}
+                  reusingParameters={reusingParameters}
+                  onReuseParameters={() => void reuseParameters(details)}
+                />
+              ) : (
+                <p className="uc-task-center__muted">选择左侧任务查看提交内容和真实状态。</p>
+              )}
+            </>
+          )}
+          detailsLabelledBy="task-details-title"
+          list={(
+            <>
+              <h2 id="task-list-title">任务列表（{filteredTasks.length}）</h2>
+              {filteredTasks.length === 0 ? (
+                <p className="uc-task-center__muted">没有符合当前筛选条件的任务。</p>
+              ) : (
+                filteredTasks.map((task) => {
+                  const state = taskState(task.latestExecutionState);
+                  return (
+                    <button
+                      aria-pressed={selectedTaskId === task.taskId}
+                      className="uc-task-center__task"
+                      key={task.taskId}
+                      onClick={() => setSelectedTaskId(task.taskId)}
+                      type="button"
+                    >
+                      <span>
+                        <strong>{taskKinds[task.kind] ?? '其他任务'}</strong>
+                        <small>{task.projectName}</small>
+                      </span>
+                      <StatusPill tone={state.tone}>{state.label}</StatusPill>
+                      <small>{new Date(task.createdAt).toLocaleString('zh-CN')}</small>
+                      <small>{task.executionCount} 次执行</small>
+                    </button>
+                  );
+                })
+              )}
+            </>
+          )}
+          listLabelledBy="task-list-title"
+        />
       )}
 
           <p className="uc-task-center__message" aria-live="polite">{message}</p>

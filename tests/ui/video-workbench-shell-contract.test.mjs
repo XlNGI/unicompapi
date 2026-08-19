@@ -68,7 +68,7 @@ test('saving a generation draft stays separate from submission', () => {
   assert.match(workbenchSource, /新建本地草稿/);
   assert.match(workbenchSource, /已自动保存/);
   assert.match(workbenchSource, /没有创建或提交任务/);
-  assert.match(workbenchSource, /共用同一套流程/);
+  assert.doesNotMatch(workbenchSource, /共用同一套流程/);
   assert.match(workbenchSource, /usesFlowAutosave/);
   assert.match(workbenchSource, /workspaceMode === 'quick_video'/);
   assert.match(workbenchSource, /workspaceMode === 'text_to_video'/);

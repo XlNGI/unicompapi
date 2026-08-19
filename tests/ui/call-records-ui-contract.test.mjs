@@ -4,7 +4,16 @@ import test from 'node:test';
 
 const page = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
 const calls = await readFile('src/pages/tasks/CallRecordsView.tsx', 'utf8');
+const taskCenterWorkspace = await readFile(
+  'src/pages/tasks/TaskCenterWorkspace.tsx',
+  'utf8'
+);
+const floatingStatusBar = await readFile(
+  'src/components/FloatingStatusBar.tsx',
+  'utf8'
+);
 const styles = await readFile('src/styles/pages.css', 'utf8');
+const shellStyles = await readFile('src/styles.css', 'utf8');
 const failureReasons = await readFile(
   'src/ui/notifications/generation-failure-reasons.ts',
   'utf8'
@@ -21,6 +30,20 @@ test('task center keeps tasks and call records as explicit segmented views', () 
   assert.match(page, /CallRecordsView/);
 });
 
+test('tasks and calls share one independently scrolling workspace component', () => {
+  assert.match(shellStyles, /\.workspace--tasks\s*\{[\s\S]*overflow: hidden;/);
+  assert.match(styles, /\.uc-task-center\s*\{[\s\S]*height: 100%;/);
+  assert.match(page, /<TaskCenterWorkspace/);
+  assert.match(calls, /<TaskCenterWorkspace/);
+  assert.match(taskCenterWorkspace, /uc-task-center__list uc-scrollbar/);
+  assert.match(taskCenterWorkspace, /uc-task-center__details uc-scrollbar/);
+  assert.match(
+    styles,
+    /\.uc-task-center__list,\s*\.uc-task-center__details\s*\{[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/
+  );
+  assert.doesNotMatch(calls, /uc-task-center__details--scrollable/);
+});
+
 test('call records use the controlled list and detail read ports', () => {
   assert.match(calls, /storage\.listCallRecords\(toRequest\(filters\)\)/);
   assert.match(calls, /storage\.getCallDetails\(selectedCallId\)/);
@@ -34,8 +57,38 @@ test('call records use the controlled list and detail read ports', () => {
     'createdFrom',
     'createdTo'
   ]) assert.match(calls, new RegExp(filter));
-  assert.match(calls, /DatePicker/);
+  assert.match(calls, /DateRangePicker/);
+  assert.match(calls, /character=" 至 "/);
+  assert.match(calls, /parseDateRange\(filters\.createdFrom, filters\.createdTo\)/);
   assert.match(calls, /开始日期不能晚于结束日期/);
+});
+
+test('call-record filters stay in one compact row', () => {
+  assert.match(
+    styles,
+    /\.uc-task-center__call-filters\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.15fr\)\s*minmax\(0, 1\.05fr\)\s*repeat\(3, minmax\(0, 0\.8fr\)\)\s*minmax\(0, 0\.95fr\)\s*minmax\(160px, 1\.7fr\);/
+  );
+  assert.match(
+    styles,
+    /\.uc-task-center__call-filters\s*\{[^}]*gap: 10px;[^}]*padding: var\(--uc-space-4\);/
+  );
+  assert.doesNotMatch(styles, /\.uc-task-center__call-filters\s*\{[^}]*overflow-x:/);
+  assert.match(
+    styles,
+    /\.uc-task-center__call-filters \.rs-picker-toggle\s*\{[^}]*min-height: 40px;/
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.uc-task-center__call-filters\s*\{[^}]*repeat\(auto-fit/
+  );
+});
+
+test('call-record read issues use the shared floating status bar', () => {
+  assert.match(calls, /FloatingStatusBar/);
+  assert.match(calls, /<FloatingStatusBar label="状态" tone="warning">/);
+  assert.match(calls, /部分项目的调用记录无法读取/);
+  assert.doesNotMatch(calls, /uc-task-center__issues/);
+  assert.match(floatingStatusBar, /export function FloatingStatusBar/);
 });
 
 test('call details show snapshot names, timeline, duration, retry, usage and local results', () => {

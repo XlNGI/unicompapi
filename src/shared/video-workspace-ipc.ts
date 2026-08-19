@@ -5,6 +5,7 @@ export const videoWorkspaceIpcChannels = {
   list: 'video-workspace:list',
   derive: 'video-workspace:derive',
   selectMaterial: 'video-workspace:select-material',
+  importMaterial: 'video-workspace:import-material',
   getMaterial: 'video-workspace:get-material',
   clearMaterial: 'video-workspace:clear-material',
   createMaterialPreview: 'video-workspace:create-material-preview',
@@ -269,6 +270,14 @@ export interface VideoWorkspaceApi {
     draftId: string,
     target: VideoWorkspaceMaterialTargetDto,
     mediaKind: 'image' | 'video'
+  ): Promise<
+    VideoWorkspaceIpcResult<VideoWorkspaceMaterialSelectionResultDto>
+  >;
+  importMaterial(
+    draftId: string,
+    target: VideoWorkspaceMaterialTargetDto,
+    mediaKind: 'image' | 'video',
+    file: unknown
   ): Promise<
     VideoWorkspaceIpcResult<VideoWorkspaceMaterialSelectionResultDto>
   >;

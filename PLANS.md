@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-19 工程补充：`feature/generation-preview-loading-refinement` 按 UI 反馈统一生图/生视频等待态。共享作品预览改为细线双环、中心星芒和阶段文案，移除粗重光晕与扫描线；图片与快速/文生/图生视频均接入真实准备、提交、服务商处理中阶段，`provider_accepted` 不再提前清空当前画布。新增等待态 UI 契约测试；Node/UI 契约、TypeScript、ESLint、生产构建和 `git diff --check` 通过。未调用真实服务商、未读取凭证或产生收费请求。记录见 `docs/active/生图生视频等待态视觉优化记录.md`。
+
 2026-08-19 工程补充：`feature/hide-professional-final-prompt` 按截图反馈默认隐藏专业生图最终提示词结果卡片，将增强入口放在原始创作需求区域；展开时仅显示模型选择和“确认增强”，真实增强完成后再显示可编辑结果。typecheck、lint 和专业生图 UI 契约测试通过。工程记录见 `docs/active/专业生图最终提示词按需显示记录.md`。
 
 2026-08-19 工程补充：`feature/simplify-prompt-enhancement-ui` 精简提示词增强交互，默认隐藏增强流程，仅保留模型选择与“确认增强”；原始创作需求为空时禁用，增强结果自动写入可编辑的最终提示词，后端继续提交原始需求、拼接结构化文案与语义优化指令。全量门禁为 Node/UI 265 项与 Vitest 725 项，共 990 项通过，0 失败、0 跳过；typecheck、lint、build 和差异检查通过。工程记录见 `docs/active/提示词增强交互精简记录.md`。
