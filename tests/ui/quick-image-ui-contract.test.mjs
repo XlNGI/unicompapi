@@ -15,6 +15,10 @@ const workbenchSource = await readFile(
   'utf8'
 );
 const pageStyles = await readFile('src/styles/pages.css', 'utf8');
+const previewSource = await readFile(
+  'src/components/GenerationResultPreview.tsx',
+  'utf8'
+);
 const source = `${quickSource}\n${featurePanelSource}`;
 
 test('quick image is pure text-to-image with no material or context entry', () => {
@@ -78,22 +82,52 @@ test('quick image synchronously blocks duplicate one-shot submissions', () => {
   assert.match(oneShot, /finally \{[\s\S]*busyRef\.current = false;/);
 });
 
-test('quick image keeps the visible work areas in 1, 2, 3 order', () => {
+test('quick image loads model candidates before prompt entry', () => {
+  assert.doesNotMatch(
+    featurePanelSource,
+    /if \(oneShot && draft\.prompt\.finalPrompt\.trim\(\)\.length === 0\) \{[\s\S]*setCandidates\(\[\]\)/
+  );
+  assert.match(featurePanelSource, /api\.listCandidates\(draftId, draftUpdatedAt\)/);
+  assert.match(featurePanelSource, /if \(prompt\.length === 0\) \{[\s\S]*showGenerationError/);
+});
+
+test('quick image autosave ignores stale responses during prompt edits', () => {
+  assert.match(featurePanelSource, /const draftRef = useRef\(draft\)/);
+  assert.match(featurePanelSource, /draftRef\.current = draft/);
+  assert.match(
+    featurePanelSource,
+    /if \(draftRef\.current !== snapshot\) return;/
+  );
+  assert.match(featurePanelSource, /draft\.prompt\.originalInput/);
+});
+
+test('quick image keeps input, model, and result areas in workflow order', () => {
   const composerIndex = quickSource.indexOf('uc-image-quick__composer');
   const inspectorIndex = quickSource.indexOf('uc-image-quick__inspector');
   const stageIndex = quickSource.indexOf('uc-image-quick__stage');
   assert.ok(composerIndex >= 0, 'quick image composer is missing');
   assert.ok(inspectorIndex > composerIndex, 'step 2 must follow step 1');
   assert.ok(stageIndex > inspectorIndex, 'step 3 must follow step 2');
-  assert.match(quickSource.slice(composerIndex, inspectorIndex), />1</);
-  assert.match(quickSource.slice(inspectorIndex, stageIndex), />2</);
-  assert.match(quickSource.slice(stageIndex), />3</);
+  assert.match(quickSource.slice(composerIndex, inspectorIndex), /输入一句话生成图片/);
+  assert.match(quickSource.slice(inspectorIndex, stageIndex), /模型与生成/);
+  assert.match(quickSource.slice(stageIndex), /生成结果/);
 });
 
 test('quick image result preview stays compact without stretching the image', () => {
   assert.match(
     pageStyles,
     /\.uc-image-quick__stage \.uc-image-quick__result-item img \{[\s\S]*max-height: 322px;[\s\S]*object-fit: contain;/
+  );
+});
+
+test('quick image keeps the result canvas free of a duplicate heading', () => {
+  assert.match(
+    pageStyles,
+    /\.uc-generation-two-pane__result > \.uc-image-quick__stage > \.uc-image-workbench__panel-heading \{\s*display: none;/
+  );
+  assert.match(
+    pageStyles,
+    /\.uc-generation-two-pane__result > \.uc-image-quick__stage > \.uc-image-quick__result-actions \{[\s\S]*border-top: 1px solid var\(--uc-color-border-subtle\);/
   );
 });
 
@@ -105,19 +139,35 @@ test('quick image exposes the registered local result without duplicating downlo
 });
 
 test('quick image keeps unavailable runtime blocked without fake output', async () => {
-  const previewSource = await readFile(
-    'src/components/GenerationResultPreview.tsx',
-    'utf8'
-  );
   assert.match(featurePanelSource, /runtime_not_allowed/);
   assert.match(featurePanelSource, /在线图片运行尚未获准，没有发出请求/);
-  assert.match(quickSource, /尚无生成结果/);
+  assert.match(quickSource, /生成结果将在这里显示/);
   assert.match(quickSource, /GenerationResultPreview/);
   assert.match(previewSource, /createWorkMediaHandle/);
   assert.doesNotMatch(
     source,
     /fetch\(|localStorage|absolutePath|upload|OpenAI|Midjourney|1024x1024|45%/
   );
+});
+
+test('quick image omits the redundant call-record notice', () => {
+  assert.doesNotMatch(quickSource, /<StatusPill[^>]*>调用记录<\/StatusPill>/);
+});
+
+test('quick image copy follows prompt, model, then generate workflow', () => {
+  assert.match(quickSource, /描述想生成的画面/);
+  assert.match(quickSource, /输入提示词，选择模型，然后点击生成。/);
+  assert.match(quickSource, /生成结果将在这里显示/);
+  assert.doesNotMatch(quickSource, />3<\/span>/);
+  assert.match(featurePanelSource, /尚未配置可用模型/);
+  assert.match(featurePanelSource, /添加并启用图像模型/);
+  assert.match(featurePanelSource, /当前输入不适用于所选模型/);
+});
+
+test('quick image uses the compact result presentation', () => {
+  assert.match(quickSource, /<GenerationResultPreview[\s\S]*compact/);
+  assert.match(previewSource, /readonly compact\?: boolean/);
+  assert.match(previewSource, /compact \? null : <strong>本地作品预览<\/strong>/);
 });
 
 test('workbench does not pass the old provider registry into quick image', () => {

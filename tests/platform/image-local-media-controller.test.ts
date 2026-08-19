@@ -201,6 +201,19 @@ describe('ImageLocalMediaController', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('registers a dropped absolute image path through the same verification chain', async () => {
+    const fixture = await createFixture();
+    const result = await fixture.controller.importInput({
+      draftId: fixture.draft.id,
+      sourcePath: fixture.selectedPath
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { cancelled: false, input: { mimeType: 'image/png' } }
+    });
+    expect(JSON.stringify(result)).not.toContain(fixture.root);
+  });
+
   it('rejects image selection from quick text-to-image before opening media', async () => {
     const fixture = await createFixture({ quick: true });
     await expect(fixture.controller.selectInput({ draftId: fixture.draft.id }))

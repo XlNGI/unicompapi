@@ -731,6 +731,11 @@ button {
   padding: 0;
 }
 
+.workspace--tasks {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .workspace:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: -2px;

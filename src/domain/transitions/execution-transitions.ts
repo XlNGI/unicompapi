@@ -135,14 +135,14 @@ export function transitionExecution(
     execution.state === 'failed' &&
     nextState === 'remote_completed' &&
     (
-      execution.failure?.stage !== 'downloading' ||
-      execution.failure.retryability !== 'retryable' ||
+      !['downloading', 'writing'].includes(execution.failure?.stage ?? '') ||
+      execution.failure?.retryability === 'not_retryable' ||
       !execution.providerOperationRecordId ||
       (!execution.remoteOperationId && execution.submissionOutcome !== 'completed_sync')
     )
   ) {
     throw new RetryNotAllowedError(
-      'only a retryable failed result download can resume remote completion'
+      'only a safely retryable failed local result receipt can resume remote completion'
     );
   }
 
@@ -277,13 +277,13 @@ export function recoverRemoteCompletedExecution(
 ): Execution {
   if (
     execution.state !== 'failed' ||
-    execution.failure?.stage !== 'downloading' ||
-    execution.failure.retryability !== 'retryable' ||
+    !['downloading', 'writing'].includes(execution.failure?.stage ?? '') ||
+    execution.failure?.retryability === 'not_retryable' ||
     !execution.providerOperationRecordId ||
     (!execution.remoteOperationId && execution.submissionOutcome !== 'completed_sync')
   ) {
     throw new RetryNotAllowedError(
-      'only a retryable failed result download can resume remote completion'
+      'only a safely retryable failed local result receipt can resume remote completion'
     );
   }
 

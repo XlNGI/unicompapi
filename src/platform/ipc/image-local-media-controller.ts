@@ -72,53 +72,18 @@ export class ImageLocalMediaController {
         if (!selectedPath) {
           return { cancelled: true };
         }
+        return this.registerInput(draftId, selectedPath);
+      })
+    );
+  }
 
-        const inspector = new NodeImageInspector();
-        const before = await inspector.inspect(selectedPath);
-        const verifier = new NodeSha256FileVerifier(context.session.rootDirectory);
-        const provisional = createFileReference({
-          id: this.createFileId(),
-          projectId: context.session.projectId,
-          locator: { kind: 'external', absolutePath: selectedPath },
-          createdAt: toIsoTimestamp(new Date().toISOString())
-        });
-        const verification = await verifier.verify({ file: provisional });
-        const after = await inspector.inspect(selectedPath);
-
-        if (!sameInspection(before, after, verification.sizeBytes)) {
-          throw new ImageLocalMediaError(
-            'image_unreadable',
-            'The selected image changed while it was being verified'
-          );
-        }
-
-        const file = createAvailableFile(provisional, verification);
-        const asset = createAsset({
-          id: this.createAssetId(),
-          projectId: context.session.projectId,
-          fileId: file.id,
-          name: path.basename(selectedPath),
-          mediaKind: 'image',
-          origin: 'imported',
-          role: inputRoleForMode(draft.mode),
-          imageMetadata: {
-            mimeType: after.mimeType,
-            width: after.width,
-            height: after.height
-          },
-          createdAt: verification.verifiedAt
-        });
-        const updated = attachInput(draft, asset, verification.verifiedAt);
-
-        await context.fileRepository.save(file);
-        await context.assetRepository.save(asset);
-        await context.workspaceRepository.save(updated);
-
-        return {
-          cancelled: false,
-          draft: toImageWorkspaceDto(updated),
-          input: toInputDto(asset, file)
-        };
+  importInput(
+    request: unknown
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const draftId = parseDraftId(request);
+        return this.registerInput(draftId, parseDroppedFilePath(request));
       })
     );
   }
@@ -254,6 +219,61 @@ export class ImageLocalMediaController {
     };
   }
 
+  private async registerInput(
+    draftId: ReturnType<typeof toDraftId>,
+    selectedPath: string
+  ): Promise<ImageWorkspaceInputSelectionDto> {
+    const context = this.createContext();
+    const draft = await requireDraft(context.workspaceRepository, draftId);
+    assertInputSelectionAllowed(draft);
+    const inspector = new NodeImageInspector();
+    const before = await inspector.inspect(selectedPath);
+    const verifier = new NodeSha256FileVerifier(context.session.rootDirectory);
+    const provisional = createFileReference({
+      id: this.createFileId(),
+      projectId: context.session.projectId,
+      locator: { kind: 'external', absolutePath: selectedPath },
+      createdAt: toIsoTimestamp(new Date().toISOString())
+    });
+    const verification = await verifier.verify({ file: provisional });
+    const after = await inspector.inspect(selectedPath);
+
+    if (!sameInspection(before, after, verification.sizeBytes)) {
+      throw new ImageLocalMediaError(
+        'image_unreadable',
+        'The selected image changed while it was being verified'
+      );
+    }
+
+    const file = createAvailableFile(provisional, verification);
+    const asset = createAsset({
+      id: this.createAssetId(),
+      projectId: context.session.projectId,
+      fileId: file.id,
+      name: path.basename(selectedPath),
+      mediaKind: 'image',
+      origin: 'imported',
+      role: inputRoleForMode(draft.mode),
+      imageMetadata: {
+        mimeType: after.mimeType,
+        width: after.width,
+        height: after.height
+      },
+      createdAt: verification.verifiedAt
+    });
+    const updated = attachInput(draft, asset, verification.verifiedAt);
+
+    await context.fileRepository.save(file);
+    await context.assetRepository.save(asset);
+    await context.workspaceRepository.save(updated);
+
+    return {
+      cancelled: false,
+      draft: toImageWorkspaceDto(updated),
+      input: toInputDto(asset, file)
+    };
+  }
+
   private createAssetId() {
     return toAssetId(
       this.dependencies.createAssetId?.() ?? `asset-image-${randomUUID()}`
@@ -312,6 +332,20 @@ function parseDraftId(request: unknown) {
       'A valid image workspace draft ID is required'
     );
   }
+}
+
+function parseDroppedFilePath(request: unknown): string {
+  if (
+    !isRecord(request) ||
+    typeof request.sourcePath !== 'string' ||
+    !path.isAbsolute(request.sourcePath)
+  ) {
+    throw new ImageLocalMediaError(
+      'invalid_request',
+      'A local dropped image file is required'
+    );
+  }
+  return request.sourcePath;
 }
 
 async function requireDraft(

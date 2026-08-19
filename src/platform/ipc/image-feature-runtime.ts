@@ -51,7 +51,8 @@ import {
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
   JsonProviderOperationRepository,
-  JsonTaskRepository
+  JsonTaskRepository,
+  JsonWorkRepository
 } from '../repositories';
 import {
   NodeProjectStorage,
@@ -99,6 +100,7 @@ export function createImageFeatureControllerRuntime(
   const contexts = new JsonProjectContextRepository(storage, options.session.projectId);
   const assets = new JsonAssetRepository(storage, options.session.projectId);
   const tasks = new JsonTaskRepository(storage, options.session.projectId);
+  const works = new JsonWorkRepository(storage, options.session.projectId);
   const executions = new JsonExecutionRepository(storage);
   const operations = new JsonProviderOperationRepository(storage);
   const invocations = new JsonProviderInvocationRepository(
@@ -150,12 +152,13 @@ export function createImageFeatureControllerRuntime(
       const execution = [...await executions.list(task.id)]
         .filter((item) => task.executionIds.includes(item.id))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+      const existingWork = execution && (await works.list(options.session.projectId))
+        .find((work) => work.sourceExecutionId === execution.id);
       if (
         task.submission.kind !== 'image_generation' ||
         !execution ||
-        execution.state !== 'failed' ||
-        execution.failure?.stage !== 'downloading' ||
-        execution.failure.retryability !== 'retryable' ||
+        existingWork ||
+        !canRecoverImageLocalReceipt(execution) ||
         execution.submissionOutcome !== 'completed_sync' ||
         !execution.providerOperationRecordId
       ) {
@@ -177,11 +180,10 @@ export function createImageFeatureControllerRuntime(
           item.subject.taskId === task.id &&
           item.subject.executionId === execution.id
       );
-      const recovered = recoverRemoteCompletedExecution(
-        execution,
-        toIsoTimestamp(now())
-      );
-      await executions.save(recovered);
+      const recovered = execution.state === 'failed'
+        ? recoverRemoteCompletedExecution(execution, toIsoTimestamp(now()))
+        : execution;
+      if (recovered !== execution) await executions.save(recovered);
       const received = await recoveryResultReceiver.receive(recovered.id);
       if (!received.ok) throw new Error(received.error.message);
       if (attempt) {
@@ -455,6 +457,19 @@ export function createImageFeatureControllerRuntime(
   };
 
   return runtime;
+}
+
+function canRecoverImageLocalReceipt(execution: {
+  readonly state: string;
+  readonly failure?: {
+    readonly stage: string;
+    readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
+  };
+}): boolean {
+  if (execution.state === 'remote_completed') return true;
+  return execution.state === 'failed' &&
+    ['downloading', 'writing'].includes(execution.failure?.stage ?? '') &&
+    execution.failure?.retryability !== 'not_retryable';
 }
 
 function latestSafeCode(

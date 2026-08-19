@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LuSparkles } from 'react-icons/lu';
 import { EmptyState } from './EmptyState';
 
 export interface GenerationResultPreviewProps {
@@ -11,6 +12,7 @@ export interface GenerationResultPreviewProps {
   readonly loadingTitle?: string;
   readonly loadingDescription?: string;
   readonly animateResult?: boolean;
+  readonly compact?: boolean;
 }
 
 /**
@@ -26,7 +28,8 @@ export function GenerationResultPreview({
   loading = false,
   loadingTitle = '正在生成',
   loadingDescription = '完成后将校验结果并登记到本地。',
-  animateResult = false
+  animateResult = false,
+  compact = false
 }: GenerationResultPreviewProps) {
   const storage = window.unicomp?.storage;
   const [localUrl, setLocalUrl] = useState<string>();
@@ -60,22 +63,19 @@ export function GenerationResultPreview({
     return (
       <div className="uc-image-quick__result-list">
         <article className="uc-image-quick__result-item uc-generation-result-preview">
-          <strong>本地作品预览</strong>
+          {compact ? null : <strong>本地作品预览</strong>}
           <div
             aria-live="polite"
             className="uc-generation-result-preview__loading"
             role="status"
           >
-            <span
-              aria-hidden="true"
-              className="uc-generation-result-preview__scan-line"
-            />
             <div className="uc-generation-result-preview__loading-content">
               <span
                 aria-hidden="true"
                 className="uc-generation-result-preview__indicator"
               >
                 <span className="uc-generation-result-preview__ring" />
+                <LuSparkles />
               </span>
               <div>
                 <strong>{loadingTitle}</strong>
@@ -109,7 +109,7 @@ export function GenerationResultPreview({
             animateResult ? 'uc-generation-result-preview--animated' : ''
           ].filter(Boolean).join(' ')}
         >
-          <strong>本地作品预览</strong>
+          {compact ? null : <strong>本地作品预览</strong>}
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" src={localUrl} />
           ) : (
@@ -126,8 +126,12 @@ export function GenerationResultPreview({
           ].filter(Boolean).join(' ')}
           key={url}
         >
-          <strong>{mediaKind === 'image' ? '图片链接' : '视频链接'}</strong>
-          <a href={url} rel="noreferrer" target="_blank">{url}</a>
+          {compact ? null : (
+            <>
+              <strong>{mediaKind === 'image' ? '图片链接' : '视频链接'}</strong>
+              <a href={url} rel="noreferrer" target="_blank">{url}</a>
+            </>
+          )}
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" src={url} />
           ) : (
@@ -135,7 +139,7 @@ export function GenerationResultPreview({
           )}
         </article>
       ))}
-      {workId ? (
+      {workId && !compact ? (
         <p className="uc-image-quick__hint" role="status">
           本地作品已登记：{workId}
           {localError ? `（${localError}）` : null}

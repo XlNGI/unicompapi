@@ -7,6 +7,7 @@ import {
 } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { FloatingStatusBar } from '../../../components/FloatingStatusBar';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
 import type {
@@ -322,6 +323,18 @@ export function ImageWorkbenchPage({
       ? '项目内本地草稿'
       : '未打开项目';
 
+  const floatingStatusMessage = message || (
+    currentDraft?.mode === 'quick_image'
+      ? currentDraft.prompt.originalInput.trim().length === 0
+        ? '输入画面描述，选择模型后生成。'
+        : currentDraft.featureSelection?.candidateId
+          ? '参数已更新，可以生成。'
+          : '请选择模型后生成。'
+      : currentDraft
+        ? '编辑参数后，状态会在这里更新。'
+        : '创建或打开草稿后，状态会在这里更新。'
+  );
+
   return (
     <section
       className="uc-image-workbench"
@@ -382,28 +395,6 @@ export function ImageWorkbenchPage({
           )}
         </div>
       </header>
-
-      <Card className="uc-image-workbench__project-strip">
-        <div className="uc-image-workbench__project-fact">
-          <span>当前项目</span>
-          <strong>{session?.projectName ?? '尚未打开项目'}</strong>
-        </div>
-        <div className="uc-image-workbench__project-fact">
-          <span>当前模式草稿</span>
-          <strong>{session ? `${drafts.length} 个` : '不可创建'}</strong>
-        </div>
-        <div className="uc-image-workbench__project-fact">
-          <span>当前状态</span>
-          <strong>
-            {currentDraft ? draftStateLabels[currentDraft.state] : '无本地草稿'}
-          </strong>
-        </div>
-        <p>
-          {isProfessionalImage
-            ? '专业生图会在后台自动保存草稿；请直接选功能、模型、参数并提交。不会自动外发或创建任务。'
-            : '本页面只操作当前项目内草稿；不会自动上传、分析、生成或提交任务。'}
-        </p>
-      </Card>
 
       {currentDraft?.mode === 'quick_image' ? (
         <ImageQuickWorkspace
@@ -627,16 +618,12 @@ export function ImageWorkbenchPage({
       </Card>
         </>
       )}
-      {message ? (
-        <Card className="uc-image-workbench__message-card" role="status">
+      <FloatingStatusBar>
           <StatusPill tone="info">状态</StatusPill>
           <p className="uc-image-workbench__message" aria-live="polite">
-            {message}
+            {floatingStatusMessage}
           </p>
-        </Card>
-      ) : (
-        <p className="uc-image-workbench__message" aria-live="polite" />
-      )}
+      </FloatingStatusBar>
     </section>
   );
 }

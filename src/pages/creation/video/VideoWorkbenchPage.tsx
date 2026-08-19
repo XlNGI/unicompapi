@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { FloatingStatusBar } from '../../../components/FloatingStatusBar';
 import { EmptyState } from '../../../components/EmptyState';
 import { StatusPill } from '../../../components/StatusPill';
 import type { StorageProjectSessionDto } from '../../../shared/storage-ipc';
@@ -30,13 +31,6 @@ const workspaceErrorMessages: Record<VideoWorkspaceIpcErrorCode, string> = {
   media_changed_during_selection: '所选素材在校验过程中发生变化，请重新选择。',
   preview_unavailable: '素材已丢失、变化或不可读，暂时无法预览。',
   workspace_storage_error: '本地视频草稿保存失败，请检查项目目录后重试。'
-};
-
-const draftStateLabels: Record<VideoWorkspaceDraftDto['state'], string> = {
-  editing: '编辑中',
-  saved: '已保存',
-  stale: '内容已过期',
-  archived: '已归档'
 };
 
 interface VideoWorkbenchPageProps {
@@ -273,40 +267,6 @@ export function VideoWorkbenchPage({
         ) : null}
       </header>
 
-      <Card className="uc-image-workbench__project-strip">
-        <div className="uc-image-workbench__project-fact">
-          <span>当前项目</span>
-          <strong>{session?.projectName ?? '尚未打开项目'}</strong>
-        </div>
-        <div className="uc-image-workbench__project-fact">
-          <span>当前模式草稿</span>
-          <strong>
-            {workspaceMode
-              ? session
-                ? `${drafts.length} 个`
-                : '不可创建'
-              : '阶段 6 不创建'}
-          </strong>
-        </div>
-        <div className="uc-image-workbench__project-fact">
-          <span>当前状态</span>
-          <strong>
-            {workspaceMode
-              ? currentDraft
-                ? draftStateLabels[currentDraft.state]
-                : '无本地草稿'
-              : '等待阶段 7 准入'}
-          </strong>
-        </div>
-        <p>
-          {usesFlowAutosave
-            ? '快速/文生/图生视频共用同一套流程：选模型、填参数后直接生成；草稿在选择服务前自动保存，不会自动外发。'
-            : workspaceMode
-              ? '本页面只操作当前项目内视频草稿；不会自动上传、分析、生成或提交任务。'
-              : '基础编辑只保留冻结入口；阶段 6 不创建编辑草稿、时间线或导出任务。'}
-        </p>
-      </Card>
-
       {currentDraft?.mode === 'quick_video' ? (
         <VideoQuickWorkspace
           dirty={dirty}
@@ -459,9 +419,12 @@ export function VideoWorkbenchPage({
       </Card>
         </>
       )}
-      <p className="uc-image-workbench__message" aria-live="polite">
-        {message}
-      </p>
+      <FloatingStatusBar>
+          <StatusPill tone="info">状态</StatusPill>
+          <p className="uc-image-workbench__message" aria-live="polite">
+            {message || '编辑参数后，状态会在这里更新。'}
+          </p>
+      </FloatingStatusBar>
     </section>
   );
 }

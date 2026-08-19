@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { LuArrowRight, LuSparkles } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { GenerationOutputPanel } from '../../../components/GenerationOutputPanel';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
+import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import type {
   VideoWorkspaceDraftDto,
   VideoWorkspaceIpcErrorCode
@@ -56,6 +58,20 @@ export function VideoQuickWorkspace({
   const [busy, setBusy] = useState(false);
   const [resultWorkId, setResultWorkId] = useState<string>();
   const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
+  const [submissionProgress, setSubmissionProgress] = useState<SubmissionProgressPhase>('idle');
+  const handleProgressChange = useCallback((phase: SubmissionProgressPhase) => {
+    if (phase === 'preparing') {
+      setResultWorkId(undefined);
+      setResultUrls([]);
+    }
+    setSubmissionProgress(phase);
+  }, []);
+  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(submissionProgress);
+  const generationPreviewCopy = submissionProgress === 'preparing'
+    ? { title: '正在准备视频生成', description: '正在锁定本次参数与提交事实。' }
+    : submissionProgress === 'requesting'
+      ? { title: '正在提交生成请求', description: '请求正在安全提交，请保持应用运行。' }
+      : { title: '正在生成视频', description: '服务商正在处理，完成后将校验并登记到本地。' };
   const legacyReference = draft.quick.reference;
   const hasLegacyContexts = draft.contextReferences.length > 0;
   const legacyReason = legacyReference?.mediaKind === 'video'
@@ -117,8 +133,9 @@ export function VideoQuickWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-image-quick__workspace">
-        <Card className="uc-image-workbench__panel uc-image-quick__composer">
+      <div className="uc-image-workbench__workspace uc-image-quick__workspace uc-generation-two-pane">
+        <section aria-label="视频生成参数" className="uc-generation-two-pane__controls uc-scrollbar">
+        <Card className="uc-image-workbench__panel uc-image-quick__composer uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -163,7 +180,7 @@ export function VideoQuickWorkspace({
           ) : null}
         </Card>
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-image-quick__inspector">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-image-quick__inspector uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
@@ -173,26 +190,27 @@ export function VideoQuickWorkspace({
           </header>
           <VideoFeatureSubmissionPanel
             blockedReason={legacyReason}
+            className="uc-image-feature-panel--compact"
             dirty={dirty}
             draft={draft}
             oneShot
             onDraftChange={(next) => onDraftChange(next as QuickVideoDraftDto)}
             onDraftPersisted={(next) => onDraftPersisted(next as QuickVideoDraftDto)}
             onMessage={onMessage}
+            onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
               setResultWorkId(submission.workId);
               setResultUrls(submission.resultVideoUrls ?? []);
-              if (
-                submission.status === 'completed' ||
-                submission.status === 'provider_accepted'
-              ) {
+              if (submission.status === 'completed') {
                 onClearUi?.();
               }
             }}
             showProgressSteps
           />
         </Card>
+        </section>
 
+        <GenerationOutputPanel aria-label="视频生成内容" className="uc-generation-two-pane__result">
         <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-image-quick__stage">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">3</span>
@@ -204,6 +222,9 @@ export function VideoQuickWorkspace({
           <GenerationResultPreview
             emptyDescription="填写提示词并选择模型后准备并提交。"
             emptyTitle="尚无生成结果"
+            loading={generationInFlight}
+            loadingDescription={generationPreviewCopy.description}
+            loadingTitle={generationPreviewCopy.title}
             mediaKind="video"
             remoteUrls={resultUrls}
             workId={resultWorkId}
@@ -219,6 +240,7 @@ export function VideoQuickWorkspace({
             </Button>
           </div>
         </Card>
+        </GenerationOutputPanel>
       </div>
 
       <Card className="uc-image-workbench__notice" role="status">

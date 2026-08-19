@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { randomUUID } from 'node:crypto';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   storageIpcChannels,
   type StorageApi
@@ -153,6 +154,11 @@ const imageWorkspaces: ImageWorkspaceApi = {
     }),
   selectInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.selectInput, { draftId }),
+  importInput: (draftId, file) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.importInput, {
+      draftId,
+      sourcePath: getPathForDroppedFile(file)
+    }),
   clearInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.clearInput, { draftId }),
   getInput: (draftId) =>
@@ -293,6 +299,13 @@ const videoWorkspaces: VideoWorkspaceApi = {
       target,
       mediaKind
     }),
+  importMaterial: (draftId, target, mediaKind, file) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.importMaterial, {
+      draftId,
+      target,
+      mediaKind,
+      sourcePath: getPathForDroppedFile(file)
+    }),
   getMaterial: (draftId, target) =>
     ipcRenderer.invoke(videoWorkspaceIpcChannels.getMaterial, {
       draftId,
@@ -313,6 +326,81 @@ const videoWorkspaces: VideoWorkspaceApi = {
       workId
     })
 };
+
+const droppedFilePaths = new Map<string, {
+  readonly sourcePath: string;
+  readonly expiresAt: number;
+}>();
+
+const rendererWindow = globalThis as unknown as {
+  addEventListener(
+    type: string,
+    listener: (event: {
+      readonly target?: unknown;
+      readonly dataTransfer?: {
+        readonly files?: { readonly length: number; item(index: number): unknown };
+      };
+    }) => void,
+    useCapture?: boolean
+  ): void;
+  dispatchEvent(event: unknown): boolean;
+};
+
+rendererWindow.addEventListener('drop', (event) => {
+  const files = event.dataTransfer?.files;
+  if (!files || files.length !== 1) return;
+  const sourcePath = getPathForNativeFile(files.item(0));
+  if (!sourcePath) return;
+  const now = Date.now();
+  for (const [token, entry] of droppedFilePaths) {
+    if (entry.expiresAt < now) droppedFilePaths.delete(token);
+  }
+  const token = randomUUID();
+  droppedFilePaths.set(token, {
+    sourcePath,
+    expiresAt: now + 30_000
+  });
+  const dropZone = findDropZone(event.target);
+  if (!dropZone) {
+    droppedFilePaths.delete(token);
+    return;
+  }
+  dropZone.setAttribute('data-unicomp-drop-token', token);
+}, true);
+
+function getPathForDroppedFile(file: unknown): string | undefined {
+  if (typeof file === 'string') {
+    const entry = droppedFilePaths.get(file);
+    droppedFilePaths.delete(file);
+    if (!entry || entry.expiresAt < Date.now()) return undefined;
+    return entry.sourcePath;
+  }
+  return getPathForNativeFile(file);
+}
+
+function getPathForNativeFile(file: unknown): string | undefined {
+  if (!file || typeof file !== 'object') return undefined;
+  try {
+    return webUtils.getPathForFile(
+      file as Parameters<typeof webUtils.getPathForFile>[0]
+    ) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function findDropZone(value: unknown): {
+  setAttribute(name: string, value: string): void;
+} | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const closest = (value as { closest?: unknown }).closest;
+  if (typeof closest !== 'function') return undefined;
+  const target = closest.call(value, '.uc-controlled-image-drop-zone');
+  return target && typeof target === 'object' &&
+    typeof (target as { setAttribute?: unknown }).setAttribute === 'function'
+    ? target as { setAttribute(name: string, value: string): void }
+    : undefined;
+}
 
 const videoEditors: VideoEditorApi = {
   create: (sourceIntent, title) =>

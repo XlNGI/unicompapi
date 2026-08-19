@@ -22,6 +22,7 @@ test('exposes only the controlled local image workspace operations', () => {
     'list',
     'derive',
     'selectInput',
+    'importInput',
     'clearInput',
     'getInput',
     'createInputPreview'

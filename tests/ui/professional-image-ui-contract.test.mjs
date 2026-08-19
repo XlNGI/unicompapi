@@ -134,11 +134,10 @@ test('professional image shows an honest animated loading state inside the resul
   assert.match(resultPreviewSource, /uc-generation-result-preview__loading/);
   assert.match(resultPreviewSource, /role="status"/);
   assert.match(resultPreviewSource, /uc-generation-result-preview__ring/);
-  assert.match(resultPreviewSource, /uc-generation-result-preview__scan-line/);
+  assert.match(resultPreviewSource, /LuSparkles/);
   assert.match(pageStyles, /\.uc-generation-result-preview__loading\s*{[\s\S]*min-height: 320px;/);
-  assert.match(pageStyles, /@keyframes uc-generation-result-preview-breathe/);
-  assert.match(pageStyles, /@keyframes uc-generation-result-preview-scan/);
-  assert.match(pageStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.uc-generation-result-preview__scan-line/);
+  assert.match(pageStyles, /\.uc-generation-result-preview__indicator\s*{[\s\S]*width: 76px;/);
+  assert.match(pageStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.uc-generation-result-preview__ring/);
   assert.doesNotMatch(resultPreviewSource, /\d+%/);
 });
 

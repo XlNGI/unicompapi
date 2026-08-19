@@ -5,6 +5,7 @@ export const imageWorkspaceIpcChannels = {
   list: 'image-workspace:list',
   derive: 'image-workspace:derive',
   selectInput: 'image-workspace:select-input',
+  importInput: 'image-workspace:import-input',
   clearInput: 'image-workspace:clear-input',
   getInput: 'image-workspace:get-input',
   createInputPreview: 'image-workspace:create-input-preview'
@@ -236,6 +237,10 @@ export interface ImageWorkspaceApi {
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceDraftDto>>;
   selectInput(
     draftId: string
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;
+  importInput(
+    draftId: string,
+    file: unknown
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;
   clearInput(
     draftId: string

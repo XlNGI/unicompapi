@@ -188,7 +188,7 @@ describe('synchronous image receipt integration', () => {
     ).resolves.toMatchObject({ state: 'completed', workId: 'work-sync-image' });
   });
 
-  it('recovers a persisted failed download after runtime reconstruction', async () => {
+  it('receives a persisted remote result after runtime reconstruction', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-recovery-'));
     roots.push(root);
     await mkdir(path.join(root, 'tmp'), { recursive: true });
@@ -211,27 +211,15 @@ describe('synchronous image receipt integration', () => {
         submissionOutcome: 'completed_sync'
       }
     );
-    const downloading = transitionExecution(
-      remoteCompleted,
-      'downloading',
-      timestamp
-    );
-    const failed = transitionExecution(downloading, 'failed', timestamp, {
-      failure: {
-        stage: 'downloading',
-        message: 'Temporary result download failure',
-        retryability: 'retryable'
-      }
-    });
     await new JsonTaskRepository(storage, projectId).save(
-      addExecutionToTask(task, failed)
+      addExecutionToTask(task, remoteCompleted)
     );
-    await new JsonExecutionRepository(storage).save(failed);
+    await new JsonExecutionRepository(storage).save(remoteCompleted);
     await new JsonProviderOperationRepository(storage).save(
       createProviderOperationRecord({
         id: recordId,
         taskId: task.id,
-        executionId: failed.id,
+        executionId: remoteCompleted.id,
         mediaKind: 'image',
         executionLifecycle: 'synchronous_completed',
         outcome: {
@@ -293,18 +281,18 @@ describe('synchronous image receipt integration', () => {
 
     await expect(runtime.recoverResult?.(task.id)).resolves.toMatchObject({
       taskId: task.id,
-      executionId: failed.id,
+      executionId: remoteCompleted.id,
       workId: expect.stringMatching(/^work-result-/)
     });
-    const completed = await new JsonExecutionRepository(storage).get(failed.id);
+    const completed = await new JsonExecutionRepository(storage).get(remoteCompleted.id);
     expect(completed).toMatchObject({
-      id: failed.id,
+      id: remoteCompleted.id,
       state: 'completed'
     });
     expect(completed).not.toHaveProperty('failure');
     const works = await new JsonWorkRepository(storage, projectId).list(projectId);
     expect(works).toHaveLength(1);
-    expect(works[0]?.sourceExecutionId).toBe(failed.id);
+    expect(works[0]?.sourceExecutionId).toBe(remoteCompleted.id);
   });
 });
 

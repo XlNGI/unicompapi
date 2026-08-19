@@ -74,6 +74,13 @@ test('distinguishes confirmed provider failures from unconfirmed outcomes', () =
   assert.match(progressSteps, /状态待确认/);
 });
 
+test('identifies a completed remote image that is waiting for local receipt', () => {
+  assert.match(provider, /details\.value\?\.canRecoverImageResult === true/);
+  assert.match(provider, /图片已完成，等待接收/);
+  assert.match(provider, /远端生成已完成，但本地文件尚未接收/);
+  assert.match(provider, /不会重新生成或重复扣费/);
+});
+
 test('shows successful generation at the bottom left and removes it automatically', () => {
   assert.match(provider, /const successDurationMs = 5_000/);
   assert.match(provider, /notification\.kind === 'success'/);
@@ -150,8 +157,12 @@ test('separates submission and generation lifecycle feedback', () => {
 });
 
 test('keeps ordinary workbench feedback separate from generated-state notifications', () => {
-  assert.match(imageWorkbench, /uc-image-workbench__message-card/);
+  assert.match(imageWorkbench, /<FloatingStatusBar>/);
+  assert.match(videoWorkbench, /<FloatingStatusBar>/);
+  assert.match(imageWorkbench, /uc-image-workbench__message/);
   assert.match(videoWorkbench, /uc-image-workbench__message/);
+  assert.doesNotMatch(imageWorkbench, /uc-image-workbench__message-card/);
+  assert.doesNotMatch(videoWorkbench, /uc-image-workbench__message-card/);
   assert.doesNotMatch(imageWorkbench, /正在生成…/);
   assert.doesNotMatch(videoWorkbench, /正在生成…/);
 });

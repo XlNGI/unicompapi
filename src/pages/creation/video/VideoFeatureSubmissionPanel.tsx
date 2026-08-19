@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
@@ -31,6 +32,7 @@ import {
 } from '../../../ui/notifications/generation-failure-reasons';
 
 interface VideoFeatureSubmissionPanelProps {
+  readonly className?: string;
   readonly dirty: boolean;
   readonly draft: VideoWorkspaceDraftDto;
   readonly blockedReason?: string;
@@ -38,6 +40,13 @@ interface VideoFeatureSubmissionPanelProps {
   readonly oneShot?: boolean;
   /** Text / image-to-video: show in-page 准备 → 请求中 → 等待上游 → 完成 progress. */
   readonly showProgressSteps?: boolean;
+  /** Hosts the primary action in the workbench footer when provided. */
+  readonly actionHost?: HTMLDivElement | null;
+  /** Exposes real submit stages to the result preview without changing execution state. */
+  readonly onProgressChange?: (
+    phase: SubmissionProgressPhase,
+    failureMessage?: string
+  ) => void;
   readonly onDraftChange: (draft: VideoWorkspaceDraftDto) => void;
   readonly onDraftPersisted?: (draft: VideoWorkspaceDraftDto) => void;
   readonly onMessage: (message: string) => void;
@@ -105,11 +114,14 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
 };
 
 export function VideoFeatureSubmissionPanel({
+  className = '',
   dirty,
   draft,
   blockedReason,
   oneShot = false,
   showProgressSteps = false,
+  actionHost,
+  onProgressChange,
   onDraftChange,
   onDraftPersisted,
   onMessage,
@@ -123,6 +135,7 @@ export function VideoFeatureSubmissionPanel({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
+  const trackProgress = showProgressSteps || Boolean(onProgressChange);
   const featureSelection = draft.featureSelection ?? {
     productFeature: draft.mode === 'image_to_video'
       ? 'image_to_video' as const
@@ -141,6 +154,15 @@ export function VideoFeatureSubmissionPanel({
   onDraftPersistedRef.current = onDraftPersisted;
   onMessageRef.current = onMessage;
   const generationNotificationId = `video-generation:${draft.draftId}`;
+
+  useEffect(() => {
+    onProgressChange?.(progressPhase, progressFailure);
+  }, [onProgressChange, progressFailure, progressPhase]);
+
+  useEffect(() => {
+    setProgressPhase('idle');
+    setProgressFailure(undefined);
+  }, [draft.draftId]);
 
   function showGenerationProgress(
     description: string,
@@ -405,14 +427,14 @@ export function VideoFeatureSubmissionPanel({
     setBusy(true);
     busyRef.current = true;
     showGenerationProgress('正在保存当前草稿并准备安全提交信息。', '视频提交准备中');
-    if (showProgressSteps) {
+    if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('preparing');
     }
     try {
       let saved = await ensureSavedDraft();
       if (!saved) {
-        if (showProgressSteps) setProgressPhase('submission_failed');
+        if (trackProgress) setProgressPhase('submission_failed');
         return;
       }
       showGenerationProgress('正在向主进程准备安全提交信息。', '视频提交准备中');
@@ -436,7 +458,7 @@ export function VideoFeatureSubmissionPanel({
       if (!result.ok) {
         const message = describeVideoFeatureError(result.error);
         showSubmissionError(message);
-        if (showProgressSteps) {
+        if (trackProgress) {
           setProgressFailure(message);
           setProgressPhase('submission_failed');
         }
@@ -446,7 +468,7 @@ export function VideoFeatureSubmissionPanel({
       await submitPrepared(saved, result.value);
     } catch {
       showSubmissionError('准备视频提交失败，请重试。');
-      if (showProgressSteps) {
+      if (trackProgress) {
         setProgressFailure('准备视频提交失败，请重试。');
         setProgressPhase('submission_failed');
       }
@@ -462,7 +484,7 @@ export function VideoFeatureSubmissionPanel({
   ) {
     if (!api) return;
     showGenerationProgress('正在向主进程提交生成请求。', '视频提交中');
-    if (showProgressSteps) {
+    if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');
     }
@@ -481,7 +503,7 @@ export function VideoFeatureSubmissionPanel({
       } else {
         showSubmissionError(message);
       }
-      if (showProgressSteps) {
+      if (trackProgress) {
         setProgressFailure(uncertain ? describeUnconfirmedGenerationOutcome() : message);
         setProgressPhase(uncertain ? 'submission_uncertain' : 'submission_failed');
       }
@@ -496,7 +518,7 @@ export function VideoFeatureSubmissionPanel({
       ? rawFeedback
       : `提交状态：${submissionStatusLabel(result.value.status)}`;
     showSubmissionOutcome(result.value);
-    if (showProgressSteps) {
+    if (trackProgress) {
       if (uncertain) {
         setProgressFailure(describeUnconfirmedGenerationOutcome(result.value.safeCode));
         setProgressPhase('uncertain');
@@ -517,7 +539,7 @@ export function VideoFeatureSubmissionPanel({
   }
 
   return (
-    <div className="uc-image-feature-panel">
+    <div className={`uc-image-feature-panel${className ? ` ${className}` : ''}`}>
       <ModelSelect
         disabled={!api || loadState !== 'loaded'}
         emptyDescription={
@@ -594,7 +616,21 @@ export function VideoFeatureSubmissionPanel({
         />
       ) : null}
 
-      <Button
+      {actionHost ? createPortal(
+        <Button
+          className="uc-image-feature-panel__primary"
+          disabled={
+            Boolean(blockedReason) ||
+            busy ||
+            !selectedCandidate?.available
+          }
+          onClick={() => void prepare()}
+        >
+          <LuSend aria-hidden="true" />
+          {busy ? '处理中' : '生成'}
+        </Button>,
+        actionHost
+      ) : <Button
         className="uc-image-feature-panel__primary"
         disabled={
           Boolean(blockedReason) ||
@@ -605,7 +641,7 @@ export function VideoFeatureSubmissionPanel({
       >
         <LuSend aria-hidden="true" />
         {busy ? '处理中' : '生成'}
-      </Button>
+      </Button>}
       {showProgressSteps ? (
         <p className="uc-image-feature-panel__action-hint" role="status">
           {!selectedCandidate

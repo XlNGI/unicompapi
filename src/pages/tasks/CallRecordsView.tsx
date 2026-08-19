@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { DatePicker, SelectPicker } from 'rsuite';
+import { DateRangePicker, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
+import { FloatingStatusBar } from '../../components/FloatingStatusBar';
 import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import type {
   StorageApi,
@@ -17,6 +18,7 @@ import {
   describeGenerationSafeCode,
   type GenerationSafeReason
 } from '../../ui/notifications/generation-failure-reasons';
+import { TaskCenterWorkspace } from './TaskCenterWorkspace';
 
 interface CallRecordsViewProps {
   readonly onNavigate?: (itemId: 'projects' | 'library') => void;
@@ -59,6 +61,12 @@ function formatDateToYmd(date: Date | null): string {
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function parseDateRange(createdFrom: string, createdTo: string): [Date, Date] | null {
+  const start = parseYmdToDate(createdFrom);
+  const end = parseYmdToDate(createdTo);
+  return start && end ? [start, end] : null;
 }
 
 const callStates: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
@@ -280,45 +288,36 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
           }))}
           value={filters.state}
         />
-        <div className="uc-rsuite-field">
-          开始日期
-          <DatePicker
-            aria-label="开始日期"
+        <div className="uc-rsuite-field uc-task-center__date-range">
+          日期范围
+          <DateRangePicker
+            aria-label="日期范围"
+            block
+            character=" 至 "
             format="yyyy-MM-dd"
-            onChange={(date) => changeFilter('createdFrom', formatDateToYmd(date))}
-            oneTap
-            shouldDisableDate={(date) =>
-              filters.createdTo ? formatDateToYmd(date) > filters.createdTo : false
-            }
-            value={parseYmdToDate(filters.createdFrom)}
-          />
-        </div>
-        <div className="uc-rsuite-field">
-          结束日期
-          <DatePicker
-            aria-label="结束日期"
-            format="yyyy-MM-dd"
-            onChange={(date) => changeFilter('createdTo', formatDateToYmd(date))}
-            oneTap
-            shouldDisableDate={(date) =>
-              filters.createdFrom ? formatDateToYmd(date) < filters.createdFrom : false
-            }
-            value={parseYmdToDate(filters.createdTo)}
+            onChange={(range) => setFilters((current) => ({
+              ...current,
+              createdFrom: formatDateToYmd(range?.[0] ?? null),
+              createdTo: formatDateToYmd(range?.[1] ?? null)
+            }))}
+            placeholder="选择日期范围"
+            showOneCalendar
+            value={parseDateRange(filters.createdFrom, filters.createdTo)}
           />
         </div>
       </Card>
 
       {issues.length > 0 ? (
-        <Card className="uc-task-center__issues" role="status">
-          <h2>部分项目的调用记录无法读取</h2>
-          {issues.map((issue) => (
-            <p key={issue.projectId}>
-              {issue.projectName}：{issue.reason === 'unavailable'
+        <FloatingStatusBar label="状态" tone="warning">
+          <p>
+            部分项目的调用记录无法读取：{' '}
+            {issues.map((issue) => (
+              `${issue.projectName}：${issue.reason === 'unavailable'
                 ? '项目失效或断盘'
-                : '调用数据损坏或缺少精确参数定义'}
-            </p>
-          ))}
-        </Card>
+                : '调用数据损坏或缺少精确参数定义'}`
+            )).join('；')}
+          </p>
+        </FloatingStatusBar>
       ) : null}
 
       {loading ? (
@@ -336,43 +335,48 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
           title="没有符合条件的调用"
         />
       ) : (
-        <div className="uc-task-center__workspace">
-          <section className="uc-task-center__list" aria-labelledby="call-list-title">
-            <h2 id="call-list-title">调用列表（{records.length} / {total}）</h2>
-            {records.map((record) => {
-              const state = callState(record.state);
-              return (
-                <button
-                  aria-pressed={selectedCallId === record.invocationAttemptId}
-                  className="uc-task-center__task uc-task-center__call"
-                  key={record.invocationAttemptId}
-                  onClick={() => setSelectedCallId(record.invocationAttemptId)}
-                  type="button"
-                >
-                  <span>
-                    <strong>{featureLabels[record.productFeature] ?? '其他功能'}</strong>
-                    <small>{record.projectName}</small>
-                  </span>
-                  <StatusPill tone={state.tone}>{state.label}</StatusPill>
-                  <small>{displayRoute(record)}</small>
-                  <small>{formatTimestamp(record.createdAt)}</small>
-                  <small>{usageLabels[record.usageAvailability] ?? '用量状态未知'}</small>
-                </button>
-              );
-            })}
-          </section>
-
-          <section className="uc-task-center__details" aria-labelledby="call-details-title">
-            <h2 id="call-details-title">调用详情</h2>
-            {detailsLoading ? (
-              <p className="uc-task-center__muted" role="status">正在读取调用详情…</p>
-            ) : details ? (
-              <CallDetails details={details} onNavigate={onNavigate} />
-            ) : (
-              <p className="uc-task-center__muted">选择左侧调用查看脱敏时间线和用量事实。</p>
-            )}
-          </section>
-        </div>
+        <TaskCenterWorkspace
+          details={(
+            <>
+              <h2 id="call-details-title">调用详情</h2>
+              {detailsLoading ? (
+                <p className="uc-task-center__muted" role="status">正在读取调用详情…</p>
+              ) : details ? (
+                <CallDetails details={details} onNavigate={onNavigate} />
+              ) : (
+                <p className="uc-task-center__muted">选择左侧调用查看脱敏时间线和用量事实。</p>
+              )}
+            </>
+          )}
+          detailsLabelledBy="call-details-title"
+          list={(
+            <>
+              <h2 id="call-list-title">调用列表（{records.length} / {total}）</h2>
+              {records.map((record) => {
+                const state = callState(record.state);
+                return (
+                  <button
+                    aria-pressed={selectedCallId === record.invocationAttemptId}
+                    className="uc-task-center__task uc-task-center__call"
+                    key={record.invocationAttemptId}
+                    onClick={() => setSelectedCallId(record.invocationAttemptId)}
+                    type="button"
+                  >
+                    <span>
+                      <strong>{featureLabels[record.productFeature] ?? '其他功能'}</strong>
+                      <small>{record.projectName}</small>
+                    </span>
+                    <StatusPill tone={state.tone}>{state.label}</StatusPill>
+                    <small>{displayRoute(record)}</small>
+                    <small>{formatTimestamp(record.createdAt)}</small>
+                    <small>{usageLabels[record.usageAvailability] ?? '用量状态未知'}</small>
+                  </button>
+                );
+              })}
+            </>
+          )}
+          listLabelledBy="call-list-title"
+        />
       )}
 
       <p className="uc-task-center__message" aria-live="polite">{message}</p>
