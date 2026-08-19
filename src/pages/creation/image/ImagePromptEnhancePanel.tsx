@@ -6,6 +6,7 @@ interface ImagePromptEnhancePanelProps {
   readonly dirty: boolean;
   readonly draft: ImageWorkspaceDraftDto;
   readonly onDraftPersisted: (draft: ImageWorkspaceDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
 }
 
@@ -13,6 +14,7 @@ export function ImagePromptEnhancePanel({
   dirty,
   draft,
   onDraftPersisted,
+  onFlushDraft,
   onMessage
 }: ImagePromptEnhancePanelProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
@@ -34,6 +36,18 @@ export function ImagePromptEnhancePanel({
           if (!imageWorkspaces) return undefined;
           if (!dirty && draft.state === 'saved') {
             return { subjectId: draft.draftId, subjectRevision: draft.updatedAt };
+          }
+          if (onFlushDraft) {
+            if (!(await onFlushDraft())) return undefined;
+            const refreshed = await imageWorkspaces.get(draft.draftId);
+            if (!refreshed.ok || !refreshed.value) {
+              onMessage('无法读取刚刚保存的图片草稿，请重试。');
+              return undefined;
+            }
+            return {
+              subjectId: refreshed.value.draftId,
+              subjectRevision: refreshed.value.updatedAt
+            };
           }
           const result = await imageWorkspaces.update({ ...draft, state: 'saved' });
           if (!result.ok) {

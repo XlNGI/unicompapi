@@ -11,10 +11,12 @@ import type { VideoWorkspaceApi } from './shared/video-workspace-ipc';
 import type { VideoEditorApi } from './shared/video-editor-ipc';
 import type { SettingsApi } from './shared/settings-ipc';
 import type { ChatContextApi } from './shared/chat-context-ipc';
+import type { AutosaveDiagnosticsApi } from './shared/autosave-diagnostics-ipc';
 
 declare global {
   interface Window {
     unicomp?: {
+      autosaveDiagnostics: AutosaveDiagnosticsApi;
       chatContexts: ChatContextApi;
       imageFeatures: ImageFeatureApi;
       promptEnhance: PromptEnhanceApi;

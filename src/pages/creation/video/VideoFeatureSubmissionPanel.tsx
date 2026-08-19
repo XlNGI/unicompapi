@@ -49,6 +49,7 @@ interface VideoFeatureSubmissionPanelProps {
   ) => void;
   readonly onDraftChange: (draft: VideoWorkspaceDraftDto) => void;
   readonly onDraftPersisted?: (draft: VideoWorkspaceDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
   readonly onSubmissionComplete?: (submission: VideoFeatureSubmissionDto) => void;
 }
@@ -124,6 +125,7 @@ export function VideoFeatureSubmissionPanel({
   onProgressChange,
   onDraftChange,
   onDraftPersisted,
+  onFlushDraft,
   onMessage,
   onSubmissionComplete
 }: VideoFeatureSubmissionPanelProps) {
@@ -147,11 +149,9 @@ export function VideoFeatureSubmissionPanel({
   );
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
-  const onDraftPersistedRef = useRef(onDraftPersisted);
   const onMessageRef = useRef(onMessage);
   busyRef.current = busy;
   draftRef.current = draft;
-  onDraftPersistedRef.current = onDraftPersisted;
   onMessageRef.current = onMessage;
   const generationNotificationId = `video-generation:${draft.draftId}`;
 
@@ -271,56 +271,17 @@ export function VideoFeatureSubmissionPanel({
     }
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
-    const delayMs = needsSave ? 350 : 0;
+    if (needsSave) {
+      setCandidates([]);
+      setLoadState('idle');
+      return;
+    }
     setLoadState('loading');
     const timer = window.setTimeout(() => {
       void (async () => {
         if (busyRef.current) return;
-        let draftId = draft.draftId;
-        let draftUpdatedAt = draft.updatedAt;
-        if (needsSave && videoWorkspaces) {
-          const snapshot = draftRef.current;
-          const saved = await persistVideoWorkspaceDraft(
-            videoWorkspaces,
-            snapshot,
-            'saved'
-          );
-          if (!active || busyRef.current) return;
-          if (!saved.ok) {
-            setCandidates([]);
-            setLoadState('loaded');
-            onMessageRef.current(describeWorkspacePersistError(saved.error));
-            return;
-          }
-          const latest = draftRef.current;
-          const superseded =
-            latest.draftId === snapshot.draftId && latest !== snapshot;
-          if (!superseded) {
-            draftId = saved.value.draftId;
-            draftUpdatedAt = saved.value.updatedAt;
-            onDraftPersistedRef.current?.(saved.value);
-          } else {
-            draftId = latest.draftId;
-            draftUpdatedAt = latest.updatedAt;
-            if (latest.state !== 'saved') {
-              const again = await persistVideoWorkspaceDraft(
-                videoWorkspaces,
-                latest,
-                'saved'
-              );
-              if (!active || busyRef.current) return;
-              if (!again.ok) {
-                setCandidates([]);
-                setLoadState('loaded');
-                onMessageRef.current(describeWorkspacePersistError(again.error));
-                return;
-              }
-              draftId = again.value.draftId;
-              draftUpdatedAt = again.value.updatedAt;
-              onDraftPersistedRef.current?.(again.value);
-            }
-          }
-        }
+        const draftId = draft.draftId;
+        const draftUpdatedAt = draft.updatedAt;
         if (busyRef.current) return;
         const result = await api.listCandidates(draftId, draftUpdatedAt);
         if (!active || busyRef.current) return;
@@ -338,7 +299,7 @@ export function VideoFeatureSubmissionPanel({
         setLoadState('loaded');
         onMessageRef.current('读取视频服务候选失败，请重试。');
       });
-    }, delayMs);
+    }, 0);
     return () => {
       active = false;
       window.clearTimeout(timer);
@@ -409,6 +370,15 @@ export function VideoFeatureSubmissionPanel({
     if (!videoWorkspaces) return undefined;
     const snapshot = draftRef.current;
     if (!dirty && snapshot.state === 'saved') return snapshot;
+    if (onFlushDraft) {
+      if (!(await onFlushDraft())) return undefined;
+      const refreshed = await videoWorkspaces.get(snapshot.draftId);
+      if (!refreshed.ok || !refreshed.value) {
+        showSubmissionError('无法读取刚刚保存的视频草稿，请重试。');
+        return undefined;
+      }
+      return refreshed.value;
+    }
     const result = await persistVideoWorkspaceDraft(
       videoWorkspaces,
       snapshot,

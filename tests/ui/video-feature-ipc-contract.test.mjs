@@ -67,8 +67,8 @@ test('video feature panel uses shared model select and dynamic parameter form', 
 });
 
 test('video candidate loading is stable across parent callback renders', () => {
-  assert.match(panel, /onDraftPersistedRef\.current/);
   assert.match(panel, /onMessageRef\.current/);
+  assert.doesNotMatch(panel, /onDraftPersistedRef/);
   assert.doesNotMatch(
     panel,
     /featureSelection\.productFeature,[\s\S]*onDraftPersisted,[\s\S]*onMessage,[\s\S]*videoWorkspaces/

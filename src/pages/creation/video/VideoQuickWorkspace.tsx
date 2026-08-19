@@ -24,6 +24,7 @@ interface VideoQuickWorkspaceProps {
   readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: QuickVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: QuickVideoDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
   readonly onNavigateToTextToVideo?: () => void;
   readonly onNavigateToImageToVideo?: (draftId: string) => void;
@@ -50,6 +51,7 @@ export function VideoQuickWorkspace({
   onClearUi,
   onDraftChange,
   onDraftPersisted,
+  onFlushDraft,
   onMessage,
   onNavigateToTextToVideo,
   onNavigateToImageToVideo
@@ -196,6 +198,7 @@ export function VideoQuickWorkspace({
             oneShot
             onDraftChange={(next) => onDraftChange(next as QuickVideoDraftDto)}
             onDraftPersisted={(next) => onDraftPersisted(next as QuickVideoDraftDto)}
+            onFlushDraft={onFlushDraft}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {

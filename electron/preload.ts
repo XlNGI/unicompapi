@@ -46,6 +46,14 @@ import {
   type ChatContextApi,
   type ConversationResponseStreamEventDto
 } from '../src/shared/chat-context-ipc';
+import {
+  autosaveDiagnosticsIpcChannel,
+  type AutosaveDiagnosticsApi
+} from '../src/shared/autosave-diagnostics-ipc';
+
+const autosaveDiagnostics: AutosaveDiagnosticsApi = {
+  record: (event) => ipcRenderer.send(autosaveDiagnosticsIpcChannel, event)
+};
 
 const storage: StorageApi = {
   probeFile: (fileId) =>
@@ -872,6 +880,7 @@ const chatContexts: ChatContextApi = {
 };
 
 contextBridge.exposeInMainWorld('unicomp', {
+  autosaveDiagnostics,
   chatContexts,
   imageSubmissions,
   imageFeatures,

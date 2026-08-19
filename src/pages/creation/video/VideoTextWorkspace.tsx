@@ -26,6 +26,7 @@ interface VideoTextWorkspaceProps {
   readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: TextVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: TextVideoDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
 }
 
@@ -35,6 +36,7 @@ export function VideoTextWorkspace({
   onClearUi,
   onDraftChange,
   onDraftPersisted,
+  onFlushDraft,
   onMessage
 }: VideoTextWorkspaceProps) {
   const [resultWorkId, setResultWorkId] = useState<string>();
@@ -293,6 +295,7 @@ export function VideoTextWorkspace({
             dirty={dirty}
             draft={draft}
             onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
+            onFlushDraft={onFlushDraft}
             onMessage={onMessage}
           />
         </Card>
@@ -312,6 +315,7 @@ export function VideoTextWorkspace({
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as TextVideoDraftDto)}
             onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
+            onFlushDraft={onFlushDraft}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {

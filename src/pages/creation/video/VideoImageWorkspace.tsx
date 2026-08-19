@@ -57,6 +57,7 @@ interface VideoImageWorkspaceProps {
   readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: ImageVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: ImageVideoDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
 }
 
@@ -66,6 +67,7 @@ export function VideoImageWorkspace({
   onClearUi,
   onDraftChange,
   onDraftPersisted,
+  onFlushDraft,
   onMessage
 }: VideoImageWorkspaceProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
@@ -188,6 +190,15 @@ export function VideoImageWorkspace({
   async function ensureSavedDraft(): Promise<ImageVideoDraftDto | undefined> {
     if (!videoWorkspaces) return undefined;
     if (!dirty && draft.state === 'saved') return draft;
+    if (onFlushDraft) {
+      if (!(await onFlushDraft())) return undefined;
+      const refreshed = await videoWorkspaces.get(draft.draftId);
+      if (!refreshed.ok || !refreshed.value) {
+        onMessage('无法读取刚刚保存的视频草稿，请重试。');
+        return undefined;
+      }
+      return refreshed.value as ImageVideoDraftDto;
+    }
     const result = await persistVideoWorkspaceDraft(
       videoWorkspaces,
       draft,
@@ -530,6 +541,7 @@ export function VideoImageWorkspace({
             dirty={dirty}
             draft={draft}
             onDraftPersisted={(next) => onDraftPersisted(next as ImageVideoDraftDto)}
+            onFlushDraft={onFlushDraft}
             onMessage={onMessage}
           />
         </Card>
@@ -549,6 +561,7 @@ export function VideoImageWorkspace({
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as ImageVideoDraftDto)}
             onDraftPersisted={(next) => onDraftPersisted(next as ImageVideoDraftDto)}
+            onFlushDraft={onFlushDraft}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {

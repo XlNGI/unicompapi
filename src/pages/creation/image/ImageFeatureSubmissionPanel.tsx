@@ -51,6 +51,7 @@ interface ImageFeatureSubmissionPanelProps {
   ) => void;
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
   readonly onSubmissionComplete?: (submission: ImageFeatureSubmissionDto) => void;
 }
@@ -100,6 +101,7 @@ export function ImageFeatureSubmissionPanel({
   actionHost,
   onDraftChange,
   onDraftPersisted,
+  onFlushDraft,
   onMessage,
   onProgressChange,
   onSubmissionComplete
@@ -138,11 +140,9 @@ export function ImageFeatureSubmissionPanel({
   );
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
-  const onDraftPersistedRef = useRef(onDraftPersisted);
   const onMessageRef = useRef(onMessage);
   busyRef.current = busy;
   draftRef.current = draft;
-  onDraftPersistedRef.current = onDraftPersisted;
   onMessageRef.current = onMessage;
   const generationNotificationId = `image-generation:${draft.draftId}`;
 
@@ -273,38 +273,18 @@ export function ImageFeatureSubmissionPanel({
     // Avoid racing prepare/submit: autosave + listCandidates must not run mid-flight.
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
-    if (draft.mode === 'professional_image' && needsSave) {
+    if (needsSave) {
       setCandidates([]);
       setLoadState('idle');
       return;
     }
-    const delayMs = needsSave ? 350 : 0;
     setLoadState('loading');
     const timer = window.setTimeout(() => {
       void (async () => {
         if (busyRef.current) return;
         const snapshot = draft;
-        let draftId = snapshot.draftId;
-        let draftUpdatedAt = snapshot.updatedAt;
-        if (needsSave && imageWorkspaces) {
-          const saved = await imageWorkspaces.update({
-            ...snapshot,
-            state: 'saved'
-          });
-          if (!active || busyRef.current) return;
-          if (!saved.ok) {
-            setCandidates([]);
-            setLoadState('loaded');
-            onMessageRef.current(errorMessages[saved.error.code] ?? '保存图片草稿失败，请重试。');
-            return;
-          }
-          // A newer keystroke may have arrived while this save was in flight.
-          // Do not publish the stale response back into the controlled form.
-          if (draftRef.current !== snapshot) return;
-          draftId = saved.value.draftId;
-          draftUpdatedAt = saved.value.updatedAt;
-          onDraftPersistedRef.current?.(saved.value as GenerationImageDraftDto);
-        }
+        const draftId = snapshot.draftId;
+        const draftUpdatedAt = snapshot.updatedAt;
         if (busyRef.current) return;
         const result = await api.listCandidates(draftId, draftUpdatedAt);
         if (!active || busyRef.current) return;
@@ -322,7 +302,7 @@ export function ImageFeatureSubmissionPanel({
         setLoadState('loaded');
         onMessageRef.current('读取图片服务候选失败，请重试。');
       });
-    }, delayMs);
+    }, 0);
     return () => {
       active = false;
       window.clearTimeout(timer);
@@ -395,6 +375,15 @@ export function ImageFeatureSubmissionPanel({
   async function ensureSavedDraft(): Promise<GenerationImageDraftDto | undefined> {
     if (!imageWorkspaces) return undefined;
     if (!dirty && draft.state === 'saved') return draft;
+    if (onFlushDraft) {
+      if (!(await onFlushDraft())) return undefined;
+      const refreshed = await imageWorkspaces.get(draft.draftId);
+      if (!refreshed.ok || !refreshed.value) {
+        showSubmissionError('无法读取刚刚保存的图片草稿，请重试。');
+        return undefined;
+      }
+      return refreshed.value as GenerationImageDraftDto;
+    }
     const result = await imageWorkspaces.update({
       ...draft,
       state: 'saved'

@@ -7,6 +7,7 @@ interface VideoPromptEnhancePanelProps {
   readonly dirty: boolean;
   readonly draft: VideoWorkspaceDraftDto;
   readonly onDraftPersisted: (draft: VideoWorkspaceDraftDto) => void;
+  readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
 }
 
@@ -14,6 +15,7 @@ export function VideoPromptEnhancePanel({
   dirty,
   draft,
   onDraftPersisted,
+  onFlushDraft,
   onMessage
 }: VideoPromptEnhancePanelProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
@@ -35,6 +37,18 @@ export function VideoPromptEnhancePanel({
           if (!videoWorkspaces) return undefined;
           if (!dirty && draft.state === 'saved') {
             return { subjectId: draft.draftId, subjectRevision: draft.updatedAt };
+          }
+          if (onFlushDraft) {
+            if (!(await onFlushDraft())) return undefined;
+            const refreshed = await videoWorkspaces.get(draft.draftId);
+            if (!refreshed.ok || !refreshed.value) {
+              onMessage('无法读取刚刚保存的视频草稿，请重试。');
+              return undefined;
+            }
+            return {
+              subjectId: refreshed.value.draftId,
+              subjectRevision: refreshed.value.updatedAt
+            };
           }
           const result = await persistVideoWorkspaceDraft(
             videoWorkspaces,
