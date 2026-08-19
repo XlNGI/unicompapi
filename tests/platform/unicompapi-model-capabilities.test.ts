@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   isKnownUniCompApiModel,
   uniCompApiModelFeatures,
+  uniCompApiTextToImageParameterSchema,
   uniCompApiSupportsFeature,
+  UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID
 } from '../../src/platform';
 
@@ -68,6 +70,14 @@ describe('UniCompAPI model capability registry', () => {
       'manual-future-model',
       'text_chat'
     )).toBe(true);
+  });
+
+  it('binds official image parameters only to Seedream 5', () => {
+    expect(
+      uniCompApiTextToImageParameterSchema('doubao-seedream-5-0-260128')?.schemaId
+    ).toBe(UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID);
+    expect(uniCompApiTextToImageParameterSchema('qwen-image')).toBeUndefined();
+    expect(uniCompApiTextToImageParameterSchema('manual-future-model')).toBeUndefined();
   });
 
 });
