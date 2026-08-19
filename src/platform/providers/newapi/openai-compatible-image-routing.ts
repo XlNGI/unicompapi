@@ -25,6 +25,7 @@ import { isOpenAiCompatiblePackageId } from './openai-compatible-identity';
 import {
   isKnownUniCompApiModel,
   isUniCompApiPackage,
+  uniCompApiTextToImageParameterSchema,
   uniCompApiSupportsImage,
   uniCompApiSupportsImageEdit,
   uniCompApiSupportsReferenceImage
@@ -172,6 +173,38 @@ function routeOpenAiCompatibleImageFeatureProfile(
     return { snapshot, model, state: 'skipped' };
   }
 
+  const imageAdapter = template.adapters.find(
+    (adapter) => adapter.adapterId === NEWAPI_IMAGE_ADAPTER_ID
+  );
+  if (!imageAdapter) {
+    return { snapshot, model, state: 'skipped' };
+  }
+
+  const definition = feature === 'text_to_image'
+    ? createOpenAiCompatibleDefaultImageDefinition({
+        packageId: connection.packageId,
+        packageVersion: connection.packageVersion,
+        providerModelKey: model.providerModelKey,
+        parameterSchemaId: isUniCompApiPackage(connection.packageId)
+          ? uniCompApiTextToImageParameterSchema(model.providerModelKey)?.schemaId
+          : undefined
+      })
+    : feature === 'reference_to_image'
+      ? createOpenAiCompatibleDefaultReferenceImageDefinition({
+          packageId: connection.packageId,
+          packageVersion: connection.packageVersion,
+          providerModelKey: model.providerModelKey
+        })
+      : createOpenAiCompatibleDefaultImageEditDefinition({
+          packageId: connection.packageId,
+          packageVersion: connection.packageVersion,
+          providerModelKey: model.providerModelKey
+        });
+  const profileTemplate = definition.profileTemplates[0];
+  if (!profileTemplate) {
+    return { snapshot, model, state: 'skipped' };
+  }
+
   const existingImageProfile = (snapshot.modelProfiles ?? []).find((candidate) =>
     candidate.modelId === model.id &&
     candidate.status === 'verified' &&
@@ -182,6 +215,53 @@ function routeOpenAiCompatibleImageFeatureProfile(
     const ensured = ensureImageCapabilityEvidence(snapshot, model, feature, now);
     const nextModel = ensured.snapshot.models.find((candidate) => candidate.id === model.id)
       ?? model;
+    const desiredFeature = profileTemplate.features.find(
+      (candidate) => candidate.productFeature === feature
+    );
+    const existingFeature = existingImageProfile.features.find(
+      (candidate) => candidate.productFeature === feature
+    );
+    if (
+      desiredFeature &&
+      existingFeature?.parameterSchemaId !== desiredFeature.parameterSchemaId
+    ) {
+      const nextModelRevision = nextModel.revision + 1;
+      const migratedProfile: ModelFeatureProfile = {
+        ...existingImageProfile,
+        revision: existingImageProfile.revision + 1,
+        sourceTemplateId: profileTemplate.templateId,
+        modelRevision: nextModelRevision,
+        features: existingImageProfile.features.map((candidate) =>
+          candidate.productFeature === feature ? desiredFeature : candidate
+        ),
+        recordedAt: now
+      };
+      const migratedModel: ProviderModel = {
+        ...nextModel,
+        revision: nextModelRevision,
+        updatedAt: now
+      };
+      const definitions = ensured.snapshot.modelDefinitions ?? [];
+      return {
+        snapshot: {
+          ...ensured.snapshot,
+          modelDefinitions: definitions.some(
+            (candidate) => candidate.definitionId === definition.definitionId
+          ) ? definitions : [...definitions, definition],
+          models: ensured.snapshot.models.map((candidate) =>
+            candidate.id === migratedModel.id ? migratedModel : candidate
+          ),
+          modelProfiles: (ensured.snapshot.modelProfiles ?? []).map((candidate) =>
+            candidate.profileId === migratedProfile.profileId
+              ? migratedProfile
+              : candidate
+          )
+        },
+        model: migratedModel,
+        profileId: migratedProfile.profileId,
+        state: 'already_attached'
+      };
+    }
     return {
       snapshot: ensured.snapshot,
       model: nextModel,
@@ -190,28 +270,7 @@ function routeOpenAiCompatibleImageFeatureProfile(
     };
   }
 
-  const imageAdapter = template.adapters.find(
-    (adapter) => adapter.adapterId === NEWAPI_IMAGE_ADAPTER_ID
-  );
-  if (!imageAdapter) {
-    return { snapshot, model, state: 'skipped' };
-  }
-
   const binding = ensureImageCatalogBinding(snapshot, connection, imageAdapter, now);
-  const definitionFactory = feature === 'text_to_image'
-    ? createOpenAiCompatibleDefaultImageDefinition
-    : feature === 'reference_to_image'
-      ? createOpenAiCompatibleDefaultReferenceImageDefinition
-      : createOpenAiCompatibleDefaultImageEditDefinition;
-  const definition = definitionFactory({
-    packageId: connection.packageId,
-    packageVersion: connection.packageVersion,
-    providerModelKey: model.providerModelKey
-  });
-  const profileTemplate = definition.profileTemplates[0];
-  if (!profileTemplate) {
-    return { snapshot, model, state: 'skipped' };
-  }
 
   const withEvidence = ensureImageCapabilityEvidence(
     {

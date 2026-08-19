@@ -42,6 +42,8 @@ import {
   newApiDefaultTextToImageParameterSchema,
   newApiDefaultReferenceToImageParameterSchema,
   newApiDefaultTextToVideoParameterSchema,
+  uniCompApiDefaultTextToImageParameterSchema,
+  uniCompApiSeedream5TextToImageParameterSchema,
   newApiProviderPackageDescriptor,
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
@@ -52,6 +54,8 @@ import {
   NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
@@ -222,7 +226,7 @@ describe('NewAPI package and dynamic model contracts', () => {
     ).toBe(true);
   });
 
-  it('publishes an empty default image definition for explicit OpenAI-compatible attach', () => {
+  it('publishes a provider-default image definition for UniCompAPI attach', () => {
     const definition = createOpenAiCompatibleDefaultImageDefinition({
       packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
       packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
@@ -233,7 +237,7 @@ describe('NewAPI package and dynamic model contracts', () => {
       adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
       features: [{
         productFeature: 'text_to_image',
-        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+        parameterSchemaId: UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
         resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
         usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
         constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID
@@ -251,7 +255,50 @@ describe('NewAPI package and dynamic model contracts', () => {
       'output_format',
       'watermark'
     ]);
+    expect(
+      uniCompApiDefaultTextToImageParameterSchema.fields.some(
+        (field) => field.fieldId === 'size'
+      )
+    ).toBe(false);
     expect(JSON.stringify(definition)).not.toMatch(/dall-e|sdxl/i);
+  });
+
+  it('keeps the generic OpenAI-compatible image size contract', () => {
+    const definition = createOpenAiCompatibleDefaultImageDefinition({
+      packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
+      providerModelKey: 'flux-manual'
+    });
+    expect(definition.profileTemplates[0]?.features[0]?.parameterSchemaId).toBe(
+      NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    );
+  });
+
+  it('publishes the official Seedream 5 image parameter contract', () => {
+    const definition = createOpenAiCompatibleDefaultImageDefinition({
+      packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+      providerModelKey: 'doubao-seedream-5-0-260128',
+      parameterSchemaId: UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    });
+    expect(definition.profileTemplates[0]?.features[0]?.parameterSchemaId).toBe(
+      UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    );
+    expect(uniCompApiSeedream5TextToImageParameterSchema.fields).toMatchObject([
+      { fieldId: 'size', required: true, options: ['2K', '3K', '4K'] },
+      { fieldId: 'output_format', required: false, options: ['jpeg', 'png'] },
+      { fieldId: 'response_format', required: false, options: ['url', 'b64_json'] },
+      { fieldId: 'watermark', required: false }
+    ]);
+    expect(uniCompApiSeedream5TextToImageParameterSchema.fields.map(
+      (field) => field.fieldId
+    )).not.toEqual(expect.arrayContaining([
+      'n',
+      'quality',
+      'style',
+      'sequential_image_generation',
+      'stream'
+    ]));
   });
 
   it('publishes the qwen single-reference generations contract explicitly', () => {
@@ -1138,6 +1185,49 @@ describe('NewAPI image adapter', () => {
     const stream = await adapter.openResult(outcome.results[0] as never);
     expect(await readAll(stream)).toEqual(png);
     expect(downloads.download).not.toHaveBeenCalled();
+  });
+
+  it('sends the official Seedream 5 size to UniCompAPI', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fixture = runtimeFixture(async () => jsonResponse({
+      data: [{ b64_json: Buffer.from(png).toString('base64') }]
+    }));
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async (schemaId: string, revision: number) =>
+          schemaId === UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID &&
+          revision === 1
+            ? uniCompApiSeedream5TextToImageParameterSchema
+            : undefined
+      },
+      usageSink().port,
+      { download: vi.fn() }
+    );
+
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiTextToImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-unicompapi-text-to-image',
+        projectId: 'project-newapi',
+        prompt: 'A synthetic image',
+        parameterValues: { size: '2K' }
+      }
+    });
+
+    expect(outcome.kind).toBe('completed_sync');
+    expect(requestJson(fixture.requests[0])).toEqual({
+      model: 'doubao-seedream-5-0-260128',
+      prompt: 'A synthetic image',
+      size: '2K'
+    });
   });
 
   it('sends qwen-image-edit-2509 reference input to images/generations', async () => {
@@ -2087,6 +2177,46 @@ function unicompapiReferenceImageRoute(): ProviderExecutionRouteSnapshotV1 {
     runtimePolicyRevision: 1,
     runtimeAuthorizationClaimId: 'claim-unicompapi-synthetic',
     createdAt: toIsoTimestamp('2026-08-11T06:00:00.000Z')
+  });
+}
+
+function unicompapiTextToImageRoute(): ProviderExecutionRouteSnapshotV1 {
+  return createProviderExecutionRouteSnapshot({
+    id: toProviderExecutionRouteSnapshotId('route-unicompapi-text-to-image'),
+    projectId: toProjectId('project-newapi'),
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+    adapterKey: NEWAPI_IMAGE_ADAPTER_ID,
+    adapterVersion: NEWAPI_ADAPTER_VERSION,
+    providerId: toProviderId('provider-unicompapi'),
+    connectionId: toConnectionId('connection-unicompapi'),
+    connectionRevision: 1,
+    connectionConfigVersionId: 'connection-config-unicompapi-1',
+    endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID,
+    endpointPolicyRevision: 1,
+    credentialVersionId: 'credential-version-unicompapi-1',
+    modelId: toModelId('model-unicompapi-doubao-seedream'),
+    providerModelKey: 'doubao-seedream-5-0-260128',
+    modelRevision: 1,
+    profileId: 'profile-unicompapi-doubao-seedream',
+    profileRevision: 1,
+    protocolBindingId: toProtocolBindingId('binding-unicompapi-text-to-image'),
+    protocolBindingRevision: 1,
+    productFeature: 'text_to_image',
+    internalPurpose: 'image_generation',
+    featureMappingVersion: 1,
+    parameterSchemaId: UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+    parameterSchemaRevision: 1,
+    resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+    resultSchemaRevision: 1,
+    usageSchemaId: toUsageSchemaId(NEWAPI_IMAGE_USAGE_SCHEMA_ID),
+    usageSchemaRevision: 1,
+    constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID,
+    constraintSetRevision: 1,
+    runtimePolicyId: 'runtime.unicompapi.synthetic',
+    runtimePolicyRevision: 1,
+    runtimeAuthorizationClaimId: 'claim-unicompapi-synthetic',
+    createdAt: toIsoTimestamp('2026-08-19T00:00:00.000Z')
   });
 }
 

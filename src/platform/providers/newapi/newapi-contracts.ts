@@ -49,6 +49,8 @@ export const NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID =
   'parameters.newapi.text_reasoning.default';
 export const NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.newapi.text_to_image.default';
+export const UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.text_to_image.provider_default';
 export const NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.newapi.reference_to_image.default';
 export const NEWAPI_DEFAULT_IMAGE_EDIT_PARAMETER_SCHEMA_ID =
@@ -418,6 +420,19 @@ export const newApiDefaultTextToImageParameterSchema: ParameterSchemaV2 = {
   ]
 };
 
+/**
+ * UniCompAPI image models do not share one fixed size range. Omitting size
+ * lets the selected upstream model apply its own valid default instead of
+ * sending a generic OpenAI preset that the model may reject.
+ */
+export const uniCompApiDefaultTextToImageParameterSchema: ParameterSchemaV2 = {
+  ...newApiDefaultTextToImageParameterSchema,
+  schemaId: UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  fields: newApiDefaultTextToImageParameterSchema.fields.filter(
+    (field) => field.fieldId !== 'size'
+  )
+};
+
 export const newApiDefaultImageEditParameterSchema: ParameterSchemaV2 = {
   schemaVersion: 2,
   schemaId: NEWAPI_DEFAULT_IMAGE_EDIT_PARAMETER_SCHEMA_ID,
@@ -707,6 +722,7 @@ export function createOpenAiCompatibleDefaultImageDefinition(input: {
   readonly packageId: string;
   readonly packageVersion: string;
   readonly providerModelKey: string;
+  readonly parameterSchemaId?: string;
 }): ProviderModelDefinition {
   const providerModelKey = requireProviderModelKey(input.providerModelKey);
   if (
@@ -715,12 +731,18 @@ export function createOpenAiCompatibleDefaultImageDefinition(input: {
   ) {
     throw new TypeError('OpenAI-compatible image definitions require a known package id');
   }
+  const parameterSchemaId = input.parameterSchemaId ?? (
+    input.packageId === 'provider-package-unicompapi'
+      ? UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+      : NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+  );
   const suffix = createHash('sha256')
     .update(canonicalJson({
       packageId: input.packageId,
       packageVersion: input.packageVersion,
       providerModelKey,
-      feature: 'text_to_image'
+      feature: 'text_to_image',
+      parameterSchemaId
     }))
     .digest('hex')
     .slice(0, 16);
@@ -740,7 +762,7 @@ export function createOpenAiCompatibleDefaultImageDefinition(input: {
           {
             productFeature: 'text_to_image',
             internalPurpose: 'image_generation',
-            parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+            parameterSchemaId,
             resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
             usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
             constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID

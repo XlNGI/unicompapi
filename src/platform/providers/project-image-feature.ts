@@ -31,8 +31,10 @@ import {
   newApiDefaultImageEditParameterSchema,
   newApiDefaultReferenceToImageParameterSchema,
   newApiDefaultTextToImageParameterSchema,
-  newApiImageUsageSchema
+  newApiImageUsageSchema,
+  uniCompApiDefaultTextToImageParameterSchema
 } from './newapi/newapi-contracts';
+import { uniCompApiSeedream5TextToImageParameterSchema } from './newapi/unicompapi-model-capabilities';
 import {
   DOUBAO_IMAGE_TO_PROMPT_RESULT_SCHEMA_ID,
   DOUBAO_IMAGE_UNDERSTANDING_RESULT_SCHEMA_ID,
@@ -271,6 +273,24 @@ export function createImageProviderFeatureContracts(): readonly ProviderFeatureC
     ...viduContracts,
     {
       parameterSchema: newApiDefaultTextToImageParameterSchema,
+      resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiImageUsageSchema,
+      constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: uniCompApiDefaultTextToImageParameterSchema,
+      resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiImageUsageSchema,
+      constraintSetId: NEWAPI_IMAGE_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: uniCompApiSeedream5TextToImageParameterSchema,
       resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
       resultSchemaRevision: 1,
       usageSchema: newApiImageUsageSchema,

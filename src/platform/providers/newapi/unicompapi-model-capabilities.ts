@@ -1,4 +1,65 @@
+import type { ParameterSchemaV2 } from '../../../domain';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
+
+export const UNICOMPAPI_SEEDREAM_5_MODEL_KEY = 'doubao-seedream-5-0-260128';
+export const UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedream_5_0_260128.text_to_image.official';
+
+/**
+ * Seedream 5.0 lite image-generation parameters supported by the current
+ * non-streaming, single-image UniCompAPI integration.
+ */
+export const uniCompApiSeedream5TextToImageParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_to_image',
+  fields: [
+    {
+      fieldId: 'size',
+      labelId: 'provider.parameter.size',
+      groupId: 'provider.parameter.generation',
+      order: 10,
+      valueType: 'enum',
+      exposure: 'user_required',
+      defaultPolicy: 'require_user_value',
+      required: true,
+      options: ['2K', '3K', '4K']
+    },
+    {
+      fieldId: 'output_format',
+      labelId: 'provider.parameter.output_format',
+      groupId: 'provider.parameter.generation',
+      order: 20,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['jpeg', 'png']
+    },
+    {
+      fieldId: 'response_format',
+      labelId: 'provider.parameter.response_format',
+      groupId: 'provider.parameter.generation',
+      order: 30,
+      valueType: 'enum',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false,
+      options: ['url', 'b64_json']
+    },
+    {
+      fieldId: 'watermark',
+      labelId: 'provider.parameter.watermark',
+      groupId: 'provider.parameter.generation',
+      order: 40,
+      valueType: 'boolean',
+      exposure: 'user_optional',
+      defaultPolicy: 'omit_use_provider_default',
+      required: false
+    }
+  ]
+};
 
 export type UniCompApiVideoFeature = 'text_to_video' | 'image_to_video';
 
@@ -19,7 +80,7 @@ const uniCompApiModelFeatureMap = new Map<string, readonly UniCompApiModelFeatur
   ['deepseek-v4-pro', ['text_chat', 'text_reasoning']],
   ['doubao-seedance-2-0-260128', ['text_to_video', 'image_to_video']],
   ['doubao-seedance-2-0-fast-260128', ['text_to_video', 'image_to_video']],
-  ['doubao-seedream-5-0-260128', ['text_to_image']],
+  [UNICOMPAPI_SEEDREAM_5_MODEL_KEY, ['text_to_image']],
   ['glm-4.6', ['text_chat', 'text_reasoning']],
   ['glm-4.7', ['text_chat', 'text_reasoning']],
   ['glm-5', ['text_chat', 'text_reasoning']],
@@ -60,6 +121,14 @@ export function uniCompApiModelFeatures(
   providerModelKey: string
 ): readonly UniCompApiModelFeature[] | undefined {
   return uniCompApiModelFeatureMap.get(providerModelKey);
+}
+
+export function uniCompApiTextToImageParameterSchema(
+  providerModelKey: string
+): ParameterSchemaV2 | undefined {
+  return providerModelKey === UNICOMPAPI_SEEDREAM_5_MODEL_KEY
+    ? uniCompApiSeedream5TextToImageParameterSchema
+    : undefined;
 }
 
 export function isKnownUniCompApiModel(providerModelKey: string): boolean {

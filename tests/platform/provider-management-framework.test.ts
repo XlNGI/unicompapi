@@ -27,6 +27,9 @@ import {
   ProviderPackageRegistry,
   ProviderRegistryController,
   SecureCredentialVault,
+  NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
   unicompapiProviderPackageDescriptor,
   type CredentialProtector,
@@ -901,6 +904,9 @@ describe('provider management framework', () => {
     expect(imageProfiles[0]?.features.map((feature) => feature.productFeature)).toEqual([
       'text_to_image'
     ]);
+    expect(imageProfiles[0]?.features[0]?.parameterSchemaId).toBe(
+      UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    );
     expect(afterEnable.capabilities.some((candidate) =>
       candidate.modelId === model.id && candidate.capability === 'image_generation'
     )).toBe(true);
@@ -915,12 +921,101 @@ describe('provider management framework', () => {
     expect(afterEnable.capabilities.some((candidate) =>
       candidate.modelId === model.id && candidate.capability === 'video_generation'
     )).toBe(true);
+    await registry.mutate((snapshot) => ({
+      snapshot: {
+        ...snapshot,
+        modelProfiles: (snapshot.modelProfiles ?? []).map((candidate) =>
+          candidate.profileId === imageProfiles[0]?.profileId
+            ? {
+                ...candidate,
+                features: candidate.features.map((feature) =>
+                  feature.productFeature === 'text_to_image'
+                    ? {
+                        ...feature,
+                        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+                      }
+                    : feature
+                )
+              }
+            : candidate
+        )
+      },
+      result: undefined
+    }));
     await expect(framework.attachOpenAiCompatibleImageProfile({
       modelId: model.id
     })).resolves.toMatchObject({
       ok: true,
       value: { state: 'already_attached', profileId: imageProfiles[0]?.profileId }
     });
+    const afterImageMigration = await registry.load();
+    const migratedImageProfile = afterImageMigration.modelProfiles?.find(
+      (candidate) => candidate.profileId === imageProfiles[0]?.profileId
+    );
+    expect(migratedImageProfile?.features[0]?.parameterSchemaId).toBe(
+      UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    );
+    expect(migratedImageProfile?.revision).toBe((imageProfiles[0]?.revision ?? 0) + 1);
+
+    await expect(framework.registerExactModel({
+      connectionId: added.value.connectionId,
+      providerModelKey: 'doubao-seedream-5-0-260128',
+      displayName: 'Seedream 5.0 lite'
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'registered_without_profile' }
+    });
+    const beforeSeedreamEnable = await registry.load();
+    const seedreamModel = beforeSeedreamEnable.models.find((candidate) =>
+      candidate.connectionId === added.value.connectionId &&
+      candidate.providerModelKey === 'doubao-seedream-5-0-260128'
+    );
+    if (!seedreamModel) throw new Error('registered Seedream model missing');
+    await expect(framework.setModelEnabled({
+      modelId: seedreamModel.id,
+      enabled: true
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'enabled' }
+    });
+    const afterSeedreamEnable = await registry.load();
+    const seedreamImageProfile = afterSeedreamEnable.modelProfiles?.find((candidate) =>
+      candidate.modelId === seedreamModel.id && candidate.adapterKey === 'newapi.image'
+    );
+    expect(seedreamImageProfile?.features).toMatchObject([{
+      productFeature: 'text_to_image',
+      parameterSchemaId: UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    }]);
+    await registry.mutate((snapshot) => ({
+      snapshot: {
+        ...snapshot,
+        modelProfiles: (snapshot.modelProfiles ?? []).map((candidate) =>
+          candidate.profileId === seedreamImageProfile?.profileId
+            ? {
+                ...candidate,
+                features: candidate.features.map((feature) => ({
+                  ...feature,
+                  parameterSchemaId: UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+                }))
+              }
+            : candidate
+        )
+      },
+      result: undefined
+    }));
+    await expect(framework.attachOpenAiCompatibleImageProfile({
+      modelId: seedreamModel.id
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'already_attached', profileId: seedreamImageProfile?.profileId }
+    });
+    const afterSeedreamMigration = await registry.load();
+    expect(afterSeedreamMigration.modelProfiles?.find(
+      (candidate) => candidate.profileId === seedreamImageProfile?.profileId
+    )?.features[0]?.parameterSchemaId).toBe(
+      UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
+    );
+
     await expect(framework.attachOpenAiCompatibleVideoProfile({
       modelId: model.id
     })).resolves.toMatchObject({
