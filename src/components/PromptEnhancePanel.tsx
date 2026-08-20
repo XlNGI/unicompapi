@@ -24,6 +24,7 @@ export interface PromptEnhanceHost {
 
 interface PromptEnhancePanelProps {
   readonly api?: PromptEnhanceApi;
+  readonly compact?: boolean;
   readonly host: PromptEnhanceHost;
   readonly onMessage: (message: string) => void;
 }
@@ -63,7 +64,12 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   schema_unsupported: '参数格式无法识别'
 };
 
-export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelProps) {
+export function PromptEnhancePanel({
+  api,
+  compact = false,
+  host,
+  onMessage
+}: PromptEnhancePanelProps) {
   const [candidates, setCandidates] = useState<readonly PromptEnhanceCandidateDto[]>([]);
   const [candidateId, setCandidateId] = useState('');
   const [open, setOpen] = useState(false);
@@ -146,27 +152,34 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
   }
 
   const canEnhance = Boolean(host.originalInput.trim()) && Boolean(api);
+  const trigger = (
+    <Button
+      aria-expanded={compact ? open : undefined}
+      disabled={!canEnhance && !open}
+      onClick={() => setOpen((current) => compact ? !current : true)}
+      variant="secondary"
+    >
+      <LuSparkles aria-hidden="true" />
+      提示词增强
+    </Button>
+  );
   if (!open) {
-    return (
-      <Button
-        disabled={!canEnhance}
-        onClick={() => setOpen(true)}
-        variant="secondary"
-      >
-        <LuSparkles aria-hidden="true" />
-        提示词增强
-      </Button>
-    );
+    return trigger;
   }
 
-  return (
-    <section className="uc-prompt-enhance" aria-label="提示词增强">
+  const panel = (
+    <section
+      className={`uc-prompt-enhance${compact ? ' uc-prompt-enhance--compact' : ''}`}
+      aria-label="提示词增强选项"
+    >
       <ModelSelect
+        ariaLabel={compact ? '选择增强模型' : undefined}
         disabled={!api || loadState !== 'loaded'}
         emptyDescription={loadState === 'loading'
           ? '正在读取文本推理模型候选。'
           : '当前没有匹配的文本推理模型，请在“模型与服务商”中完成配置。'}
         emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选文本模型'}
+        label={compact ? '增强模型' : undefined}
         onChange={(nextId) => {
           setCandidateId(nextId);
         }}
@@ -179,12 +192,19 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
           unavailableReasons: candidate.unavailableReasons
         }))}
         reasonLabels={unavailableReasonLabels}
+        showEmptyState={!compact}
+        placeholder={loadState === 'loading' ? '正在读取增强模型…' : '请选择增强模型'}
         value={candidateId}
       />
 
-      {selectedCandidate ? (
+      {compact || selectedCandidate ? (
         <Button
-          disabled={busy || !selectedCandidate.available || !host.originalInput.trim()}
+          disabled={
+            busy ||
+            !selectedCandidate ||
+            !selectedCandidate.available ||
+            !host.originalInput.trim()
+          }
           onClick={() => void confirmEnhancement()}
         >
           <LuShieldCheck aria-hidden="true" />
@@ -193,4 +213,6 @@ export function PromptEnhancePanel({ api, host, onMessage }: PromptEnhancePanelP
       ) : null}
     </section>
   );
+
+  return compact ? <>{trigger}{panel}</> : panel;
 }

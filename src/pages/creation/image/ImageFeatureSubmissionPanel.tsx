@@ -41,6 +41,8 @@ interface ImageFeatureSubmissionPanelProps {
    * Until the user explicitly picks a feature, hide model and parameter UI.
    */
   readonly requireExplicitFeature?: boolean;
+  /** Professional image: omit the redundant candidate contract summary card. */
+  readonly showCandidateFacts?: boolean;
   /** Professional image: show in-page 准备 → 提交中 → 生成中 → 完成 progress. */
   readonly showProgressSteps?: boolean;
   /** Optional fixed action host used by the professional two-pane workspace. */
@@ -97,6 +99,7 @@ export function ImageFeatureSubmissionPanel({
   blockedReason,
   oneShot = false,
   requireExplicitFeature = false,
+  showCandidateFacts = true,
   showProgressSteps = false,
   actionHost,
   onDraftChange,
@@ -274,7 +277,7 @@ export function ImageFeatureSubmissionPanel({
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
     if (needsSave) {
-      setCandidates([]);
+      // Keep the active parameter contract mounted while autosave persists edits.
       setLoadState('idle');
       return;
     }
@@ -691,19 +694,21 @@ export function ImageFeatureSubmissionPanel({
 
       {selectedCandidate ? (
         <>
-          <div className="uc-image-feature-panel__facts">
-            <span>
-              <strong>已锁定参数合同</strong>
-              参数配置版本 {selectedCandidate.parameterSchema.revision}
-            </span>
-            <span>
-              <strong>费用</strong>
-              {costLabel(selectedCandidate.cost)}
-            </span>
-            <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
-              {selectedCandidate.available ? '可准备' : '当前不可用'}
-            </StatusPill>
-          </div>
+          {showCandidateFacts ? (
+            <div className="uc-image-feature-panel__facts">
+              <span>
+                <strong>已锁定参数合同</strong>
+                参数配置版本 {selectedCandidate.parameterSchema.revision}
+              </span>
+              <span>
+                <strong>费用</strong>
+                {costLabel(selectedCandidate.cost)}
+              </span>
+              <StatusPill tone={selectedCandidate.available ? 'success' : 'warning'}>
+                {selectedCandidate.available ? '可准备' : '当前不可用'}
+              </StatusPill>
+            </div>
+          ) : null}
           {!selectedCandidate.available ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>

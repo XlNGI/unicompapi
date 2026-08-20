@@ -26,6 +26,15 @@ test('selector honors privacy settings and loads candidates only after explicit 
   assert.doesNotMatch(selector, /getConversation\(|fetch\(|ipcRenderer|localStorage/);
 });
 
+test('professional image uses the compact context action without changing selector privacy', () => {
+  assert.match(image, /<WorkspaceContextSelector\s+compact/);
+  assert.match(selector, /uc-image-professional__contexts--compact/);
+  assert.match(selector, /uc-image-professional__context--compact/);
+  assert.match(selector, /uc-image-professional__context-count/);
+  assert.match(selector, /compact \? section\.title : section\.action/);
+  assert.match(selector, /!compact \? \(/);
+});
+
 test('saved conversation candidates contain summaries but no message content', () => {
   const start = shared.indexOf('export interface ConversationCandidateDto');
   const end = shared.indexOf('export interface ProjectContextFragmentDto', start);
