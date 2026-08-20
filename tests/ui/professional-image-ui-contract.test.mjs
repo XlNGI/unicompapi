@@ -171,13 +171,25 @@ test('professional image shows only the final prompt and dynamic safe parameters
     /toDynamicParameterFields\(selectedCandidate\.parameterSchema\.fields\)/
   );
   assert.doesNotMatch(featurePanelSource, /ProviderRegistry|CapabilityEvidence/);
+  assert.match(professionalSource, /showCandidateFacts=\{false\}/);
+  assert.match(featurePanelSource, /showCandidateFacts = true/);
+  assert.match(featurePanelSource, /\{showCandidateFacts \? \(/);
 });
 
 test('professional image hosts reusable prompt enhance without image Task', () => {
   assert.match(professionalSource, /ImagePromptEnhancePanel/);
+  assert.match(professionalSource, /uc-image-professional__prompt-tools/);
+  assert.match(professionalSource, /<WorkspaceContextSelector\s+compact/);
+  assert.match(professionalSource, /<ImagePromptEnhancePanel\s+compact/);
   assert.match(enhancePanelSource, /promptEnhance/);
+  assert.match(enhancePanelSource, /compact=\{compact\}/);
   assert.match(enhancePanelSource, /PromptEnhancePanel/);
   assert.match(promptEnhanceSource, /<ModelSelect/);
+  assert.match(promptEnhanceSource, /aria-expanded=\{compact \? open : undefined\}/);
+  assert.match(promptEnhanceSource, /uc-prompt-enhance--compact/);
+  assert.match(promptEnhanceSource, /label=\{compact \? '增强模型' : undefined\}/);
+  assert.match(promptEnhanceSource, /showEmptyState=\{!compact\}/);
+  assert.match(promptEnhanceSource, /compact \|\| selectedCandidate/);
   assert.match(promptEnhanceSource, /确认增强/);
   assert.match(promptEnhanceSource, /host\.originalInput\.trim\(\)/);
   assert.match(promptEnhanceSource, /setOpen\(false\)/);
@@ -225,6 +237,7 @@ test('professional image autosaves drafts without a manual save gate', async () 
 });
 
 test('prompt enhance keeps model selection and one-click confirmation', () => {
+  assert.match(promptEnhanceSource, /api\.listCandidates\(\)/);
   assert.match(promptEnhanceSource, /api\.prepare\(/);
   assert.match(promptEnhanceSource, /api\.submit\(/);
   assert.match(promptEnhanceSource, /result\.value\.confirmation\.confirmationId/);

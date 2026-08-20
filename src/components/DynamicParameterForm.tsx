@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
+import { useEffect, useId, useState } from 'react';
+import type { ReactNode } from 'react';
+import { LuInfo } from 'react-icons/lu';
+import { Input, InputNumber, SelectPicker, Toggle } from 'rsuite';
 
 export type DynamicParameterValue =
   | string
@@ -59,7 +61,7 @@ const parameterLabels: Readonly<Record<string, string>> = {
   width: '宽度'
 };
 
-/** Short usage notes shown under each dynamic parameter control. */
+/** Short usage notes exposed from each parameter's info control. */
 const parameterDescriptions: Readonly<Record<string, string>> = {
   aspect_ratio: '控制画面宽高比例；未选时由服务商默认。',
   aspectRatio: '控制画面宽高比例；未选时由服务商默认。',
@@ -238,20 +240,98 @@ function parameterLabel(field: DynamicParameterField): {
 function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
   const { text, required } = parameterLabel(field);
   const description = displayParameterDescription(field.fieldId || field.labelId);
+  const descriptionId = useId();
   return (
     <span className="uc-dynamic-parameters__heading">
       <span className="uc-dynamic-parameters__label">
         <span className="uc-dynamic-parameters__key">{text}</span>
+        {description ? (
+          <span className="uc-dynamic-parameters__info-wrap">
+            <button
+              aria-describedby={descriptionId}
+              aria-label={`${text}参数说明`}
+              className="uc-dynamic-parameters__info"
+              type="button"
+            >
+              <LuInfo aria-hidden="true" />
+            </button>
+            <span
+              className="uc-dynamic-parameters__tooltip"
+              id={descriptionId}
+              role="tooltip"
+            >
+              {description}
+            </span>
+          </span>
+        ) : null}
         {required ? (
           <span aria-label="必填" className="uc-dynamic-parameters__required">
             必填
           </span>
         ) : null}
       </span>
-      {description ? (
-        <span className="uc-dynamic-parameters__help">{description}</span>
-      ) : null}
     </span>
+  );
+}
+
+function parameterConstraint(field: DynamicParameterField): string | undefined {
+  if (field.valueType === 'number' || field.valueType === 'integer') {
+    const range = field.minimum !== undefined && field.maximum !== undefined
+      ? `${field.minimum} - ${field.maximum}`
+      : field.minimum !== undefined
+        ? `不小于 ${field.minimum}`
+        : field.maximum !== undefined
+          ? `不大于 ${field.maximum}`
+          : undefined;
+    const step = field.valueType === 'integer'
+      ? '仅限整数'
+      : field.step !== undefined
+        ? `步长 ${field.step}`
+        : undefined;
+    return [range, step].filter(Boolean).join(' · ') || undefined;
+  }
+  if (field.valueType === 'string_array' || field.valueType === 'number_array') {
+    return field.valueType === 'number_array'
+      ? '输入多个数值时使用逗号分隔'
+      : '输入多项内容时使用逗号分隔';
+  }
+  if (field.valueType === 'object') return '使用 JSON 对象格式';
+  return undefined;
+}
+
+function ParameterMeta({ field }: { readonly field: DynamicParameterField }) {
+  const constraint = parameterConstraint(field);
+  if (!constraint) return null;
+  return <span className="uc-dynamic-parameters__constraint">{constraint}</span>;
+}
+
+function ParameterShell({
+  children,
+  field,
+  filled,
+  invalid = false
+}: {
+  readonly children: ReactNode;
+  readonly field: DynamicParameterField;
+  readonly filled: boolean;
+  readonly invalid?: boolean;
+}) {
+  return (
+    <div
+      className="uc-dynamic-parameters__field"
+      data-filled={filled || undefined}
+      data-invalid={invalid || undefined}
+      data-value-type={field.valueType}
+    >
+      <div className="uc-dynamic-parameters__field-header">
+        <ParameterLabel field={field} />
+        <span className="uc-dynamic-parameters__value-state">
+          {filled ? '已设置' : '使用默认值'}
+        </span>
+      </div>
+      <div className="uc-dynamic-parameters__control">{children}</div>
+      <ParameterMeta field={field} />
+    </div>
   );
 }
 
@@ -268,14 +348,17 @@ function ParameterField({
 }) {
   if (field.valueType === 'boolean') {
     return (
-      <Checkbox
-        checked={value === true}
-        className="uc-model-select__checkbox"
-        disabled={disabled}
-        onChange={(_value, checked) => onChange(checked)}
-      >
+      <div className="uc-dynamic-parameters__field uc-dynamic-parameters__field--boolean" data-filled>
         <ParameterLabel field={field} />
-      </Checkbox>
+        <Toggle
+          checked={value === true}
+          checkedChildren="开启"
+          disabled={disabled}
+          label={displayParameterKey(field.fieldId || field.labelId)}
+          onChange={onChange}
+          unCheckedChildren="关闭"
+        />
+      </div>
     );
   }
   if (field.valueType === 'enum') {
@@ -284,8 +367,7 @@ function ParameterField({
       label: displayParameterOption(option, index)
     }));
     return (
-      <div className="uc-model-select__field">
-        <ParameterLabel field={field} />
+      <ParameterShell field={field} filled={value !== undefined}>
         <SelectPicker
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           block
@@ -300,14 +382,14 @@ function ParameterField({
           searchable={false}
           value={value === undefined ? null : String(value)}
         />
-      </div>
+      </ParameterShell>
     );
   }
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
-      <label className="uc-model-select__field">
-        <ParameterLabel field={field} />
+      <ParameterShell field={field} filled={typeof value === 'number'}>
         <InputNumber
+          aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled={disabled}
           max={field.maximum}
           min={field.minimum}
@@ -318,14 +400,14 @@ function ParameterField({
           step={field.valueType === 'integer' ? 1 : field.step}
           value={typeof value === 'number' ? value : ''}
         />
-      </label>
+      </ParameterShell>
     );
   }
   if (field.valueType === 'string_array' || field.valueType === 'number_array') {
     return (
-      <label className="uc-model-select__field">
-        <ParameterLabel field={field} />
+      <ParameterShell field={field} filled={Array.isArray(value) && value.length > 0}>
         <Input
+          aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled={disabled}
           onChange={(next) => {
             const items = next.split(',').map((item) => item.trim()).filter(Boolean);
@@ -335,11 +417,11 @@ function ParameterField({
                 ? items.map(Number)
                 : items);
           }}
-          placeholder="使用逗号分隔"
+          placeholder={field.required ? '请输入（必填）' : '留空使用服务默认值'}
           required={field.required}
           value={Array.isArray(value) ? value.join(', ') : ''}
         />
-      </label>
+      </ParameterShell>
     );
   }
   if (field.valueType === 'object') {
@@ -347,22 +429,27 @@ function ParameterField({
   }
   if (field.valueType === 'media_slot') {
     return (
-      <label className="uc-model-select__field">
-        <ParameterLabel field={field} />
-        <Input disabled readOnly value="由当前草稿的受控素材提供" />
-      </label>
+      <ParameterShell field={field} filled>
+        <Input
+          aria-label={displayParameterKey(field.fieldId || field.labelId)}
+          disabled
+          readOnly
+          value="由当前草稿的受控素材提供"
+        />
+      </ParameterShell>
     );
   }
   return (
-    <label className="uc-model-select__field">
-      <ParameterLabel field={field} />
+    <ParameterShell field={field} filled={typeof value === 'string' && value.length > 0}>
       <Input
+        aria-label={displayParameterKey(field.fieldId || field.labelId)}
         disabled={disabled}
         onChange={(next) => onChange(next || undefined)}
+        placeholder={field.required ? '请输入（必填）' : '留空使用服务默认值'}
         required={field.required}
         value={typeof value === 'string' ? value : ''}
       />
-    </label>
+    </ParameterShell>
   );
 }
 
@@ -384,9 +471,9 @@ function ObjectParameterField({
     setInvalid(false);
   }, [value]);
   return (
-    <label className="uc-model-select__field">
-      <ParameterLabel field={field} />
+    <ParameterShell field={field} filled={text.trim().length > 0} invalid={invalid}>
       <Input
+        aria-label={displayParameterKey(field.fieldId || field.labelId)}
         aria-invalid={invalid}
         as="textarea"
         disabled={disabled}
@@ -408,10 +495,11 @@ function ObjectParameterField({
           }
         }}
         onChange={(next) => setText(next)}
+        placeholder={field.required ? '{ "key": "value" }（必填）' : '{ "key": "value" }'}
         rows={3}
         value={text}
       />
       {invalid ? <small role="alert">请输入有效的 JSON 对象。</small> : null}
-    </label>
+    </ParameterShell>
   );
 }

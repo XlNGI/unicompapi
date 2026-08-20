@@ -419,16 +419,32 @@ export function ImageProfessionalWorkspace({
             </ControlledImageDropZone>
           ) : null}
 
-          <WorkspaceContextSelector
-            disabled={busy}
-            onChange={(contextReferences) => changeDraft({
-              ...draft,
-              contextReferences
-            })}
-            onMessage={onMessage}
-            projectContextsOnly
-            references={draft.contextReferences}
-          />
+          <div className="uc-image-professional__prompt-tools">
+            <WorkspaceContextSelector
+              compact
+              disabled={busy}
+              onChange={(contextReferences) => changeDraft({
+                ...draft,
+                contextReferences
+              })}
+              onMessage={onMessage}
+              projectContextsOnly
+              references={draft.contextReferences}
+            />
+            <ImagePromptEnhancePanel
+              compact
+              dirty={dirty}
+              draft={draft}
+              onFlushDraft={onFlushDraft}
+              onDraftPersisted={(next) =>
+                onDraftPersisted(next as GenerationImageDraftDto)
+              }
+              onMessage={onMessage}
+            />
+          </div>
+          <p className="uc-image-quick__hint">
+            候选只在点击后读取；只有确认增强或生成时才会发起对应请求。
+          </p>
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文引用</strong>
@@ -440,15 +456,6 @@ export function ImageProfessionalWorkspace({
             </div>
           ) : null}
 
-          <ImagePromptEnhancePanel
-            dirty={dirty}
-            draft={draft}
-            onFlushDraft={onFlushDraft}
-            onDraftPersisted={(next) =>
-              onDraftPersisted(next as GenerationImageDraftDto)
-            }
-            onMessage={onMessage}
-          />
         </Card>
 
         {enhancementContent ? (
@@ -520,6 +527,7 @@ export function ImageProfessionalWorkspace({
               setResultUrls(submission.resultImageUrls ?? []);
             }}
             requireExplicitFeature
+            showCandidateFacts={false}
           />
         </Card>
           </div>

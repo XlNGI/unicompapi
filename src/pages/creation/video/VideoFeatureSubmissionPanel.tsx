@@ -272,7 +272,7 @@ export function VideoFeatureSubmissionPanel({
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
     if (needsSave) {
-      setCandidates([]);
+      // Keep the active parameter contract mounted while autosave persists edits.
       setLoadState('idle');
       return;
     }

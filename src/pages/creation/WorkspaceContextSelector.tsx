@@ -22,6 +22,7 @@ export interface WorkspaceContextReference {
 }
 
 interface WorkspaceContextSelectorProps {
+  readonly compact?: boolean;
   readonly disabled?: boolean;
   readonly references: readonly WorkspaceContextReference[];
   readonly onChange: (references: readonly WorkspaceContextReference[]) => void;
@@ -58,6 +59,7 @@ const sections: readonly {
 ];
 
 export function WorkspaceContextSelector({
+  compact = false,
   disabled = false,
   references,
   onChange,
@@ -182,7 +184,9 @@ export function WorkspaceContextSelector({
 
   return (
     <>
-      <div className="uc-image-professional__contexts">
+      <div
+        className={`uc-image-professional__contexts${compact ? ' uc-image-professional__contexts--compact' : ''}`}
+      >
         {visibleSections.map((section) => {
           const count = references.filter((reference) => reference.kind === section.kind).length;
           const permitted = section.kind === 'project_asset'
@@ -191,13 +195,19 @@ export function WorkspaceContextSelector({
               ? permissions?.projectContexts === true
               : permissions?.savedChats === true;
           return (
-            <section className="uc-image-professional__context" key={section.kind}>
-              <div>
-                <strong>{section.title}</strong>
-                <span>{section.description}</span>
-              </div>
+            <section
+              className={`uc-image-professional__context${compact ? ' uc-image-professional__context--compact' : ''}`}
+              key={section.kind}
+            >
+              {!compact ? (
+                <div>
+                  <strong>{section.title}</strong>
+                  <span>{section.description}</span>
+                </div>
+              ) : null}
               <div className="uc-image-professional__context-action">
                 <Button
+                  aria-label={compact ? `${section.title}，已选择 ${count} 项` : undefined}
                   disabled={disabled || !chat || !permitted}
                   onClick={() => {
                     if (section.kind !== 'project_asset') void openSelector(section.kind);
@@ -218,17 +228,24 @@ export function WorkspaceContextSelector({
                   ) : (
                     <LuMessageCircle aria-hidden="true" />
                   )}
-                  {section.action}
+                  {compact ? section.title : section.action}
+                  {compact ? (
+                    <span className="uc-image-professional__context-count" aria-hidden="true">
+                      {count}
+                    </span>
+                  ) : null}
                 </Button>
-                <span>已明确选择 {count} 项</span>
+                {!compact ? <span>已明确选择 {count} 项</span> : null}
               </div>
             </section>
           );
         })}
       </div>
-      <p className="uc-image-quick__hint">
-        候选只在点击后读取；保存草稿不构成向服务商外发授权。
-      </p>
+      {!compact ? (
+        <p className="uc-image-quick__hint">
+          候选只在点击后读取；保存草稿不构成向服务商外发授权。
+        </p>
+      ) : null}
 
       {openKind ? (
         <dialog

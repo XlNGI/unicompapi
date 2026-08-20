@@ -3,6 +3,7 @@ import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhan
 import type { ImageWorkspaceDraftDto } from '../../../shared/image-workspace-ipc';
 
 interface ImagePromptEnhancePanelProps {
+  readonly compact?: boolean;
   readonly dirty: boolean;
   readonly draft: ImageWorkspaceDraftDto;
   readonly onDraftPersisted: (draft: ImageWorkspaceDraftDto) => void;
@@ -11,6 +12,7 @@ interface ImagePromptEnhancePanelProps {
 }
 
 export function ImagePromptEnhancePanel({
+  compact = false,
   dirty,
   draft,
   onDraftPersisted,
@@ -22,6 +24,7 @@ export function ImagePromptEnhancePanel({
   return (
     <PromptEnhancePanel
       api={window.unicomp?.promptEnhance}
+      compact={compact}
       host={{
         subjectId: draft.draftId,
         subjectRevision: draft.updatedAt,
