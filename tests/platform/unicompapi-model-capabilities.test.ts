@@ -3,8 +3,11 @@ import {
   isKnownUniCompApiModel,
   uniCompApiModelFeatures,
   uniCompApiTextToImageParameterSchema,
+  uniCompApiReferenceToImageParameterSchema,
   uniCompApiSupportsFeature,
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID
 } from '../../src/platform';
 
@@ -34,6 +37,7 @@ const currentCatalogModels = [
   'happyhorse-1.1-r2v',
   'happyhorse-1.1-t2v',
   'kimi-k2.6',
+  'kimi-k3',
   'kling-v3-turbo',
   'qwen-image',
   'qwen-image-edit-2509',
@@ -48,7 +52,7 @@ const currentCatalogModels = [
 describe('UniCompAPI model capability registry', () => {
   it('declares every current catalog model explicitly', () => {
     expect(currentCatalogModels.every(isKnownUniCompApiModel)).toBe(true);
-    expect(new Set(currentCatalogModels).size).toBe(34);
+    expect(new Set(currentCatalogModels).size).toBe(35);
   });
 
   it('keeps exact feature boundaries for image and video models', () => {
@@ -61,6 +65,10 @@ describe('UniCompAPI model capability registry', () => {
       'text_to_video',
       'image_to_video'
     ]);
+    expect(uniCompApiModelFeatures('kimi-k3')).toEqual([
+      'text_chat',
+      'text_reasoning'
+    ]);
     expect(uniCompApiModelFeatures('happyhorse-1.0-r2v')).toEqual([]);
   });
 
@@ -72,11 +80,32 @@ describe('UniCompAPI model capability registry', () => {
     )).toBe(true);
   });
 
-  it('binds official image parameters only to Seedream 5', () => {
+  it('binds model-specific official image parameters', () => {
     expect(
       uniCompApiTextToImageParameterSchema('doubao-seedream-5-0-260128')?.schemaId
     ).toBe(UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID);
-    expect(uniCompApiTextToImageParameterSchema('qwen-image')).toBeUndefined();
+    expect(
+      uniCompApiTextToImageParameterSchema('qwen-image')
+    ).toMatchObject({
+      schemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+      productFeature: 'text_to_image',
+      fields: expect.arrayContaining([
+        expect.objectContaining({ fieldId: 'negative_prompt' }),
+        expect.objectContaining({ fieldId: 'prompt_extend' }),
+        expect.objectContaining({ fieldId: 'seed', minimum: 0, maximum: 2_147_483_647 })
+      ])
+    });
+    expect(
+      uniCompApiReferenceToImageParameterSchema('qwen-image-edit-2509')
+    ).toMatchObject({
+      schemaId: UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+      productFeature: 'reference_to_image',
+      fields: expect.arrayContaining([
+        expect.objectContaining({ fieldId: 'negative_prompt' }),
+        expect.objectContaining({ fieldId: 'watermark' }),
+        expect.objectContaining({ fieldId: 'seed' })
+      ])
+    });
     expect(uniCompApiTextToImageParameterSchema('manual-future-model')).toBeUndefined();
   });
 

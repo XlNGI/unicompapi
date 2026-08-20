@@ -164,7 +164,7 @@ describe('ProjectImageFeatureSubjectResolver', () => {
     })).rejects.toThrow('requires a current prompt enhancement');
   });
 
-  it('requires a current adopted enhancement when structured prompt content exists', async () => {
+  it('ignores removed professional reference-purpose data', async () => {
     const base = createImageWorkspaceDraft({
       ...savedDraft('professional_image', 'reference_to_image'),
       input: {
@@ -174,36 +174,10 @@ describe('ProjectImageFeatureSubjectResolver', () => {
         purpose: '仅参考构图，不复制人物'
       }
     });
+    expect(base.input).not.toHaveProperty('purpose');
     await expect(assertImagePromptEnhancementSatisfied({
       projectId,
       draft: base,
-      contexts: contextRepository()
-    })).rejects.toThrow('requires a current prompt enhancement');
-
-    const inputFingerprint = await promptEnhanceInputFingerprint({
-      originalInput: base.prompt.originalInput,
-      structuredInput: '图片用途：仅参考构图，不复制人物',
-      contextSnapshots: []
-    });
-    const enhancedText = 'Enhanced prompt with reference purpose';
-    const enhanced = createImageWorkspaceDraft({
-      ...base,
-      prompt: {
-        ...base.prompt,
-        finalPrompt: enhancedText,
-        systemSupplements: [{
-          source: 'enhancement',
-          content: enhancedText,
-          sourceReference: promptEnhanceSourceReference({
-            inputFingerprint,
-            executionId: 'prompt-once-structured-image'
-          })
-        }]
-      }
-    });
-    await expect(assertImagePromptEnhancementSatisfied({
-      projectId,
-      draft: enhanced,
       contexts: contextRepository()
     })).resolves.toBeUndefined();
   });

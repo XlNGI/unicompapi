@@ -132,6 +132,37 @@ describe('ImageWorkspaceController', () => {
     });
   });
 
+  it('removes legacy reference purpose from professional drafts', async () => {
+    const fixture = await createFixture();
+    const created = await fixture.controller.create({
+      mode: 'professional_image'
+    });
+    if (!created.ok) {
+      throw fixture.getLastError();
+    }
+
+    const updated = await fixture.controller.update({
+      draft: {
+        ...created.value,
+        input: {
+          assetId: 'asset-professional-reference',
+          role: 'reference',
+          purpose: 'legacy composition reference',
+          selectedAt: created.value.updatedAt
+        }
+      }
+    });
+
+    expect(updated).toMatchObject({ ok: true });
+    if (!updated.ok) {
+      throw fixture.getLastError();
+    }
+    expect(updated.value.input).not.toHaveProperty('purpose');
+    await expect(
+      fixture.controller.get({ draftId: created.value.draftId })
+    ).resolves.toEqual(updated);
+  });
+
   it('creates a derived draft while preserving the source draft', async () => {
     const fixture = await createFixture();
     const created = await fixture.controller.create({ mode: 'quick_image' });

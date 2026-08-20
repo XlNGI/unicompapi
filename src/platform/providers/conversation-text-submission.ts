@@ -48,6 +48,7 @@ import {
   type NewApiSharedRuntime,
 } from './newapi';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_PROVIDER_PACKAGE_VERSION } from './newapi/unicompapi-contracts';
+import { KIMI_PROVIDER_PACKAGE_ID, KIMI_PROVIDER_PACKAGE_VERSION } from './kimi/kimi-contracts';
 import { createTextProviderFeatureContracts } from './project-text-feature';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type { ProviderPackageRegistry } from './provider-package-registry';
@@ -150,6 +151,9 @@ export function createConversationTextDispatchBridge(
       acceptedPackages: [{
         packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
         packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION
+      }, {
+        packageId: KIMI_PROVIDER_PACKAGE_ID,
+        packageVersion: KIMI_PROVIDER_PACKAGE_VERSION
       }],
       adapterKey: NEWAPI_CHAT_ADAPTER_ID,
       adapterVersion: NEWAPI_ADAPTER_VERSION,

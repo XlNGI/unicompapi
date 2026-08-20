@@ -12,6 +12,13 @@ import {
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION
 } from './unicompapi-contracts';
+import {
+  KIMI_ENDPOINT_POLICY_ID,
+  KIMI_PROVIDER_PACKAGE_ID,
+  KIMI_PROVIDER_PACKAGE_VERSION,
+  KIMI_CREDENTIAL_SCHEMA_ID,
+  KIMI_OFFICIAL_TEMPLATE_ID
+} from '../kimi/kimi-contracts';
 
 export interface OpenAiCompatiblePackageIdentity {
   readonly packageId: string;
@@ -35,6 +42,13 @@ const OPENAI_COMPATIBLE_PACKAGES: readonly OpenAiCompatiblePackageIdentity[] = [
     templateId: UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
     credentialSchemaId: UNICOMPAPI_CREDENTIAL_SCHEMA_ID,
     endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID
+  },
+  {
+    packageId: KIMI_PROVIDER_PACKAGE_ID,
+    packageVersion: KIMI_PROVIDER_PACKAGE_VERSION,
+    templateId: KIMI_OFFICIAL_TEMPLATE_ID,
+    credentialSchemaId: KIMI_CREDENTIAL_SCHEMA_ID,
+    endpointPolicyId: KIMI_ENDPOINT_POLICY_ID
   }
 ];
 

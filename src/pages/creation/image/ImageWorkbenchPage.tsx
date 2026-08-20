@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   LuFilePlus2,
   LuImagePlus,
@@ -92,6 +92,11 @@ export function ImageWorkbenchPage({
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState('');
+  const [blockingReason, setBlockingReason] = useState('');
+  const handleBlockingReasonChange = useCallback(
+    (reason?: string) => setBlockingReason(reason ?? ''),
+    []
+  );
   const [selectedDraftId, setSelectedDraftId] = useState(preferredDraftId);
   const currentDraft =
     drafts.find((draft) => draft.draftId === selectedDraftId) ??
@@ -394,7 +399,9 @@ export function ImageWorkbenchPage({
       ? '项目内本地草稿'
       : '未打开项目';
 
-  const floatingStatusMessage = message || (
+  const floatingStatusMessage = blockingReason
+    ? `当前不能生成：${blockingReason}`
+    : message || (
     currentDraft?.mode === 'quick_image'
       ? currentDraft.prompt.originalInput.trim().length === 0
         ? '输入画面描述，选择模型后生成。'
@@ -403,8 +410,8 @@ export function ImageWorkbenchPage({
           : '请选择模型后生成。'
       : currentDraft
         ? '编辑参数后，状态会在这里更新。'
-        : '创建或打开草稿后，状态会在这里更新。'
-  );
+      : '创建或打开草稿后，状态会在这里更新。'
+    );
 
   return (
     <section
@@ -490,6 +497,7 @@ export function ImageWorkbenchPage({
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onFlushDraft={() => autosave.flush()}
           onMessage={setMessage}
+          onBlockingReasonChange={handleBlockingReasonChange}
         />
       ) : currentDraft?.mode === 'image_understanding' ? (
         <ImageUnderstandingWorkspace

@@ -289,7 +289,7 @@ function parseDeriveRequest(request: unknown): {
 export function toImageWorkspaceDto(
   draft: ImageWorkspaceDraft
 ): ImageWorkspaceDraftDto {
-  const { id, ...rest } = structuredClone(draft);
+  const { id, ...rest } = createImageWorkspaceDraft(draft);
   return { ...rest, draftId: id } as ImageWorkspaceDraftDto;
 }
 

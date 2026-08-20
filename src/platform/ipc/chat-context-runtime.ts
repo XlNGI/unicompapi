@@ -54,6 +54,7 @@ import {
   createTextProviderFeatureContracts,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
+  kimiProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   ProjectConversationResponseSubjectResolver,
   ProviderFeatureCandidateService,
@@ -148,6 +149,7 @@ export function createChatContextRuntime(
     deepSeekProviderPackageDescriptor,
     volcengineProviderPackageDescriptor,
     klingProviderPackageDescriptor,
+    kimiProviderPackageDescriptor,
     newApiProviderPackageDescriptor,
     unicompapiProviderPackageDescriptor,
     viduProviderPackageDescriptor

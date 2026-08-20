@@ -42,5 +42,9 @@ test('image and video workbenches route live messages through the shared status 
   assert.match(videoWorkbenchSource, /<FloatingStatusBar>[\s\S]*uc-image-workbench__message/);
   assert.doesNotMatch(imageWorkbenchSource, /uc-image-workbench__message-card/);
   assert.doesNotMatch(imageWorkbenchSource, /\{message \? \([\s\S]*<FloatingStatusBar>/);
-  assert.match(imageWorkbenchSource, /const floatingStatusMessage = message \|\|/);
+  assert.match(imageWorkbenchSource, /const floatingStatusMessage = blockingReason/);
+  assert.match(imageWorkbenchSource, /const \[blockingReason, setBlockingReason\]/);
+  assert.match(imageWorkbenchSource, /当前不能生成：\$\{blockingReason\}/);
+  assert.match(imageWorkbenchSource, /const handleBlockingReasonChange = useCallback/);
+  assert.match(imageWorkbenchSource, /onBlockingReasonChange=\{handleBlockingReasonChange\}/);
 });

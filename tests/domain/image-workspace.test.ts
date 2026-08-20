@@ -66,7 +66,7 @@ describe('image workspace contracts', () => {
       input: {
         assetId: toAssetId('asset-reference'),
         role: 'reference',
-        purpose: 'style reference',
+        purpose: 'legacy style reference',
         selectedAt: t0
       },
       generation: {
@@ -89,6 +89,7 @@ describe('image workspace contracts', () => {
       'Use project palette'
     );
     expect(draft.prompt.finalPrompt).toContain('project palette');
+    expect(draft.input).not.toHaveProperty('purpose');
     expect(draft.generation.parameters?.capabilityEvidenceId).toBe(
       'evidence-image'
     );
@@ -181,6 +182,7 @@ describe('image workspace contracts', () => {
       input: {
         assetId: toAssetId('asset-legacy-quick-reference'),
         role: 'reference' as const,
+        purpose: 'legacy composition reference',
         selectedAt: t0
       }
     });
@@ -198,6 +200,7 @@ describe('image workspace contracts', () => {
       },
       input: { role: 'reference' }
     });
+    expect(derived.input).not.toHaveProperty('purpose');
   });
 
   it('marks an existing image-to-prompt result stale without deleting it', () => {

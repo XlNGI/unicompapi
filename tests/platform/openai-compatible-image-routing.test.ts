@@ -49,7 +49,9 @@ describe('UniCompAPI reference image soft routing', () => {
       features: [
         {
           productFeature: 'reference_to_image',
-          internalPurpose: 'reference_to_image'
+          internalPurpose: 'reference_to_image',
+          parameterSchemaId:
+            'parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official'
         }
       ]
     });

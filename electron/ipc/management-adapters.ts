@@ -9,6 +9,7 @@ import {
   NewApiManagementAdapter,
   NewApiSharedRuntime,
   NewApiTransportFailure,
+  KIMI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   ViduManagementAdapter,
   ViduSharedRuntime,
@@ -84,6 +85,9 @@ export function createLiveProviderManagementComposition(options: {
       new NewApiManagementAdapter(newApiRuntime),
       new NewApiManagementAdapter(newApiRuntime, {
         packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID
+      }),
+      new NewApiManagementAdapter(newApiRuntime, {
+        packageId: KIMI_PROVIDER_PACKAGE_ID
       }),
       new KlingManagementAdapter(klingRuntime),
       new VolcengineManagementAdapter(volcengineRuntime),

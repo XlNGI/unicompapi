@@ -46,6 +46,8 @@ interface ImageFeatureSubmissionPanelProps {
   readonly requireExplicitFeature?: boolean;
   /** Professional image: omit the redundant candidate contract summary card. */
   readonly showCandidateFacts?: boolean;
+  /** Professional image can route blocked-generation copy to the workspace status bar. */
+  readonly showBlockedReason?: boolean;
   /** Professional image: show in-page 准备 → 提交中 → 生成中 → 完成 progress. */
   readonly showProgressSteps?: boolean;
   /** Optional fixed action host used by the professional two-pane workspace. */
@@ -101,6 +103,7 @@ export function ImageFeatureSubmissionPanel({
   oneShot = false,
   requireExplicitFeature = false,
   showCandidateFacts = true,
+  showBlockedReason = true,
   showProgressSteps = false,
   actionHost,
   onDraftChange,
@@ -764,7 +767,7 @@ export function ImageFeatureSubmissionPanel({
         </>
       ) : null}
 
-      {blockedReason ? (
+      {showBlockedReason && blockedReason ? (
         <div className="uc-image-quick__preflight" role="status">
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>

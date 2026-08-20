@@ -654,6 +654,8 @@ export function createOpenAiCompatibleDefaultTextDefinition(input: {
   readonly packageVersion: string;
   readonly providerModelKey: string;
   readonly features?: readonly ('text_chat' | 'text_reasoning')[];
+  readonly textChatParameterSchemaId?: string;
+  readonly textReasoningParameterSchemaId?: string;
 }): ProviderModelDefinition {
   const providerModelKey = requireProviderModelKey(input.providerModelKey);
   if (
@@ -695,7 +697,8 @@ export function createOpenAiCompatibleDefaultTextDefinition(input: {
           ? {
             productFeature: 'text_chat',
             internalPurpose: 'text_execution',
-            parameterSchemaId: NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+            parameterSchemaId: input.textChatParameterSchemaId ??
+              NEWAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
             resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
             usageSchemaId: NEWAPI_CHAT_USAGE_SCHEMA_ID,
             constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID
@@ -703,7 +706,8 @@ export function createOpenAiCompatibleDefaultTextDefinition(input: {
           : {
             productFeature: 'text_reasoning',
             internalPurpose: 'text_execution',
-            parameterSchemaId: NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+            parameterSchemaId: input.textReasoningParameterSchemaId ??
+              NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
             resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
             usageSchemaId: NEWAPI_CHAT_USAGE_SCHEMA_ID,
             constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID
@@ -829,6 +833,7 @@ export function createOpenAiCompatibleDefaultReferenceImageDefinition(input: {
   readonly packageId: string;
   readonly packageVersion: string;
   readonly providerModelKey: string;
+  readonly parameterSchemaId?: string;
 }): ProviderModelDefinition {
   const providerModelKey = requireProviderModelKey(input.providerModelKey);
   if (input.packageId !== 'provider-package-unicompapi') {
@@ -841,7 +846,9 @@ export function createOpenAiCompatibleDefaultReferenceImageDefinition(input: {
       packageId: input.packageId,
       packageVersion: input.packageVersion,
       providerModelKey,
-      feature: 'reference_to_image'
+      feature: 'reference_to_image',
+      parameterSchemaId: input.parameterSchemaId ??
+        NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID
     }))
     .digest('hex')
     .slice(0, 16);
@@ -861,7 +868,8 @@ export function createOpenAiCompatibleDefaultReferenceImageDefinition(input: {
           {
             productFeature: 'reference_to_image',
             internalPurpose: 'reference_to_image',
-            parameterSchemaId: NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+            parameterSchemaId: input.parameterSchemaId ??
+              NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
             resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
             usageSchemaId: NEWAPI_IMAGE_USAGE_SCHEMA_ID,
             constraintSetId: NEWAPI_REFERENCE_IMAGE_CONSTRAINT_SET_ID
