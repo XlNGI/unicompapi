@@ -342,7 +342,7 @@ export function createImageWorkspaceDraft<TDraft extends ImageWorkspaceDraft>(
     throw new TypeError('image workspace draft is invalid');
   }
 
-  return cloneImageWorkspaceDraft(input);
+  return cloneImageWorkspaceDraft(withoutProfessionalInputPurpose(input));
 }
 
 export function deriveImageWorkspaceDraft(input: {
@@ -388,7 +388,7 @@ export function deriveImageWorkspaceDraft(input: {
   };
 
   if (shared.mode === 'image_editing' && sourceInput) {
-    return {
+    return createImageWorkspaceDraft({
       ...shared,
       editing: {
         ...shared.editing,
@@ -397,10 +397,10 @@ export function deriveImageWorkspaceDraft(input: {
           parentAssetId: sourceInput.assetId
         }
       }
-    };
+    });
   }
 
-  return shared;
+  return createImageWorkspaceDraft(shared);
 }
 
 export function markImageAnalysisStale(
@@ -585,6 +585,21 @@ function cloneImageWorkspaceDraft<TDraft extends ImageWorkspaceDraft>(
   draft: TDraft
 ): TDraft {
   return structuredClone(draft);
+}
+
+function withoutProfessionalInputPurpose<
+  TDraft extends ImageWorkspaceDraft
+>(draft: TDraft): TDraft {
+  if (draft.mode !== 'professional_image' || !draft.input) return draft;
+  return {
+    ...draft,
+    input: {
+      assetId: draft.input.assetId,
+      role: draft.input.role,
+      ...(draft.input.region ? { region: { ...draft.input.region } } : {}),
+      selectedAt: draft.input.selectedAt
+    }
+  } as TDraft;
 }
 
 function clonePrompt(prompt: PromptSnapshot): PromptSnapshot {

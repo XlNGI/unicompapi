@@ -7,6 +7,7 @@ const providerBrands = {
   'provider-package-deepseek': { name: 'deepseek', icon: SiDeepseek },
   'provider-package-volcengine': { name: 'volcengine', icon: SiBytedance },
   'provider-package-kling': { name: 'kling', icon: SiKuaishou },
+  'provider-package-kimi': { name: 'kimi' },
   'provider-package-newapi': { name: 'openai', icon: TbBrandOpenai },
   'provider-package-unicompapi': {
     name: 'unicomp',

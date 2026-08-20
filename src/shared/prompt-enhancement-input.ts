@@ -4,6 +4,12 @@ export interface PromptEnhancementContentSourceContext {
 }
 
 export interface ImagePromptEnhancementContentSource {
+  readonly mode?:
+    | 'quick_image'
+    | 'professional_image'
+    | 'image_understanding'
+    | 'image_editing'
+    | 'image_to_prompt';
   readonly contextReferences: readonly PromptEnhancementContentSourceContext[];
   readonly input?: {
     readonly purpose?: string;
@@ -58,7 +64,9 @@ export function composeImagePromptEnhancementInput(
   source: ImagePromptEnhancementContentSource
 ): PromptEnhancementContentResult {
   const sections: string[] = [];
-  const purpose = source.input?.purpose?.trim();
+  const purpose = source.mode === 'professional_image'
+    ? undefined
+    : source.input?.purpose?.trim();
   if (purpose) sections.push(`图片用途：${purpose}`);
   if (source.input?.region) {
     sections.push(

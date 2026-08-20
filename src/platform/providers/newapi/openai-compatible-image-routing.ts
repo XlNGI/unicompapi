@@ -26,6 +26,7 @@ import {
   isKnownUniCompApiModel,
   isUniCompApiPackage,
   uniCompApiTextToImageParameterSchema,
+  uniCompApiReferenceToImageParameterSchema,
   uniCompApiSupportsImage,
   uniCompApiSupportsImageEdit,
   uniCompApiSupportsReferenceImage
@@ -193,7 +194,10 @@ function routeOpenAiCompatibleImageFeatureProfile(
       ? createOpenAiCompatibleDefaultReferenceImageDefinition({
           packageId: connection.packageId,
           packageVersion: connection.packageVersion,
-          providerModelKey: model.providerModelKey
+          providerModelKey: model.providerModelKey,
+          parameterSchemaId: isUniCompApiPackage(connection.packageId)
+            ? uniCompApiReferenceToImageParameterSchema(model.providerModelKey)?.schemaId
+            : undefined
         })
       : createOpenAiCompatibleDefaultImageEditDefinition({
           packageId: connection.packageId,

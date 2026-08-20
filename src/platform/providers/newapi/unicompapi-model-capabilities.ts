@@ -1,9 +1,13 @@
-import type { ParameterSchemaV2 } from '../../../domain';
+import type { ParameterFieldSchemaV2, ParameterSchemaV2 } from '../../../domain';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 
 export const UNICOMPAPI_SEEDREAM_5_MODEL_KEY = 'doubao-seedream-5-0-260128';
 export const UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.doubao_seedream_5_0_260128.text_to_image.official';
+export const UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.qwen_image.text_to_image.official';
+export const UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official';
 
 /**
  * Seedream 5.0 lite image-generation parameters supported by the current
@@ -61,6 +65,75 @@ export const uniCompApiSeedream5TextToImageParameterSchema: ParameterSchemaV2 = 
   ]
 };
 
+const qwenImageSizeOptions = [
+  '1664*928',
+  '1472*1104',
+  '1328*1328',
+  '1104*1472',
+  '928*1664'
+] as const;
+
+function qwenOptionalField(
+  fieldId: string,
+  valueType: ParameterFieldSchemaV2['valueType'],
+  order: number,
+  extra: Partial<ParameterFieldSchemaV2> = {}
+): ParameterFieldSchemaV2 {
+  return {
+    fieldId,
+    labelId: `provider.parameter.${fieldId}`,
+    groupId: 'provider.parameter.generation',
+    order,
+    valueType,
+    exposure: 'user_optional',
+    defaultPolicy: 'omit_use_provider_default',
+    required: false,
+    ...extra
+  };
+}
+
+/**
+ * Qwen-Image parameters exposed by the UniCompAPI OpenAI-compatible gateway.
+ * Qwen keeps PNG output and a single result fixed for this catalog model, so
+ * generic OpenAI quality/style/output-format controls are intentionally absent.
+ */
+export const uniCompApiQwenImageTextToImageParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_to_image',
+  fields: [
+    qwenOptionalField('size', 'enum', 10, { options: qwenImageSizeOptions }),
+    qwenOptionalField('negative_prompt', 'string', 20),
+    qwenOptionalField('prompt_extend', 'boolean', 30),
+    qwenOptionalField('watermark', 'boolean', 40),
+    qwenOptionalField('seed', 'integer', 50, {
+      minimum: 0,
+      maximum: 2_147_483_647
+    })
+  ]
+};
+
+/**
+ * qwen-image-edit-2509 is the legacy single-output reference model. Its
+ * documented controls are negative prompt, watermark, and seed; size,
+ * prompt extension, and output-format controls are not sent by default.
+ */
+export const uniCompApiQwenImageReferenceToImageParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'reference_to_image',
+  fields: [
+    qwenOptionalField('negative_prompt', 'string', 10),
+    qwenOptionalField('watermark', 'boolean', 20),
+    qwenOptionalField('seed', 'integer', 30, {
+      minimum: 0,
+      maximum: 2_147_483_647
+    })
+  ]
+};
+
 export type UniCompApiVideoFeature = 'text_to_video' | 'image_to_video';
 
 export type UniCompApiModelFeature =
@@ -98,6 +171,7 @@ const uniCompApiModelFeatureMap = new Map<string, readonly UniCompApiModelFeatur
   ['happyhorse-1.1-t2v', ['text_to_video']],
   ['kimi-k2.6', ['text_chat']],
   ['kling-v3-turbo', ['text_to_video', 'image_to_video']],
+  ['kimi-k3', ['text_chat', 'text_reasoning']],
   ['qwen-image', ['text_to_image']],
   ['qwen-image-edit-2509', ['reference_to_image']],
   ['qwen3-235b-a22b', ['text_chat', 'text_reasoning']],
@@ -126,8 +200,19 @@ export function uniCompApiModelFeatures(
 export function uniCompApiTextToImageParameterSchema(
   providerModelKey: string
 ): ParameterSchemaV2 | undefined {
-  return providerModelKey === UNICOMPAPI_SEEDREAM_5_MODEL_KEY
-    ? uniCompApiSeedream5TextToImageParameterSchema
+  if (providerModelKey === UNICOMPAPI_SEEDREAM_5_MODEL_KEY) {
+    return uniCompApiSeedream5TextToImageParameterSchema;
+  }
+  return providerModelKey === 'qwen-image'
+    ? uniCompApiQwenImageTextToImageParameterSchema
+    : undefined;
+}
+
+export function uniCompApiReferenceToImageParameterSchema(
+  providerModelKey: string
+): ParameterSchemaV2 | undefined {
+  return providerModelKey === 'qwen-image-edit-2509'
+    ? uniCompApiQwenImageReferenceToImageParameterSchema
     : undefined;
 }
 

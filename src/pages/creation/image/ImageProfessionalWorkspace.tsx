@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   LuFileImage,
-  LuImagePlus,
+  LuPlus,
   LuRotateCcw,
   LuTrash2,
   LuType
@@ -27,6 +27,7 @@ interface ImageProfessionalWorkspaceProps {
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
   readonly onMessage: (message: string) => void;
+  readonly onBlockingReasonChange?: (reason?: string) => void;
 }
 
 export function ImageProfessionalWorkspace({
@@ -35,7 +36,8 @@ export function ImageProfessionalWorkspace({
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
-  onMessage
+  onMessage,
+  onBlockingReasonChange
 }: ImageProfessionalWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const [input, setInput] = useState<ImageWorkspaceInputAssetDto>();
@@ -92,6 +94,11 @@ export function ImageProfessionalWorkspace({
           : undefined;
 
   useEffect(() => {
+    onBlockingReasonChange?.(blockedReason);
+    return () => onBlockingReasonChange?.(undefined);
+  }, [blockedReason, onBlockingReasonChange]);
+
+  useEffect(() => {
     let active = true;
     setInput(undefined);
     setPreviewUrl('');
@@ -146,17 +153,6 @@ export function ImageProfessionalWorkspace({
     });
   }
 
-  function changeReferencePurpose(value: string) {
-    if (!draft.input) return;
-    changeDraft({
-      ...draft,
-      input: {
-        ...draft.input,
-        purpose: value.trim() ? value : undefined
-      }
-    });
-  }
-
   async function ensureSavedDraft(): Promise<GenerationImageDraftDto | undefined> {
     if (!imageWorkspaces) return undefined;
     if (!dirty && draft.state === 'saved') return draft;
@@ -198,7 +194,7 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
+      onDraftChange(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(
         result.value.draft.draftId
@@ -232,7 +228,7 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
+      onDraftChange(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(
         result.value.draft.draftId
@@ -258,7 +254,7 @@ export function ImageProfessionalWorkspace({
         onMessage('清除图片失败，请重试。');
         return;
       }
-      onDraftPersisted(result.value as GenerationImageDraftDto);
+      onDraftChange(result.value as GenerationImageDraftDto);
       setInput(undefined);
       setPreviewUrl('');
       onMessage('已从当前草稿清除图片引用；项目内原始素材记录保持不变。');
@@ -329,74 +325,73 @@ export function ImageProfessionalWorkspace({
             </button>
           </div>
 
-          <label className="uc-image-quick__field">
+          <div className="uc-image-quick__field">
             <span>原始创作需求</span>
-            <Input
-              as="textarea"
-              maxLength={1000}
-              onChange={(value) => changeOriginalInput(value)}
-              placeholder="描述主体、场景、氛围和创作用途"
-              rows={5}
-              value={draft.prompt.originalInput}
-            />
-            <small>{draft.prompt.originalInput.length} / 1000</small>
-          </label>
-
-          {productFeature === 'reference_to_image' ? (
-            <ControlledImageDropZone
-              disabled={!imageWorkspaces || busy}
-              hasImage={Boolean(draft.input)}
-              onDropFile={(file, dropToken) => void importReference(file, dropToken)}
-              onReject={onMessage}
+            <div
+              className={`uc-image-professional__prompt-input${productFeature === 'reference_to_image' ? ' has-reference' : ''}`}
             >
-            <section className="uc-image-professional__reference">
-              <div className="uc-image-quick__reference">
-                <div>
-                  <strong>项目图片</strong>
-                  <span>
-                    {input
-                      ? `${input.name} · ${input.width} × ${input.height}`
-                      : '选择后只复制并登记到当前项目，不会自动外发。'}
-                  </span>
-                </div>
-                <div className="uc-image-feature-panel__media-actions">
-                  <Button
-                    disabled={!imageWorkspaces || busy}
-                    onClick={() => void selectReference()}
-                    variant="secondary"
+              <Input
+                aria-label="原始创作需求"
+                as="textarea"
+                className="uc-image-professional__prompt-textarea"
+                maxLength={1000}
+                onChange={(value) => changeOriginalInput(value)}
+                placeholder="描述主体、场景、氛围和创作用途"
+                rows={8}
+                value={draft.prompt.originalInput}
+              />
+              {productFeature === 'reference_to_image' ? (
+                <ControlledImageDropZone
+                  disabled={!imageWorkspaces || busy}
+                  hasImage={Boolean(draft.input)}
+                  onDropFile={(file, dropToken) => void importReference(file, dropToken)}
+                  onReject={onMessage}
+                >
+                  <section
+                    className={`uc-image-professional__reference${input ? ' has-image' : ' is-empty'}`}
                   >
-                    <LuImagePlus aria-hidden="true" />
-                    {input ? '替换图片' : '选择图片'}
-                  </Button>
-                  <Button
-                    disabled={!imageWorkspaces || !draft.input || busy}
-                    onClick={() => void clearReference()}
-                    variant="secondary"
-                  >
-                    <LuTrash2 aria-hidden="true" />
-                    清除图片
-                  </Button>
-                </div>
-              </div>
-              {previewUrl ? (
-                <figure className="uc-image-professional__preview">
-                  <img alt={`项目图片：${input?.name ?? '本地图片'}`} src={previewUrl} />
-                  <figcaption>受控本地预览，不代表生成结果。</figcaption>
-                </figure>
+                    {previewUrl ? (
+                      <figure className="uc-image-professional__preview">
+                        <div className="uc-image-professional__preview-media">
+                          <img alt={`项目图片：${input?.name ?? '本地图片'}`} src={previewUrl} />
+                          {input ? (
+                            <span className="uc-image-professional__preview-meta">
+                              {`${input.name} · ${input.width} × ${input.height}`}
+                            </span>
+                          ) : null}
+                          <div className="uc-image-professional__preview-overlay">
+                            <Button
+                              aria-label="删除图片"
+                              className="uc-image-professional__preview-delete"
+                              disabled={busy}
+                              onClick={() => void clearReference()}
+                              variant="secondary"
+                            >
+                              <LuTrash2 aria-hidden="true" />
+                            </Button>
+                          </div>
+                        </div>
+                      </figure>
+                    ) : (
+                      <div className="uc-image-professional__placeholder">
+                        <Button
+                          aria-label="添加图片"
+                          className="uc-image-professional__placeholder-button"
+                          disabled={!imageWorkspaces || busy}
+                          onClick={() => void selectReference()}
+                          title="添加图片"
+                          variant="secondary"
+                        >
+                          <LuPlus />
+                        </Button>
+                      </div>
+                    )}
+                  </section>
+                </ControlledImageDropZone>
               ) : null}
-              <label className="uc-image-quick__field">
-                <span>图片用途</span>
-                <Input
-                  disabled={!draft.input}
-                  maxLength={200}
-                  onChange={(value) => changeReferencePurpose(value)}
-                  placeholder="例如：仅参考构图，不复制人物"
-                  value={draft.input?.purpose ?? ''}
-                />
-              </label>
-            </section>
-            </ControlledImageDropZone>
-          ) : null}
+            </div>
+            <small>{draft.prompt.originalInput.length} / 1000</small>
+          </div>
 
           <div className="uc-image-professional__prompt-tools">
             <WorkspaceContextSelector
@@ -421,9 +416,6 @@ export function ImageProfessionalWorkspace({
               onMessage={onMessage}
             />
           </div>
-          <p className="uc-image-quick__hint">
-            候选只在点击后读取；只有确认增强或生成时才会发起对应请求。
-          </p>
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>发现旧上下文引用</strong>
@@ -506,6 +498,7 @@ export function ImageProfessionalWorkspace({
             }}
             requireExplicitFeature
             showCandidateFacts={false}
+            showBlockedReason={false}
           />
         </Card>
           </div>
@@ -540,12 +533,6 @@ export function ImageProfessionalWorkspace({
         </Card>
       </div>
 
-      <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="warning">在线运行未授权</StatusPill>
-        <p>
-          填写参数后可直接生成；提交时会自动锁定候选、参数、图片、上下文和外发事实快照。
-        </p>
-      </Card>
     </>
   );
 }

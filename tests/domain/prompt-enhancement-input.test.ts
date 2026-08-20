@@ -12,11 +12,19 @@ describe('structured prompt enhancement input', () => {
     expect(plain).toEqual({ required: false, text: '' });
 
     const withPurpose = composeImagePromptEnhancementInput({
+      mode: 'image_understanding',
       contextReferences: [],
       input: { purpose: '仅参考构图，不复制人物' }
     });
     expect(withPurpose.required).toBe(true);
     expect(withPurpose.text).toContain('图片用途：仅参考构图，不复制人物');
+
+    const professional = composeImagePromptEnhancementInput({
+      mode: 'professional_image',
+      contextReferences: [],
+      input: { purpose: '旧草稿残留用途' }
+    });
+    expect(professional).toEqual({ required: false, text: '' });
 
     const withRegion = composeImagePromptEnhancementInput({
       contextReferences: [],

@@ -41,6 +41,8 @@ import {
   newApiDefaultTextReasoningParameterSchema,
   newApiDefaultTextToImageParameterSchema,
   newApiDefaultReferenceToImageParameterSchema,
+  uniCompApiQwenImageReferenceToImageParameterSchema,
+  uniCompApiQwenImageTextToImageParameterSchema,
   newApiDefaultTextToVideoParameterSchema,
   uniCompApiDefaultTextToImageParameterSchema,
   uniCompApiSeedream5TextToImageParameterSchema,
@@ -57,6 +59,7 @@ import {
   UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_ENDPOINT_POLICY_ID,
@@ -81,6 +84,16 @@ import {
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
   unicompapiProviderPackageDescriptor,
+  kimiProviderPackageDescriptor,
+  kimiK3TextChatParameterSchema,
+  kimiK3TextReasoningParameterSchema,
+  KIMI_CREDENTIAL_SCHEMA_ID,
+  KIMI_ENDPOINT_POLICY_ID,
+  KIMI_OFFICIAL_TEMPLATE_ID,
+  KIMI_PROVIDER_PACKAGE_ID,
+  KIMI_PROVIDER_PACKAGE_VERSION,
+  KIMI_K3_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID,
   type ControlledNewApiImageV1,
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
@@ -299,6 +312,60 @@ describe('NewAPI package and dynamic model contracts', () => {
       'sequential_image_generation',
       'stream'
     ]));
+  });
+
+  it('registers the official Kimi package and K3 provider defaults', () => {
+    const registry = new ProviderPackageRegistry([kimiProviderPackageDescriptor]);
+    const template = registry.resolveTemplate(KIMI_PROVIDER_PACKAGE_ID, KIMI_OFFICIAL_TEMPLATE_ID);
+    expect(template.package.packageVersion).toBe(KIMI_PROVIDER_PACKAGE_VERSION);
+    expect(template.template.endpointPolicyId).toBe(KIMI_ENDPOINT_POLICY_ID);
+    expect(template.template.credentialSchemaId).toBe(KIMI_CREDENTIAL_SCHEMA_ID);
+    expect(registry.resolveEndpoint(template, undefined, false))
+      .toBe('https://api.moonshot.cn/v1');
+    expect(kimiK3TextChatParameterSchema.schemaId).toBe(KIMI_K3_TEXT_CHAT_PARAMETER_SCHEMA_ID);
+    expect(kimiK3TextReasoningParameterSchema.schemaId).toBe(KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID);
+    expect(kimiK3TextReasoningParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'max_completion_tokens',
+      'reasoning_effort',
+      'stop',
+      'response_format',
+      'tool_choice',
+      'parallel_tool_calls',
+      'user',
+      'metadata'
+    ]);
+    expect(kimiK3TextReasoningParameterSchema.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: 'max_completion_tokens',
+          minimum: 1,
+          maximum: 1_048_576,
+          defaultPolicy: 'omit_use_provider_default'
+        }),
+        expect.objectContaining({
+          fieldId: 'reasoning_effort',
+          options: ['low', 'high', 'max'],
+          defaultPolicy: 'omit_use_provider_default'
+        })
+      ])
+    );
+  });
+
+  it('publishes Qwen image schemas with provider-default policies', () => {
+    expect(uniCompApiQwenImageTextToImageParameterSchema.fields.map(
+      (field) => field.fieldId
+    )).toEqual([
+      'size', 'negative_prompt', 'prompt_extend', 'watermark', 'seed'
+    ]);
+    expect(uniCompApiQwenImageTextToImageParameterSchema.fields.every(
+      (field) => field.defaultPolicy === 'omit_use_provider_default'
+    )).toBe(true);
+    expect(uniCompApiQwenImageReferenceToImageParameterSchema.fields.map(
+      (field) => field.fieldId
+    )).toEqual(['negative_prompt', 'watermark', 'seed']);
+    expect(uniCompApiQwenImageReferenceToImageParameterSchema.fields.every(
+      (field) => field.defaultPolicy === 'omit_use_provider_default'
+    )).toBe(true);
   });
 
   it('publishes the qwen single-reference generations contract explicitly', () => {
@@ -1246,9 +1313,9 @@ describe('NewAPI image adapter', () => {
       },
       {
         get: async (schemaId: string, revision: number) =>
-          schemaId === NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID &&
+          schemaId === UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID &&
           revision === 1
-            ? newApiDefaultReferenceToImageParameterSchema
+            ? uniCompApiQwenImageReferenceToImageParameterSchema
             : undefined
       },
       usageSink().port,
@@ -1278,7 +1345,11 @@ describe('NewAPI image adapter', () => {
         projectId: 'project-newapi',
         prompt: '保留主体并调整画面',
         assetId: toAssetId('asset-qwen-reference'),
-        parameterValues: {}
+        parameterValues: {
+          negative_prompt: '低清晰度',
+          watermark: false,
+          seed: 7
+        }
       }
     });
 
@@ -1289,7 +1360,10 @@ describe('NewAPI image adapter', () => {
     expect(requestJson(fixture.requests[0])).toEqual({
       model: 'qwen-image-edit-2509',
       prompt: '保留主体并调整画面',
-      image: `data:image/png;base64,${Buffer.from(png).toString('base64')}`
+      image: `data:image/png;base64,${Buffer.from(png).toString('base64')}`,
+      negative_prompt: '低清晰度',
+      watermark: false,
+      seed: 7
     });
   });
 
@@ -1309,7 +1383,7 @@ describe('NewAPI image adapter', () => {
         ) => operation(unicompapiCredential())
       },
       {
-        get: async () => newApiDefaultReferenceToImageParameterSchema
+        get: async () => uniCompApiQwenImageReferenceToImageParameterSchema
       },
       usageSink().port,
       { download: vi.fn() },
@@ -1363,7 +1437,7 @@ describe('NewAPI image adapter', () => {
         ) => operation(unicompapiCredential())
       },
       {
-        get: async () => newApiDefaultReferenceToImageParameterSchema
+        get: async () => uniCompApiQwenImageReferenceToImageParameterSchema
       },
       usageSink().port,
       { download: vi.fn() },
@@ -2165,7 +2239,7 @@ function unicompapiReferenceImageRoute(): ProviderExecutionRouteSnapshotV1 {
     productFeature: 'reference_to_image',
     internalPurpose: 'reference_to_image',
     featureMappingVersion: 1,
-    parameterSchemaId: NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+    parameterSchemaId: UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
     parameterSchemaRevision: 1,
     resultSchemaId: NEWAPI_IMAGE_RESULT_SCHEMA_ID,
     resultSchemaRevision: 1,

@@ -58,6 +58,46 @@ test('professional image requires an explicit text or reference feature', () => 
   assert.match(professionalSource, /图生图必须选择恰好一张图片/);
   assert.match(professionalSource, /文生图不能包含图片/);
   assert.match(professionalSource, /clearInput\(saved\.draftId\)/);
+  assert.doesNotMatch(
+    professionalSource,
+    /图片用途|changeReferencePurpose|仅参考构图，不复制人物|input\.purpose|候选只在点击后读取/
+  );
+  assert.match(professionalSource, /uc-image-professional__placeholder/);
+  assert.match(professionalSource, /<LuPlus \/>/);
+  assert.doesNotMatch(professionalSource, /图片虚位以待/);
+  assert.doesNotMatch(professionalSource, /受控本地预览，不代表生成结果/);
+  assert.match(professionalSource, /aria-label="添加图片"/);
+  assert.match(professionalSource, /onClick=\{\(\) => void selectReference\(\)\}/);
+  assert.match(professionalSource, /uc-image-professional__preview-overlay/);
+  assert.match(professionalSource, /uc-image-professional__preview-meta/);
+  assert.doesNotMatch(professionalSource, /<strong>项目图片<\/strong>/);
+  assert.match(professionalSource, /aria-label="删除图片"/);
+  assert.match(professionalSource, /onClick=\{\(\) => void clearReference\(\)\}/);
+  assert.match(professionalSource, /has-image/);
+  assert.match(professionalSource, /is-empty/);
+  assert.doesNotMatch(
+    professionalSource,
+    />\s*(?:选择图片|替换图片|清除图片)\s*</
+  );
+});
+
+test('professional image embeds a compact reference control in the enlarged prompt input', () => {
+  assert.match(
+    professionalSource,
+    /uc-image-professional__prompt-input[\s\S]*rows=\{8\}[\s\S]*ControlledImageDropZone/
+  );
+  assert.match(
+    pageStyles,
+    /\.uc-image-professional__prompt-input\s+\.uc-image-professional__prompt-textarea\s*\{[\s\S]*min-height:\s*220px;/
+  );
+  assert.match(
+    pageStyles,
+    /\.uc-image-professional__prompt-input\s*>\s*\.uc-controlled-image-drop-zone\s*\{[\s\S]*right:\s*var\(--uc-space-3\);[\s\S]*bottom:\s*var\(--uc-space-3\);[\s\S]*width:\s*132px;[\s\S]*height:\s*88px;/
+  );
+  assert.match(
+    pageStyles,
+    /\.uc-image-professional__prompt-input\.has-reference[\s\S]*\.uc-image-professional__prompt-textarea\s*\{[\s\S]*padding-bottom:\s*112px;/
+  );
 });
 
 test('professional image consumes only revision-pinned ProjectContext', () => {
@@ -295,6 +335,11 @@ test('professional image autosaves drafts without a manual save gate', async () 
   assert.match(autosaveStatusSource, /保存失败，修改已保留/);
   assert.doesNotMatch(featurePanelSource, /if \(needsSave && imageWorkspaces\)/);
   assert.match(featurePanelSource, /onMessageRef\.current/);
+  assert.match(featurePanelSource, /showBlockedReason = true/);
+  assert.match(featurePanelSource, /showBlockedReason && blockedReason/);
+  assert.match(professionalSource, /onBlockingReasonChange/);
+  assert.match(professionalSource, /showBlockedReason=\{false\}/);
+  assert.doesNotMatch(professionalSource, /<strong>当前不能生成<\/strong>/);
 });
 
 test('prompt enhance keeps model selection and one-click confirmation', () => {
@@ -318,12 +363,25 @@ test('image submission keeps internal status codes out of user messages', () => 
   assert.doesNotMatch(featurePanelSource, /提交状态：\$\{result\.value\.status\}/);
   assert.doesNotMatch(featurePanelSource, /\$\{result\.error\.code\}/);
   assert.match(featurePanelSource, /!\/\[A-Za-z_\]\/u\.test\(rawFeedback\)/);
+  assert.doesNotMatch(professionalSource, /在线运行未授权/);
 });
 
 test('professional image uses controlled local media and the safe feature API', () => {
   for (const operation of ['selectInput', 'clearInput', 'createInputPreview']) {
     assert.match(professionalSource, new RegExp(`\\.${operation}\\(`));
   }
+  assert.match(
+    professionalSource,
+    /selectInput\([\s\S]*?onDraftChange\(result\.value\.draft/
+  );
+  assert.match(
+    professionalSource,
+    /importInput\([\s\S]*?onDraftChange\(result\.value\.draft/
+  );
+  assert.match(
+    professionalSource,
+    /clearInput\([\s\S]*?onDraftChange\(result\.value/
+  );
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));
   }

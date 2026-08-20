@@ -18,6 +18,7 @@ import {
   JsonProviderManagementAuditStore,
   JsonRuntimeAuthorizationLedgerStore,
   klingProviderPackageDescriptor,
+  kimiProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   normalizeTrustedExternalUrl,
   unicompapiProviderPackageDescriptor,
@@ -86,6 +87,7 @@ const providerPackages = new ProviderPackageRegistry([
   deepSeekProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   klingProviderPackageDescriptor,
+  kimiProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor

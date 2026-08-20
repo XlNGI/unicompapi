@@ -28,7 +28,6 @@ import {
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_CHAT_PROTOCOL_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
-  NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_PROTOCOL_VERSION,
   NEWAPI_CHAT_RESULT_SCHEMA_ID,
   NEWAPI_CHAT_USAGE_SCHEMA_ID,
@@ -37,7 +36,8 @@ import {
 } from './newapi-contracts';
 import {
   isOpenAiCompatibleEndpointPolicyId,
-  isOpenAiCompatiblePackageId
+  isOpenAiCompatiblePackageId,
+  isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
 import {
   isUniCompApiPackage
@@ -848,7 +848,7 @@ function validateRoute(value: unknown) {
   const route = parseProviderExecutionRouteSnapshot(value);
   if (
     !isOpenAiCompatiblePackageId(route.packageId) ||
-    route.packageVersion !== NEWAPI_PROVIDER_PACKAGE_VERSION ||
+    !isOpenAiCompatiblePackageVersion(route.packageId, route.packageVersion) ||
     route.adapterKey !== NEWAPI_CHAT_ADAPTER_ID ||
     route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
     !isOpenAiCompatibleEndpointPolicyId(route.endpointPolicyId) ||

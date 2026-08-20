@@ -44,6 +44,10 @@ import {
   uniCompApiSupportsText
 } from './newapi/unicompapi-model-capabilities';
 import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
+import {
+  KIMI_K3_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID
+} from './kimi/kimi-contracts';
 import { VIDU_PROVIDER_PACKAGE_ID } from './vidu/vidu-contracts';
 import { installPackagedViduCatalog } from './vidu/vidu-packaged-catalog-install';
 import {
@@ -2153,7 +2157,11 @@ function resolveDefaultTextChatDefinition(input: {
       packageId: input.packageId,
       packageVersion: input.packageVersion,
       providerModelKey: input.providerModelKey,
-      ...(declaredFeatures ? { features: declaredFeatures } : {})
+      ...(declaredFeatures ? { features: declaredFeatures } : {}),
+      ...(input.providerModelKey === 'kimi-k3' ? {
+        textChatParameterSchemaId: KIMI_K3_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+        textReasoningParameterSchemaId: KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID
+      } : {})
     });
   }
   return undefined;
