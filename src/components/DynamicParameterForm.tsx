@@ -182,16 +182,18 @@ export function DynamicParameterForm({
     return <p className="uc-model-select__hint" role="status">{emptyHint}</p>;
   }
   return (
-    <div className="uc-dynamic-parameters" aria-label="模型参数">
-      {fields.map((field) => (
-        <ParameterField
-          disabled={disabled}
-          field={field}
-          key={field.fieldId}
-          onChange={(value) => onChange(field.fieldId, value)}
-          value={values[field.fieldId]}
-        />
-      ))}
+    <div className="uc-dynamic-parameters-container">
+      <div className="uc-dynamic-parameters" aria-label="模型参数">
+        {fields.map((field) => (
+          <ParameterField
+            disabled={disabled}
+            field={field}
+            key={field.fieldId}
+            onChange={(value) => onChange(field.fieldId, value)}
+            value={values[field.fieldId]}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -240,16 +242,17 @@ function parameterLabel(field: DynamicParameterField): {
 function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
   const { text, required } = parameterLabel(field);
   const description = displayParameterDescription(field.fieldId || field.labelId);
+  const constraint = parameterConstraint(field);
   const descriptionId = useId();
   return (
     <span className="uc-dynamic-parameters__heading">
       <span className="uc-dynamic-parameters__label">
         <span className="uc-dynamic-parameters__key">{text}</span>
-        {description ? (
+        {description || constraint ? (
           <span className="uc-dynamic-parameters__info-wrap">
             <button
               aria-describedby={descriptionId}
-              aria-label={`${text}参数说明`}
+              aria-label={`${text}参数详情`}
               className="uc-dynamic-parameters__info"
               type="button"
             >
@@ -260,7 +263,13 @@ function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
               id={descriptionId}
               role="tooltip"
             >
-              {description}
+              {description ? <span>{description}</span> : null}
+              {constraint ? (
+                <span className="uc-dynamic-parameters__constraint">
+                  <strong>填写要求</strong>
+                  {constraint}
+                </span>
+              ) : null}
             </span>
           </span>
         ) : null}
@@ -299,38 +308,23 @@ function parameterConstraint(field: DynamicParameterField): string | undefined {
   return undefined;
 }
 
-function ParameterMeta({ field }: { readonly field: DynamicParameterField }) {
-  const constraint = parameterConstraint(field);
-  if (!constraint) return null;
-  return <span className="uc-dynamic-parameters__constraint">{constraint}</span>;
-}
-
 function ParameterShell({
   children,
   field,
-  filled,
   invalid = false
 }: {
   readonly children: ReactNode;
   readonly field: DynamicParameterField;
-  readonly filled: boolean;
   readonly invalid?: boolean;
 }) {
   return (
     <div
       className="uc-dynamic-parameters__field"
-      data-filled={filled || undefined}
       data-invalid={invalid || undefined}
       data-value-type={field.valueType}
     >
-      <div className="uc-dynamic-parameters__field-header">
-        <ParameterLabel field={field} />
-        <span className="uc-dynamic-parameters__value-state">
-          {filled ? '已设置' : '使用默认值'}
-        </span>
-      </div>
+      <ParameterLabel field={field} />
       <div className="uc-dynamic-parameters__control">{children}</div>
-      <ParameterMeta field={field} />
     </div>
   );
 }
@@ -348,7 +342,7 @@ function ParameterField({
 }) {
   if (field.valueType === 'boolean') {
     return (
-      <div className="uc-dynamic-parameters__field uc-dynamic-parameters__field--boolean" data-filled>
+      <div className="uc-dynamic-parameters__field uc-dynamic-parameters__field--boolean">
         <ParameterLabel field={field} />
         <Toggle
           checked={value === true}
@@ -367,7 +361,7 @@ function ParameterField({
       label: displayParameterOption(option, index)
     }));
     return (
-      <ParameterShell field={field} filled={value !== undefined}>
+      <ParameterShell field={field}>
         <SelectPicker
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           block
@@ -387,7 +381,7 @@ function ParameterField({
   }
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
-      <ParameterShell field={field} filled={typeof value === 'number'}>
+      <ParameterShell field={field}>
         <InputNumber
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled={disabled}
@@ -405,7 +399,7 @@ function ParameterField({
   }
   if (field.valueType === 'string_array' || field.valueType === 'number_array') {
     return (
-      <ParameterShell field={field} filled={Array.isArray(value) && value.length > 0}>
+      <ParameterShell field={field}>
         <Input
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled={disabled}
@@ -417,7 +411,7 @@ function ParameterField({
                 ? items.map(Number)
                 : items);
           }}
-          placeholder={field.required ? '请输入（必填）' : '留空使用服务默认值'}
+          placeholder={field.required ? '请输入（必填）' : '可留空'}
           required={field.required}
           value={Array.isArray(value) ? value.join(', ') : ''}
         />
@@ -429,7 +423,7 @@ function ParameterField({
   }
   if (field.valueType === 'media_slot') {
     return (
-      <ParameterShell field={field} filled>
+      <ParameterShell field={field}>
         <Input
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled
@@ -440,12 +434,12 @@ function ParameterField({
     );
   }
   return (
-    <ParameterShell field={field} filled={typeof value === 'string' && value.length > 0}>
+    <ParameterShell field={field}>
       <Input
         aria-label={displayParameterKey(field.fieldId || field.labelId)}
         disabled={disabled}
         onChange={(next) => onChange(next || undefined)}
-        placeholder={field.required ? '请输入（必填）' : '留空使用服务默认值'}
+        placeholder={field.required ? '请输入（必填）' : '可留空'}
         required={field.required}
         value={typeof value === 'string' ? value : ''}
       />
@@ -471,7 +465,7 @@ function ObjectParameterField({
     setInvalid(false);
   }, [value]);
   return (
-    <ParameterShell field={field} filled={text.trim().length > 0} invalid={invalid}>
+    <ParameterShell field={field} invalid={invalid}>
       <Input
         aria-label={displayParameterKey(field.fieldId || field.labelId)}
         aria-invalid={invalid}

@@ -42,7 +42,6 @@ const errorMessages: Partial<Record<PromptEnhanceIpcErrorCode, string>> = {
   route_selection_consumed: '本次增强准备已使用。',
   stale_route_selection: '草稿、提示词或上下文已变化，请重试提示词增强。',
   confirmation_required: '请重新确认提示词增强。',
-  runtime_not_allowed: '在线文本运行尚未获准，没有发出请求。',
   authorization_not_claimed: '运行授权未取得，没有发出请求。',
   submission_failed_before_request: '增强请求发送前失败。',
   submission_outcome_unknown: '增强结果未知。',
@@ -59,7 +58,6 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   profile_unavailable: '功能档案未验证',
   feature_unsupported: '不支持文本推理',
   binding_unavailable: '协议适配器不可用',
-  runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '约束不满足',
   schema_unsupported: '参数格式无法识别'
 };
@@ -120,6 +118,10 @@ export function PromptEnhancePanel({
         {}
       );
       if (!result.ok) {
+        if (result.error.code === 'runtime_not_allowed') {
+          onMessage('');
+          return;
+        }
         onMessage(errorMessages[result.error.code] ?? '提示词增强失败，请重试。');
         return;
       }
@@ -131,6 +133,10 @@ export function PromptEnhancePanel({
         true
       );
       if (!submission.ok || submission.value.status !== 'completed' || !submission.value.enhancedText) {
+        if (!submission.ok && submission.error.code === 'runtime_not_allowed') {
+          onMessage('');
+          return;
+        }
         const message = submission.ok
           ? '提示词增强未完成，请重试。'
           : errorMessages[submission.error.code] ?? '提示词增强失败，请重试。';

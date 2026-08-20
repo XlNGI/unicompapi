@@ -6,6 +6,10 @@ const professionalSource = await readFile(
   'src/pages/creation/image/ImageProfessionalWorkspace.tsx',
   'utf8'
 );
+const historySource = await readFile(
+  'src/components/GenerationHistory.tsx',
+  'utf8'
+);
 const featurePanelSource = await readFile(
   'src/pages/creation/image/ImageFeatureSubmissionPanel.tsx',
   'utf8'
@@ -43,7 +47,7 @@ const autosaveStatusSource = await readFile(
   'src/components/AutosaveStatus.tsx',
   'utf8'
 );
-const source = `${professionalSource}\n${featurePanelSource}\n${selectorSource}\n${enhancePanelSource}`;
+const source = `${professionalSource}\n${historySource}\n${featurePanelSource}\n${selectorSource}\n${enhancePanelSource}`;
 
 test('professional image requires an explicit text or reference feature', () => {
   assert.match(professionalSource, /aria-label="生图方式"/);
@@ -116,8 +120,8 @@ test('professional image uses a scrollable preparation pane and stable result pa
   assert.match(professionalSource, /actionHost={actionHost}/);
   assert.match(featurePanelSource, /createPortal\(primaryAction, actionHost\)/);
   assert.match(professionalSource, /aria-label="生成过程与作品区域"/);
-  assert.match(professionalSource, /第二步 · 生成过程与作品/);
-  assert.match(professionalSource, /<GenerationResultPreview/);
+  assert.match(professionalSource, /<GenerationHistory/);
+  assert.doesNotMatch(professionalSource, /第二步 · 生成过程与作品/);
   assert.match(pageStyles, /\.uc-image-professional__workspace\s*{[\s\S]*grid-template-columns:[^;]+;/);
   assert.match(pageStyles, /\.uc-image-professional__before-scroll\s*{[\s\S]*overflow-y: auto;/);
   assert.match(pageStyles, /\.uc-image-professional__before-pane\s*{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;/);
@@ -135,10 +139,10 @@ test('professional image uses a scrollable preparation pane and stable result pa
 });
 
 test('professional image shows an honest animated loading state inside the result preview', () => {
-  assert.match(professionalSource, /loading={generationInFlight}/);
-  assert.match(professionalSource, /正在准备图片生成/);
-  assert.match(professionalSource, /正在提交生成请求/);
-  assert.match(professionalSource, /正在生成图片/);
+  assert.match(historySource, /loading={showLoadingPreview}/);
+  assert.match(historySource, /const showLoadingPreview = generationInFlight && !selectedWorkId/);
+  assert.match(historySource, /mediaKind === 'image' \? '图片' : '视频'/);
+  assert.match(historySource, /完成后将校验并登记到本地/);
   assert.match(resultPreviewSource, /uc-generation-result-preview__loading/);
   assert.match(resultPreviewSource, /role="status"/);
   assert.match(resultPreviewSource, /uc-generation-result-preview__ring/);
@@ -151,10 +155,65 @@ test('professional image shows an honest animated loading state inside the resul
 
 test('professional image preserves the current result after submission', () => {
   assert.doesNotMatch(professionalSource, /onClearUi/);
+  assert.doesNotMatch(
+    professionalSource,
+    /if \(phase === 'preparing'\)[\s\S]{0,160}setResultWorkId\(undefined\)/
+  );
+  assert.doesNotMatch(professionalSource, /resultSelection|setResultWorkId/);
+  assert.match(professionalSource, /key={draft\.draftId}/);
+  assert.match(historySource, /if \(!historyLoaded\) return/);
+  assert.match(historySource, /works\.some\(\(work\) => work\.workId === selectedWorkId\)/);
   const start = workbenchSource.indexOf('<ImageProfessionalWorkspace');
   const end = workbenchSource.indexOf('/>', start);
   const invocation = workbenchSource.slice(start, end);
   assert.doesNotMatch(invocation, /onClearUi=/);
+});
+
+test('professional image history uses current-draft verified local works only', () => {
+  for (const operation of [
+    'listTasks',
+    'listWorks',
+    'getTaskDetails',
+    'getWorkDetails',
+    'createWorkMediaHandle'
+  ]) {
+    assert.match(historySource, new RegExp(`storage\\.${operation}\\(`));
+  }
+  assert.match(historySource, /task\.sourceDraftId === draftId/);
+  assert.match(historySource, /taskIds\.has\(details\.value\.sourceTaskId\)/);
+  assert.match(historySource, /work\.mediaKind === mediaKind/);
+  assert.match(historySource, /work\.fileState === 'available'/);
+  assert.match(historySource, /details\.value\?\.verifiedAt/);
+  assert.match(historySource, /handle\.ok && handle\.value\.mediaKind === mediaKind/);
+  assert.match(historySource, /a\.createdAt\.localeCompare\(b\.createdAt\)/);
+  assert.match(historySource, /aria-pressed={node\.work\.workId === selectedWorkId}/);
+  assert.match(historySource, /setSelectedWorkId\(node\.work\.workId\)/);
+  assert.doesNotMatch(historySource, /remoteUrls|resultImageUrl|fetch\(|localStorage/);
+});
+
+test('professional image history keeps concise truthful timeline states', () => {
+  for (const text of ['生成历史', '张作品', '最新在右侧', '生成中', '失败']) {
+    assert.match(historySource, new RegExp(text));
+  }
+  assert.doesNotMatch(historySource, /当前草稿的生成历史|按生成时间排列/);
+  assert.match(historySource, /latestExecutionUpdatedAt \?\? task\.createdAt/);
+  assert.match(historySource, /startedAt \?\? new Date\(\)\.toISOString\(\)/);
+  assert.doesNotMatch(historySource, /onLocalStorageChanged/);
+  assert.match(historySource, /timeline\.scrollLeft = timeline\.scrollWidth/);
+  assert.match(historySource, /onWheel={handleTimelineWheel}/);
+  assert.match(historySource, /event\.deltaX/);
+  assert.match(historySource, /event\.deltaY/);
+  assert.match(historySource, /event\.preventDefault\(\)/);
+  assert.match(historySource, /timeline\.scrollWidth <= timeline\.clientWidth/);
+  assert.match(historySource, /nextScrollLeft === timeline\.scrollLeft/);
+  assert.match(pageStyles, /\.uc-generation-history\s*{[\s\S]*grid-template-rows: minmax\(0, 1fr\) auto;/);
+  assert.match(pageStyles, /\.uc-generation-history__timeline-scroll\s*{[\s\S]*overflow-x: auto;/);
+  assert.match(pageStyles, /\.uc-generation-history__node\s*{[\s\S]*grid-template-rows: 86px 8px 18px;/);
+  assert.match(pageStyles, /\.uc-generation-history__work img,[\s\S]*\.uc-generation-history__work video\s*{[\s\S]*object-fit: contain;/);
+  assert.match(
+    pageStyles,
+    /\.uc-generation-history__preview \.uc-generation-result-preview img,[\s\S]*\.uc-generation-history__preview \.uc-generation-result-preview video\s*{[\s\S]*width: 100%;[\s\S]*height: 100%;[\s\S]*max-width: 100%;[\s\S]*max-height: 100%;[\s\S]*object-fit: contain;/
+  );
 });
 
 test('professional image shows only the final prompt and dynamic safe parameters', () => {
@@ -192,6 +251,8 @@ test('professional image hosts reusable prompt enhance without image Task', () =
   assert.match(promptEnhanceSource, /compact \|\| selectedCandidate/);
   assert.match(promptEnhanceSource, /确认增强/);
   assert.match(promptEnhanceSource, /host\.originalInput\.trim\(\)/);
+  assert.doesNotMatch(promptEnhanceSource, /在线运行未授权|在线文本运行尚未获准/);
+  assert.match(promptEnhanceSource, /submission\.error\.code === 'runtime_not_allowed'/);
   assert.match(promptEnhanceSource, /setOpen\(false\)/);
   assert.doesNotMatch(promptEnhanceSource, /SubmissionProgressSteps|DynamicParameterForm|Checkbox/);
   assert.doesNotMatch(promptEnhanceSource, /准备增强|确认本次提示词增强外发/);

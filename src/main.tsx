@@ -5,6 +5,7 @@ import { RSuiteThemeBridge } from './theme/RSuiteThemeBridge';
 import { initializeTheme } from './theme/theme';
 import { App } from './ui/App';
 import { GlobalNotificationProvider } from './ui/notifications/GlobalNotificationProvider';
+import { ProjectStatusProvider } from './ui/status/ProjectStatusContext';
 import './styles/tokens.css';
 import 'rsuite/dist/rsuite-no-reset.min.css';
 import './styles/rsuite-bridge.css';
@@ -17,7 +18,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <ThemeProvider>
       <RSuiteThemeBridge>
         <GlobalNotificationProvider>
-          <App />
+          <ProjectStatusProvider>
+            <App />
+          </ProjectStatusProvider>
         </GlobalNotificationProvider>
       </RSuiteThemeBridge>
     </ThemeProvider>

@@ -7,7 +7,10 @@ import {
   toDynamicParameterFields,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
-import { ModelSelect } from '../../../components/ModelSelect';
+import {
+  isVisibleModelUnavailableReason,
+  ModelSelect
+} from '../../../components/ModelSelect';
 import {
   SubmissionProgressSteps,
   type SubmissionProgressPhase
@@ -58,7 +61,7 @@ interface ImageFeatureSubmissionPanelProps {
   readonly onSubmissionComplete?: (submission: ImageFeatureSubmissionDto) => void;
 }
 
-const errorMessages: Record<ImageFeatureIpcErrorCode, string> &
+const errorMessages: Partial<Record<ImageFeatureIpcErrorCode, string>> &
   Partial<Record<ImageWorkspaceIpcErrorCode, string>> = {
   invalid_request: '图片功能请求无效，请重新保存当前草稿。',
   project_not_open: '当前没有打开的项目。',
@@ -72,7 +75,6 @@ const errorMessages: Record<ImageFeatureIpcErrorCode, string> &
   route_selection_consumed: '本次服务选择已经使用，不能重复提交。',
   stale_route_selection: '草稿或服务事实已变化，请重新准备。',
   confirmation_required: '请确认本次外发事实后再提交。',
-  runtime_not_allowed: '在线图片运行尚未获准，没有发出请求。',
   authorization_not_claimed: '运行授权未取得，没有发出请求。',
   submission_failed_before_request: '请求发送前失败，没有产生远端结果。',
   submission_outcome_unknown: '提交结果未知，禁止自动重试。',
@@ -87,7 +89,6 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   profile_unavailable: '功能档案未验证',
   feature_unsupported: '不支持当前生图方式',
   binding_unavailable: '协议适配器不可用',
-  runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '草稿约束不满足',
   schema_unsupported: '参数定义无法识别'
 };
@@ -148,6 +149,17 @@ export function ImageFeatureSubmissionPanel({
   draftRef.current = draft;
   onMessageRef.current = onMessage;
   const generationNotificationId = `image-generation:${draft.draftId}`;
+  const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
+    isVisibleModelUnavailableReason
+  ) ?? [];
+
+  function silentlyFinishRuntimeGate() {
+    notifications.dismiss(generationNotificationId);
+    if (trackProgress) {
+      setProgressFailure(undefined);
+      setProgressPhase('idle');
+    }
+  }
 
   useEffect(() => {
     onProgressChange?.(progressPhase, progressFailure);
@@ -294,7 +306,9 @@ export function ImageFeatureSubmissionPanel({
         if (!result.ok) {
           setCandidates([]);
           setLoadState('loaded');
-          onMessageRef.current(errorMessages[result.error.code]);
+          onMessageRef.current(
+            errorMessages[result.error.code] ?? '读取图片服务候选失败，请重试。'
+          );
           return;
         }
         setCandidates(result.value);
@@ -434,9 +448,14 @@ export function ImageFeatureSubmissionPanel({
         }
       }
       if (!result.ok) {
-        showSubmissionError(errorMessages[result.error.code]);
+        if (result.error.code === 'runtime_not_allowed') {
+          silentlyFinishRuntimeGate();
+          return;
+        }
+        const message = errorMessages[result.error.code] ?? '图片提交准备失败，请重试。';
+        showSubmissionError(message);
         if (trackProgress) {
-          setProgressFailure(errorMessages[result.error.code]);
+          setProgressFailure(message);
           setProgressPhase('submission_failed');
         }
         return;
@@ -473,6 +492,10 @@ export function ImageFeatureSubmissionPanel({
       true
     );
     if (!result.ok) {
+      if (result.error.code === 'runtime_not_allowed') {
+        silentlyFinishRuntimeGate();
+        return;
+      }
       const message =
         errorMessages[result.error.code] ||
         '图片提交失败';
@@ -537,13 +560,13 @@ export function ImageFeatureSubmissionPanel({
       return;
     }
     if (!selectedCandidate.available) {
-      showGenerationError(
-        `所选模型当前不可用：${
-          selectedCandidate.unavailableReasons
+      if (selectedUnavailableReasons.length > 0) {
+        showGenerationError(
+          `所选模型当前不可用：${selectedUnavailableReasons
             .map((reason) => unavailableReasonLabels[reason] ?? '其他不可用原因')
-            .join('、') || '未知原因'
-        }`
-      );
+            .join('、')}`
+        );
+      }
       return;
     }
     const prompt = draft.prompt.finalPrompt.trim();
@@ -572,6 +595,10 @@ export function ImageFeatureSubmissionPanel({
           parameterValues
         );
         if (!result.ok) {
+          if (result.error.code === 'runtime_not_allowed') {
+            silentlyFinishRuntimeGate();
+            return;
+          }
           if (result.error.code === 'submission_outcome_unknown') {
             showGenerationUncertain(describeUnconfirmedGenerationOutcome());
           } else {
@@ -648,7 +675,7 @@ export function ImageFeatureSubmissionPanel({
       className="uc-image-feature-panel__primary"
       disabled={
         oneShot
-          ? busy
+          ? Boolean(blockedReason) || busy || !selectedCandidate?.available
           : Boolean(blockedReason) ||
             busy ||
             !selectedCandidate?.available
@@ -709,10 +736,10 @@ export function ImageFeatureSubmissionPanel({
               </StatusPill>
             </div>
           ) : null}
-          {!selectedCandidate.available ? (
+          {!selectedCandidate.available && selectedUnavailableReasons.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>
-              {selectedCandidate.unavailableReasons.map((reason) => (
+              {selectedUnavailableReasons.map((reason) => (
                 <span key={reason}>• {unavailableReasonLabels[reason] ?? '其他不可用原因'}</span>
               ))}
             </div>

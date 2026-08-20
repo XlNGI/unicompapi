@@ -7,7 +7,10 @@ import {
   toDynamicParameterFields,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
-import { ModelSelect } from '../../../components/ModelSelect';
+import {
+  isVisibleModelUnavailableReason,
+  ModelSelect
+} from '../../../components/ModelSelect';
 import {
   SubmissionProgressSteps,
   type SubmissionProgressPhase
@@ -54,7 +57,7 @@ interface VideoFeatureSubmissionPanelProps {
   readonly onSubmissionComplete?: (submission: VideoFeatureSubmissionDto) => void;
 }
 
-const errorMessages: Record<VideoFeatureIpcErrorCode, string> &
+const errorMessages: Partial<Record<VideoFeatureIpcErrorCode, string>> &
   Partial<Record<VideoWorkspaceIpcErrorCode, string>> = {
   invalid_request: '视频功能请求无效，请重新保存当前草稿。',
   project_not_open: '当前没有打开的项目。',
@@ -68,7 +71,6 @@ const errorMessages: Record<VideoFeatureIpcErrorCode, string> &
   route_selection_consumed: '本次服务选择已经使用，不能重复提交。',
   stale_route_selection: '草稿或服务事实已变化，请重新准备。',
   confirmation_required: '请确认本次外发事实后再提交。',
-  runtime_not_allowed: '视频提交运行时未就绪或未获准，没有发出请求。',
   authorization_not_claimed: '运行授权未取得，没有发出请求。',
   submission_failed_before_request: '请求发送前失败，没有产生远端结果。',
   submission_outcome_unknown: '提交结果未知，禁止自动重试。',
@@ -98,8 +100,7 @@ function describeWorkspacePersistError(error: {
 function describeVideoFeatureError(
   error: { readonly code: VideoFeatureIpcErrorCode; readonly message: string }
 ): string {
-  const fallback = errorMessages[error.code];
-  return fallback;
+  return errorMessages[error.code] ?? '视频功能操作失败，请重试。';
 }
 
 const unavailableReasonLabels: Readonly<Record<string, string>> = {
@@ -109,7 +110,6 @@ const unavailableReasonLabels: Readonly<Record<string, string>> = {
   profile_unavailable: '功能档案未验证',
   feature_unsupported: '不支持当前视频方式',
   binding_unavailable: '协议适配器不可用',
-  runtime_not_allowed: '在线运行未授权',
   subject_constraints_unsatisfied: '草稿约束不满足',
   schema_unsupported: '参数定义无法识别'
 };
@@ -154,6 +154,17 @@ export function VideoFeatureSubmissionPanel({
   draftRef.current = draft;
   onMessageRef.current = onMessage;
   const generationNotificationId = `video-generation:${draft.draftId}`;
+  const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
+    isVisibleModelUnavailableReason
+  ) ?? [];
+
+  function silentlyFinishRuntimeGate() {
+    notifications.dismiss(generationNotificationId);
+    if (trackProgress) {
+      setProgressFailure(undefined);
+      setProgressPhase('idle');
+    }
+  }
 
   useEffect(() => {
     onProgressChange?.(progressPhase, progressFailure);
@@ -426,6 +437,10 @@ export function VideoFeatureSubmissionPanel({
         }
       }
       if (!result.ok) {
+        if (result.error.code === 'runtime_not_allowed') {
+          silentlyFinishRuntimeGate();
+          return;
+        }
         const message = describeVideoFeatureError(result.error);
         showSubmissionError(message);
         if (trackProgress) {
@@ -466,6 +481,10 @@ export function VideoFeatureSubmissionPanel({
       true
     );
     if (!result.ok) {
+      if (result.error.code === 'runtime_not_allowed') {
+        silentlyFinishRuntimeGate();
+        return;
+      }
       const message = describeVideoFeatureError(result.error);
       const uncertain = result.error.code === 'submission_outcome_unknown';
       if (uncertain) {
@@ -544,10 +563,10 @@ export function VideoFeatureSubmissionPanel({
               {selectedCandidate.available ? '可准备' : '当前不可用'}
             </StatusPill>
           </div>
-          {!selectedCandidate.available ? (
+          {!selectedCandidate.available && selectedUnavailableReasons.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
               <strong>不可用原因</strong>
-              {selectedCandidate.unavailableReasons.map((reason) => (
+              {selectedUnavailableReasons.map((reason) => (
                 <span key={reason}>• {unavailableReasonLabels[reason] ?? '其他不可用原因'}</span>
               ))}
             </div>

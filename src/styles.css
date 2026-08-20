@@ -317,12 +317,51 @@ button {
 }
 
 .app-body {
+  position: relative;
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
 }
 
+.uc-project-status-bar {
+  grid-row: 2;
+  grid-column: 2;
+  z-index: 80;
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--uc-space-2);
+  border: 1px solid var(--uc-color-border-default);
+  border-radius: var(--uc-radius-8);
+  padding: var(--uc-space-2) var(--uc-space-3);
+  margin: 0 var(--uc-space-4) var(--uc-space-4);
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-raised);
+  box-shadow: var(--uc-shadow-md);
+}
+
+.uc-project-status-bar__content {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--uc-space-2);
+}
+
+.uc-project-status-bar__content > p {
+  min-width: 0;
+  margin: 0;
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-caption);
+}
+
 .sidebar {
+  grid-row: 1 / -1;
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -720,7 +759,10 @@ button {
 }
 
 .workspace {
+  grid-row: 1;
+  grid-column: 2;
   min-width: 0;
+  min-height: 0;
   overflow: auto;
   padding: 16px;
 }

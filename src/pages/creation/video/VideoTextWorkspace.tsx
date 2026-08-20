@@ -1,10 +1,9 @@
 import { useCallback, useState } from 'react';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
-import { Input, SelectPicker } from 'rsuite';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
-import { StatusPill } from '../../../components/StatusPill';
+import { GenerationHistory } from '../../../components/GenerationHistory';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import type {
   VideoWorkspaceDraftDto,
@@ -39,23 +38,21 @@ export function VideoTextWorkspace({
   onFlushDraft,
   onMessage
 }: VideoTextWorkspaceProps) {
-  const [resultWorkId, setResultWorkId] = useState<string>();
-  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
-  const [submissionProgress, setSubmissionProgress] = useState<SubmissionProgressPhase>('idle');
-  const handleProgressChange = useCallback((phase: SubmissionProgressPhase) => {
-    if (phase === 'preparing') {
-      setResultWorkId(undefined);
-      setResultUrls([]);
-    }
-    setSubmissionProgress(phase);
+  const [submissionProgress, setSubmissionProgress] = useState<{
+    readonly phase: SubmissionProgressPhase;
+    readonly failureMessage?: string;
+  }>({ phase: 'idle' });
+  const handleProgressChange = useCallback((
+    phase: SubmissionProgressPhase,
+    failureMessage?: string
+  ) => {
+    setSubmissionProgress({ phase, failureMessage });
   }, []);
-  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(submissionProgress);
-  const generationPreviewCopy = submissionProgress === 'preparing'
-    ? { title: '正在准备视频生成', description: '正在锁定本次参数、素材与提交事实。' }
-    : submissionProgress === 'requesting'
-      ? { title: '正在提交生成请求', description: '请求正在安全提交，请保持应用运行。' }
-      : { title: '正在生成视频', description: '服务商正在处理，完成后将校验并登记到本地。' };
+  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(
+    submissionProgress.phase
+  );
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
       reference.kind !== 'project_context' ||
@@ -177,26 +174,6 @@ export function VideoTextWorkspace({
               <p>文生视频固定为无素材输入；镜头计划在第一步整理，最终提示词在第二步确认。</p>
             </div>
           </header>
-          <div className="uc-image-quick__field">
-            <span>文字来源</span>
-            <SelectPicker
-              aria-label="文字来源"
-              cleanable={false}
-              data={[
-                { value: 'short_idea', label: '简短创意' },
-                { value: 'long_form', label: '长文本脚本' }
-              ]}
-              onChange={(value) => changeDraft({
-                ...draft,
-                textToVideo: {
-                  ...draft.textToVideo,
-                  sourceKind: value as 'short_idea' | 'long_form'
-                }
-              })}
-              searchable={false}
-              value={draft.textToVideo.sourceKind}
-            />
-          </div>
           <label className="uc-image-quick__field">
             <span>原始需求</span>
             <Input
@@ -319,8 +296,7 @@ export function VideoTextWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
-              setResultWorkId(submission.workId);
-              setResultUrls(submission.resultVideoUrls ?? []);
+              setHistoryRefreshKey((key) => key + 1);
               if (submission.status === 'completed') {
                 onClearUi?.();
               }
@@ -351,24 +327,18 @@ export function VideoTextWorkspace({
             </div>
           </header>
           <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-text__canvas">
-            <GenerationResultPreview
-              loading={generationInFlight}
-              loadingDescription={generationPreviewCopy.description}
-              loadingTitle={generationPreviewCopy.title}
+            <GenerationHistory
+              draftId={draft.draftId}
+              key={draft.draftId}
               mediaKind="video"
-              remoteUrls={resultUrls}
-              workId={resultWorkId}
+              projectId={draft.projectId}
+              refreshKey={historyRefreshKey}
+              submissionProgress={submissionProgress}
             />
           </Card>
         </section>
       </div>
 
-      <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="info">调用记录</StatusPill>
-        <p>
-          快速/文生/图生视频共用同一提交与调用记录流程；上下文或参数变化会使旧选择令牌失效。
-        </p>
-      </Card>
     </>
   );
 }

@@ -42,7 +42,7 @@ test('professional video pages keep prompts and submission controls out of the r
   for (const { path, source } of sources.filter(({ path }) => path.includes('VideoText') || path.includes('VideoImage'))) {
     const controls = source.indexOf('uc-generation-two-pane__controls');
     const result = source.indexOf('uc-generation-two-pane__result');
-    const preview = source.indexOf('<GenerationResultPreview');
+    const preview = source.indexOf('<GenerationHistory');
     assert.ok(controls >= 0 && result > controls, `${path} should place result area after parameters`);
     assert.ok(preview > result, `${path} should render preview only in the result area`);
     assert.ok(source.indexOf('<VideoFeatureSubmissionPanel') < result, `${path} should keep submission controls left`);

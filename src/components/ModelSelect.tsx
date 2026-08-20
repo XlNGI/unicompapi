@@ -12,6 +12,11 @@ export interface ModelSelectOption {
   readonly unavailableReasons?: readonly string[];
 }
 
+/** Runtime authorization is an internal gate, not a user-actionable model reason. */
+export function isVisibleModelUnavailableReason(reason: string): boolean {
+  return reason !== 'runtime_not_allowed';
+}
+
 export interface ModelSelectProps {
   readonly label?: string;
   readonly ariaLabel?: string;
@@ -189,6 +194,7 @@ function ModelSelectOptionContent({
   readonly compact?: boolean;
 }) {
   const reasons = (option.unavailableReasons ?? [])
+    .filter(isVisibleModelUnavailableReason)
     .map((reason) => reasonLabels[reason] ?? '其他不可用原因')
     .filter((reason, index, all) => all.indexOf(reason) === index);
   const statusLabel =

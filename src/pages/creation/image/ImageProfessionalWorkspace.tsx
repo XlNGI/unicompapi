@@ -9,8 +9,8 @@ import {
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
+import { GenerationHistory } from '../../../components/GenerationHistory';
 import { ControlledImageDropZone } from '../../../components/ControlledImageDropZone';
-import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
 import { StatusPill } from '../../../components/StatusPill';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
@@ -41,8 +41,7 @@ export function ImageProfessionalWorkspace({
   const [input, setInput] = useState<ImageWorkspaceInputAssetDto>();
   const [previewUrl, setPreviewUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const [resultWorkId, setResultWorkId] = useState<string>();
-  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
@@ -52,34 +51,14 @@ export function ImageProfessionalWorkspace({
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
-    if (phase === 'preparing') {
-      setResultWorkId(undefined);
-      setResultUrls([]);
-    }
     setSubmissionProgress({ phase, failureMessage });
   }, []);
   const generationInFlight =
     submissionProgress.phase === 'preparing' ||
     submissionProgress.phase === 'requesting' ||
     submissionProgress.phase === 'waiting';
-  const generationPreviewCopy = submissionProgress.phase === 'preparing'
-    ? {
-        title: '正在准备图片生成',
-        description: '正在锁定本次参数、素材与提交事实。'
-      }
-    : submissionProgress.phase === 'requesting'
-      ? {
-          title: '正在提交生成请求',
-          description: '请求正在安全提交，请保持应用运行。'
-        }
-      : {
-          title: '正在生成图片',
-          description: '服务商正在处理，完成后将校验并登记到本地。'
-        };
-
   useEffect(() => {
-    setResultWorkId(undefined);
-    setResultUrls([]);
+    setHistoryRefreshKey(0);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
   const productFeature = draft.featureSelection?.productFeature === 'text_to_image' ||
@@ -522,9 +501,8 @@ export function ImageProfessionalWorkspace({
             onFlushDraft={onFlushDraft}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
-            onSubmissionComplete={(submission) => {
-              setResultWorkId(submission.workId);
-              setResultUrls(submission.resultImageUrls ?? []);
+            onSubmissionComplete={() => {
+              setHistoryRefreshKey((key) => key + 1);
             }}
             requireExplicitFeature
             showCandidateFacts={false}
@@ -551,35 +529,14 @@ export function ImageProfessionalWorkspace({
           aria-label="生成过程与作品区域"
           className="uc-image-professional__after-pane"
         >
-          <header className="uc-image-professional__pane-heading">
-            <span aria-hidden="true">2</span>
-            <div>
-              <h2>第二步 · 生成过程与作品</h2>
-              <p>提交状态与通过本地校验的作品会保留在这里。</p>
-            </div>
-          </header>
-
-          <div className="uc-image-professional__stage">
-            <GenerationResultPreview
-              animateResult
-              emptyDescription={
-                submissionProgress.phase === 'idle'
-                  ? '完成左侧配置并点击“生成”后，这里显示生成过程和作品。'
-                  : '只有完成本地文件校验后，生成结果才会登记为正式作品。'
-              }
-              emptyTitle={
-                submissionProgress.phase === 'idle'
-                  ? '等待提交'
-                  : '暂时没有可展示的作品'
-              }
-              loading={generationInFlight}
-              loadingDescription={generationPreviewCopy.description}
-              loadingTitle={generationPreviewCopy.title}
-              mediaKind="image"
-              remoteUrls={resultUrls}
-              workId={resultWorkId}
-            />
-          </div>
+          <GenerationHistory
+            draftId={draft.draftId}
+            key={draft.draftId}
+            mediaKind="image"
+            projectId={draft.projectId}
+            refreshKey={historyRefreshKey}
+            submissionProgress={submissionProgress}
+          />
         </Card>
       </div>
 

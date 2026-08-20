@@ -5,6 +5,9 @@ import type {
 } from '../navigation/navigationItems';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
+import { useEffect, useId } from 'react';
+import { useProjectStatus } from '../status/ProjectStatusContext';
+import { StatusPill } from '../../components/StatusPill';
 
 interface AppLayoutProps {
   activeItemId: NavigationItemId;
@@ -24,6 +27,40 @@ export function AppLayout({
   onNavigate,
   onSecondaryNavigate
 }: AppLayoutProps) {
+  const { register, unregister, status } = useProjectStatus();
+  const sceneStatusId = useId();
+  const sceneLabel = activeSubItemId
+    ? ({
+        'quick-image': '快速生图',
+        'professional-image': '专业生图',
+        'image-understanding': '图片识别',
+        'image-editing': '图片编辑',
+        'image-to-prompt': '图片转提示词',
+        'quick-video': '快速视频',
+        'text-to-video': '文生视频',
+        'image-to-video': '图生视频',
+        'video-editing': '视频编辑'
+      } as Record<string, string>)[activeSubItemId]
+    : ({
+        projects: '项目',
+        chat: '对话',
+        'image-creation': '图片创作',
+        'video-creation': '视频创作',
+        tasks: '任务中心',
+        library: '作品库',
+        providers: '模型与服务商',
+        settings: '本地设置'
+      } as Record<string, string>)[activeItemId];
+  useEffect(() => {
+    register(sceneStatusId, {
+      label: '项目状态',
+      tone: 'neutral',
+      content: `当前场景：${sceneLabel}。页面状态会在这里更新。`,
+      priority: 0,
+      role: 'status'
+    });
+    return () => unregister(sceneStatusId);
+  }, [activeItemId, activeSubItemId, register, sceneLabel, sceneStatusId, unregister]);
   return (
     <div className="app-shell app-shell--compact">
       <a className="skip-link" href="#main-content">
@@ -44,6 +81,10 @@ export function AppLayout({
         >
           {children}
         </main>
+        <aside className="uc-project-status-bar" role={status.role}>
+          <StatusPill tone={status.tone}>{status.label}</StatusPill>
+          <div className="uc-project-status-bar__content">{status.content}</div>
+        </aside>
       </div>
     </div>
   );

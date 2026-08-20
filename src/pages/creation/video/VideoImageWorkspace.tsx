@@ -4,7 +4,7 @@ import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { ControlledImageDropZone } from '../../../components/ControlledImageDropZone';
-import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
+import { GenerationHistory } from '../../../components/GenerationHistory';
 import { StatusPill } from '../../../components/StatusPill';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import type {
@@ -74,23 +74,21 @@ export function VideoImageWorkspace({
   const [material, setMaterial] = useState<VideoWorkspaceMaterialAssetDto>();
   const [preview, setPreview] = useState<VideoWorkspaceMaterialPreviewDto>();
   const [busy, setBusy] = useState(false);
-  const [resultWorkId, setResultWorkId] = useState<string>();
-  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
-  const [submissionProgress, setSubmissionProgress] = useState<SubmissionProgressPhase>('idle');
-  const handleProgressChange = useCallback((phase: SubmissionProgressPhase) => {
-    if (phase === 'preparing') {
-      setResultWorkId(undefined);
-      setResultUrls([]);
-    }
-    setSubmissionProgress(phase);
+  const [submissionProgress, setSubmissionProgress] = useState<{
+    readonly phase: SubmissionProgressPhase;
+    readonly failureMessage?: string;
+  }>({ phase: 'idle' });
+  const handleProgressChange = useCallback((
+    phase: SubmissionProgressPhase,
+    failureMessage?: string
+  ) => {
+    setSubmissionProgress({ phase, failureMessage });
   }, []);
-  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(submissionProgress);
-  const generationPreviewCopy = submissionProgress === 'preparing'
-    ? { title: '正在准备视频生成', description: '正在锁定本次参数、素材与提交事实。' }
-    : submissionProgress === 'requesting'
-      ? { title: '正在提交生成请求', description: '请求正在安全提交，请保持应用运行。' }
-      : { title: '正在生成视频', description: '服务商正在处理，完成后将校验并登记到本地。' };
+  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(
+    submissionProgress.phase
+  );
   const legacySelections = useMemo(
     () => draft.imageToVideo.materials?.slots.flatMap(
       (slot) => slot.selection ? [slot.selection] : []
@@ -565,8 +563,7 @@ export function VideoImageWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
-              setResultWorkId(submission.workId);
-              setResultUrls(submission.resultVideoUrls ?? []);
+              setHistoryRefreshKey((key) => key + 1);
               if (submission.status === 'completed') {
                 onClearUi?.();
               }
@@ -597,13 +594,13 @@ export function VideoImageWorkspace({
             </div>
           </header>
           <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
-            <GenerationResultPreview
-              loading={generationInFlight}
-              loadingDescription={generationPreviewCopy.description}
-              loadingTitle={generationPreviewCopy.title}
+            <GenerationHistory
+              draftId={draft.draftId}
+              key={draft.draftId}
               mediaKind="video"
-              remoteUrls={resultUrls}
-              workId={resultWorkId}
+              projectId={draft.projectId}
+              refreshKey={historyRefreshKey}
+              submissionProgress={submissionProgress}
             />
           </Card>
         </section>

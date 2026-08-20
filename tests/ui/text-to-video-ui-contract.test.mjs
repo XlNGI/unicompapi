@@ -32,9 +32,11 @@ test('text-to-video can explicitly remove unsupported legacy contexts', () => {
 });
 
 test('text-to-video keeps prompt and shot planning local', () => {
-  for (const fact of ['originalInput', 'finalPrompt', 'sourceKind', 'shots', '添加镜头']) {
+  for (const fact of ['originalInput', 'finalPrompt', 'shots', '添加镜头']) {
     assert.match(source, new RegExp(fact));
   }
+  assert.doesNotMatch(source, /文字来源|简短创意|长文本脚本/);
+  assert.doesNotMatch(source, /调用记录/);
   assert.ok(
     source.indexOf('添加镜头') < source.indexOf('<h2>最终提示词</h2>'),
     'shot planning should appear before the final prompt step'
@@ -46,7 +48,8 @@ test('text-to-video keeps prompt and shot planning local', () => {
 test('text-to-video uses only the unified candidate and submission panel', () => {
   assert.match(source, /VideoFeatureSubmissionPanel/);
   assert.match(source, /showProgressSteps/);
-  assert.match(source, /GenerationResultPreview/);
+  assert.match(source, /GenerationHistory/);
+  assert.match(source, /mediaKind="video"/);
   assert.match(source, /onSubmissionComplete/);
   assert.match(panel, /routeSelectionToken/);
   assert.match(panel, /confirmationId/);

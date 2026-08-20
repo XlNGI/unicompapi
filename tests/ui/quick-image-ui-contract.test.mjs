@@ -144,7 +144,9 @@ test('quick image exposes the registered local result without duplicating downlo
 
 test('quick image keeps unavailable runtime blocked without fake output', async () => {
   assert.match(featurePanelSource, /runtime_not_allowed/);
-  assert.match(featurePanelSource, /在线图片运行尚未获准，没有发出请求/);
+  assert.doesNotMatch(featurePanelSource, /在线图片运行尚未获准|在线运行未授权/);
+  assert.match(featurePanelSource, /notifications\.dismiss\(generationNotificationId\)/);
+  assert.match(featurePanelSource, /!selectedCandidate\?\.available/);
   assert.match(quickSource, /生成结果将在这里显示/);
   assert.match(quickSource, /GenerationResultPreview/);
   assert.match(previewSource, /createWorkMediaHandle/);

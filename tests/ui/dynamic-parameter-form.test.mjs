@@ -62,10 +62,14 @@ test('dynamic enum values use Chinese labels while preserving submitted values',
   assert.match(source, /return `其他选项 \$\{index \+ 1\}`/);
 });
 
-test('dynamic parameter controls expose value state and nearby constraints', () => {
-  assert.match(source, /uc-dynamic-parameters__value-state/);
-  assert.match(source, /filled \? '已设置' : '使用默认值'/);
+test('dynamic parameter controls omit persistent state and move constraints into details', () => {
+  assert.doesNotMatch(source, /uc-dynamic-parameters__value-state/);
+  assert.doesNotMatch(source, /使用默认值|已设置/);
+  assert.match(source, /placeholder={field\.required \? '请输入（必填）' : '可留空'}/);
   assert.match(source, /uc-dynamic-parameters__constraint/);
+  assert.match(source, /填写要求/);
+  assert.match(source, /description \|\| constraint/);
+  assert.doesNotMatch(source, /function ParameterMeta/);
   assert.match(source, /不小于/);
   assert.match(source, /不大于/);
   assert.match(source, /仅限整数/);
@@ -80,14 +84,19 @@ test('dynamic parameters use accessible controls and responsive stable layout', 
   assert.match(source, /unCheckedChildren="关闭"/);
   assert.match(source, /label=\{displayParameterKey/);
   assert.match(source, /aria-label=\{displayParameterKey/);
-  assert.match(styles, /\.uc-dynamic-parameters__field-header/);
   assert.match(styles, /\.uc-dynamic-parameters__control/);
   assert.match(source, /data-value-type=\{field\.valueType\}/);
-  assert.match(styles, /width: min\(100%, 18rem\)/);
-  assert.match(styles, /data-value-type='number'[\s\S]*?width: min\(100%, 14rem\)/);
+  assert.match(source, /uc-dynamic-parameters-container/);
+  assert.match(styles, /\.uc-dynamic-parameters-container\s*{[\s\S]*container-type: inline-size;/);
+  assert.match(styles, /\.uc-dynamic-parameters\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(styles, /@container \(min-width: 620px\)[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(styles, /grid-template-columns: 7rem minmax\(0, 1fr\)/);
+  assert.match(styles, /grid-template-areas: "label control"/);
+  assert.match(styles, /\.uc-dynamic-parameters__control\s*{[\s\S]*grid-area: control;[\s\S]*width: 100%;/);
   assert.match(styles, /data-value-type='object'[\s\S]*?width: 100%/);
-  assert.match(styles, /min-height: 7\.25rem/);
-  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?grid-template-columns: 1fr/);
+  assert.match(styles, /data-value-type='object'[\s\S]*?grid-column: 1 \/ -1/);
+  assert.match(styles, /min-height: 3\.25rem/);
+  assert.match(styles, /min-height: 2\.25rem/);
   assert.match(styles, /data-invalid='true'/);
   assert.match(styles, /\.uc-dynamic-parameters__info-wrap:focus-within/);
   assert.match(styles, /\.uc-dynamic-parameters__tooltip/);

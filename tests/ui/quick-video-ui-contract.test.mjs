@@ -47,6 +47,7 @@ test('quick video shares the text/image result and call-record surface', () => {
   assert.match(quick, /调用记录/);
   assert.match(quick, /快速\/文生\/图生视频共用同一提交/);
   assert.match(panel, /runtime_not_allowed/);
-  assert.doesNotMatch(quick, /在线运行未授权/);
+  assert.doesNotMatch(panel + quick, /在线运行未授权|视频提交运行时未就绪或未获准/);
+  assert.match(panel, /notifications\.dismiss\(generationNotificationId\)/);
   assert.doesNotMatch(bundle, /默认 1 个结果|16:9|1080p|24fps|Runway|Sora/);
 });

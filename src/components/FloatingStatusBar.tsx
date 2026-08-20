@@ -1,6 +1,7 @@
-import type { HTMLAttributes, ReactNode } from 'react';
-import { StatusPill, type StatusTone } from './StatusPill';
+import { useEffect, useId, type HTMLAttributes, type ReactNode } from 'react';
+import type { StatusTone } from './StatusPill';
 import '../styles/components.css';
+import { useProjectStatus } from '../ui/status/ProjectStatusContext';
 
 export interface FloatingStatusBarProps extends Omit<HTMLAttributes<HTMLElement>, 'children'> {
   readonly children: ReactNode;
@@ -14,20 +15,21 @@ export interface FloatingStatusBarProps extends Omit<HTMLAttributes<HTMLElement>
  */
 export function FloatingStatusBar({
   children,
-  className = '',
   label,
   role = 'status',
-  tone = 'neutral',
-  ...props
+  tone = 'neutral'
 }: FloatingStatusBarProps) {
-  return (
-    <aside
-      className={['uc-floating-status-bar', className].filter(Boolean).join(' ')}
-      role={role}
-      {...props}
-    >
-      {label ? <StatusPill tone={tone}>{label}</StatusPill> : null}
-      <div className="uc-floating-status-bar__content">{children}</div>
-    </aside>
-  );
+  const statusId = useId();
+  const { register, unregister } = useProjectStatus();
+  useEffect(() => {
+    register(statusId, {
+      label: label ?? '项目状态',
+      tone,
+      content: children,
+      priority: 10,
+      role: role === 'alert' ? 'alert' : 'status'
+    });
+    return () => unregister(statusId);
+  }, [children, label, register, role, statusId, tone, unregister]);
+  return null;
 }
