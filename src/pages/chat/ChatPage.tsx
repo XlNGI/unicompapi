@@ -18,7 +18,7 @@ import {
   LuTrash2,
   LuX
 } from 'react-icons/lu';
-import { Checkbox, Drawer, Input, Modal, SelectPicker, Tooltip, Whisper } from 'rsuite';
+import { Checkbox, Drawer, Input, Modal, Tooltip, Whisper } from 'rsuite';
 import { ActionMenu } from '../../components/ActionMenu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -92,6 +92,16 @@ const documentErrorMessages: Record<string, string> = {
   file_unavailable: '文档文件不可用。',
   storage_error: '本地保存失败，请检查存储状态。'
 };
+
+const documentKindOptions: readonly {
+  readonly value: DocumentKindOption;
+  readonly label: string;
+}[] = [
+  { value: 'auto', label: '自动' },
+  { value: 'word', label: 'Word' },
+  { value: 'excel', label: 'Excel' },
+  { value: 'ppt', label: 'PPT' }
+];
 
 function rendererTrace(message: string, detail?: unknown): void {
   if (!import.meta.env.DEV) return;
@@ -1863,20 +1873,30 @@ export function ChatPage({
                   <span>文档</span>
                 </button>
                 {documentMode ? (
-                  <SelectPicker
+                  <div
                     aria-label="文档类型"
-                    cleanable={false}
-                    data={[
-                      { value: 'auto', label: '自动判断' },
-                      { value: 'word', label: 'Word 文档' },
-                      { value: 'excel', label: 'Excel 表格' },
-                      { value: 'ppt', label: 'PPT 演示' }
-                    ]}
-                    disabled={!canCompose || !session || busy}
-                    onChange={(value) => setDocumentKind((value ?? 'auto') as DocumentKindOption)}
-                    value={documentKind}
-                    width={110}
-                  />
+                    className="uc-chat-page__doc-kind"
+                    role="radiogroup"
+                  >
+                    {documentKindOptions.map((option) => (
+                      <button
+                        aria-checked={documentKind === option.value}
+                        className={documentKind === option.value ? 'is-active' : ''}
+                        disabled={!canCompose || !session || busy}
+                        key={option.value}
+                        onClick={() => setDocumentKind(option.value)}
+                        role="radio"
+                        title={
+                          option.value === 'auto'
+                            ? '根据需求自动判断文档类型'
+                            : option.label
+                        }
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 ) : null}
                 <ModelSelect
                   appearance="subtle"

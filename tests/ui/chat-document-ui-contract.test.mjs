@@ -7,10 +7,11 @@ const styles = await readFile('src/styles/pages.css', 'utf8');
 
 test('chat page exposes a document generation entry without making chat the only path', () => {
   assert.match(page, /documentMode/);
-  assert.match(page, /自动判断/);
-  assert.match(page, /Word 文档/);
-  assert.match(page, /Excel 表格/);
-  assert.match(page, /PPT 演示/);
+  assert.match(page, /uc-chat-page__doc-kind/);
+  assert.match(page, /\{ value: 'auto', label: '自动' \}/);
+  assert.match(page, /\{ value: 'word', label: 'Word' \}/);
+  assert.match(page, /\{ value: 'excel', label: 'Excel' \}/);
+  assert.match(page, /\{ value: 'ppt', label: 'PPT' \}/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);
@@ -28,4 +29,5 @@ test('chat page document card styles exist', () => {
   assert.match(styles, /\.uc-chat-page__document-card/);
   assert.match(styles, /\.uc-chat-page__attachments/);
   assert.match(styles, /\.uc-chat-page__drop-overlay/);
+  assert.match(styles, /\.uc-chat-page__doc-kind/);
 });

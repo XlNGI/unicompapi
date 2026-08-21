@@ -8583,6 +8583,34 @@ button.uc-project-center__project-card:disabled {
   color: var(--uc-accent, #4f8cff);
   background: color-mix(in srgb, var(--uc-accent, #4f8cff) 10%, transparent);
 }
+.uc-chat-page__doc-kind {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--uc-border, rgba(127, 127, 127, 0.35));
+  border-radius: 6px;
+  gap: 2px;
+}
+.uc-chat-page__doc-kind button {
+  height: 24px;
+  padding: 0 0.55rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.uc-chat-page__doc-kind button.is-active {
+  background: color-mix(in srgb, var(--uc-accent, #4f8cff) 14%, transparent);
+  color: var(--uc-accent, #4f8cff);
+  font-weight: 600;
+}
+.uc-chat-page__doc-kind button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .uc-chat-page__composer--document {
   outline: 1px dashed color-mix(in srgb, var(--uc-accent, #4f8cff) 55%, transparent);
   outline-offset: 2px;
