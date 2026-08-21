@@ -100,10 +100,20 @@ function qwenOptionalField(
 export const uniCompApiQwenImageTextToImageParameterSchema: ParameterSchemaV2 = {
   schemaVersion: 2,
   schemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
-  revision: 2,
+  revision: 3,
   productFeature: 'text_to_image',
   fields: [
-    qwenOptionalField('size', 'enum', 10, { options: qwenImageSizeOptions }),
+    {
+      fieldId: 'size',
+      labelId: 'provider.parameter.size',
+      groupId: 'provider.parameter.generation',
+      order: 10,
+      valueType: 'enum',
+      exposure: 'user_required',
+      defaultPolicy: 'require_user_value',
+      required: true,
+      options: qwenImageSizeOptions
+    },
     qwenOptionalField('negative_prompt', 'string', 20),
     qwenOptionalField('prompt_extend', 'boolean', 30),
     qwenOptionalField('watermark', 'boolean', 40),

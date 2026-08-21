@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { projectParameterSchema } from '../../src/domain';
 import {
   isKnownUniCompApiModel,
+  uniCompApiQwenImageTextToImageParameterSchema,
   uniCompApiModelFeatures,
   uniCompApiTextToImageParameterSchema,
   uniCompApiReferenceToImageParameterSchema,
@@ -88,11 +90,14 @@ describe('UniCompAPI model capability registry', () => {
       uniCompApiTextToImageParameterSchema('qwen-image')
     ).toMatchObject({
       schemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
-      revision: 2,
+      revision: 3,
       productFeature: 'text_to_image',
       fields: expect.arrayContaining([
         expect.objectContaining({
           fieldId: 'size',
+          exposure: 'user_required',
+          defaultPolicy: 'require_user_value',
+          required: true,
           options: [
             '1664x928',
             '1472x1104',
@@ -106,6 +111,10 @@ describe('UniCompAPI model capability registry', () => {
         expect.objectContaining({ fieldId: 'seed', minimum: 0, maximum: 2_147_483_647 })
       ])
     });
+    expect(projectParameterSchema(
+      uniCompApiQwenImageTextToImageParameterSchema,
+      'required_only'
+    ).fields.map((field) => field.fieldId)).toEqual(['size']);
     expect(
       uniCompApiReferenceToImageParameterSchema('qwen-image-edit-2509')
     ).toMatchObject({
