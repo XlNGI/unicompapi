@@ -352,13 +352,19 @@ describe('NewAPI package and dynamic model contracts', () => {
     );
   });
 
-  it('publishes Qwen image schemas with provider-default policies', () => {
+  it('publishes Qwen image schemas with required text-to-image size', () => {
     expect(uniCompApiQwenImageTextToImageParameterSchema.fields.map(
       (field) => field.fieldId
     )).toEqual([
       'size', 'negative_prompt', 'prompt_extend', 'watermark', 'seed'
     ]);
-    expect(uniCompApiQwenImageTextToImageParameterSchema.fields.every(
+    expect(uniCompApiQwenImageTextToImageParameterSchema.fields[0]).toMatchObject({
+      fieldId: 'size',
+      exposure: 'user_required',
+      defaultPolicy: 'require_user_value',
+      required: true
+    });
+    expect(uniCompApiQwenImageTextToImageParameterSchema.fields.slice(1).every(
       (field) => field.defaultPolicy === 'omit_use_provider_default'
     )).toBe(true);
     expect(uniCompApiQwenImageReferenceToImageParameterSchema.fields.map(
