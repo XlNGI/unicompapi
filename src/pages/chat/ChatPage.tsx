@@ -1142,7 +1142,7 @@ export function ChatPage({
         },
         title: conversationTitleFromMessage(requirements),
         content: combined,
-        productFeature: 'text_reasoning',
+        productFeature: responseFeature,
         candidateId: selectedCandidateId,
         contextSelections: includedContextIds.flatMap((contextId) => {
           const context = viewedContexts[contextId];
