@@ -396,7 +396,8 @@ function validateRoute(value: unknown) {
         route.productFeature !== 'reference_to_image' &&
         route.productFeature !== 'image_edit') ||
     route.internalPurpose !== expectedPurpose ||
-    route.parameterSchemaRevision !== 1 ||
+    !Number.isSafeInteger(route.parameterSchemaRevision) ||
+    route.parameterSchemaRevision < 1 ||
     route.resultSchemaId !== NEWAPI_IMAGE_RESULT_SCHEMA_ID ||
     route.resultSchemaRevision !== 1 ||
     route.usageSchemaId !== NEWAPI_IMAGE_USAGE_SCHEMA_ID ||

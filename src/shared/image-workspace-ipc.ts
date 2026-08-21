@@ -6,10 +6,13 @@ export const imageWorkspaceIpcChannels = {
   derive: 'image-workspace:derive',
   selectInput: 'image-workspace:select-input',
   importInput: 'image-workspace:import-input',
+  useWorkAsInput: 'image-workspace:use-work-as-input',
   clearInput: 'image-workspace:clear-input',
   getInput: 'image-workspace:get-input',
   createInputPreview: 'image-workspace:create-input-preview'
 } as const;
+
+export const imageWorkDragDataType = 'application/x-unicomp-image-work';
 
 export const imageWorkspaceDtoModes = [
   'quick_image',
@@ -241,6 +244,10 @@ export interface ImageWorkspaceApi {
   importInput(
     draftId: string,
     file: unknown
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;
+  useWorkAsInput(
+    draftId: string,
+    workId: string
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>>;
   clearInput(
     draftId: string

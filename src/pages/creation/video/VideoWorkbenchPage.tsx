@@ -347,7 +347,9 @@ export function VideoWorkbenchPage({
       : '未打开项目';
   return (
     <section
-      className="uc-image-workbench uc-video-workbench"
+      className={`uc-image-workbench uc-video-workbench${
+        usesFlowAutosave ? ' uc-image-workbench--generation' : ''
+      }`}
       aria-labelledby={`${mode.id}-title`}
     >
       <header className="uc-image-workbench__header">

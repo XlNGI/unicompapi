@@ -5,7 +5,6 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationOutputPanel } from '../../../components/GenerationOutputPanel';
 import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
-import { StatusPill } from '../../../components/StatusPill';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import type {
   VideoWorkspaceDraftDto,
@@ -246,12 +245,6 @@ export function VideoQuickWorkspace({
         </GenerationOutputPanel>
       </div>
 
-      <Card className="uc-image-workbench__notice" role="status">
-        <StatusPill tone="info">调用记录</StatusPill>
-        <p>
-          快速/文生/图生视频共用同一提交与调用记录流程；每次提交都会写入任务中心。
-        </p>
-      </Card>
     </>
   );
 }

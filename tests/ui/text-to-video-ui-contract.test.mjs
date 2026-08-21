@@ -31,18 +31,25 @@ test('text-to-video can explicitly remove unsupported legacy contexts', () => {
   assert.match(source, /reference\.includeInPrompt !== undefined/);
 });
 
-test('text-to-video keeps prompt and shot planning local', () => {
-  for (const fact of ['originalInput', 'finalPrompt', 'shots', '添加镜头']) {
+test('text-to-video keeps prompt editing local without shot controls', () => {
+  for (const fact of ['originalInput', 'finalPrompt', '视频创意']) {
     assert.match(source, new RegExp(fact));
   }
   assert.doesNotMatch(source, /文字来源|简短创意|长文本脚本/);
   assert.doesNotMatch(source, /调用记录/);
-  assert.ok(
-    source.indexOf('添加镜头') < source.indexOf('<h2>最终提示词</h2>'),
-    'shot planning should appear before the final prompt step'
-  );
-  assert.match(source, /emptyStoryboard/);
+  assert.doesNotMatch(source, /镜头计划|添加镜头|删除镜头|uc-video-text__shot/);
+  assert.doesNotMatch(source, /addShot|updateShot|removeShot|emptyStoryboard/);
   assert.doesNotMatch(bundle, /fetch\(|upload\(|analy[sz]e\(|absolutePath/);
+});
+
+test('text-to-video reuses the professional image prompt tools layout', () => {
+  assert.match(source, /uc-image-professional__prompt-tools/);
+  assert.match(source, /<WorkspaceContextSelector\s+compact/);
+  assert.match(source, /<VideoPromptEnhancePanel\s+compact/);
+  assert.ok(
+    source.indexOf('<WorkspaceContextSelector') < source.indexOf('<VideoPromptEnhancePanel'),
+    'project context should precede prompt enhancement in the shared tool row'
+  );
 });
 
 test('text-to-video uses only the unified candidate and submission panel', () => {

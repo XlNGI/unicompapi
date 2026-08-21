@@ -167,6 +167,11 @@ const imageWorkspaces: ImageWorkspaceApi = {
       draftId,
       sourcePath: getPathForDroppedFile(file)
     }),
+  useWorkAsInput: (draftId, workId) =>
+    ipcRenderer.invoke(imageWorkspaceIpcChannels.useWorkAsInput, {
+      draftId,
+      workId
+    }),
   clearInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.clearInput, { draftId }),
   getInput: (draftId) =>

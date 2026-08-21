@@ -1,11 +1,13 @@
 import { useState, type DragEvent, type ReactNode } from 'react';
 import { LuImagePlus } from 'react-icons/lu';
+import { imageWorkDragDataType } from '../shared/image-workspace-ipc';
 
 interface ControlledImageDropZoneProps {
   readonly children: ReactNode;
   readonly disabled?: boolean;
   readonly hasImage: boolean;
   readonly onDropFile: (file: File, dropToken?: string) => void;
+  readonly onDropWork?: (workId: string) => void;
   readonly onReject: (message: string) => void;
 }
 
@@ -14,12 +16,13 @@ export function ControlledImageDropZone({
   disabled = false,
   hasImage,
   onDropFile,
+  onDropWork,
   onReject
 }: ControlledImageDropZoneProps) {
   const [dragging, setDragging] = useState(false);
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
-    if (disabled || !hasFiles(event)) return;
+    if (disabled || !hasSupportedPayload(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     setDragging(true);
@@ -31,9 +34,14 @@ export function ControlledImageDropZone({
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
-    if (disabled || !hasFiles(event)) return;
+    if (disabled || !hasSupportedPayload(event)) return;
     event.preventDefault();
     setDragging(false);
+    const workId = event.dataTransfer.getData(imageWorkDragDataType).trim();
+    if (workId) {
+      onDropWork?.(workId);
+      return;
+    }
     const files = Array.from(event.dataTransfer.files);
     if (files.length !== 1) {
       onReject('一次只能添加一张图片。');
@@ -72,6 +80,7 @@ export function ControlledImageDropZone({
   );
 }
 
-function hasFiles(event: DragEvent<HTMLDivElement>): boolean {
-  return Array.from(event.dataTransfer.types).includes('Files');
+function hasSupportedPayload(event: DragEvent<HTMLDivElement>): boolean {
+  const types = Array.from(event.dataTransfer.types);
+  return types.includes('Files') || types.includes(imageWorkDragDataType);
 }

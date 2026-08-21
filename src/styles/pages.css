@@ -1167,6 +1167,16 @@
   overflow: hidden;
 }
 
+.uc-generation-history__preview.is-draggable,
+.uc-generation-history__work[draggable='true'] {
+  cursor: grab;
+}
+
+.uc-generation-history__preview.is-draggable:active,
+.uc-generation-history__work[draggable='true']:active {
+  cursor: grabbing;
+}
+
 .uc-generation-history__preview > .uc-image-quick__result-list,
 .uc-generation-history__preview .uc-generation-result-preview {
   min-width: 0;
@@ -1642,6 +1652,19 @@
     "requirements"
     "motion"
     "prompt";
+}
+
+@media (min-width: 1181px) {
+  .uc-image-workbench--generation {
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+    padding-bottom: 0;
+  }
+
+  .uc-image-workbench--generation > .uc-generation-two-pane {
+    height: 100%;
+  }
 }
 
 .uc-video-image__materials {

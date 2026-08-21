@@ -66,11 +66,11 @@ export const uniCompApiSeedream5TextToImageParameterSchema: ParameterSchemaV2 = 
 };
 
 const qwenImageSizeOptions = [
-  '1664*928',
-  '1472*1104',
-  '1328*1328',
-  '1104*1472',
-  '928*1664'
+  '1664x928',
+  '1472x1104',
+  '1328x1328',
+  '1104x1472',
+  '928x1664'
 ] as const;
 
 function qwenOptionalField(
@@ -100,7 +100,7 @@ function qwenOptionalField(
 export const uniCompApiQwenImageTextToImageParameterSchema: ParameterSchemaV2 = {
   schemaVersion: 2,
   schemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
-  revision: 1,
+  revision: 2,
   productFeature: 'text_to_image',
   fields: [
     qwenOptionalField('size', 'enum', 10, { options: qwenImageSizeOptions }),

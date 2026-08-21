@@ -88,8 +88,19 @@ describe('UniCompAPI model capability registry', () => {
       uniCompApiTextToImageParameterSchema('qwen-image')
     ).toMatchObject({
       schemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+      revision: 2,
       productFeature: 'text_to_image',
       fields: expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: 'size',
+          options: [
+            '1664x928',
+            '1472x1104',
+            '1328x1328',
+            '1104x1472',
+            '928x1664'
+          ]
+        }),
         expect.objectContaining({ fieldId: 'negative_prompt' }),
         expect.objectContaining({ fieldId: 'prompt_extend' }),
         expect.objectContaining({ fieldId: 'seed', minimum: 0, maximum: 2_147_483_647 })

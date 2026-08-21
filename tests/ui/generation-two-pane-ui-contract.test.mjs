@@ -14,6 +14,8 @@ const componentStyles = await readFile('src/styles/components.css', 'utf8');
 const outputPanel = await readFile('src/components/GenerationOutputPanel.tsx', 'utf8');
 const appLayout = await readFile('src/ui/layout/AppLayout.tsx', 'utf8');
 const imageFeaturePanel = await readFile('src/pages/creation/image/ImageFeatureSubmissionPanel.tsx', 'utf8');
+const imageWorkbench = await readFile('src/pages/creation/image/ImageWorkbenchPage.tsx', 'utf8');
+const videoWorkbench = await readFile('src/pages/creation/video/VideoWorkbenchPage.tsx', 'utf8');
 
 test('image and video generation pages use the shared two-pane workbench', () => {
   for (const { path, source } of sources) {
@@ -36,6 +38,19 @@ test('the shared generation workbench keeps parameters left and generated conten
   assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar \{[\s\S]*width: 12px;/);
   assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar-button \{[\s\S]*display: none;/);
   assert.match(styles, /\.uc-scrollbar::-webkit-scrollbar-thumb \{[\s\S]*border-radius: var\(--uc-radius-full\);/);
+});
+
+test('all generation workbenches fill the space above the project status bar', () => {
+  assert.match(imageWorkbench, /isGenerationImage \? ' uc-image-workbench--generation' : ''/);
+  assert.match(videoWorkbench, /usesFlowAutosave \? ' uc-image-workbench--generation' : ''/);
+  assert.match(
+    styles,
+    /\.uc-image-workbench--generation \{[\s\S]*height: 100%;[\s\S]*grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*padding-bottom: 0;/
+  );
+  assert.match(
+    styles,
+    /\.uc-image-workbench--generation > \.uc-generation-two-pane \{[\s\S]*height: 100%;/
+  );
 });
 
 test('professional video pages keep prompts and submission controls out of the result area', () => {
