@@ -3,6 +3,7 @@ export * from './repositories';
 export * from './files';
 export * from './ipc';
 export * from './providers';
+export * from './documents';
 export * from './images';
 export * from './videos';
 export * from './settings';

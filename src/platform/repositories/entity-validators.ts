@@ -2,6 +2,7 @@ import {
   assetOrigins,
   creationKinds,
   draftStates,
+  documentWorkspaceKinds,
   executionStates,
   fileStates,
   isImageWorkspaceDraft,
@@ -71,13 +72,30 @@ export const isFileReferenceEntity: EntityValidator = (value) =>
 export const isTaskEntity: EntityValidator = (value) =>
   isNonBlankString(value.sourceDraftId) &&
   isRecord(value.submission) &&
-  isOneOf(value.submission.kind, creationKinds) &&
+  isOneOf(value.submission.kind, [...creationKinds, 'document_generation']) &&
   isCanonicalIsoTimestamp(value.submission.confirmedAt) &&
-  (value.submission.kind === 'video_editing'
-    ? isVideoEditingSubmission(value.submission)
-    : isGenerationSubmission(value.submission)) &&
+  (value.submission.kind === 'document_generation'
+    ? isDocumentGenerationSubmission(value.submission)
+    : value.submission.kind === 'video_editing'
+      ? isVideoEditingSubmission(value.submission)
+      : isGenerationSubmission(value.submission)) &&
   isStringArray(value.executionIds) &&
   isCanonicalIsoTimestamp(value.createdAt);
+
+export const isDocumentGenerationSubmission: EntityValidator = (value) =>
+  value.kind === 'document_generation' &&
+  isCanonicalIsoTimestamp(value.confirmedAt) &&
+  isRecord(value.document) &&
+  isOneOf(value.document.kind, documentWorkspaceKinds) &&
+  isNonBlankString(value.document.title) &&
+  typeof value.document.contentFingerprint === 'string' &&
+  /^[a-f0-9]{64}$/.test(value.document.contentFingerprint) &&
+  isNonNegativeInteger(value.document.draftRevision) &&
+  value.prompt === undefined &&
+  value.assetIds === undefined &&
+  value.image === undefined &&
+  value.video === undefined &&
+  value.videoEditing === undefined;
 
 export const isExecutionEntity: EntityValidator = (value) =>
   isNonBlankString(value.taskId) &&

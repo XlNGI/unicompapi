@@ -1,0 +1,106 @@
+import { describe, expect, it } from 'vitest';
+import {
+  DocumentOutlineError,
+  isDocumentOutline,
+  parseDocumentOutline
+} from '../../src/platform';
+
+function validOutline() {
+  return JSON.stringify({
+    kind: 'ppt',
+    title: '季度销售复盘',
+    sections: [
+      {
+        heading: '业绩概览',
+        level: 1,
+        blocks: [
+          { type: 'bullets', items: ['营收 1200 万', '同比增长 18%'] },
+          {
+            type: 'table',
+            header: ['目标', '负责团队'],
+            rows: [['3000 万', '华东']]
+          }
+        ]
+      },
+      {
+        heading: '下季度计划',
+        level: 2,
+        blocks: [{ type: 'paragraph', text: '聚焦重点市场。' }]
+      }
+    ]
+  });
+}
+
+describe('document outline parser', () => {
+  it('parses a valid outline', () => {
+    const outline = parseDocumentOutline(validOutline());
+    expect(outline.kind).toBe('ppt');
+    expect(outline.title).toBe('季度销售复盘');
+    expect(outline.sections).toHaveLength(2);
+    expect(outline.sections[0].blocks[0]).toEqual({
+      type: 'bullets',
+      items: ['营收 1200 万', '同比增长 18%']
+    });
+    expect(isDocumentOutline(outline)).toBe(true);
+  });
+
+  it('rejects invalid JSON', () => {
+    expect(() => parseDocumentOutline('{bad json')).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects unsupported kind', () => {
+    const value = JSON.parse(validOutline());
+    value.kind = 'pdf';
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects missing title and oversized sections', () => {
+    const noTitle = JSON.parse(validOutline());
+    noTitle.title = ' ';
+    expect(() => parseDocumentOutline(JSON.stringify(noTitle))).toThrow(
+      DocumentOutlineError
+    );
+    const oversized = JSON.parse(validOutline());
+    oversized.sections = Array.from({ length: 101 }, () => ({
+      heading: '节',
+      level: 1,
+      blocks: []
+    }));
+    expect(() => parseDocumentOutline(JSON.stringify(oversized))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects invalid blocks and table shapes', () => {
+    const badBlock = JSON.parse(validOutline());
+    badBlock.sections[0].blocks.push({ type: 'image', src: 'x' });
+    expect(() => parseDocumentOutline(JSON.stringify(badBlock))).toThrow(
+      DocumentOutlineError
+    );
+    const badTable = JSON.parse(validOutline());
+    badTable.sections[0].blocks[1].rows = [[1, 2]];
+    expect(() => parseDocumentOutline(JSON.stringify(badTable))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects out-of-range levels and oversized items', () => {
+    const badLevel = JSON.parse(validOutline());
+    badLevel.sections[0].level = 4;
+    expect(() => parseDocumentOutline(JSON.stringify(badLevel))).toThrow(
+      DocumentOutlineError
+    );
+    const badItems = JSON.parse(validOutline());
+    badItems.sections[0].blocks[0].items = Array.from(
+      { length: 51 },
+      (_, index) => `项目 ${index}`
+    );
+    expect(() => parseDocumentOutline(JSON.stringify(badItems))).toThrow(
+      DocumentOutlineError
+    );
+  });
+});

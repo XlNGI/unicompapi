@@ -16,6 +16,10 @@ import {
   toIsoTimestamp,
   type IsoTimestamp
 } from '../timestamps';
+import {
+  parseDocumentMessageResult,
+  type DocumentMessageResult
+} from './document-generation';
 
 export const conversationStatuses = ['active', 'archived', 'deleted'] as const;
 export type ConversationStatus = (typeof conversationStatuses)[number];
@@ -61,6 +65,7 @@ interface MessageBase {
   readonly role: MessageRole;
   readonly content: string;
   readonly reasoningContent?: string;
+  readonly documentResult?: DocumentMessageResult;
   readonly attachments: readonly ConversationAttachmentReference[];
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
@@ -572,6 +577,10 @@ export function parseMessage(value: unknown): Message {
     record,
     'reasoningContent'
   );
+  const hasDocumentResult = Object.prototype.hasOwnProperty.call(
+    record,
+    'documentResult'
+  );
   const stateKeys: Record<MessageState, readonly string[]> = {
     pending: [],
     streaming: ['startedAt', 'streamSequence'],
@@ -584,6 +593,7 @@ export function parseMessage(value: unknown): Message {
     [
       ...messageBaseKeys,
       ...(hasReasoningContent ? ['reasoningContent'] : []),
+      ...(hasDocumentResult ? ['documentResult'] : []),
       ...stateKeys[state]
     ],
     'message'
@@ -603,6 +613,9 @@ export function parseMessage(value: unknown): Message {
   }
   const reasoningContent = hasReasoningContent
     ? requireString(record.reasoningContent, 'message.reasoningContent')
+    : undefined;
+  const documentResult = hasDocumentResult
+    ? parseDocumentMessageResult(record.documentResult)
     : undefined;
   if (
     reasoningContent !== undefined &&
@@ -626,6 +639,7 @@ export function parseMessage(value: unknown): Message {
     role,
     content,
     ...(reasoningContent !== undefined ? { reasoningContent } : {}),
+    ...(documentResult !== undefined ? { documentResult } : {}),
     attachments,
     createdAt,
     updatedAt
@@ -635,6 +649,14 @@ export function parseMessage(value: unknown): Message {
   }
   if (role !== 'assistant' && reasoningContent !== undefined) {
     throw new TypeError('only assistant messages can persist reasoning content');
+  }
+  if (
+    documentResult !== undefined &&
+    (role !== 'assistant' || state !== 'completed')
+  ) {
+    throw new TypeError(
+      'only completed assistant messages can persist a document result'
+    );
   }
   if (state === 'pending') {
     if (role !== 'assistant' || content !== '') {

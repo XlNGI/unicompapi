@@ -347,10 +347,14 @@ function toTaskDetails(
     sourceDraftId: task.sourceDraftId,
     originalInput: task.submission.kind === 'video_editing'
       ? task.submission.videoEditing.title
-      : task.submission.prompt.originalInput,
+      : task.submission.kind === 'document_generation'
+        ? task.submission.document.title
+        : task.submission.prompt.originalInput,
     finalPrompt: task.submission.kind === 'video_editing'
       ? `本地视频导出，草稿版本 ${task.submission.videoEditing.draftRevision}`
-      : task.submission.prompt.finalPrompt,
+      : task.submission.kind === 'document_generation'
+        ? `本地文档生成，草稿版本 ${task.submission.document.draftRevision}`
+        : task.submission.prompt.finalPrompt,
     canRecoverImageResult:
       entry.projectId === currentProjectId &&
       task.submission.kind === 'image_generation' &&

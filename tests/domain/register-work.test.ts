@@ -91,4 +91,28 @@ describe('work registration', () => {
     expect(work.sourceExecutionId).toBe(completed.id);
     expect(work.sourceTaskId).toBe(task.id);
   });
+
+  it('registers a locally produced work while execution is registering_work', () => {
+    const { execution, file, task } = createAvailableFile();
+    const queued = transitionExecution(execution, 'queued', t3);
+    const validating = transitionExecution(queued, 'validating_sources', t3);
+    const preparing = transitionExecution(validating, 'preparing_media', t3);
+    const encoding = transitionExecution(preparing, 'encoding', t3);
+    const writingFile = transitionExecution(encoding, 'writing_file', t3);
+    const verifyingFile = transitionExecution(writingFile, 'verifying_file', t3);
+    const registering = transitionExecution(verifyingFile, 'registering_work', t3, {
+      outputFileId: file.id
+    });
+    const work = registerWork({
+      id: toWorkId('work-local-document'),
+      task,
+      execution: registering,
+      file,
+      mediaKind: 'document',
+      name: 'Report.docx',
+      createdAt: t7
+    });
+    expect(work.mediaKind).toBe('document');
+    expect(work.fileId).toBe(file.id);
+  });
 });
