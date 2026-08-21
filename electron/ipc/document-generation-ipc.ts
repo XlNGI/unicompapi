@@ -35,6 +35,15 @@ export function registerDocumentGenerationIpcHandlers(options: {
   const controller = new DocumentGenerationController({
     getSession: () => options.sessionRegistry.get(),
     getStreaming: (session) => createStreaming(session, now, ids),
+    loadConversation: async (session, conversationId) => {
+      const storage = new NodeProjectStorage(session.rootDirectory);
+      const repository = new JsonProjectConversationRepository(
+        storage,
+        session.projectId,
+        now
+      );
+      return repository.get(conversationId);
+    },
     getRunner: (session) =>
       new DocumentGenerationRunner({
         rootDirectory: session.rootDirectory,
@@ -50,6 +59,10 @@ export function registerDocumentGenerationIpcHandlers(options: {
   ipcMain.handle(
     documentGenerationIpcChannels.generateFromConversation,
     (_event, request: unknown) => controller.generateFromConversation(request)
+  );
+  ipcMain.handle(
+    documentGenerationIpcChannels.generateFromMessage,
+    (_event, request: unknown) => controller.generateFromMessage(request)
   );
   ipcMain.handle(
     documentGenerationIpcChannels.openDocument,

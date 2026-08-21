@@ -40,9 +40,7 @@ import type {
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
 import {
-  buildOutlineFromRequirements,
   inferDocumentKind,
-  sha256Hex,
   type DocumentKindOption
 } from './documentDrafting';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
@@ -1081,13 +1079,15 @@ export function ChatPage({
       !session ||
       (selected && (selected.readOnly || selected.status !== 'active')) ||
       !input.trim() ||
+      !selectedCandidateId ||
+      !selectedCandidate?.available ||
       busy ||
       responseInProgress
     ) {
       return;
     }
     setBusy(true);
-    setNotice('正在生成文档…');
+    setNotice('AI 正在撰写文档内容…');
     const requirements = input.trim();
     const attachmentText = attachments
       .filter((attachment) => attachment.status === 'extracted')
@@ -1102,9 +1102,6 @@ export function ChatPage({
     const kind = documentKind === 'auto'
       ? inferDocumentKind(requirements)
       : documentKind;
-    const title = (requirements.split(/\r?\n/)[0] ?? '文档').trim().slice(0, 40) || '文档';
-    const outline = buildOutlineFromRequirements(combined, kind, title);
-    const contentFingerprint = await sha256Hex(`${kind}:${combined}`);
     let targetId = selected?.conversationId;
     let expectedRevision = selected?.revision ?? 0;
     try {
@@ -1136,15 +1133,60 @@ export function ChatPage({
         return;
       }
       replaceConversation(userResult.value);
-      const generated = await documentGeneration.generateFromConversation({
+      const started = await chat.startResponse({
+        clientCommandId: `chat-doc-${crypto.randomUUID()}`,
+        conversation: {
+          conversationId: targetId,
+          expectedRevision: userResult.value.revision,
+          editedMessageId: null
+        },
+        title: conversationTitleFromMessage(requirements),
+        content: combined,
+        productFeature: 'text_reasoning',
+        candidateId: selectedCandidateId,
+        contextSelections: includedContextIds.flatMap((contextId) => {
+          const context = viewedContexts[contextId];
+          return context
+            ? [{
+                contextId,
+                contextRevision: context.revision,
+                includeInPrompt: true
+              }]
+            : [];
+        }),
+        parameterValues: {},
+        confirmed: true
+      });
+      if (!started.ok) {
+        setNotice(documentErrorMessages[started.error.code] ?? started.error.message);
+        const refreshedFailed = await chat.getConversation(targetId);
+        if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
+        return;
+      }
+      replaceConversation(started.value.conversation);
+      setResponseExecution(started.value.execution);
+      updateInput('');
+      setAttachments([]);
+      const completion = await awaitDocumentCompletion(
+        chat,
+        started.value.execution.responseExecutionId
+      );
+      const refreshedBefore = await chat.getConversation(targetId);
+      if (!refreshedBefore.ok) {
+        setNotice('刷新对话失败，请重试。');
+        return;
+      }
+      replaceConversation(refreshedBefore.value);
+      if (!completion) {
+        setNotice('AI 内容生成未完成，文档未生成。');
+        return;
+      }
+      setNotice('正在生成本地 Office 文档…');
+      const generated = await documentGeneration.generateFromMessage({
         conversationId: targetId,
-        expectedRevision: userResult.value.revision,
+        expectedRevision: refreshedBefore.value.revision,
+        messageId: completion.assistantMessageId,
         kind,
-        title,
-        outlineJson: JSON.stringify(outline),
-        contentFingerprint,
-        draftRevision: 1,
-        sourceDraftId: `doc-${targetId}-${Date.now()}`
       });
       if (!generated.ok) {
         setNotice(documentErrorMessages[generated.error.code] ?? generated.error.message);
@@ -1156,14 +1198,28 @@ export function ChatPage({
         replaceConversation(refreshed.value);
         setSelectedId(refreshed.value.conversationId);
       }
-      updateInput('');
-      setAttachments([]);
       setDocumentMode(false);
     } catch {
       setNotice('文档生成失败，请重试。');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function awaitDocumentCompletion(
+    api: NonNullable<typeof chat>,
+    responseExecutionId: string
+  ): Promise<ConversationResponseExecutionDto | undefined> {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+      const result = await api.getResponseExecution(responseExecutionId);
+      if (!result.ok) return undefined;
+      if (result.value.state === 'completed') return result.value;
+      if (result.value.state === 'failed' || result.value.state === 'cancelled') {
+        return undefined;
+      }
+    }
+    return undefined;
   }
 
   async function cancelResponse() {

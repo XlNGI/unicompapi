@@ -442,6 +442,31 @@ export function completeAssistantMessage(
   });
 }
 
+export function attachDocumentResultToMessage(
+  conversation: Conversation,
+  messageId: MessageId,
+  documentResult: DocumentMessageResult,
+  updatedAt: IsoTimestamp
+): ActiveConversation {
+  assertConversationActive(conversation, 'attach document result');
+  return replaceAssistantMessage(conversation, messageId, updatedAt, (message) => {
+    if (message.state !== 'completed' || message.role !== 'assistant') {
+      throw new InvalidStateTransitionError(
+        'message',
+        message.state,
+        'attach_document_result'
+      );
+    }
+    return parseMessage({
+      ...message,
+      revision: message.revision + 1,
+      documentResult,
+      completedAt: updatedAt,
+      updatedAt
+    });
+  });
+}
+
 export function failAssistantMessage(
   conversation: Conversation,
   messageId: MessageId,

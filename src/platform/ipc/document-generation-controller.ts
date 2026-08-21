@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import {
   InvalidStateTransitionError,
   toConversationId,
-  type toMessageId,
-  toWorkId
+  toMessageId,
+  toWorkId,
+  type Conversation
 } from '../../domain';
 import {
   ConversationApplicationError,
@@ -19,6 +21,7 @@ import {
   DocumentGenerationError,
   DocumentOutlineError,
   parseDocumentOutline,
+  parseMarkdownToOutline,
   type DocumentGenerationRunner,
   type DocumentOutline
 } from '../documents';
@@ -33,6 +36,10 @@ import type { StorageProjectSession } from './storage-ipc-controller';
 export interface DocumentGenerationControllerDependencies {
   getSession(): StorageProjectSession | undefined;
   getStreaming(session: StorageProjectSession): ConversationStreamingService;
+  loadConversation(
+    session: StorageProjectSession,
+    conversationId: ReturnType<typeof toConversationId>
+  ): Promise<Conversation | undefined>;
   getRunner(session: StorageProjectSession): DocumentGenerationRunner;
   openPath(absolutePath: string): Promise<string>;
   now?(): string;
@@ -119,6 +126,75 @@ export class DocumentGenerationController {
         }
         throw error;
       }
+    });
+  }
+
+  generateFromMessage(
+    request: unknown
+  ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>> {
+    return this.execute(async () => {
+      const input = documentGenerationRequestParsers.generateFromMessage(request);
+      const session = this.requireSession();
+      const streaming = this.dependencies.getStreaming(session);
+      const runner = this.dependencies.getRunner(session);
+      const conversation = await this.dependencies.loadConversation(
+        session,
+        toConversationId(input.conversationId)
+      );
+      if (!conversation) {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'Conversation does not exist'
+        );
+      }
+      const message = conversation.messages.find(
+        (item) => item.id === toMessageId(input.messageId)
+      );
+      if (!message || message.role !== 'assistant' || message.state !== 'completed') {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'Message is not a completed assistant message'
+        );
+      }
+      const outline = parseMarkdownToOutline(message.content, input.kind);
+      const contentFingerprint = createHash('sha256')
+        .update(message.content)
+        .digest('hex');
+      const result = await runner.run({
+        kind: input.kind,
+        title: outline.title,
+        contentFingerprint,
+        draftRevision: 1,
+        sourceDraftId: `message-${input.messageId}`,
+        outline
+      });
+      const fileName =
+        result.file.locator.kind === 'project'
+          ? result.file.locator.relativePath.split('/').pop() ?? result.work.name
+          : result.work.name;
+      await streaming.attachDocumentResult({
+        conversationId: toConversationId(input.conversationId),
+        messageId: toMessageId(input.messageId),
+        expectedRevision: conversation.revision,
+        documentResult: {
+          workId: result.work.id,
+          fileName,
+          kind: input.kind,
+          sizeBytes: result.file.sizeBytes ?? 0
+        }
+      });
+      return {
+        ok: true,
+        value: {
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          taskId: result.task.id,
+          executionId: result.execution.id,
+          workId: result.work.id,
+          fileName,
+          sizeBytes: result.file.sizeBytes ?? 0
+        }
+      };
     });
   }
 

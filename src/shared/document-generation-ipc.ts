@@ -1,5 +1,6 @@
 export const documentGenerationIpcChannels = {
   generateFromConversation: 'document-generation:generate-from-conversation',
+  generateFromMessage: 'document-generation:generate-from-message',
   openDocument: 'document-generation:open-document'
 } as const;
 
@@ -50,6 +51,13 @@ export interface DocumentGenerationRequest {
   readonly sourceDraftId: string;
 }
 
+export interface DocumentGenerationFromMessageRequest {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly messageId: string;
+  readonly kind: 'word' | 'excel' | 'ppt';
+}
+
 export interface OpenDocumentRequest {
   readonly workId: string;
 }
@@ -90,6 +98,20 @@ export const documentGenerationRequestParsers = {
       sourceDraftId: requireString(value.sourceDraftId, 'sourceDraftId')
     };
   },
+  generateFromMessage(value: unknown): DocumentGenerationFromMessageRequest {
+    if (!isRecord(value)) {
+      throw new TypeError('Invalid document generation from message request');
+    }
+    return {
+      conversationId: requireString(value.conversationId, 'conversationId'),
+      expectedRevision: requireNonNegativeInteger(
+        value.expectedRevision,
+        'expectedRevision'
+      ),
+      messageId: requireString(value.messageId, 'messageId'),
+      kind: requireKind(value.kind)
+    };
+  },
   openDocument(value: unknown): OpenDocumentRequest {
     if (!isRecord(value)) {
       throw new TypeError('Invalid open document request');
@@ -115,6 +137,9 @@ function requireKind(value: unknown): 'word' | 'excel' | 'ppt' {
 export interface DocumentGenerationApi {
   generateFromConversation(
     request: DocumentGenerationRequest
+  ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>>;
+  generateFromMessage(
+    request: DocumentGenerationFromMessageRequest
   ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>>;
   openDocument(
     workId: string

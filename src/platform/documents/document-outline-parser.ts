@@ -83,6 +83,142 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
   return { kind, title, sections };
 }
 
+export function parseMarkdownToOutline(
+  markdown: string,
+  kind: DocumentWorkspaceKind
+): DocumentOutline {
+  const lines = markdown
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+$/g, ''));
+  let title = '';
+  const sections: DocumentOutlineSection[] = [];
+  let currentSection: DocumentOutlineSection | undefined;
+  let pendingTable: { header: string[]; rows: string[][] } | undefined;
+  let headingCount = 0;
+
+  const flushTable = () => {
+    if (!pendingTable) return;
+    if (!currentSection) {
+      currentSection = {
+        heading: '内容',
+        level: 1,
+        blocks: []
+      };
+      sections.push(currentSection);
+    }
+    (currentSection.blocks as DocumentOutlineBlock[]).push({
+      type: 'table',
+      header: pendingTable.header,
+      rows: pendingTable.rows
+    });
+    pendingTable = undefined;
+  };
+
+  for (const rawLine of lines) {
+    const heading = /^(#{1,3})\s+(.+)$/.exec(rawLine);
+    if (heading) {
+      flushTable();
+      const level = Math.min(heading[1].length, 3) as 1 | 2 | 3;
+      if (heading[1].length === 1 && headingCount === 0) {
+        title = heading[2].trim();
+        headingCount += 1;
+        continue;
+      }
+      headingCount += 1;
+      currentSection = {
+        heading: heading[2].trim(),
+        level,
+        blocks: []
+      };
+      sections.push(currentSection);
+      continue;
+    }
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      flushTable();
+      continue;
+    }
+    if (/^\|.*\|$/.test(trimmed)) {
+      const cells = splitTableRow(trimmed);
+      if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) {
+        continue;
+      }
+      if (pendingTable) {
+        pendingTable.rows.push(cells);
+      } else {
+        pendingTable = { header: cells, rows: [] };
+      }
+      continue;
+    }
+    flushTable();
+    ensureSection();
+    const bullet = /^\s*[-*•]\s+(.+)$/.exec(rawLine);
+    const numbered = /^\s*\d+[.、）)]\s+(.+)$/.exec(rawLine);
+    const quote = /^\s*>\s?(.+)$/.exec(rawLine);
+    if (bullet) {
+      appendTextBlock('bullets', bullet[1].trim());
+    } else if (numbered) {
+      appendTextBlock('numbered', numbered[1].trim());
+    } else if (quote) {
+      appendTextBlock('quote', quote[1].trim());
+    } else {
+      appendTextBlock('paragraph', trimmed);
+    }
+  }
+  flushTable();
+
+  if (sections.length === 0) {
+    const body = lines.map((line) => line.trim()).filter(Boolean);
+    if (body.length > 0) {
+      sections.push({
+        heading: '内容',
+        level: 1,
+        blocks: [{ type: 'paragraph', text: body.join('\n') }]
+      });
+    }
+  }
+  return {
+    kind,
+    title: title || lines.map((line) => line.trim()).find(Boolean)?.slice(0, 40) || '文档',
+    sections
+  };
+
+  function ensureSection(): DocumentOutlineSection {
+    if (currentSection) return currentSection;
+    currentSection = {
+      heading: '内容',
+      level: 1,
+      blocks: []
+    };
+    sections.push(currentSection);
+    return currentSection;
+  }
+
+  function appendTextBlock(
+    type: 'paragraph' | 'bullets' | 'numbered' | 'quote',
+    text: string
+  ): void {
+    const section = ensureSection();
+    const blocks = section.blocks as DocumentOutlineBlock[];
+    const last = blocks[blocks.length - 1];
+    if (type === 'paragraph' || type === 'quote') {
+      blocks.push({ type, text });
+    } else if (last && last.type === type) {
+      blocks[blocks.length - 1] = {
+        type,
+        items: [...last.items, text].slice(-50)
+      };
+    } else {
+      blocks.push({ type, items: [text] });
+    }
+  }
+}
+
+function splitTableRow(line: string): string[] {
+  const inner = line.replace(/^\|/, '').replace(/\|$/, '');
+  return inner.split('|').map((cell) => cell.trim());
+}
+
 function parseSection(value: unknown, index: number): DocumentOutlineSection {
   if (!isRecord(value)) {
     throw new DocumentOutlineError(

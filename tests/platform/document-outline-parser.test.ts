@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   DocumentOutlineError,
   isDocumentOutline,
-  parseDocumentOutline
+  parseDocumentOutline,
+  parseMarkdownToOutline
 } from '../../src/platform';
 
 function validOutline() {
@@ -102,5 +103,44 @@ describe('document outline parser', () => {
     expect(() => parseDocumentOutline(JSON.stringify(badItems))).toThrow(
       DocumentOutlineError
     );
+  });
+});
+
+describe('markdown to outline parser', () => {
+  it('converts headings, bullets and tables into outline blocks', () => {
+    const outline = parseMarkdownToOutline(
+      [
+        '# 项目周报',
+        '',
+        '## 本周进展',
+        '',
+        '- 完成方案评审',
+        '- 修复三个缺陷',
+        '',
+        '## 下周计划',
+        '',
+        '| 目标 | 负责人 |',
+        '| --- | --- |',
+        '| 上线 | 张三 |'
+      ].join('\n'),
+      'word'
+    );
+    expect(outline.title).toBe('项目周报');
+    expect(outline.sections).toHaveLength(2);
+    expect(outline.sections[0].blocks[0]).toEqual({
+      type: 'bullets',
+      items: ['完成方案评审', '修复三个缺陷']
+    });
+    expect(outline.sections[1].blocks[0]).toEqual({
+      type: 'table',
+      header: ['目标', '负责人'],
+      rows: [['上线', '张三']]
+    });
+  });
+
+  it('falls back to a single section for plain text', () => {
+    const outline = parseMarkdownToOutline('这是没有标题的正文内容。', 'ppt');
+    expect(outline.kind).toBe('ppt');
+    expect(outline.sections[0].blocks[0].type).toBe('paragraph');
   });
 });

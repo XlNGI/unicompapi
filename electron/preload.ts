@@ -68,6 +68,8 @@ const getPathForFile = (file: File) => webUtils.getPathForFile(file);
 const documentGeneration: DocumentGenerationApi = {
   generateFromConversation: (request) =>
     ipcRenderer.invoke(documentGenerationIpcChannels.generateFromConversation, request),
+  generateFromMessage: (request) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.generateFromMessage, request),
   openDocument: (workId) =>
     ipcRenderer.invoke(documentGenerationIpcChannels.openDocument, { workId })
 };

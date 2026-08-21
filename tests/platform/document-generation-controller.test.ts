@@ -7,10 +7,16 @@ import {
   ConversationStreamingService
 } from '../../src/application';
 import {
+  appendAssistantMessageChunk,
+  beginAssistantMessage,
+  completeAssistantMessage,
+  startAssistantMessageStreaming,
   toConversationId,
+  toIsoTimestamp,
   toMessageId,
   toProjectId,
-  toWorkId
+  toWorkId,
+  type Conversation
 } from '../../src/domain';
 import {
   DocumentGenerationController,
@@ -33,7 +39,8 @@ async function createEnvironment() {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-doc-ipc-'));
   temporaryRoots.push(rootDirectory);
   const projectId = toProjectId('doc-ipc-project');
-  const now = () => '2026-08-22T10:00:00.000Z';
+  let clock = Date.parse('2026-08-22T10:00:00.000Z');
+  const now = () => new Date((clock += 1000)).toISOString();
   const ids = {
     nextConversationId: () => toConversationId(`conversation-${Math.random()}`),
     nextMessageId: () => toMessageId(`message-${Math.random()}`)
@@ -50,6 +57,8 @@ async function createEnvironment() {
   const controller = new DocumentGenerationController({
     getSession: () => session,
     getStreaming: () => new ConversationStreamingService(repository, ids, now),
+    loadConversation: async (_currentSession, conversationId) =>
+      repository.get(conversationId),
     getRunner: () =>
       new DocumentGenerationRunner({
         rootDirectory,
@@ -71,6 +80,7 @@ async function createEnvironment() {
   return {
     conversationId: created.id,
     controller,
+    now,
     openedPaths,
     repository,
     rootDirectory,
@@ -106,8 +116,10 @@ describe('document generation controller', () => {
       draftRevision: 1,
       sourceDraftId: 'response-draft-1'
     });
+    if (!result.ok) {
+      throw new Error(`generation failed: ${result.error.code} ${result.error.message}`);
+    }
     expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('generation failed');
     expect(result.value.workId).toMatch(/^work-document-/);
     expect(result.value.fileName.endsWith('.docx')).toBe(true);
 
@@ -180,5 +192,67 @@ describe('document generation controller', () => {
     expect(openedPaths).toHaveLength(1);
     expect(openedPaths[0]).toContain('files');
     expect(openedPaths[0]).toContain('documents');
+  });
+
+  it('generates a document from a completed AI assistant message', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const stored = await repository.get(toConversationId(conversationId));
+    if (!stored) throw new Error('conversation missing');
+    let conversation: Conversation = stored;
+    const messageId = toMessageId('message-ai-1');
+    const steps: Array<(current: typeof conversation) => typeof conversation> = [
+      (current) =>
+        beginAssistantMessage(current, {
+          id: messageId,
+          createdAt: toIsoTimestamp(now())
+        }),
+      (current) =>
+        startAssistantMessageStreaming(
+          current,
+          messageId,
+          toIsoTimestamp(now())
+        ),
+      (current) =>
+        appendAssistantMessageChunk(
+          current,
+          messageId,
+          '# 项目周报\n\n## 本周进展\n\n- 完成方案评审',
+          toIsoTimestamp(now())
+        ),
+      (current) =>
+        completeAssistantMessage(
+          current,
+          messageId,
+          toIsoTimestamp(now())
+        )
+    ];
+    for (const step of steps) {
+      const next = step(conversation);
+      await repository.save(next, conversation.revision);
+      conversation = next;
+    }
+    const result = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word'
+    });
+    if (!result.ok) {
+      throw new Error(`generation failed: ${result.error.code} ${result.error.message}`);
+    }
+    expect(result.ok).toBe(true);
+    const refreshed = await repository.get(toConversationId(conversationId));
+    const message = refreshed?.messages.find((item) => item.id === messageId);
+    expect(message?.state).toBe('completed');
+    if (message?.state !== 'completed') throw new Error('message not completed');
+    expect(message.documentResult?.workId).toBe(result.value.workId);
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect((await works.get(toWorkId(result.value.workId)))?.mediaKind).toBe(
+      'document'
+    );
   });
 });
