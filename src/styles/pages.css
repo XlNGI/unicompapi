@@ -8587,8 +8587,30 @@ button.uc-project-center__project-card:disabled {
   outline: 1px dashed color-mix(in srgb, var(--uc-accent, #4f8cff) 55%, transparent);
   outline-offset: 2px;
 }
-.uc-chat-page__composer--dragging {
-  background: color-mix(in srgb, var(--uc-accent, #4f8cff) 8%, transparent);
+.uc-chat-page__drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: color-mix(in srgb, var(--uc-bg, #101418) 86%, transparent);
+  border: 2px dashed var(--uc-accent, #4f8cff);
+  color: inherit;
+  pointer-events: none;
+}
+.uc-chat-page__drop-overlay > svg {
+  font-size: 2.2rem;
+  color: var(--uc-accent, #4f8cff);
+}
+.uc-chat-page__drop-overlay strong {
+  font-size: 1.05rem;
+}
+.uc-chat-page__drop-overlay span {
+  opacity: 0.75;
+  font-size: 0.85rem;
 }
 .uc-chat-page__attachments {
   display: flex;

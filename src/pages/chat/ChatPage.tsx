@@ -358,6 +358,7 @@ export function ChatPage({
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
@@ -1033,12 +1034,38 @@ export function ChatPage({
     }
   }
 
-  function handleDrop(event: React.DragEvent<HTMLElement>) {
+  function hasDraggedFiles(event: React.DragEvent<HTMLElement>): boolean {
+    return Array.from(event.dataTransfer.types).includes('Files');
+  }
+
+  function handlePageDragEnter(event: React.DragEvent<HTMLElement>) {
+    if (!session || !hasDraggedFiles(event)) return;
     event.preventDefault();
+    dragDepthRef.current += 1;
+    setDragging(true);
+    if (!documentMode) setDocumentMode(true);
+  }
+
+  function handlePageDragOver(event: React.DragEvent<HTMLElement>) {
+    if (session && hasDraggedFiles(event)) event.preventDefault();
+  }
+
+  function handlePageDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!hasDraggedFiles(event)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  }
+
+  function handlePageDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    dragDepthRef.current = 0;
     setDragging(false);
-    if (!documentMode || !session || busy || responseInProgress) return;
+    if (!session || busy || responseInProgress) return;
     const files = Array.from(event.dataTransfer.files);
-    files.forEach((file) => void importDroppedFile(file));
+    if (files.length > 0) {
+      setDocumentMode(true);
+      files.forEach((file) => void importDroppedFile(file));
+    }
   }
 
   function removeAttachment(fileId: string) {
@@ -1443,7 +1470,14 @@ export function ChatPage({
   }
 
   return (
-    <section className="uc-chat-page" aria-labelledby="chat-page-title">
+    <section
+      aria-labelledby="chat-page-title"
+      className="uc-chat-page"
+      onDragEnter={handlePageDragEnter}
+      onDragLeave={handlePageDragLeave}
+      onDragOver={handlePageDragOver}
+      onDrop={handlePageDrop}
+    >
       <section className="uc-chat-page__conversation" aria-label="当前对话">
         <header className="uc-chat-page__header">
           <div className="uc-chat-page__title-block">
@@ -1699,18 +1733,7 @@ export function ChatPage({
           ) : null}
           <section
             aria-labelledby="chat-composer-title"
-            className={`uc-chat-page__composer${documentMode ? ' uc-chat-page__composer--document' : ''}${dragging ? ' uc-chat-page__composer--dragging' : ''}`}
-            onDragEnter={(event) => {
-              if (documentMode && session) {
-                event.preventDefault();
-                setDragging(true);
-              }
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDragOver={(event) => {
-              if (documentMode && session) event.preventDefault();
-            }}
-            onDrop={handleDrop}
+            className={`uc-chat-page__composer${documentMode ? ' uc-chat-page__composer--document' : ''}`}
           >
             <h2 className="uc-visually-hidden" id="chat-composer-title">发送消息</h2>
             <textarea
@@ -1904,6 +1927,13 @@ export function ChatPage({
           ) : null}
         </div>
       </section>
+      {dragging ? (
+        <div className="uc-chat-page__drop-overlay" aria-hidden="true">
+          <LuPaperclip aria-hidden="true" />
+          <strong>松开鼠标导入附件</strong>
+          <span>图片/文档将作为依据，用于生成 Office 文档</span>
+        </div>
+      ) : null}
 
       <Drawer
         backdropClassName="uc-chat-page__drawer-backdrop"

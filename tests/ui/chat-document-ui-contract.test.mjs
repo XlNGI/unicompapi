@@ -16,9 +16,13 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /getPathForFile/);
   assert.match(page, /importAttachment/);
   assert.match(page, /sendDocumentMessage/);
+  assert.match(page, /handlePageDrop/);
+  assert.match(page, /uc-chat-page__drop-overlay/);
+  assert.match(page, /if \(!documentMode\) setDocumentMode\(true\)/);
 });
 
 test('chat page document card styles exist', () => {
   assert.match(styles, /\.uc-chat-page__document-card/);
   assert.match(styles, /\.uc-chat-page__attachments/);
+  assert.match(styles, /\.uc-chat-page__drop-overlay/);
 });
