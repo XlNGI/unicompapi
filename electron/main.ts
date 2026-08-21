@@ -13,6 +13,7 @@ import { registerStorageIpcHandlers } from './ipc/storage-ipc';
 import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
 import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
+import { registerDocumentGenerationIpcHandlers } from './ipc/document-generation-ipc';
 import {
   deepSeekProviderPackageDescriptor,
   JsonProviderManagementAuditStore,
@@ -128,10 +129,16 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
     newApiRuntime: liveProviders.newApiRuntime
   }
 });
+const documentLifecycle = registerDocumentGenerationIpcHandlers({
+  sessionRegistry: projectSessionRegistry
+});
 const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,
   providerPackages,
-  additionalSessionChangeGuards: [chatContextLifecycle.waitForMutations],
+  additionalSessionChangeGuards: [
+    chatContextLifecycle.waitForMutations,
+    documentLifecycle.waitForOperations
+  ],
   vidu: viduComposition,
   runtimeAuthorization: runtimeAuthorizationLedger,
   textSubmission: {

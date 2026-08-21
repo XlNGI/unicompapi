@@ -24,3 +24,4 @@ export * from './video-feature-controller';
 export * from './video-feature-runtime';
 export * from './project-context-controller';
 export * from './chat-context-runtime';
+export * from './document-generation-controller';

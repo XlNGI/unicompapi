@@ -419,7 +419,8 @@ export function completeAssistantMessage(
   conversation: Conversation,
   messageId: MessageId,
   completedAt: IsoTimestamp,
-  reasoningContent?: string
+  reasoningContent?: string,
+  documentResult?: DocumentMessageResult
 ): ActiveConversation {
   return replaceAssistantMessage(conversation, messageId, completedAt, (message) => {
     if (message.state !== 'streaming') {
@@ -434,6 +435,7 @@ export function completeAssistantMessage(
       revision: message.revision + 1,
       state: 'completed',
       ...(reasoningContent ? { reasoningContent } : {}),
+      ...(documentResult ? { documentResult } : {}),
       completedAt,
       updatedAt: completedAt
     });
