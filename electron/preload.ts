@@ -63,6 +63,8 @@ const autosaveDiagnostics: AutosaveDiagnosticsApi = {
   record: (event) => ipcRenderer.send(autosaveDiagnosticsIpcChannel, event)
 };
 
+const getPathForFile = (file: File) => webUtils.getPathForFile(file);
+
 const documentGeneration: DocumentGenerationApi = {
   generateFromConversation: (request) =>
     ipcRenderer.invoke(documentGenerationIpcChannels.generateFromConversation, request),
@@ -911,6 +913,7 @@ contextBridge.exposeInMainWorld('unicomp', {
   chatContexts,
   documentAttachments,
   documentGeneration,
+  getPathForFile,
   imageSubmissions,
   imageFeatures,
   promptEnhance,

@@ -22,6 +22,7 @@ declare global {
       chatContexts: ChatContextApi;
       documentAttachments: DocumentAttachmentApi;
       documentGeneration: DocumentGenerationApi;
+      getPathForFile: (file: File) => string;
       imageFeatures: ImageFeatureApi;
       promptEnhance: PromptEnhanceApi;
       imagePromptEnhance: PromptEnhanceApi;
