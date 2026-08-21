@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { WheelEvent } from 'react';
+import type { DragEvent, WheelEvent } from 'react';
 import {
   LuCircleAlert,
   LuCircleX,
@@ -13,6 +13,7 @@ import type {
   StorageTaskDetailsDto,
   StorageWorkSummaryDto
 } from '../shared/storage-ipc';
+import { imageWorkDragDataType } from '../shared/image-workspace-ipc';
 
 interface GenerationHistoryProps {
   readonly draftId: string;
@@ -203,6 +204,15 @@ export function GenerationHistory({
   const generationUncertain = liveUncertainPhases.has(submissionProgress.phase);
   const showLoadingPreview = generationInFlight && !selectedWorkId;
 
+  function handleWorkDragStart(
+    event: DragEvent<HTMLElement>,
+    workId: string
+  ) {
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(imageWorkDragDataType, workId);
+    event.dataTransfer.setData('text/plain', workId);
+  }
+
   return (
     <div className="uc-generation-history">
       <section
@@ -230,7 +240,13 @@ export function GenerationHistory({
           ) : null}
         </header>
 
-        <div className="uc-generation-history__preview">
+        <div
+          className={`uc-generation-history__preview${selectedWorkId ? ' is-draggable' : ''}`}
+          draggable={Boolean(selectedWorkId)}
+          onDragStart={selectedWorkId
+            ? (event) => handleWorkDragStart(event, selectedWorkId)
+            : undefined}
+        >
           <GenerationResultPreview
             animateResult
             compact
@@ -282,7 +298,11 @@ export function GenerationHistory({
                     aria-label={`查看作品 ${node.work.name}`}
                     aria-pressed={node.work.workId === selectedWorkId}
                     className="uc-generation-history__work"
+                    draggable
                     onClick={() => setSelectedWorkId(node.work.workId)}
+                    onDragStart={(event) =>
+                      handleWorkDragStart(event, node.work.workId)
+                    }
                     type="button"
                   >
                     {mediaKind === 'image' ? (

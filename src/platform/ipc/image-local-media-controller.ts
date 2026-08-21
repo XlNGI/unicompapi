@@ -9,6 +9,7 @@ import {
   toDraftId,
   toFileReferenceId,
   toIsoTimestamp,
+  toWorkId,
   transitionFile,
   type Asset,
   type FileReference,
@@ -35,7 +36,8 @@ import {
   JsonAssetRepository,
   JsonFileIndexRepository,
   JsonFileReferenceRepository,
-  JsonImageWorkspaceRepository
+  JsonImageWorkspaceRepository,
+  JsonWorkRepository
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import type { LocalMediaHandleRegistry } from './controlled-local-media';
@@ -84,6 +86,81 @@ export class ImageLocalMediaController {
       this.execute(async () => {
         const draftId = parseDraftId(request);
         return this.registerInput(draftId, parseDroppedFilePath(request));
+      })
+    );
+  }
+
+  useWorkAsInput(
+    request: unknown
+  ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputSelectionDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const draftId = parseDraftId(request);
+        const workId = parseWorkId(request);
+        const context = this.createContext();
+        const draft = await requireDraft(context.workspaceRepository, draftId);
+        assertInputSelectionAllowed(draft);
+        const work = (await context.workRepository.list(context.session.projectId))
+          .find((candidate) => candidate.id === workId);
+        if (!work || work.mediaKind !== 'image') {
+          throw new ImageLocalMediaError(
+            'input_not_found',
+            'The selected local image Work does not exist'
+          );
+        }
+        const file = await context.fileRepository.get(work.fileId);
+        if (!file || file.state !== 'available' || !file.checksumSha256) {
+          throw new ImageLocalMediaError(
+            'input_not_found',
+            'The selected local image Work is unavailable'
+          );
+        }
+        const verification = await new NodeSha256FileVerifier(
+          context.session.rootDirectory
+        ).verify({ file, expectedChecksum: file.checksumSha256 });
+        if (!verification.matchesExpected) {
+          throw new ImageLocalMediaError(
+            'image_unreadable',
+            'The selected local image Work changed after registration'
+          );
+        }
+        const target = await resolveFileReferencePathSafely(
+          context.session.rootDirectory,
+          file
+        );
+        const inspection = await new NodeImageInspector().inspect(target);
+        const existing = (await context.assetRepository.list(context.session.projectId))
+          .find((candidate) =>
+            candidate.fileId === file.id && candidate.mediaKind === 'image'
+          );
+        const asset = existing ?? createAsset({
+          id: this.createAssetId(),
+          projectId: context.session.projectId,
+          fileId: file.id,
+          name: work.name,
+          mediaKind: 'image',
+          origin: 'generated',
+          role: inputRoleForMode(draft.mode),
+          imageMetadata: {
+            mimeType: inspection.mimeType,
+            width: inspection.width,
+            height: inspection.height
+          },
+          createdAt: verification.verifiedAt
+        });
+        if (!existing) await context.assetRepository.save(asset);
+        const updated = attachInput(
+          draft,
+          asset,
+          verification.verifiedAt,
+          work.id
+        );
+        await context.workspaceRepository.save(updated);
+        return {
+          cancelled: false,
+          draft: toImageWorkspaceDto(updated),
+          input: toInputDto(asset, file)
+        };
       })
     );
   }
@@ -215,7 +292,8 @@ export class ImageLocalMediaController {
       ),
       assetRepository: new JsonAssetRepository(storage, session.projectId),
       fileRepository: new JsonFileReferenceRepository(storage, session.projectId),
-      indexRepository: new JsonFileIndexRepository(storage, session.projectId)
+      indexRepository: new JsonFileIndexRepository(storage, session.projectId),
+      workRepository: new JsonWorkRepository(storage, session.projectId)
     };
   }
 
@@ -304,6 +382,7 @@ interface ImageLocalMediaContext {
   readonly assetRepository: JsonAssetRepository;
   readonly fileRepository: JsonFileReferenceRepository;
   readonly indexRepository: JsonFileIndexRepository;
+  readonly workRepository: JsonWorkRepository;
 }
 
 class ImageLocalMediaError extends Error {
@@ -346,6 +425,23 @@ function parseDroppedFilePath(request: unknown): string {
     );
   }
   return request.sourcePath;
+}
+
+function parseWorkId(request: unknown) {
+  if (!isRecord(request) || typeof request.workId !== 'string') {
+    throw new ImageLocalMediaError(
+      'invalid_request',
+      'A valid local image Work ID is required'
+    );
+  }
+  try {
+    return toWorkId(request.workId);
+  } catch {
+    throw new ImageLocalMediaError(
+      'invalid_request',
+      'A valid local image Work ID is required'
+    );
+  }
 }
 
 async function requireDraft(
@@ -414,7 +510,8 @@ function createAvailableFile(
 function attachInput(
   draft: ImageWorkspaceDraft,
   asset: Asset,
-  updatedAt: IsoTimestamp
+  updatedAt: IsoTimestamp,
+  parentWorkId?: ReturnType<typeof toWorkId>
 ): ImageWorkspaceDraft {
   const role = inputRoleForMode(draft.mode);
   const shared = {
@@ -435,7 +532,7 @@ function attachInput(
           mode: draft.mode,
           editing: {
             ...draft.editing,
-            lineage: { parentAssetId: asset.id }
+            lineage: { parentAssetId: asset.id, parentWorkId }
           }
         }
       : shared as ImageWorkspaceDraft

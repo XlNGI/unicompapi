@@ -505,6 +505,10 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => imageLocalMedia.importInput(request)
   );
   ipcMain.handle(
+    imageWorkspaceIpcChannels.useWorkAsInput,
+    (_event, request: unknown) => imageLocalMedia.useWorkAsInput(request)
+  );
+  ipcMain.handle(
     imageWorkspaceIpcChannels.clearInput,
     (_event, request: unknown) => imageLocalMedia.clearInput(request)
   );

@@ -415,7 +415,9 @@ export function ImageWorkbenchPage({
 
   return (
     <section
-      className="uc-image-workbench"
+      className={`uc-image-workbench${
+        isGenerationImage ? ' uc-image-workbench--generation' : ''
+      }`}
       data-mode={mode.workspaceMode}
       aria-labelledby={`${mode.id}-title`}
     >

@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -6,8 +7,14 @@ import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
   toDraftId,
+  toExecutionId,
+  toFileReferenceId,
   toIsoTimestamp,
-  toProjectId
+  toProjectId,
+  toTaskId,
+  toWorkId,
+  type FileReference,
+  type Work
 } from '../../src/domain';
 import {
   ImageLocalMediaController,
@@ -15,6 +22,7 @@ import {
   JsonAssetRepository,
   JsonFileReferenceRepository,
   JsonImageWorkspaceRepository,
+  JsonWorkRepository,
   LocalMediaHandleRegistry,
   NodeProjectStorage,
   projectStoragePaths
@@ -212,6 +220,89 @@ describe('ImageLocalMediaController', () => {
       value: { cancelled: false, input: { mimeType: 'image/png' } }
     });
     expect(JSON.stringify(result)).not.toContain(fixture.root);
+  });
+
+  it('uses an unchanged verified local image Work as the reference input', async () => {
+    const fixture = await createFixture();
+    const relativePath = 'files/results/work-reference.png';
+    const target = path.join(fixture.root, relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    const bytes = pngHeader(1024, 768, 'verified-work');
+    await writeFile(target, bytes);
+    const checksumSha256 = createHash('sha256').update(bytes).digest('hex');
+    const file: FileReference = {
+      schemaVersion: 1,
+      id: toFileReferenceId('file-work-reference'),
+      projectId: fixture.projectId,
+      sourceExecutionId: toExecutionId('execution-work-reference'),
+      locator: { kind: 'project', relativePath },
+      state: 'available',
+      sizeBytes: bytes.byteLength,
+      checksumSha256,
+      lastVerification: {
+        sizeBytes: bytes.byteLength,
+        checksumSha256,
+        matchesExpected: true,
+        verifiedAt: t0
+      },
+      createdAt: t0,
+      updatedAt: t0
+    };
+    const work: Work = {
+      schemaVersion: 1,
+      id: toWorkId('work-reference'),
+      projectId: fixture.projectId,
+      sourceTaskId: toTaskId('task-work-reference'),
+      sourceExecutionId: toExecutionId('execution-work-reference'),
+      fileId: file.id,
+      mediaKind: 'image',
+      name: 'Generated reference.png',
+      createdAt: t0
+    };
+    await new JsonFileReferenceRepository(
+      fixture.storage,
+      fixture.projectId
+    ).save(file);
+    await new JsonWorkRepository(fixture.storage, fixture.projectId).save(work);
+
+    const result = await fixture.controller.useWorkAsInput({
+      draftId: fixture.draft.id,
+      workId: work.id
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        cancelled: false,
+        draft: { input: { role: 'reference' } },
+        input: {
+          name: work.name,
+          mimeType: 'image/png',
+          width: 1024,
+          height: 768,
+          fileState: 'available'
+        }
+      }
+    });
+    const assets = await new JsonAssetRepository(
+      fixture.storage,
+      fixture.projectId
+    ).list(fixture.projectId);
+    expect(assets).toHaveLength(1);
+    expect(assets[0]).toMatchObject({
+      fileId: file.id,
+      origin: 'generated',
+      role: 'reference'
+    });
+
+    await writeFile(target, pngHeader(1024, 768, 'changed-work'));
+    await expect(fixture.controller.useWorkAsInput({
+      draftId: fixture.draft.id,
+      workId: work.id
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'image_unreadable' }
+    });
   });
 
   it('rejects image selection from quick text-to-image before opening media', async () => {

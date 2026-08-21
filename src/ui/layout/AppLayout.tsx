@@ -7,7 +7,7 @@ import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
 import { useEffect, useId } from 'react';
 import { useProjectStatus } from '../status/ProjectStatusContext';
-import { StatusPill } from '../../components/StatusPill';
+import { TaskStatusDock } from './TaskStatusDock';
 
 interface AppLayoutProps {
   activeItemId: NavigationItemId;
@@ -81,10 +81,7 @@ export function AppLayout({
         >
           {children}
         </main>
-        <aside className="uc-project-status-bar" role={status.role}>
-          <StatusPill tone={status.tone}>{status.label}</StatusPill>
-          <div className="uc-project-status-bar__content">{status.content}</div>
-        </aside>
+        <TaskStatusDock fallbackStatus={status} onNavigate={onNavigate} />
       </div>
     </div>
   );

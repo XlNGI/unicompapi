@@ -17,4 +17,6 @@ test('image creation workspaces share a controlled single-image drop zone', () =
   assert.match(dropZone, /file\.type\.startsWith\('image\/'\)/);
   assert.match(dropZone, /dataset\.unicompDropToken/);
   assert.match(dropZone, /onDropFile\(file, dropToken\)/);
+  assert.match(dropZone, /imageWorkDragDataType/);
+  assert.match(dropZone, /onDropWork\?\.\(workId\)/);
 });

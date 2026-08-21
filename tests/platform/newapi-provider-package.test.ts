@@ -58,6 +58,7 @@ import {
   NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
@@ -1297,6 +1298,49 @@ describe('NewAPI image adapter', () => {
     });
   });
 
+  it('sends qwen-image size using the upstream width x height format', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fixture = runtimeFixture(async () => jsonResponse({
+      data: [{ b64_json: Buffer.from(png).toString('base64') }]
+    }));
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async (schemaId: string, revision: number) =>
+          schemaId === UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID &&
+          revision === uniCompApiQwenImageTextToImageParameterSchema.revision
+            ? uniCompApiQwenImageTextToImageParameterSchema
+            : undefined
+      },
+      usageSink().port,
+      { download: vi.fn() }
+    );
+
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiQwenTextToImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-unicompapi-qwen-text-to-image',
+        projectId: 'project-newapi',
+        prompt: 'A synthetic image',
+        parameterValues: { size: '928x1664' }
+      }
+    });
+
+    expect(outcome.kind).toBe('completed_sync');
+    expect(requestJson(fixture.requests[0])).toEqual({
+      model: 'qwen-image',
+      prompt: 'A synthetic image',
+      size: '928x1664'
+    });
+  });
+
   it('sends qwen-image-edit-2509 reference input to images/generations', async () => {
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const fixture = runtimeFixture(async () => jsonResponse({
@@ -2291,6 +2335,19 @@ function unicompapiTextToImageRoute(): ProviderExecutionRouteSnapshotV1 {
     runtimePolicyRevision: 1,
     runtimeAuthorizationClaimId: 'claim-unicompapi-synthetic',
     createdAt: toIsoTimestamp('2026-08-19T00:00:00.000Z')
+  });
+}
+
+function unicompapiQwenTextToImageRoute(): ProviderExecutionRouteSnapshotV1 {
+  return createProviderExecutionRouteSnapshot({
+    ...unicompapiTextToImageRoute(),
+    id: toProviderExecutionRouteSnapshotId('route-unicompapi-qwen-text-to-image'),
+    modelId: toModelId('model-unicompapi-qwen-image'),
+    providerModelKey: 'qwen-image',
+    profileId: 'profile-unicompapi-qwen-text-to-image',
+    protocolBindingId: toProtocolBindingId('binding-unicompapi-qwen-text-to-image'),
+    parameterSchemaId: UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
+    parameterSchemaRevision: uniCompApiQwenImageTextToImageParameterSchema.revision
   });
 }
 

@@ -26,7 +26,6 @@ import type {
   ImageWorkspaceIpcErrorCode,
   ImageWorkspaceParameterValueDto
 } from '../../../shared/image-workspace-ipc';
-import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
 import {
   describeUnconfirmedGenerationOutcome,
   isUnconfirmedGenerationOutcome
@@ -115,7 +114,6 @@ export function ImageFeatureSubmissionPanel({
 }: ImageFeatureSubmissionPanelProps) {
   const api = window.unicomp?.imageFeatures;
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
-  const notifications = useGlobalNotifications();
   const [candidates, setCandidates] = useState<readonly ImageFeatureCandidateDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
@@ -151,13 +149,12 @@ export function ImageFeatureSubmissionPanel({
   busyRef.current = busy;
   draftRef.current = draft;
   onMessageRef.current = onMessage;
-  const generationNotificationId = `image-generation:${draft.draftId}`;
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
 
   function silentlyFinishRuntimeGate() {
-    notifications.dismiss(generationNotificationId);
+    onMessage('');
     if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('idle');
@@ -174,56 +171,20 @@ export function ImageFeatureSubmissionPanel({
     setProgressPhase('idle');
   }, [draft.draftId, trackProgress]);
 
-  function showGenerationProgress(
-    description: string,
-    title = '图片生成中',
-    trackTask = false,
-    taskId?: string
-  ) {
+  function clearGenerationMessage() {
     onMessage('');
-    notifications.show({
-      id: generationNotificationId,
-      kind: 'progress',
-      title,
-      description,
-      ...(trackTask ? {
-        tracking: {
-          mediaKind: 'image' as const,
-          sourceDraftId: draft.draftId,
-          ...(taskId ? { taskId } : {})
-        }
-      } : {})
-    });
   }
 
   function showGenerationError(description: string) {
-    onMessage('');
-    notifications.show({
-      id: generationNotificationId,
-      kind: 'error',
-      title: '图片生成失败',
-      description
-    });
+    onMessage(description);
   }
 
   function showSubmissionError(description: string) {
-    onMessage('');
-    notifications.show({
-      id: generationNotificationId,
-      kind: 'error',
-      title: '图片提交失败',
-      description
-    });
+    onMessage(description);
   }
 
   function showGenerationUncertain(description: string) {
-    onMessage('');
-    notifications.show({
-      id: generationNotificationId,
-      kind: 'warning',
-      title: '图片生成状态待确认',
-      description
-    });
+    onMessage(description);
   }
 
   function showSubmissionOutcome(submission: ImageFeatureSubmissionDto) {
@@ -247,24 +208,11 @@ export function ImageFeatureSubmissionPanel({
       return;
     }
     if (submission.status === 'completed' && (urls.length > 0 || submission.workId)) {
-      onMessage('');
-      notifications.show({
-        id: generationNotificationId,
-        kind: 'success',
-        title: '已成功生成',
-        description: safeFeedback ?? (submission.workId
-          ? '图片已完成本地校验并登记到作品库。'
-          : '图片结果已返回，链接已写入调用记录。')
-      });
+      clearGenerationMessage();
       return;
     }
     if (submission.status === 'provider_accepted') {
-      showGenerationProgress(
-        safeFeedback ?? '提交成功，服务商正在排队或生成；真实结果以任务中心为准。',
-        '图片生成中',
-        true,
-        submission.taskId
-      );
+      clearGenerationMessage();
       return;
     }
     const status = submissionStatusLabel(submission.status);
@@ -420,7 +368,7 @@ export function ImageFeatureSubmissionPanel({
     if (!api || !selectedCandidate || busy || blockedReason) return;
     setBusy(true);
     busyRef.current = true;
-    showGenerationProgress('正在保存当前草稿并准备安全提交信息。', '图片提交准备中');
+    clearGenerationMessage();
     if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('preparing');
@@ -431,7 +379,7 @@ export function ImageFeatureSubmissionPanel({
         if (trackProgress) setProgressPhase('submission_failed');
         return;
       }
-      showGenerationProgress('正在向主进程准备安全提交信息。', '图片提交准备中');
+      clearGenerationMessage();
       let result = await api.prepareSubmission(
         saved.draftId,
         saved.updatedAt,
@@ -463,7 +411,7 @@ export function ImageFeatureSubmissionPanel({
         }
         return;
       }
-      showGenerationProgress('提交信息已准备完成，正在继续生成。', '图片提交中');
+      clearGenerationMessage();
       await submitPrepared(saved, result.value);
     } catch {
       showSubmissionError('准备图片提交失败，请重试。');
@@ -482,7 +430,7 @@ export function ImageFeatureSubmissionPanel({
     prepared: ImageFeaturePreparationDto
   ) {
     if (!api) return;
-    showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
+    clearGenerationMessage();
     if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');
@@ -579,7 +527,7 @@ export function ImageFeatureSubmissionPanel({
     }
     busyRef.current = true;
     setBusy(true);
-    showGenerationProgress('正在向主进程提交生成请求。', '图片提交中');
+    clearGenerationMessage();
     if (trackProgress) {
       setProgressFailure(undefined);
       setProgressPhase('requesting');

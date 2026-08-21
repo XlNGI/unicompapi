@@ -1,14 +1,11 @@
 import { useCallback, useState } from 'react';
-import { LuPlus, LuTrash2 } from 'react-icons/lu';
+import { LuTrash2 } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { GenerationHistory } from '../../../components/GenerationHistory';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
-import type {
-  VideoWorkspaceDraftDto,
-  VideoWorkspaceShotDto
-} from '../../../shared/video-workspace-ipc';
+import type { VideoWorkspaceDraftDto } from '../../../shared/video-workspace-ipc';
 import { composeVideoPromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import { VideoFeatureSubmissionPanel } from './VideoFeatureSubmissionPanel';
@@ -94,44 +91,6 @@ export function VideoTextWorkspace({
     changeDraft({ ...draft, prompt });
   }
 
-  function addShot() {
-    const nextOrder = draft.textToVideo.shots.length + 1;
-    changeDraft({
-      ...draft,
-      textToVideo: {
-        ...draft.textToVideo,
-        shots: [
-          ...draft.textToVideo.shots,
-          { id: `shot-${Date.now()}`, order: nextOrder, description: '' }
-        ],
-        storyboard: emptyStoryboard()
-      }
-    });
-  }
-
-  function updateShot(shotId: string, patch: Partial<VideoWorkspaceShotDto>) {
-    changeDraft({
-      ...draft,
-      textToVideo: {
-        ...draft.textToVideo,
-        shots: draft.textToVideo.shots.map((shot) =>
-          shot.id === shotId ? { ...shot, ...patch } : shot
-        ),
-        storyboard: emptyStoryboard()
-      }
-    });
-  }
-
-  function removeShot(shotId: string) {
-    const shots = draft.textToVideo.shots
-      .filter((shot) => shot.id !== shotId)
-      .map((shot, index) => ({ ...shot, order: index + 1 }));
-    changeDraft({
-      ...draft,
-      textToVideo: { ...draft.textToVideo, shots, storyboard: emptyStoryboard() }
-    });
-  }
-
   function removeLegacyMaterials() {
     changeDraft({
       ...draft,
@@ -170,8 +129,8 @@ export function VideoTextWorkspace({
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
-              <h2>文字需求、项目上下文与镜头计划</h2>
-              <p>文生视频固定为无素材输入；镜头计划在第一步整理，最终提示词在第二步确认。</p>
+              <h2>视频创意</h2>
+              <p>填写视频创意并按需选择项目上下文；文生视频不接收素材。</p>
             </div>
           </header>
           <label className="uc-image-quick__field">
@@ -185,47 +144,26 @@ export function VideoTextWorkspace({
             />
             <small>{draft.prompt.originalInput.length} / 4000</small>
           </label>
-          <WorkspaceContextSelector
-            disabled={false}
-            onChange={(contextReferences) => changeDraft({
-              ...draft,
-              contextReferences
-            })}
-            onMessage={onMessage}
-            projectContextsOnly
-            references={draft.contextReferences}
-          />
-          <div className="uc-image-quick__result-actions">
-            <Button onClick={addShot} variant="secondary">
-              <LuPlus aria-hidden="true" />
-              添加镜头
-            </Button>
-          </div>
-          <div className="uc-video-text__shot-list">
-            {draft.textToVideo.shots.map((shot) => (
-              <section className="uc-video-text__shot" key={shot.id}>
-                <div className="uc-video-text__shot-heading">
-                  <strong>镜头 {shot.order}</strong>
-                  <Button
-                    aria-label={`删除镜头 ${shot.order}`}
-                    onClick={() => removeShot(shot.id)}
-                    title="删除镜头"
-                    variant="ghost"
-                  >
-                    <LuTrash2 aria-hidden="true" />
-                  </Button>
-                </div>
-                <label className="uc-image-quick__field">
-                  <span>画面描述</span>
-                  <Input
-                    as="textarea"
-                    onChange={(value) => updateShot(shot.id, { description: value })}
-                    rows={3}
-                    value={shot.description}
-                  />
-                </label>
-              </section>
-            ))}
+          <div className="uc-image-professional__prompt-tools">
+            <WorkspaceContextSelector
+              compact
+              disabled={false}
+              onChange={(contextReferences) => changeDraft({
+                ...draft,
+                contextReferences
+              })}
+              onMessage={onMessage}
+              projectContextsOnly
+              references={draft.contextReferences}
+            />
+            <VideoPromptEnhancePanel
+              compact
+              dirty={dirty}
+              draft={draft}
+              onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
+              onFlushDraft={onFlushDraft}
+              onMessage={onMessage}
+            />
           </div>
           {unsupportedContexts.length > 0 ? (
             <div className="uc-image-quick__preflight" role="status">
@@ -268,13 +206,6 @@ export function VideoTextWorkspace({
             />
             <small>{draft.prompt.finalPrompt.length} / 6000</small>
           </label>
-          <VideoPromptEnhancePanel
-            dirty={dirty}
-            draft={draft}
-            onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
-            onFlushDraft={onFlushDraft}
-            onMessage={onMessage}
-          />
         </Card>
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit">
@@ -347,13 +278,5 @@ function emptyGeneration(): TextVideoDraftDto['generation'] {
   return {
     enhancement: { state: 'not_created', staleReasons: [] },
     preflight: { state: 'not_created', staleReasons: [] }
-  };
-}
-
-function emptyStoryboard(): TextVideoDraftDto['textToVideo']['storyboard'] {
-  return {
-    state: 'not_created',
-    staleReasons: [],
-    frameAssetIds: []
   };
 }

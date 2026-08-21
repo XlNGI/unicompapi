@@ -100,6 +100,15 @@ test('professional image embeds a compact reference control in the enlarged prom
   );
 });
 
+test('professional image can drag a verified result into the reference slot', () => {
+  assert.match(historySource, /imageWorkDragDataType/);
+  assert.match(historySource, /handleWorkDragStart/);
+  assert.match(historySource, /draggable=\{Boolean\(selectedWorkId\)\}/);
+  assert.match(professionalSource, /onDropWork=\{\(workId\)/);
+  assert.match(professionalSource, /imageWorkspaces\.useWorkAsInput\(/);
+  assert.doesNotMatch(professionalSource, /uc-image-professional__after-drop-zone/);
+});
+
 test('professional image consumes only revision-pinned ProjectContext', () => {
   assert.match(professionalSource, /projectContextsOnly/);
   assert.match(professionalSource, /reference\.kind !== 'project_context'/);

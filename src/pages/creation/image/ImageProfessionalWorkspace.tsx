@@ -208,7 +208,10 @@ export function ImageProfessionalWorkspace({
     }
   }
 
-  async function importReference(file: File, dropToken?: string) {
+  async function importReference(
+    file: File,
+    dropToken?: string
+  ) {
     if (
       !imageWorkspaces ||
       productFeature !== 'reference_to_image' ||
@@ -237,6 +240,34 @@ export function ImageProfessionalWorkspace({
       onMessage('图片已完成本地校验并登记到当前项目。');
     } catch {
       onMessage('拖入图片失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function useWorkAsReference(workId: string) {
+    if (
+      !imageWorkspaces ||
+      productFeature !== 'reference_to_image' ||
+      busy
+    ) return;
+    setBusy(true);
+    onMessage('');
+    try {
+      const saved = await ensureSavedDraft();
+      if (!saved) return;
+      const result = await imageWorkspaces.useWorkAsInput(saved.draftId, workId);
+      if (!result.ok || result.value.cancelled || !result.value.draft) {
+        onMessage('添加本地作品失败，请确认作品文件仍然可用。');
+        return;
+      }
+      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      setInput(result.value.input);
+      const preview = await imageWorkspaces.createInputPreview(saved.draftId);
+      setPreviewUrl(preview.ok ? preview.value.url : '');
+      onMessage('本地作品已重新校验并添加为当前参考图。');
+    } catch {
+      onMessage('添加本地作品失败，请重试。');
     } finally {
       setBusy(false);
     }
@@ -345,6 +376,7 @@ export function ImageProfessionalWorkspace({
                   disabled={!imageWorkspaces || busy}
                   hasImage={Boolean(draft.input)}
                   onDropFile={(file, dropToken) => void importReference(file, dropToken)}
+                  onDropWork={(workId) => void useWorkAsReference(workId)}
                   onReject={onMessage}
                 >
                   <section

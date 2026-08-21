@@ -4,6 +4,7 @@ import type { VideoWorkspaceDraftDto } from '../../../shared/video-workspace-ipc
 import { persistVideoWorkspaceDraft } from './persistVideoWorkspaceDraft';
 
 interface VideoPromptEnhancePanelProps {
+  readonly compact?: boolean;
   readonly dirty: boolean;
   readonly draft: VideoWorkspaceDraftDto;
   readonly onDraftPersisted: (draft: VideoWorkspaceDraftDto) => void;
@@ -12,6 +13,7 @@ interface VideoPromptEnhancePanelProps {
 }
 
 export function VideoPromptEnhancePanel({
+  compact = false,
   dirty,
   draft,
   onDraftPersisted,
@@ -23,6 +25,7 @@ export function VideoPromptEnhancePanel({
   return (
     <PromptEnhancePanel
       api={window.unicomp?.promptEnhance}
+      compact={compact}
       host={{
         subjectId: draft.draftId,
         subjectRevision: draft.updatedAt,

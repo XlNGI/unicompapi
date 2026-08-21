@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const monitor = await readFile('src/ui/layout/GlobalStatusMonitor.tsx', 'utf8');
+const taskStatusDock = await readFile('src/ui/layout/TaskStatusDock.tsx', 'utf8');
 const sidebar = await readFile('src/ui/layout/Sidebar.tsx', 'utf8');
 const styles = await readFile('src/styles.css', 'utf8');
 const storageIpc = await readFile('electron/ipc/storage-ipc.ts', 'utf8');
@@ -35,6 +36,12 @@ test('task activity bar exposes only truthful compact status counts', () => {
     '最近任务活动', '运行中', '需处理', '等待处理', '已完成'
   ]) assert.match(monitor, new RegExp(label));
   assert.match(monitor, /aria-expanded=\{expanded\}/);
+  assert.match(monitor, /summarizeTasks\(tasks \?\? \[\], Date\.now\(\)\)/);
+  assert.match(taskStatusDock, /visibleTerminalDurationMs = 10 \* 60 \* 1_000/);
+  assert.match(taskStatusDock, /visibleActiveDurationMs = 60 \* 60 \* 1_000/);
+  assert.match(taskStatusDock, /task\.latestExecutionState === 'failed'/);
+  assert.match(taskStatusDock, /if \(!state\) return 'inactive'/);
+  assert.match(taskStatusDock, /'created', 'queued', 'validating_sources'/);
   assert.doesNotMatch(monitor, /最近变化|打开任务中心|onOpenTasks|taskUpdatedAt|executionStateLabel/);
   assert.doesNotMatch(sidebar, /onOpenTasks/);
   assert.match(styles, /\.global-status-monitor/);

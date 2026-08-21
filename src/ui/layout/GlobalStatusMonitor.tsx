@@ -10,33 +10,7 @@ import type {
   StorageTaskSummaryDto
 } from '../../shared/storage-ipc';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
-
-const activeExecutionStates = new Set([
-  'submitting',
-  'queued',
-  'processing',
-  'validating_sources',
-  'preparing_media',
-  'encoding',
-  'remote_completed',
-  'downloading',
-  'writing',
-  'verifying',
-  'writing_file',
-  'verifying_file',
-  'registering_work',
-  'cancel_requested'
-]);
-
-const attentionExecutionStates = new Set([
-  'submission_outcome_unknown',
-  'cancellation_unknown',
-  'needs_user_action',
-  'interrupted',
-  'recovery_required',
-  'failed',
-  'expired'
-]);
+import { summarizeTasks } from './TaskStatusDock';
 
 export function GlobalStatusMonitor() {
   const storageApi = window.unicomp?.storage;
@@ -118,7 +92,7 @@ export function GlobalStatusMonitor() {
     };
   }, [storageApi]);
 
-  const summary = useMemo(() => summarizeTasks(tasks ?? []), [tasks]);
+  const summary = useMemo(() => summarizeTasks(tasks ?? [], Date.now()), [tasks]);
   const projectUsageWarning = storage ? [
     storage.projectUsage.unavailableProjectCount > 0
       ? `${storage.projectUsage.unavailableProjectCount} 个项目未统计`
@@ -215,7 +189,11 @@ export function GlobalStatusMonitor() {
               aria-live="polite"
               className="global-status-monitor__counts"
             >
-              <TaskCount label="运行中" tone="active" value={tasks ? summary.active : '—'} />
+              <TaskCount
+                label="运行中"
+                tone="active"
+                value={tasks ? summary.generating + summary.receiving : '—'}
+              />
               <TaskCount label="需处理" tone="attention" value={tasks ? summary.attention : '—'} />
               <TaskCount label="等待处理" tone="waiting" value={tasks ? summary.waiting : '—'} />
               <TaskCount label="已完成" tone="completed" value={tasks ? summary.completed : '—'} />
@@ -238,19 +216,6 @@ function TaskCount({ label, tone, value }: {
       <dd>{value}</dd>
     </div>
   );
-}
-
-function summarizeTasks(tasks: readonly StorageTaskSummaryDto[]) {
-  const knownStates = new Set([...activeExecutionStates, ...attentionExecutionStates, 'created', 'completed', 'cancelled']);
-  return {
-    active: tasks.filter((task) => activeExecutionStates.has(task.latestExecutionState ?? '')).length,
-    attention: tasks.filter((task) =>
-      attentionExecutionStates.has(task.latestExecutionState ?? '') ||
-      Boolean(task.latestExecutionState && !knownStates.has(task.latestExecutionState))
-    ).length,
-    waiting: tasks.filter((task) => !task.latestExecutionState || task.latestExecutionState === 'created').length,
-    completed: tasks.filter((task) => ['completed', 'cancelled'].includes(task.latestExecutionState ?? '')).length
-  };
 }
 
 function formatBytes(bytes: number): string {
