@@ -1,5 +1,8 @@
 export type DocumentKindOption = 'auto' | 'word' | 'excel' | 'ppt';
 
+export const DOCUMENT_GENERATION_INSTRUCTION =
+  '请直接输出文档正文（Markdown 格式），不要寒暄、不要解释、不要任何前后缀，直接从文档标题开始。';
+
 export function inferDocumentKind(requirements: string): 'word' | 'excel' | 'ppt' {
   const text = requirements.toLowerCase();
   if (/表格|数据|统计|excel|xlsx|sheet|清单|台账/.test(text)) {
@@ -55,10 +58,11 @@ export function composeDocumentRevisionInput(
   previousContent: string | undefined,
   requirements: string
 ): string {
-  if (!previousContent || previousContent.trim().length === 0) {
-    return requirements;
-  }
-  return `上一版文档内容：\n${previousContent}\n\n修改要求：\n${requirements}`;
+  const body =
+    previousContent && previousContent.trim().length > 0
+      ? `上一版文档内容：\n${previousContent}\n\n修改要求：\n${requirements}`
+      : requirements;
+  return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}`;
 }
 
 export function extractSectionHeadings(

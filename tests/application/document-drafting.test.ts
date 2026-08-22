@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DOCUMENT_GENERATION_INSTRUCTION,
   buildOutlineFromRequirements,
   composeDocumentRevisionInput,
   extractSectionHeadings,
@@ -39,11 +40,14 @@ describe('document drafting helpers', () => {
       '# 项目周报\n\n- 完成评审',
       '把第二部分改为强调风险'
     );
+    expect(input).toContain(DOCUMENT_GENERATION_INSTRUCTION);
     expect(input).toContain('上一版文档内容');
     expect(input).toContain('# 项目周报');
     expect(input).toContain('修改要求');
     expect(input).toContain('强调风险');
-    expect(composeDocumentRevisionInput(undefined, '新需求')).toBe('新需求');
+    expect(composeDocumentRevisionInput(undefined, '新需求')).toContain(
+      DOCUMENT_GENERATION_INSTRUCTION
+    );
   });
 
   it('extracts section headings from assistant markdown', () => {
