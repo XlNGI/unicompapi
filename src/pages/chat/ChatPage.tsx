@@ -90,6 +90,7 @@ const documentErrorMessages: Record<string, string> = {
   revision_conflict: '内容已变化，请重试。',
   invalid_outline: '文档大纲无效，请调整需求后重试。',
   generation_failed: '文档生成失败，请重试。',
+  ai_images_unavailable: 'AI 配图执行器尚未接入，请先关闭“AI 配图”开关。',
   work_not_found: '文档作品不存在。',
   file_unavailable: '文档文件不可用。',
   storage_error: '本地保存失败，请检查存储状态。'
@@ -361,6 +362,7 @@ export function ChatPage({
   const [documentTheme, setDocumentTheme] = useState<
     'blueprint' | 'ink' | 'forest'
   >('blueprint');
+  const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
   const [templateFileId, setTemplateFileId] = useState<string>();
   const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
@@ -1302,7 +1304,8 @@ export function ChatPage({
             fileId: attachment.fileId,
             caption: attachment.fileName
           })),
-        ...(templateColors ? { customTheme: templateColors } : {})
+        ...(templateColors ? { customTheme: templateColors } : {}),
+        ...(aiImagesEnabled ? { aiImages: true } : {})
       });
       rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
         ok: generated.ok,
@@ -2049,6 +2052,18 @@ export function ChatPage({
                       </button>
                     ))}
                   </div>
+                ) : null}
+                {documentMode ? (
+                  <button
+                    aria-pressed={aiImagesEnabled}
+                    className={`uc-chat-page__doc-mode${aiImagesEnabled ? ' is-active' : ''}`}
+                    disabled={!canCompose || !session || busy}
+                    onClick={() => setAiImagesEnabled((enabled) => !enabled)}
+                    title="用已配置的图片模型为缺图分节生成配图，消耗模型额度，生成前需确认"
+                    type="button"
+                  >
+                    AI 配图
+                  </button>
                 ) : null}
                 <ModelSelect
                   appearance="subtle"

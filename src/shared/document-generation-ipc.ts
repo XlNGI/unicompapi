@@ -12,6 +12,7 @@ export type DocumentGenerationIpcErrorCode =
   | 'revision_conflict'
   | 'invalid_outline'
   | 'generation_failed'
+  | 'ai_images_unavailable'
   | 'work_not_found'
   | 'file_unavailable'
   | 'storage_error';
@@ -68,6 +69,7 @@ export interface DocumentGenerationFromMessageRequest {
     readonly text: string;
     readonly muted: string;
   };
+  readonly aiImages?: boolean;
 }
 
 export interface OpenDocumentRequest {
@@ -133,6 +135,9 @@ export const documentGenerationRequestParsers = {
         : {}),
       ...(value.customTheme !== undefined
         ? { customTheme: parseThemeColors(value.customTheme) }
+        : {}),
+      ...(value.aiImages !== undefined
+        ? { aiImages: value.aiImages === true }
         : {})
     };
   },
