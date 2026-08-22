@@ -325,6 +325,20 @@ function isImageFileName(fileName: string): boolean {
   return /\.(png|jpe?g|gif|webp)$/i.test(fileName);
 }
 
+function canAutoGenerateImageCandidate(candidate: {
+  readonly parameterSchema: {
+    readonly fields: readonly {
+      readonly required: boolean;
+      readonly defaultPolicy: string;
+    }[];
+  };
+}): boolean {
+  return candidate.parameterSchema.fields.every(
+    (field) =>
+      !field.required || field.defaultPolicy !== 'require_user_value'
+  );
+}
+
 function describeDocumentError(error: {
   readonly code: string;
   readonly message: string;
@@ -1387,10 +1401,14 @@ export function ChatPage({
         : 0
     }));
     const candidate = candidates.ok
-      ? candidates.value.find((item) => item.available)
+      ? candidates.value.find(
+          (item) => item.available && canAutoGenerateImageCandidate(item)
+        )
       : undefined;
     if (!candidate) {
-      setNotice('未配置可用的图片生成模型，AI 配图已跳过。');
+      setNotice(
+        '可用图片模型都需要必填参数（如尺寸），AI 配图无法自动取值，已跳过；请先到快速生图配置参数。'
+      );
       return [];
     }
     const headings = extractSectionHeadings(content).slice(
