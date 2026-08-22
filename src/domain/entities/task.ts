@@ -18,6 +18,7 @@ import { assertTimestampNotBefore } from '../timestamps';
 import type { CreationKind, Draft } from './draft';
 import type { Execution } from './execution';
 import type { PromptSnapshot } from './prompt';
+import type { DocumentWorkspaceKind } from './document-generation';
 import type {
   DynamicParameterValue,
   ImageWorkspaceDraft,
@@ -154,9 +155,26 @@ export interface VideoEditingSubmissionSnapshot {
   readonly video?: never;
 }
 
+export interface DocumentGenerationSubmissionSnapshot {
+  readonly kind: 'document_generation';
+  readonly confirmedAt: IsoTimestamp;
+  readonly document: {
+    readonly kind: DocumentWorkspaceKind;
+    readonly title: string;
+    readonly contentFingerprint: string;
+    readonly draftRevision: number;
+  };
+  readonly prompt?: never;
+  readonly assetIds?: never;
+  readonly image?: never;
+  readonly video?: never;
+  readonly videoEditing?: never;
+}
+
 export type SubmissionSnapshot =
   | GenerationSubmissionSnapshot
-  | VideoEditingSubmissionSnapshot;
+  | VideoEditingSubmissionSnapshot
+  | DocumentGenerationSubmissionSnapshot;
 
 export interface CreateImageTaskInput {
   readonly id: TaskId;
@@ -456,6 +474,51 @@ export function createVideoEditingTask(input: CreateVideoEditingTaskInput): Task
         exportPlanId: input.exportPlanId,
         draftRevision: input.draftRevision,
         title
+      }
+    },
+    executionIds: [],
+    createdAt: input.confirmedAt
+  };
+}
+
+export interface CreateDocumentTaskInput {
+  readonly id: TaskId;
+  readonly projectId: ProjectId;
+  readonly sourceDraftId: string;
+  readonly kind: DocumentWorkspaceKind;
+  readonly title: string;
+  readonly contentFingerprint: string;
+  readonly draftRevision: number;
+  readonly confirmedAt: IsoTimestamp;
+}
+
+export function createDocumentTask(input: CreateDocumentTaskInput): Task {
+  const title = input.title.trim();
+  if (!title) {
+    throw new InvariantViolationError('document task title is required');
+  }
+  if (input.sourceDraftId.trim().length === 0) {
+    throw new InvariantViolationError('document task source draft is required');
+  }
+  if (!Number.isSafeInteger(input.draftRevision) || input.draftRevision < 0) {
+    throw new InvariantViolationError('document task draft revision is invalid');
+  }
+  if (!/^[a-f0-9]{64}$/.test(input.contentFingerprint)) {
+    throw new InvariantViolationError('document content fingerprint is invalid');
+  }
+  return {
+    schemaVersion: 1,
+    id: input.id,
+    projectId: input.projectId,
+    sourceDraftId: input.sourceDraftId as Task['sourceDraftId'],
+    submission: {
+      kind: 'document_generation',
+      confirmedAt: input.confirmedAt,
+      document: {
+        kind: input.kind,
+        title,
+        contentFingerprint: input.contentFingerprint,
+        draftRevision: input.draftRevision
       }
     },
     executionIds: [],

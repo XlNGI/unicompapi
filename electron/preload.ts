@@ -50,9 +50,35 @@ import {
   autosaveDiagnosticsIpcChannel,
   type AutosaveDiagnosticsApi
 } from '../src/shared/autosave-diagnostics-ipc';
+import {
+  documentAttachmentIpcChannels,
+  type DocumentAttachmentApi
+} from '../src/shared/document-attachment-ipc';
+import {
+  documentGenerationIpcChannels,
+  type DocumentGenerationApi
+} from '../src/shared/document-generation-ipc';
 
 const autosaveDiagnostics: AutosaveDiagnosticsApi = {
   record: (event) => ipcRenderer.send(autosaveDiagnosticsIpcChannel, event)
+};
+
+const getPathForFile = (file: File) => webUtils.getPathForFile(file);
+
+const documentGeneration: DocumentGenerationApi = {
+  generateFromConversation: (request) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.generateFromConversation, request),
+  generateFromMessage: (request) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.generateFromMessage, request),
+  openDocument: (workId) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.openDocument, { workId })
+};
+
+const documentAttachments: DocumentAttachmentApi = {
+  importAttachment: (request) =>
+    ipcRenderer.invoke(documentAttachmentIpcChannels.importAttachment, request),
+  extractFile: (request) =>
+    ipcRenderer.invoke(documentAttachmentIpcChannels.extractFile, request)
 };
 
 const storage: StorageApi = {
@@ -887,6 +913,9 @@ const chatContexts: ChatContextApi = {
 contextBridge.exposeInMainWorld('unicomp', {
   autosaveDiagnostics,
   chatContexts,
+  documentAttachments,
+  documentGeneration,
+  getPathForFile,
   imageSubmissions,
   imageFeatures,
   promptEnhance,
