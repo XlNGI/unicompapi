@@ -185,7 +185,7 @@ describe('markdown to outline parser', () => {
       '# 汇报\n\n## 签约流程\n\n- **客户确认**、`编号` 与 [详情](https://example.com)',
       'word'
     );
-    const bullet = outline.sections[1].blocks[0];
+    const bullet = outline.sections[0].blocks[0];
     expect(bullet.type).toBe('bullets');
     if (bullet.type !== 'bullets') throw new Error('unexpected block');
     expect(bullet.items[0]).toBe('客户确认、编号 与 详情');
