@@ -104,4 +104,18 @@ describe('JsonImageWorkspaceRepository', () => {
       'contains an invalid project-scoped entity'
     );
   });
+
+  it('removes ephemeral drafts after programmatic generation', async () => {
+    const fixture = await createFixture();
+    const draft = createEmptyImageWorkspaceDraft({
+      id: toDraftId('draft-ephemeral'),
+      projectId: fixture.projectId,
+      mode: 'quick_image',
+      createdAt: timestamp
+    });
+    await fixture.repository.save(draft);
+    await fixture.repository.remove(draft.id);
+    await expect(fixture.repository.get(draft.id)).resolves.toBeUndefined();
+    await expect(fixture.repository.list(fixture.projectId)).resolves.toEqual([]);
+  });
 });

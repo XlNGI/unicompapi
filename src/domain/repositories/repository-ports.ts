@@ -193,6 +193,7 @@ export interface ImageWorkspaceRepository {
   get(id: DraftId): Promise<ImageWorkspaceDraft | undefined>;
   list(projectId: ProjectId): Promise<readonly ImageWorkspaceDraft[]>;
   save(draft: ImageWorkspaceDraft): Promise<void>;
+  remove(id: DraftId): Promise<void>;
 }
 
 export interface VideoWorkspaceRepository {

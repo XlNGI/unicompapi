@@ -448,6 +448,7 @@ export function createImageFeatureControllerRuntime(
       routeSelectionToken: prepared.routeSelectionToken,
       confirmation
     });
+    await drafts.remove(saved.id);
     return {
       schemaVersion: 1 as const,
       draftId: saved.id,
@@ -486,7 +487,9 @@ export function createImageFeatureControllerRuntime(
       draftId: saved.id,
       draftRevision: imageDraftRevision(saved.updatedAt)
     };
-    return candidates.listFeatureCandidates(subject);
+    const result = await candidates.listFeatureCandidates(subject);
+    await drafts.remove(saved.id);
+    return result;
   };
 
   return runtime;
