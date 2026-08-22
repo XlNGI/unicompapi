@@ -168,6 +168,16 @@ export class DocumentGenerationController {
         sourceDraftId: `message-${input.messageId}`,
         outline
       });
+      const latestConversation = await this.dependencies.loadConversation(
+        session,
+        toConversationId(input.conversationId)
+      );
+      if (!latestConversation) {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'Conversation disappeared during document generation'
+        );
+      }
       const fileName =
         result.file.locator.kind === 'project'
           ? result.file.locator.relativePath.split('/').pop() ?? result.work.name
@@ -175,7 +185,7 @@ export class DocumentGenerationController {
       await streaming.attachDocumentResult({
         conversationId: toConversationId(input.conversationId),
         messageId: toMessageId(input.messageId),
-        expectedRevision: conversation.revision,
+        expectedRevision: latestConversation.revision,
         documentResult: {
           workId: result.work.id,
           fileName,
