@@ -103,6 +103,15 @@ const documentKindOptions: readonly {
   { value: 'ppt', label: 'PPT' }
 ];
 
+const documentThemeOptions: readonly {
+  readonly value: 'blueprint' | 'ink' | 'forest';
+  readonly label: string;
+}[] = [
+  { value: 'blueprint', label: '商务蓝' },
+  { value: 'ink', label: '墨色' },
+  { value: 'forest', label: '松绿' }
+];
+
 function rendererTrace(message: string, detail?: unknown): void {
   if (!import.meta.env.DEV) return;
   console.info('[chat-page]', message, detail ?? '');
@@ -343,6 +352,9 @@ export function ChatPage({
   const [input, setInput] = useState('');
   const [documentMode, setDocumentMode] = useState(false);
   const [documentKind, setDocumentKind] = useState<DocumentKindOption>('auto');
+  const [documentTheme, setDocumentTheme] = useState<
+    'blueprint' | 'ink' | 'forest'
+  >('blueprint');
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
   const [dragging, setDragging] = useState(false);
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
@@ -1232,6 +1244,7 @@ export function ChatPage({
         expectedRevision: refreshedBefore.value.revision,
         messageId: completion.assistantMessageId,
         kind,
+        theme: documentTheme,
       });
       rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
         ok: generated.ok,
@@ -1935,6 +1948,27 @@ export function ChatPage({
                             ? '根据需求自动判断文档类型'
                             : option.label
                         }
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {documentMode ? (
+                  <div
+                    aria-label="文档主题"
+                    className="uc-chat-page__doc-kind"
+                    role="radiogroup"
+                  >
+                    {documentThemeOptions.map((option) => (
+                      <button
+                        aria-checked={documentTheme === option.value}
+                        className={documentTheme === option.value ? 'is-active' : ''}
+                        disabled={!canCompose || !session || busy}
+                        key={option.value}
+                        onClick={() => setDocumentTheme(option.value)}
+                        role="radio"
                         type="button"
                       >
                         {option.label}

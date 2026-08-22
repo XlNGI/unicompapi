@@ -49,6 +49,7 @@ export interface DocumentGenerationRequest {
   readonly contentFingerprint: string;
   readonly draftRevision: number;
   readonly sourceDraftId: string;
+  readonly theme?: 'blueprint' | 'ink' | 'forest';
 }
 
 export interface DocumentGenerationFromMessageRequest {
@@ -56,6 +57,7 @@ export interface DocumentGenerationFromMessageRequest {
   readonly expectedRevision: number;
   readonly messageId: string;
   readonly kind: 'word' | 'excel' | 'ppt';
+  readonly theme?: 'blueprint' | 'ink' | 'forest';
 }
 
 export interface OpenDocumentRequest {
@@ -95,7 +97,10 @@ export const documentGenerationRequestParsers = {
         value.draftRevision,
         'draftRevision'
       ),
-      sourceDraftId: requireString(value.sourceDraftId, 'sourceDraftId')
+      sourceDraftId: requireString(value.sourceDraftId, 'sourceDraftId'),
+      ...(value.theme !== undefined
+        ? { theme: requireTheme(value.theme) }
+        : {})
     };
   },
   generateFromMessage(value: unknown): DocumentGenerationFromMessageRequest {
@@ -109,7 +114,10 @@ export const documentGenerationRequestParsers = {
         'expectedRevision'
       ),
       messageId: requireString(value.messageId, 'messageId'),
-      kind: requireKind(value.kind)
+      kind: requireKind(value.kind),
+      ...(value.theme !== undefined
+        ? { theme: requireTheme(value.theme) }
+        : {})
     };
   },
   openDocument(value: unknown): OpenDocumentRequest {
@@ -130,6 +138,15 @@ function requireNonNegativeInteger(value: unknown, label: string): number {
 function requireKind(value: unknown): 'word' | 'excel' | 'ppt' {
   if (value !== 'word' && value !== 'excel' && value !== 'ppt') {
     throw new TypeError('kind must be word, excel or ppt');
+  }
+  return value;
+}
+
+function requireTheme(
+  value: unknown
+): 'blueprint' | 'ink' | 'forest' {
+  if (value !== 'blueprint' && value !== 'ink' && value !== 'forest') {
+    throw new TypeError('theme must be blueprint, ink or forest');
   }
   return value;
 }

@@ -20,6 +20,7 @@ import {
   type Work,
   type WorkId
 } from '../../domain';
+import type { DocumentThemeId } from './document-theme';
 import { FileVerificationPersistenceService, NodeFileStatusProbe } from '../files';
 import {
   JsonExecutionRepository,
@@ -56,6 +57,7 @@ export interface DocumentGenerationPlanInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
+  readonly theme?: DocumentThemeId;
 }
 
 export interface DocumentGenerationResult {
@@ -130,7 +132,8 @@ export class DocumentGenerationRunner {
         kind: input.kind,
         outline: input.outline,
         outputDirectory,
-        now: now()
+        now: now(),
+        ...(input.theme !== undefined ? { theme: input.theme } : {})
       });
       execution = await this.move(context, execution, 'verifying_file');
       const file = await this.registerVerifiedOutput(

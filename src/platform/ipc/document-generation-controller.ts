@@ -166,7 +166,8 @@ export class DocumentGenerationController {
         contentFingerprint,
         draftRevision: 1,
         sourceDraftId: `message-${input.messageId}`,
-        outline
+        outline,
+        ...(input.theme !== undefined ? { theme: input.theme } : {})
       });
       const fileName =
         result.file.locator.kind === 'project'
