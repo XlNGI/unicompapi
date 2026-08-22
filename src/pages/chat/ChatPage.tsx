@@ -1112,44 +1112,16 @@ export function ChatPage({
     const kind = documentKind === 'auto'
       ? inferDocumentKind(requirements)
       : documentKind;
-    let targetId = selected?.conversationId;
-    let expectedRevision = selected?.revision ?? 0;
     try {
-      if (!targetId) {
-        const created = await chat.createConversation(
-          conversationTitleFromMessage(requirements),
-          true
-        );
-        if (!created.ok) {
-          setNotice(errorMessages[created.error.code]);
-          return;
-        }
-        targetId = created.value.conversationId;
-        expectedRevision = created.value.revision;
-        replaceConversation(created.value);
-        setSelectedId(created.value.conversationId);
-      }
-      const userResult = await chat.addUserMessage(
-        targetId,
-        expectedRevision,
-        requirements
-      );
-      if (!userResult.ok) {
-        setNotice(errorMessages[userResult.error.code]);
-        if (selected) {
-          const refreshed = await chat.getConversation(selected.conversationId);
-          if (refreshed.ok) replaceConversation(refreshed.value);
-        }
-        return;
-      }
-      replaceConversation(userResult.value);
       const started = await chat.startResponse({
         clientCommandId: `chat-doc-${crypto.randomUUID()}`,
-        conversation: {
-          conversationId: targetId,
-          expectedRevision: userResult.value.revision,
-          editedMessageId: null
-        },
+        conversation: selected
+          ? {
+              conversationId: selected.conversationId,
+              expectedRevision: selected.revision,
+              editedMessageId: null
+            }
+          : null,
         title: conversationTitleFromMessage(requirements),
         content: combined,
         productFeature: responseFeature,
@@ -1169,14 +1141,18 @@ export function ChatPage({
       });
       if (!started.ok) {
         setNotice(documentErrorMessages[started.error.code] ?? started.error.message);
-        const refreshedFailed = await chat.getConversation(targetId);
-        if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
+        if (selected) {
+          const refreshedFailed = await chat.getConversation(selected.conversationId);
+          if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
+        }
         return;
       }
       replaceConversation(started.value.conversation);
+      setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
       updateInput('');
       setAttachments([]);
+      const targetId = started.value.conversation.conversationId;
       const completion = await awaitDocumentCompletion(
         chat,
         started.value.execution.responseExecutionId
@@ -1188,7 +1164,15 @@ export function ChatPage({
       }
       replaceConversation(refreshedBefore.value);
       if (!completion) {
-        setNotice('AI 内容生成未完成，文档未生成。');
+        const finalCheck = await chat.getResponseExecution(
+          started.value.execution.responseExecutionId
+        );
+        const terminal = finalCheck.ok ? finalCheck.value.state : 'unknown';
+        setNotice(
+          terminal === 'failed' || terminal === 'cancelled'
+            ? `AI 内容生成${terminal === 'cancelled' ? '已取消' : '失败'}，文档未生成。`
+            : 'AI 内容生成未完成，文档未生成。'
+        );
         return;
       }
       setNotice('正在生成本地 Office 文档…');
