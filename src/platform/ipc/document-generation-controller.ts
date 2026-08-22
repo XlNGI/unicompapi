@@ -352,6 +352,12 @@ export function formatOutlineForMessage(outline: DocumentOutline): string {
         blocks.push(block.text);
       } else if (block.type === 'bullets' || block.type === 'numbered') {
         block.items.forEach((item) => blocks.push(`- ${item}`));
+      } else if (block.type === 'chart') {
+        blocks.push(
+          `图表（${block.chartKind === 'bar' ? '柱状' : '饼图'}）${
+            block.title ? `：${block.title}` : ''
+          }：${block.data.map((item) => `${item.label} ${item.value}`).join('；')}`
+        );
       } else {
         blocks.push(block.header.join(' | '));
         block.rows.forEach((row) => blocks.push(row.join(' | ')));

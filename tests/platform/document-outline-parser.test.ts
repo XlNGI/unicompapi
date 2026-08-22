@@ -104,6 +104,42 @@ describe('document outline parser', () => {
       DocumentOutlineError
     );
   });
+
+  it('accepts chart blocks and rejects invalid chart data', () => {
+    const withChart = JSON.parse(validOutline());
+    withChart.sections[0].blocks.push({
+      type: 'chart',
+      chartKind: 'bar',
+      title: '月度趋势',
+      data: [
+        { label: '一月', value: 10 },
+        { label: '二月', value: 22 }
+      ]
+    });
+    const outline = parseDocumentOutline(JSON.stringify(withChart));
+    expect(outline.sections[0].blocks[2]).toMatchObject({
+      type: 'chart',
+      chartKind: 'bar'
+    });
+    const badKind = JSON.parse(validOutline());
+    badKind.sections[0].blocks.push({
+      type: 'chart',
+      chartKind: 'line',
+      data: []
+    });
+    expect(() => parseDocumentOutline(JSON.stringify(badKind))).toThrow(
+      DocumentOutlineError
+    );
+    const badValue = JSON.parse(validOutline());
+    badValue.sections[0].blocks.push({
+      type: 'chart',
+      chartKind: 'pie',
+      data: [{ label: 'a', value: 'x' }]
+    });
+    expect(() => parseDocumentOutline(JSON.stringify(badValue))).toThrow(
+      DocumentOutlineError
+    );
+  });
 });
 
 describe('markdown to outline parser', () => {

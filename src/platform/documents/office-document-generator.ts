@@ -147,6 +147,19 @@ function wordBlock(block: DocumentOutlineBlock): Paragraph | Table {
           }
         }
       });
+    case 'chart':
+      return new Paragraph({
+        children: [
+          new TextRun({
+            text: `图表（${block.chartKind === 'bar' ? '柱状' : '饼图'}）${
+              block.title ? `：${block.title}` : ''
+            }：${block.data
+              .map((item) => `${item.label} ${item.value}`)
+              .join('；')}`,
+            italics: true
+          })
+        ]
+      });
     case 'bullets':
       return new Paragraph({
         children: block.items.map((item) => new TextRun(item)),
@@ -303,6 +316,42 @@ async function buildPptBuffer(
           border: { pt: 0.5, color: 'CCCCCC' }
         });
         y += rows.length * 0.4 + 0.4;
+        continue;
+      }
+      if (block.type === 'chart') {
+        if (textLines.length > 0) {
+          slide.addText(pptTextLines(textLines), {
+            x: 0.6,
+            y,
+            w: 12.3,
+            h: Math.max(0.6, textLines.length * 0.45),
+            fontSize: 16,
+            color: theme.text
+          });
+          y += textLines.length * 0.45 + 0.3;
+          textLines.length = 0;
+        }
+        slide.addChart(
+          pptx.ChartType[block.chartKind === 'bar' ? 'bar' : 'pie'],
+          [
+            {
+              name: block.title ?? '数据',
+              labels: block.data.map((item) => item.label),
+              values: block.data.map((item) => item.value)
+            }
+          ],
+          {
+            x: 0.6,
+            y,
+            w: 12.1,
+            h: 4.8,
+            showTitle: Boolean(block.title),
+            title: block.title ?? '',
+            showLegend: true,
+            showValue: true
+          }
+        );
+        y += 5.1;
         continue;
       }
       if (block.type === 'paragraph') {

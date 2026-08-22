@@ -111,6 +111,46 @@ describe('office document generator', () => {
     expect(secondSlide).toContain('业绩概览');
   });
 
+  it('renders chart blocks as native pptx charts', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'ppt',
+        title: '数据看板',
+        sections: [
+          {
+            heading: '月度趋势',
+            level: 1,
+            blocks: [
+              {
+                type: 'chart',
+                chartKind: 'bar',
+                title: '月度趋势',
+                data: [
+                  { label: '一月', value: 10 },
+                  { label: '二月', value: 22 }
+                ]
+              }
+            ]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-22T10:00:00.000Z'
+    });
+    const buffer = await readFile(result.absolutePath);
+    const zip = new AdmZip(Buffer.from(buffer));
+    expect(
+      zip.getEntries().some((entry) =>
+        entry.entryName.startsWith('ppt/charts/chart')
+      )
+    ).toBe(true);
+  });
+
   it('sanitizes file names', () => {
     expect(sanitizeFileName('汇报: 2026? 报告*')).toBe('汇报 2026 报告');
     expect(sanitizeFileName('   ')).toBe('文档');

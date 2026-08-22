@@ -9,6 +9,12 @@ export type DocumentOutlineBlock =
   | { readonly type: 'numbered'; readonly items: readonly string[] }
   | { readonly type: 'quote'; readonly text: string }
   | {
+      readonly type: 'chart';
+      readonly chartKind: 'bar' | 'pie';
+      readonly title?: string;
+      readonly data: readonly { readonly label: string; readonly value: number }[];
+    }
+  | {
       readonly type: 'table';
       readonly header: readonly string[];
       readonly rows: readonly (readonly string[])[];
@@ -44,6 +50,8 @@ const MAX_TEXT_LENGTH = 2000;
 const MAX_TABLE_COLUMNS = 50;
 const MAX_TABLE_ROWS = 200;
 const MAX_TABLE_CELL_LENGTH = 1000;
+const MAX_CHART_ITEMS = 50;
+const MAX_CHART_LABEL_LENGTH = 100;
 
 export function parseDocumentOutline(jsonText: string): DocumentOutline {
   let parsed: unknown;
@@ -286,12 +294,71 @@ function parseBlock(
       };
     case 'table':
       return parseTable(value, label);
+    case 'chart':
+      return parseChart(value, label);
     default:
       throw new DocumentOutlineError(
         'document_invalid_outline',
         `${label}.type is not supported`
       );
   }
+}
+
+function parseChart(
+  value: Record<string, unknown>,
+  label: string
+): DocumentOutlineBlock {
+  if (value.chartKind !== 'bar' && value.chartKind !== 'pie') {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label}.chartKind must be bar or pie`
+    );
+  }
+  if (value.title !== undefined && typeof value.title !== 'string') {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label}.title must be a string`
+    );
+  }
+  if (!Array.isArray(value.data)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label}.data must be an array`
+    );
+  }
+  if (value.data.length > MAX_CHART_ITEMS) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} exceeds ${MAX_CHART_ITEMS} chart items`
+    );
+  }
+  const data = value.data.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label}.data[${index}] must be an object`
+      );
+    }
+    if (
+      typeof item.label !== 'string' ||
+      item.label.trim().length === 0 ||
+      item.label.length > MAX_CHART_LABEL_LENGTH ||
+      typeof item.value !== 'number' ||
+      !Number.isFinite(item.value)
+    ) {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label}.data[${index}] is invalid`
+      );
+    }
+    return { label: item.label, value: item.value };
+  });
+  return {
+    type: 'chart',
+    chartKind: value.chartKind,
+    ...(value.title !== undefined ? { title: value.title as string } : {}),
+    data
+  };
 }
 
 function parseTable(
