@@ -1105,6 +1105,12 @@ export function ChatPage({
     }
     setBusy(true);
     setNotice('AI 正在撰写文档内容…');
+    rendererTrace('sendDocumentMessage:start', {
+      selectedId,
+      documentKind,
+      candidateId: selectedCandidateId,
+      productFeature: responseFeature
+    });
     const requirements = input.trim();
     const attachmentText = attachments
       .filter((attachment) => attachment.status === 'extracted')
@@ -1147,6 +1153,10 @@ export function ChatPage({
         confirmed: true
       });
       if (!started.ok) {
+        rendererTrace('sendDocumentMessage:startResponse-error', {
+          code: started.error.code,
+          message: started.error.message
+        });
         setNotice(describeDocumentError(started.error));
         if (selected) {
           const refreshedFailed = await chat.getConversation(selected.conversationId);
@@ -1154,6 +1164,11 @@ export function ChatPage({
         }
         return;
       }
+      rendererTrace('sendDocumentMessage:startResponse-ok', {
+        conversationId: started.value.conversation.conversationId,
+        executionState: started.value.execution.state,
+        executionId: started.value.execution.responseExecutionId
+      });
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
@@ -1164,6 +1179,10 @@ export function ChatPage({
         chat,
         started.value.execution.responseExecutionId
       );
+      rendererTrace('sendDocumentMessage:completion', {
+        completed: Boolean(completion),
+        state: completion?.state
+      });
       const refreshedBefore = await chat.getConversation(targetId);
       if (!refreshedBefore.ok) {
         setNotice('刷新对话失败，请重试。');
@@ -1188,6 +1207,11 @@ export function ChatPage({
         expectedRevision: refreshedBefore.value.revision,
         messageId: completion.assistantMessageId,
         kind,
+      });
+      rendererTrace('sendDocumentMessage:generate-result', {
+        ok: generated.ok,
+        code: generated.ok ? undefined : generated.error.code,
+        message: generated.ok ? undefined : generated.error.message
       });
       if (!generated.ok) {
         setNotice(describeDocumentError(generated.error));
