@@ -1364,6 +1364,13 @@ export function ChatPage({
     content: string,
     userImageCount: number
   ): Promise<readonly { readonly workId: string; readonly caption: string }[]> {
+    rendererTrace('generateAiSlideImages:start', JSON.stringify({
+      aiImagesEnabled,
+      hasFeatures: Boolean(imageFeatures),
+      hasWorkspaces: Boolean(imageWorkspaces),
+      contentLength: content.length,
+      userImageCount
+    }));
     if (!aiImagesEnabled || !imageFeatures || !imageWorkspaces) return [];
     if (
       !window.confirm(
@@ -1374,6 +1381,10 @@ export function ChatPage({
       return [];
     }
     const draft = await imageWorkspaces.create('quick_image');
+    rendererTrace('generateAiSlideImages:draft', JSON.stringify({
+      ok: draft.ok,
+      code: draft.ok ? undefined : draft.error.code
+    }));
     if (!draft.ok) {
       setNotice('无法准备图片生成草稿，AI 配图已跳过。');
       return [];
@@ -1382,6 +1393,13 @@ export function ChatPage({
       draft.value.draftId,
       draft.value.updatedAt
     );
+    rendererTrace('generateAiSlideImages:candidates', JSON.stringify({
+      ok: candidates.ok,
+      count: candidates.ok ? candidates.value.length : 0,
+      available: candidates.ok
+        ? candidates.value.filter((item) => item.available).length
+        : 0
+    }));
     const candidate = candidates.ok
       ? candidates.value.find((item) => item.available)
       : undefined;
@@ -1393,6 +1411,7 @@ export function ChatPage({
       0,
       Math.max(0, 6 - userImageCount)
     );
+    rendererTrace('generateAiSlideImages:headings', JSON.stringify(headings));
     const generated: { readonly workId: string; readonly caption: string }[] = [];
     for (const heading of headings) {
       try {
@@ -1401,6 +1420,13 @@ export function ChatPage({
           candidate.candidateId,
           {}
         );
+        rendererTrace('generateAiSlideImages:image', JSON.stringify({
+          heading,
+          ok: result.ok,
+          code: result.ok ? undefined : result.error.code,
+          workId: result.ok ? result.value.submission.workId : undefined,
+          safeCode: result.ok ? result.value.submission.safeCode : undefined
+        }));
         if (result.ok && result.value.submission.workId) {
           generated.push({
             workId: result.value.submission.workId,
@@ -1414,6 +1440,9 @@ export function ChatPage({
     if (headings.length > 0 && generated.length === 0) {
       setNotice('AI 配图生成失败，文档将不包含 AI 配图。');
     }
+    rendererTrace('generateAiSlideImages:result', JSON.stringify({
+      generatedCount: generated.length
+    }));
     return generated;
   }
 
