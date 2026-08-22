@@ -273,6 +273,7 @@ export class DocumentGenerationController {
     let task!: Promise<DocumentGenerationIpcResult<T>>;
     task = operation()
       .catch((error: unknown): DocumentGenerationIpcResult<T> => {
+        this.dependencies.onError?.(error);
         if (error instanceof DocumentGenerationError) {
           return failure(
             error.code === 'generation_failed' ? 'generation_failed' : 'storage_error',
@@ -296,7 +297,6 @@ export class DocumentGenerationController {
         if (error instanceof TypeError) {
           return failure('invalid_request', error.message);
         }
-        this.dependencies.onError?.(error);
         return failure(
           'storage_error',
           error instanceof Error ? error.message : 'Document generation failed'

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { ipcMain, shell } from 'electron';
+import { appendFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { app, ipcMain, shell } from 'electron';
 import {
   ConversationStreamingService
 } from '../../src/application';
@@ -53,7 +55,30 @@ export function registerDocumentGenerationIpcHandlers(options: {
       }),
     openPath: async (absolutePath) => shell.openPath(absolutePath),
     now,
-    createId: () => randomUUID()
+    createId: () => randomUUID(),
+    onError: (error) => {
+      const line = `${JSON.stringify({
+        at: new Date().toISOString(),
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                code: (error as { code?: unknown }).code ?? undefined
+              }
+            : String(error)
+      })}\n`;
+      const logsDirectory = path.join(app.getPath('userData'), 'logs');
+      void mkdir(logsDirectory, { recursive: true })
+        .then(() =>
+          appendFile(
+            path.join(logsDirectory, 'document-generation.log'),
+            line,
+            'utf8'
+          )
+        )
+        .catch(() => undefined);
+    }
   });
 
   ipcMain.handle(
