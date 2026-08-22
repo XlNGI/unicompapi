@@ -1105,12 +1105,12 @@ export function ChatPage({
     }
     setBusy(true);
     setNotice('AI 正在撰写文档内容…');
-    rendererTrace('sendDocumentMessage:start', {
+    rendererTrace('sendDocumentMessage:start', JSON.stringify({
       selectedId,
       documentKind,
       candidateId: selectedCandidateId,
       productFeature: responseFeature
-    });
+    }));
     const requirements = input.trim();
     const attachmentText = attachments
       .filter((attachment) => attachment.status === 'extracted')
@@ -1153,10 +1153,10 @@ export function ChatPage({
         confirmed: true
       });
       if (!started.ok) {
-        rendererTrace('sendDocumentMessage:startResponse-error', {
+        rendererTrace('sendDocumentMessage:startResponse-error', JSON.stringify({
           code: started.error.code,
           message: started.error.message
-        });
+        }));
         setNotice(describeDocumentError(started.error));
         if (selected) {
           const refreshedFailed = await chat.getConversation(selected.conversationId);
@@ -1164,11 +1164,11 @@ export function ChatPage({
         }
         return;
       }
-      rendererTrace('sendDocumentMessage:startResponse-ok', {
+      rendererTrace('sendDocumentMessage:startResponse-ok', JSON.stringify({
         conversationId: started.value.conversation.conversationId,
         executionState: started.value.execution.state,
         executionId: started.value.execution.responseExecutionId
-      });
+      }));
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
@@ -1179,10 +1179,10 @@ export function ChatPage({
         chat,
         started.value.execution.responseExecutionId
       );
-      rendererTrace('sendDocumentMessage:completion', {
+      rendererTrace('sendDocumentMessage:completion', JSON.stringify({
         completed: Boolean(completion),
         state: completion?.state
-      });
+      }));
       const refreshedBefore = await chat.getConversation(targetId);
       if (!refreshedBefore.ok) {
         setNotice('刷新对话失败，请重试。');
@@ -1194,6 +1194,10 @@ export function ChatPage({
           started.value.execution.responseExecutionId
         );
         const terminal = finalCheck.ok ? finalCheck.value.state : 'unknown';
+        rendererTrace('sendDocumentMessage:terminal-state', JSON.stringify({
+          terminal,
+          finalCheckOk: finalCheck.ok
+        }));
         setNotice(
           terminal === 'failed' || terminal === 'cancelled'
             ? `AI 内容生成${terminal === 'cancelled' ? '已取消' : '失败'}，文档未生成。`
@@ -1208,11 +1212,11 @@ export function ChatPage({
         messageId: completion.assistantMessageId,
         kind,
       });
-      rendererTrace('sendDocumentMessage:generate-result', {
+      rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
         ok: generated.ok,
         code: generated.ok ? undefined : generated.error.code,
         message: generated.ok ? undefined : generated.error.message
-      });
+      }));
       if (!generated.ok) {
         setNotice(describeDocumentError(generated.error));
       } else {
