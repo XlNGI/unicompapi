@@ -28,7 +28,8 @@ import {
 import type { ExtractedThemeColors } from './pptx-theme-extractor';
 import type {
   DocumentOutline,
-  DocumentOutlineBlock
+  DocumentOutlineBlock,
+  DocumentOutlineSection
 } from './document-outline-parser';
 
 export interface GeneratedDocumentFile {
@@ -286,6 +287,13 @@ async function buildPptBuffer(
     h: 0.18,
     fill: { color: theme.accent }
   });
+  titleSlide.addShape('rect', {
+    x: 0,
+    y: 7.2,
+    w: 2.2,
+    h: 0.18,
+    fill: { color: theme.accent }
+  });
   titleSlide.addText(outline.title, {
     x: 0.6,
     y: 2.0,
@@ -311,10 +319,19 @@ async function buildPptBuffer(
     const slide = pptx.addSlide();
     slide.background = { color: theme.background };
     const image = images[sectionIndex];
+    const cardColor = tintColor(theme.accent, 0.93);
+    const cardBorder = tintColor(theme.accent, 0.78);
+    slide.addShape('rect', {
+      x: 0.5,
+      y: 0.42,
+      w: 0.09,
+      h: 0.5,
+      fill: { color: theme.accent }
+    });
     if (image) {
       slide.addImage({
         path: image.absolutePath,
-        x: 9.1,
+        x: 9.05,
         y: 1.45,
         w: 3.6,
         h: 4.2,
@@ -334,7 +351,7 @@ async function buildPptBuffer(
     }
     const textWidth = image ? 8.1 : 12.3;
     slide.addText(section.heading, {
-      x: 0.5,
+      x: 0.72,
       y: 0.35,
       w: image ? 8.2 : 12.5,
       h: 0.8,
@@ -344,6 +361,18 @@ async function buildPptBuffer(
     });
     let y = 1.35;
     const textLines: string[] = [];
+    const cardHeight = image ? 4.3 : contentHeightEstimate(section);
+    if (!image) {
+      slide.addShape('rect', {
+        x: 0.5,
+        y: 1.3,
+        w: 12.5,
+        h: cardHeight,
+        fill: { color: cardColor },
+        line: { color: cardBorder, width: 0.75 },
+        rectRadius: 0.08
+      });
+    }
     for (const block of section.blocks) {
       if (block.type === 'table') {
         if (textLines.length > 0) {
@@ -428,6 +457,33 @@ async function buildPptBuffer(
     }
   });
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+}
+
+function tintColor(hex: string, ratio: number): string {
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const mix = (channel: number): string =>
+    Math.round(channel + (255 - channel) * ratio)
+      .toString(16)
+      .padStart(2, '0');
+  return `${mix(r)}${mix(g)}${mix(b)}`.toUpperCase();
+}
+
+function contentHeightEstimate(section: DocumentOutlineSection): number {
+  const lines = section.blocks.reduce((count, block) => {
+    if (block.type === 'bullets' || block.type === 'numbered') {
+      return count + block.items.length;
+    }
+    if (block.type === 'table') {
+      return count + block.rows.length + 2;
+    }
+    if (block.type === 'chart') {
+      return count + 10;
+    }
+    return count + 1;
+  }, 0);
+  return Math.min(5.8, Math.max(1.1, lines * 0.42 + 0.4));
 }
 
 function pptTextLines(

@@ -194,6 +194,34 @@ describe('office document generator', () => {
     ).toBe(true);
   });
 
+  it('applies themed accents and card styling to slides', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'ppt',
+        title: '主题验收',
+        sections: [
+          {
+            heading: '要点页',
+            level: 1,
+            blocks: [{ type: 'bullets', items: ['要点一', '要点二'] }]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-22T10:00:00.000Z',
+      theme: 'forest'
+    });
+    const buffer = await readFile(result.absolutePath);
+    const zip = new AdmZip(Buffer.from(buffer));
+    const slideXml = zip.readAsText('ppt/slides/slide2.xml');
+    expect(slideXml).toContain('2E7D5B');
+  });
+
   it('sanitizes file names', () => {
     expect(sanitizeFileName('汇报: 2026? 报告*')).toBe('汇报 2026 报告');
     expect(sanitizeFileName('   ')).toBe('文档');
