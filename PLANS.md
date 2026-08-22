@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-23 工程补充：按负责人批准顺序完成对话内 Office 文档生成候选功能并推送 `develop`。对话式改稿（上一版正文作为上下文改写、旧版保留）；PPTX 模板风格迁移（提取 clrScheme 主题色作为自定义主题）；AI 生图配图（默认关、生成前确认、图片模型选择器、按分节生成并 SHA-256 校验登记、临时草稿生成后自动清理）；成品模板 v1（封面色带、分节强调条、内容卡片，主题色确定性派生）；结构化内容契约（开场白剥离、JSON 大纲优先解析 + Markdown 回退、行内 Markdown 剥离）；BM25 关键词检索与 RAG 集成（附件全文切块索引、检索 top-3 作为生成上下文、指令强制基于资料撰写）。全量门禁 805/805 通过，0 失败、0 跳过；Windows 人工验收完成。记录见 `docs/active/对话内Office文档生成-候选功能验收记录.md`。后续候选：模型直接输出 JSON 契约、程序化生图端口彻底去草稿、Excel/Word 图表图文版式、文本溢出策略、PPT 转图片预览、向量 RAG（需批准引入 embedding 模型）。
+
 2026-08-22 工程补充：`feature/chat-office-doc-pr1-domain-generator` 完成“对话内 Office 文档生成”PR1—PR6 并非快进合入 `develop`（`68e33e0`），功能分支保留。对话页新增“文档”模式：输入需求后由已选文本模型撰写 Markdown 正文，主进程解析为大纲并本地生成 Word/Excel/PPT（docx/exceljs/pptxgenjs），经 SHA-256 校验后登记为 `mediaKind: document` 正式作品并挂载文档卡片（打开/作品库/重试）；支持拖拽文件（白名单 txt/md/csv/docx/pdf/xlsx/pptx，魔数/大小/页数/行数/ZIP 炸弹校验，项目内副本登记）、图片附件嵌入 PPT 图片槽、chart 块渲染为原生 PPT 图表、内置主题（商务蓝/墨色/松绿）与版式引擎；受控 IPC/preload，renderer 不接触路径/Hash/凭证。全量门禁 801/802（唯一失败为工作区既有 Vidu 未提交改动的旧断言，已随 `232980e` 独立提交）。项目负责人确认覆盖 AGENTS.md“不得把对话页做成直接生成入口”旧规则。后续候选：对话式改稿、模板风格迁移、AI 生图配图、关键词检索/RAG，待负责人批准。
 
 2026-08-21 工程补充：按 Vidu 官方当前文档核对并更新参数适配。文生视频与参考生视频新增可选 `seed`；参考生视频 q3 系列 `audio` 默认修正为 `true`，`viduq3-turbo/mix/q3` 时长范围修正为 `3–16` 秒；`resolution`、`aspect_ratio` 改为官方枚举并在适配器 HTTP 前校验；官方参考生图 `viduq2/viduq1` 的比例与分辨率同步枚举；变更参数 Schema 升级 revision 2，路由解析器移除 revision 1 硬编码，旧 revision 路由按精确 Schema 校验。`model`、`prompt` 与参考生视频 `images` 继续由产品约束和适配器强制必填。TypeScript（应用与测试）和定向 ESLint 通过，`git diff --check` 通过；当前沙箱阻止 Vitest 的 Vite 配置加载，完整门禁待正常环境复跑。未调用真实服务商、未读取凭证、未产生收费请求；阶段 10 与 macOS 延期边界不变。记录见 `docs/active/2026-08-21-Vidu官方参数核对更新记录.md`。

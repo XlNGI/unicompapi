@@ -2225,21 +2225,32 @@ export function ChatPage({
                   </button>
                 ) : null}
                 {documentMode && aiImagesEnabled && imageCandidateOptions.length > 0 ? (
-                  <select
-                    aria-label="AI 配图模型"
-                    className="uc-chat-page__image-model"
-                    disabled={!canCompose || !session || busy}
-                    onChange={(event) =>
-                      setSelectedImageCandidateId(event.currentTarget.value)
-                    }
-                    value={selectedImageCandidateId ?? ''}
-                  >
-                    {imageCandidateOptions.map((option) => (
-                      <option key={option.candidateId} value={option.candidateId}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <details className="uc-chat-page__image-model">
+                    <summary>
+                      {imageCandidateOptions.find(
+                        (option) => option.candidateId === selectedImageCandidateId
+                      )?.label ?? '配图模型'}
+                    </summary>
+                    <div
+                      className="uc-chat-page__image-model-menu"
+                      role="radiogroup"
+                    >
+                      {imageCandidateOptions.map((option) => (
+                        <button
+                          aria-checked={selectedImageCandidateId === option.candidateId}
+                          disabled={!canCompose || !session || busy}
+                          key={option.candidateId}
+                          onClick={() =>
+                            setSelectedImageCandidateId(option.candidateId)
+                          }
+                          role="radio"
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </details>
                 ) : null}
                 {documentMode ? (
                   <button

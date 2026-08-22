@@ -8612,14 +8612,60 @@ button.uc-project-center__project-card:disabled {
   cursor: default;
 }
 .uc-chat-page__image-model {
-  max-width: 180px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   height: 30px;
-  padding: 0 0.4rem;
   border: 1px solid var(--uc-border, rgba(127, 127, 127, 0.35));
   border-radius: 6px;
+  color: inherit;
+  font-size: 0.8rem;
+}
+.uc-chat-page__image-model summary {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  height: 100%;
+  padding: 0 0.6rem;
+  cursor: pointer;
+  list-style: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.uc-chat-page__image-model summary::-webkit-details-marker {
+  display: none;
+}
+.uc-chat-page__image-model-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  min-width: 220px;
+  max-height: 220px;
+  flex-direction: column;
+  overflow: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--uc-border, rgba(127, 127, 127, 0.35));
+  border-radius: 8px;
+  background: var(--uc-surface, #1b2028);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.uc-chat-page__image-model-menu button {
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
   color: inherit;
   font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+.uc-chat-page__image-model-menu button[aria-checked='true'] {
+  background: color-mix(in srgb, var(--uc-accent, #4f8cff) 14%, transparent);
+  color: var(--uc-accent, #4f8cff);
+  font-weight: 600;
 }
 .uc-chat-page__composer--document {
   outline: 1px dashed color-mix(in srgb, var(--uc-accent, #4f8cff) 55%, transparent);
