@@ -42,6 +42,10 @@ export interface GenerateDocumentFileInput {
   readonly outputDirectory: string;
   readonly now: string;
   readonly theme?: DocumentThemeId;
+  readonly images?: readonly {
+    readonly absolutePath: string;
+    readonly caption?: string;
+  }[];
 }
 
 export async function generateDocumentFile(
@@ -58,7 +62,11 @@ export async function generateDocumentFile(
       ? await buildWordBuffer(input.outline, resolveDocumentTheme(input.theme))
       : input.kind === 'excel'
         ? await buildExcelBuffer(input.outline)
-        : await buildPptBuffer(input.outline, resolveDocumentTheme(input.theme));
+        : await buildPptBuffer(
+            input.outline,
+            resolveDocumentTheme(input.theme),
+            input.images ?? []
+          );
   await writeFile(absolutePath, buffer);
   const fileStat = await stat(absolutePath);
   return { fileName, absolutePath, sizeBytes: fileStat.size };
@@ -241,7 +249,11 @@ function sanitizeSheetName(value: string): string {
 
 async function buildPptBuffer(
   outline: DocumentOutline,
-  theme: DocumentTheme
+  theme: DocumentTheme,
+  images: readonly {
+    readonly absolutePath: string;
+    readonly caption?: string;
+  }[]
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -276,13 +288,36 @@ async function buildPptBuffer(
       color: theme.muted
     });
   }
-  outline.sections.forEach((section) => {
+  outline.sections.forEach((section, sectionIndex) => {
     const slide = pptx.addSlide();
     slide.background = { color: theme.background };
+    const image = images[sectionIndex];
+    if (image) {
+      slide.addImage({
+        path: image.absolutePath,
+        x: 9.1,
+        y: 1.45,
+        w: 3.6,
+        h: 4.2,
+        sizing: { type: 'contain', w: 3.6, h: 4.2 }
+      });
+      if (image.caption) {
+        slide.addText(image.caption, {
+          x: 9.1,
+          y: 5.7,
+          w: 3.6,
+          h: 0.4,
+          fontSize: 11,
+          color: theme.muted,
+          align: 'center'
+        });
+      }
+    }
+    const textWidth = image ? 8.1 : 12.3;
     slide.addText(section.heading, {
       x: 0.5,
       y: 0.35,
-      w: 12.5,
+      w: image ? 8.2 : 12.5,
       h: 0.8,
       fontSize: 26,
       bold: true,
@@ -296,7 +331,7 @@ async function buildPptBuffer(
           slide.addText(pptTextLines(textLines), {
             x: 0.6,
             y,
-            w: 12.3,
+            w: textWidth,
             h: Math.max(0.6, textLines.length * 0.45),
             fontSize: 16,
             color: theme.text
@@ -310,7 +345,7 @@ async function buildPptBuffer(
         slide.addTable(rows, {
           x: 0.6,
           y,
-          w: 12.3,
+          w: textWidth,
           fontSize: 13,
           color: theme.text,
           border: { pt: 0.5, color: 'CCCCCC' }
@@ -320,10 +355,10 @@ async function buildPptBuffer(
       }
       if (block.type === 'chart') {
         if (textLines.length > 0) {
-          slide.addText(pptTextLines(textLines), {
-            x: 0.6,
-            y,
-            w: 12.3,
+        slide.addText(pptTextLines(textLines), {
+          x: 0.6,
+          y,
+          w: textWidth,
             h: Math.max(0.6, textLines.length * 0.45),
             fontSize: 16,
             color: theme.text

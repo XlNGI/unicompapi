@@ -317,6 +317,10 @@ function documentKindLabel(kind: 'word' | 'excel' | 'ppt'): string {
   return kind === 'word' ? 'Word 文档' : kind === 'excel' ? 'Excel 表格' : 'PPT 演示';
 }
 
+function isImageFileName(fileName: string): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(fileName);
+}
+
 function describeDocumentError(error: {
   readonly code: string;
   readonly message: string;
@@ -1245,6 +1249,12 @@ export function ChatPage({
         messageId: completion.assistantMessageId,
         kind,
         theme: documentTheme,
+        images: attachments
+          .filter((attachment) => isImageFileName(attachment.fileName))
+          .map((attachment) => ({
+            fileId: attachment.fileId,
+            caption: attachment.fileName
+          }))
       });
       rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
         ok: generated.ok,

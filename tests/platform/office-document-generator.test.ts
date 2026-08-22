@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  writeFile as writeFixture
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
@@ -148,6 +155,42 @@ describe('office document generator', () => {
       zip.getEntries().some((entry) =>
         entry.entryName.startsWith('ppt/charts/chart')
       )
+    ).toBe(true);
+  });
+
+  it('embeds local images into slides', async () => {
+    const outputDirectory = await createOutputDirectory();
+    await mkdir(outputDirectory, { recursive: true });
+    const imagePath = path.join(outputDirectory, 'pixel.png');
+    const pixelPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    await writeFixture(imagePath, pixelPng);
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'ppt',
+        title: '图文汇报',
+        sections: [
+          {
+            heading: '现场情况',
+            level: 1,
+            blocks: [{ type: 'bullets', items: ['图片说明'] }]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-22T10:00:00.000Z',
+      images: [{ absolutePath: imagePath, caption: '现场照片' }]
+    });
+    const buffer = await readFile(result.absolutePath);
+    const zip = new AdmZip(Buffer.from(buffer));
+    expect(
+      zip.getEntries().some((entry) => entry.entryName.startsWith('ppt/media/'))
     ).toBe(true);
   });
 

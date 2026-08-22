@@ -20,6 +20,7 @@ import {
   type Work,
   type WorkId
 } from '../../domain';
+import { resolveFileReferencePathSafely } from '../files';
 import type { DocumentThemeId } from './document-theme';
 import { FileVerificationPersistenceService, NodeFileStatusProbe } from '../files';
 import {
@@ -58,6 +59,10 @@ export interface DocumentGenerationPlanInput {
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
   readonly theme?: DocumentThemeId;
+  readonly images?: readonly {
+    readonly fileId: string;
+    readonly caption?: string;
+  }[];
 }
 
 export interface DocumentGenerationResult {
@@ -133,7 +138,10 @@ export class DocumentGenerationRunner {
         outline: input.outline,
         outputDirectory,
         now: now(),
-        ...(input.theme !== undefined ? { theme: input.theme } : {})
+        ...(input.theme !== undefined ? { theme: input.theme } : {}),
+        ...(input.images !== undefined && input.images.length > 0
+          ? { images: await this.resolveImages(context, input.images) }
+          : {})
       });
       execution = await this.move(context, execution, 'verifying_file');
       const file = await this.registerVerifiedOutput(
@@ -267,5 +275,37 @@ export class DocumentGenerationRunner {
       );
     }
     return file;
+  }
+
+  private async resolveImages(
+    context: RunnerContext,
+    images: readonly {
+      readonly fileId: string;
+      readonly caption?: string;
+    }[]
+  ): Promise<
+    readonly { readonly absolutePath: string; readonly caption?: string }[]
+  > {
+    const resolved: {
+      readonly absolutePath: string;
+      readonly caption?: string;
+    }[] = [];
+    for (const image of images) {
+      const file = await context.files.get(toFileReferenceId(image.fileId));
+      if (!file) {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'Image attachment does not exist'
+        );
+      }
+      resolved.push({
+        absolutePath: await resolveFileReferencePathSafely(
+          this.options.rootDirectory,
+          file
+        ),
+        ...(image.caption !== undefined ? { caption: image.caption } : {})
+      });
+    }
+    return resolved;
   }
 }

@@ -167,7 +167,10 @@ export class DocumentGenerationController {
         draftRevision: 1,
         sourceDraftId: `message-${input.messageId}`,
         outline,
-        ...(input.theme !== undefined ? { theme: input.theme } : {})
+        ...(input.theme !== undefined ? { theme: input.theme } : {}),
+        ...(input.images !== undefined && input.images.length > 0
+          ? { images: input.images }
+          : {})
       });
       const fileName =
         result.file.locator.kind === 'project'

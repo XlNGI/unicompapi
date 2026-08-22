@@ -58,6 +58,10 @@ export interface DocumentGenerationFromMessageRequest {
   readonly messageId: string;
   readonly kind: 'word' | 'excel' | 'ppt';
   readonly theme?: 'blueprint' | 'ink' | 'forest';
+  readonly images?: readonly {
+    readonly fileId: string;
+    readonly caption?: string;
+  }[];
 }
 
 export interface OpenDocumentRequest {
@@ -117,6 +121,9 @@ export const documentGenerationRequestParsers = {
       kind: requireKind(value.kind),
       ...(value.theme !== undefined
         ? { theme: requireTheme(value.theme) }
+        : {}),
+      ...(value.images !== undefined
+        ? { images: parseImages(value.images) }
         : {})
     };
   },
@@ -149,6 +156,25 @@ function requireTheme(
     throw new TypeError('theme must be blueprint, ink or forest');
   }
   return value;
+}
+
+function parseImages(
+  value: unknown
+): readonly { readonly fileId: string; readonly caption?: string }[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError('images must be an array');
+  }
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new TypeError(`images[${index}] must be an object`);
+    }
+    return {
+      fileId: requireString(item.fileId, `images[${index}].fileId`),
+      ...(item.caption !== undefined
+        ? { caption: requireString(item.caption, `images[${index}].caption`) }
+        : {})
+    };
+  });
 }
 
 export interface DocumentGenerationApi {
