@@ -148,7 +148,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
         const colors = await extractPptxThemeColors(absolutePath);
         if (!colors) {
           throw new AttachmentImportError(
-            'unsupported_format',
+            'storage_error',
             'PPTX 主题不可用'
           );
         }
