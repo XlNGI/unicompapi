@@ -1247,6 +1247,8 @@ export function ChatPage({
             )
             .join('\n\n');
           modelContent = `${combined}\n\n以下为检索到的项目资料：\n${ragText}`;
+        } else if (ragResult.ok) {
+          setNotice('未检索到相关项目资料，本次按原需求生成。');
         }
       } catch {
         // 检索失败不阻断生成。

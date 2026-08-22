@@ -1,7 +1,7 @@
 export type DocumentKindOption = 'auto' | 'word' | 'excel' | 'ppt';
 
 export const DOCUMENT_GENERATION_INSTRUCTION =
-  '请直接输出文档正文（Markdown 格式），不要寒暄、不要解释、不要任何前后缀，直接从文档标题开始。';
+  '请直接输出文档正文（Markdown 格式），不要寒暄、不要解释、不要任何前后缀，直接从文档标题开始。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
 
 export function inferDocumentKind(requirements: string): 'word' | 'excel' | 'ppt' {
   const text = requirements.toLowerCase();
