@@ -4,6 +4,7 @@ export * from './files';
 export * from './ipc';
 export * from './providers';
 export * from './documents';
+export * from './search';
 export * from './images';
 export * from './videos';
 export * from './settings';
