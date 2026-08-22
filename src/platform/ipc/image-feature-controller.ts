@@ -72,7 +72,7 @@ export class ImageFeatureController {
   }
 
   listQuickCandidates(
-    request: unknown
+    request?: unknown
   ): Promise<ImageFeatureIpcResult<readonly ImageFeatureCandidateDto[]>> {
     return this.execute(async () => {
       if (request !== undefined && request !== null) {
