@@ -22,6 +22,8 @@ import {
   DocumentOutlineError,
   parseDocumentOutline,
   parseMarkdownToOutline,
+  stripPreamble,
+  unwrapJsonFence,
   type DocumentGenerationRunner,
   type DocumentOutline
 } from '../documents';
@@ -151,9 +153,16 @@ export class DocumentGenerationController {
           'Assistant message disappeared during document generation'
         );
       }
-      const outline = parseMarkdownToOutline(message.content, input.kind);
+      const cleaned = stripPreamble(message.content);
+      let outline: DocumentOutline;
+      try {
+        outline = parseDocumentOutline(unwrapJsonFence(cleaned));
+      } catch (error) {
+        if (!(error instanceof DocumentOutlineError)) throw error;
+        outline = parseMarkdownToOutline(cleaned, input.kind);
+      }
       const contentFingerprint = createHash('sha256')
-        .update(message.content)
+        .update(cleaned)
         .digest('hex');
       const result = await runner.run({
         kind: input.kind,

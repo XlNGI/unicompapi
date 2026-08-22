@@ -3,7 +3,9 @@ import {
   DocumentOutlineError,
   isDocumentOutline,
   parseDocumentOutline,
-  parseMarkdownToOutline
+  parseMarkdownToOutline,
+  stripPreamble,
+  unwrapJsonFence
 } from '../../src/platform';
 
 function validOutline() {
@@ -191,5 +193,23 @@ describe('markdown to outline parser', () => {
     expect(bullet.items[0]).toBe('客户确认、编号 与 详情');
     expect(bullet.items[0]).not.toContain('*');
     expect(bullet.items[0]).not.toContain('`');
+  });
+});
+
+describe('content contract helpers', () => {
+  it('strips chatty preamble before parsing', () => {
+    expect(
+      stripPreamble(
+        '好的，我理解您希望得到一个版本。\n\n# 项目周报\n\n- 完成评审'
+      )
+    ).toBe('# 项目周报\n\n- 完成评审');
+    expect(stripPreamble('直接开始的正文内容')).toBe('直接开始的正文内容');
+  });
+
+  it('unwraps fenced JSON and accepts it as a structured contract', () => {
+    const content = '```json\n{"kind":"word","title":"周报","sections":[]}\n```';
+    const outline = parseDocumentOutline(unwrapJsonFence(content));
+    expect(outline.kind).toBe('word');
+    expect(outline.title).toBe('周报');
   });
 });

@@ -444,6 +444,29 @@ function parseBoundedText(
   return stripInlineMarkdown(value);
 }
 
+export function unwrapJsonFence(content: string): string {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(content);
+  return (fenced ? fenced[1] : content).trim();
+}
+
+export function stripPreamble(content: string): string {
+  const lines = content.split(/\r?\n/).map((line) => line.trim());
+  const chatty = /^(好的|好的，|明白|以下|以下为|根据|为您|这是|我将|首先)/;
+  let start = 0;
+  while (start < lines.length) {
+    const line = lines[start];
+    if (!line) {
+      start += 1;
+      continue;
+    }
+    if (line.startsWith('#') || line.startsWith('{') || !chatty.test(line)) {
+      break;
+    }
+    start += 1;
+  }
+  return lines.slice(start).join('\n').trim();
+}
+
 export function stripInlineMarkdown(value: string): string {
   return value
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
