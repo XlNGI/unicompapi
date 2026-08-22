@@ -379,6 +379,11 @@ export function ChatPage({
     'blueprint' | 'ink' | 'forest'
   >('blueprint');
   const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
+  const [imageCandidateOptions, setImageCandidateOptions] = useState<
+    readonly { readonly candidateId: string; readonly label: string }[]
+  >([]);
+  const [selectedImageCandidateId, setSelectedImageCandidateId] =
+    useState<string>();
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
   const [templateFileId, setTemplateFileId] = useState<string>();
   const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
@@ -553,6 +558,31 @@ export function ChatPage({
   useEffect(() => {
     onCandidateChange?.(selectedCandidateId);
   }, [onCandidateChange, selectedCandidateId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadImageCandidates() {
+      if (!documentMode || !aiImagesEnabled || !imageFeatures) return;
+      const result = await imageFeatures.listQuickCandidates();
+      if (!active || !result.ok) return;
+      const options = result.value
+        .filter((item) => item.available && canAutoGenerateImageCandidate(item))
+        .map((item) => ({
+          candidateId: item.candidateId,
+          label: `${item.modelName}（${item.providerName}）`
+        }));
+      setImageCandidateOptions(options);
+      setSelectedImageCandidateId((current) =>
+        current && options.some((option) => option.candidateId === current)
+          ? current
+          : options[0]?.candidateId
+      );
+    }
+    void loadImageCandidates();
+    return () => {
+      active = false;
+    };
+  }, [documentMode, aiImagesEnabled]);
 
   useEffect(() => {
     setRenameTitle(selected?.title ?? '');
@@ -1402,6 +1432,12 @@ export function ChatPage({
     }));
     const candidate = candidates.ok
       ? candidates.value.find(
+          (item) =>
+            item.candidateId === selectedImageCandidateId &&
+            item.available &&
+            canAutoGenerateImageCandidate(item)
+        ) ??
+        candidates.value.find(
           (item) => item.available && canAutoGenerateImageCandidate(item)
         )
       : undefined;
@@ -2164,6 +2200,23 @@ export function ChatPage({
                   >
                     AI 配图
                   </button>
+                ) : null}
+                {documentMode && aiImagesEnabled && imageCandidateOptions.length > 0 ? (
+                  <select
+                    aria-label="AI 配图模型"
+                    className="uc-chat-page__image-model"
+                    disabled={!canCompose || !session || busy}
+                    onChange={(event) =>
+                      setSelectedImageCandidateId(event.currentTarget.value)
+                    }
+                    value={selectedImageCandidateId ?? ''}
+                  >
+                    {imageCandidateOptions.map((option) => (
+                      <option key={option.candidateId} value={option.candidateId}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 ) : null}
                 <ModelSelect
                   appearance="subtle"

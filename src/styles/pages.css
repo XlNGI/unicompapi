@@ -8611,6 +8611,16 @@ button.uc-project-center__project-card:disabled {
   opacity: 0.5;
   cursor: default;
 }
+.uc-chat-page__image-model {
+  max-width: 180px;
+  height: 30px;
+  padding: 0 0.4rem;
+  border: 1px solid var(--uc-border, rgba(127, 127, 127, 0.35));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.8rem;
+}
 .uc-chat-page__composer--document {
   outline: 1px dashed color-mix(in srgb, var(--uc-accent, #4f8cff) 55%, transparent);
   outline-offset: 2px;
