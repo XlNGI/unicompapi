@@ -76,6 +76,7 @@ describe('Vidu official text2video adapter', () => {
 
   it('applies official q3 defaults and rejects invalid enum values before HTTP', async () => {
     const fixture = await createFixture();
+    fixture.transport.responses.push(jsonResponse(200, { task_id: 'task-t2v-remote' }));
 
     await expect(
       fixture.adapter.submit(submitRequest(fixture, {}))
