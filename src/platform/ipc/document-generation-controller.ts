@@ -168,31 +168,46 @@ export class DocumentGenerationController {
         sourceDraftId: `message-${input.messageId}`,
         outline
       });
-      const latestConversation = await this.dependencies.loadConversation(
-        session,
-        toConversationId(input.conversationId)
-      );
-      if (!latestConversation) {
-        throw new DocumentGenerationError(
-          'storage_error',
-          'Conversation disappeared during document generation'
-        );
-      }
       const fileName =
         result.file.locator.kind === 'project'
           ? result.file.locator.relativePath.split('/').pop() ?? result.work.name
           : result.work.name;
-      await streaming.attachDocumentResult({
-        conversationId: toConversationId(input.conversationId),
-        messageId: toMessageId(input.messageId),
-        expectedRevision: latestConversation.revision,
-        documentResult: {
-          workId: result.work.id,
-          fileName,
-          kind: input.kind,
-          sizeBytes: result.file.sizeBytes ?? 0
+      let attached = false;
+      for (let attempt = 0; attempt < 3 && !attached; attempt += 1) {
+        const current = await this.dependencies.loadConversation(
+          session,
+          toConversationId(input.conversationId)
+        );
+        if (!current) {
+          throw new DocumentGenerationError(
+            'storage_error',
+            'Conversation disappeared during document generation'
+          );
         }
-      });
+        try {
+          await streaming.attachDocumentResult({
+            conversationId: toConversationId(input.conversationId),
+            messageId: toMessageId(input.messageId),
+            expectedRevision: current.revision,
+            documentResult: {
+              workId: result.work.id,
+              fileName,
+              kind: input.kind,
+              sizeBytes: result.file.sizeBytes ?? 0
+            }
+          });
+          attached = true;
+        } catch (error) {
+          if (
+            !(error instanceof ConversationApplicationError) ||
+            error.code !== 'revision_conflict' ||
+            attempt === 2
+          ) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+      }
       return {
         ok: true,
         value: {

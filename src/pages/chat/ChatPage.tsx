@@ -1157,6 +1157,15 @@ export function ChatPage({
           code: started.error.code,
           message: started.error.message
         }));
+        if (started.error.code === 'revision_conflict' && selected) {
+          const refreshed = await chat.getConversation(selected.conversationId);
+          if (refreshed.ok) {
+            replaceConversation(refreshed.value);
+            setSelectedId(refreshed.value.conversationId);
+          }
+          setNotice('会话已更新并刷新，请再次发送。');
+          return;
+        }
         setNotice(describeDocumentError(started.error));
         if (selected) {
           const refreshedFailed = await chat.getConversation(selected.conversationId);
