@@ -17,6 +17,10 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /theme: documentTheme/);
   assert.match(page, /composeDocumentRevisionInput/);
   assert.match(page, /previousDocument/);
+  assert.match(page, /toggleTemplate/);
+  assert.match(page, /extractTheme/);
+  assert.match(page, /customTheme/);
+  assert.match(page, /作为样式模板/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);

@@ -13,8 +13,11 @@ import {
   DocumentGenerationRunner,
   FileExtractionError,
   FileExtractionService,
+  JsonFileReferenceRepository,
   JsonProjectConversationRepository,
   NodeProjectStorage,
+  extractPptxThemeColors,
+  resolveFileReferencePathSafely,
   type StorageProjectSession,
   type StorageProjectSessionRegistry
 } from '../../src/platform';
@@ -121,6 +124,35 @@ export function registerDocumentGenerationIpcHandlers(options: {
           ok: true,
           value: await service.extract(toFileReferenceId(input.fileId))
         };
+      })
+  );
+  ipcMain.handle(
+    documentAttachmentIpcChannels.extractTheme,
+    (_event, request: unknown) =>
+      withAttachmentErrors(async () => {
+        const input = documentAttachmentRequestParsers.extractTheme(request);
+        const session = requireSession(options.sessionRegistry);
+        const storage = new NodeProjectStorage(session.rootDirectory);
+        const files = new JsonFileReferenceRepository(storage, session.projectId);
+        const file = await files.get(toFileReferenceId(input.fileId));
+        if (!file) {
+          throw new AttachmentImportError(
+            'storage_error',
+            'Attachment file does not exist'
+          );
+        }
+        const absolutePath = await resolveFileReferencePathSafely(
+          session.rootDirectory,
+          file
+        );
+        const colors = await extractPptxThemeColors(absolutePath);
+        if (!colors) {
+          throw new AttachmentImportError(
+            'unsupported_format',
+            'PPTX 主题不可用'
+          );
+        }
+        return { ok: true, value: colors };
       })
   );
 

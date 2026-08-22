@@ -22,6 +22,7 @@ import {
 } from '../../domain';
 import { resolveFileReferencePathSafely } from '../files';
 import type { DocumentThemeId } from './document-theme';
+import type { ExtractedThemeColors } from './pptx-theme-extractor';
 import { FileVerificationPersistenceService, NodeFileStatusProbe } from '../files';
 import {
   JsonExecutionRepository,
@@ -63,6 +64,7 @@ export interface DocumentGenerationPlanInput {
     readonly fileId: string;
     readonly caption?: string;
   }[];
+  readonly customTheme?: ExtractedThemeColors;
 }
 
 export interface DocumentGenerationResult {
@@ -141,6 +143,9 @@ export class DocumentGenerationRunner {
         ...(input.theme !== undefined ? { theme: input.theme } : {}),
         ...(input.images !== undefined && input.images.length > 0
           ? { images: await this.resolveImages(context, input.images) }
+          : {}),
+        ...(input.customTheme !== undefined
+          ? { customTheme: input.customTheme }
           : {})
       });
       execution = await this.move(context, execution, 'verifying_file');

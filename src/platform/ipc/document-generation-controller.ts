@@ -165,6 +165,9 @@ export class DocumentGenerationController {
         ...(input.theme !== undefined ? { theme: input.theme } : {}),
         ...(input.images !== undefined && input.images.length > 0
           ? { images: input.images }
+          : {}),
+        ...(input.customTheme !== undefined
+          ? { customTheme: input.customTheme }
           : {})
       });
       const fileName =

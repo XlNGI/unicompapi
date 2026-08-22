@@ -39,6 +39,7 @@ import type {
 } from '../../shared/chat-context-ipc';
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
+import type { DocumentThemeColorsDto } from '../../shared/document-attachment-ipc';
 import {
   composeDocumentRevisionInput,
   inferDocumentKind,
@@ -361,6 +362,8 @@ export function ChatPage({
     'blueprint' | 'ink' | 'forest'
   >('blueprint');
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
+  const [templateFileId, setTemplateFileId] = useState<string>();
+  const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
   const [dragging, setDragging] = useState(false);
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
@@ -1104,6 +1107,33 @@ export function ChatPage({
     setAttachments((current) =>
       current.filter((attachment) => attachment.fileId !== fileId)
     );
+    if (templateFileId === fileId) {
+      setTemplateFileId(undefined);
+      setTemplateColors(undefined);
+    }
+  }
+
+  async function toggleTemplate(attachment: AttachmentDraft) {
+    if (!documentAttachments) return;
+    if (templateFileId === attachment.fileId) {
+      setTemplateFileId(undefined);
+      setTemplateColors(undefined);
+      return;
+    }
+    try {
+      const result = await documentAttachments.extractTheme({
+        fileId: attachment.fileId
+      });
+      if (!result.ok) {
+        setNotice('该文件无法作为样式模板，请上传含主题的 PPTX。');
+        return;
+      }
+      setTemplateFileId(attachment.fileId);
+      setTemplateColors(result.value);
+      setNotice(`已应用模板「${attachment.fileName}」的主题色。`);
+    } catch {
+      setNotice('读取模板主题失败，请重试。');
+    }
   }
 
   async function sendDocumentMessage() {
@@ -1214,6 +1244,8 @@ export function ChatPage({
       setResponseExecution(started.value.execution);
       updateInput('');
       setAttachments([]);
+      setTemplateFileId(undefined);
+      setTemplateColors(undefined);
       const targetId = started.value.conversation.conversationId;
       const completion = await awaitDocumentCompletion(
         chat,
@@ -1269,7 +1301,8 @@ export function ChatPage({
           .map((attachment) => ({
             fileId: attachment.fileId,
             caption: attachment.fileName
-          }))
+          })),
+        ...(templateColors ? { customTheme: templateColors } : {})
       });
       rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
         ok: generated.ok,
@@ -1917,6 +1950,22 @@ export function ChatPage({
                   <li key={attachment.fileId}>
                     <LuPaperclip aria-hidden="true" />
                     <span title={attachment.fileName}>{attachment.fileName}</span>
+                    {/\.pptx$/i.test(attachment.fileName) ? (
+                      <button
+                        aria-pressed={templateFileId === attachment.fileId}
+                        className={templateFileId === attachment.fileId ? 'is-template' : ''}
+                        disabled={busy}
+                        onClick={() => void toggleTemplate(attachment)}
+                        title={
+                          templateFileId === attachment.fileId
+                            ? '取消作为样式模板'
+                            : '作为样式模板'
+                        }
+                        type="button"
+                      >
+                        {templateFileId === attachment.fileId ? '模板' : '模板'}
+                      </button>
+                    ) : null}
                     <button
                       aria-label={`移除附件 ${attachment.fileName}`}
                       disabled={busy}

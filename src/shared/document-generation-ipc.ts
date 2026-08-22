@@ -62,6 +62,12 @@ export interface DocumentGenerationFromMessageRequest {
     readonly fileId: string;
     readonly caption?: string;
   }[];
+  readonly customTheme?: {
+    readonly accent: string;
+    readonly background: string;
+    readonly text: string;
+    readonly muted: string;
+  };
 }
 
 export interface OpenDocumentRequest {
@@ -124,6 +130,9 @@ export const documentGenerationRequestParsers = {
         : {}),
       ...(value.images !== undefined
         ? { images: parseImages(value.images) }
+        : {}),
+      ...(value.customTheme !== undefined
+        ? { customTheme: parseThemeColors(value.customTheme) }
         : {})
     };
   },
@@ -175,6 +184,32 @@ function parseImages(
         : {})
     };
   });
+}
+
+function parseThemeColors(
+  value: unknown
+): {
+  readonly accent: string;
+  readonly background: string;
+  readonly text: string;
+  readonly muted: string;
+} {
+  if (!isRecord(value)) {
+    throw new TypeError('customTheme must be an object');
+  }
+  const requireHex = (name: string): string => {
+    const color = requireString(value[name], `customTheme.${name}`);
+    if (!/^[0-9A-Fa-f]{6}$/.test(color)) {
+      throw new TypeError(`customTheme.${name} must be a hex color`);
+    }
+    return color.toUpperCase();
+  };
+  return {
+    accent: requireHex('accent'),
+    background: requireHex('background'),
+    text: requireHex('text'),
+    muted: requireHex('muted')
+  };
 }
 
 export interface DocumentGenerationApi {

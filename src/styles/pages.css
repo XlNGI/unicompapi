@@ -8676,6 +8676,10 @@ button.uc-project-center__project-card:disabled {
   color: inherit;
   cursor: pointer;
 }
+.uc-chat-page__attachments button.is-template {
+  color: var(--uc-accent, #4f8cff);
+  font-weight: 600;
+}
 .uc-chat-page__document-card {
   display: flex;
   align-items: center;

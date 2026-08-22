@@ -1,6 +1,7 @@
 export const documentAttachmentIpcChannels = {
   importAttachment: 'document-attachment:import',
-  extractFile: 'document-attachment:extract'
+  extractFile: 'document-attachment:extract',
+  extractTheme: 'document-attachment:extract-theme'
 } as const;
 
 export type DocumentAttachmentIpcErrorCode =
@@ -70,6 +71,13 @@ export interface FileExtractionRequest {
   readonly fileId: string;
 }
 
+export interface DocumentThemeColorsDto {
+  readonly accent: string;
+  readonly background: string;
+  readonly text: string;
+  readonly muted: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -93,6 +101,12 @@ export const documentAttachmentRequestParsers = {
       throw new TypeError('Invalid file extraction request');
     }
     return { fileId: requireString(value.fileId, 'fileId') };
+  },
+  extractTheme(value: unknown): FileExtractionRequest {
+    if (!isRecord(value)) {
+      throw new TypeError('Invalid theme extraction request');
+    }
+    return { fileId: requireString(value.fileId, 'fileId') };
   }
 };
 
@@ -103,4 +117,7 @@ export interface DocumentAttachmentApi {
   extractFile(
     request: FileExtractionRequest
   ): Promise<DocumentAttachmentIpcResult<DocumentExtractionDto>>;
+  extractTheme(
+    request: FileExtractionRequest
+  ): Promise<DocumentAttachmentIpcResult<DocumentThemeColorsDto>>;
 }

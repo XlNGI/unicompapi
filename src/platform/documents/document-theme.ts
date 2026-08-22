@@ -2,7 +2,7 @@ export const documentThemeIds = ['blueprint', 'ink', 'forest'] as const;
 export type DocumentThemeId = (typeof documentThemeIds)[number];
 
 export interface DocumentTheme {
-  readonly id: DocumentThemeId;
+  readonly id: DocumentThemeId | 'custom';
   readonly name: string;
   readonly accent: string;
   readonly background: string;

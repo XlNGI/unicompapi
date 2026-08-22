@@ -25,6 +25,7 @@ import {
   type DocumentTheme,
   type DocumentThemeId
 } from './document-theme';
+import type { ExtractedThemeColors } from './pptx-theme-extractor';
 import type {
   DocumentOutline,
   DocumentOutlineBlock
@@ -42,6 +43,7 @@ export interface GenerateDocumentFileInput {
   readonly outputDirectory: string;
   readonly now: string;
   readonly theme?: DocumentThemeId;
+  readonly customTheme?: ExtractedThemeColors;
   readonly images?: readonly {
     readonly absolutePath: string;
     readonly caption?: string;
@@ -59,17 +61,34 @@ export async function generateDocumentFile(
   const absolutePath = path.join(input.outputDirectory, fileName);
   const buffer =
     input.kind === 'word'
-      ? await buildWordBuffer(input.outline, resolveDocumentTheme(input.theme))
+      ? await buildWordBuffer(
+          input.outline,
+          resolveGenerationTheme(input.theme, input.customTheme)
+        )
       : input.kind === 'excel'
         ? await buildExcelBuffer(input.outline)
         : await buildPptBuffer(
             input.outline,
-            resolveDocumentTheme(input.theme),
+            resolveGenerationTheme(input.theme, input.customTheme),
             input.images ?? []
           );
   await writeFile(absolutePath, buffer);
   const fileStat = await stat(absolutePath);
   return { fileName, absolutePath, sizeBytes: fileStat.size };
+}
+
+function resolveGenerationTheme(
+  themeId: DocumentThemeId | undefined,
+  customTheme: ExtractedThemeColors | undefined
+): DocumentTheme {
+  if (customTheme) {
+    return {
+      id: 'custom',
+      name: '自定义模板',
+      ...customTheme
+    };
+  }
+  return resolveDocumentTheme(themeId);
 }
 
 export function sanitizeFileName(title: string): string {

@@ -5,3 +5,4 @@ export * from './file-extraction-service';
 export * from './attachment-import-service';
 export * from './document-theme';
 export * from './document-layout';
+export * from './pptx-theme-extractor';
