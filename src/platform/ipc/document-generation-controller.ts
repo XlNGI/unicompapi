@@ -134,12 +134,6 @@ export class DocumentGenerationController {
   ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>> {
     return this.execute(async () => {
       const input = documentGenerationRequestParsers.generateFromMessage(request);
-      if (input.aiImages === true) {
-        return failure(
-          'ai_images_unavailable',
-          'AI 配图执行器尚未接入：请先关闭“AI 配图”开关，或等待配图能力上线。'
-        ) as DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>;
-      }
       const session = this.requireSession();
       const streaming = this.dependencies.getStreaming(session);
       const runner = this.dependencies.getRunner(session);
