@@ -128,13 +128,13 @@ export function parseMarkdownToOutline(
       flushTable();
       const level = Math.min(heading[1].length, 3) as 1 | 2 | 3;
       if (heading[1].length === 1 && headingCount === 0) {
-        title = heading[2].trim();
+        title = stripInlineMarkdown(heading[2].trim());
         headingCount += 1;
         continue;
       }
       headingCount += 1;
       currentSection = {
-        heading: heading[2].trim(),
+        heading: stripInlineMarkdown(heading[2].trim()),
         level,
         blocks: []
       };
@@ -151,10 +151,11 @@ export function parseMarkdownToOutline(
       if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) {
         continue;
       }
+      const cleanedCells = cells.map((cell) => stripInlineMarkdown(cell));
       if (pendingTable) {
-        pendingTable.rows.push(cells);
+        pendingTable.rows.push(cleanedCells);
       } else {
-        pendingTable = { header: cells, rows: [] };
+        pendingTable = { header: cleanedCells, rows: [] };
       }
       continue;
     }
@@ -164,13 +165,13 @@ export function parseMarkdownToOutline(
     const numbered = /^\s*\d+[.、）)]\s+(.+)$/.exec(rawLine);
     const quote = /^\s*>\s?(.+)$/.exec(rawLine);
     if (bullet) {
-      appendTextBlock('bullets', bullet[1].trim());
+      appendTextBlock('bullets', stripInlineMarkdown(bullet[1].trim()));
     } else if (numbered) {
-      appendTextBlock('numbered', numbered[1].trim());
+      appendTextBlock('numbered', stripInlineMarkdown(numbered[1].trim()));
     } else if (quote) {
-      appendTextBlock('quote', quote[1].trim());
+      appendTextBlock('quote', stripInlineMarkdown(quote[1].trim()));
     } else {
-      appendTextBlock('paragraph', trimmed);
+      appendTextBlock('paragraph', stripInlineMarkdown(trimmed));
     }
   }
   flushTable();
@@ -181,13 +182,13 @@ export function parseMarkdownToOutline(
       sections.push({
         heading: '内容',
         level: 1,
-        blocks: [{ type: 'paragraph', text: body.join('\n') }]
+        blocks: [{ type: 'paragraph', text: stripInlineMarkdown(body.join('\n')) }]
       });
     }
   }
   return {
     kind,
-    title: title || lines.map((line) => line.trim()).find(Boolean)?.slice(0, 40) || '文档',
+    title: title || stripInlineMarkdown(lines.map((line) => line.trim()).find(Boolean) ?? '')?.slice(0, 40) || '文档',
     sections
   };
 
