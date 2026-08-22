@@ -238,6 +238,8 @@ const imageFeatures: ImageFeatureApi = {
       draftId,
       draftUpdatedAt
     }),
+  listQuickCandidates: () =>
+    ipcRenderer.invoke(imageFeatureIpcChannels.listQuickCandidates),
   prepareSubmission: (draftId, draftUpdatedAt, candidateId) =>
     ipcRenderer.invoke(imageFeatureIpcChannels.prepareSubmission, {
       draftId,

@@ -456,6 +456,39 @@ export function createImageFeatureControllerRuntime(
     };
   };
 
+  runtime.listQuickCandidates = async () => {
+    await options.mutations.wait();
+    const createdAt = toIsoTimestamp(now());
+    const draftId = toDraftId(`draft-quick-candidates-${randomUUID()}`);
+    const empty = createEmptyImageWorkspaceDraft({
+      id: draftId,
+      projectId: options.session.projectId,
+      mode: 'quick_image',
+      createdAt
+    });
+    const saved = createImageWorkspaceDraft({
+      ...empty,
+      state: 'saved',
+      prompt: {
+        originalInput: '快速生图候选查询',
+        systemSupplements: [],
+        finalPrompt: '快速生图候选查询'
+      },
+      featureSelection: {
+        productFeature: 'text_to_image',
+        parameterValues: {}
+      },
+      updatedAt: createdAt
+    });
+    await drafts.save(saved);
+    const subject: FeatureCandidateSubjectV1 = {
+      kind: 'draft',
+      draftId: saved.id,
+      draftRevision: imageDraftRevision(saved.updatedAt)
+    };
+    return candidates.listFeatureCandidates(subject);
+  };
+
   return runtime;
 }
 

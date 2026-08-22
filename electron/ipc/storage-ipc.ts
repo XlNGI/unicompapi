@@ -545,6 +545,10 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => imageFeatures.listCandidates(request)
   );
   ipcMain.handle(
+    imageFeatureIpcChannels.listQuickCandidates,
+    (_event) => imageFeatures.listQuickCandidates()
+  );
+  ipcMain.handle(
     imageFeatureIpcChannels.prepareSubmission,
     (_event, request: unknown) => imageFeatures.prepareSubmission(request)
   );

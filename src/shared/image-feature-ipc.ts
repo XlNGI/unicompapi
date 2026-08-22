@@ -1,5 +1,6 @@
 export const imageFeatureIpcChannels = {
   listCandidates: 'image-feature:list-candidates',
+  listQuickCandidates: 'image-feature:list-quick-candidates',
   prepareSubmission: 'image-feature:prepare-submission',
   submitDraft: 'image-feature:submit-draft',
   generateQuickImage: 'image-feature:generate-quick-image',
@@ -158,6 +159,9 @@ export interface ImageFeatureApi {
     draftId: string,
     draftUpdatedAt: string
   ): Promise<ImageFeatureIpcResult<readonly ImageFeatureCandidateDto[]>>;
+  listQuickCandidates(): Promise<
+    ImageFeatureIpcResult<readonly ImageFeatureCandidateDto[]>
+  >;
   prepareSubmission(
     draftId: string,
     draftUpdatedAt: string,

@@ -351,7 +351,6 @@ export function ChatPage({
   const documentGeneration = window.unicomp?.documentGeneration;
   const documentAttachments = window.unicomp?.documentAttachments;
   const imageFeatures = window.unicomp?.imageFeatures;
-  const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
@@ -1367,11 +1366,10 @@ export function ChatPage({
     rendererTrace('generateAiSlideImages:start', JSON.stringify({
       aiImagesEnabled,
       hasFeatures: Boolean(imageFeatures),
-      hasWorkspaces: Boolean(imageWorkspaces),
       contentLength: content.length,
       userImageCount
     }));
-    if (!aiImagesEnabled || !imageFeatures || !imageWorkspaces) return [];
+    if (!aiImagesEnabled || !imageFeatures) return [];
     if (
       !window.confirm(
         'AI 配图将调用你已配置的图片模型为文档分节生成配图，可能消耗模型额度。继续？'
@@ -1380,19 +1378,7 @@ export function ChatPage({
       setNotice('已取消 AI 配图。');
       return [];
     }
-    const draft = await imageWorkspaces.create('quick_image');
-    rendererTrace('generateAiSlideImages:draft', JSON.stringify({
-      ok: draft.ok,
-      code: draft.ok ? undefined : draft.error.code
-    }));
-    if (!draft.ok) {
-      setNotice('无法准备图片生成草稿，AI 配图已跳过。');
-      return [];
-    }
-    const candidates = await imageFeatures.listCandidates(
-      draft.value.draftId,
-      draft.value.updatedAt
-    );
+    const candidates = await imageFeatures.listQuickCandidates();
     rendererTrace('generateAiSlideImages:candidates', JSON.stringify({
       ok: candidates.ok,
       count: candidates.ok ? candidates.value.length : 0,
