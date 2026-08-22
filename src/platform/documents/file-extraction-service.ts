@@ -148,6 +148,32 @@ export class FileExtractionService {
     }
   }
 
+  async extractFullText(
+    fileId: FileReference['id']
+  ): Promise<string | undefined> {
+    const file = await this.files.get(fileId);
+    if (!file) {
+      throw new FileExtractionError(
+        'storage_error',
+        'Attachment file reference does not exist'
+      );
+    }
+    const absolutePath = await resolveFileReferencePathSafely(
+      this.options.rootDirectory,
+      file
+    );
+    const head = await readHeadBytes(absolutePath);
+    const format = detectDocumentFormat(
+      file.locator.kind === 'project'
+        ? path.basename(file.locator.relativePath)
+        : path.basename(file.locator.absolutePath),
+      head
+    );
+    if (!format) return undefined;
+    const outcome = await extractByFormat(absolutePath, format, this.limits);
+    return outcome.status === 'extracted' ? outcome.text : undefined;
+  }
+
   private outcomeDto(
     fileId: string,
     format: DocumentAttachmentFormat,

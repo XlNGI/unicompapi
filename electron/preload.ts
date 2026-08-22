@@ -80,7 +80,9 @@ const documentAttachments: DocumentAttachmentApi = {
   extractFile: (request) =>
     ipcRenderer.invoke(documentAttachmentIpcChannels.extractFile, request),
   extractTheme: (request) =>
-    ipcRenderer.invoke(documentAttachmentIpcChannels.extractTheme, request)
+    ipcRenderer.invoke(documentAttachmentIpcChannels.extractTheme, request),
+  retrieveContext: (request) =>
+    ipcRenderer.invoke(documentAttachmentIpcChannels.retrieveContext, request)
 };
 
 const storage: StorageApi = {

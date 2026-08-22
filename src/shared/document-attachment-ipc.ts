@@ -1,7 +1,8 @@
 export const documentAttachmentIpcChannels = {
   importAttachment: 'document-attachment:import',
   extractFile: 'document-attachment:extract',
-  extractTheme: 'document-attachment:extract-theme'
+  extractTheme: 'document-attachment:extract-theme',
+  retrieveContext: 'document-attachment:retrieve-context'
 } as const;
 
 export type DocumentAttachmentIpcErrorCode =
@@ -78,6 +79,16 @@ export interface DocumentThemeColorsDto {
   readonly muted: string;
 }
 
+export interface RagContextRequest {
+  readonly query: string;
+  readonly k?: number;
+}
+
+export interface RagContextChunkDto {
+  readonly source: string;
+  readonly text: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -107,6 +118,22 @@ export const documentAttachmentRequestParsers = {
       throw new TypeError('Invalid theme extraction request');
     }
     return { fileId: requireString(value.fileId, 'fileId') };
+  },
+  retrieveContext(value: unknown): RagContextRequest {
+    if (!isRecord(value)) {
+      throw new TypeError('Invalid context retrieval request');
+    }
+    const k = value.k === undefined ? undefined : value.k;
+    if (
+      k !== undefined &&
+      (!Number.isSafeInteger(k) || Number(k) < 1 || Number(k) > 10)
+    ) {
+      throw new TypeError('k must be an integer between 1 and 10');
+    }
+    return {
+      query: requireString(value.query, 'query'),
+      ...(k !== undefined ? { k: Number(k) } : {})
+    };
   }
 };
 
@@ -120,4 +147,7 @@ export interface DocumentAttachmentApi {
   extractTheme(
     request: FileExtractionRequest
   ): Promise<DocumentAttachmentIpcResult<DocumentThemeColorsDto>>;
+  retrieveContext(
+    request: RagContextRequest
+  ): Promise<DocumentAttachmentIpcResult<readonly RagContextChunkDto[]>>;
 }

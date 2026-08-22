@@ -384,6 +384,7 @@ export function ChatPage({
   >([]);
   const [selectedImageCandidateId, setSelectedImageCandidateId] =
     useState<string>();
+  const [ragEnabled, setRagEnabled] = useState(false);
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
   const [templateFileId, setTemplateFileId] = useState<string>();
   const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
@@ -1231,6 +1232,26 @@ export function ChatPage({
     const combined = attachmentText
       ? `${revisionInput}\n\n${attachmentText}`
       : revisionInput;
+    let modelContent = combined;
+    if (ragEnabled && documentAttachments) {
+      try {
+        const ragResult = await documentAttachments.retrieveContext({
+          query: requirements,
+          k: 3
+        });
+        if (ragResult.ok && ragResult.value.length > 0) {
+          const ragText = ragResult.value
+            .map(
+              (chunk) =>
+                `【资料：${chunk.source}】\n${chunk.text.slice(0, 800)}`
+            )
+            .join('\n\n');
+          modelContent = `${combined}\n\n以下为检索到的项目资料：\n${ragText}`;
+        }
+      } catch {
+        // 检索失败不阻断生成。
+      }
+    }
     const kind = documentKind === 'auto'
       ? inferDocumentKind(requirements)
       : documentKind;
@@ -1245,7 +1266,7 @@ export function ChatPage({
             }
           : null,
         title: conversationTitleFromMessage(requirements),
-        content: combined,
+        content: modelContent,
         productFeature: responseFeature,
         candidateId: selectedCandidateId,
         contextSelections: includedContextIds.flatMap((contextId) => {
@@ -2217,6 +2238,18 @@ export function ChatPage({
                       </option>
                     ))}
                   </select>
+                ) : null}
+                {documentMode ? (
+                  <button
+                    aria-pressed={ragEnabled}
+                    className={`uc-chat-page__doc-mode${ragEnabled ? ' is-active' : ''}`}
+                    disabled={!canCompose || !session || busy}
+                    onClick={() => setRagEnabled((enabled) => !enabled)}
+                    title="从项目附件中检索相关内容，作为文档生成依据（本地检索）"
+                    type="button"
+                  >
+                    检索资料
+                  </button>
                 ) : null}
                 <ModelSelect
                   appearance="subtle"

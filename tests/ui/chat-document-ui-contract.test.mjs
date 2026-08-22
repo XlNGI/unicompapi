@@ -32,6 +32,9 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /imageCandidateOptions/);
   assert.match(page, /selectedImageCandidateId/);
   assert.match(page, /uc-chat-page__image-model/);
+  assert.match(page, /ragEnabled/);
+  assert.match(page, /检索资料/);
+  assert.match(page, /retrieveContext/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);

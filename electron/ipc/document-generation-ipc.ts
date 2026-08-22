@@ -17,6 +17,7 @@ import {
   JsonProjectConversationRepository,
   NodeProjectStorage,
   extractPptxThemeColors,
+  RagRetrievalService,
   resolveFileReferencePathSafely,
   type StorageProjectSession,
   type StorageProjectSessionRegistry
@@ -153,6 +154,22 @@ export function registerDocumentGenerationIpcHandlers(options: {
           );
         }
         return { ok: true, value: colors };
+      })
+  );
+  ipcMain.handle(
+    documentAttachmentIpcChannels.retrieveContext,
+    (_event, request: unknown) =>
+      withAttachmentErrors(async () => {
+        const input = documentAttachmentRequestParsers.retrieveContext(request);
+        const session = requireSession(options.sessionRegistry);
+        const service = new RagRetrievalService({
+          rootDirectory: session.rootDirectory,
+          projectId: session.projectId
+        });
+        return {
+          ok: true,
+          value: await service.retrieve(input)
+        };
       })
   );
 
