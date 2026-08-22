@@ -1347,7 +1347,7 @@ export function ChatPage({
     for (let attempt = 0; attempt < 300; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 1_000));
       const result = await api.getResponseExecution(responseExecutionId);
-      if (!result.ok) return undefined;
+      if (!result.ok) continue;
       if (result.value.state === 'completed') return result.value;
       if (
         result.value.state === 'failed' ||
