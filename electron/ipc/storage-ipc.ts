@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import {
@@ -181,7 +182,30 @@ export function registerStorageIpcHandlers(options: {
   const imageFeatures = new ImageFeatureController({
     getSession: () => sessionRegistry.get(),
     getRuntime: getImageFeatureRuntime,
-    mutations: imageMutations
+    mutations: imageMutations,
+    onError: (error) => {
+      const line = `${JSON.stringify({
+        at: new Date().toISOString(),
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+              }
+            : String(error)
+      })}\n`;
+      const logsDirectory = path.join(app.getPath('userData'), 'logs');
+      void mkdir(logsDirectory, { recursive: true })
+        .then(() =>
+          appendFile(
+            path.join(logsDirectory, 'image-feature.log'),
+            line,
+            'utf8'
+          )
+        )
+        .catch(() => undefined);
+    }
   });
   let promptEnhanceRuntime: {
     readonly projectId: string;
