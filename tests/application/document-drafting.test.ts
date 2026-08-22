@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOutlineFromRequirements,
+  composeDocumentRevisionInput,
   inferDocumentKind,
   sha256Hex
 } from '../../src/pages/chat/documentDrafting';
@@ -30,5 +31,17 @@ describe('document drafting helpers', () => {
     const second = await sha256Hex('word:周报');
     expect(first).toBe(second);
     expect(first).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('composes revision context from the previous document', () => {
+    const input = composeDocumentRevisionInput(
+      '# 项目周报\n\n- 完成评审',
+      '把第二部分改为强调风险'
+    );
+    expect(input).toContain('上一版文档内容');
+    expect(input).toContain('# 项目周报');
+    expect(input).toContain('修改要求');
+    expect(input).toContain('强调风险');
+    expect(composeDocumentRevisionInput(undefined, '新需求')).toBe('新需求');
   });
 });

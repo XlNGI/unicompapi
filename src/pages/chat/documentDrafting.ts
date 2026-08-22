@@ -50,3 +50,13 @@ export async function sha256Hex(value: string): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 }
+
+export function composeDocumentRevisionInput(
+  previousContent: string | undefined,
+  requirements: string
+): string {
+  if (!previousContent || previousContent.trim().length === 0) {
+    return requirements;
+  }
+  return `上一版文档内容：\n${previousContent}\n\n修改要求：\n${requirements}`;
+}

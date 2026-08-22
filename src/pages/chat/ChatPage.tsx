@@ -40,6 +40,7 @@ import type {
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
 import {
+  composeDocumentRevisionInput,
   inferDocumentKind,
   type DocumentKindOption
 } from './documentDrafting';
@@ -1135,9 +1136,23 @@ export function ChatPage({
           `【附件：${attachment.fileName}】\n${attachment.preview.slice(0, 2000)}`
       )
       .join('\n\n');
+    const previousDocument = selected
+      ? [...selected.messages]
+          .reverse()
+          .find(
+            (item) =>
+              item.role === 'assistant' &&
+              item.state === 'completed' &&
+              item.documentResult
+          )
+      : undefined;
+    const revisionInput = composeDocumentRevisionInput(
+      previousDocument?.content,
+      requirements
+    );
     const combined = attachmentText
-      ? `${requirements}\n\n${attachmentText}`
-      : requirements;
+      ? `${revisionInput}\n\n${attachmentText}`
+      : revisionInput;
     const kind = documentKind === 'auto'
       ? inferDocumentKind(requirements)
       : documentKind;

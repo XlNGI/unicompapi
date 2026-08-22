@@ -15,6 +15,8 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /documentThemeOptions/);
   assert.match(page, /\{ value: 'blueprint', label: '商务蓝' \}/);
   assert.match(page, /theme: documentTheme/);
+  assert.match(page, /composeDocumentRevisionInput/);
+  assert.match(page, /previousDocument/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);
