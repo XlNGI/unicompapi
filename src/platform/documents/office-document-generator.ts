@@ -20,6 +20,11 @@ import {
   documentWorkspaceKindExtensions,
   type DocumentWorkspaceKind
 } from '../../domain';
+import {
+  resolveDocumentTheme,
+  type DocumentTheme,
+  type DocumentThemeId
+} from './document-theme';
 import type {
   DocumentOutline,
   DocumentOutlineBlock
@@ -36,6 +41,7 @@ export interface GenerateDocumentFileInput {
   readonly outline: DocumentOutline;
   readonly outputDirectory: string;
   readonly now: string;
+  readonly theme?: DocumentThemeId;
 }
 
 export async function generateDocumentFile(
@@ -49,10 +55,10 @@ export async function generateDocumentFile(
   const absolutePath = path.join(input.outputDirectory, fileName);
   const buffer =
     input.kind === 'word'
-      ? await buildWordBuffer(input.outline)
+      ? await buildWordBuffer(input.outline, resolveDocumentTheme(input.theme))
       : input.kind === 'excel'
         ? await buildExcelBuffer(input.outline)
-        : await buildPptBuffer(input.outline);
+        : await buildPptBuffer(input.outline, resolveDocumentTheme(input.theme));
   await writeFile(absolutePath, buffer);
   const fileStat = await stat(absolutePath);
   return { fileName, absolutePath, sizeBytes: fileStat.size };
@@ -72,7 +78,10 @@ function timestampSuffix(now: string): string {
   return digits.length === 14 ? digits : new Date().toISOString().replace(/\D/g, '').slice(0, 14);
 }
 
-async function buildWordBuffer(outline: DocumentOutline): Promise<Buffer> {
+async function buildWordBuffer(
+  outline: DocumentOutline,
+  theme: DocumentTheme
+): Promise<Buffer> {
   const doc = new Document({
     numbering: {
       config: [
@@ -93,13 +102,17 @@ async function buildWordBuffer(outline: DocumentOutline): Promise<Buffer> {
       {
         children: [
           new Paragraph({
-            text: outline.title,
-            heading: HeadingLevel.TITLE
+            heading: HeadingLevel.TITLE,
+            children: [
+              new TextRun({ text: outline.title, color: theme.accent })
+            ]
           }),
           ...outline.sections.flatMap((section) => [
             new Paragraph({
-              text: section.heading,
-              heading: headingLevel(section.level)
+              heading: headingLevel(section.level),
+              children: [
+                new TextRun({ text: section.heading, color: theme.accent })
+              ]
             }),
             ...section.blocks.map((block) => wordBlock(block))
           ])
@@ -213,11 +226,22 @@ function sanitizeSheetName(value: string): string {
   return cleaned;
 }
 
-async function buildPptBuffer(outline: DocumentOutline): Promise<Buffer> {
+async function buildPptBuffer(
+  outline: DocumentOutline,
+  theme: DocumentTheme
+): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = outline.title;
   const titleSlide = pptx.addSlide();
+  titleSlide.background = { color: theme.background };
+  titleSlide.addShape('rect', {
+    x: 0,
+    y: 0,
+    w: 13.33,
+    h: 0.18,
+    fill: { color: theme.accent }
+  });
   titleSlide.addText(outline.title, {
     x: 0.6,
     y: 2.0,
@@ -225,6 +249,7 @@ async function buildPptBuffer(outline: DocumentOutline): Promise<Buffer> {
     h: 1.2,
     fontSize: 32,
     bold: true,
+    color: theme.accent,
     align: 'center'
   });
   if (outline.sections.length > 0) {
@@ -235,18 +260,20 @@ async function buildPptBuffer(outline: DocumentOutline): Promise<Buffer> {
       h: 0.8,
       fontSize: 18,
       align: 'center',
-      color: '666666'
+      color: theme.muted
     });
   }
   outline.sections.forEach((section) => {
     const slide = pptx.addSlide();
+    slide.background = { color: theme.background };
     slide.addText(section.heading, {
       x: 0.5,
       y: 0.35,
       w: 12.5,
       h: 0.8,
       fontSize: 26,
-      bold: true
+      bold: true,
+      color: theme.accent
     });
     let y = 1.35;
     const textLines: string[] = [];
@@ -258,7 +285,8 @@ async function buildPptBuffer(outline: DocumentOutline): Promise<Buffer> {
             y,
             w: 12.3,
             h: Math.max(0.6, textLines.length * 0.45),
-            fontSize: 16
+            fontSize: 16,
+            color: theme.text
           });
           y += textLines.length * 0.45 + 0.3;
           textLines.length = 0;
@@ -271,6 +299,7 @@ async function buildPptBuffer(outline: DocumentOutline): Promise<Buffer> {
           y,
           w: 12.3,
           fontSize: 13,
+          color: theme.text,
           border: { pt: 0.5, color: 'CCCCCC' }
         });
         y += rows.length * 0.4 + 0.4;
@@ -290,7 +319,8 @@ async function buildPptBuffer(outline: DocumentOutline): Promise<Buffer> {
         y,
         w: 12.3,
         h: Math.max(0.6, textLines.length * 0.45),
-        fontSize: 16
+        fontSize: 16,
+        color: theme.text
       });
     }
   });
