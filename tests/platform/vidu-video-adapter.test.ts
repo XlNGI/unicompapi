@@ -56,7 +56,8 @@ describe('Vidu Q3 reference video adapter', () => {
         audio: true,
         duration: 2,
         resolution: '1080p',
-        aspect_ratio: '16:9'
+        aspect_ratio: '16:9',
+        seed: 7
       }))
     ).resolves.toEqual({
       kind: 'accepted_async',
@@ -77,7 +78,8 @@ describe('Vidu Q3 reference video adapter', () => {
       audio: true,
       duration: 2,
       resolution: '1080p',
-      aspect_ratio: '16:9'
+      aspect_ratio: '16:9',
+      seed: 7
     });
   });
 
@@ -90,7 +92,8 @@ describe('Vidu Q3 reference video adapter', () => {
         audio: true,
         duration: 5,
         resolution: '720p',
-        aspect_ratio: '16:9'
+        aspect_ratio: '16:9',
+        seed: 8
       }))
     ).resolves.toEqual({
       kind: 'accepted_async',
@@ -109,7 +112,41 @@ describe('Vidu Q3 reference video adapter', () => {
       audio: true,
       duration: 5,
       resolution: '720p',
-      aspect_ratio: '16:9'
+      aspect_ratio: '16:9',
+      seed: 8
+    });
+  });
+
+  it('uses official q3 defaults and duration 16 for turbo/mix reference video', async () => {
+    const fixture = await createAdapterFixture({
+      providerModelKey: 'viduq3-turbo',
+      capability: 'reference_to_video'
+    });
+    fixture.transport.responses.push(jsonResponse(200, { task_id: 'task-turbo-ref' }));
+
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { duration: 16 }))
+    ).resolves.toMatchObject({ kind: 'accepted_async' });
+    expect(bodyOf(fixture.transport.requests[0])).toMatchObject({
+      model: 'viduq3-turbo',
+      audio: true,
+      duration: 16
+    });
+
+    const mixFixture = await createAdapterFixture({
+      providerModelKey: 'viduq3-mix',
+      capability: 'reference_to_video'
+    });
+    mixFixture.transport.responses.push(
+      jsonResponse(200, { task_id: 'task-mix-ref' })
+    );
+    await expect(
+      mixFixture.adapter.submit(submitRequest(mixFixture, { duration: 16 }))
+    ).resolves.toMatchObject({ kind: 'accepted_async' });
+    expect(bodyOf(mixFixture.transport.requests[0])).toMatchObject({
+      model: 'viduq3-mix',
+      audio: true,
+      duration: 16
     });
   });
 
@@ -133,6 +170,15 @@ describe('Vidu Q3 reference video adapter', () => {
     ).resolves.toMatchObject({ kind: 'failed_before_submission' });
     await expect(
       fixture.adapter.submit(submitRequest(fixture, { duration: 16 }))
+    ).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { resolution: '4K' }))
+    ).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { aspect_ratio: '21:9' }))
+    ).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { seed: -1 }))
     ).resolves.toMatchObject({ kind: 'failed_before_submission' });
 
     fixture.materials.material = {
@@ -298,7 +344,7 @@ async function createTurboTextFixture() {
 }
 
 async function createAdapterFixture(options: {
-  readonly providerModelKey: 'viduq3-drama' | 'viduq3-turbo';
+  readonly providerModelKey: 'viduq3-drama' | 'viduq3-turbo' | 'viduq3-mix';
   readonly capability: 'reference_to_video' | 'video_generation';
   readonly now?: () => number;
 }) {

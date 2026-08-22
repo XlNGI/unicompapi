@@ -77,7 +77,7 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
       const body: Record<string, unknown> = {
         model: request.model.providerModelKey,
         prompt: requirePrompt(request),
-        ...officialImageParameters(image.parameters)
+        ...officialImageParameters(request.model.providerModelKey, image.parameters)
       };
       if (expectedInputs === 1) {
         const material = await this.dependencies.materials.resolve({
@@ -259,6 +259,7 @@ async function requireConnection(
 }
 
 function officialImageParameters(
+  modelKey: string,
   parameters: Readonly<Record<string, DynamicParameterValue>>
 ): Record<string, string | number> {
   const allowed = new Set(['aspect_ratio', 'resolution', 'seed']);
@@ -273,23 +274,25 @@ function officialImageParameters(
   const result: Record<string, string | number> = {};
   const aspect = parameters.aspect_ratio;
   if (aspect !== undefined) {
-    if (typeof aspect !== 'string' || aspect.trim().length === 0) {
+    const normalized = typeof aspect === 'string' ? aspect.trim() : '';
+    if (!aspectOptions(modelKey).includes(normalized)) {
       throw new ViduReferenceImageAdapterError(
-        'The official image parameter is invalid',
+        'The official image aspect ratio is outside the option set',
         'not_retryable'
       );
     }
-    result.aspect_ratio = aspect.trim();
+    result.aspect_ratio = normalized;
   }
   const resolution = parameters.resolution;
   if (resolution !== undefined) {
-    if (typeof resolution !== 'string' || resolution.trim().length === 0) {
+    const normalized = typeof resolution === 'string' ? resolution.trim() : '';
+    if (!resolutionOptions(modelKey).includes(normalized)) {
       throw new ViduReferenceImageAdapterError(
-        'The official image parameter is invalid',
+        'The official image resolution is outside the option set',
         'not_retryable'
       );
     }
-    result.resolution = resolution.trim();
+    result.resolution = normalized;
   }
   const seed = parameters.seed;
   if (seed !== undefined) {
@@ -302,6 +305,25 @@ function officialImageParameters(
     result.seed = seed;
   }
   return result;
+}
+
+function aspectOptions(modelKey: string): readonly string[] {
+  if (modelKey === 'viduq1') return ['16:9', '9:16', '1:1', '3:4', '4:3'];
+  return [
+    '16:9',
+    '9:16',
+    '1:1',
+    '3:4',
+    '4:3',
+    '21:9',
+    '2:3',
+    '3:2',
+    'auto'
+  ];
+}
+
+function resolutionOptions(modelKey: string): readonly string[] {
+  return modelKey === 'viduq1' ? ['1080p'] : ['1080p', '2K', '4K'];
 }
 
 function serializeBoundedJson(value: unknown): Uint8Array {

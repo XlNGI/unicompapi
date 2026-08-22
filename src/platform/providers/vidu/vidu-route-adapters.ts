@@ -146,7 +146,6 @@ export class ViduRegistryExecutionRouteResolver
       route.endpointPolicyRevision !== 1 ||
       route.protocolBindingRevision !== 1 ||
       route.featureMappingVersion !== 1 ||
-      route.parameterSchemaRevision !== 1 ||
       route.resultSchemaRevision !== 1 ||
       route.usageSchemaId !== VIDU_USAGE_SCHEMA_ID ||
       route.usageSchemaRevision !== 1 ||

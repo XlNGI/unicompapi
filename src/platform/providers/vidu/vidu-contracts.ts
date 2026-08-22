@@ -333,8 +333,18 @@ function geminiImageContract(
     const editSchemaId =
       `parameters.vidu.reference-image-v2.image-edit.${providerModelKey}`;
     const commonFields: readonly ParameterFieldSchemaV2[] = [
-      optionalString('aspect_ratio', 10),
-      optionalString('resolution', 20),
+      optionalEnum('aspect_ratio', 10, [
+        '16:9',
+        '9:16',
+        '1:1',
+        '3:4',
+        '4:3',
+        '21:9',
+        '2:3',
+        '3:2',
+        'auto'
+      ]),
+      optionalEnum('resolution', 20, ['1080p', '2K', '4K']),
       optionalInteger('seed', 30, 0, 2_147_483_647)
     ];
     return {
@@ -368,9 +378,9 @@ function geminiImageContract(
         ]
       ),
       parameterSchemas: [
-        schema(textSchemaId, 'text_to_image', commonFields),
-        schema(referenceSchemaId, 'reference_to_image', commonFields),
-        schema(editSchemaId, 'image_edit', commonFields)
+        schema(textSchemaId, 'text_to_image', commonFields, 2),
+        schema(referenceSchemaId, 'reference_to_image', commonFields, 2),
+        schema(editSchemaId, 'image_edit', commonFields, 2)
       ],
       defaultProfileStatus: 'restricted'
     };
@@ -394,10 +404,10 @@ function geminiImageContract(
         )]
       ),
       parameterSchemas: [schema(schemaId, 'reference_to_image', [
-        optionalString('aspect_ratio', 10),
-        optionalString('resolution', 20),
+        optionalEnum('aspect_ratio', 10, ['16:9', '9:16', '1:1', '3:4', '4:3']),
+        optionalEnum('resolution', 20, ['1080p']),
         optionalInteger('seed', 30, 0, 2_147_483_647)
-      ])],
+      ], 2)],
       defaultProfileStatus: 'restricted'
     };
   }
@@ -444,12 +454,8 @@ function referenceVideoContract(
         VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID
       )]
     ),
-    parameterSchemas: [schema(schemaId, 'image_to_video', [
-      optionalBoolean('audio', 10),
-      optionalInteger('duration', 20, range.minimum, range.maximum, 'second'),
-      optionalString('resolution', 30),
-      optionalString('aspect_ratio', 40)
-    ])],
+    parameterSchemas: [schema(schemaId, 'image_to_video',
+      referenceVideoFields(providerModelKey, range), 2)],
     defaultProfileStatus: 'restricted'
   };
 }
@@ -475,12 +481,8 @@ function textVideoContract(
         VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID
       )]
     ),
-    parameterSchemas: [schema(schemaId, 'text_to_video', [
-      optionalBoolean('audio', 10),
-      optionalInteger('duration', 20, range.minimum, range.maximum, 'second'),
-      optionalString('resolution', 30),
-      optionalString('aspect_ratio', 40)
-    ])],
+    parameterSchemas: [schema(schemaId, 'text_to_video',
+      textVideoFields(range), 2)],
     defaultProfileStatus: 'restricted'
   };
 }
@@ -521,30 +523,9 @@ function dualVideoContract(
       ]
     ),
     parameterSchemas: [
-      schema(referenceSchemaId, 'image_to_video', [
-        optionalBoolean('audio', 10),
-        optionalInteger(
-          'duration',
-          20,
-          referenceRange.minimum,
-          referenceRange.maximum,
-          'second'
-        ),
-        optionalString('resolution', 30),
-        optionalString('aspect_ratio', 40)
-      ]),
-      schema(textSchemaId, 'text_to_video', [
-        optionalBoolean('audio', 10),
-        optionalInteger(
-          'duration',
-          20,
-          textRange.minimum,
-          textRange.maximum,
-          'second'
-        ),
-        optionalString('resolution', 30),
-        optionalString('aspect_ratio', 40)
-      ])
+      schema(referenceSchemaId, 'image_to_video',
+        referenceVideoFields(providerModelKey, referenceRange), 2),
+      schema(textSchemaId, 'text_to_video', textVideoFields(textRange), 2)
     ],
     defaultProfileStatus: 'restricted'
   };
@@ -595,9 +576,10 @@ function feature(
 function schema(
   schemaId: string,
   productFeature: ParameterSchemaV2['productFeature'],
-  fields: readonly ParameterFieldSchemaV2[]
+  fields: readonly ParameterFieldSchemaV2[],
+  revision = 1
 ): ParameterSchemaV2 {
-  return { schemaVersion: 2, schemaId, revision: 1, productFeature, fields };
+  return { schemaVersion: 2, schemaId, revision, productFeature, fields };
 }
 
 function optionalString(fieldId: string, order: number): ParameterFieldSchemaV2 {
@@ -606,6 +588,17 @@ function optionalString(fieldId: string, order: number): ParameterFieldSchemaV2 
 
 function optionalBoolean(fieldId: string, order: number): ParameterFieldSchemaV2 {
   return optionalField(fieldId, order, 'boolean');
+}
+
+function optionalEnum(
+  fieldId: string,
+  order: number,
+  options: readonly string[]
+): ParameterFieldSchemaV2 {
+  return {
+    ...optionalField(fieldId, order, 'enum'),
+    options
+  };
 }
 
 function optionalInteger(
@@ -626,7 +619,7 @@ function optionalInteger(
 function optionalField(
   fieldId: string,
   order: number,
-  valueType: 'string' | 'integer' | 'boolean'
+  valueType: 'string' | 'integer' | 'boolean' | 'enum'
 ): ParameterFieldSchemaV2 {
   return {
     fieldId,
@@ -644,8 +637,8 @@ function referenceDurationRange(
   modelKey: (typeof frozenViduReferenceVideoModelKeys)[number]
 ): { readonly minimum: number; readonly maximum: number } {
   if (modelKey === 'viduq3-drama') return { minimum: 2, maximum: 15 };
-  if (modelKey === 'viduq3') return { minimum: 3, maximum: 16 };
-  return { minimum: 3, maximum: 15 };
+  if (modelKey === 'viduq3-ad') return { minimum: 3, maximum: 15 };
+  return { minimum: 3, maximum: 16 };
 }
 
 function textDurationRange(
@@ -656,6 +649,50 @@ function textDurationRange(
     return { minimum: 1, maximum: 16 };
   }
   return { minimum: 1, maximum: 16 };
+}
+
+function referenceVideoFields(
+  modelKey: (typeof frozenViduReferenceVideoModelKeys)[number],
+  range: { readonly minimum: number; readonly maximum: number }
+): readonly ParameterFieldSchemaV2[] {
+  return [
+    optionalBoolean('audio', 10),
+    optionalInteger('duration', 20, range.minimum, range.maximum, 'second'),
+    optionalEnum('resolution', 30, referenceResolutionOptions(modelKey)),
+    optionalEnum('aspect_ratio', 40, referenceAspectRatioOptions(modelKey)),
+    optionalInteger('seed', 50, 0, 2_147_483_647)
+  ];
+}
+
+function textVideoFields(
+  range: { readonly minimum: number; readonly maximum: number }
+): readonly ParameterFieldSchemaV2[] {
+  return [
+    optionalBoolean('audio', 10),
+    optionalInteger('duration', 20, range.minimum, range.maximum, 'second'),
+    optionalEnum('resolution', 30, ['540p', '720p', '1080p']),
+    optionalEnum('aspect_ratio', 40, ['16:9', '9:16', '3:4', '4:3', '1:1']),
+    optionalInteger('seed', 50, 0, 2_147_483_647)
+  ];
+}
+
+function referenceResolutionOptions(
+  modelKey: (typeof frozenViduReferenceVideoModelKeys)[number]
+): readonly string[] {
+  if (modelKey === 'viduq3-drama') return ['1080p'];
+  if (modelKey === 'viduq3-mix' || modelKey === 'viduq3-ad') {
+    return ['720p', '1080p'];
+  }
+  return ['540p', '720p', '1080p'];
+}
+
+function referenceAspectRatioOptions(
+  modelKey: (typeof frozenViduReferenceVideoModelKeys)[number]
+): readonly string[] {
+  if (modelKey === 'viduq3-drama' || modelKey === 'viduq3-ad') {
+    return ['16:9', '9:16', '4:3', '3:4', '1:1'];
+  }
+  return ['16:9', '9:16', '1:1'];
 }
 
 function requireFrozenModelKey(value: string): FrozenViduModelKey {
