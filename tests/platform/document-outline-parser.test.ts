@@ -179,4 +179,17 @@ describe('markdown to outline parser', () => {
     expect(outline.kind).toBe('ppt');
     expect(outline.sections[0].blocks[0].type).toBe('paragraph');
   });
+
+  it('strips inline markdown markers from document text', () => {
+    const outline = parseMarkdownToOutline(
+      '# 汇报\n\n## 签约流程\n\n- **客户确认**、`编号` 与 [详情](https://example.com)',
+      'word'
+    );
+    const bullet = outline.sections[1].blocks[0];
+    expect(bullet.type).toBe('bullets');
+    if (bullet.type !== 'bullets') throw new Error('unexpected block');
+    expect(bullet.items[0]).toBe('客户确认、编号 与 详情');
+    expect(bullet.items[0]).not.toContain('*');
+    expect(bullet.items[0]).not.toContain('`');
+  });
 });

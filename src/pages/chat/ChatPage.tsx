@@ -1420,7 +1420,7 @@ export function ChatPage({
     for (const heading of headings) {
       try {
         const result = await imageFeatures.generateQuickImage(
-          `为演示文稿「${heading}」一页生成配图，风格与内容契合，画面不含文字`,
+          `为演示文稿「${heading}」一页生成纯图形插画配图，风格与内容契合；画面中绝对不能出现任何文字、字母、数字、标点、标题或水印`,
           candidate.candidateId,
           {}
         );

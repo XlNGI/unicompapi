@@ -28,6 +28,7 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /generateQuickImage/);
   assert.match(page, /extractSectionHeadings/);
   assert.match(page, /canAutoGenerateImageCandidate/);
+  assert.match(page, /绝对不能出现任何文字/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);
