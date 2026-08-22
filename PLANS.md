@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-22 工程补充：`feature/chat-office-doc-pr1-domain-generator` 完成“对话内 Office 文档生成”PR1—PR6 并非快进合入 `develop`（`68e33e0`），功能分支保留。对话页新增“文档”模式：输入需求后由已选文本模型撰写 Markdown 正文，主进程解析为大纲并本地生成 Word/Excel/PPT（docx/exceljs/pptxgenjs），经 SHA-256 校验后登记为 `mediaKind: document` 正式作品并挂载文档卡片（打开/作品库/重试）；支持拖拽文件（白名单 txt/md/csv/docx/pdf/xlsx/pptx，魔数/大小/页数/行数/ZIP 炸弹校验，项目内副本登记）、图片附件嵌入 PPT 图片槽、chart 块渲染为原生 PPT 图表、内置主题（商务蓝/墨色/松绿）与版式引擎；受控 IPC/preload，renderer 不接触路径/Hash/凭证。全量门禁 801/802（唯一失败为工作区既有 Vidu 未提交改动的旧断言，已随 `232980e` 独立提交）。项目负责人确认覆盖 AGENTS.md“不得把对话页做成直接生成入口”旧规则。后续候选：对话式改稿、模板风格迁移、AI 生图配图、关键词检索/RAG，待负责人批准。
+
 2026-08-21 工程补充：按 Vidu 官方当前文档核对并更新参数适配。文生视频与参考生视频新增可选 `seed`；参考生视频 q3 系列 `audio` 默认修正为 `true`，`viduq3-turbo/mix/q3` 时长范围修正为 `3–16` 秒；`resolution`、`aspect_ratio` 改为官方枚举并在适配器 HTTP 前校验；官方参考生图 `viduq2/viduq1` 的比例与分辨率同步枚举；变更参数 Schema 升级 revision 2，路由解析器移除 revision 1 硬编码，旧 revision 路由按精确 Schema 校验。`model`、`prompt` 与参考生视频 `images` 继续由产品约束和适配器强制必填。TypeScript（应用与测试）和定向 ESLint 通过，`git diff --check` 通过；当前沙箱阻止 Vitest 的 Vite 配置加载，完整门禁待正常环境复跑。未调用真实服务商、未读取凭证、未产生收费请求；阶段 10 与 macOS 延期边界不变。记录见 `docs/active/2026-08-21-Vidu官方参数核对更新记录.md`。
 
 2026-08-21 最终收口：`feature/remove-text-video-shot-ui` 汇总今日已批准的生成界面与状态反馈调整。应用级底栏升级为多任务生产状态栏，生成生命周期不再重复弹出全局通知；文生视频移除镜头 UI，图生视频移除独立运动约束控件并改为与图生图一致的“大提示词输入 + 右下角单图缩略位 + 项目上下文/提示词增强”结构；专业生图支持把已校验本地作品拖回参考图槽；Qwen Image 尺寸值统一为上游要求的 `<width>x<height>`，对应参数模式升至 revision 2，适配器接受正整数参数模式版本。底层草稿兼容字段、模型选择、动态参数、提交合同、本地文件校验和正式作品登记门禁保持不变。全量 Node/UI/工具链 312 项与 Vitest 752 项，共 1064 项通过，0 失败、0 跳过；TypeScript、ESLint、生产构建与 `git diff --check` 通过。未调用真实服务商、未读取凭证或产生收费请求；阶段 10 未启动，macOS 仍为延期目标。统一工程记录见 `docs/active/2026-08-21-生成界面与状态栏收口记录.md`。
