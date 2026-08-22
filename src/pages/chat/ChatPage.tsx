@@ -1198,10 +1198,22 @@ export function ChatPage({
           terminal,
           finalCheckOk: finalCheck.ok
         }));
+        const latest = await chat.getConversation(targetId);
+        const failedMessage = latest.ok
+          ? [...latest.value.messages]
+              .reverse()
+              .find(
+                (item) =>
+                  item.role === 'assistant' &&
+                  item.state === 'failed'
+              )
+          : undefined;
         setNotice(
-          terminal === 'failed' || terminal === 'cancelled'
-            ? `AI 内容生成${terminal === 'cancelled' ? '已取消' : '失败'}，文档未生成。`
-            : 'AI 内容生成未完成，文档未生成。'
+          terminal === 'cancelled'
+            ? 'AI 内容生成已取消，文档未生成。'
+            : failedMessage
+              ? failedResponseNotice(failedMessage)
+              : 'AI 内容生成失败，文档未生成。'
         );
         return;
       }
