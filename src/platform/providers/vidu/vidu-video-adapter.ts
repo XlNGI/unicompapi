@@ -462,14 +462,21 @@ function videoParameters(
   values: Readonly<Record<string, VideoDynamicParameterValue>>,
   mode: 'text' | 'reference'
 ): { readonly audio: boolean; readonly optional: Readonly<Record<string, unknown>> } {
-  const allowed = new Set(['audio', 'duration', 'resolution', 'aspect_ratio']);
+  const allowed = new Set([
+    'audio',
+    'duration',
+    'resolution',
+    'aspect_ratio',
+    'seed'
+  ]);
   if (Object.keys(values).some((key) => !allowed.has(key))) {
     throw new ViduVideoAdapterError(
       'The Vidu video request contains an unsupported parameter',
       'not_retryable'
     );
   }
-  const audio = values.audio ?? (mode === 'text');
+  // Official q3 reference and text models default to native audio output.
+  const audio = values.audio ?? (mode === 'text' || modelKey.startsWith('viduq3'));
   if (typeof audio !== 'boolean') {
     throw new ViduVideoAdapterError('The Vidu audio option is invalid', 'not_retryable');
   }
@@ -491,14 +498,31 @@ function videoParameters(
   for (const key of ['resolution', 'aspect_ratio'] as const) {
     const value = values[key];
     if (value !== undefined) {
-      if (typeof value !== 'string' || value.trim().length === 0) {
+      const normalized = typeof value === 'string' ? value.trim() : '';
+      const options = optionSet(modelKey, mode, key);
+      if (!options.includes(normalized)) {
         throw new ViduVideoAdapterError(
-          'The Vidu video parameter is invalid',
+          'The Vidu video parameter is outside the official option set',
           'not_retryable'
         );
       }
-      optional[key] = value.trim();
+      optional[key] = normalized;
     }
+  }
+  if (values.seed !== undefined) {
+    const seed = values.seed;
+    if (
+      typeof seed !== 'number' ||
+      !Number.isSafeInteger(seed) ||
+      seed < 0 ||
+      seed > 2_147_483_647
+    ) {
+      throw new ViduVideoAdapterError(
+        'The Vidu seed is outside the official range',
+        'not_retryable'
+      );
+    }
+    if (seed !== 0) optional.seed = seed;
   }
   return { audio, optional };
 }
@@ -512,11 +536,34 @@ function durationRange(
     throw new ViduVideoAdapterError('The Vidu text2video model is unavailable', 'not_retryable');
   }
   if (modelKey === 'viduq3-drama') return { minimum: 2, maximum: 15 };
-  if (['viduq3-ad', 'viduq3-mix', 'viduq3-turbo'].includes(modelKey)) {
-    return { minimum: 3, maximum: 15 };
+  if (modelKey === 'viduq3-ad') return { minimum: 3, maximum: 15 };
+  if (['viduq3-mix', 'viduq3-turbo', 'viduq3'].includes(modelKey)) {
+    return { minimum: 3, maximum: 16 };
   }
-  if (modelKey === 'viduq3') return { minimum: 3, maximum: 16 };
   throw new ViduVideoAdapterError('The Vidu Q3 model is unavailable', 'not_retryable');
+}
+
+function optionSet(
+  modelKey: string,
+  mode: 'text' | 'reference',
+  key: 'resolution' | 'aspect_ratio'
+): readonly string[] {
+  if (mode === 'text') {
+    return key === 'resolution'
+      ? ['540p', '720p', '1080p']
+      : ['16:9', '9:16', '3:4', '4:3', '1:1'];
+  }
+  if (key === 'resolution') {
+    if (modelKey === 'viduq3-drama') return ['1080p'];
+    if (modelKey === 'viduq3-mix' || modelKey === 'viduq3-ad') {
+      return ['720p', '1080p'];
+    }
+    return ['540p', '720p', '1080p'];
+  }
+  if (modelKey === 'viduq3-drama' || modelKey === 'viduq3-ad') {
+    return ['16:9', '9:16', '4:3', '3:4', '1:1'];
+  }
+  return ['16:9', '9:16', '1:1'];
 }
 
 function requirePrompt(request: ProviderProtocolSubmitRequest): string {

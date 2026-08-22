@@ -32,6 +32,7 @@ import {
   ViduProviderPackage,
   ViduRegistryExecutionRouteResolver,
   createViduModelContract,
+  viduPackagedParameterSchemas,
   viduProviderPackageDescriptor,
   type ControlledImageMaterialPort,
   type CredentialProtector
@@ -169,6 +170,46 @@ describe('Vidu Provider Package migration', () => {
     expect(reloaded.protocolBindings).toHaveLength(1);
     expect(reloaded.models).toHaveLength(2);
     expect(reloaded.capabilities).toHaveLength(2);
+  });
+
+  it('aligns Vidu video parameter schemas with official options and revisions', () => {
+    const turbo = createViduModelContract('viduq3-turbo');
+    const textSchema = turbo.parameterSchemas.find(
+      (schema) => schema.productFeature === 'text_to_video'
+    )!;
+    const referenceSchema = turbo.parameterSchemas.find(
+      (schema) => schema.productFeature === 'image_to_video'
+    )!;
+
+    expect(textSchema).toMatchObject({ revision: 2 });
+    expect(textSchema.fields.map((field) => field.fieldId)).toEqual([
+      'audio',
+      'duration',
+      'resolution',
+      'aspect_ratio',
+      'seed'
+    ]);
+    expect(textSchema.fields.find((field) => field.fieldId === 'duration'))
+      .toMatchObject({ minimum: 1, maximum: 16 });
+    expect(textSchema.fields.find((field) => field.fieldId === 'resolution'))
+      .toMatchObject({ valueType: 'enum', options: ['540p', '720p', '1080p'] });
+    expect(textSchema.fields.find((field) => field.fieldId === 'aspect_ratio'))
+      .toMatchObject({
+        valueType: 'enum',
+        options: ['16:9', '9:16', '3:4', '4:3', '1:1']
+      });
+
+    expect(referenceSchema).toMatchObject({ revision: 2 });
+    expect(referenceSchema.fields.find((field) => field.fieldId === 'duration'))
+      .toMatchObject({ minimum: 3, maximum: 16 });
+    expect(referenceSchema.fields.find((field) => field.fieldId === 'resolution'))
+      .toMatchObject({ valueType: 'enum', options: ['540p', '720p', '1080p'] });
+
+    const drama = createViduModelContract('viduq3-drama').parameterSchemas[0];
+    expect(drama.fields.find((field) => field.fieldId === 'duration'))
+      .toMatchObject({ minimum: 2, maximum: 15 });
+    expect(drama.fields.find((field) => field.fieldId === 'resolution'))
+      .toMatchObject({ valueType: 'enum', options: ['1080p'] });
   });
 });
 
@@ -476,7 +517,20 @@ function routeFor(
   const feature = profile?.features.find(
     (candidate) => candidate.productFeature === productFeature
   );
-  if (!provider || !connection || !model || !profile || !binding || !feature) {
+  const parameterSchema = feature
+    ? viduPackagedParameterSchemas.find(
+        (candidate) => candidate.schemaId === feature.parameterSchemaId
+      )
+    : undefined;
+  if (
+    !provider ||
+    !connection ||
+    !model ||
+    !profile ||
+    !binding ||
+    !feature ||
+    !parameterSchema
+  ) {
     throw new Error('Vidu route fixture is incomplete');
   }
   const adapterVersion = binding.adapterKind === VIDU_IMAGE_V1_ADAPTER_ID
@@ -516,7 +570,7 @@ function routeFor(
     internalPurpose: feature.internalPurpose,
     featureMappingVersion: 1,
     parameterSchemaId: feature.parameterSchemaId,
-    parameterSchemaRevision: 1,
+    parameterSchemaRevision: parameterSchema.revision,
     resultSchemaId: feature.resultSchemaId,
     resultSchemaRevision: 1,
     usageSchemaId: feature.usageSchemaId as ProviderExecutionRouteSnapshotV1['usageSchemaId'],

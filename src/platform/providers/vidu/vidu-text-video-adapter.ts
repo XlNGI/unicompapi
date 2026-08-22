@@ -348,7 +348,13 @@ function videoParameters(
   modelKey: string,
   values: Readonly<Record<string, VideoDynamicParameterValue>>
 ): { readonly audio: boolean; readonly optional: Readonly<Record<string, unknown>> } {
-  const allowed = new Set(['audio', 'duration', 'resolution', 'aspect_ratio']);
+  const allowed = new Set([
+    'audio',
+    'duration',
+    'resolution',
+    'aspect_ratio',
+    'seed'
+  ]);
   if (Object.keys(values).some((key) => !allowed.has(key))) {
     throw new ViduTextVideoAdapterError(
       'The Vidu video request contains an unsupported parameter',
@@ -378,14 +384,33 @@ function videoParameters(
   for (const key of ['resolution', 'aspect_ratio'] as const) {
     const value = values[key];
     if (value !== undefined) {
-      if (typeof value !== 'string' || value.trim().length === 0) {
+      const normalized = typeof value === 'string' ? value.trim() : '';
+      const options = key === 'resolution'
+        ? ['540p', '720p', '1080p']
+        : ['16:9', '9:16', '3:4', '4:3', '1:1'];
+      if (!options.includes(normalized)) {
         throw new ViduTextVideoAdapterError(
-          'The Vidu video parameter is invalid',
+          'The Vidu video parameter is outside the official option set',
           'not_retryable'
         );
       }
-      optional[key] = value.trim();
+      optional[key] = normalized;
     }
+  }
+  if (values.seed !== undefined) {
+    const seed = values.seed;
+    if (
+      typeof seed !== 'number' ||
+      !Number.isSafeInteger(seed) ||
+      seed < 0 ||
+      seed > 2_147_483_647
+    ) {
+      throw new ViduTextVideoAdapterError(
+        'The Vidu seed is outside the official range',
+        'not_retryable'
+      );
+    }
+    if (seed !== 0) optional.seed = seed;
   }
   return { audio, optional };
 }

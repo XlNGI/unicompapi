@@ -49,7 +49,8 @@ describe('Vidu official text2video adapter', () => {
         audio: true,
         duration: 5,
         resolution: '720p',
-        aspect_ratio: '16:9'
+        aspect_ratio: '16:9',
+        seed: 42
       }))
     ).resolves.toEqual({
       kind: 'accepted_async',
@@ -68,8 +69,33 @@ describe('Vidu official text2video adapter', () => {
       audio: true,
       duration: 5,
       resolution: '720p',
-      aspect_ratio: '16:9'
+      aspect_ratio: '16:9',
+      seed: 42
     });
+  });
+
+  it('applies official q3 defaults and rejects invalid enum values before HTTP', async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, {}))
+    ).resolves.toMatchObject({ kind: 'accepted_async' });
+    expect(bodyOf(fixture.transport.requests[0])).toMatchObject({
+      audio: true
+    });
+    expect(bodyOf(fixture.transport.requests[0])).not.toHaveProperty('duration');
+    expect(bodyOf(fixture.transport.requests[0])).not.toHaveProperty('seed');
+
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { resolution: '4K' }))
+    ).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { aspect_ratio: '21:9' }))
+    ).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    await expect(
+      fixture.adapter.submit(submitRequest(fixture, { seed: -1 }))
+    ).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    expect(fixture.transport.requests).toHaveLength(1);
   });
 
   it('rejects materials, unsupported models and out-of-range durations before HTTP', async () => {
