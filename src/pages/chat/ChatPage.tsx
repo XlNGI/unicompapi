@@ -308,6 +308,13 @@ function documentKindLabel(kind: 'word' | 'excel' | 'ppt'): string {
   return kind === 'word' ? 'Word 文档' : kind === 'excel' ? 'Excel 表格' : 'PPT 演示';
 }
 
+function describeDocumentError(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  return `${documentErrorMessages[error.code] ?? error.message}（${error.code}）`;
+}
+
 interface AttachmentDraft {
   readonly fileId: string;
   readonly fileName: string;
@@ -1140,7 +1147,7 @@ export function ChatPage({
         confirmed: true
       });
       if (!started.ok) {
-        setNotice(documentErrorMessages[started.error.code] ?? started.error.message);
+        setNotice(describeDocumentError(started.error));
         if (selected) {
           const refreshedFailed = await chat.getConversation(selected.conversationId);
           if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
@@ -1183,7 +1190,7 @@ export function ChatPage({
         kind,
       });
       if (!generated.ok) {
-        setNotice(documentErrorMessages[generated.error.code] ?? generated.error.message);
+        setNotice(describeDocumentError(generated.error));
       } else {
         setNotice('文档已生成。');
       }
@@ -1209,7 +1216,11 @@ export function ChatPage({
       const result = await api.getResponseExecution(responseExecutionId);
       if (!result.ok) return undefined;
       if (result.value.state === 'completed') return result.value;
-      if (result.value.state === 'failed' || result.value.state === 'cancelled') {
+      if (
+        result.value.state === 'failed' ||
+        result.value.state === 'cancelled' ||
+        result.value.state === 'interrupted'
+      ) {
         return undefined;
       }
     }
