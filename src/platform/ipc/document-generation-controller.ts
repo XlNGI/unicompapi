@@ -137,23 +137,18 @@ export class DocumentGenerationController {
       const session = this.requireSession();
       const streaming = this.dependencies.getStreaming(session);
       const runner = this.dependencies.getRunner(session);
-      const conversation = await this.dependencies.loadConversation(
+      const conversation = await this.waitForCompletedMessage(
         session,
-        toConversationId(input.conversationId)
+        input.conversationId,
+        input.messageId
       );
-      if (!conversation) {
-        throw new DocumentGenerationError(
-          'storage_error',
-          'Conversation does not exist'
-        );
-      }
       const message = conversation.messages.find(
         (item) => item.id === toMessageId(input.messageId)
       );
-      if (!message || message.role !== 'assistant' || message.state !== 'completed') {
+      if (!message || message.role !== 'assistant') {
         throw new DocumentGenerationError(
           'storage_error',
-          'Message is not a completed assistant message'
+          'Assistant message disappeared during document generation'
         );
       }
       const outline = parseMarkdownToOutline(message.content, input.kind);
@@ -294,6 +289,42 @@ export class DocumentGenerationController {
     } catch {
       // Best effort: the conversation may already have moved past this message.
     }
+  }
+
+  private async waitForCompletedMessage(
+    session: StorageProjectSession,
+    conversationId: string,
+    messageId: string
+  ): Promise<Conversation> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const conversation = await this.dependencies.loadConversation(
+        session,
+        toConversationId(conversationId)
+      );
+      if (!conversation) {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'Conversation does not exist'
+        );
+      }
+      const message = conversation.messages.find(
+        (item) => item.id === toMessageId(messageId)
+      );
+      if (message?.state === 'completed') {
+        return conversation;
+      }
+      if (message?.state === 'failed' || message?.state === 'cancelled') {
+        throw new DocumentGenerationError(
+          'storage_error',
+          `Assistant message ended in ${message.state} state`
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new DocumentGenerationError(
+      'storage_error',
+      'Assistant message did not complete in time'
+    );
   }
 
   private execute<T>(
