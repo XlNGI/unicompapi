@@ -42,6 +42,7 @@ import type { DocumentExtractionStatus } from '../../shared/document-attachment-
 import type { DocumentThemeColorsDto } from '../../shared/document-attachment-ipc';
 import {
   composeDocumentRevisionInput,
+  extractSectionHeadings,
   inferDocumentKind,
   type DocumentKindOption
 } from './documentDrafting';
@@ -349,6 +350,8 @@ export function ChatPage({
   const chat = window.unicomp?.chatContexts;
   const documentGeneration = window.unicomp?.documentGeneration;
   const documentAttachments = window.unicomp?.documentAttachments;
+  const imageFeatures = window.unicomp?.imageFeatures;
+  const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
@@ -1292,18 +1295,25 @@ export function ChatPage({
         return;
       }
       setNotice('正在生成本地 Office 文档…');
+      const aiImages = await generateAiSlideImages(
+        completion.content,
+        attachments.filter((attachment) => isImageFileName(attachment.fileName)).length
+      );
       const generated = await documentGeneration.generateFromMessage({
         conversationId: targetId,
         expectedRevision: refreshedBefore.value.revision,
         messageId: completion.assistantMessageId,
         kind,
         theme: documentTheme,
-        images: attachments
-          .filter((attachment) => isImageFileName(attachment.fileName))
-          .map((attachment) => ({
-            fileId: attachment.fileId,
-            caption: attachment.fileName
-          })),
+        images: [
+          ...attachments
+            .filter((attachment) => isImageFileName(attachment.fileName))
+            .map((attachment) => ({
+              fileId: attachment.fileId,
+              caption: attachment.fileName
+            })),
+          ...aiImages
+        ],
         ...(templateColors ? { customTheme: templateColors } : {}),
         ...(aiImagesEnabled ? { aiImages: true } : {})
       });
@@ -1348,6 +1358,63 @@ export function ChatPage({
       }
     }
     return undefined;
+  }
+
+  async function generateAiSlideImages(
+    content: string,
+    userImageCount: number
+  ): Promise<readonly { readonly workId: string; readonly caption: string }[]> {
+    if (!aiImagesEnabled || !imageFeatures || !imageWorkspaces) return [];
+    if (
+      !window.confirm(
+        'AI 配图将调用你已配置的图片模型为文档分节生成配图，可能消耗模型额度。继续？'
+      )
+    ) {
+      setNotice('已取消 AI 配图。');
+      return [];
+    }
+    const draft = await imageWorkspaces.create('quick_image');
+    if (!draft.ok) {
+      setNotice('无法准备图片生成草稿，AI 配图已跳过。');
+      return [];
+    }
+    const candidates = await imageFeatures.listCandidates(
+      draft.value.draftId,
+      draft.value.updatedAt
+    );
+    const candidate = candidates.ok
+      ? candidates.value.find((item) => item.available)
+      : undefined;
+    if (!candidate) {
+      setNotice('未配置可用的图片生成模型，AI 配图已跳过。');
+      return [];
+    }
+    const headings = extractSectionHeadings(content).slice(
+      0,
+      Math.max(0, 6 - userImageCount)
+    );
+    const generated: { readonly workId: string; readonly caption: string }[] = [];
+    for (const heading of headings) {
+      try {
+        const result = await imageFeatures.generateQuickImage(
+          `为演示文稿「${heading}」一页生成配图，风格与内容契合，画面不含文字`,
+          candidate.candidateId,
+          {}
+        );
+        if (result.ok && result.value.submission.workId) {
+          generated.push({
+            workId: result.value.submission.workId,
+            caption: heading
+          });
+        }
+      } catch {
+        // 单张配图失败不阻断整体生成。
+      }
+    }
+    if (headings.length > 0 && generated.length === 0) {
+      setNotice('AI 配图生成失败，文档将不包含 AI 配图。');
+    }
+    return generated;
   }
 
   async function cancelResponse() {

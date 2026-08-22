@@ -60,3 +60,25 @@ export function composeDocumentRevisionInput(
   }
   return `上一版文档内容：\n${previousContent}\n\n修改要求：\n${requirements}`;
 }
+
+export function extractSectionHeadings(
+  markdown: string,
+  limit = 6
+): readonly string[] {
+  const headings: string[] = [];
+  const regex = /^#{1,3}\s+(.+)$/gm;
+  let match = regex.exec(markdown);
+  while (match && headings.length < limit) {
+    const text = match[1].trim();
+    if (text) headings.push(text.slice(0, 60));
+    match = regex.exec(markdown);
+  }
+  if (headings.length === 0) {
+    const firstLine = markdown
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (firstLine) headings.push(firstLine.slice(0, 60));
+  }
+  return headings;
+}

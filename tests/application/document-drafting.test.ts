@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOutlineFromRequirements,
   composeDocumentRevisionInput,
+  extractSectionHeadings,
   inferDocumentKind,
   sha256Hex
 } from '../../src/pages/chat/documentDrafting';
@@ -43,5 +44,12 @@ describe('document drafting helpers', () => {
     expect(input).toContain('修改要求');
     expect(input).toContain('强调风险');
     expect(composeDocumentRevisionInput(undefined, '新需求')).toBe('新需求');
+  });
+
+  it('extracts section headings from assistant markdown', () => {
+    expect(
+      extractSectionHeadings('# 封面\n\n## 本周进展\n\n正文\n\n## 下周计划')
+    ).toEqual(['封面', '本周进展', '下周计划']);
+    expect(extractSectionHeadings('没有标题的正文')).toEqual(['没有标题的正文']);
   });
 });

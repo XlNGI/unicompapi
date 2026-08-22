@@ -61,7 +61,8 @@ export interface DocumentGenerationPlanInput {
   readonly parentWorkId?: WorkId;
   readonly theme?: DocumentThemeId;
   readonly images?: readonly {
-    readonly fileId: string;
+    readonly fileId?: string;
+    readonly workId?: string;
     readonly caption?: string;
   }[];
   readonly customTheme?: ExtractedThemeColors;
@@ -285,7 +286,8 @@ export class DocumentGenerationRunner {
   private async resolveImages(
     context: RunnerContext,
     images: readonly {
-      readonly fileId: string;
+      readonly fileId?: string;
+      readonly workId?: string;
       readonly caption?: string;
     }[]
   ): Promise<
@@ -296,11 +298,25 @@ export class DocumentGenerationRunner {
       readonly caption?: string;
     }[] = [];
     for (const image of images) {
-      const file = await context.files.get(toFileReferenceId(image.fileId));
+      let file: FileReference | undefined;
+      if (image.workId !== undefined) {
+        const work = await context.works.get(toWorkId(image.workId));
+        if (!work) {
+          throw new DocumentGenerationError(
+            'storage_error',
+            'AI image work does not exist'
+          );
+        }
+        file = await context.files.get(work.fileId);
+      } else if (image.fileId !== undefined) {
+        file = await context.files.get(toFileReferenceId(image.fileId));
+      } else {
+        file = undefined;
+      }
       if (!file) {
         throw new DocumentGenerationError(
           'storage_error',
-          'Image attachment does not exist'
+          'Image source does not exist'
         );
       }
       resolved.push({

@@ -60,7 +60,8 @@ export interface DocumentGenerationFromMessageRequest {
   readonly kind: 'word' | 'excel' | 'ppt';
   readonly theme?: 'blueprint' | 'ink' | 'forest';
   readonly images?: readonly {
-    readonly fileId: string;
+    readonly fileId?: string;
+    readonly workId?: string;
     readonly caption?: string;
   }[];
   readonly customTheme?: {
@@ -174,7 +175,11 @@ function requireTheme(
 
 function parseImages(
   value: unknown
-): readonly { readonly fileId: string; readonly caption?: string }[] {
+): readonly {
+  readonly fileId?: string;
+  readonly workId?: string;
+  readonly caption?: string;
+}[] {
   if (!Array.isArray(value)) {
     throw new TypeError('images must be an array');
   }
@@ -182,8 +187,14 @@ function parseImages(
     if (!isRecord(item)) {
       throw new TypeError(`images[${index}] must be an object`);
     }
+    const fileId = item.fileId === undefined ? undefined : requireString(item.fileId, `images[${index}].fileId`);
+    const workId = item.workId === undefined ? undefined : requireString(item.workId, `images[${index}].workId`);
+    if (!fileId && !workId) {
+      throw new TypeError(`images[${index}] requires fileId or workId`);
+    }
     return {
-      fileId: requireString(item.fileId, `images[${index}].fileId`),
+      ...(fileId !== undefined ? { fileId } : {}),
+      ...(workId !== undefined ? { workId } : {}),
       ...(item.caption !== undefined
         ? { caption: requireString(item.caption, `images[${index}].caption`) }
         : {})

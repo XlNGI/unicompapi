@@ -24,6 +24,9 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /aiImagesEnabled/);
   assert.match(page, /AI 配图/);
   assert.match(page, /ai_images_unavailable/);
+  assert.match(page, /generateAiSlideImages/);
+  assert.match(page, /generateQuickImage/);
+  assert.match(page, /extractSectionHeadings/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);
