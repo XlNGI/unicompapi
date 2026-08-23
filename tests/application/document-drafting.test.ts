@@ -4,6 +4,7 @@ import {
   buildOutlineFromRequirements,
   composeDocumentRevisionInput,
   detectDocumentIntent,
+  documentKindInstruction,
   extractSectionHeadings,
   inferDocumentKind,
   sha256Hex
@@ -70,5 +71,11 @@ describe('document drafting helpers', () => {
       kind: 'chat',
       missing: []
     });
+  });
+
+  it('returns document-type writing rules', () => {
+    expect(documentKindInstruction('ppt')).toContain('每页最多 3 个要点');
+    expect(documentKindInstruction('excel')).toContain('列名');
+    expect(documentKindInstruction('word')).toContain('标题层级');
   });
 });

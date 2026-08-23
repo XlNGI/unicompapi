@@ -376,7 +376,7 @@ async function buildPptBuffer(
     for (const block of section.blocks) {
       if (block.type === 'table') {
         if (textLines.length > 0) {
-          slide.addText(pptTextLines(textLines), {
+          slide.addText(pptTextLines(textLines, theme.accent), {
             x: 0.6,
             y,
             w: textWidth,
@@ -403,7 +403,7 @@ async function buildPptBuffer(
       }
       if (block.type === 'chart') {
         if (textLines.length > 0) {
-        slide.addText(pptTextLines(textLines), {
+        slide.addText(pptTextLines(textLines, theme.accent), {
           x: 0.6,
           y,
           w: textWidth,
@@ -446,7 +446,7 @@ async function buildPptBuffer(
       }
     }
     if (textLines.length > 0) {
-      slide.addText(pptTextLines(textLines), {
+      slide.addText(pptTextLines(textLines, theme.accent), {
         x: 0.6,
         y,
         w: 12.3,
@@ -455,6 +455,15 @@ async function buildPptBuffer(
         color: theme.text
       });
     }
+    slide.addText(String(sectionIndex + 2), {
+      x: 12.3,
+      y: 7.05,
+      w: 0.6,
+      h: 0.3,
+      fontSize: 10,
+      color: theme.muted,
+      align: 'right'
+    });
   });
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
 }
@@ -487,10 +496,14 @@ function contentHeightEstimate(section: DocumentOutlineSection): number {
 }
 
 function pptTextLines(
-  lines: readonly string[]
+  lines: readonly string[],
+  accent: string
 ): { readonly text: string; readonly options: Record<string, unknown> }[] {
   return lines.map((line) => ({
     text: line,
-    options: { bullet: { code: '2022' }, paraSpaceAfter: 6 }
+    options: {
+      bullet: { code: '2022', color: accent },
+      paraSpaceAfter: 6
+    }
   }));
 }

@@ -87,6 +87,18 @@ export function extractSectionHeadings(
   return headings;
 }
 
+export function documentKindInstruction(
+  kind: 'word' | 'excel' | 'ppt'
+): string {
+  if (kind === 'ppt') {
+    return '这是 PPT 文档：一页只讲一个观点，每页最多 3 个要点、每个要点不超过 15 个字，观点先行，禁止大段文字；用标题与短要点组织内容。';
+  }
+  if (kind === 'excel') {
+    return '这是 Excel 表格：以清晰的列名与数据行为主，避免大段文字，需要汇总时给出合计行。';
+  }
+  return '这是 Word 文档：标题层级清晰，段落完整，关键数据用表格呈现。';
+}
+
 export interface DocumentIntent {
   readonly kind: 'document' | 'chat';
   readonly documentKind?: 'word' | 'excel' | 'ppt';

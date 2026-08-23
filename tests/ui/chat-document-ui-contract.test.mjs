@@ -37,6 +37,7 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /retrieveContext/);
   assert.match(page, /detectDocumentIntent/);
   assert.match(page, /pendingDocumentClarification/);
+  assert.match(page, /documentKindInstruction/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);

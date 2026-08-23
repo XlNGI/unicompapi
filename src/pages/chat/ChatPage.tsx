@@ -43,6 +43,7 @@ import type { DocumentThemeColorsDto } from '../../shared/document-attachment-ip
 import {
   composeDocumentRevisionInput,
   detectDocumentIntent,
+  documentKindInstruction,
   extractSectionHeadings,
   inferDocumentKind,
   type DocumentKindOption
@@ -1261,10 +1262,15 @@ export function ChatPage({
       previousDocument?.content,
       requirements
     );
+    const kind = documentKind === 'auto'
+      ? inferDocumentKind(requirements)
+      : documentKind;
     const combined = attachmentText
       ? `${revisionInput}\n\n${attachmentText}`
       : revisionInput;
-    let modelContent = combined;
+    const kindInstruction = documentKindInstruction(kind);
+    const combinedWithKind = `${combined}\n\n${kindInstruction}`;
+    let modelContent = combinedWithKind;
     if (ragEnabled && documentAttachments) {
       try {
         const ragResult = await documentAttachments.retrieveContext({
@@ -1278,7 +1284,7 @@ export function ChatPage({
                 `【资料：${chunk.source}】\n${chunk.text.slice(0, 800)}`
             )
             .join('\n\n');
-          modelContent = `${combined}\n\n以下为检索到的项目资料：\n${ragText}`;
+          modelContent = `${combinedWithKind}\n\n以下为检索到的项目资料：\n${ragText}`;
         } else if (ragResult.ok) {
           setNotice('未检索到相关项目资料，本次按原需求生成。');
         }
@@ -1286,9 +1292,6 @@ export function ChatPage({
         // 检索失败不阻断生成。
       }
     }
-    const kind = documentKind === 'auto'
-      ? inferDocumentKind(requirements)
-      : documentKind;
     try {
       const started = await chat.startResponse({
         clientCommandId: `chat-doc-${crypto.randomUUID()}`,
