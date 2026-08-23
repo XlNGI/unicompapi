@@ -41,3 +41,9 @@ export function resolveLayoutStyle(
     muted: theme.muted
   };
 }
+
+/**
+ * 动画预留：当前 pptxgenjs 4.0.1 不原生支持动画。
+ * 后续通过 OOXML 动画注入或升级依赖实现时，统一使用该预设。
+ */
+export const slideAnimationPreset = 'fade' as const;

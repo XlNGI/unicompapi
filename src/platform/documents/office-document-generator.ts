@@ -406,7 +406,7 @@ async function buildPptBuffer(
         slide.addText(pptTextLines(textLines, theme.accent), {
           x: 0.6,
           y,
-          w: textWidth,
+            w: textWidth,
             h: Math.max(0.6, textLines.length * 0.45),
             fontSize: 16,
             color: theme.text
@@ -431,7 +431,8 @@ async function buildPptBuffer(
             showTitle: Boolean(block.title),
             title: block.title ?? '',
             showLegend: true,
-            showValue: true
+            showValue: true,
+            chartColors: chartPalette(theme.accent)
           }
         );
         y += 5.1;
@@ -506,6 +507,15 @@ async function buildPptBuffer(
     });
   }
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+}
+
+function chartPalette(accent: string): string[] {
+  return [
+    accent,
+    tintColor(accent, 0.62),
+    tintColor(accent, 0.35),
+    tintColor(accent, 0.18)
+  ];
 }
 
 function tintColor(hex: string, ratio: number): string {
