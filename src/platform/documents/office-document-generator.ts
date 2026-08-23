@@ -446,11 +446,14 @@ async function buildPptBuffer(
       }
     }
     if (textLines.length > 0) {
-      slide.addText(pptTextLines(textLines, theme.accent), {
+      const maxLines = Math.max(1, Math.floor((cardHeight - 0.35) / 0.45));
+      const cappedLines =
+        textLines.length > maxLines ? textLines.slice(0, maxLines) : textLines;
+      slide.addText(pptTextLines(cappedLines, theme.accent), {
         x: 0.6,
         y,
-        w: 12.3,
-        h: Math.max(0.6, textLines.length * 0.45),
+        w: textWidth,
+        h: Math.max(0.6, cappedLines.length * 0.45),
         fontSize: 16,
         color: theme.text
       });
@@ -465,6 +468,43 @@ async function buildPptBuffer(
       align: 'right'
     });
   });
+  if (outline.sections.length > 0) {
+    const closing = pptx.addSlide();
+    closing.background = { color: theme.background };
+    closing.addShape('rect', {
+      x: 0,
+      y: 0,
+      w: 13.33,
+      h: 0.18,
+      fill: { color: theme.accent }
+    });
+    closing.addShape('rect', {
+      x: 0,
+      y: 7.2,
+      w: 2.2,
+      h: 0.18,
+      fill: { color: theme.accent }
+    });
+    closing.addText('谢谢观看', {
+      x: 0.6,
+      y: 2.8,
+      w: 12.13,
+      h: 1.0,
+      fontSize: 34,
+      bold: true,
+      color: theme.accent,
+      align: 'center'
+    });
+    closing.addText(outline.title, {
+      x: 0.6,
+      y: 3.9,
+      w: 12.13,
+      h: 0.6,
+      fontSize: 18,
+      color: theme.muted,
+      align: 'center'
+    });
+  }
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
 }
 

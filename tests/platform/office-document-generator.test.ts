@@ -112,10 +112,13 @@ describe('office document generator', () => {
     expect(zip.getEntry('ppt/presentation.xml')).toBeTruthy();
     expect(zip.getEntry('ppt/slides/slide1.xml')).toBeTruthy();
     expect(zip.getEntry('ppt/slides/slide2.xml')).toBeTruthy();
+    expect(zip.getEntry('ppt/slides/slide4.xml')).toBeTruthy();
     const firstSlide = zip.readAsText('ppt/slides/slide1.xml');
     expect(firstSlide).toContain('季度销售复盘');
     const secondSlide = zip.readAsText('ppt/slides/slide2.xml');
     expect(secondSlide).toContain('业绩概览');
+    const closingSlide = zip.readAsText('ppt/slides/slide4.xml');
+    expect(closingSlide).toContain('谢谢观看');
   });
 
   it('renders chart blocks as native pptx charts', async () => {
