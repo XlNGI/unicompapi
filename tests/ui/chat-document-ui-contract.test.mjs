@@ -35,6 +35,8 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /ragEnabled/);
   assert.match(page, /检索资料/);
   assert.match(page, /retrieveContext/);
+  assert.match(page, /detectDocumentIntent/);
+  assert.match(page, /pendingDocumentClarification/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
   assert.match(page, /getPathForFile/);

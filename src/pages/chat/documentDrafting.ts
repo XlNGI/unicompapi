@@ -86,3 +86,46 @@ export function extractSectionHeadings(
   }
   return headings;
 }
+
+export interface DocumentIntent {
+  readonly kind: 'document' | 'chat';
+  readonly documentKind?: 'word' | 'excel' | 'ppt';
+  readonly missing: readonly string[];
+}
+
+const documentActionPattern = /(做|生成|制作|创建|写|出一份|帮我)/;
+const typePatterns: readonly {
+  readonly kind: 'word' | 'excel' | 'ppt';
+  readonly pattern: RegExp;
+}[] = [
+  {
+    kind: 'ppt',
+    pattern: /(ppt|pptx|幻灯片|演示|汇报|宣讲|课件|路演|答辩)/
+  },
+  {
+    kind: 'excel',
+    pattern: /(excel|xlsx|表格|数据表|台账|清单|统计表)/
+  },
+  {
+    kind: 'word',
+    pattern: /(word|docx|文档|周报|总结|纪要|方案|报告|简历|计划|说明|介绍)/
+  }
+];
+const audiencePattern = /(领导|老板|客户|同事|团队|学生|管理层|董事会|甲方)/;
+const contentPattern = /(包含|包括|涉及|需要|要求|要有|重点|内容|数据)/;
+
+export function detectDocumentIntent(text: string): DocumentIntent {
+  const matched = typePatterns.find((item) => item.pattern.test(text));
+  if (!matched || !documentActionPattern.test(text)) {
+    return { kind: 'chat', missing: [] };
+  }
+  const missing: string[] = [];
+  if (!audiencePattern.test(text) && !contentPattern.test(text)) {
+    missing.push('受众或需要包含的内容点');
+  }
+  return {
+    kind: 'document',
+    documentKind: matched.kind,
+    missing
+  };
+}

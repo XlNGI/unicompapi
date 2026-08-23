@@ -3,6 +3,7 @@ import {
   DOCUMENT_GENERATION_INSTRUCTION,
   buildOutlineFromRequirements,
   composeDocumentRevisionInput,
+  detectDocumentIntent,
   extractSectionHeadings,
   inferDocumentKind,
   sha256Hex
@@ -55,5 +56,19 @@ describe('document drafting helpers', () => {
       extractSectionHeadings('# 封面\n\n## 本周进展\n\n正文\n\n## 下周计划')
     ).toEqual(['封面', '本周进展', '下周计划']);
     expect(extractSectionHeadings('没有标题的正文')).toEqual(['没有标题的正文']);
+  });
+
+  it('detects document intent and missing details', () => {
+    expect(detectDocumentIntent('帮我做一份季度汇报 PPT')).toMatchObject({
+      kind: 'document',
+      documentKind: 'ppt'
+    });
+    expect(
+      detectDocumentIntent('帮我做一份季度汇报 PPT，给领导看，包含业绩和问题')
+    ).toMatchObject({ kind: 'document', documentKind: 'ppt', missing: [] });
+    expect(detectDocumentIntent('今天天气怎么样')).toEqual({
+      kind: 'chat',
+      missing: []
+    });
   });
 });

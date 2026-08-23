@@ -42,6 +42,7 @@ import type { DocumentExtractionStatus } from '../../shared/document-attachment-
 import type { DocumentThemeColorsDto } from '../../shared/document-attachment-ipc';
 import {
   composeDocumentRevisionInput,
+  detectDocumentIntent,
   extractSectionHeadings,
   inferDocumentKind,
   type DocumentKindOption
@@ -385,6 +386,10 @@ export function ChatPage({
   const [selectedImageCandidateId, setSelectedImageCandidateId] =
     useState<string>();
   const [ragEnabled, setRagEnabled] = useState(false);
+  const [pendingDocumentKind, setPendingDocumentKind] =
+    useState<DocumentKindOption>();
+  const [pendingDocumentClarification, setPendingDocumentClarification] =
+    useState(false);
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
   const [templateFileId, setTemplateFileId] = useState<string>();
   const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
@@ -991,6 +996,33 @@ export function ChatPage({
       responseInProgress ||
       busy
     ) {
+      return;
+    }
+    const documentIntent = detectDocumentIntent(input.trim());
+    if (pendingDocumentClarification) {
+      setPendingDocumentClarification(false);
+      if (documentIntent.documentKind) setDocumentKind(documentIntent.documentKind);
+      else if (pendingDocumentKind) setDocumentKind(pendingDocumentKind);
+      setPendingDocumentKind(undefined);
+      await sendDocumentMessage();
+      return;
+    }
+    if (documentIntent.kind === 'document') {
+      const kind = documentIntent.documentKind ?? 'auto';
+      setDocumentKind(kind);
+      if (documentIntent.missing.length > 0) {
+        setPendingDocumentClarification(true);
+        setPendingDocumentKind(kind);
+        setNotice(
+          `好的，帮你生成${documentKindLabel(
+            documentIntent.documentKind ?? 'word'
+          )}。请补充：${documentIntent.missing.join(
+            '、'
+          )}。例如：主题是什么、给谁看、需要包含哪些内容。`
+        );
+        return;
+      }
+      await sendDocumentMessage();
       return;
     }
     rendererTrace('sendMessage:start', {
