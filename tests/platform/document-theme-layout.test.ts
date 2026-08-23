@@ -9,6 +9,12 @@ import {
 describe('document themes', () => {
   it('resolves known themes and falls back to the default', () => {
     expect(resolveDocumentTheme('forest').id).toBe('forest');
+    expect(resolveDocumentTheme('financing')).toMatchObject({
+      id: 'financing',
+      name: '融资演讲稿',
+      accent: '078AA3',
+      presentationStyle: 'financing'
+    });
     expect(resolveDocumentTheme('unknown').id).toBe('blueprint');
     expect(documentThemes.blueprint.accent).toMatch(/^[0-9A-F]{6}$/);
   });

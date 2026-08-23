@@ -110,12 +110,13 @@ const documentKindOptions: readonly {
 ];
 
 const documentThemeOptions: readonly {
-  readonly value: 'blueprint' | 'ink' | 'forest';
+  readonly value: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly label: string;
 }[] = [
   { value: 'blueprint', label: '商务蓝' },
   { value: 'ink', label: '墨色' },
-  { value: 'forest', label: '松绿' }
+  { value: 'forest', label: '松绿' },
+  { value: 'financing', label: '融资演讲稿' }
 ];
 
 function rendererTrace(message: string, detail?: unknown): void {
@@ -378,7 +379,7 @@ export function ChatPage({
   const [documentMode, setDocumentMode] = useState(false);
   const [documentKind, setDocumentKind] = useState<DocumentKindOption>('auto');
   const [documentTheme, setDocumentTheme] = useState<
-    'blueprint' | 'ink' | 'forest'
+    'blueprint' | 'ink' | 'forest' | 'financing'
   >('blueprint');
   const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
   const [imageCandidateOptions, setImageCandidateOptions] = useState<

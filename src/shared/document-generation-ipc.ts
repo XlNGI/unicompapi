@@ -50,7 +50,7 @@ export interface DocumentGenerationRequest {
   readonly contentFingerprint: string;
   readonly draftRevision: number;
   readonly sourceDraftId: string;
-  readonly theme?: 'blueprint' | 'ink' | 'forest';
+  readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
 }
 
 export interface DocumentGenerationFromMessageRequest {
@@ -58,7 +58,7 @@ export interface DocumentGenerationFromMessageRequest {
   readonly expectedRevision: number;
   readonly messageId: string;
   readonly kind: 'word' | 'excel' | 'ppt';
-  readonly theme?: 'blueprint' | 'ink' | 'forest';
+  readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly images?: readonly {
     readonly fileId?: string;
     readonly workId?: string;
@@ -166,9 +166,14 @@ function requireKind(value: unknown): 'word' | 'excel' | 'ppt' {
 
 function requireTheme(
   value: unknown
-): 'blueprint' | 'ink' | 'forest' {
-  if (value !== 'blueprint' && value !== 'ink' && value !== 'forest') {
-    throw new TypeError('theme must be blueprint, ink or forest');
+): 'blueprint' | 'ink' | 'forest' | 'financing' {
+  if (
+    value !== 'blueprint' &&
+    value !== 'ink' &&
+    value !== 'forest' &&
+    value !== 'financing'
+  ) {
+    throw new TypeError('theme must be blueprint, ink, forest or financing');
   }
   return value;
 }

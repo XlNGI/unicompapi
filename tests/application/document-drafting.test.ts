@@ -14,6 +14,7 @@ describe('document drafting helpers', () => {
   it('infers the document kind from requirements', () => {
     expect(inferDocumentKind('请生成季度销售数据表格')).toBe('excel');
     expect(inferDocumentKind('做一个工作汇报 PPT')).toBe('ppt');
+    expect(inferDocumentKind('修改 PPT 中的财务表格数据')).toBe('ppt');
     expect(inferDocumentKind('写一份项目周报')).toBe('word');
   });
 
@@ -45,6 +46,8 @@ describe('document drafting helpers', () => {
     expect(input).toContain(DOCUMENT_GENERATION_INSTRUCTION);
     expect(input).toContain('上一版文档内容');
     expect(input).toContain('# 项目周报');
+    expect(input).toContain('这是一次局部修改');
+    expect(input).toContain('其他内容、顺序、标题和样式保持不变');
     expect(input).toContain('修改要求');
     expect(input).toContain('强调风险');
     expect(composeDocumentRevisionInput(undefined, '新需求')).toContain(
@@ -75,6 +78,9 @@ describe('document drafting helpers', () => {
 
   it('returns document-type writing rules', () => {
     expect(documentKindInstruction('ppt')).toContain('每页最多 3 个要点');
+    expect(documentKindInstruction('ppt')).toContain('"type":"table"');
+    expect(documentKindInstruction('ppt')).toContain('"type":"chart"');
+    expect(documentKindInstruction('ppt')).toContain('必须同时提供 table 和 chart');
     expect(documentKindInstruction('excel')).toContain('列名');
     expect(documentKindInstruction('word')).toContain('标题层级');
   });

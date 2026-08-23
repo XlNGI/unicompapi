@@ -1,15 +1,15 @@
 export type DocumentKindOption = 'auto' | 'word' | 'excel' | 'ppt';
 
 export const DOCUMENT_GENERATION_INSTRUCTION =
-  '请直接输出文档正文（Markdown 格式），不要寒暄、不要解释、不要任何前后缀，直接从文档标题开始。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
+  '请直接输出文档正文（优先按文档类型规则输出 JSON 大纲，无法结构化时使用 Markdown），不要寒暄、不要解释、不要任何前后缀。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
 
 export function inferDocumentKind(requirements: string): 'word' | 'excel' | 'ppt' {
   const text = requirements.toLowerCase();
-  if (/表格|数据|统计|excel|xlsx|sheet|清单|台账/.test(text)) {
-    return 'excel';
-  }
   if (/汇报|演示|ppt|pptx|幻灯片|课件|路演|宣讲/.test(text)) {
     return 'ppt';
+  }
+  if (/表格|数据|统计|excel|xlsx|sheet|清单|台账/.test(text)) {
+    return 'excel';
   }
   return 'word';
 }
@@ -60,7 +60,7 @@ export function composeDocumentRevisionInput(
 ): string {
   const body =
     previousContent && previousContent.trim().length > 0
-      ? `上一版文档内容：\n${previousContent}\n\n修改要求：\n${requirements}`
+      ? `上一版文档内容：\n${previousContent}\n\n这是一次局部修改：只修改用户明确指出的页面、分节、表格、图表或单元格，其他内容、顺序、标题和样式保持不变。输出时仍需返回完整文档大纲，以便生成新版文件。\n\n修改要求：\n${requirements}`
       : requirements;
   return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}`;
 }
@@ -91,7 +91,13 @@ export function documentKindInstruction(
   kind: 'word' | 'excel' | 'ppt'
 ): string {
   if (kind === 'ppt') {
-    return '这是 PPT 文档：一页只讲一个观点，每页最多 3 个要点、每个要点不超过 15 个字，观点先行，禁止大段文字；用标题与短要点组织内容。';
+    return [
+      '这是 PPT 文档：一页只讲一个观点，每页最多 3 个要点、每个要点不超过 15 个字，观点先行，禁止大段文字。',
+      '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
+      '{"kind":"ppt","title":"标题","sections":[{"heading":"分节标题","level":1,"blocks":[{"type":"bullets","items":["要点"]},{"type":"table","header":["列名"],"rows":[["数据"]]},{"type":"chart","chartKind":"bar","title":"图表标题","data":[{"label":"分类","value":1}]}]}]}。',
+      '只在资料中有足够数据时输出 table 或 chart；需要比较数值时必须同时提供 table 和 chart，chartKind 使用 bar 或 pie，value 必须是数字。没有可靠数据时不要编造。',
+      '如果无法输出 JSON，才使用 Markdown 标题、短要点和标准管线表格。'
+    ].join('\n');
   }
   if (kind === 'excel') {
     return '这是 Excel 表格：以清晰的列名与数据行为主，避免大段文字，需要汇总时给出合计行。';

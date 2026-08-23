@@ -278,8 +278,9 @@ async function buildPptBuffer(
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = outline.title;
+  const financing = theme.presentationStyle === 'financing';
   const titleSlide = pptx.addSlide();
-  titleSlide.background = { color: theme.background };
+  titleSlide.background = { color: financing ? '202020' : theme.background };
   titleSlide.addShape('rect', {
     x: 0,
     y: 0,
@@ -294,30 +295,55 @@ async function buildPptBuffer(
     h: 0.18,
     fill: { color: theme.accent }
   });
+  if (financing) {
+    titleSlide.addShape('rect', {
+      x: 0,
+      y: 4.58,
+      w: 10.05,
+      h: 0.18,
+      fill: { color: theme.accent }
+    });
+  }
   titleSlide.addText(outline.title, {
-    x: 0.6,
-    y: 2.0,
-    w: 12.3,
+    x: financing ? 1.02 : 0.6,
+    y: financing ? 4.95 : 2.0,
+    w: financing ? 8.6 : 12.3,
     h: 1.2,
     fontSize: 32,
     bold: true,
-    color: theme.accent,
-    align: 'center'
+    color: financing ? 'FFFFFF' : theme.accent,
+    align: financing ? 'left' : 'center'
   });
   if (outline.sections.length > 0) {
     titleSlide.addText(outline.sections[0].heading, {
-      x: 0.6,
-      y: 3.3,
-      w: 12.3,
+      x: financing ? 1.02 : 0.6,
+      y: financing ? 6.0 : 3.3,
+      w: financing ? 8.6 : 12.3,
       h: 0.8,
       fontSize: 18,
-      align: 'center',
-      color: theme.muted
+      align: financing ? 'left' : 'center',
+      color: financing ? 'FFFFFF' : theme.muted
     });
   }
   outline.sections.forEach((section, sectionIndex) => {
     const slide = pptx.addSlide();
     slide.background = { color: theme.background };
+    if (financing) {
+      slide.addShape('rect', {
+        x: 0,
+        y: 0,
+        w: 13.33,
+        h: 1.2,
+        fill: { color: '202020' }
+      });
+      slide.addShape('rect', {
+        x: 0,
+        y: 1.08,
+        w: 10.95,
+        h: 0.16,
+        fill: { color: theme.accent }
+      });
+    }
     const image = images[sectionIndex];
     const cardColor = tintColor(theme.accent, 0.93);
     const cardBorder = tintColor(theme.accent, 0.78);
@@ -357,7 +383,7 @@ async function buildPptBuffer(
       h: 0.8,
       fontSize: 26,
       bold: true,
-      color: theme.accent
+      color: financing ? 'FFFFFF' : theme.accent
     });
     let y = 1.35;
     const textLines: string[] = [];
@@ -368,7 +394,7 @@ async function buildPptBuffer(
         y: 1.3,
         w: 12.5,
         h: cardHeight,
-        fill: { color: cardColor },
+        fill: { color: financing ? 'F3F4F4' : cardColor },
         line: { color: cardBorder, width: 0.75 },
         rectRadius: 0.08
       });
@@ -471,7 +497,7 @@ async function buildPptBuffer(
   });
   if (outline.sections.length > 0) {
     const closing = pptx.addSlide();
-    closing.background = { color: theme.background };
+    closing.background = { color: financing ? '202020' : theme.background };
     closing.addShape('rect', {
       x: 0,
       y: 0,
@@ -493,7 +519,7 @@ async function buildPptBuffer(
       h: 1.0,
       fontSize: 34,
       bold: true,
-      color: theme.accent,
+      color: financing ? 'FFFFFF' : theme.accent,
       align: 'center'
     });
     closing.addText(outline.title, {

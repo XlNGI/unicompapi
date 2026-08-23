@@ -1,4 +1,4 @@
-export const documentThemeIds = ['blueprint', 'ink', 'forest'] as const;
+export const documentThemeIds = ['blueprint', 'ink', 'forest', 'financing'] as const;
 export type DocumentThemeId = (typeof documentThemeIds)[number];
 
 export interface DocumentTheme {
@@ -8,6 +8,8 @@ export interface DocumentTheme {
   readonly background: string;
   readonly text: string;
   readonly muted: string;
+  /** Native editable PPT layout family used by the theme. */
+  readonly presentationStyle?: 'standard' | 'financing';
 }
 
 export const documentThemes: Readonly<Record<DocumentThemeId, DocumentTheme>> = {
@@ -34,6 +36,15 @@ export const documentThemes: Readonly<Record<DocumentThemeId, DocumentTheme>> = 
     background: 'FFFFFF',
     text: '14231B',
     muted: '5A6B61'
+  },
+  financing: {
+    id: 'financing',
+    name: '融资演讲稿',
+    accent: '078AA3',
+    background: 'FFFFFF',
+    text: '111111',
+    muted: '666666',
+    presentationStyle: 'financing'
   }
 };
 

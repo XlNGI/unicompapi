@@ -225,6 +225,39 @@ describe('office document generator', () => {
     expect(slideXml).toContain('2E7D5B');
   });
 
+  it('renders the financing presentation template with editable theme bands', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'ppt',
+        title: '融资演讲稿',
+        sections: [
+          {
+            heading: '市场概览',
+            level: 1,
+            blocks: [{ type: 'bullets', items: ['机会清晰', '成本可控'] }]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-23T10:00:00.000Z',
+      theme: 'financing'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const titleXml = zip.readAsText('ppt/slides/slide1.xml');
+    const contentXml = zip.readAsText('ppt/slides/slide2.xml');
+    const closingXml = zip.readAsText('ppt/slides/slide3.xml');
+    expect(titleXml).toContain('202020');
+    expect(titleXml).toContain('078AA3');
+    expect(contentXml).toContain('市场概览');
+    expect(contentXml).toContain('F3F4F4');
+    expect(closingXml).toContain('谢谢观看');
+  });
+
   it('sanitizes file names', () => {
     expect(sanitizeFileName('汇报: 2026? 报告*')).toBe('汇报 2026 报告');
     expect(sanitizeFileName('   ')).toBe('文档');
