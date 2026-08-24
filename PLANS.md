@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-24 工程补充：按用户需求在“对话内 Office 文档生成”系列内新增 EPUB 电子书上传与解析（分支 `feature/chat-epub-upload`）。对话页文档模式附件白名单扩展为 txt/md/csv/docx/pdf/xlsx/pptx/epub：EPUB 按 mimetype/container.xml/OPF 的 manifest+spine 顺序解析 XHTML 章节正文（标签剥离、HTML 实体解码、章节标题分隔），沿用文件 20MB/ZIP 条目 500/全文 2,000,000 字符/预览 4,000 字符上限，非法 EPUB 返回 failed 并给中文警告；RAG 检索复用全文提取自动纳入。UI 文案补充“EPUB 电子书”提示。全量门禁 146 文件 / 822 项通过，0 失败、0 跳过；typecheck/lint/build/git diff --check 通过。记录见 `docs/active/对话内Office文档生成-EPUB电子书上传解析验收记录.md`。
+
 2026-08-23 工程补充：按负责人批准顺序完成对话内 Office 文档生成候选功能并推送 `develop`。对话式改稿（上一版正文作为上下文改写、旧版保留）；PPTX 模板风格迁移（提取 clrScheme 主题色作为自定义主题）；AI 生图配图（默认关、生成前确认、图片模型选择器、按分节生成并 SHA-256 校验登记、临时草稿生成后自动清理）；成品模板 v1（封面色带、分节强调条、内容卡片，主题色确定性派生）；结构化内容契约（开场白剥离、JSON 大纲优先解析 + Markdown 回退、行内 Markdown 剥离）；BM25 关键词检索与 RAG 集成（附件全文切块索引、检索 top-3 作为生成上下文、指令强制基于资料撰写）。全量门禁 805/805 通过，0 失败、0 跳过；Windows 人工验收完成。记录见 `docs/active/对话内Office文档生成-候选功能验收记录.md`。后续候选：模型直接输出 JSON 契约、程序化生图端口彻底去草稿、Excel/Word 图表图文版式、文本溢出策略、PPT 转图片预览、向量 RAG（需批准引入 embedding 模型）。
 
 工作流偏差登记：PR1—PR6 在功能分支 `feature/chat-office-doc-pr1-domain-generator` 开发并保留；候选功能（对话式改稿、模板迁移、AI 配图、RAG 等）与 Vidu 独立提交在合并后直接提交于 `develop`，未按“功能开发从 develop 创建 feature/* 分支”规则执行。原因：候选功能以连续小步迭代方式托管实施，未逐一建分支。影响：develop 历史缺少逐功能分支回溯点，但提交粒度小、验收记录完整，无功能缺失。纠正：后续所有功能严格走 `feature/*` 分支 + 非快进合并 + 保留本地与远程分支。

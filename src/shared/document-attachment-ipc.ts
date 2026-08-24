@@ -21,7 +21,8 @@ export type DocumentAttachmentFormat =
   | 'docx'
   | 'pdf'
   | 'xlsx'
-  | 'pptx';
+  | 'pptx'
+  | 'epub';
 
 export type DocumentExtractionStatus =
   | 'extracted'

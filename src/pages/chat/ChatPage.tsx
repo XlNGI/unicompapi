@@ -2133,7 +2133,7 @@ export function ChatPage({
                 !session
                   ? '请先打开项目'
                   : documentMode
-                    ? '输入需求，生成 Office 文档（可拖入图片/文档）'
+                    ? '输入需求，生成 Office 文档（可拖入图片/文档/EPUB 电子书）'
                     : selectedCandidate
                       ? '询问 UniComp AI'
                       : '选择模型后输入问题'
@@ -2409,7 +2409,7 @@ export function ChatPage({
         <div className="uc-chat-page__drop-overlay" aria-hidden="true">
           <LuPaperclip aria-hidden="true" />
           <strong>松开鼠标导入附件</strong>
-          <span>图片/文档将作为依据，用于生成 Office 文档</span>
+          <span>图片/文档/EPUB 电子书将作为依据，用于生成 Office 文档</span>
         </div>
       ) : null}
 
