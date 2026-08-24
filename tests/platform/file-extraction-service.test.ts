@@ -101,6 +101,56 @@ async function generatedOutline(kind: 'word' | 'excel' | 'ppt') {
   );
 }
 
+async function createMinimalEpub(
+  chapters: readonly {
+    readonly id: string;
+    readonly heading: string;
+    readonly text: string;
+  }[]
+): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/epub+zip');
+  zip.file(
+    'META-INF/container.xml',
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">' +
+      '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>' +
+      '</container>'
+  );
+  const manifestItems = chapters
+    .map(
+      (chapter, index) =>
+        `<item id="${chapter.id}" href="chapter${index + 1}.xhtml" media-type="application/xhtml+xml"/>`
+    )
+    .join('');
+  const spineItems = chapters
+    .map((chapter) => `<itemref idref="${chapter.id}"/>`)
+    .join('');
+  zip.file(
+    'OEBPS/content.opf',
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">' +
+      '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+      '<dc:identifier id="book-id">test</dc:identifier><dc:title>Test Book</dc:title></metadata>' +
+      `<manifest>${manifestItems}</manifest>` +
+      `<spine>${spineItems}</spine>` +
+      '</package>'
+  );
+  chapters.forEach((chapter, index) => {
+    zip.file(
+      `OEBPS/chapter${index + 1}.xhtml`,
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>' +
+        chapter.heading +
+        '</title></head><body>' +
+        `<h1>${chapter.heading}</h1>` +
+        `<p>${chapter.text}</p>` +
+        '</body></html>'
+    );
+  });
+  return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }));
+}
+
 describe('file extraction service', () => {
   it('extracts plain text files', async () => {
     const { root, projectId } = await createProject();
@@ -193,4 +243,82 @@ describe('file extraction service', () => {
     const result = await service.extract(fileId);
     expect(result.status).toBe('too_large');
   });
+  it('extracts EPUB e-book text in spine order', async () => {
+    const { root, projectId } = await createProject();
+    const epub = await createMinimalEpub([
+      { id: 'c1', heading: '第一章 初遇', text: '夜色深沉，少年推开了客栈的门。' },
+      { id: 'c2', heading: '第二章 奇遇', text: '他拾起那枚发光的玉佩，心中一动。' }
+    ]);
+    const fileId = await registerFile(root, projectId, 'novel.epub', epub);
+    const service = new FileExtractionService({ rootDirectory: root, projectId });
+    const result = await service.extract(fileId);
+    expect(result.status).toBe('extracted');
+    expect(result.format).toBe('epub');
+    expect(result.preview).toContain('第一章 初遇');
+    expect(result.preview).toContain('夜色深沉');
+    expect(result.preview).toContain('第二章 奇遇');
+    expect(result.stats.pages).toBe(2);
+  });
+
+  it('decodes HTML entities and line breaks in EPUB chapters', async () => {
+    const { root, projectId } = await createProject();
+    const epub = await createMinimalEpub([
+      { id: 'c1', heading: '试炼', text: 'A &amp; B，C&nbsp;D。<br/>第二行' }
+    ]);
+    const fileId = await registerFile(root, projectId, 'entities.epub', epub);
+    const service = new FileExtractionService({ rootDirectory: root, projectId });
+    const result = await service.extract(fileId);
+    expect(result.status).toBe('extracted');
+    expect(result.preview).toContain('A & B');
+    expect(result.preview).toContain('第二行');
+  });
+
+  it('rejects zip files that are not valid EPUB', async () => {
+    const { root, projectId } = await createProject();
+    const zip = new JSZip();
+    zip.file('readme.txt', 'not an ebook');
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const fileId = await registerFile(root, projectId, 'fake.epub', Buffer.from(buffer));
+    const service = new FileExtractionService({ rootDirectory: root, projectId });
+    const result = await service.extract(fileId);
+    expect(result.status).toBe('failed');
+  });
+
+  it('resolves nested EPUB content paths relative to the package document', async () => {
+    const { root, projectId } = await createProject();
+    const zip = new JSZip();
+    zip.file('mimetype', 'application/epub+zip');
+    zip.file(
+      'META-INF/container.xml',
+      '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">' +
+        '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>' +
+        '</container>'
+    );
+    zip.file(
+      'OEBPS/content.opf',
+      '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">' +
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Nested</dc:title></metadata>' +
+        '<manifest>' +
+        '<item id="cover" href="Text/cover.xhtml" media-type="application/xhtml+xml"/>' +
+        '<item id="c1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>' +
+        '</manifest>' +
+        '<spine><itemref idref="cover"/><itemref idref="c1"/></spine>' +
+        '</package>'
+    );
+    zip.file('OEBPS/Text/cover.xhtml', '<html><body><h1>封面</h1><p>简介文字</p></body></html>');
+    zip.file('OEBPS/Text/ch1.xhtml', '<html><body><h1>正文第一章</h1><p>嵌套路径正文</p></body></html>');
+    const fileId = await registerFile(
+      root,
+      projectId,
+      'nested.epub',
+      Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }))
+    );
+    const service = new FileExtractionService({ rootDirectory: root, projectId });
+    const result = await service.extract(fileId);
+    expect(result.status).toBe('extracted');
+    expect(result.preview).toContain('封面');
+    expect(result.preview).toContain('正文第一章');
+    expect(result.stats.pages).toBe(2);
+  });
+
 });
