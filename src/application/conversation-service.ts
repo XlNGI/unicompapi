@@ -5,6 +5,7 @@ import {
   beginAssistantMessage,
   cancelAssistantMessage,
   completeAssistantMessage,
+  attachDocumentResultToMessage,
   createConversation,
   deleteConversation,
   editUserMessageAfterCancelledResponse,
@@ -18,6 +19,7 @@ import {
   type ConversationId,
   type ConversationListOptions,
   type ConversationRepository,
+  type DocumentMessageResult,
   type MessageFailureReason,
   type MessageId,
   type ProjectId
@@ -266,11 +268,30 @@ export class ConversationStreamingService
     readonly conversationId: ConversationId;
     readonly messageId: MessageId;
     readonly expectedRevision: number;
+    readonly documentResult?: DocumentMessageResult;
   }): Promise<Conversation> {
     return this.update(input, (conversation) =>
       completeAssistantMessage(
         conversation,
         input.messageId,
+        toIsoTimestamp(this.now()),
+        undefined,
+        input.documentResult
+      )
+    );
+  }
+
+  async attachDocumentResult(input: {
+    readonly conversationId: ConversationId;
+    readonly messageId: MessageId;
+    readonly expectedRevision: number;
+    readonly documentResult: DocumentMessageResult;
+  }): Promise<Conversation> {
+    return this.update(input, (conversation) =>
+      attachDocumentResultToMessage(
+        conversation,
+        input.messageId,
+        input.documentResult,
         toIsoTimestamp(this.now())
       )
     );

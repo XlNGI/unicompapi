@@ -104,6 +104,12 @@ export interface MessageDto {
   readonly state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled';
   readonly content: string;
   readonly reasoningContent?: string;
+  readonly documentResult?: {
+    readonly workId: string;
+    readonly fileName: string;
+    readonly kind: 'word' | 'excel' | 'ppt';
+    readonly sizeBytes: number;
+  };
   readonly attachments: readonly ConversationAttachmentDto[];
   readonly streamSequence?: number;
   readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'truncated' | 'unknown';

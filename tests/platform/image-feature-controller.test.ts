@@ -257,7 +257,8 @@ function createFixture(options?: {
   const drafts: ImageWorkspaceRepository = {
     async get(id) { return id === draft.id ? structuredClone(draft) : undefined; },
     async list() { return [structuredClone(draft)]; },
-    async save(value) { draft = structuredClone(value); }
+    async save(value) { draft = structuredClone(value); },
+    async remove() { draft = undefined as unknown as ImageWorkspaceDraft; }
   };
   const candidates = new ProviderFeatureCandidateService(
     {

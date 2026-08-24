@@ -151,6 +151,7 @@ export function App() {
           initialCandidateId={selectedChatCandidateId}
           onConversationChange={setSelectedChatConversationId}
           onCandidateChange={setSelectedChatCandidateId}
+          onOpenLibrary={() => handleNavigate('library')}
         />
       ) : activeItemId === 'projects' && !activeSubItemId ? (
         <ProjectsPage onNavigate={handleNavigate} />

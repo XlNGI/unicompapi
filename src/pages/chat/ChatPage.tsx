@@ -8,8 +8,10 @@ import {
   LuCheck,
   LuChevronDown,
   LuCopy,
+  LuFileText,
   LuMessageSquarePlus,
   LuMessagesSquare,
+  LuPaperclip,
   LuPanelRight,
   LuPencil,
   LuSquare,
@@ -36,6 +38,16 @@ import type {
   ProjectContextDraftPreviewDto
 } from '../../shared/chat-context-ipc';
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
+import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
+import type { DocumentThemeColorsDto } from '../../shared/document-attachment-ipc';
+import {
+  composeDocumentRevisionInput,
+  detectDocumentIntent,
+  documentKindInstruction,
+  extractSectionHeadings,
+  inferDocumentKind,
+  type DocumentKindOption
+} from './documentDrafting';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
 import '../../styles/pages.css';
 
@@ -72,6 +84,40 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   adapter_unavailable: '文本适配器当前不可用。',
   storage_error: '本地保存失败，请检查存储状态后重试。'
 };
+
+const documentErrorMessages: Record<string, string> = {
+  invalid_request: '当前操作数据无效。',
+  project_not_open: '请先打开项目。',
+  conversation_not_found: '该对话已不存在。',
+  conversation_not_active: '请先恢复已归档对话。',
+  revision_conflict: '内容已变化，请重试。',
+  invalid_outline: '文档大纲无效，请调整需求后重试。',
+  generation_failed: '文档生成失败，请重试。',
+  ai_images_unavailable: 'AI 配图执行器尚未接入，请先关闭“AI 配图”开关。',
+  work_not_found: '文档作品不存在。',
+  file_unavailable: '文档文件不可用。',
+  storage_error: '本地保存失败，请检查存储状态。'
+};
+
+const documentKindOptions: readonly {
+  readonly value: DocumentKindOption;
+  readonly label: string;
+}[] = [
+  { value: 'auto', label: '自动' },
+  { value: 'word', label: 'Word' },
+  { value: 'excel', label: 'Excel' },
+  { value: 'ppt', label: 'PPT' }
+];
+
+const documentThemeOptions: readonly {
+  readonly value: 'blueprint' | 'ink' | 'forest' | 'financing';
+  readonly label: string;
+}[] = [
+  { value: 'blueprint', label: '商务蓝' },
+  { value: 'ink', label: '墨色' },
+  { value: 'forest', label: '松绿' },
+  { value: 'financing', label: '融资演讲稿' }
+];
 
 function rendererTrace(message: string, detail?: unknown): void {
   if (!import.meta.env.DEV) return;
@@ -264,15 +310,64 @@ interface ChatPageProps {
   readonly onConversationChange?: (conversationId?: string) => void;
   readonly initialCandidateId?: string;
   readonly onCandidateChange?: (candidateId?: string) => void;
+  readonly onOpenLibrary?: () => void;
+}
+
+function formatBytes(value?: number): string {
+  if (value === undefined) return '未知大小';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function documentKindLabel(kind: 'word' | 'excel' | 'ppt'): string {
+  return kind === 'word' ? 'Word 文档' : kind === 'excel' ? 'Excel 表格' : 'PPT 演示';
+}
+
+function isImageFileName(fileName: string): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(fileName);
+}
+
+function canAutoGenerateImageCandidate(candidate: {
+  readonly parameterSchema: {
+    readonly fields: readonly {
+      readonly required: boolean;
+      readonly defaultPolicy: string;
+    }[];
+  };
+}): boolean {
+  return candidate.parameterSchema.fields.every(
+    (field) =>
+      !field.required || field.defaultPolicy !== 'require_user_value'
+  );
+}
+
+function describeDocumentError(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  return `${documentErrorMessages[error.code] ?? error.message}（${error.code}）`;
+}
+
+interface AttachmentDraft {
+  readonly fileId: string;
+  readonly fileName: string;
+  readonly sizeBytes: number;
+  readonly status: DocumentExtractionStatus;
+  readonly preview: string;
 }
 
 export function ChatPage({
   initialConversationId,
   onConversationChange,
   initialCandidateId,
-  onCandidateChange
+  onCandidateChange,
+  onOpenLibrary
 }: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
+  const documentGeneration = window.unicomp?.documentGeneration;
+  const documentAttachments = window.unicomp?.documentAttachments;
+  const imageFeatures = window.unicomp?.imageFeatures;
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
@@ -281,6 +376,26 @@ export function ChatPage({
   const [renameTitle, setRenameTitle] = useState('');
   const [renamingConversationId, setRenamingConversationId] = useState<string>();
   const [input, setInput] = useState('');
+  const [documentMode, setDocumentMode] = useState(false);
+  const [documentKind, setDocumentKind] = useState<DocumentKindOption>('auto');
+  const [documentTheme, setDocumentTheme] = useState<
+    'blueprint' | 'ink' | 'forest' | 'financing'
+  >('blueprint');
+  const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
+  const [imageCandidateOptions, setImageCandidateOptions] = useState<
+    readonly { readonly candidateId: string; readonly label: string }[]
+  >([]);
+  const [selectedImageCandidateId, setSelectedImageCandidateId] =
+    useState<string>();
+  const [ragEnabled, setRagEnabled] = useState(false);
+  const [pendingDocumentKind, setPendingDocumentKind] =
+    useState<DocumentKindOption>();
+  const [pendingDocumentClarification, setPendingDocumentClarification] =
+    useState(false);
+  const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
+  const [templateFileId, setTemplateFileId] = useState<string>();
+  const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
+  const [dragging, setDragging] = useState(false);
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | undefined>(initialCandidateId);
@@ -309,6 +424,7 @@ export function ChatPage({
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
@@ -450,6 +566,31 @@ export function ChatPage({
   useEffect(() => {
     onCandidateChange?.(selectedCandidateId);
   }, [onCandidateChange, selectedCandidateId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadImageCandidates() {
+      if (!documentMode || !aiImagesEnabled || !imageFeatures) return;
+      const result = await imageFeatures.listQuickCandidates();
+      if (!active || !result.ok) return;
+      const options = result.value
+        .filter((item) => item.available && canAutoGenerateImageCandidate(item))
+        .map((item) => ({
+          candidateId: item.candidateId,
+          label: `${item.modelName}（${item.providerName}）`
+        }));
+      setImageCandidateOptions(options);
+      setSelectedImageCandidateId((current) =>
+        current && options.some((option) => option.candidateId === current)
+          ? current
+          : options[0]?.candidateId
+      );
+    }
+    void loadImageCandidates();
+    return () => {
+      active = false;
+    };
+  }, [documentMode, aiImagesEnabled]);
 
   useEffect(() => {
     setRenameTitle(selected?.title ?? '');
@@ -859,6 +1000,33 @@ export function ChatPage({
     ) {
       return;
     }
+    const documentIntent = detectDocumentIntent(input.trim());
+    if (pendingDocumentClarification) {
+      setPendingDocumentClarification(false);
+      if (documentIntent.documentKind) setDocumentKind(documentIntent.documentKind);
+      else if (pendingDocumentKind) setDocumentKind(pendingDocumentKind);
+      setPendingDocumentKind(undefined);
+      await sendDocumentMessage();
+      return;
+    }
+    if (documentIntent.kind === 'document') {
+      const kind = documentIntent.documentKind ?? 'auto';
+      setDocumentKind(kind);
+      if (documentIntent.missing.length > 0) {
+        setPendingDocumentClarification(true);
+        setPendingDocumentKind(kind);
+        setNotice(
+          `好的，帮你生成${documentKindLabel(
+            documentIntent.documentKind ?? 'word'
+          )}。请补充：${documentIntent.missing.join(
+            '、'
+          )}。例如：主题是什么、给谁看、需要包含哪些内容。`
+        );
+        return;
+      }
+      await sendDocumentMessage();
+      return;
+    }
     rendererTrace('sendMessage:start', {
       selectedId,
       editingMessageId,
@@ -946,6 +1114,437 @@ export function ChatPage({
 
   }
 
+  async function importDroppedFile(file: File) {
+    if (!documentAttachments || !session || busy || responseInProgress) return;
+    const sourcePath = window.unicomp?.getPathForFile(file);
+    if (!sourcePath) {
+      setNotice('无法读取拖入的文件，请尝试使用本地选择。');
+      return;
+    }
+    setBusy(true);
+    setNotice('');
+    try {
+      const result = await documentAttachments.importAttachment({ sourcePath });
+      if (!result.ok) {
+        setNotice(
+          result.error.code === 'too_large'
+            ? '附件超过大小上限，请压缩后重试。'
+            : result.error.code === 'unsupported_format'
+              ? '不支持该附件格式。'
+              : errorMessages.storage_error
+        );
+        return;
+      }
+      setAttachments((current) => [
+        ...current,
+        {
+          fileId: result.value.fileId,
+          fileName: result.value.fileName,
+          sizeBytes: result.value.sizeBytes,
+          status: result.value.extraction.status,
+          preview: result.value.extraction.preview
+        }
+      ]);
+    } catch {
+      setNotice('附件导入失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function hasDraggedFiles(event: React.DragEvent<HTMLElement>): boolean {
+    return Array.from(event.dataTransfer.types).includes('Files');
+  }
+
+  function handlePageDragEnter(event: React.DragEvent<HTMLElement>) {
+    if (!session || !hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setDragging(true);
+    if (!documentMode) setDocumentMode(true);
+  }
+
+  function handlePageDragOver(event: React.DragEvent<HTMLElement>) {
+    if (session && hasDraggedFiles(event)) event.preventDefault();
+  }
+
+  function handlePageDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (!hasDraggedFiles(event)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  }
+
+  function handlePageDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setDragging(false);
+    if (!session || busy || responseInProgress) return;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) {
+      setDocumentMode(true);
+      files.forEach((file) => void importDroppedFile(file));
+    }
+  }
+
+  function removeAttachment(fileId: string) {
+    setAttachments((current) =>
+      current.filter((attachment) => attachment.fileId !== fileId)
+    );
+    if (templateFileId === fileId) {
+      setTemplateFileId(undefined);
+      setTemplateColors(undefined);
+    }
+  }
+
+  async function toggleTemplate(attachment: AttachmentDraft) {
+    if (!documentAttachments) return;
+    if (templateFileId === attachment.fileId) {
+      setTemplateFileId(undefined);
+      setTemplateColors(undefined);
+      return;
+    }
+    try {
+      const result = await documentAttachments.extractTheme({
+        fileId: attachment.fileId
+      });
+      if (!result.ok) {
+        setNotice('该文件无法作为样式模板，请上传含主题的 PPTX。');
+        return;
+      }
+      setTemplateFileId(attachment.fileId);
+      setTemplateColors(result.value);
+      setNotice(`已应用模板「${attachment.fileName}」的主题色。`);
+    } catch {
+      setNotice('读取模板主题失败，请重试。');
+    }
+  }
+
+  async function sendDocumentMessage() {
+    if (
+      !chat ||
+      !documentGeneration ||
+      !session ||
+      (selected && (selected.readOnly || selected.status !== 'active')) ||
+      !input.trim() ||
+      !selectedCandidateId ||
+      !selectedCandidate?.available ||
+      busy ||
+      responseInProgress
+    ) {
+      return;
+    }
+    setBusy(true);
+    setNotice('AI 正在撰写文档内容…');
+    rendererTrace('sendDocumentMessage:start', JSON.stringify({
+      selectedId,
+      documentKind,
+      candidateId: selectedCandidateId,
+      productFeature: responseFeature
+    }));
+    const requirements = input.trim();
+    const attachmentText = attachments
+      .filter((attachment) => attachment.status === 'extracted')
+      .map(
+        (attachment) =>
+          `【附件：${attachment.fileName}】\n${attachment.preview.slice(0, 2000)}`
+      )
+      .join('\n\n');
+    const previousDocument = selected
+      ? [...selected.messages]
+          .reverse()
+          .find(
+            (item) =>
+              item.role === 'assistant' &&
+              item.state === 'completed' &&
+              item.documentResult
+          )
+      : undefined;
+    const revisionInput = composeDocumentRevisionInput(
+      previousDocument?.content,
+      requirements
+    );
+    const kind = documentKind === 'auto'
+      ? inferDocumentKind(requirements)
+      : documentKind;
+    const combined = attachmentText
+      ? `${revisionInput}\n\n${attachmentText}`
+      : revisionInput;
+    const kindInstruction = documentKindInstruction(kind);
+    const combinedWithKind = `${combined}\n\n${kindInstruction}`;
+    let modelContent = combinedWithKind;
+    if (ragEnabled && documentAttachments) {
+      try {
+        const ragResult = await documentAttachments.retrieveContext({
+          query: requirements,
+          k: 3
+        });
+        if (ragResult.ok && ragResult.value.length > 0) {
+          const ragText = ragResult.value
+            .map(
+              (chunk) =>
+                `【资料：${chunk.source}】\n${chunk.text.slice(0, 800)}`
+            )
+            .join('\n\n');
+          modelContent = `${combinedWithKind}\n\n以下为检索到的项目资料：\n${ragText}`;
+        } else if (ragResult.ok) {
+          setNotice('未检索到相关项目资料，本次按原需求生成。');
+        }
+      } catch {
+        // 检索失败不阻断生成。
+      }
+    }
+    try {
+      const started = await chat.startResponse({
+        clientCommandId: `chat-doc-${crypto.randomUUID()}`,
+        conversation: selected
+          ? {
+              conversationId: selected.conversationId,
+              expectedRevision: selected.revision,
+              editedMessageId: null
+            }
+          : null,
+        title: conversationTitleFromMessage(requirements),
+        content: modelContent,
+        productFeature: responseFeature,
+        candidateId: selectedCandidateId,
+        contextSelections: includedContextIds.flatMap((contextId) => {
+          const context = viewedContexts[contextId];
+          return context
+            ? [{
+                contextId,
+                contextRevision: context.revision,
+                includeInPrompt: true
+              }]
+            : [];
+        }),
+        parameterValues: {},
+        confirmed: true
+      });
+      if (!started.ok) {
+        rendererTrace('sendDocumentMessage:startResponse-error', JSON.stringify({
+          code: started.error.code,
+          message: started.error.message
+        }));
+        if (started.error.code === 'revision_conflict' && selected) {
+          const refreshed = await chat.getConversation(selected.conversationId);
+          if (refreshed.ok) {
+            replaceConversation(refreshed.value);
+            setSelectedId(refreshed.value.conversationId);
+          }
+          setNotice('会话已更新并刷新，请再次发送。');
+          return;
+        }
+        setNotice(describeDocumentError(started.error));
+        if (selected) {
+          const refreshedFailed = await chat.getConversation(selected.conversationId);
+          if (refreshedFailed.ok) replaceConversation(refreshedFailed.value);
+        }
+        return;
+      }
+      rendererTrace('sendDocumentMessage:startResponse-ok', JSON.stringify({
+        conversationId: started.value.conversation.conversationId,
+        executionState: started.value.execution.state,
+        executionId: started.value.execution.responseExecutionId
+      }));
+      replaceConversation(started.value.conversation);
+      setSelectedId(started.value.conversation.conversationId);
+      setResponseExecution(started.value.execution);
+      updateInput('');
+      setAttachments([]);
+      setTemplateFileId(undefined);
+      setTemplateColors(undefined);
+      const targetId = started.value.conversation.conversationId;
+      const completion = await awaitDocumentCompletion(
+        chat,
+        started.value.execution.responseExecutionId
+      );
+      rendererTrace('sendDocumentMessage:completion', JSON.stringify({
+        completed: Boolean(completion),
+        state: completion?.state
+      }));
+      const refreshedBefore = await chat.getConversation(targetId);
+      if (!refreshedBefore.ok) {
+        setNotice('刷新对话失败，请重试。');
+        return;
+      }
+      replaceConversation(refreshedBefore.value);
+      if (!completion) {
+        const finalCheck = await chat.getResponseExecution(
+          started.value.execution.responseExecutionId
+        );
+        const terminal = finalCheck.ok ? finalCheck.value.state : 'unknown';
+        rendererTrace('sendDocumentMessage:terminal-state', JSON.stringify({
+          terminal,
+          finalCheckOk: finalCheck.ok
+        }));
+        const latest = await chat.getConversation(targetId);
+        const failedMessage = latest.ok
+          ? [...latest.value.messages]
+              .reverse()
+              .find(
+                (item) =>
+                  item.role === 'assistant' &&
+                  item.state === 'failed'
+              )
+          : undefined;
+        setNotice(
+          terminal === 'cancelled'
+            ? 'AI 内容生成已取消，文档未生成。'
+            : failedMessage
+              ? failedResponseNotice(failedMessage)
+              : 'AI 内容生成失败，文档未生成。'
+        );
+        return;
+      }
+      setNotice('正在生成本地 Office 文档…');
+      const aiImages = await generateAiSlideImages(
+        completion.content,
+        attachments.filter((attachment) => isImageFileName(attachment.fileName)).length
+      );
+      const generated = await documentGeneration.generateFromMessage({
+        conversationId: targetId,
+        expectedRevision: refreshedBefore.value.revision,
+        messageId: completion.assistantMessageId,
+        kind,
+        theme: documentTheme,
+        images: [
+          ...attachments
+            .filter((attachment) => isImageFileName(attachment.fileName))
+            .map((attachment) => ({
+              fileId: attachment.fileId,
+              caption: attachment.fileName
+            })),
+          ...aiImages
+        ],
+        ...(templateColors ? { customTheme: templateColors } : {}),
+        ...(aiImagesEnabled ? { aiImages: true } : {})
+      });
+      rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
+        ok: generated.ok,
+        code: generated.ok ? undefined : generated.error.code,
+        message: generated.ok ? undefined : generated.error.message
+      }));
+      if (!generated.ok) {
+        setNotice(describeDocumentError(generated.error));
+      } else {
+        setNotice('文档已生成。');
+      }
+      const refreshed = await chat.getConversation(targetId);
+      if (refreshed.ok) {
+        replaceConversation(refreshed.value);
+        setSelectedId(refreshed.value.conversationId);
+      }
+      setDocumentMode(false);
+    } catch {
+      setNotice('文档生成失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function awaitDocumentCompletion(
+    api: NonNullable<typeof chat>,
+    responseExecutionId: string
+  ): Promise<ConversationResponseExecutionDto | undefined> {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+      const result = await api.getResponseExecution(responseExecutionId);
+      if (!result.ok) continue;
+      if (result.value.state === 'completed') return result.value;
+      if (
+        result.value.state === 'failed' ||
+        result.value.state === 'cancelled' ||
+        result.value.state === 'interrupted'
+      ) {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  async function generateAiSlideImages(
+    content: string,
+    userImageCount: number
+  ): Promise<readonly { readonly workId: string; readonly caption: string }[]> {
+    rendererTrace('generateAiSlideImages:start', JSON.stringify({
+      aiImagesEnabled,
+      hasFeatures: Boolean(imageFeatures),
+      contentLength: content.length,
+      userImageCount
+    }));
+    if (!aiImagesEnabled || !imageFeatures) return [];
+    if (
+      !window.confirm(
+        'AI 配图将调用你已配置的图片模型为文档分节生成配图，可能消耗模型额度。继续？'
+      )
+    ) {
+      setNotice('已取消 AI 配图。');
+      return [];
+    }
+    const candidates = await imageFeatures.listQuickCandidates();
+    rendererTrace('generateAiSlideImages:candidates', JSON.stringify({
+      ok: candidates.ok,
+      count: candidates.ok ? candidates.value.length : 0,
+      available: candidates.ok
+        ? candidates.value.filter((item) => item.available).length
+        : 0
+    }));
+    const candidate = candidates.ok
+      ? candidates.value.find(
+          (item) =>
+            item.candidateId === selectedImageCandidateId &&
+            item.available &&
+            canAutoGenerateImageCandidate(item)
+        ) ??
+        candidates.value.find(
+          (item) => item.available && canAutoGenerateImageCandidate(item)
+        )
+      : undefined;
+    if (!candidate) {
+      setNotice(
+        '可用图片模型都需要必填参数（如尺寸），AI 配图无法自动取值，已跳过；请先到快速生图配置参数。'
+      );
+      return [];
+    }
+    const headings = extractSectionHeadings(content).slice(
+      0,
+      Math.max(0, 6 - userImageCount)
+    );
+    rendererTrace('generateAiSlideImages:headings', JSON.stringify(headings));
+    const generated: { readonly workId: string; readonly caption: string }[] = [];
+    for (const heading of headings) {
+      try {
+        const result = await imageFeatures.generateQuickImage(
+          `为演示文稿「${heading}」一页生成纯图形插画配图，风格与内容契合；画面中绝对不能出现任何文字、字母、数字、标点、标题或水印`,
+          candidate.candidateId,
+          {}
+        );
+        rendererTrace('generateAiSlideImages:image', JSON.stringify({
+          heading,
+          ok: result.ok,
+          code: result.ok ? undefined : result.error.code,
+          workId: result.ok ? result.value.submission.workId : undefined,
+          safeCode: result.ok ? result.value.submission.safeCode : undefined
+        }));
+        if (result.ok && result.value.submission.workId) {
+          generated.push({
+            workId: result.value.submission.workId,
+            caption: heading
+          });
+        }
+      } catch {
+        // 单张配图失败不阻断整体生成。
+      }
+    }
+    if (headings.length > 0 && generated.length === 0) {
+      setNotice('AI 配图生成失败，文档将不包含 AI 配图。');
+    }
+    rendererTrace('generateAiSlideImages:result', JSON.stringify({
+      generatedCount: generated.length
+    }));
+    return generated;
+  }
+
   async function cancelResponse() {
     if (responseStarting) {
       if (cancelRequested) return;
@@ -1025,6 +1624,24 @@ export function ChatPage({
       }, 1_600);
     } catch {
       setNotice('复制失败，请手动选择消息内容。');
+    }
+  }
+
+  async function openDocumentWork(workId: string) {
+    if (!documentGeneration) return;
+    try {
+      const result = await documentGeneration.openDocument(workId);
+      if (!result.ok) {
+        setNotice(
+          result.error.code === 'work_not_found'
+            ? '文档作品不存在。'
+            : result.error.code === 'file_unavailable'
+              ? '文档文件当前不可用。'
+              : '打开文档失败，请重试。'
+        );
+      }
+    } catch {
+      setNotice('打开文档失败，请重试。');
     }
   }
 
@@ -1232,7 +1849,14 @@ export function ChatPage({
   }
 
   return (
-    <section className="uc-chat-page" aria-labelledby="chat-page-title">
+    <section
+      aria-labelledby="chat-page-title"
+      className="uc-chat-page"
+      onDragEnter={handlePageDragEnter}
+      onDragLeave={handlePageDragLeave}
+      onDragOver={handlePageDragOver}
+      onDrop={handlePageDrop}
+    >
       <section className="uc-chat-page__conversation" aria-label="当前对话">
         <header className="uc-chat-page__header">
           <div className="uc-chat-page__title-block">
@@ -1408,6 +2032,33 @@ export function ChatPage({
                       ) : (
                         <p className="uc-chat-page__message-bubble">{item.content}</p>
                       )}
+                      {item.role === 'assistant' && item.documentResult ? (
+                        <section className="uc-chat-page__document-card" aria-label="生成的 Office 文档">
+                          <LuFileText aria-hidden="true" />
+                          <div className="uc-chat-page__document-card-main">
+                            <strong>{item.documentResult.fileName}</strong>
+                            <small>
+                              {documentKindLabel(item.documentResult.kind)} ·{' '}
+                              {formatBytes(item.documentResult.sizeBytes)}
+                            </small>
+                          </div>
+                          <div className="uc-chat-page__document-card-actions">
+                            <Button
+                              disabled={busy}
+                              onClick={() => void openDocumentWork(item.documentResult!.workId)}
+                              title="用系统默认程序打开"
+                              variant="secondary"
+                            >
+                              打开
+                            </Button>
+                            {onOpenLibrary ? (
+                              <Button onClick={onOpenLibrary} title="在作品库中查看" variant="ghost">
+                                作品库
+                              </Button>
+                            ) : null}
+                          </div>
+                        </section>
+                      ) : null}
                       {item.state === 'completed' ? (
                         <div className="uc-chat-page__message-meta">
                           <time dateTime={item.createdAt}>{formatMessageTime(item.createdAt)}</time>
@@ -1459,7 +2110,10 @@ export function ChatPage({
               {notice}
             </p>
           ) : null}
-          <section className="uc-chat-page__composer" aria-labelledby="chat-composer-title">
+          <section
+            aria-labelledby="chat-composer-title"
+            className={`uc-chat-page__composer${documentMode ? ' uc-chat-page__composer--document' : ''}`}
+          >
             <h2 className="uc-visually-hidden" id="chat-composer-title">发送消息</h2>
             <textarea
               aria-label={editingMessageId ? '编辑已停止的消息' : '对话输入'}
@@ -1469,14 +2123,59 @@ export function ChatPage({
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
-                  if (!responseInProgress && !cancelRequested) void sendMessage();
+                  if (!responseInProgress && !cancelRequested && !busy) {
+                    if (documentMode) void sendDocumentMessage();
+                    else void sendMessage();
+                  }
                 }
               }}
-              placeholder={!session ? '请先打开项目' : selectedCandidate ? '询问 UniComp AI' : '选择模型后输入问题'}
+              placeholder={
+                !session
+                  ? '请先打开项目'
+                  : documentMode
+                    ? '输入需求，生成 Office 文档（可拖入图片/文档）'
+                    : selectedCandidate
+                      ? '询问 UniComp AI'
+                      : '选择模型后输入问题'
+              }
               ref={composerRef}
               rows={1}
               value={input}
             />
+            {attachments.length > 0 ? (
+              <ul className="uc-chat-page__attachments">
+                {attachments.map((attachment) => (
+                  <li key={attachment.fileId}>
+                    <LuPaperclip aria-hidden="true" />
+                    <span title={attachment.fileName}>{attachment.fileName}</span>
+                    {/\.pptx$/i.test(attachment.fileName) ? (
+                      <button
+                        aria-pressed={templateFileId === attachment.fileId}
+                        className={templateFileId === attachment.fileId ? 'is-template' : ''}
+                        disabled={busy}
+                        onClick={() => void toggleTemplate(attachment)}
+                        title={
+                          templateFileId === attachment.fileId
+                            ? '取消作为样式模板'
+                            : '作为样式模板'
+                        }
+                        type="button"
+                      >
+                        {templateFileId === attachment.fileId ? '模板' : '模板'}
+                      </button>
+                    ) : null}
+                    <button
+                      aria-label={`移除附件 ${attachment.fileName}`}
+                      disabled={busy}
+                      onClick={() => removeAttachment(attachment.fileId)}
+                      type="button"
+                    >
+                      <LuX aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="uc-chat-page__composer-toolbar">
               <div className="uc-chat-page__composer-actions">
                 {editingMessageId ? (
@@ -1490,6 +2189,116 @@ export function ChatPage({
                   >
                     <LuX aria-hidden="true" />
                   </Button>
+                ) : null}
+                <button
+                  aria-pressed={documentMode}
+                  className={`uc-chat-page__doc-mode${documentMode ? ' is-active' : ''}`}
+                  disabled={!canCompose || !session || busy || cancelRequested || responseInProgress}
+                  onClick={() => setDocumentMode((mode) => !mode)}
+                  title={documentMode ? '退出文档生成模式' : '生成 Office 文档（Word/Excel/PPT）'}
+                  type="button"
+                >
+                  <LuFileText aria-hidden="true" />
+                  <span>文档</span>
+                </button>
+                {documentMode ? (
+                  <div
+                    aria-label="文档类型"
+                    className="uc-chat-page__doc-kind"
+                    role="radiogroup"
+                  >
+                    {documentKindOptions.map((option) => (
+                      <button
+                        aria-checked={documentKind === option.value}
+                        className={documentKind === option.value ? 'is-active' : ''}
+                        disabled={!canCompose || !session || busy}
+                        key={option.value}
+                        onClick={() => setDocumentKind(option.value)}
+                        role="radio"
+                        title={
+                          option.value === 'auto'
+                            ? '根据需求自动判断文档类型'
+                            : option.label
+                        }
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {documentMode ? (
+                  <div
+                    aria-label="文档主题"
+                    className="uc-chat-page__doc-kind"
+                    role="radiogroup"
+                  >
+                    {documentThemeOptions.map((option) => (
+                      <button
+                        aria-checked={documentTheme === option.value}
+                        className={documentTheme === option.value ? 'is-active' : ''}
+                        disabled={!canCompose || !session || busy}
+                        key={option.value}
+                        onClick={() => setDocumentTheme(option.value)}
+                        role="radio"
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {documentMode ? (
+                  <button
+                    aria-pressed={aiImagesEnabled}
+                    className={`uc-chat-page__doc-mode${aiImagesEnabled ? ' is-active' : ''}`}
+                    disabled={!canCompose || !session || busy}
+                    onClick={() => setAiImagesEnabled((enabled) => !enabled)}
+                    title="用已配置的图片模型为缺图分节生成配图，消耗模型额度，生成前需确认"
+                    type="button"
+                  >
+                    AI 配图
+                  </button>
+                ) : null}
+                {documentMode && aiImagesEnabled && imageCandidateOptions.length > 0 ? (
+                  <details className="uc-chat-page__image-model">
+                    <summary>
+                      {imageCandidateOptions.find(
+                        (option) => option.candidateId === selectedImageCandidateId
+                      )?.label ?? '配图模型'}
+                    </summary>
+                    <div
+                      className="uc-chat-page__image-model-menu"
+                      role="radiogroup"
+                    >
+                      {imageCandidateOptions.map((option) => (
+                        <button
+                          aria-checked={selectedImageCandidateId === option.candidateId}
+                          disabled={!canCompose || !session || busy}
+                          key={option.candidateId}
+                          onClick={() =>
+                            setSelectedImageCandidateId(option.candidateId)
+                          }
+                          role="radio"
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+                {documentMode ? (
+                  <button
+                    aria-pressed={ragEnabled}
+                    className={`uc-chat-page__doc-mode${ragEnabled ? ' is-active' : ''}`}
+                    disabled={!canCompose || !session || busy}
+                    onClick={() => setRagEnabled((enabled) => !enabled)}
+                    title="从项目附件中检索相关内容，作为文档生成依据（本地检索）"
+                    type="button"
+                  >
+                    检索资料
+                  </button>
                 ) : null}
                 <ModelSelect
                   appearance="subtle"
@@ -1567,8 +2376,21 @@ export function ChatPage({
                 <button
                   aria-label={responseInProgress ? cancelRequested ? '正在停止生成' : '停止生成' : '发送消息'}
                   className={`uc-chat-page__submit${responseInProgress ? ' uc-chat-page__submit--stop' : ''}`}
-                  disabled={responseInProgress ? busy || cancelRequested : (!chat || !canCompose || !input.trim() || !selectedCandidate?.available || busy || cancelRequested)}
-                  onClick={() => responseInProgress ? void cancelResponse() : void sendMessage()}
+                  disabled={responseInProgress
+                    ? busy || cancelRequested
+                    : !chat ||
+                      !canCompose ||
+                      !input.trim() ||
+                      (!documentMode && !selectedCandidate?.available) ||
+                      busy ||
+                      cancelRequested}
+                  onClick={() =>
+                    responseInProgress
+                      ? void cancelResponse()
+                      : documentMode
+                        ? void sendDocumentMessage()
+                        : void sendMessage()
+                  }
                   title={responseInProgress ? cancelRequested ? '正在停止' : '停止生成' : '发送'}
                   type="button"
                 >
@@ -1583,6 +2405,13 @@ export function ChatPage({
           ) : null}
         </div>
       </section>
+      {dragging ? (
+        <div className="uc-chat-page__drop-overlay" aria-hidden="true">
+          <LuPaperclip aria-hidden="true" />
+          <strong>松开鼠标导入附件</strong>
+          <span>图片/文档将作为依据，用于生成 Office 文档</span>
+        </div>
+      ) : null}
 
       <Drawer
         backdropClassName="uc-chat-page__drawer-backdrop"

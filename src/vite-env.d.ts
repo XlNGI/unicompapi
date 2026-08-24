@@ -12,12 +12,17 @@ import type { VideoEditorApi } from './shared/video-editor-ipc';
 import type { SettingsApi } from './shared/settings-ipc';
 import type { ChatContextApi } from './shared/chat-context-ipc';
 import type { AutosaveDiagnosticsApi } from './shared/autosave-diagnostics-ipc';
+import type { DocumentAttachmentApi } from './shared/document-attachment-ipc';
+import type { DocumentGenerationApi } from './shared/document-generation-ipc';
 
 declare global {
   interface Window {
     unicomp?: {
       autosaveDiagnostics: AutosaveDiagnosticsApi;
       chatContexts: ChatContextApi;
+      documentAttachments: DocumentAttachmentApi;
+      documentGeneration: DocumentGenerationApi;
+      getPathForFile: (file: File) => string;
       imageFeatures: ImageFeatureApi;
       promptEnhance: PromptEnhanceApi;
       imagePromptEnhance: PromptEnhanceApi;

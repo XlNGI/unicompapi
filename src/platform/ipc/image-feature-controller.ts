@@ -42,6 +42,7 @@ export interface ImageFeatureControllerRuntime {
   generateQuickImage?(
     input: ImageFeatureGenerateQuickInput
   ): Promise<ImageFeatureGenerateQuickDto>;
+  listQuickCandidates?(): Promise<readonly ImageFeatureCandidateDto[]>;
   recoverResult?(taskId: string): Promise<ImageFeatureRecoveryDto>;
 }
 
@@ -66,6 +67,28 @@ export class ImageFeatureController {
       return {
         ok: true,
         value: await resolved.runtime.candidates.listFeatureCandidates(resolved.subject)
+      };
+    });
+  }
+
+  listQuickCandidates(
+    request?: unknown
+  ): Promise<ImageFeatureIpcResult<readonly ImageFeatureCandidateDto[]>> {
+    return this.execute(async () => {
+      if (request !== undefined && request !== null) {
+        throw new TypeError('Quick candidate listing accepts no arguments');
+      }
+      const session = this.dependencies.getSession();
+      if (!session) {
+        return failure('project_not_open', 'A project must be open');
+      }
+      const runtime = this.dependencies.getRuntime(session);
+      if (!runtime.listQuickCandidates) {
+        return failure('runtime_not_allowed', 'Quick candidate listing is unavailable');
+      }
+      return {
+        ok: true,
+        value: await runtime.listQuickCandidates()
       };
     });
   }

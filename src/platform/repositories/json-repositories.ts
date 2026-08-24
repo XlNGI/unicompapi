@@ -118,6 +118,24 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
     });
   }
 
+  async remove(id: string): Promise<void> {
+    await this.storage.withExclusiveAccess([this.path], async () => {
+      const collection = await this.read();
+      if (!collection.entities.some((entity) => entity.id === id)) {
+        return;
+      }
+      await this.storage.writeJsonAtomically<EntityCollection<TEntity>>(
+        this.path,
+        {
+          schemaVersion: 2,
+          revision: collection.revision + 1,
+          entities: collection.entities.filter((entity) => entity.id !== id)
+        },
+        { backup: true }
+      );
+    });
+  }
+
   private async read(): Promise<EntityCollection<TEntity>> {
     const loaded = await this.storage.readJsonWithBackup(
       this.path,
@@ -299,6 +317,10 @@ export class JsonImageWorkspaceRepository
 
   save(draft: ImageWorkspaceDraft) {
     return this.collection.save(draft);
+  }
+
+  remove(id: DraftId) {
+    return this.collection.remove(id);
   }
 }
 

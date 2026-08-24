@@ -43,7 +43,7 @@ export function registerWork(input: RegisterWorkInput): Work {
 
   if (
     input.execution.state === 'registering_work' &&
-    (!input.execution.exportPlanId || input.execution.outputFileId !== input.file.id)
+    input.execution.outputFileId !== input.file.id
   ) {
     throw new WorkRegistrationRejectedError(
       'local export execution has not linked its verified output'
