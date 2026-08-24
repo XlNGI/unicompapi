@@ -6423,7 +6423,7 @@ button.uc-project-center__project-card:disabled {
 
 .uc-chat-page__composer-tools,
 .uc-chat-page__composer-actions {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .uc-chat-page__composer-actions {
@@ -6861,6 +6861,19 @@ button.uc-project-center__project-card:disabled {
     bottom: 88px;
     left: 12px;
     width: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .uc-chat-page__composer-actions {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .uc-chat-page__doc-kind {
+    max-width: 100%;
+    height: auto;
+    flex-wrap: wrap;
   }
 }
 

@@ -58,3 +58,20 @@ test('chat page document card styles exist', () => {
   assert.match(styles, /\.uc-chat-page__drop-overlay/);
   assert.match(styles, /\.uc-chat-page__doc-kind/);
 });
+
+test('document composer keeps its controls reachable in the compact chat width', () => {
+  assert.match(styles, /\.uc-chat-page__composer-actions\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
+  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*?\.uc-chat-page__composer-actions\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
+  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*?\.uc-chat-page__doc-kind\s*\{[\s\S]*?max-width:\s*100%;/);
+});
+
+test('document response failures retain the safe provider reason after polling', () => {
+  assert.match(page, /responseFailureSafeCodeRef/);
+  assert.match(page, /failedResponseNotice\(\s*failedMessage,[\s\S]*?failureSafeCode\?\.executionId/);
+  assert.match(page, /responseFailureSafeCodeRef\.current = undefined/);
+});
+
+test('document submission guards re-entry before React state updates', () => {
+  assert.match(page, /documentGenerationInFlightRef/);
+  assert.match(page, /if \(documentGenerationInFlightRef\.current\) return;/);
+});

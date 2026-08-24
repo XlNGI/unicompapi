@@ -1,7 +1,7 @@
 export type DocumentKindOption = 'auto' | 'word' | 'excel' | 'ppt';
 
 export const DOCUMENT_GENERATION_INSTRUCTION =
-  '请直接输出文档正文（优先按文档类型规则输出 JSON 大纲，无法结构化时使用 Markdown），不要寒暄、不要解释、不要任何前后缀。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
+  '请直接输出文档正文（优先按文档类型规则输出严格 JSON 大纲，无法结构化时使用 Markdown），不要寒暄、不要解释、不要任何前后缀。JSON 大纲必须使用 kind、title、sections、heading、level、blocks 字段；正文块只能使用 paragraph、bullets、numbered、quote、table、chart 及其规范字段，不要使用 content、id、ordered_list、headers 或 subsection。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
 
 export function inferDocumentKind(requirements: string): 'word' | 'excel' | 'ppt' {
   const text = requirements.toLowerCase();
@@ -102,7 +102,12 @@ export function documentKindInstruction(
   if (kind === 'excel') {
     return '这是 Excel 表格：以清晰的列名与数据行为主，避免大段文字，需要汇总时给出合计行。';
   }
-  return '这是 Word 文档：标题层级清晰，段落完整，关键数据用表格呈现。';
+  return [
+    '这是 Word 文档：标题层级清晰，段落完整，关键数据用表格呈现。',
+    '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
+    '{"kind":"word","title":"标题","sections":[{"heading":"分节标题","level":1,"blocks":[{"type":"paragraph","text":"正文"},{"type":"numbered","items":["步骤"]},{"type":"table","header":["列名"],"rows":[["数据"]]}]}]}。',
+    '不要使用 content、id、ordered_list、headers 或 subsection；只有无法结构化时才使用 Markdown 标题、段落、列表和标准管线表格。'
+  ].join('\n');
 }
 
 export interface DocumentIntent {

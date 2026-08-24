@@ -91,6 +91,29 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
   return { kind, title, sections };
 }
 
+export function parseDocumentContent(
+  content: string,
+  kind: DocumentWorkspaceKind
+): DocumentOutline {
+  const cleaned = stripPreamble(content);
+  const candidate = unwrapJsonFence(cleaned);
+  if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
+    return parseMarkdownToOutline(cleaned, kind);
+  }
+  const parsed = parseJsonRecord(candidate);
+  if ('kind' in parsed) {
+    const outline = parseDocumentOutline(candidate);
+    if (outline.kind !== kind) {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `Document outline kind must be ${kind}`
+      );
+    }
+    return outline;
+  }
+  return normalizeObservedDocument(parsed, kind);
+}
+
 export function parseMarkdownToOutline(
   markdown: string,
   kind: DocumentWorkspaceKind
@@ -490,6 +513,107 @@ function parseKind(value: unknown): DocumentWorkspaceKind {
     );
   }
   return value as DocumentWorkspaceKind;
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `Document outline is not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      'Document outline must be a JSON object'
+    );
+  }
+  return parsed;
+}
+
+function normalizeObservedDocument(
+  value: Record<string, unknown>,
+  kind: DocumentWorkspaceKind
+): DocumentOutline {
+  if (!Array.isArray(value.sections)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      'Observed document sections must be an array'
+    );
+  }
+  const normalized = {
+    kind,
+    title: value.title,
+    sections: value.sections.map((section, sectionIndex) => {
+      if (!isRecord(section) || !Array.isArray(section.content)) {
+        throw new DocumentOutlineError(
+          'document_invalid_outline',
+          `Observed document section ${sectionIndex} is invalid`
+        );
+      }
+      return {
+        heading: section.heading,
+        level: 1,
+        blocks: section.content.flatMap((block, blockIndex) =>
+          normalizeObservedBlock(block, `sections[${sectionIndex}].content[${blockIndex}]`, 0)
+        )
+      };
+    })
+  };
+  return parseDocumentOutline(JSON.stringify(normalized));
+}
+
+function normalizeObservedBlock(
+  value: unknown,
+  label: string,
+  depth: number
+): Record<string, unknown>[] {
+  if (!isRecord(value) || typeof value.type !== 'string' || depth > 3) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} is invalid`
+    );
+  }
+  switch (value.type) {
+    case 'paragraph':
+      return [{ type: 'paragraph', text: value.text }];
+    case 'ordered_list':
+      return [{ type: 'numbered', items: value.items }];
+    case 'unordered_list':
+    case 'bullet_list':
+      return [{ type: 'bullets', items: value.items }];
+    case 'table':
+      return [
+        ...(value.caption === undefined
+          ? []
+          : [{ type: 'paragraph', text: value.caption }]),
+        { type: 'table', header: value.headers, rows: value.rows }
+      ];
+    case 'subsection': {
+      if (!Array.isArray(value.content)) {
+        throw new DocumentOutlineError(
+          'document_invalid_outline',
+          `${label}.content must be an array`
+        );
+      }
+      return [
+        { type: 'paragraph', text: value.heading },
+        ...value.content.flatMap((block, index) =>
+          normalizeObservedBlock(block, `${label}.content[${index}]`, depth + 1)
+        )
+      ];
+    }
+    default:
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label}.type is unsupported`
+      );
+  }
 }
 
 export function isDocumentOutline(value: unknown): value is DocumentOutline {

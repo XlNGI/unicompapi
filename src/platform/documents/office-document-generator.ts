@@ -110,40 +110,99 @@ async function buildWordBuffer(
   outline: DocumentOutline,
   theme: DocumentTheme
 ): Promise<Buffer> {
+  const numberedBlockCount = outline.sections.reduce(
+    (count, section) => count + section.blocks.filter((block) => block.type === 'numbered').length,
+    0
+  );
   const doc = new Document({
-    numbering: {
-      config: [
-        {
-          reference: 'document-numbering',
-          levels: [
-            {
-              level: 0,
-              format: LevelFormat.DECIMAL,
-              text: '%1.',
-              alignment: AlignmentType.START
-            }
-          ]
+    styles: {
+      default: {
+        document: {
+          paragraph: { spacing: { after: 160, line: 360 } },
+          run: {
+            font: {
+              ascii: 'Aptos',
+              hAnsi: 'Aptos',
+              eastAsia: 'Microsoft YaHei'
+            },
+            size: 22,
+            color: theme.text
+          }
+        },
+        heading1: {
+          paragraph: { keepNext: true, spacing: { before: 320, after: 160 } },
+          run: { bold: true, color: theme.accent, size: 30 }
+        },
+        heading2: {
+          paragraph: { keepNext: true, spacing: { before: 280, after: 140 } },
+          run: { bold: true, color: theme.accent, size: 27 }
+        },
+        heading3: {
+          paragraph: { keepNext: true, spacing: { before: 240, after: 120 } },
+          run: { bold: true, color: theme.accent, size: 24 }
         }
-      ]
+      }
+    },
+    numbering: {
+      config: Array.from({ length: Math.max(1, numberedBlockCount) }, (_, index) => ({
+        reference: `document-numbering-${index}`,
+        levels: [{
+          level: 0,
+          format: LevelFormat.DECIMAL,
+          text: '%1.',
+          alignment: AlignmentType.START
+        }]
+      }))
     },
     sections: [
       {
+        properties: {
+          page: {
+            margin: {
+              top: 1080,
+              right: 1260,
+              bottom: 1080,
+              left: 1260
+            }
+          }
+        },
         children: [
           new Paragraph({
             heading: HeadingLevel.TITLE,
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 360 },
+            border: {
+              bottom: {
+                style: BorderStyle.SINGLE,
+                size: 6,
+                color: theme.muted
+              }
+            },
             children: [
-              new TextRun({ text: outline.title, color: theme.accent })
+              new TextRun({
+                text: outline.title,
+                color: theme.accent,
+                bold: true,
+                size: 36
+              })
             ]
           }),
-          ...outline.sections.flatMap((section) => [
-            new Paragraph({
-              heading: headingLevel(section.level),
-              children: [
-                new TextRun({ text: section.heading, color: theme.accent })
-              ]
-            }),
-            ...section.blocks.map((block) => wordBlock(block))
-          ])
+          ...(() => {
+            let numberedIndex = 0;
+            return outline.sections.flatMap((section) => [
+              new Paragraph({
+                heading: headingLevel(section.level),
+                children: [
+                  new TextRun({ text: section.heading, color: theme.accent })
+                ]
+              }),
+              ...section.blocks.flatMap((block) => {
+                const reference = `document-numbering-${numberedIndex}`;
+                if (block.type === 'numbered') numberedIndex += 1;
+                return wordBlock(block, theme, reference);
+              })
+            ]);
+          })()
         ]
       }
     ]
@@ -159,12 +218,16 @@ function headingLevel(level: 1 | 2 | 3) {
       : HeadingLevel.HEADING_3;
 }
 
-function wordBlock(block: DocumentOutlineBlock): Paragraph | Table {
+function wordBlock(
+  block: DocumentOutlineBlock,
+  theme: DocumentTheme,
+  numberingReference: string
+): readonly (Paragraph | Table)[] {
   switch (block.type) {
     case 'paragraph':
-      return new Paragraph({ children: [new TextRun(block.text)] });
+      return [new Paragraph({ children: [new TextRun(block.text)] })];
     case 'quote':
-      return new Paragraph({
+      return [new Paragraph({
         children: [new TextRun({ text: block.text, italics: true })],
         indent: { left: 720 },
         border: {
@@ -174,9 +237,9 @@ function wordBlock(block: DocumentOutlineBlock): Paragraph | Table {
             color: '999999'
           }
         }
-      });
+      })];
     case 'chart':
-      return new Paragraph({
+      return [new Paragraph({
         children: [
           new TextRun({
             text: `图表（${block.chartKind === 'bar' ? '柱状' : '饼图'}）${
@@ -187,36 +250,75 @@ function wordBlock(block: DocumentOutlineBlock): Paragraph | Table {
             italics: true
           })
         ]
-      });
+      })];
     case 'bullets':
-      return new Paragraph({
-        children: block.items.map((item) => new TextRun(item)),
-        bullet: { level: 0 }
-      });
+      return block.items.map(
+        (item) =>
+          new Paragraph({
+            children: [new TextRun(item)],
+            bullet: { level: 0 },
+            spacing: { after: 80 }
+          })
+      );
     case 'numbered':
-      return new Paragraph({
-        children: block.items.map((item) => new TextRun(item)),
-        numbering: { reference: 'document-numbering', level: 0 }
-      });
+      return block.items.map(
+        (item) =>
+          new Paragraph({
+            children: [new TextRun(item)],
+            numbering: { reference: numberingReference, level: 0 },
+            spacing: { after: 80 }
+          })
+      );
     case 'table': {
       const columnCount = Math.max(
         block.header.length,
         ...block.rows.map((row) => row.length)
       );
-      const cells = (row: readonly string[]) =>
+      const bodyCells = (row: readonly string[]) =>
         Array.from({ length: columnCount }, (_, index) =>
           new TableCell({
-            children: [new Paragraph(row[index] ?? '')]
+            margins: { top: 100, bottom: 100, left: 120, right: 120 },
+            children: [new Paragraph({ children: [new TextRun(row[index] ?? '')] })]
           })
         );
-      return new Table({
+      const headerCells = Array.from({ length: columnCount }, (_, index) =>
+        new TableCell({
+          shading: { fill: theme.accent },
+          margins: { top: 100, bottom: 100, left: 120, right: 120 },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [
+                new TextRun({
+                  text: block.header[index] ?? '',
+                  color: 'FFFFFF',
+                  bold: true
+                })
+              ]
+            })
+          ]
+        })
+      );
+      const border = {
+        style: BorderStyle.SINGLE,
+        size: 4,
+        color: theme.muted
+      } as const;
+      return [new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
-        columnWidths: Array.from({ length: columnCount }, () => 1),
+        borders: {
+          top: border,
+          bottom: border,
+          left: border,
+          right: border,
+          insideHorizontal: border,
+          insideVertical: border
+        },
         rows: [
-          new TableRow({ children: cells(block.header) }),
-          ...block.rows.map((row) => new TableRow({ children: cells(row) }))
+          new TableRow({ children: headerCells, tableHeader: true }),
+          ...block.rows.map((row) => new TableRow({ children: bodyCells(row) }))
         ]
-      });
+      })];
     }
   }
 }

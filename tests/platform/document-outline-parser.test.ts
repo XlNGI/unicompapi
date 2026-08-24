@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DocumentOutlineError,
   isDocumentOutline,
+  parseDocumentContent,
   parseDocumentOutline,
   parseMarkdownToOutline,
   stripPreamble,
@@ -211,5 +212,102 @@ describe('content contract helpers', () => {
     const outline = parseDocumentOutline(unwrapJsonFence(content));
     expect(outline.kind).toBe('word');
     expect(outline.title).toBe('周报');
+  });
+
+  it('normalizes the observed section-content JSON shape into a Word outline', () => {
+    const source = JSON.stringify({
+      title: '智能客服 Agent 系统设计文档',
+      sections: [
+        {
+          id: '1',
+          heading: '一、系统概述',
+          content: [
+            { type: 'paragraph', text: '系统说明。' },
+            {
+              type: 'table',
+              caption: '表 1-1 系统核心能力',
+              headers: ['能力', '说明'],
+              rows: [['意图识别', '识别用户咨询']]
+            }
+          ]
+        },
+        {
+          id: '2',
+          heading: '二、核心流程',
+          content: [
+            {
+              type: 'ordered_list',
+              items: ['接收请求', '检索资料', '输出答案']
+            },
+            {
+              type: 'subsection',
+              heading: '2.1 低置信度处理',
+              content: [{ type: 'paragraph', text: '转人工。' }]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(parseDocumentContent(source, 'word')).toEqual({
+      kind: 'word',
+      title: '智能客服 Agent 系统设计文档',
+      sections: [
+        {
+          heading: '一、系统概述',
+          level: 1,
+          blocks: [
+            { type: 'paragraph', text: '系统说明。' },
+            { type: 'paragraph', text: '表 1-1 系统核心能力' },
+            {
+              type: 'table',
+              header: ['能力', '说明'],
+              rows: [['意图识别', '识别用户咨询']]
+            }
+          ]
+        },
+        {
+          heading: '二、核心流程',
+          level: 1,
+          blocks: [
+            {
+              type: 'numbered',
+              items: ['接收请求', '检索资料', '输出答案']
+            },
+            { type: 'paragraph', text: '2.1 低置信度处理' },
+            { type: 'paragraph', text: '转人工。' }
+          ]
+        }
+      ]
+    });
+  });
+
+  it('fails closed for unsupported JSON-shaped content', () => {
+    expect(() =>
+      parseDocumentContent(
+        '{"title":"文档","sections":[{"heading":"正文","content":[{"type":"unknown"}]}]}',
+        'word'
+      )
+    ).toThrow(DocumentOutlineError);
+  });
+
+  it('rejects a canonical outline for a different document kind', () => {
+    expect(() =>
+      parseDocumentContent(
+        '{"kind":"ppt","title":"汇报","sections":[]}',
+        'word'
+      )
+    ).toThrow(DocumentOutlineError);
+  });
+
+  it('keeps Markdown fallback for non-JSON content', () => {
+    expect(parseDocumentContent('# 周报\n\n正文。', 'word').title).toBe('周报');
+  });
+
+  it('fails closed for JSON arrays instead of rendering them as Markdown', () => {
+    expect(() => parseDocumentContent('[]', 'word')).toThrow(DocumentOutlineError);
+    expect(() => parseDocumentContent('```json\n[]\n```', 'word')).toThrow(
+      DocumentOutlineError
+    );
   });
 });
