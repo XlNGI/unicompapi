@@ -79,6 +79,100 @@ describe('office document generator', () => {
     expect(xml).toContain('w:tbl');
   });
 
+  it('renders normalized Word content with editable report styling', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'word',
+        title: '智能客服 Agent 系统设计文档',
+        sections: [
+          {
+            heading: '一、系统概述',
+            level: 1,
+            blocks: [
+              { type: 'paragraph', text: '系统说明。' },
+              { type: 'paragraph', text: '表 1-1 系统核心能力' },
+              {
+                type: 'table',
+                header: ['能力', '说明'],
+                rows: [['意图识别', '识别用户咨询']]
+              }
+            ]
+          },
+          {
+            heading: '二、核心流程',
+            level: 1,
+            blocks: [
+              {
+                type: 'numbered',
+                items: ['接收请求', '检索资料', '输出答案']
+              }
+            ]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'word',
+      outline,
+      outputDirectory,
+      now: '2026-08-24T10:00:00.000Z',
+      theme: 'blueprint'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const xml = zip.readAsText('word/document.xml');
+    expect(xml).toContain('智能客服 Agent 系统设计文档');
+    expect(xml).toContain('系统说明。');
+    expect(xml).toContain('表 1-1 系统核心能力');
+    expect(xml).toContain('意图识别');
+    expect(xml).toContain('接收请求');
+    expect(xml).toContain('<w:jc w:val="center"/>');
+    expect(xml).toContain('1F5FBF');
+    expect(xml).toContain('<w:shd w:fill="1F5FBF"');
+    expect(xml).toContain('<w:b/>');
+    expect(xml).not.toContain('&quot;title&quot;');
+    expect(xml).not.toContain('&quot;sections&quot;');
+    expect(xml).not.toContain('ordered_list');
+    expect((xml.match(/接收请求/g) ?? []).length).toBe(1);
+    expect((xml.match(/检索资料/g) ?? []).length).toBe(1);
+    expect((xml.match(/输出答案/g) ?? []).length).toBe(1);
+  });
+
+  it('starts each numbered block with its own numbering instance', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'word',
+        title: '独立步骤',
+        sections: [
+          {
+            heading: '第一部分',
+            level: 1,
+            blocks: [{ type: 'numbered', items: ['甲', '乙'] }]
+          },
+          {
+            heading: '第二部分',
+            level: 1,
+            blocks: [{ type: 'numbered', items: ['丙', '丁'] }]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'word',
+      outline,
+      outputDirectory,
+      now: '2026-08-24T10:00:00.000Z',
+      theme: 'blueprint'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const xml = zip.readAsText('word/document.xml');
+    const ids = [...xml.matchAll(/<w:numPr>[\s\S]*?<w:numId w:val="(\d+)"/g)].map(
+      (match) => match[1]
+    );
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it('generates a real Excel workbook', async () => {
     const outputDirectory = await createOutputDirectory();
     const outline = parseDocumentOutline(outlineText);

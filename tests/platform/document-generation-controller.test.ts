@@ -102,6 +102,43 @@ function outlineJson() {
   });
 }
 
+async function storeCompletedAssistantMessage(input: {
+  readonly conversationId: string;
+  readonly content: string;
+  readonly messageId: string;
+  readonly now: () => string;
+  readonly repository: JsonProjectConversationRepository;
+}): Promise<Conversation> {
+  const stored = await input.repository.get(toConversationId(input.conversationId));
+  if (!stored) throw new Error('conversation missing');
+  const messageId = toMessageId(input.messageId);
+  const steps: Array<(current: Conversation) => Conversation> = [
+    (current) =>
+      beginAssistantMessage(current, {
+        id: messageId,
+        createdAt: toIsoTimestamp(input.now())
+      }),
+    (current) =>
+      startAssistantMessageStreaming(current, messageId, toIsoTimestamp(input.now())),
+    (current) =>
+      appendAssistantMessageChunk(
+        current,
+        messageId,
+        input.content,
+        toIsoTimestamp(input.now())
+      ),
+    (current) =>
+      completeAssistantMessage(current, messageId, toIsoTimestamp(input.now()))
+  ];
+  let conversation = stored;
+  for (const step of steps) {
+    const next = step(conversation);
+    await input.repository.save(next, conversation.revision);
+    conversation = next;
+  }
+  return conversation;
+}
+
 describe('document generation controller', () => {
   it('generates a document and completes the assistant message with a result', async () => {
     const { controller, conversationId, repository, rootDirectory } =
@@ -254,5 +291,210 @@ describe('document generation controller', () => {
     expect((await works.get(toWorkId(result.value.workId)))?.mediaKind).toBe(
       'document'
     );
+  });
+
+  it('generates a titled Word document from the observed model JSON shape', async () => {
+    const { controller, conversationId, now, repository } =
+      await createEnvironment();
+    const messageId = 'message-observed-word';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        title: '智能客服 Agent 系统设计文档',
+        sections: [
+          {
+            id: '1',
+            heading: '一、系统概述',
+            content: [{ type: 'paragraph', text: '系统说明。' }]
+          }
+        ]
+      })
+    });
+
+    const result = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word'
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.fileName).toContain('智能客服 Agent 系统设计文档');
+    expect(result.value.fileName.startsWith('{')).toBe(false);
+  });
+
+  it('rejects unsupported model JSON without registering a Word work', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const messageId = 'message-invalid-word';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content:
+        '{"title":"文档","sections":[{"heading":"正文","content":[{"type":"unknown"}]}]}'
+    });
+
+    const result = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word'
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected invalid outline');
+    expect(result.error.code).toBe('invalid_outline');
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect(await works.list(toProjectId('doc-ipc-project'))).toEqual([]);
+  });
+
+  it('deduplicates concurrent generation requests for the same assistant message', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const messageId = 'message-concurrent-word';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        title: '并发文档',
+        sections: [{ heading: '正文', content: [{ type: 'paragraph', text: '内容' }] }]
+      })
+    });
+    const request = {
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word' as const
+    };
+
+    const [first, second] = await Promise.all([
+      controller.generateFromMessage(request),
+      controller.generateFromMessage(request)
+    ]);
+
+    expect(first).toEqual(second);
+    if (!first.ok) throw new Error(first.error.message);
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect(await works.list(toProjectId('doc-ipc-project'))).toHaveLength(1);
+  });
+
+  it('reuses a completed result for the same message generation request', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const messageId = 'message-sequential-word';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        title: '顺序幂等文档',
+        sections: [{ heading: '正文', content: [{ type: 'paragraph', text: '内容' }] }]
+      })
+    });
+    const request = {
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word' as const
+    };
+
+    const first = await controller.generateFromMessage(request);
+    const second = await controller.generateFromMessage(request);
+
+    expect(first).toEqual(second);
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect(await works.list(toProjectId('doc-ipc-project'))).toHaveLength(1);
+  });
+
+  it('does not let an invalid request reuse a valid in-flight request', async () => {
+    const { controller, conversationId, now, repository } = await createEnvironment();
+    const messageId = 'message-invalid-concurrent';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        title: '合法请求',
+        sections: [{ heading: '正文', content: [{ type: 'paragraph', text: '内容' }] }]
+      })
+    });
+    const valid = controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word'
+    });
+    const invalid = controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'not-a-kind'
+    });
+
+    const [validResult, invalidResult] = await Promise.all([valid, invalid]);
+
+    expect(validResult.ok).toBe(true);
+    expect(invalidResult).toEqual({
+      ok: false,
+      error: { code: 'invalid_request', message: 'kind must be word, excel or ppt' }
+    });
+  });
+
+  it('does not merge requests whose output kind differs', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const messageId = 'message-different-kind';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        title: '多格式文档',
+        sections: [{ heading: '正文', content: [{ type: 'paragraph', text: '内容' }] }]
+      })
+    });
+
+    const word = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word'
+    });
+    const ppt = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'ppt'
+    });
+
+    expect(word.ok).toBe(true);
+    expect(ppt.ok).toBe(true);
+    if (!word.ok || !ppt.ok) return;
+    expect(word.value.workId).not.toBe(ppt.value.workId);
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect(await works.list(toProjectId('doc-ipc-project'))).toHaveLength(2);
   });
 });

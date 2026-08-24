@@ -82,6 +82,12 @@ describe('document drafting helpers', () => {
     expect(documentKindInstruction('ppt')).toContain('"type":"chart"');
     expect(documentKindInstruction('ppt')).toContain('必须同时提供 table 和 chart');
     expect(documentKindInstruction('excel')).toContain('列名');
-    expect(documentKindInstruction('word')).toContain('标题层级');
+    const wordInstruction = documentKindInstruction('word');
+    expect(wordInstruction).toContain('标题层级');
+    expect(wordInstruction).toContain('"kind":"word"');
+    expect(wordInstruction).toContain('"blocks"');
+    expect(wordInstruction).toContain('"header"');
+    expect(wordInstruction).toContain('不要使用 content、id、ordered_list、headers 或 subsection');
+    expect(DOCUMENT_GENERATION_INSTRUCTION).toContain('kind');
   });
 });

@@ -428,6 +428,11 @@ export function ChatPage({
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
+  const documentGenerationInFlightRef = useRef(false);
+  const responseFailureSafeCodeRef = useRef<{
+    readonly executionId: string;
+    readonly safeCode?: string;
+  }>();
   const followOutputRef = useRef(true);
   const responseExecutionSnapshotRef = useRef(responseExecution);
   responseExecutionSnapshotRef.current = responseExecution;
@@ -726,6 +731,12 @@ export function ChatPage({
 
     const handleTerminalEvent = (event: ConversationResponseStreamEventDto) => {
       terminalReceived = true;
+      responseFailureSafeCodeRef.current = {
+        executionId,
+        ...(event.type === 'stream_failed' && event.safeCode
+          ? { safeCode: event.safeCode }
+          : {})
+      };
       rendererTrace('terminalEvent', {
         sequence: event.sequence,
         type: event.type,
@@ -843,6 +854,7 @@ export function ChatPage({
     cancelRequestedRef.current = false;
     setCancelRequested(false);
     setResponseExecution(undefined);
+    responseFailureSafeCodeRef.current = undefined;
   }
 
   function updateInput(value: string) {
@@ -1220,6 +1232,7 @@ export function ChatPage({
   }
 
   async function sendDocumentMessage() {
+    if (documentGenerationInFlightRef.current) return;
     if (
       !chat ||
       !documentGeneration ||
@@ -1233,6 +1246,8 @@ export function ChatPage({
     ) {
       return;
     }
+    documentGenerationInFlightRef.current = true;
+    responseFailureSafeCodeRef.current = undefined;
     setBusy(true);
     setNotice('AI 正在撰写文档内容…');
     rendererTrace('sendDocumentMessage:start', JSON.stringify({
@@ -1387,11 +1402,20 @@ export function ChatPage({
                   item.state === 'failed'
               )
           : undefined;
+        const failureSafeCode = responseFailureSafeCodeRef.current as
+          | { readonly executionId: string; readonly safeCode?: string }
+          | undefined;
         setNotice(
           terminal === 'cancelled'
             ? 'AI 内容生成已取消，文档未生成。'
             : failedMessage
-              ? failedResponseNotice(failedMessage)
+              ? failedResponseNotice(
+                failedMessage,
+                failureSafeCode?.executionId ===
+                  started.value.execution.responseExecutionId
+                  ? failureSafeCode.safeCode
+                  : undefined
+              )
               : 'AI 内容生成失败，文档未生成。'
         );
         return;
@@ -1438,6 +1462,7 @@ export function ChatPage({
     } catch {
       setNotice('文档生成失败，请重试。');
     } finally {
+      documentGenerationInFlightRef.current = false;
       setBusy(false);
     }
   }

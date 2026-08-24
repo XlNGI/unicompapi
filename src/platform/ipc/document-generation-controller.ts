@@ -20,10 +20,9 @@ import { documentGenerationRequestParsers } from '../../shared/document-generati
 import {
   DocumentGenerationError,
   DocumentOutlineError,
+  parseDocumentContent,
   parseDocumentOutline,
-  parseMarkdownToOutline,
   stripPreamble,
-  unwrapJsonFence,
   type DocumentGenerationRunner,
   type DocumentOutline
 } from '../documents';
@@ -50,7 +49,12 @@ export interface DocumentGenerationControllerDependencies {
 }
 
 export class DocumentGenerationController {
+  private static readonly maxRememberedMessageOperations = 100;
   private readonly operations = new Set<Promise<unknown>>();
+  private readonly messageOperations = new Map<
+    string,
+    Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>>
+  >();
 
   constructor(
     private readonly dependencies: DocumentGenerationControllerDependencies
@@ -134,8 +138,18 @@ export class DocumentGenerationController {
   generateFromMessage(
     request: unknown
   ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>> {
-    return this.execute(async () => {
-      const input = documentGenerationRequestParsers.generateFromMessage(request);
+    let input: ReturnType<typeof documentGenerationRequestParsers.generateFromMessage>;
+    try {
+      input = documentGenerationRequestParsers.generateFromMessage(request);
+    } catch (error) {
+      return this.execute(async () => {
+        throw error;
+      });
+    }
+    const key = documentMessageOperationKey(input, this.dependencies.getSession()?.projectId);
+    const existing = key ? this.messageOperations.get(key) : undefined;
+    if (existing) return existing;
+    const operation = this.execute(async () => {
       const session = this.requireSession();
       const streaming = this.dependencies.getStreaming(session);
       const runner = this.dependencies.getRunner(session);
@@ -154,13 +168,7 @@ export class DocumentGenerationController {
         );
       }
       const cleaned = stripPreamble(message.content);
-      let outline: DocumentOutline;
-      try {
-        outline = parseDocumentOutline(unwrapJsonFence(cleaned));
-      } catch (error) {
-        if (!(error instanceof DocumentOutlineError)) throw error;
-        outline = parseMarkdownToOutline(cleaned, input.kind);
-      }
+      const outline = parseDocumentContent(cleaned, input.kind);
       const contentFingerprint = createHash('sha256')
         .update(cleaned)
         .digest('hex');
@@ -232,6 +240,28 @@ export class DocumentGenerationController {
         }
       };
     });
+    if (key) {
+      if (
+        this.messageOperations.size >=
+        DocumentGenerationController.maxRememberedMessageOperations
+      ) {
+        const oldest = this.messageOperations.keys().next().value as string | undefined;
+        if (oldest !== undefined) this.messageOperations.delete(oldest);
+      }
+      this.messageOperations.set(key, operation);
+      const clear = (result: DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>) => {
+        if (result.ok) return;
+        if (this.messageOperations.get(key) === operation) {
+          this.messageOperations.delete(key);
+        }
+      };
+      void operation.then(clear, () => {
+        if (this.messageOperations.get(key) === operation) {
+          this.messageOperations.delete(key);
+        }
+      });
+    }
+    return operation;
   }
 
   openDocument(
@@ -348,8 +378,12 @@ export class DocumentGenerationController {
         this.dependencies.onError?.(error);
         if (error instanceof DocumentGenerationError) {
           return failure(
-            error.code === 'generation_failed' ? 'generation_failed' : 'storage_error',
-            error.message
+            error.code === 'generation_failed' || error.code === 'verification_failed'
+              ? 'generation_failed'
+              : 'storage_error',
+            error.code === 'generation_failed' || error.code === 'verification_failed'
+              ? 'Document generation failed'
+              : 'Local document storage failed'
           );
         }
         if (error instanceof DocumentOutlineError) {
@@ -369,10 +403,7 @@ export class DocumentGenerationController {
         if (error instanceof TypeError) {
           return failure('invalid_request', error.message);
         }
-        return failure(
-          'storage_error',
-          error instanceof Error ? error.message : 'Document generation failed'
-        );
+        return failure('storage_error', 'Local document storage failed');
       })
       .finally(() => {
         this.operations.delete(task);
@@ -380,6 +411,23 @@ export class DocumentGenerationController {
     this.operations.add(task);
     return task;
   }
+}
+
+function documentMessageOperationKey(
+  input: ReturnType<typeof documentGenerationRequestParsers.generateFromMessage>,
+  projectId?: string
+): string {
+  return JSON.stringify({
+    projectId: projectId ?? '',
+    conversationId: input.conversationId,
+    messageId: input.messageId,
+    expectedRevision: input.expectedRevision,
+    kind: input.kind,
+    theme: input.theme,
+    images: input.images,
+    customTheme: input.customTheme,
+    aiImages: input.aiImages
+  });
 }
 
 function failure(
