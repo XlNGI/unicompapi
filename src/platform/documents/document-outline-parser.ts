@@ -97,12 +97,17 @@ export function parseDocumentContent(
 ): DocumentOutline {
   const cleaned = stripPreamble(content);
   const candidate = unwrapJsonFence(cleaned);
-  if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
+  const jsonCandidate = candidate.startsWith('{')
+    ? extractBalancedJsonObject(candidate)
+    : candidate.startsWith('[')
+      ? candidate
+      : extractBalancedJsonObject(candidate);
+  if (!jsonCandidate) {
     return parseMarkdownToOutline(cleaned, kind);
   }
-  const parsed = parseJsonRecord(candidate);
+  const parsed = parseJsonRecord(jsonCandidate);
   if ('kind' in parsed) {
-    const outline = parseDocumentOutline(candidate);
+    const outline = parseDocumentOutline(jsonCandidate);
     if (outline.kind !== kind) {
       throw new DocumentOutlineError(
         'document_invalid_outline',
@@ -110,6 +115,13 @@ export function parseDocumentContent(
       );
     }
     return outline;
+  }
+  if (isCanonicalOutlineRecord(parsed)) {
+    return parseDocumentOutline(JSON.stringify({
+      ...parsed,
+      kind,
+      title: parsed.title ?? '文档'
+    }));
   }
   return normalizeObservedDocument(parsed, kind);
 }
@@ -263,7 +275,14 @@ function parseSection(value: unknown, index: number): DocumentOutlineSection {
     `outline.sections[${index}].heading`,
     MAX_TITLE_LENGTH
   );
-  if (value.level !== 1 && value.level !== 2 && value.level !== 3) {
+  const level = value.level === 1 || value.level === '1'
+    ? 1
+    : value.level === 2 || value.level === '2'
+      ? 2
+      : value.level === 3 || value.level === '3'
+        ? 3
+        : undefined;
+  if (level === undefined) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
       `outline.sections[${index}].level must be 1, 2 or 3`
@@ -284,7 +303,7 @@ function parseSection(value: unknown, index: number): DocumentOutlineSection {
   const blocks = value.blocks.map((block, blockIndex) =>
     parseBlock(block, index, blockIndex)
   );
-  return { heading, level: value.level as 1 | 2 | 3, blocks };
+  return { heading, level, blocks };
 }
 
 function parseBlock(
@@ -490,6 +509,36 @@ export function stripPreamble(content: string): string {
   return lines.slice(start).join('\n').trim();
 }
 
+function extractBalancedJsonObject(value: string): string | undefined {
+  const start = value.indexOf('{');
+  if (start < 0) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === '{') {
+      depth += 1;
+    } else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return value.slice(start, index + 1);
+    }
+  }
+  return undefined;
+}
+
 export function stripInlineMarkdown(value: string): string {
   return value
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -566,6 +615,17 @@ function normalizeObservedDocument(
     })
   };
   return parseDocumentOutline(JSON.stringify(normalized));
+}
+
+function isCanonicalOutlineRecord(
+  value: Record<string, unknown>
+): value is Record<string, unknown> & {
+  readonly title?: string;
+  readonly sections: readonly Record<string, unknown>[];
+} {
+  return Array.isArray(value.sections) && value.sections.every(
+    (section) => isRecord(section) && Array.isArray(section.blocks)
+  );
 }
 
 function normalizeObservedBlock(

@@ -15,6 +15,12 @@ describe('document themes', () => {
       accent: '078AA3',
       presentationStyle: 'financing'
     });
+    expect(resolveDocumentTheme('university')).toMatchObject({
+      id: 'university',
+      name: '大学课堂汇报',
+      accent: '109B91',
+      presentationStyle: 'university'
+    });
     expect(resolveDocumentTheme('unknown').id).toBe('blueprint');
     expect(documentThemes.blueprint.accent).toMatch(/^[0-9A-F]{6}$/);
   });

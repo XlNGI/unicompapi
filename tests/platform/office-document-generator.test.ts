@@ -31,6 +31,22 @@ async function createOutputDirectory() {
   return path.join(root, 'out');
 }
 
+function readChartFrameExtents(xml: string): { x: number; y: number; w: number; h: number }[] {
+  return [...xml.matchAll(/<p:graphicFrame>([\s\S]*?<c:chart[\s\S]*?)<\/p:graphicFrame>/g)]
+    .map((match) => {
+      const transform = match[1].match(
+        /<p:xfrm>[\s\S]*?<a:off x="(\d+)" y="(\d+)"\/>[\s\S]*?<a:ext cx="(\d+)" cy="(\d+)"\/>/
+      );
+      if (!transform) throw new Error('Chart frame has no transform');
+      return {
+        x: Number(transform[1]),
+        y: Number(transform[2]),
+        w: Number(transform[3]),
+        h: Number(transform[4])
+      };
+    });
+}
+
 const outlineText = JSON.stringify({
   kind: 'word',
   title: '季度销售复盘',
@@ -255,6 +271,57 @@ describe('office document generator', () => {
     ).toBe(true);
   });
 
+  it('keeps chart frames inside the slide when paired with an image and many labels', async () => {
+    const outputDirectory = await createOutputDirectory();
+    await mkdir(outputDirectory, { recursive: true });
+    const imagePath = path.join(outputDirectory, 'chart-reference.png');
+    await writeFixture(
+      imagePath,
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64'
+      )
+    );
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '图表边界验收',
+      sections: [{
+        heading: '经营数据',
+        level: 1,
+        blocks: [{
+          type: 'chart',
+          chartKind: 'bar',
+          title: '年度收入',
+          data: [
+            { label: '2021 年', value: 10 },
+            { label: '2022 年', value: 20 },
+            { label: '2023 年', value: 30 },
+            { label: '2024 年', value: 40 },
+            { label: '2025 年', value: 50 },
+            { label: '2026 年', value: 60 },
+            { label: '2027 年', value: 70 }
+          ]
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-24T10:00:00.000Z',
+      images: [{ absolutePath: imagePath, caption: '参考图' }]
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const chartFrames = zip
+      .getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+      .flatMap((entry) => readChartFrameExtents(zip.readAsText(entry.entryName)));
+    const emuPerInch = 914400;
+    expect(chartFrames).toHaveLength(1);
+    expect(chartFrames[0].x + chartFrames[0].w).toBeLessThanOrEqual(13.333 * emuPerInch);
+    expect(chartFrames[0].y + chartFrames[0].h).toBeLessThanOrEqual(7.5 * emuPerInch);
+  });
+
   it('embeds local images into slides', async () => {
     const outputDirectory = await createOutputDirectory();
     await mkdir(outputDirectory, { recursive: true });
@@ -350,6 +417,221 @@ describe('office document generator', () => {
     expect(contentXml).toContain('市场概览');
     expect(contentXml).toContain('F3F4F4');
     expect(closingXml).toContain('谢谢观看');
+  });
+
+  it('renders the university classroom template with editable color cards', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '数据科学导论',
+      sections: [{
+        heading: '核心概念',
+        level: 1,
+        blocks: [{
+          type: 'bullets',
+          items: ['数据采集', '模型训练', '结果评估', '负责任使用']
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-24T12:00:00.000Z',
+      theme: 'university'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const titleXml = zip.readAsText('ppt/slides/slide1.xml');
+    const contentXml = zip.readAsText('ppt/slides/slide2.xml');
+    expect(titleXml).toContain('UNDERSTANDING AI');
+    expect(titleXml).toContain('109B91');
+    expect(contentXml).toContain('核心概念');
+    expect(contentXml).toContain('E0F6F2');
+    expect(contentXml).toContain('4084CC');
+    expect(contentXml).toContain('EB8E41');
+    expect(contentXml).toContain('CD5454');
+    expect(contentXml).toContain('大学课堂汇报');
+  });
+
+  it('keeps all university template content by splitting long sections across slides', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '课堂内容完整性',
+      sections: [{
+        heading: '知识梳理',
+        level: 1,
+        blocks: [
+          { type: 'paragraph', text: '第一段说明' },
+          { type: 'paragraph', text: '第二段说明' },
+          {
+            type: 'bullets',
+            items: ['要点一', '要点二', '要点三', '要点四', '要点五', '要点六']
+          },
+          {
+            type: 'table',
+            header: ['序号', '内容'],
+            rows: [
+              ['1', '表格一'], ['2', '表格二'], ['3', '表格三'], ['4', '表格四'],
+              ['5', '表格五'], ['6', '表格六'], ['7', '表格七']
+            ]
+          }
+        ]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-24T12:00:00.000Z',
+      theme: 'university'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slidesXml = zip.getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+      .map((entry) => zip.readAsText(entry));
+    const allSlideText = slidesXml.join('');
+    expect(slidesXml).toHaveLength(6);
+    [
+      '第一段说明', '第二段说明', '要点一', '要点六', '表格一', '表格七'
+    ].forEach((text) => expect(allSlideText).toContain(text));
+  });
+
+  it('renders semantic comparison sections with a two-column component', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '方式对比',
+      sections: [{
+        heading: '传统方式与现在方式的区别',
+        level: 1,
+        blocks: [{
+          type: 'bullets',
+          items: ['传统方式：人工处理', '现在方式：模型辅助']
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-25T12:00:00.000Z',
+      theme: 'university'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slidesXml = zip.getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+      .map((entry) => zip.readAsText(entry));
+    const allSlideText = slidesXml.join('');
+    expect(allSlideText).toContain('对比分析');
+    expect(allSlideText).toContain('传统方式：人工处理');
+    expect(allSlideText).toContain('现在方式：模型辅助');
+    expect(allSlideText).toContain('4084CC');
+    expect(allSlideText).toContain('EB8E41');
+  });
+
+  it('renders evaluation sections with a metrics component instead of cards', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '结果评估',
+      sections: [{
+        heading: '结果评估',
+        level: 1,
+        blocks: [{
+          type: 'bullets',
+          items: ['划分测试集验证', '关注准确率召回率', '对比基准模型']
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-25T12:00:00.000Z',
+      theme: 'university'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const allSlideText = zip.getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+      .map((entry) => zip.readAsText(entry))
+      .join('');
+    expect(allSlideText).toContain('结果评估');
+    expect(allSlideText).toContain('结果评估');
+    expect(allSlideText).toContain('D5DEE8');
+  });
+
+  it('rotates ordinary university layouts while preserving semantic components', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '组件轮换验收',
+      sections: [
+        { heading: '基础概念', level: 1, blocks: [{ type: 'bullets', items: ['概念一', '概念二'] }] },
+        { heading: '应用场景', level: 1, blocks: [{ type: 'bullets', items: ['场景一', '场景二'] }] },
+        { heading: '学习方法', level: 1, blocks: [{ type: 'bullets', items: ['方法一', '方法二'] }] },
+        { heading: '结果评估', level: 1, blocks: [{ type: 'bullets', items: ['准确率', '召回率'] }] }
+      ]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-25T12:00:00.000Z',
+      theme: 'university'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slides = zip.getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+      .map((entry) => zip.readAsText(entry));
+    expect(slides.join('')).toContain('准确率');
+    expect(slides.join('')).toContain('召回率');
+    expect(slides.some((xml) => xml.includes('• 场景一'))).toBe(true);
+    expect(slides.some((xml) => xml.includes('E0F6F2'))).toBe(true);
+  });
+
+  it('falls back from the reference master when a later chapter needs a semantic component', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const sections = [
+      '基础概念',
+      '发展脉络',
+      '工作原理',
+      '核心技术',
+      '结果评估',
+      '应用场景',
+      '生成式 AI',
+      '风险意识',
+      '负责任行动'
+    ].map((heading, index) => ({
+      heading,
+      level: 1 as const,
+      blocks: [{
+        type: 'bullets' as const,
+        items: index === 4
+          ? ['划分测试集验证', '关注准确率召回率', '对比基准模型']
+          : [`${heading}要点一`, `${heading}要点二`]
+      }]
+    }));
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '大学课堂组件验收',
+      sections
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-08-25T12:00:00.000Z',
+      theme: 'university'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slideEntries = zip.getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName));
+    const allSlideText = slideEntries.map((entry) => zip.readAsText(entry)).join('');
+    expect(slideEntries.length).toBeGreaterThan(10);
+    expect(allSlideText).toContain('结果评估');
+    expect(allSlideText).toContain('划分测试集验证');
+    expect(allSlideText).toContain('D5DEE8');
   });
 
   it('sanitizes file names', () => {
