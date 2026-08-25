@@ -7,6 +7,10 @@ import {
   uniCompApiTextToImageParameterSchema,
   uniCompApiReferenceToImageParameterSchema,
   uniCompApiSupportsFeature,
+  uniCompApiTextChatParameterSchema,
+  uniCompApiTextReasoningParameterSchema,
+  UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
@@ -74,12 +78,22 @@ describe('UniCompAPI model capability registry', () => {
     expect(uniCompApiModelFeatures('happyhorse-1.0-r2v')).toEqual([]);
   });
 
-  it('keeps unknown manual model keys backward-compatible', () => {
+  it('keeps unknown UniCompAPI model keys without any inferred capability', () => {
     expect(uniCompApiSupportsFeature(
       UNICOMPAPI_PROVIDER_PACKAGE_ID,
       'manual-future-model',
       'text_chat'
-    )).toBe(true);
+    )).toBe(false);
+    expect(uniCompApiSupportsFeature(
+      UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      'manual-future-model',
+      'text_to_image'
+    )).toBe(false);
+    expect(uniCompApiSupportsFeature(
+      UNICOMPAPI_PROVIDER_PACKAGE_ID,
+      'manual-future-model',
+      'text_to_video'
+    )).toBe(false);
   });
 
   it('binds model-specific official image parameters', () => {
@@ -127,6 +141,89 @@ describe('UniCompAPI model capability registry', () => {
       ])
     });
     expect(uniCompApiTextToImageParameterSchema('manual-future-model')).toBeUndefined();
+  });
+
+  it('limits UniCompAPI text chat parameters to the official Chat Completions contract', () => {
+    expect(uniCompApiTextChatParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+      revision: 1,
+      productFeature: 'text_chat'
+    });
+    expect(uniCompApiTextChatParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'max_tokens',
+      'temperature',
+      'top_p',
+      'stop',
+      'n',
+      'presence_penalty',
+      'frequency_penalty',
+      'seed',
+      'response_format',
+      'tool_choice',
+      'user',
+      'logit_bias'
+    ]);
+    expect(uniCompApiTextChatParameterSchema.fields.map((field) => field.fieldId))
+      .not.toEqual(expect.arrayContaining([
+        'thinking',
+        'top_k',
+        'chat_template_kwargs',
+        'enable_thinking',
+        'metadata',
+        'parallel_tool_calls'
+      ]));
+    expect(uniCompApiTextChatParameterSchema.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fieldId: 'max_tokens', minimum: 1, maximum: 128000 }),
+        expect.objectContaining({ fieldId: 'temperature', minimum: 0, maximum: 2 }),
+        expect.objectContaining({ fieldId: 'top_p', minimum: 0, maximum: 1 }),
+        expect.objectContaining({ fieldId: 'logit_bias', valueType: 'object' })
+      ])
+    );
+  });
+
+  it('limits UniCompAPI text reasoning parameters to official fields', () => {
+    expect(uniCompApiTextReasoningParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+      revision: 1,
+      productFeature: 'text_reasoning'
+    });
+    expect(uniCompApiTextReasoningParameterSchema.fields.map((field) => field.fieldId)).toEqual([
+      'max_completion_tokens',
+      'reasoning_effort',
+      'stop',
+      'n',
+      'presence_penalty',
+      'frequency_penalty',
+      'seed',
+      'response_format',
+      'tool_choice',
+      'user',
+      'logit_bias'
+    ]);
+    expect(uniCompApiTextReasoningParameterSchema.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldId: 'reasoning_effort',
+          valueType: 'enum',
+          options: ['low', 'medium', 'high']
+        }),
+        expect.objectContaining({
+          fieldId: 'max_completion_tokens',
+          minimum: 1,
+          maximum: 128000
+        }),
+        expect.objectContaining({ fieldId: 'logit_bias', valueType: 'object' })
+      ])
+    );
+    expect(uniCompApiTextReasoningParameterSchema.fields.map((field) => field.fieldId))
+      .not.toEqual(expect.arrayContaining([
+        'thinking',
+        'top_k',
+        'chat_template_kwargs',
+        'enable_thinking',
+        'metadata'
+      ]));
   });
 
 });

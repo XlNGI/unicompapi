@@ -43,6 +43,7 @@ import {
   isOpenAiCompatiblePackageId,
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
+import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
 
@@ -739,7 +740,7 @@ function serializeVideoRequest(
         ? values.ratio.trim()
         : '';
   if (aspectRatio.length > 0) {
-    metadata[route.packageId === 'provider-package-unicompapi'
+    metadata[route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID
       ? 'ratio'
       : 'aspect_ratio'] = aspectRatio;
   }
@@ -799,7 +800,7 @@ function validateUniCompApiVideoParameters(
   route: ValidatedNewApiRoute,
   values: Readonly<Record<string, ParameterValue>>
 ): void {
-  if (route.packageId !== 'provider-package-unicompapi') return;
+  if (route.packageId !== UNICOMPAPI_PROVIDER_PACKAGE_ID) return;
   const hasSize = values.size !== undefined ||
     values.width !== undefined || values.height !== undefined;
   const hasResolution = typeof values.resolution === 'string' &&

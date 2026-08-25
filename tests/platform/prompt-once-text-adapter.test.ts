@@ -29,10 +29,12 @@ import {
   NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_TEXT_CONSTRAINT_SET_ID,
+  UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_ENDPOINT_POLICY_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
   newApiDefaultTextReasoningParameterSchema,
+  uniCompApiTextReasoningParameterSchema,
   parsePromptOnceCompletion,
   parsePromptOnceResponse,
   serializePromptOnceRequest,
@@ -143,7 +145,9 @@ describe('prompt_once text adapter contract', () => {
     });
     expect(validatePromptOnceRoute(openAiRoute(true))).toMatchObject({
       packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
-      endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID
+      endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID,
+      parameterSchemaId: UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+      parameterSchemaRevision: uniCompApiTextReasoningParameterSchema.revision
     });
   });
 });
@@ -202,8 +206,12 @@ function openAiRoute(unicomp = false) {
     adapterVersion: NEWAPI_ADAPTER_VERSION,
     endpointPolicyId: unicomp ? UNICOMPAPI_ENDPOINT_POLICY_ID : NEWAPI_ENDPOINT_POLICY_ID,
     providerModelKey: 'reasoning-model',
-    parameterSchemaId: NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
-    parameterSchemaRevision: newApiDefaultTextReasoningParameterSchema.revision,
+    parameterSchemaId: unicomp
+      ? UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID
+      : NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+    parameterSchemaRevision: unicomp
+      ? uniCompApiTextReasoningParameterSchema.revision
+      : newApiDefaultTextReasoningParameterSchema.revision,
     resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
     usageSchemaId: toUsageSchemaId(NEWAPI_CHAT_USAGE_SCHEMA_ID),
     constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID

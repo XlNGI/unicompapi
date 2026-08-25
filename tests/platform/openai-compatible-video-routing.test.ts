@@ -77,6 +77,28 @@ describe('openai-compatible video soft routing', () => {
       )
     ).toHaveLength(1);
   });
+
+  it('does not infer video capabilities for unknown UniCompAPI model keys', () => {
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const snapshot = baseSnapshot();
+    const model = {
+      ...snapshot.models[0]!,
+      providerModelKey: 'future-video-model',
+      displayName: 'Future Video Model'
+    };
+    const routed = routeOpenAiCompatibleVideoProfile(
+      { ...snapshot, models: [model] },
+      packages,
+      model,
+      now
+    );
+    expect(routed.state).toBe('skipped');
+    expect(routed.profileId).toBeUndefined();
+    expect(routed.snapshot.modelProfiles).toEqual([]);
+    expect(routed.snapshot.capabilities.some((candidate) =>
+      candidate.modelId === model.id && candidate.capability === 'video_generation'
+    )).toBe(false);
+  });
 });
 
 function baseSnapshot(): ProviderRegistrySnapshot {
@@ -120,8 +142,8 @@ function baseSnapshot(): ProviderRegistrySnapshot {
     id: modelId,
     providerId,
     connectionId,
-    providerModelKey: 'video-capable-model',
-    displayName: 'Video Capable',
+    providerModelKey: 'viduq3-turbo',
+    displayName: 'viduq3-turbo',
     protocolBindingId: toProtocolBindingId('protocol-binding-chat'),
     mediaKind: 'unknown',
     enabled: true,

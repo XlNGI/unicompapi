@@ -98,7 +98,9 @@ import {
   type ControlledNewApiImageV1,
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
-  type NewApiHttpTransportResponse
+  type NewApiHttpTransportResponse,
+  uniCompApiTextChatParameterSchema,
+  uniCompApiTextReasoningParameterSchema,
 } from '../../src/platform';
 
 const modelKey = 'tenant-deployment-42';
@@ -1125,6 +1127,83 @@ describe('NewAPI chat adapter', () => {
     expect(lifecycle.content).toBe('普通回答。');
   });
 
+  it('only serializes official UniCompAPI chat parameters and forwards logit_bias', async () => {
+    const fixture = runtimeFixture(async () => streamResponse([
+      event({
+        id: 'chatcmpl-unicomp-official-params',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 'deepseek-v3',
+        choices: [{ index: 0, delta: { content: '???' }, finish_reason: 'stop' }]
+      }),
+      'data: [DONE]\n\n'
+    ].join('')));
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      { get: async () => unicompapiConnection() },
+      defaultTextSchemaResolver(),
+      lifecycleFixture().port,
+      usageSink().port
+    );
+    const handle = await adapter.submit({
+      routeSnapshot: unicompapiTextRoute('text_chat', 'deepseek-v3'),
+      request: {
+        responseExecutionId: 'response-execution-unicomp-official-params',
+        invocationAttemptId: 'attempt-unicomp-official-params',
+        messages: [{ role: 'user', content: '????' }],
+        parameterValues: {
+          temperature: 0.7,
+          logit_bias: { '1234': -1 }
+        }
+      }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    const body = requestJson(fixture.requests[0]);
+    expect(body).toMatchObject({
+      model: 'deepseek-v3',
+      temperature: 0.7,
+      logit_bias: { '1234': -1 }
+    });
+    expect(body).not.toHaveProperty('thinking');
+    expect(body).not.toHaveProperty('top_k');
+    expect(body).not.toHaveProperty('chat_template_kwargs');
+    expect(body).not.toHaveProperty('enable_thinking');
+    expect(body).not.toHaveProperty('metadata');
+  });
+
+  it('rejects non-official UniCompAPI chat parameters before HTTP', async () => {
+    const fixture = runtimeFixture(async () => streamResponse('data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      { get: async () => unicompapiConnection() },
+      defaultTextSchemaResolver(),
+      lifecycleFixture().port,
+      usageSink().port
+    );
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiTextRoute('text_chat', 'deepseek-v3'),
+      request: {
+        responseExecutionId: 'response-execution-unicomp-reject',
+        invocationAttemptId: 'attempt-unicomp-reject',
+        messages: [{ role: 'user', content: '????' }],
+        parameterValues: { thinking: { type: 'enabled' } }
+      }
+    })).rejects.toThrow();
+    expect(fixture.requests).toHaveLength(0);
+  });
+
   it('rejects unknown JSON and mismatched schemas before HTTP', async () => {
     const fixture = runtimeFixture(async () => streamResponse('data: [DONE]\n\n'));
     const adapter = new NewApiChatAdapter(
@@ -2128,7 +2207,9 @@ function schemaResolver() {
 function defaultTextSchemaResolver() {
   const schemas = [
     newApiDefaultTextChatParameterSchema,
-    newApiDefaultTextReasoningParameterSchema
+    newApiDefaultTextReasoningParameterSchema,
+    uniCompApiTextChatParameterSchema,
+    uniCompApiTextReasoningParameterSchema
   ];
   return {
     get: async (schemaId: string, revision: number) =>
@@ -2223,8 +2304,8 @@ function unicompapiTextRoute(
   providerModelKey: string
 ): ProviderExecutionRouteSnapshotV1 {
   const schema = feature === 'text_reasoning'
-    ? newApiDefaultTextReasoningParameterSchema
-    : newApiDefaultTextChatParameterSchema;
+    ? uniCompApiTextReasoningParameterSchema
+    : uniCompApiTextChatParameterSchema;
   return createProviderExecutionRouteSnapshot({
     id: toProviderExecutionRouteSnapshotId(`route-unicompapi-${feature}`),
     projectId: toProjectId('project-newapi'),

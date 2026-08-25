@@ -65,7 +65,14 @@ export function routeOpenAiCompatibleVideoProfile(
     : undefined;
   if (
     isUniCompApiPackage(connection.packageId) &&
-    isKnownUniCompApiModel(model.providerModelKey) &&
+    !isKnownUniCompApiModel(model.providerModelKey)
+  ) {
+    // Closed-world UniCompAPI: unknown catalog/manual keys never receive an
+    // inferred video profile until the capability table is extended.
+    return { snapshot, model, state: 'skipped' };
+  }
+  if (
+    isUniCompApiPackage(connection.packageId) &&
     (!features || features.length === 0)
   ) {
     return { snapshot, model, state: 'skipped' };
