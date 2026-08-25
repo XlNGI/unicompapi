@@ -52,6 +52,11 @@ test('text-to-video reuses the professional image prompt tools layout', () => {
   );
 });
 
+test('text-to-video reveals the final prompt only after enhancement', () => {
+  assert.match(source, /enhancementContent \? \(/);
+  assert.match(source, /enhancementContent \? '3' : '2'/);
+});
+
 test('text-to-video uses only the unified candidate and submission panel', () => {
   assert.match(source, /VideoFeatureSubmissionPanel/);
   assert.match(source, /showProgressSteps/);
