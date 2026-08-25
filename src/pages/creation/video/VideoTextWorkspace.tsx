@@ -187,6 +187,7 @@ export function VideoTextWorkspace({
           ) : null}
         </Card>
 
+        {enhancementContent ? (
         <Card className="uc-image-workbench__panel uc-video-text__prompt">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
@@ -207,10 +208,11 @@ export function VideoTextWorkspace({
             <small>{draft.prompt.finalPrompt.length} / 6000</small>
           </label>
         </Card>
+        ) : null}
 
         <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit">
           <header className="uc-image-workbench__panel-heading">
-            <span aria-hidden="true">3</span>
+            <span aria-hidden="true">{enhancementContent ? '3' : '2'}</span>
             <div>
               <h2>模型、参数与提交流程</h2>
               <p>选择模型后由后台锁定接口与参数配置；填写参数后准备并提交。</p>
