@@ -1,5 +1,6 @@
 import type { DocumentOutlineSection } from './document-outline-parser';
 import type { DocumentTheme } from './document-theme';
+import { selectSectionComponent } from './document-components';
 
 export type DocumentSlideLayout =
   | 'title'
@@ -20,12 +21,16 @@ export interface DocumentLayoutStyle {
 export function chooseSectionLayout(
   section: DocumentOutlineSection
 ): DocumentSlideLayout {
-  const hasTable = section.blocks.some((block) => block.type === 'table');
-  if (hasTable) return 'table';
-  const hasBullets = section.blocks.some(
-    (block) => block.type === 'bullets' || block.type === 'numbered'
-  );
-  if (hasBullets) return 'bullets';
+  const component = selectSectionComponent(section).id;
+  if (component === 'table') return 'table';
+  if (component === 'image-text') return 'image_text';
+  if (
+    component === 'cards' ||
+    component === 'timeline' ||
+    component === 'metrics' ||
+    component === 'callout' ||
+    component === 'comparison'
+  ) return 'bullets';
   return 'section';
 }
 

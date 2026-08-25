@@ -110,13 +110,14 @@ const documentKindOptions: readonly {
 ];
 
 const documentThemeOptions: readonly {
-  readonly value: 'blueprint' | 'ink' | 'forest' | 'financing';
+  readonly value: 'blueprint' | 'ink' | 'forest' | 'financing' | 'university';
   readonly label: string;
 }[] = [
   { value: 'blueprint', label: '商务蓝' },
   { value: 'ink', label: '墨色' },
   { value: 'forest', label: '松绿' },
-  { value: 'financing', label: '融资演讲稿' }
+  { value: 'financing', label: '融资演讲稿' },
+  { value: 'university', label: '大学课堂汇报' }
 ];
 
 function rendererTrace(message: string, detail?: unknown): void {
@@ -346,7 +347,11 @@ function describeDocumentError(error: {
   readonly code: string;
   readonly message: string;
 }): string {
-  return `${documentErrorMessages[error.code] ?? error.message}（${error.code}）`;
+  const label = documentErrorMessages[error.code] ?? error.message;
+  const detail = error.code === 'invalid_outline' && error.message !== label
+    ? `：${error.message}`
+    : '';
+  return `${label}${detail}（${error.code}）`;
 }
 
 interface AttachmentDraft {
@@ -379,7 +384,7 @@ export function ChatPage({
   const [documentMode, setDocumentMode] = useState(false);
   const [documentKind, setDocumentKind] = useState<DocumentKindOption>('auto');
   const [documentTheme, setDocumentTheme] = useState<
-    'blueprint' | 'ink' | 'forest' | 'financing'
+    'blueprint' | 'ink' | 'forest' | 'financing' | 'university'
   >('blueprint');
   const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
   const [imageCandidateOptions, setImageCandidateOptions] = useState<

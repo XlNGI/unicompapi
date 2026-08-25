@@ -304,6 +304,19 @@ describe('content contract helpers', () => {
     expect(parseDocumentContent('# 周报\n\n正文。', 'word').title).toBe('周报');
   });
 
+  it('recovers a canonical outline without kind and with surrounding prose', () => {
+    const outline = parseDocumentContent(
+      '下面是生成结果：\n{"title":"课堂汇报","sections":[{"heading":"核心概念","level":"1","blocks":[{"type":"bullets","items":["数据","算法"]}]}]}\n以上。',
+      'ppt'
+    );
+    expect(outline.kind).toBe('ppt');
+    expect(outline.sections[0].level).toBe(1);
+    expect(outline.sections[0].blocks[0]).toEqual({
+      type: 'bullets',
+      items: ['数据', '算法']
+    });
+  });
+
   it('fails closed for JSON arrays instead of rendering them as Markdown', () => {
     expect(() => parseDocumentContent('[]', 'word')).toThrow(DocumentOutlineError);
     expect(() => parseDocumentContent('```json\n[]\n```', 'word')).toThrow(
