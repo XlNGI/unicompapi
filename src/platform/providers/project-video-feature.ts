@@ -32,6 +32,10 @@ import {
   newApiVideoUsageSchema
 } from './newapi/newapi-contracts';
 import {
+  uniCompApiSeedance2ImageToVideoParameterSchema,
+  uniCompApiSeedance2TextToVideoParameterSchema
+} from './newapi/unicompapi-model-capabilities';
+import {
   viduPackagedModelContracts,
   viduUsageSchema
 } from './vidu/vidu-contracts';
@@ -259,6 +263,24 @@ export function createVideoProviderFeatureContracts(): readonly ProviderFeatureC
     },
     {
       parameterSchema: newApiDefaultImageToVideoParameterSchema,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiVideoUsageSchema,
+      constraintSetId: NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: uniCompApiSeedance2TextToVideoParameterSchema,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiVideoUsageSchema,
+      constraintSetId: NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: uniCompApiSeedance2ImageToVideoParameterSchema,
       resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
       resultSchemaRevision: 1,
       usageSchema: newApiVideoUsageSchema,
