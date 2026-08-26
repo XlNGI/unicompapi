@@ -44,8 +44,12 @@ import {
   uniCompApiQwenImageReferenceToImageParameterSchema,
   uniCompApiQwenImageTextToImageParameterSchema,
   newApiDefaultTextToVideoParameterSchema,
+  newApiDefaultImageToVideoParameterSchema,
   uniCompApiDefaultTextToImageParameterSchema,
   uniCompApiSeedream5TextToImageParameterSchema,
+  uniCompApiSeedance2ImageToVideoParameterSchema,
+  uniCompApiSeedance2TextToVideoParameterSchema,
+  uniCompApiVideoParameterSchema,
   newApiProviderPackageDescriptor,
   NEWAPI_ADAPTER_VERSION,
   NEWAPI_CHAT_ADAPTER_ID,
@@ -1900,7 +1904,7 @@ describe('NewAPI video adapter', () => {
     });
   });
 
-  it('projects default UniCompAPI video fields into resolution and metadata', async () => {
+  it('projects generic UniCompAPI video fields into resolution and metadata', async () => {
     const fixture = runtimeFixture(async () => jsonResponse({
       id: 'task_script_ok',
       task_id: 'task_script_ok',
@@ -1962,6 +1966,129 @@ describe('NewAPI video adapter', () => {
         audio: true
       }
     });
+  });
+
+  it('projects only validated Seedance 2.0 Fast parameters into the UniCompAPI request body', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_fast', 'queued')));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+    const route = unicompapiVideoRoute(
+      'text_to_video',
+      'doubao-seedance-2-0-fast-260128'
+    );
+    const outcome = await adapter.submit({
+      routeSnapshot: route,
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-fast',
+        projectId: 'project-newapi',
+        prompt: 'A lighthouse beam passes through a storm at night',
+        parameterValues: {
+          duration: 5,
+          resolution: '720p',
+          ratio: '16:9',
+          generate_audio: true,
+          watermark: false,
+          camera_fixed: true,
+          return_last_frame: false,
+          seed: 7
+        }
+      }
+    });
+    expect(outcome).toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'task_seedance_fast',
+      state: 'queued'
+    });
+    const body = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
+    expect(body).toEqual({
+      model: 'doubao-seedance-2-0-fast-260128',
+      prompt: 'A lighthouse beam passes through a storm at night',
+      duration: 5,
+      resolution: '720p',
+      ratio: '16:9',
+      generate_audio: true,
+      watermark: false,
+      camera_fixed: true,
+      return_last_frame: false,
+      seed: 7
+    });
+    expect(body).not.toHaveProperty('metadata');
+  });
+
+  it('rejects mixed Seedance duration and frames before HTTP', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('must-not-submit', 'queued')));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiVideoRoute(
+        'text_to_video',
+        'doubao-seedance-2-0-fast-260128'
+      ),
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-duration-frames',
+        projectId: 'project-newapi',
+        prompt: 'A city skyline changes from day to night',
+        parameterValues: { duration: 5, frames: 120 }
+      }
+    })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('rejects gateway-only Seedance parameters before HTTP', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('must-not-submit', 'queued')));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiVideoRoute(
+        'text_to_video',
+        'doubao-seedance-2-0-fast-260128'
+      ),
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-gateway-only',
+        projectId: 'project-newapi',
+        prompt: 'A city skyline changes from day to night',
+        parameterValues: { mode: 'pro' }
+      }
+    })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('keeps a Seedance 2.0 Fast first frame while projecting image-to-video fields to top level', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_fast_image', 'queued')));
+    const resolve = vi.fn(async (): Promise<ControlledNewApiImageV1> => ({
+      assetId: 'asset-seedance-first-frame',
+      mimeType: 'image/png',
+      width: 640,
+      height: 480,
+      sizeBytes: 8,
+      bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    }));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), resolve);
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiVideoRoute(
+        'image_to_video',
+        'doubao-seedance-2-0-fast-260128'
+      ),
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-fast-image',
+        projectId: 'project-newapi',
+        assetId: 'asset-seedance-first-frame',
+        prompt: 'The cloud bank moves slowly behind the subject',
+        parameterValues: { ratio: '9:16', frames: 120, seed: 42 }
+      }
+    });
+    expect(outcome).toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'task_seedance_fast_image',
+      state: 'queued'
+    });
+    const body = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
+    expect(body).toMatchObject({
+      model: 'doubao-seedance-2-0-fast-260128',
+      prompt: 'The cloud bank moves slowly behind the subject',
+      ratio: '9:16',
+      frames: 120,
+      seed: 42
+    });
+    expect(body.image).toMatch(/^data:image\/png;base64,/u);
+    expect(body).not.toHaveProperty('metadata');
   });
 
   it('accepts exactly one controlled JPG/PNG only for image-to-video', async () => {
@@ -2299,6 +2426,36 @@ function routeFor(
   });
 }
 
+function unicompapiVideoRoute(
+  feature: 'text_to_video' | 'image_to_video',
+  providerModelKey: string
+): ProviderExecutionRouteSnapshotV1 {
+  const schema = uniCompApiVideoParameterSchema(providerModelKey, feature) ??
+    (feature === 'text_to_video'
+      ? newApiDefaultTextToVideoParameterSchema
+      : newApiDefaultImageToVideoParameterSchema);
+  return {
+    ...routeFor(feature),
+    id: toProviderExecutionRouteSnapshotId(`route-unicompapi-${feature}-${providerModelKey}`),
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+    providerId: toProviderId('provider-unicompapi'),
+    connectionId: toConnectionId('connection-unicompapi'),
+    connectionConfigVersionId: 'connection-config-unicompapi-1',
+    endpointPolicyId: UNICOMPAPI_ENDPOINT_POLICY_ID,
+    endpointPolicyRevision: 1,
+    credentialVersionId: 'credential-version-unicompapi-1',
+    modelId: toModelId(`model-unicompapi-${providerModelKey}`),
+    providerModelKey,
+    profileId: `profile-unicompapi-${feature}-${providerModelKey}`,
+    protocolBindingId: toProtocolBindingId(`binding-unicompapi-${feature}-${providerModelKey}`),
+    parameterSchemaId: schema.schemaId,
+    parameterSchemaRevision: schema.revision,
+    runtimePolicyId: 'runtime.unicompapi.synthetic',
+    runtimeAuthorizationClaimId: `claim-unicompapi-${feature}-${providerModelKey}`
+  };
+}
+
 function unicompapiTextRoute(
   feature: 'text_chat' | 'text_reasoning',
   providerModelKey: string
@@ -2491,6 +2648,40 @@ function videoAdapter(
     {
       nextProviderUsageObservationId: () =>
         toProviderUsageObservationId(`newapi-video-usage-${Math.random()}`)
+    }
+  );
+}
+
+function unicompapiVideoAdapter(
+  runtime: NewApiSharedRuntime,
+  usage: ReturnType<typeof usageSink>,
+  resolveImage: ReturnType<typeof vi.fn>
+) {
+  const schemas = [
+    newApiDefaultTextToVideoParameterSchema,
+    newApiDefaultImageToVideoParameterSchema,
+    uniCompApiSeedance2TextToVideoParameterSchema,
+    uniCompApiSeedance2ImageToVideoParameterSchema
+  ];
+  return new NewApiVideoAdapter(
+    runtime,
+    { get: async () => unicompapiConnection() },
+    {
+      useCredential: async <T>(
+        _input: unknown,
+        operation: (value: StructuredCredentialRecord) => Promise<T>
+      ) => operation(unicompapiCredential())
+    },
+    {
+      get: async (schemaId, revision) => schemas.find(
+        (schema) => schema.schemaId === schemaId && schema.revision === revision
+      )
+    },
+    { resolve: resolveImage },
+    usage.port,
+    {
+      nextProviderUsageObservationId: () =>
+        toProviderUsageObservationId(`newapi-video-usage-unicompapi-${Math.random()}`)
     }
   );
 }

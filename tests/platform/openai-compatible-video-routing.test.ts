@@ -14,7 +14,13 @@ import {
 } from '../../src/domain';
 import {
   NEWAPI_VIDEO_ADAPTER_ID,
+  NEWAPI_COMPATIBLE_TEMPLATE_ID,
+  NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  NEWAPI_PROVIDER_PACKAGE_ID,
+  NEWAPI_PROVIDER_PACKAGE_VERSION,
   ProviderPackageRegistry,
+  newApiProviderPackageDescriptor,
   routeOpenAiCompatibleVideoProfile,
   unicompapiProviderPackageDescriptor,
   UNICOMPAPI_CREDENTIAL_SCHEMA_ID,
@@ -22,7 +28,9 @@ import {
   UNICOMPAPI_OFFICIAL_BASE_URL,
   UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
-  UNICOMPAPI_PROVIDER_PACKAGE_VERSION
+  UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
+  UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
 } from '../../src/platform';
 import type { ProviderRegistrySnapshot } from '../../src/platform';
 
@@ -99,9 +107,77 @@ describe('openai-compatible video soft routing', () => {
       candidate.modelId === model.id && candidate.capability === 'video_generation'
     )).toBe(false);
   });
+
+  it('migrates exact UniCompAPI Seedance profiles from generic schemas', () => {
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const seeded = baseSnapshot('doubao-seedance-2-0-fast-260128');
+    const attached = routeOpenAiCompatibleVideoProfile(
+      seeded,
+      packages,
+      seeded.models[0]!,
+      now
+    );
+    const staleSnapshot: ProviderRegistrySnapshot = {
+      ...attached.snapshot,
+      modelProfiles: attached.snapshot.modelProfiles?.map((profile) => ({
+        ...profile,
+        features: profile.features.map((feature) => ({
+          ...feature,
+          parameterSchemaId: feature.productFeature === 'text_to_video'
+            ? NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+            : NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+        }))
+      }))
+    };
+    const migrated = routeOpenAiCompatibleVideoProfile(
+      staleSnapshot,
+      packages,
+      attached.model,
+      now
+    );
+    expect(migrated.state).toBe('already_attached');
+    expect(migrated.snapshot.modelProfiles?.[0]?.features).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productFeature: 'text_to_video',
+        parameterSchemaId: UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+      }),
+      expect.objectContaining({
+        productFeature: 'image_to_video',
+        parameterSchemaId: UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+      })
+    ]));
+  });
+
+  it('keeps a same-name model on a generic OpenAI-compatible schema', () => {
+    const packages = new ProviderPackageRegistry([newApiProviderPackageDescriptor]);
+    const snapshot = baseSnapshot('doubao-seedance-2-0-fast-260128');
+    const connection = {
+      ...snapshot.connections[0]!,
+      packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
+      templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID
+    };
+    const routed = routeOpenAiCompatibleVideoProfile(
+      { ...snapshot, connections: [connection] },
+      packages,
+      snapshot.models[0]!,
+      now
+    );
+    expect(routed.state).toBe('attached');
+    expect(routed.snapshot.modelProfiles?.[0]?.features).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productFeature: 'text_to_video',
+        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+      }),
+      expect.objectContaining({
+        productFeature: 'image_to_video',
+        parameterSchemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+      })
+    ]));
+  });
 });
 
-function baseSnapshot(): ProviderRegistrySnapshot {
+function baseSnapshot(providerModelKey = 'viduq3-turbo'): ProviderRegistrySnapshot {
   const providerId = toProviderId('provider-unicompapi');
   const connectionId = toConnectionId('connection-unicompapi');
   const modelId = toModelId('model-unicompapi');
@@ -142,8 +218,8 @@ function baseSnapshot(): ProviderRegistrySnapshot {
     id: modelId,
     providerId,
     connectionId,
-    providerModelKey: 'viduq3-turbo',
-    displayName: 'viduq3-turbo',
+    providerModelKey,
+    displayName: providerModelKey,
     protocolBindingId: toProtocolBindingId('protocol-binding-chat'),
     mediaKind: 'unknown',
     enabled: true,

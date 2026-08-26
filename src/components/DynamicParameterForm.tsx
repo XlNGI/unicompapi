@@ -2,35 +2,28 @@ import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { LuInfo } from 'react-icons/lu';
 import { Input, InputNumber, SelectPicker, Toggle } from 'rsuite';
+import type {
+  DynamicParameterField,
+  DynamicParameterValue
+} from './dynamic-parameter-validation';
 
-export type DynamicParameterValue =
-  | string
-  | number
-  | boolean
-  | readonly string[]
-  | readonly number[]
-  | Readonly<Record<string, unknown>>;
-
-export interface DynamicParameterField {
-  readonly fieldId: string;
-  readonly labelId: string;
-  readonly valueType: string;
-  readonly required: boolean;
-  readonly options?: readonly (string | number | boolean)[];
-  readonly minimum?: number;
-  readonly maximum?: number;
-  readonly step?: number;
-}
+export type {
+  DynamicParameterField,
+  DynamicParameterValue
+} from './dynamic-parameter-validation';
+export { validateDynamicParameterValues } from './dynamic-parameter-validation';
 
 const parameterLabels: Readonly<Record<string, string>> = {
   aspectRatio: '画面比例',
   aspect_ratio: '画面比例',
   audio: '音频',
   background: '背景',
+  camera_fixed: '固定运镜',
   detail: '识别精度',
   duration: '视频时长',
   fps: '帧率',
   frames: '帧数',
+  generate_audio: '生成音频',
   height: '高度',
   imageSize: '图像尺寸',
   include_usage: '包含用量信息',
@@ -48,6 +41,7 @@ const parameterLabels: Readonly<Record<string, string>> = {
   reasoning_effort: '推理强度',
   resolution: '分辨率',
   response_format: '返回格式',
+  return_last_frame: '返回尾帧',
   seconds: '时长（秒）',
   seed: '随机种子',
   size: '输出尺寸',
@@ -67,6 +61,7 @@ const parameterDescriptions: Readonly<Record<string, string>> = {
   aspectRatio: '控制画面宽高比例；未选时由服务商默认。',
   audio: '是否在结果中附带音频；取决于当前模型是否支持。',
   background: '背景处理方式（如透明/不透明）；仅部分模型有效。',
+  camera_fixed: '是否固定镜头运动；仅当前模型合同支持时才会发送。',
   detail: '影响识别精细程度；通常越高越慢、费用可能更高。',
   duration: '生成视频的目标时长（秒）；未填时使用服务商默认值。',
   seconds: 'OpenAI 兼容格式的时长（秒）；未填时使用服务商默认值。',
@@ -74,6 +69,7 @@ const parameterDescriptions: Readonly<Record<string, string>> = {
   mode: '生成模式；按当前模型支持的选项填写，未填时使用服务商默认值。',
   resolution: '输出分辨率档位（如 720p / 1080p）；未填时使用服务商默认值。',
   frames: '目标帧数；与时长、帧率相关，按模型能力填写。',
+  generate_audio: '是否让模型生成音频；仅当前模型合同支持时才会发送。',
   height: '输出高度（像素）；常与宽度一起约束画面比例。',
   imageSize: '输出图像尺寸档位；按模型支持的选项选择。',
   include_usage: '是否在响应中附带用量信息，便于核对计费。',
@@ -89,6 +85,7 @@ const parameterDescriptions: Readonly<Record<string, string>> = {
   ratio: '控制画面宽高比例；未选时由服务商默认。',
   reasoning_effort: '推理强度（如 low / medium / high）；更高通常更慢。',
   response_format: '结果返回方式：链接（url）便于预览下载；Base64（b64_json）适合内嵌落盘。',
+  return_last_frame: '是否返回生成视频的最后一帧；仅当前模型合同支持时才会发送。',
   seed: '随机种子；相同种子便于复现近似结果，留空则由服务商随机。',
   size: '输出宽×高，格式如 1280x720（用英文字母 x）。未填时使用服务商默认值。',
   stop: '遇到该停止词时结束生成；未填则不额外限制。',
@@ -132,7 +129,7 @@ export function displayParameterKey(value: string): string {
     .replace(/^provider\.parameter\./, '')
     .replace(/^provider\./, '');
   if (parameterLabels[key]) return parameterLabels[key];
-  return /[\u3400-\u9fff]/.test(key) ? key : '其他参数';
+  return key;
 }
 
 /** Usage note for a parameter field; empty when unknown. */
@@ -146,7 +143,7 @@ export function displayParameterDescription(value: string): string | undefined {
 /** Keep submitted option values unchanged while localizing their visible labels. */
 export function displayParameterOption(
   value: string | number | boolean,
-  index = 0
+  _index = 0
 ): string {
   const text = String(value);
   const normalized = text.toLowerCase();
@@ -160,7 +157,7 @@ export function displayParameterOption(
   ) {
     return text;
   }
-  return `其他选项 ${index + 1}`;
+  return text;
 }
 
 export interface DynamicParameterFormProps {
@@ -168,6 +165,8 @@ export interface DynamicParameterFormProps {
   readonly values: Readonly<Record<string, DynamicParameterValue | undefined>>;
   readonly disabled?: boolean;
   readonly emptyHint?: string;
+  readonly errors?: Readonly<Record<string, string | undefined>>;
+  readonly onInputErrorChange?: (fieldId: string, error?: string) => void;
   readonly onChange: (fieldId: string, value: DynamicParameterValue | undefined) => void;
 }
 
@@ -176,6 +175,8 @@ export function DynamicParameterForm({
   values,
   disabled = false,
   emptyHint = '本次不需要用户参数，采用服务商默认值。',
+  errors = {},
+  onInputErrorChange,
   onChange
 }: DynamicParameterFormProps) {
   if (fields.length === 0) {
@@ -187,9 +188,11 @@ export function DynamicParameterForm({
         {fields.map((field) => (
           <ParameterField
             disabled={disabled}
+            error={errors[field.fieldId]}
             field={field}
             key={field.fieldId}
             onChange={(value) => onChange(field.fieldId, value)}
+            onInputErrorChange={(error) => onInputErrorChange?.(field.fieldId, error)}
             value={values[field.fieldId]}
           />
         ))}
@@ -310,21 +313,24 @@ function parameterConstraint(field: DynamicParameterField): string | undefined {
 
 function ParameterShell({
   children,
+  error,
   field,
-  invalid = false
 }: {
   readonly children: ReactNode;
+  readonly error?: string;
   readonly field: DynamicParameterField;
-  readonly invalid?: boolean;
 }) {
   return (
     <div
       className="uc-dynamic-parameters__field"
-      data-invalid={invalid || undefined}
+      data-invalid={Boolean(error) || undefined}
       data-value-type={field.valueType}
     >
       <ParameterLabel field={field} />
-      <div className="uc-dynamic-parameters__control">{children}</div>
+      <div className="uc-dynamic-parameters__control">
+        {children}
+        {error ? <small role="alert">{error}</small> : null}
+      </div>
     </div>
   );
 }
@@ -333,26 +339,33 @@ function ParameterField({
   field,
   value,
   disabled,
+  error,
+  onInputErrorChange,
   onChange
 }: {
   readonly field: DynamicParameterField;
   readonly value: DynamicParameterValue | undefined;
   readonly disabled: boolean;
+  readonly error?: string;
+  readonly onInputErrorChange: (error?: string) => void;
   readonly onChange: (value: DynamicParameterValue | undefined) => void;
 }) {
   if (field.valueType === 'boolean') {
     return (
-      <div className="uc-dynamic-parameters__field uc-dynamic-parameters__field--boolean">
-        <ParameterLabel field={field} />
+      <ParameterShell error={error} field={field}>
         <Toggle
+          aria-invalid={Boolean(error)}
           checked={value === true}
           checkedChildren="开启"
           disabled={disabled}
           label={displayParameterKey(field.fieldId || field.labelId)}
-          onChange={onChange}
+          onChange={(next) => {
+            onInputErrorChange(undefined);
+            onChange(next);
+          }}
           unCheckedChildren="关闭"
         />
-      </div>
+      </ParameterShell>
     );
   }
   if (field.valueType === 'enum') {
@@ -361,8 +374,9 @@ function ParameterField({
       label: displayParameterOption(option, index)
     }));
     return (
-      <ParameterShell field={field}>
+      <ParameterShell error={error} field={field}>
         <SelectPicker
+          aria-invalid={Boolean(error)}
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           block
           cleanable={!field.required}
@@ -370,6 +384,7 @@ function ParameterField({
           disabled={disabled}
           onChange={(next) => {
             const option = field.options?.find((item) => String(item) === next);
+            onInputErrorChange(undefined);
             onChange(option);
           }}
           placeholder={field.required ? '请选择（必填）' : '请选择'}
@@ -381,15 +396,17 @@ function ParameterField({
   }
   if (field.valueType === 'number' || field.valueType === 'integer') {
     return (
-      <ParameterShell field={field}>
+      <ParameterShell error={error} field={field}>
         <InputNumber
+          aria-invalid={Boolean(error)}
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled={disabled}
           max={field.maximum}
           min={field.minimum}
-          onChange={(next) => onChange(
-            next === null || next === '' ? undefined : Number(next)
-          )}
+          onChange={(next) => {
+            onInputErrorChange(undefined);
+            onChange(next === null || next === '' ? undefined : Number(next));
+          }}
           required={field.required}
           step={field.valueType === 'integer' ? 1 : field.step}
           value={typeof value === 'number' ? value : ''}
@@ -398,32 +415,28 @@ function ParameterField({
     );
   }
   if (field.valueType === 'string_array' || field.valueType === 'number_array') {
-    return (
-      <ParameterShell field={field}>
-        <Input
-          aria-label={displayParameterKey(field.fieldId || field.labelId)}
-          disabled={disabled}
-          onChange={(next) => {
-            const items = next.split(',').map((item) => item.trim()).filter(Boolean);
-            onChange(items.length === 0
-              ? undefined
-              : field.valueType === 'number_array'
-                ? items.map(Number)
-                : items);
-          }}
-          placeholder={field.required ? '请输入（必填）' : '可留空'}
-          required={field.required}
-          value={Array.isArray(value) ? value.join(', ') : ''}
-        />
-      </ParameterShell>
-    );
+    return <ArrayParameterField
+      disabled={disabled}
+      error={error}
+      field={field}
+      onChange={onChange}
+      onInputErrorChange={onInputErrorChange}
+      value={value}
+    />;
   }
   if (field.valueType === 'object') {
-    return <ObjectParameterField disabled={disabled} field={field} onChange={onChange} value={value} />;
+    return <ObjectParameterField
+      disabled={disabled}
+      error={error}
+      field={field}
+      onChange={onChange}
+      onInputErrorChange={onInputErrorChange}
+      value={value}
+    />;
   }
   if (field.valueType === 'media_slot') {
     return (
-      <ParameterShell field={field}>
+      <ParameterShell error={error} field={field}>
         <Input
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           disabled
@@ -434,11 +447,15 @@ function ParameterField({
     );
   }
   return (
-    <ParameterShell field={field}>
+    <ParameterShell error={error} field={field}>
       <Input
         aria-label={displayParameterKey(field.fieldId || field.labelId)}
+        aria-invalid={Boolean(error)}
         disabled={disabled}
-        onChange={(next) => onChange(next || undefined)}
+        onChange={(next) => {
+          onInputErrorChange(undefined);
+          onChange(next || undefined);
+        }}
         placeholder={field.required ? '请输入（必填）' : '可留空'}
         required={field.required}
         value={typeof value === 'string' ? value : ''}
@@ -451,49 +468,126 @@ function ObjectParameterField({
   field,
   value,
   disabled,
+  error,
+  onInputErrorChange,
   onChange
 }: {
   readonly field: DynamicParameterField;
   readonly value: DynamicParameterValue | undefined;
   readonly disabled: boolean;
+  readonly error?: string;
+  readonly onInputErrorChange: (error?: string) => void;
   readonly onChange: (value: DynamicParameterValue | undefined) => void;
 }) {
   const [text, setText] = useState(value === undefined ? '' : JSON.stringify(value));
-  const [invalid, setInvalid] = useState(false);
   useEffect(() => {
-    setText(value === undefined ? '' : JSON.stringify(value));
-    setInvalid(false);
+    const serialized = value === undefined ? '' : JSON.stringify(value);
+    try {
+      if (text.trim() && JSON.stringify(JSON.parse(text)) === serialized) return;
+    } catch {
+      // Keep the invalid local text until the user fixes it.
+      return;
+    }
+    setText(serialized);
   }, [value]);
   return (
-    <ParameterShell field={field} invalid={invalid}>
+    <ParameterShell error={error} field={field}>
       <Input
         aria-label={displayParameterKey(field.fieldId || field.labelId)}
-        aria-invalid={invalid}
+        aria-invalid={Boolean(error)}
         as="textarea"
         disabled={disabled}
-        onBlur={() => {
-          if (!text.trim()) {
-            setInvalid(false);
+        onChange={(next) => {
+          setText(next);
+          if (!next.trim()) {
+            onInputErrorChange(undefined);
             onChange(undefined);
             return;
           }
           try {
-            const parsed = JSON.parse(text) as unknown;
+            const parsed = JSON.parse(next) as unknown;
             if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
               throw new TypeError('object required');
             }
-            setInvalid(false);
+            onInputErrorChange(undefined);
             onChange(parsed as Readonly<Record<string, unknown>>);
           } catch {
-            setInvalid(true);
+            onInputErrorChange('请输入有效的 JSON 对象。');
           }
         }}
-        onChange={(next) => setText(next)}
         placeholder={field.required ? '{ "key": "value" }（必填）' : '{ "key": "value" }'}
         rows={3}
         value={text}
       />
-      {invalid ? <small role="alert">请输入有效的 JSON 对象。</small> : null}
+    </ParameterShell>
+  );
+}
+
+function ArrayParameterField({
+  field,
+  value,
+  disabled,
+  error,
+  onInputErrorChange,
+  onChange
+}: {
+  readonly field: DynamicParameterField;
+  readonly value: DynamicParameterValue | undefined;
+  readonly disabled: boolean;
+  readonly error?: string;
+  readonly onInputErrorChange: (error?: string) => void;
+  readonly onChange: (value: DynamicParameterValue | undefined) => void;
+}) {
+  const [text, setText] = useState(Array.isArray(value) ? value.join(', ') : '');
+  useEffect(() => {
+    const serialized = Array.isArray(value) ? value.join(', ') : '';
+    if (field.valueType === 'number_array' && text.trim()) {
+      const items = text.split(',').map((item) => item.trim());
+      const parsed = items.map(Number);
+      if (
+        items.every(Boolean) &&
+        parsed.every(Number.isFinite) &&
+        parsed.join(', ') === serialized
+      ) return;
+    }
+    if (field.valueType === 'string_array') {
+      const parsed = text.split(',').map((item) => item.trim()).filter(Boolean);
+      if (parsed.join(', ') === serialized) return;
+    }
+    setText(serialized);
+  }, [field.valueType, value]);
+  return (
+    <ParameterShell error={error} field={field}>
+      <Input
+        aria-label={displayParameterKey(field.fieldId || field.labelId)}
+        aria-invalid={Boolean(error)}
+        disabled={disabled}
+        onChange={(next) => {
+          setText(next);
+          if (!next.trim()) {
+            onInputErrorChange(undefined);
+            onChange(undefined);
+            return;
+          }
+          const items = next.split(',').map((item) => item.trim());
+          if (field.valueType === 'number_array') {
+            const numbers = items.map(Number);
+            if (items.some((item) => !item) || numbers.some((item) => !Number.isFinite(item))) {
+              onInputErrorChange('请输入以逗号分隔的有效数字。');
+              return;
+            }
+            onInputErrorChange(undefined);
+            onChange(numbers);
+            return;
+          }
+          onInputErrorChange(undefined);
+          const strings = items.filter(Boolean);
+          onChange(strings.length === 0 ? undefined : strings);
+        }}
+        placeholder={field.required ? '请输入（必填）' : '可留空'}
+        required={field.required}
+        value={text}
+      />
     </ParameterShell>
   );
 }

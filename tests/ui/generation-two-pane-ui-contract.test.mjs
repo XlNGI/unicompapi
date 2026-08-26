@@ -90,6 +90,18 @@ test('professional video preparation is enclosed in one complete panel', () => {
   );
 });
 
+test('professional generation save status does not claim submission readiness', () => {
+  const professionalSources = sources.filter(({ path }) =>
+    path.includes('ImageProfessional') ||
+    path.includes('VideoText') ||
+    path.includes('VideoImage')
+  );
+  for (const { path, source } of professionalSources) {
+    assert.match(source, /当前配置已保存/, `${path} should report only the saved fact`);
+    assert.doesNotMatch(source, /可以提交/, `${path} must not imply submission readiness`);
+  }
+});
+
 test('generation parameter panels share the reusable scrollbar style', () => {
   for (const { path, source } of sources) {
     assert.match(source, /uc-scrollbar/, `${path} should apply the shared scrollbar class`);

@@ -8,6 +8,10 @@ export const UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image.text_to_image.official';
 export const UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official';
+export const UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0.text_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0.image_to_video.official';
 
 
 export const UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
@@ -229,6 +233,46 @@ export const uniCompApiQwenImageReferenceToImageParameterSchema: ParameterSchema
 
 export type UniCompApiVideoFeature = 'text_to_video' | 'image_to_video';
 
+/**
+ * Verified UniCompAPI Seedance 2.0 request-body fields. The public contract
+ * identifies this field set but does not publish model-specific required
+ * values or option lists for the two catalog keys below, so none are inferred.
+ */
+function uniCompApiSeedance2VideoParameterSchema(
+  schemaId: string,
+  productFeature: UniCompApiVideoFeature
+): ParameterSchemaV2 {
+  return {
+    schemaVersion: 2,
+    schemaId,
+    revision: 1,
+    productFeature,
+    fields: [
+      qwenOptionalField('resolution', 'string', 10),
+      qwenOptionalField('ratio', 'string', 20),
+      qwenOptionalField('duration', 'integer', 30, { minimum: 1 }),
+      qwenOptionalField('frames', 'integer', 40, { minimum: 1 }),
+      qwenOptionalField('seed', 'integer', 50, { minimum: 0 }),
+      qwenOptionalField('camera_fixed', 'boolean', 60),
+      qwenOptionalField('watermark', 'boolean', 70),
+      qwenOptionalField('generate_audio', 'boolean', 80),
+      qwenOptionalField('return_last_frame', 'boolean', 90)
+    ]
+  };
+}
+
+export const uniCompApiSeedance2TextToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'text_to_video'
+  );
+
+export const uniCompApiSeedance2ImageToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'image_to_video'
+  );
+
 export type UniCompApiModelFeature =
   | 'text_chat'
   | 'text_reasoning'
@@ -316,6 +360,21 @@ export function uniCompApiReferenceToImageParameterSchema(
   return providerModelKey === 'qwen-image-edit-2509'
     ? uniCompApiQwenImageReferenceToImageParameterSchema
     : undefined;
+}
+
+export function uniCompApiVideoParameterSchema(
+  providerModelKey: string,
+  feature: UniCompApiVideoFeature
+): ParameterSchemaV2 | undefined {
+  if (
+    providerModelKey !== 'doubao-seedance-2-0-260128' &&
+    providerModelKey !== 'doubao-seedance-2-0-fast-260128'
+  ) {
+    return undefined;
+  }
+  return feature === 'text_to_video'
+    ? uniCompApiSeedance2TextToVideoParameterSchema
+    : uniCompApiSeedance2ImageToVideoParameterSchema;
 }
 
 export function isKnownUniCompApiModel(providerModelKey: string): boolean {

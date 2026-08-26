@@ -3,9 +3,12 @@ import { projectParameterSchema } from '../../src/domain';
 import {
   isKnownUniCompApiModel,
   uniCompApiQwenImageTextToImageParameterSchema,
+  uniCompApiSeedance2ImageToVideoParameterSchema,
+  uniCompApiSeedance2TextToVideoParameterSchema,
   uniCompApiModelFeatures,
   uniCompApiTextToImageParameterSchema,
   uniCompApiReferenceToImageParameterSchema,
+  uniCompApiVideoParameterSchema,
   uniCompApiSupportsFeature,
   uniCompApiTextChatParameterSchema,
   uniCompApiTextReasoningParameterSchema,
@@ -14,6 +17,8 @@ import {
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID
 } from '../../src/platform';
 
@@ -141,6 +146,43 @@ describe('UniCompAPI model capability registry', () => {
       ])
     });
     expect(uniCompApiTextToImageParameterSchema('manual-future-model')).toBeUndefined();
+  });
+
+  it('binds only exact UniCompAPI Seedance 2.0 keys to verified video fields', () => {
+    expect(uniCompApiVideoParameterSchema(
+      'doubao-seedance-2-0-fast-260128',
+      'text_to_video'
+    )).toBe(uniCompApiSeedance2TextToVideoParameterSchema);
+    expect(uniCompApiVideoParameterSchema(
+      'doubao-seedance-2-0-260128',
+      'image_to_video'
+    )).toBe(uniCompApiSeedance2ImageToVideoParameterSchema);
+    expect(uniCompApiSeedance2TextToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      productFeature: 'text_to_video'
+    });
+    expect(uniCompApiSeedance2ImageToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      productFeature: 'image_to_video'
+    });
+    expect(uniCompApiSeedance2TextToVideoParameterSchema.fields.map(
+      (field) => field.fieldId
+    )).toEqual([
+      'resolution',
+      'ratio',
+      'duration',
+      'frames',
+      'seed',
+      'camera_fixed',
+      'watermark',
+      'generate_audio',
+      'return_last_frame'
+    ]);
+    expect(uniCompApiSeedance2TextToVideoParameterSchema.fields.every(
+      (field) => field.required === false && field.options === undefined
+    )).toBe(true);
+    expect(uniCompApiVideoParameterSchema('seedance-2.0-fast', 'text_to_video'))
+      .toBeUndefined();
   });
 
   it('limits UniCompAPI text chat parameters to the official Chat Completions contract', () => {
