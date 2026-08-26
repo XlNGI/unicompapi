@@ -9,9 +9,13 @@ export const UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
 export const UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official';
 export const UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
-  'parameters.unicompapi.doubao_seedance_2_0.text_to_video.official';
+  'parameters.unicompapi.doubao_seedance_2_0_260128.text_to_video.official';
 export const UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
-  'parameters.unicompapi.doubao_seedance_2_0.image_to_video.official';
+  'parameters.unicompapi.doubao_seedance_2_0_260128.image_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0_fast_260128.text_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0_fast_260128.image_to_video.official';
 
 
 export const UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
@@ -233,14 +237,23 @@ export const uniCompApiQwenImageReferenceToImageParameterSchema: ParameterSchema
 
 export type UniCompApiVideoFeature = 'text_to_video' | 'image_to_video';
 
+const seedance2RatioOptions = [
+  '21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'
+] as const;
+
+const seedance2DurationOptions = [
+  -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+] as const;
+
 /**
- * Verified UniCompAPI Seedance 2.0 request-body fields. The public contract
- * identifies this field set but does not publish model-specific required
- * values or option lists for the two catalog keys below, so none are inferred.
+ * Model-specific Seedance 2.0 controls verified against the Volcano Ark
+ * documentation on 2026-08-26. `model` and input `content` are the only
+ * required official API fields; all controls below are intentionally optional.
  */
 function uniCompApiSeedance2VideoParameterSchema(
   schemaId: string,
-  productFeature: UniCompApiVideoFeature
+  productFeature: UniCompApiVideoFeature,
+  resolutionOptions: readonly string[]
 ): ParameterSchemaV2 {
   return {
     schemaVersion: 2,
@@ -248,9 +261,9 @@ function uniCompApiSeedance2VideoParameterSchema(
     revision: 1,
     productFeature,
     fields: [
-      qwenOptionalField('resolution', 'string', 10),
-      qwenOptionalField('ratio', 'string', 20),
-      qwenOptionalField('duration', 'integer', 30, { minimum: 1 }),
+      qwenOptionalField('resolution', 'enum', 10, { options: resolutionOptions }),
+      qwenOptionalField('ratio', 'enum', 20, { options: seedance2RatioOptions }),
+      qwenOptionalField('duration', 'enum', 30, { options: seedance2DurationOptions }),
       qwenOptionalField('frames', 'integer', 40, { minimum: 1 }),
       qwenOptionalField('seed', 'integer', 50, { minimum: 0 }),
       qwenOptionalField('camera_fixed', 'boolean', 60),
@@ -264,13 +277,29 @@ function uniCompApiSeedance2VideoParameterSchema(
 export const uniCompApiSeedance2TextToVideoParameterSchema =
   uniCompApiSeedance2VideoParameterSchema(
     UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
-    'text_to_video'
+    'text_to_video',
+    ['480p', '720p', '1080p', '4k']
   );
 
 export const uniCompApiSeedance2ImageToVideoParameterSchema =
   uniCompApiSeedance2VideoParameterSchema(
     UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
-    'image_to_video'
+    'image_to_video',
+    ['480p', '720p', '1080p', '4k']
+  );
+
+export const uniCompApiSeedance2FastTextToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'text_to_video',
+    ['480p', '720p']
+  );
+
+export const uniCompApiSeedance2FastImageToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'image_to_video',
+    ['480p', '720p']
   );
 
 export type UniCompApiModelFeature =
@@ -366,15 +395,17 @@ export function uniCompApiVideoParameterSchema(
   providerModelKey: string,
   feature: UniCompApiVideoFeature
 ): ParameterSchemaV2 | undefined {
-  if (
-    providerModelKey !== 'doubao-seedance-2-0-260128' &&
-    providerModelKey !== 'doubao-seedance-2-0-fast-260128'
-  ) {
-    return undefined;
+  if (providerModelKey === 'doubao-seedance-2-0-260128') {
+    return feature === 'text_to_video'
+      ? uniCompApiSeedance2TextToVideoParameterSchema
+      : uniCompApiSeedance2ImageToVideoParameterSchema;
   }
-  return feature === 'text_to_video'
-    ? uniCompApiSeedance2TextToVideoParameterSchema
-    : uniCompApiSeedance2ImageToVideoParameterSchema;
+  if (providerModelKey === 'doubao-seedance-2-0-fast-260128') {
+    return feature === 'text_to_video'
+      ? uniCompApiSeedance2FastTextToVideoParameterSchema
+      : uniCompApiSeedance2FastImageToVideoParameterSchema;
+  }
+  return undefined;
 }
 
 export function isKnownUniCompApiModel(providerModelKey: string): boolean {

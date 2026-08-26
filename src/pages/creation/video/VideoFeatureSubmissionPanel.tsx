@@ -164,6 +164,11 @@ export function VideoFeatureSubmissionPanel({
     featureSelection.parameterValues as Readonly<Record<string, DynamicParameterValue | undefined>>,
     parameterInputErrors
   );
+  const requiredInputError = draft.prompt.finalPrompt.trim().length === 0
+    ? '提示词为必填项。'
+    : draft.mode === 'image_to_video' && !draft.imageToVideo.source
+      ? '首帧图片为必填项。'
+      : undefined;
 
   function silentlyFinishRuntimeGate() {
     onMessage('');
@@ -375,6 +380,10 @@ export function VideoFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
+    if (requiredInputError) {
+      showSubmissionError(requiredInputError);
+      return;
+    }
     if (!parameterValidation.valid) {
       showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
       return;
@@ -521,6 +530,7 @@ export function VideoFeatureSubmissionPanel({
           available: candidate.available,
           unavailableReasons: candidate.unavailableReasons
         }))}
+        required
         reasonLabels={unavailableReasonLabels}
         value={featureSelection.candidateId ?? ''}
       />
@@ -578,6 +588,13 @@ export function VideoFeatureSubmissionPanel({
         <div className="uc-image-quick__preflight" role="status">
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>
+        </div>
+      ) : null}
+
+      {requiredInputError ? (
+        <div className="uc-image-quick__preflight" role="alert">
+          <strong>请补全必填项</strong>
+          <span>{requiredInputError}</span>
         </div>
       ) : null}
 

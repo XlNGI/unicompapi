@@ -134,7 +134,7 @@ export function VideoTextWorkspace({
             </div>
           </header>
           <label className="uc-image-quick__field">
-            <span>原始需求</span>
+            <span>原始需求 <span className="uc-dynamic-parameters__required">必填</span></span>
             <Input
               as="textarea"
               maxLength={4000}
@@ -197,7 +197,7 @@ export function VideoTextWorkspace({
             </div>
           </header>
           <label className="uc-image-quick__field">
-            <span>最终提示词</span>
+            <span>最终提示词 <span className="uc-dynamic-parameters__required">必填</span></span>
             <Input
               as="textarea"
               maxLength={6000}

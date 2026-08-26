@@ -868,6 +868,9 @@ function validateUniCompApiVideoParameters(
       'Seedance duration and frames cannot be supplied together'
     );
   }
+  if (isUniCompApiSeedance20Request(route)) {
+    validateSeedance2ParameterValues(route, values);
+  }
   if (
     route.productFeature === 'text_to_video' &&
     Object.prototype.hasOwnProperty.call(values, 'image')
@@ -877,6 +880,41 @@ function validateUniCompApiVideoParameters(
       'Text-to-video does not accept image input'
     );
   }
+}
+
+function validateSeedance2ParameterValues(
+  route: ValidatedNewApiRoute,
+  values: Readonly<Record<string, ParameterValue>>
+): void {
+  const resolution = optionalTextParameter(values.resolution);
+  const allowedResolutions = route.providerModelKey === 'doubao-seedance-2-0-fast-260128'
+    ? ['480p', '720p']
+    : ['480p', '720p', '1080p', '4k'];
+  if (resolution !== undefined && !allowedResolutions.includes(resolution)) {
+    throw invalidRequest('newapi.invalid_request', 'Seedance resolution is unsupported');
+  }
+  const ratio = optionalTextParameter(values.ratio) ??
+    optionalTextParameter(values.aspect_ratio) ??
+    optionalTextParameter(values.aspectRatio);
+  if (ratio !== undefined && ![
+    '21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'
+  ].includes(ratio)) {
+    throw invalidRequest('newapi.invalid_request', 'Seedance ratio is unsupported');
+  }
+  const duration = parseSeedance2Duration(values.duration);
+  if (duration !== undefined && duration !== -1 && (duration < 4 || duration > 15)) {
+    throw invalidRequest('newapi.invalid_request', 'Seedance duration is unsupported');
+  }
+}
+
+function optionalTextParameter(value: ParameterValue | undefined): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function parseSeedance2Duration(value: ParameterValue | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'string' && /^-?\d+$/u.test(value.trim())) return Number(value.trim());
+  return undefined;
 }
 
 function parseVideoDuration(

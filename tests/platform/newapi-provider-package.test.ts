@@ -47,6 +47,8 @@ import {
   newApiDefaultImageToVideoParameterSchema,
   uniCompApiDefaultTextToImageParameterSchema,
   uniCompApiSeedream5TextToImageParameterSchema,
+  uniCompApiSeedance2FastImageToVideoParameterSchema,
+  uniCompApiSeedance2FastTextToVideoParameterSchema,
   uniCompApiSeedance2ImageToVideoParameterSchema,
   uniCompApiSeedance2TextToVideoParameterSchema,
   uniCompApiVideoParameterSchema,
@@ -2032,6 +2034,49 @@ describe('NewAPI video adapter', () => {
     expect(fixture.requests).toHaveLength(0);
   });
 
+  it('rejects unsupported Seedance 2.0 Fast controls before HTTP', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('must-not-submit', 'queued')));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+    const route = unicompapiVideoRoute(
+      'text_to_video',
+      'doubao-seedance-2-0-fast-260128'
+    );
+    for (const parameterValues of [
+      { resolution: '1080p' },
+      { ratio: '2:1' },
+      { duration: 3 }
+    ]) {
+      await expect(adapter.submit({
+        routeSnapshot: route,
+        request: {
+          invocationAttemptId: `attempt-video-seedance-invalid-${JSON.stringify(parameterValues)}`,
+          projectId: 'project-newapi',
+          prompt: 'A city skyline changes from day to night',
+          parameterValues
+        }
+      })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    }
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('accepts the 4k Seedance 2.0 control that Fast does not support', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('task-seedance-2-4k', 'queued')));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiVideoRoute('text_to_video', 'doubao-seedance-2-0-260128'),
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-2-4k',
+        projectId: 'project-newapi',
+        prompt: 'A city skyline changes from day to night',
+        parameterValues: { resolution: '4k', duration: -1 }
+      }
+    })).resolves.toMatchObject({ kind: 'accepted_async' });
+    expect(JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'))).toMatchObject({
+      resolution: '4k',
+      duration: -1
+    });
+  });
+
   it('rejects gateway-only Seedance parameters before HTTP', async () => {
     const fixture = runtimeFixture(async () => jsonResponse(videoObject('must-not-submit', 'queued')));
     const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
@@ -2661,7 +2706,9 @@ function unicompapiVideoAdapter(
     newApiDefaultTextToVideoParameterSchema,
     newApiDefaultImageToVideoParameterSchema,
     uniCompApiSeedance2TextToVideoParameterSchema,
-    uniCompApiSeedance2ImageToVideoParameterSchema
+    uniCompApiSeedance2ImageToVideoParameterSchema,
+    uniCompApiSeedance2FastTextToVideoParameterSchema,
+    uniCompApiSeedance2FastImageToVideoParameterSchema
   ];
   return new NewApiVideoAdapter(
     runtime,
