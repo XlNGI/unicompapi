@@ -29,8 +29,8 @@ import {
   UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
-  UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
-  UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+  UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
 } from '../../src/platform';
 import type { ProviderRegistrySnapshot } from '../../src/platform';
 
@@ -139,11 +139,11 @@ describe('openai-compatible video soft routing', () => {
     expect(migrated.snapshot.modelProfiles?.[0]?.features).toEqual(expect.arrayContaining([
       expect.objectContaining({
         productFeature: 'text_to_video',
-        parameterSchemaId: UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+        parameterSchemaId: UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
       }),
       expect.objectContaining({
         productFeature: 'image_to_video',
-        parameterSchemaId: UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+        parameterSchemaId: UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
       })
     ]));
   });

@@ -3,6 +3,8 @@ import { projectParameterSchema } from '../../src/domain';
 import {
   isKnownUniCompApiModel,
   uniCompApiQwenImageTextToImageParameterSchema,
+  uniCompApiSeedance2FastImageToVideoParameterSchema,
+  uniCompApiSeedance2FastTextToVideoParameterSchema,
   uniCompApiSeedance2ImageToVideoParameterSchema,
   uniCompApiSeedance2TextToVideoParameterSchema,
   uniCompApiModelFeatures,
@@ -19,6 +21,8 @@ import {
   UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID
 } from '../../src/platform';
 
@@ -152,7 +156,7 @@ describe('UniCompAPI model capability registry', () => {
     expect(uniCompApiVideoParameterSchema(
       'doubao-seedance-2-0-fast-260128',
       'text_to_video'
-    )).toBe(uniCompApiSeedance2TextToVideoParameterSchema);
+    )).toBe(uniCompApiSeedance2FastTextToVideoParameterSchema);
     expect(uniCompApiVideoParameterSchema(
       'doubao-seedance-2-0-260128',
       'image_to_video'
@@ -163,6 +167,14 @@ describe('UniCompAPI model capability registry', () => {
     });
     expect(uniCompApiSeedance2ImageToVideoParameterSchema).toMatchObject({
       schemaId: UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      productFeature: 'image_to_video'
+    });
+    expect(uniCompApiSeedance2FastTextToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      productFeature: 'text_to_video'
+    });
+    expect(uniCompApiSeedance2FastImageToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
       productFeature: 'image_to_video'
     });
     expect(uniCompApiSeedance2TextToVideoParameterSchema.fields.map(
@@ -178,8 +190,20 @@ describe('UniCompAPI model capability registry', () => {
       'generate_audio',
       'return_last_frame'
     ]);
-    expect(uniCompApiSeedance2TextToVideoParameterSchema.fields.every(
-      (field) => field.required === false && field.options === undefined
+    expect(uniCompApiSeedance2TextToVideoParameterSchema.fields.find(
+      (field) => field.fieldId === 'resolution'
+    )?.options).toEqual(['480p', '720p', '1080p', '4k']);
+    expect(uniCompApiSeedance2FastTextToVideoParameterSchema.fields.find(
+      (field) => field.fieldId === 'resolution'
+    )?.options).toEqual(['480p', '720p']);
+    expect(uniCompApiSeedance2FastTextToVideoParameterSchema.fields.find(
+      (field) => field.fieldId === 'ratio'
+    )?.options).toEqual(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive']);
+    expect(uniCompApiSeedance2FastTextToVideoParameterSchema.fields.find(
+      (field) => field.fieldId === 'duration'
+    )?.options).toEqual([-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(uniCompApiSeedance2FastTextToVideoParameterSchema.fields.every(
+      (field) => field.required === false
     )).toBe(true);
     expect(uniCompApiVideoParameterSchema('seedance-2.0-fast', 'text_to_video'))
       .toBeUndefined();

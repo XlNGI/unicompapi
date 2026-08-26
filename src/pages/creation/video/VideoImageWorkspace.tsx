@@ -372,7 +372,7 @@ export function VideoImageWorkspace({
             </div>
           </header>
           <div className="uc-image-quick__field">
-            <span>原始创作需求</span>
+            <span>原始创作需求 <span className="uc-dynamic-parameters__required">必填</span></span>
             <div className="uc-image-professional__prompt-input has-reference">
               <Input
                 aria-label="原始创作需求"
@@ -390,6 +390,7 @@ export function VideoImageWorkspace({
                 onDropFile={(file, dropToken) => void importImage(file, dropToken)}
                 onReject={onMessage}
               >
+                <span className="uc-dynamic-parameters__required">首帧图片必填</span>
                 <section
                   className={`uc-image-professional__reference${material ? ' has-image' : ' is-empty'}`}
                 >
@@ -493,7 +494,7 @@ export function VideoImageWorkspace({
             </div>
           </header>
           <label className="uc-image-quick__field">
-            <span>最终提交提示词</span>
+            <span>最终提交提示词 <span className="uc-dynamic-parameters__required">必填</span></span>
             <Input
               as="textarea"
               maxLength={5000}

@@ -25,6 +25,7 @@ export interface ModelSelectProps {
   readonly value: string;
   readonly options: readonly ModelSelectOption[];
   readonly disabled?: boolean;
+  readonly required?: boolean;
   readonly emptyTitle?: string;
   readonly emptyDescription?: string;
   readonly hint?: string;
@@ -50,6 +51,7 @@ export function ModelSelect({
   value,
   options,
   disabled = false,
+  required = false,
   emptyTitle = '没有可选模型',
   emptyDescription = '请先到「模型与服务商」添加连接并启用模型。',
   hint,
@@ -117,7 +119,10 @@ export function ModelSelect({
   return (
     <div className={`uc-model-select${className ? ` ${className}` : ''}`}>
       <div className="uc-model-select__field">
-        <span>{label}</span>
+        <span>
+          {label}
+          {required ? <span className="uc-dynamic-parameters__required">必填</span> : null}
+        </span>
         <SelectPicker
           appearance={appearance}
           aria-label={ariaLabel}
