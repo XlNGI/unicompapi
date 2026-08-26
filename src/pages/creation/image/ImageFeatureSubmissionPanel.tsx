@@ -240,8 +240,10 @@ export function ImageFeatureSubmissionPanel({
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
     if (needsSave) {
-      // Keep the active parameter contract mounted while autosave persists edits.
-      setLoadState('idle');
+      // Keep an already resolved contract interactive while autosave persists
+      // a local selection or parameter edit. A fresh candidate read still
+      // waits for the saved revision, but users can switch among the current
+      // candidates instead of being locked out by the debounce window.
       return;
     }
     setLoadState('loading');

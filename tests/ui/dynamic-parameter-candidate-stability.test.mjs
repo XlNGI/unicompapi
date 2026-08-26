@@ -25,10 +25,10 @@ function blockFor(source, marker) {
   assert.fail(`unterminated block: ${marker}`);
 }
 
-test('autosave keeps image and video dynamic parameter contracts mounted', () => {
+test('autosave keeps image and video dynamic parameter contracts interactive', () => {
   for (const source of [imagePanel, videoPanel]) {
     const needsSaveBlock = blockFor(source, 'if (needsSave)');
-    assert.match(needsSaveBlock, /setLoadState\('idle'\)/);
+    assert.doesNotMatch(needsSaveBlock, /setLoadState\(/);
     assert.doesNotMatch(needsSaveBlock, /setCandidates\(\[\]\)/);
     assert.match(source, /if \(blockedReason\) \{[\s\S]*?setCandidates\(\[\]\)/);
   }

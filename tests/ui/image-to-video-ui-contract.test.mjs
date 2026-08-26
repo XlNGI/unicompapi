@@ -35,6 +35,18 @@ test('image source selection stays inside controlled media APIs', () => {
     assert.match(source, new RegExp(`\\.${operation}\\(`));
   }
   assert.match(source, /selectMaterial\([\s\S]*createMaterialPreview\(/);
+  assert.match(
+    source,
+    /selectMaterial\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+  );
+  assert.match(
+    source,
+    /importMaterial\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+  );
+  assert.match(
+    source,
+    /clearMaterial\([\s\S]*?onDraftPersisted\(result\.value/
+  );
   assert.doesNotMatch(bundle, /absolutePath|remoteOperationId|upload\(|analy[sz]e\(|fetch\(/);
 });
 
