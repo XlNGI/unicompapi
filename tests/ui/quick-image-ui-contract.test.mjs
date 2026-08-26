@@ -102,7 +102,10 @@ test('quick image autosave coalesces edits behind one in-flight save', () => {
   assert.match(autosaveSource, /private pending\?/);
   assert.match(autosaveSource, /snapshot: this\.options\.rebase\(pending\.snapshot, result\.value\)/);
   assert.doesNotMatch(featurePanelSource, /draftRef\.current !== snapshot/);
-  assert.match(featurePanelSource, /if \(needsSave\) \{[\s\S]*setLoadState\('idle'\);[\s\S]*return;/);
+  const needsSaveBlock = featurePanelSource.match(/if \(needsSave\) \{[\s\S]*?return;\s*\}/)?.[0];
+  assert.ok(needsSaveBlock, 'autosave guard is missing');
+  assert.doesNotMatch(needsSaveBlock, /setLoadState\(/);
+  assert.doesNotMatch(needsSaveBlock, /setCandidates\(\[\]\)/);
 });
 
 test('quick image keeps input, model, and result areas in workflow order', () => {

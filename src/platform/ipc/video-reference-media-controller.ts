@@ -533,7 +533,7 @@ function attachSelection(
     : target.kind === 'image_source'
       ? {
           ...draft,
-          state: 'editing' as const,
+          state: imageSourceMutationState(target),
           imageToVideo: {
             ...(draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo,
             source: selection
@@ -563,7 +563,7 @@ function clearSelection(
     : target.kind === 'image_source'
       ? {
           ...draft,
-          state: 'editing' as const,
+          state: imageSourceMutationState(target),
           imageToVideo: withoutImageSource(
             (draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo
           ),
@@ -575,6 +575,15 @@ function clearSelection(
     createVideoWorkspaceDraft(candidate as VideoWorkspaceDraft),
     updatedAt
   );
+}
+
+function imageSourceMutationState(
+  target: VideoWorkspaceMaterialTargetDto
+) {
+  // The image-to-video source command has already persisted the entire draft.
+  // Returning "editing" leaves the renderer waiting for an autosave it did
+  // not enqueue because this IPC result is handled as already persisted.
+  return target.kind === 'image_source' ? 'saved' as const : 'editing' as const;
 }
 
 function withoutImageSource(

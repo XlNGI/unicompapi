@@ -551,7 +551,7 @@ export function VideoImageWorkspace({
                 ? '请求处理中，请在右侧查看进度'
                 : dirty || draft.state !== 'saved'
                   ? '正在保存当前配置'
-                  : '草稿已保存，可以提交'}
+                  : '当前配置已保存'}
             </span>
             <div className="uc-image-professional__submit-action" ref={setActionHost} />
           </footer>
