@@ -313,8 +313,11 @@ function currentUniCompFeatureSupported(
   providerModelKey: string,
   productFeature: ProductFeature
 ): boolean {
-  if (!isUniCompApiPackage(packageId) || !isKnownUniCompApiModel(providerModelKey)) {
+  if (!isUniCompApiPackage(packageId)) {
     return true;
+  }
+  if (!isKnownUniCompApiModel(providerModelKey)) {
+    return false;
   }
   const supportedFeatures: readonly UniCompApiModelFeature[] = [
     'text_chat',

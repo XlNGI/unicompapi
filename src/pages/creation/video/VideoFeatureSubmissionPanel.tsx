@@ -5,6 +5,7 @@ import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
   toDynamicParameterFields,
+  validateDynamicParameterValues,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
 import {
@@ -135,6 +136,7 @@ export function VideoFeatureSubmissionPanel({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
+  const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
   const trackProgress = showProgressSteps || Boolean(onProgressChange);
   const featureSelection = draft.featureSelection ?? {
     productFeature: draft.mode === 'image_to_video'
@@ -154,6 +156,14 @@ export function VideoFeatureSubmissionPanel({
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
+  const dynamicParameterFields = selectedCandidate
+    ? toDynamicParameterFields(selectedCandidate.parameterSchema.fields)
+    : [];
+  const parameterValidation = validateDynamicParameterValues(
+    dynamicParameterFields,
+    featureSelection.parameterValues as Readonly<Record<string, DynamicParameterValue | undefined>>,
+    parameterInputErrors
+  );
 
   function silentlyFinishRuntimeGate() {
     onMessage('');
@@ -294,6 +304,7 @@ export function VideoFeatureSubmissionPanel({
           )
         )
       : {};
+    setParameterInputErrors({});
     onDraftChange({
       ...draft,
       state: 'editing',
@@ -316,6 +327,12 @@ export function VideoFeatureSubmissionPanel({
     fieldId: string,
     value: VideoWorkspaceParameterValueDto | undefined
   ) {
+    setParameterInputErrors((current) => {
+      if (!(fieldId in current)) return current;
+      const next = { ...current };
+      delete next[fieldId];
+      return next;
+    });
     const parameterValues = { ...featureSelection.parameterValues } as Record<
       string,
       VideoWorkspaceParameterValueDto
@@ -358,6 +375,10 @@ export function VideoFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
+    if (!parameterValidation.valid) {
+      showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
+      return;
+    }
     setBusy(true);
     busyRef.current = true;
     clearGenerationMessage();
@@ -524,7 +545,7 @@ export function VideoFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          {oneShot ? (
+          {oneShot && dynamicParameterFields.length === 0 ? (
             <p className="uc-model-select__hint" role="status">
               快速视频使用服务默认参数，无需填写动态参数。
             </p>
@@ -532,7 +553,16 @@ export function VideoFeatureSubmissionPanel({
             <DynamicParameterForm
               disabled={busy}
               emptyHint="当前表面没有需要用户填写的参数。"
-              fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+              fields={dynamicParameterFields}
+              errors={parameterValidation.errors}
+              onInputErrorChange={(fieldId, error) => {
+                setParameterInputErrors((current) => {
+                  const next = { ...current };
+                  if (error) next[fieldId] = error;
+                  else delete next[fieldId];
+                  return next;
+                });
+              }}
               onChange={(fieldId, value) =>
                 changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
               }
@@ -564,6 +594,7 @@ export function VideoFeatureSubmissionPanel({
           disabled={
             Boolean(blockedReason) ||
             busy ||
+            !parameterValidation.valid ||
             !selectedCandidate?.available
           }
           onClick={() => void prepare()}
@@ -577,6 +608,7 @@ export function VideoFeatureSubmissionPanel({
         disabled={
           Boolean(blockedReason) ||
           busy ||
+          !parameterValidation.valid ||
           !selectedCandidate?.available
         }
         onClick={() => void prepare()}

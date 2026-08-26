@@ -8,6 +8,93 @@ export const UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image.text_to_image.official';
 export const UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official';
+export const UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0.text_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0.image_to_video.official';
+
+
+export const UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.text_chat.official';
+export const UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.text_reasoning.official';
+
+function uniCompApiTextField(
+  fieldId: string,
+  valueType: ParameterFieldSchemaV2['valueType'],
+  order: number,
+  extra: Partial<ParameterFieldSchemaV2> = {}
+): ParameterFieldSchemaV2 {
+  return {
+    fieldId,
+    labelId: `provider.parameter.${fieldId}`,
+    groupId: 'provider.parameter.generation',
+    order,
+    valueType,
+    exposure: 'user_optional',
+    defaultPolicy: 'omit_use_provider_default',
+    required: false,
+    ...extra
+  };
+}
+
+/**
+ * UniCompAPI text chat parameters limited to the official OpenAI-compatible
+ * Chat Completions contract. Unverified vendor extensions (thinking, top_k,
+ * chat_template_kwargs, enable_thinking, metadata) are intentionally absent:
+ * UniCompAPI rejects request fields that are not part of its public contract.
+ */
+export const uniCompApiTextChatParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_chat',
+  fields: [
+    uniCompApiTextField('max_tokens', 'integer', 10, { minimum: 1, maximum: 128_000 }),
+    uniCompApiTextField('temperature', 'number', 20, { minimum: 0, maximum: 2 }),
+    uniCompApiTextField('top_p', 'number', 30, { minimum: 0, maximum: 1 }),
+    uniCompApiTextField('stop', 'string', 40),
+    uniCompApiTextField('n', 'integer', 50, { minimum: 1, maximum: 8 }),
+    uniCompApiTextField('presence_penalty', 'number', 60),
+    uniCompApiTextField('frequency_penalty', 'number', 70),
+    uniCompApiTextField('seed', 'integer', 80),
+    uniCompApiTextField('response_format', 'object', 90),
+    uniCompApiTextField('tool_choice', 'string', 100),
+    uniCompApiTextField('user', 'string', 110),
+    uniCompApiTextField('logit_bias', 'object', 120)
+  ]
+};
+
+/**
+ * UniCompAPI text reasoning parameters limited to the official
+ * Chat Completions contract (reasoning_effort + standard sampling fields).
+ * No thinking / chat_template_kwargs / enable_thinking / top_k: those are not
+ * part of the public UniCompAPI contract and are rejected by the gateway.
+ */
+export const uniCompApiTextReasoningParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_reasoning',
+  fields: [
+    uniCompApiTextField('max_completion_tokens', 'integer', 10, {
+      minimum: 1,
+      maximum: 128_000
+    }),
+    uniCompApiTextField('reasoning_effort', 'enum', 20, {
+      options: ['low', 'medium', 'high']
+    }),
+    uniCompApiTextField('stop', 'string', 30),
+    uniCompApiTextField('n', 'integer', 40, { minimum: 1, maximum: 8 }),
+    uniCompApiTextField('presence_penalty', 'number', 50),
+    uniCompApiTextField('frequency_penalty', 'number', 60),
+    uniCompApiTextField('seed', 'integer', 70),
+    uniCompApiTextField('response_format', 'object', 80),
+    uniCompApiTextField('tool_choice', 'string', 90),
+    uniCompApiTextField('user', 'string', 100),
+    uniCompApiTextField('logit_bias', 'object', 110)
+  ]
+};
 
 /**
  * Seedream 5.0 lite image-generation parameters supported by the current
@@ -146,6 +233,46 @@ export const uniCompApiQwenImageReferenceToImageParameterSchema: ParameterSchema
 
 export type UniCompApiVideoFeature = 'text_to_video' | 'image_to_video';
 
+/**
+ * Verified UniCompAPI Seedance 2.0 request-body fields. The public contract
+ * identifies this field set but does not publish model-specific required
+ * values or option lists for the two catalog keys below, so none are inferred.
+ */
+function uniCompApiSeedance2VideoParameterSchema(
+  schemaId: string,
+  productFeature: UniCompApiVideoFeature
+): ParameterSchemaV2 {
+  return {
+    schemaVersion: 2,
+    schemaId,
+    revision: 1,
+    productFeature,
+    fields: [
+      qwenOptionalField('resolution', 'string', 10),
+      qwenOptionalField('ratio', 'string', 20),
+      qwenOptionalField('duration', 'integer', 30, { minimum: 1 }),
+      qwenOptionalField('frames', 'integer', 40, { minimum: 1 }),
+      qwenOptionalField('seed', 'integer', 50, { minimum: 0 }),
+      qwenOptionalField('camera_fixed', 'boolean', 60),
+      qwenOptionalField('watermark', 'boolean', 70),
+      qwenOptionalField('generate_audio', 'boolean', 80),
+      qwenOptionalField('return_last_frame', 'boolean', 90)
+    ]
+  };
+}
+
+export const uniCompApiSeedance2TextToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'text_to_video'
+  );
+
+export const uniCompApiSeedance2ImageToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'image_to_video'
+  );
+
 export type UniCompApiModelFeature =
   | 'text_chat'
   | 'text_reasoning'
@@ -201,6 +328,15 @@ export function isUniCompApiDeepSeekModel(providerModelKey: string): boolean {
     (uniCompApiModelFeatureMap.get(providerModelKey)?.includes('text_reasoning') ?? false);
 }
 
+/**
+ * Exact UniCompAPI DeepSeek V4 reasoning models that accept the official
+ * `reasoning_effort` field (low/medium/high, default medium). Older DeepSeek
+ * catalog models are not sent this field.
+ */
+export function isUniCompApiDeepSeekV4Model(providerModelKey: string): boolean {
+  return providerModelKey === 'deepseek-v4-flash' || providerModelKey === 'deepseek-v4-pro';
+}
+
 export function uniCompApiModelFeatures(
   providerModelKey: string
 ): readonly UniCompApiModelFeature[] | undefined {
@@ -226,6 +362,21 @@ export function uniCompApiReferenceToImageParameterSchema(
     : undefined;
 }
 
+export function uniCompApiVideoParameterSchema(
+  providerModelKey: string,
+  feature: UniCompApiVideoFeature
+): ParameterSchemaV2 | undefined {
+  if (
+    providerModelKey !== 'doubao-seedance-2-0-260128' &&
+    providerModelKey !== 'doubao-seedance-2-0-fast-260128'
+  ) {
+    return undefined;
+  }
+  return feature === 'text_to_video'
+    ? uniCompApiSeedance2TextToVideoParameterSchema
+    : uniCompApiSeedance2ImageToVideoParameterSchema;
+}
+
 export function isKnownUniCompApiModel(providerModelKey: string): boolean {
   return uniCompApiModelFeatureMap.has(providerModelKey);
 }
@@ -237,10 +388,10 @@ export function uniCompApiSupportsFeature(
 ): boolean {
   if (!isUniCompApiPackage(packageId)) return true;
   const features = uniCompApiModelFeatures(providerModelKey);
-  // Preserve legacy manual-registration behavior for model keys that are not
-  // part of the current UniCompAPI catalog. Exact catalog keys are closed-
-  // world and only receive explicitly declared features.
-  return features === undefined ? true : features.includes(feature);
+  // Closed-world routing: only exact declared capabilities are routable.
+  // Unknown catalog or manual keys stay without any inferred profile until
+  // the capability table, schema and routing tests are explicitly extended.
+  return features === undefined ? false : features.includes(feature);
 }
 
 export function uniCompApiVideoFeatures(
@@ -252,11 +403,6 @@ export function uniCompApiVideoFeatures(
     (feature): feature is UniCompApiVideoFeature =>
       feature === 'text_to_video' || feature === 'image_to_video'
   );
-}
-
-export function isUniCompApiViduModel(providerModelKey: string): boolean {
-  return ['viduq3', 'viduq3-mix', 'viduq3-pro', 'viduq3-turbo']
-    .includes(providerModelKey);
 }
 
 export function uniCompApiSupportsText(

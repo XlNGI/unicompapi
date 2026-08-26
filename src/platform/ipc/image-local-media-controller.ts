@@ -177,7 +177,7 @@ export class ImageLocalMediaController {
         const updatedAt = toIsoTimestamp(new Date().toISOString());
         const shared = {
           ...draft,
-          state: 'editing' as const,
+          state: inputMutationState(draft.mode),
           input: undefined,
           updatedAt
         };
@@ -516,7 +516,7 @@ function attachInput(
   const role = inputRoleForMode(draft.mode);
   const shared = {
     ...draft,
-    state: 'editing' as const,
+    state: inputMutationState(draft.mode),
     input: {
       assetId: asset.id,
       role,
@@ -538,6 +538,13 @@ function attachInput(
       : shared as ImageWorkspaceDraft
   );
   return applyImageWorkspaceChangeStaleness(draft, candidate, updatedAt);
+}
+
+function inputMutationState(mode: ImageWorkspaceDraft['mode']) {
+  // Professional-image media commands already persist the complete draft in
+  // this controller. Returning "editing" made the renderer enqueue a second
+  // save and kept model candidates gated behind that redundant round trip.
+  return mode === 'professional_image' ? 'saved' as const : 'editing' as const;
 }
 
 function inputRoleForMode(mode: ImageWorkspaceDraft['mode']) {

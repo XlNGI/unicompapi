@@ -27,7 +27,6 @@ import {
   ProviderPackageRegistry,
   ProviderRegistryController,
   SecureCredentialVault,
-  NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_OFFICIAL_TEMPLATE_ID,
@@ -884,78 +883,40 @@ describe('provider management framework', () => {
     const afterEnable = await registry.load();
     const enabled = afterEnable.models.find((candidate) => candidate.id === model.id);
     expect(enabled?.enabled).toBe(true);
-    expect(enabled?.activeProfileId).toBeTruthy();
-    const profile = afterEnable.modelProfiles?.find((candidate) =>
-      candidate.profileId === enabled?.activeProfileId
+    // Closed-world UniCompAPI: unknown model keys stay profile-less until the
+    // capability table, schema and routing tests are explicitly extended.
+    expect(enabled?.activeProfileId).toBeUndefined();
+    const manualProfiles = (afterEnable.modelProfiles ?? []).filter(
+      (candidate) => candidate.modelId === model.id
     );
-    expect(profile).toMatchObject({
-      status: 'verified',
-      adapterKey: 'newapi.chat',
-      packageId: unicompapiProviderPackageDescriptor.packageId
-    });
-    expect(profile?.features.map((feature) => feature.productFeature).sort()).toEqual([
-      'text_chat',
-      'text_reasoning'
-    ]);
-    const imageProfiles = (afterEnable.modelProfiles ?? []).filter((candidate) =>
-      candidate.modelId === model.id && candidate.adapterKey === 'newapi.image'
-    );
-    expect(imageProfiles).toHaveLength(1);
-    expect(imageProfiles[0]?.features.map((feature) => feature.productFeature)).toEqual([
-      'text_to_image'
-    ]);
-    expect(imageProfiles[0]?.features[0]?.parameterSchemaId).toBe(
-      UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
-    );
+    expect(manualProfiles).toHaveLength(0);
     expect(afterEnable.capabilities.some((candidate) =>
-      candidate.modelId === model.id && candidate.capability === 'image_generation'
-    )).toBe(true);
-    const videoProfiles = (afterEnable.modelProfiles ?? []).filter((candidate) =>
-      candidate.modelId === model.id && candidate.adapterKey === 'newapi.video'
-    );
-    expect(videoProfiles).toHaveLength(1);
-    expect(videoProfiles[0]?.features.map((feature) => feature.productFeature).sort()).toEqual([
-      'image_to_video',
-      'text_to_video'
-    ]);
-    expect(afterEnable.capabilities.some((candidate) =>
-      candidate.modelId === model.id && candidate.capability === 'video_generation'
-    )).toBe(true);
-    await registry.mutate((snapshot) => ({
-      snapshot: {
-        ...snapshot,
-        modelProfiles: (snapshot.modelProfiles ?? []).map((candidate) =>
-          candidate.profileId === imageProfiles[0]?.profileId
-            ? {
-                ...candidate,
-                features: candidate.features.map((feature) =>
-                  feature.productFeature === 'text_to_image'
-                    ? {
-                        ...feature,
-                        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
-                      }
-                    : feature
-                )
-              }
-            : candidate
-        )
-      },
-      result: undefined
-    }));
+      candidate.modelId === model.id
+    )).toBe(false);
     await expect(framework.attachOpenAiCompatibleImageProfile({
       modelId: model.id
     })).resolves.toMatchObject({
       ok: true,
-      value: { state: 'already_attached', profileId: imageProfiles[0]?.profileId }
+      value: { state: 'skipped' }
     });
-    const afterImageMigration = await registry.load();
-    const migratedImageProfile = afterImageMigration.modelProfiles?.find(
-      (candidate) => candidate.profileId === imageProfiles[0]?.profileId
-    );
-    expect(migratedImageProfile?.features[0]?.parameterSchemaId).toBe(
-      UNICOMPAPI_DEFAULT_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
-    );
-    expect(migratedImageProfile?.revision).toBe((imageProfiles[0]?.revision ?? 0) + 1);
+    const imageAttach = await framework.attachOpenAiCompatibleImageProfile({
+      modelId: model.id
+    });
+    expect(imageAttach.ok ? imageAttach.value.profileId : 'unexpected').toBeUndefined();
+    await expect(framework.attachOpenAiCompatibleVideoProfile({
+      modelId: model.id
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'skipped' }
+    });
+    const videoAttach = await framework.attachOpenAiCompatibleVideoProfile({
+      modelId: model.id
+    });
+    expect(videoAttach.ok ? videoAttach.value.profileId : 'unexpected').toBeUndefined();
+    const afterAttach = await registry.load();
+    expect((afterAttach.modelProfiles ?? []).filter(
+      (candidate) => candidate.modelId === model.id
+    )).toHaveLength(0);
 
     await expect(framework.registerExactModel({
       connectionId: added.value.connectionId,
@@ -1016,22 +977,10 @@ describe('provider management framework', () => {
       UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID
     );
 
-    await expect(framework.attachOpenAiCompatibleVideoProfile({
-      modelId: model.id
-    })).resolves.toMatchObject({
-      ok: true,
-      value: { state: 'already_attached', profileId: videoProfiles[0]?.profileId }
-    });
     const summary = await new ProviderRegistryController(registry).getRegistry();
     if (!summary.ok) throw new Error('registry summary unavailable');
     const summaryModel = summary.value.models.find((candidate) => candidate.modelId === model.id);
-    expect(summaryModel?.productFeatures?.slice().sort()).toEqual([
-      'image_to_video',
-      'text_chat',
-      'text_reasoning',
-      'text_to_image',
-      'text_to_video'
-    ]);
+    expect(summaryModel?.productFeatures?.slice().sort() ?? []).toEqual([]);
   });
 });
 

@@ -43,6 +43,7 @@ import {
   isOpenAiCompatiblePackageId,
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
+import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
 
@@ -709,14 +710,16 @@ function serializeVideoRequest(
     model: route.providerModelKey,
     prompt: request.prompt
   };
-  if (typeof values.mode === 'string' && values.mode.trim().length > 0) {
+  const isUniCompApiSeedance20 = isUniCompApiSeedance20Request(route);
+  if (!isUniCompApiSeedance20 && typeof values.mode === 'string' && values.mode.trim().length > 0) {
     body.mode = values.mode.trim();
   }
   if (typeof values.duration === 'number' && Number.isSafeInteger(values.duration)) {
     body.duration = values.duration;
   } else if (typeof values.duration === 'string' && /^\d+$/u.test(values.duration.trim())) {
     body.duration = Number(values.duration.trim());
-  } else if (typeof values.seconds === 'string' || typeof values.seconds === 'number') {
+  } else if (!isUniCompApiSeedance20 &&
+    (typeof values.seconds === 'string' || typeof values.seconds === 'number')) {
     const secondsText = String(values.seconds).trim();
     if (secondsText.length > 0) {
       body.seconds = secondsText;
@@ -725,9 +728,11 @@ function serializeVideoRequest(
   if (typeof values.resolution === 'string' && values.resolution.trim().length > 0) {
     body.resolution = values.resolution.trim();
   }
-  const size = normalizeVideoSize(values);
-  if (size !== undefined) {
-    body.size = size;
+  if (!isUniCompApiSeedance20) {
+    const size = normalizeVideoSize(values);
+    if (size !== undefined) {
+      body.size = size;
+    }
   }
 
   const metadata: Record<string, string | number | boolean> = {};
@@ -739,37 +744,64 @@ function serializeVideoRequest(
         ? values.ratio.trim()
         : '';
   if (aspectRatio.length > 0) {
-    metadata[route.packageId === 'provider-package-unicompapi'
-      ? 'ratio'
-      : 'aspect_ratio'] = aspectRatio;
+    if (isUniCompApiSeedance20) {
+      body.ratio = aspectRatio;
+    } else {
+      metadata[route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID
+        ? 'ratio'
+        : 'aspect_ratio'] = aspectRatio;
+    }
   }
-  if (typeof values.audio === 'boolean') {
+  if (!isUniCompApiSeedance20 && typeof values.audio === 'boolean') {
     metadata.audio = values.audio;
   }
   if (typeof values.generate_audio === 'boolean') {
-    metadata.generate_audio = values.generate_audio;
+    if (isUniCompApiSeedance20) {
+      body.generate_audio = values.generate_audio;
+    } else {
+      metadata.generate_audio = values.generate_audio;
+    }
   }
   for (const key of [
     'watermark',
     'camera_fixed',
     'return_last_frame'
   ] as const) {
-    if (typeof values[key] === 'boolean') metadata[key] = values[key];
+    if (typeof values[key] === 'boolean') {
+      if (isUniCompApiSeedance20) {
+        body[key] = values[key];
+      } else {
+        metadata[key] = values[key];
+      }
+    }
   }
-  for (const key of [
-    'frames',
-    'callback_url',
-    'service_tier',
-    'execution_expires_after'
-  ] as const) {
-    if (typeof values[key] === 'number' || typeof values[key] === 'string') {
-      metadata[key] = values[key];
+  if (typeof values.frames === 'number' || typeof values.frames === 'string') {
+    if (isUniCompApiSeedance20) {
+      body.frames = values.frames;
+    } else {
+      metadata.frames = values.frames;
+    }
+  }
+  if (!isUniCompApiSeedance20) {
+    for (const key of [
+      'callback_url',
+      'service_tier',
+      'execution_expires_after'
+    ] as const) {
+      if (typeof values[key] === 'number' || typeof values[key] === 'string') {
+        metadata[key] = values[key];
+      }
     }
   }
   if (typeof values.seed === 'number' || typeof values.seed === 'string') {
-    metadata.seed = values.seed;
+    if (isUniCompApiSeedance20) {
+      body.seed = values.seed;
+    } else {
+      metadata.seed = values.seed;
+    }
   }
-  if (typeof values.fps === 'number' || typeof values.fps === 'string') {
+  if (!isUniCompApiSeedance20 &&
+    (typeof values.fps === 'number' || typeof values.fps === 'string')) {
     metadata.fps = values.fps;
   }
   if (Object.keys(metadata).length > 0) {
@@ -795,11 +827,18 @@ function serializeVideoRequest(
   };
 }
 
+function isUniCompApiSeedance20Request(route: ValidatedNewApiRoute): boolean {
+  return route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID && (
+    route.providerModelKey === 'doubao-seedance-2-0-260128' ||
+    route.providerModelKey === 'doubao-seedance-2-0-fast-260128'
+  );
+}
+
 function validateUniCompApiVideoParameters(
   route: ValidatedNewApiRoute,
   values: Readonly<Record<string, ParameterValue>>
 ): void {
-  if (route.packageId !== 'provider-package-unicompapi') return;
+  if (route.packageId !== UNICOMPAPI_PROVIDER_PACKAGE_ID) return;
   const hasSize = values.size !== undefined ||
     values.width !== undefined || values.height !== undefined;
   const hasResolution = typeof values.resolution === 'string' &&
@@ -818,6 +857,16 @@ function validateUniCompApiVideoParameters(
         'Kling v3 turbo duration must be between 3 and 15 seconds'
       );
     }
+  }
+  if (
+    isUniCompApiSeedance20Request(route) &&
+    values.duration !== undefined &&
+    values.frames !== undefined
+  ) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'Seedance duration and frames cannot be supplied together'
+    );
   }
   if (
     route.productFeature === 'text_to_video' &&

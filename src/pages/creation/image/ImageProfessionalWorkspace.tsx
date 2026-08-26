@@ -194,7 +194,7 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(
         result.value.draft.draftId
@@ -231,7 +231,7 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(
         result.value.draft.draftId
@@ -261,7 +261,7 @@ export function ImageProfessionalWorkspace({
         onMessage('添加本地作品失败，请确认作品文件仍然可用。');
         return;
       }
-      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(saved.draftId);
       setPreviewUrl(preview.ok ? preview.value.url : '');
@@ -285,7 +285,7 @@ export function ImageProfessionalWorkspace({
         onMessage('清除图片失败，请重试。');
         return;
       }
-      onDraftChange(result.value as GenerationImageDraftDto);
+      onDraftPersisted(result.value as GenerationImageDraftDto);
       setInput(undefined);
       setPreviewUrl('');
       onMessage('已从当前草稿清除图片引用；项目内原始素材记录保持不变。');
@@ -541,7 +541,7 @@ export function ImageProfessionalWorkspace({
                 ? '请求处理中，请在右侧查看进度'
                 : dirty || draft.state !== 'saved'
                   ? '正在保存当前配置'
-                  : '草稿已保存，可以提交'}
+                  : '当前配置已保存'}
             </span>
             <div
               className="uc-image-professional__submit-action"

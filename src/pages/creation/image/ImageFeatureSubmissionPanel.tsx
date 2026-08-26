@@ -5,6 +5,7 @@ import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
   toDynamicParameterFields,
+  validateDynamicParameterValues,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
 import {
@@ -119,6 +120,7 @@ export function ImageFeatureSubmissionPanel({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
+  const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
   const trackProgress = showProgressSteps || Boolean(onProgressChange);
   const explicitFeature =
     draft.featureSelection?.productFeature === 'text_to_image' ||
@@ -152,6 +154,14 @@ export function ImageFeatureSubmissionPanel({
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
+  const dynamicParameterFields = selectedCandidate
+    ? toDynamicParameterFields(selectedCandidate.parameterSchema.fields)
+    : [];
+  const parameterValidation = validateDynamicParameterValues(
+    dynamicParameterFields,
+    featureSelection.parameterValues as Readonly<Record<string, DynamicParameterValue | undefined>>,
+    parameterInputErrors
+  );
 
   function silentlyFinishRuntimeGate() {
     onMessage('');
@@ -299,13 +309,14 @@ export function ImageFeatureSubmissionPanel({
     const sameSchema = candidate &&
       featureSelection.parameterSchemaId === candidate.parameterSchema.schemaId &&
       featureSelection.parameterSchemaRevision === candidate.parameterSchema.revision;
-    const nextValues = oneShot
-      ? {}
-      : {
-          ...defaultQuickImageParameterValues(candidate?.parameterSchema.fields ?? []),
-          ...(sameSchema ? featureSelection.parameterValues : {})
-        };
+    const nextValues = {
+      ...(!oneShot
+        ? defaultUnsetWatermarkParameter(candidate?.parameterSchema.fields ?? [])
+        : {}),
+      ...(sameSchema ? featureSelection.parameterValues : {})
+    };
     onMessage('');
+    setParameterInputErrors({});
     onDraftChange({
       ...draft,
       state: 'editing',
@@ -328,6 +339,12 @@ export function ImageFeatureSubmissionPanel({
     fieldId: string,
     value: ImageWorkspaceParameterValueDto | undefined
   ) {
+    setParameterInputErrors((current) => {
+      if (!(fieldId in current)) return current;
+      const next = { ...current };
+      delete next[fieldId];
+      return next;
+    });
     const parameterValues = { ...featureSelection.parameterValues } as Record<
       string,
       ImageWorkspaceParameterValueDto
@@ -368,6 +385,10 @@ export function ImageFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
+    if (!parameterValidation.valid) {
+      showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
+      return;
+    }
     setBusy(true);
     busyRef.current = true;
     clearGenerationMessage();
@@ -500,6 +521,10 @@ export function ImageFeatureSubmissionPanel({
 
   async function generateOneShot() {
     if (busyRef.current) return;
+    if (!parameterValidation.valid) {
+      showGenerationError(parameterValidation.firstError ?? '请先修正动态参数。');
+      return;
+    }
     if (!api) {
       showGenerationError('当前运行环境未连接桌面图片功能。');
       return;
@@ -537,7 +562,6 @@ export function ImageFeatureSubmissionPanel({
     try {
       if (api.generateQuickImage) {
         const parameterValues: Record<string, string | number | boolean | readonly string[]> = {
-          ...defaultQuickImageParameterValues(selectedCandidate.parameterSchema.fields),
           ...(featureSelection.parameterValues as Readonly<
             Record<string, string | number | boolean | readonly string[]>
           >)
@@ -627,11 +651,10 @@ export function ImageFeatureSubmissionPanel({
     <Button
       className="uc-image-feature-panel__primary"
       disabled={
-        oneShot
-          ? Boolean(blockedReason) || busy || !selectedCandidate?.available
-          : Boolean(blockedReason) ||
-            busy ||
-            !selectedCandidate?.available
+        Boolean(blockedReason) ||
+        busy ||
+        !parameterValidation.valid ||
+        !selectedCandidate?.available
       }
       onClick={() => void (oneShot
         ? generateOneShot()
@@ -697,7 +720,7 @@ export function ImageFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          {oneShot ? (
+          {oneShot && dynamicParameterFields.length === 0 ? (
             <p className="uc-image-feature-panel__action-hint" role="status">
               快速生图使用服务默认参数（含默认输出尺寸），无需填写动态参数。
             </p>
@@ -705,7 +728,16 @@ export function ImageFeatureSubmissionPanel({
             <DynamicParameterForm
               disabled={busy}
               emptyHint="当前表面没有需要用户填写的参数。"
-              fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
+              fields={dynamicParameterFields}
+              errors={parameterValidation.errors}
+              onInputErrorChange={(fieldId, error) => {
+                setParameterInputErrors((current) => {
+                  const next = { ...current };
+                  if (error) next[fieldId] = error;
+                  else delete next[fieldId];
+                  return next;
+                });
+              }}
               onChange={(fieldId, value) =>
                 changeParameter(fieldId, value as ImageWorkspaceParameterValueDto | undefined)
               }
@@ -771,26 +803,25 @@ function costLabel(cost: { readonly state: string; readonly summary?: string }):
   return '未知，以服务商账单为准';
 }
 
-function defaultQuickImageParameterValues(
+/**
+ * The professional parameter form renders optional boolean switches as
+ * "off" by default, but omitting the field would let the provider apply its
+ * own default (Seedream 5.0 defaults to a watermark). Send an explicit
+ * "watermark: false" when the schema exposes the switch and the user has not
+ * chosen a value, so the visible "off" state matches the request.
+ */
+function defaultUnsetWatermarkParameter(
   fields: readonly {
     readonly fieldId: string;
+    readonly valueType?: string;
+    readonly kind?: string;
     readonly required?: boolean;
     readonly exposure?: string;
-    readonly options?: readonly (string | number | boolean)[];
   }[]
-): Readonly<Record<string, string | number | boolean>> {
-  const values: Record<string, string | number | boolean> = {};
-  for (const field of fields) {
-    if (field.fieldId === 'size' && field.options && field.options.length > 0) {
-      values.size = field.options[0] as string | number | boolean;
-      continue;
-    }
-    const required = field.required === true || field.exposure === 'user_required';
-    if (!required || !field.options || field.options.length < 1) continue;
-    const first = field.options[0];
-    if (typeof first === 'string' || typeof first === 'number' || typeof first === 'boolean') {
-      values[field.fieldId] = first;
-    }
-  }
-  return values;
+): Readonly<Record<string, boolean>> {
+  const field = fields.find((candidate) => candidate.fieldId === 'watermark');
+  const valueType = field?.valueType ?? field?.kind;
+  const required = field?.required === true || field?.exposure === 'user_required';
+  if (!field || required || valueType !== 'boolean') return {};
+  return { watermark: false };
 }

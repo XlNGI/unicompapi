@@ -40,8 +40,11 @@ import {
 } from './newapi/openai-compatible-image-routing';
 import { routeOpenAiCompatibleVideoProfile } from './newapi/openai-compatible-video-routing';
 import {
+  isUniCompApiPackage,
   uniCompApiModelFeatures,
-  uniCompApiSupportsText
+  uniCompApiSupportsText,
+  UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID
 } from './newapi/unicompapi-model-capabilities';
 import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
 import {
@@ -2147,7 +2150,7 @@ function resolveDefaultTextChatDefinition(input: {
     if (!uniCompApiSupportsText(input.packageId, input.providerModelKey)) {
       return undefined;
     }
-    const declaredFeatures = input.packageId === 'provider-package-unicompapi'
+    const declaredFeatures = isUniCompApiPackage(input.packageId)
       ? uniCompApiModelFeatures(input.providerModelKey)
         ?.filter((feature): feature is 'text_chat' | 'text_reasoning' =>
           feature === 'text_chat' || feature === 'text_reasoning'
@@ -2161,6 +2164,10 @@ function resolveDefaultTextChatDefinition(input: {
       ...(input.providerModelKey === 'kimi-k3' ? {
         textChatParameterSchemaId: KIMI_K3_TEXT_CHAT_PARAMETER_SCHEMA_ID,
         textReasoningParameterSchemaId: KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID
+      } : {}),
+      ...(isUniCompApiPackage(input.packageId) ? {
+        textChatParameterSchemaId: UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+        textReasoningParameterSchemaId: UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID
       } : {})
     });
   }

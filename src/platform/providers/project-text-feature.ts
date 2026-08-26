@@ -18,6 +18,10 @@ import {
   kimiK3TextChatParameterSchema,
   kimiK3TextReasoningParameterSchema
 } from './kimi/kimi-contracts';
+import {
+  uniCompApiTextChatParameterSchema,
+  uniCompApiTextReasoningParameterSchema
+} from './newapi/unicompapi-model-capabilities';
 import type { ProviderFeatureContractV1 } from './provider-registry-feature-candidates';
 
 export function createTextProviderFeatureContracts(): readonly ProviderFeatureContractV1[] {
@@ -69,6 +73,24 @@ export function createTextProviderFeatureContracts(): readonly ProviderFeatureCo
     },
     {
       parameterSchema: kimiK3TextReasoningParameterSchema,
+      resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiChatUsageSchema,
+      constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: uniCompApiTextChatParameterSchema,
+      resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
+      resultSchemaRevision: 1,
+      usageSchema: newApiChatUsageSchema,
+      constraintSetId: NEWAPI_TEXT_CONSTRAINT_SET_ID,
+      constraintSetRevision: 1,
+      featureMappingVersion: 1
+    },
+    {
+      parameterSchema: uniCompApiTextReasoningParameterSchema,
       resultSchemaId: NEWAPI_CHAT_RESULT_SCHEMA_ID,
       resultSchemaRevision: 1,
       usageSchema: newApiChatUsageSchema,

@@ -381,15 +381,19 @@ test('professional image uses controlled local media and the safe feature API', 
   }
   assert.match(
     professionalSource,
-    /selectInput\([\s\S]*?onDraftChange\(result\.value\.draft/
+    /selectInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
   );
   assert.match(
     professionalSource,
-    /importInput\([\s\S]*?onDraftChange\(result\.value\.draft/
+    /importInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
   );
   assert.match(
     professionalSource,
-    /clearInput\([\s\S]*?onDraftChange\(result\.value/
+    /useWorkAsInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+  );
+  assert.match(
+    professionalSource,
+    /clearInput\([\s\S]*?onDraftPersisted\(result\.value/
   );
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));
