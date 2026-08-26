@@ -192,6 +192,7 @@ describe('VideoReferenceMediaController', () => {
     if (!selected.ok || selected.value.cancelled) throw fixture.getLastError();
     expect(selected.value).toMatchObject({
       draft: {
+        state: 'saved',
         imageToVideo: {
           source: {
             mediaKind: 'image',
@@ -213,6 +214,21 @@ describe('VideoReferenceMediaController', () => {
       draftId: fixture.draft.id,
       target
     })).resolves.toEqual({ ok: true, value: selected.value.material });
+    const stored = await new JsonVideoWorkspaceRepository(
+      fixture.storage,
+      fixture.projectId
+    ).get(fixture.draft.id);
+    expect(stored).toMatchObject({ state: 'saved' });
+
+    const cleared = await fixture.controller.clearMaterial({
+      draftId: fixture.draft.id,
+      target
+    });
+    expect(cleared).toMatchObject({ ok: true, value: { state: 'saved' } });
+    if (!cleared.ok || cleared.value.mode !== 'image_to_video') {
+      throw fixture.getLastError();
+    }
+    expect(cleared.value.imageToVideo.source).toBeUndefined();
   });
 
   it('registers a dropped image as the single image-to-video source', async () => {
@@ -228,7 +244,10 @@ describe('VideoReferenceMediaController', () => {
       value: {
         cancelled: false,
         material: { mediaKind: 'image', mimeType: 'image/png' },
-        draft: { imageToVideo: { source: { mediaKind: 'image' } } }
+        draft: {
+          state: 'saved',
+          imageToVideo: { source: { mediaKind: 'image' } }
+        }
       }
     });
   });
