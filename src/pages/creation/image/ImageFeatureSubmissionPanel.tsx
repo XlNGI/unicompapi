@@ -31,6 +31,7 @@ import {
   describeUnconfirmedGenerationOutcome,
   isUnconfirmedGenerationOutcome
 } from '../../../ui/notifications/generation-failure-reasons';
+import { CreationAdvancedSection } from '../CreationAdvancedSection';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 
 interface ImageFeatureSubmissionPanelProps {
@@ -50,6 +51,8 @@ interface ImageFeatureSubmissionPanelProps {
   readonly showBlockedReason?: boolean;
   /** Professional image: show in-page 准备 → 提交中 → 生成中 → 完成 progress. */
   readonly showProgressSteps?: boolean;
+  /** Professional image: tuck optional model parameters behind an on-demand section. */
+  readonly collapseParameters?: boolean;
   /** Optional fixed action host used by the professional two-pane workspace. */
   readonly actionHost?: HTMLElement | null;
   readonly onProgressChange?: (
@@ -105,6 +108,7 @@ export function ImageFeatureSubmissionPanel({
   showCandidateFacts = true,
   showBlockedReason = true,
   showProgressSteps = false,
+  collapseParameters = false,
   actionHost,
   onDraftChange,
   onDraftPersisted,
@@ -161,6 +165,28 @@ export function ImageFeatureSubmissionPanel({
     dynamicParameterFields,
     featureSelection.parameterValues as Readonly<Record<string, DynamicParameterValue | undefined>>,
     parameterInputErrors
+  );
+  const parameterForm = (
+    <DynamicParameterForm
+      disabled={busy}
+      emptyHint="当前表面没有需要用户填写的参数。"
+      fields={dynamicParameterFields}
+      errors={parameterValidation.errors}
+      onInputErrorChange={(fieldId, error) => {
+        setParameterInputErrors((current) => {
+          const next = { ...current };
+          if (error) next[fieldId] = error;
+          else delete next[fieldId];
+          return next;
+        });
+      }}
+      onChange={(fieldId, value) =>
+        changeParameter(fieldId, value as ImageWorkspaceParameterValueDto | undefined)
+      }
+      values={featureSelection.parameterValues as Readonly<
+        Record<string, DynamicParameterValue | undefined>
+      >}
+    />
   );
 
   function silentlyFinishRuntimeGate() {
@@ -725,26 +751,15 @@ export function ImageFeatureSubmissionPanel({
               快速生图使用服务默认参数（含默认输出尺寸），无需填写动态参数。
             </p>
           ) : (
-            <DynamicParameterForm
-              disabled={busy}
-              emptyHint="当前表面没有需要用户填写的参数。"
-              fields={dynamicParameterFields}
-              errors={parameterValidation.errors}
-              onInputErrorChange={(fieldId, error) => {
-                setParameterInputErrors((current) => {
-                  const next = { ...current };
-                  if (error) next[fieldId] = error;
-                  else delete next[fieldId];
-                  return next;
-                });
-              }}
-              onChange={(fieldId, value) =>
-                changeParameter(fieldId, value as ImageWorkspaceParameterValueDto | undefined)
-              }
-              values={featureSelection.parameterValues as Readonly<
-                Record<string, DynamicParameterValue | undefined>
-              >}
-            />
+            collapseParameters && dynamicParameterFields.length > 0 ? (
+              <CreationAdvancedSection
+                defaultOpen={!parameterValidation.valid}
+                note={`${dynamicParameterFields.length} 项`}
+                title="模型参数"
+              >
+                {parameterForm}
+              </CreationAdvancedSection>
+            ) : parameterForm
           )}
         </>
       ) : null}

@@ -27,6 +27,7 @@ import {
   type ProviderUsageObservationId,
   type ProviderUsageObservationV1,
   type Task,
+  type UsageFactV1,
   type UsageSchemaV1,
   type VideoDynamicParameterValue
 } from '../../../domain';
@@ -68,7 +69,8 @@ import {
   ViduGeminiImageV2Adapter,
   ViduImageV1Adapter,
   type ViduAdapterRequestControl,
-  type ViduConnectionPort
+  type ViduConnectionPort,
+  type ViduImageSubmitOutcome
 } from './vidu-image-adapters';
 import { ViduReferenceImageV2Adapter } from './vidu-reference-image-adapter';
 import { readViduImmediateImageResult } from './vidu-image-result-port';
@@ -432,14 +434,19 @@ export class ViduImageRouteAdapter {
 
   private async persistUsage(
     attemptId: ProviderInvocationAttemptId,
-    outcome: ProviderSubmitOutcome,
+    outcome: ViduImageSubmitOutcome,
     requestStarted: boolean
   ): Promise<void> {
     const operationId = 'providerOperationId' in outcome
       ? outcome.providerOperationId ?? 'unknown'
       : 'not-started';
+    const facts = outcome.kind === 'completed_sync'
+      ? outcome.usageFacts ?? []
+      : [];
     const status = outcome.kind === 'submission_outcome_unknown'
       ? 'unknown_outcome'
+      : facts.length > 0
+        ? 'reported'
       : 'not_reported';
     if (!requestStarted && outcome.kind === 'failed_before_submission') return;
     await this.dependencies.usage.append(createProviderUsageObservation({
@@ -451,7 +458,7 @@ export class ViduImageRouteAdapter {
       sequence: 1,
       status,
       sourceStage: 'result',
-      facts: [],
+      facts,
       observedAt: this.now()
     }, viduUsageSchema), viduUsageSchema);
   }
@@ -590,7 +597,10 @@ export class ViduVideoRouteAdapter {
     const operationId = this.requireAttached(resolved.route, providerOperationId);
     const status = await this.legacyAdapter(resolved).query(operationId);
     if (status.state === 'completed' || status.state === 'failed') {
-      await this.persistTerminal(operationId);
+      await this.persistTerminal(
+        operationId,
+        status.state === 'completed' ? status.usageFacts ?? [] : []
+      );
     }
     return status;
   }
@@ -698,13 +708,17 @@ export class ViduVideoRouteAdapter {
     return operationId;
   }
 
-  private async persistTerminal(operationId: string): Promise<void> {
+  private async persistTerminal(
+    operationId: string,
+    facts: readonly UsageFactV1[] = []
+  ): Promise<void> {
     const context = this.contexts.get(operationId);
     if (!context || context.usagePersisted) return;
     await this.persistUsage(
       context.invocationAttemptId,
       operationId,
-      'not_reported'
+      facts.length > 0 ? 'reported' : 'not_reported',
+      facts
     );
     context.usagePersisted = true;
   }
@@ -712,7 +726,8 @@ export class ViduVideoRouteAdapter {
   private async persistUsage(
     attemptId: ProviderInvocationAttemptId,
     operationId: string,
-    status: 'not_reported' | 'unknown_outcome'
+    status: 'reported' | 'not_reported' | 'unknown_outcome',
+    facts: readonly UsageFactV1[] = []
   ): Promise<void> {
     await this.dependencies.usage.append(createProviderUsageObservation({
       id: this.ids.nextProviderUsageObservationId(),
@@ -723,7 +738,7 @@ export class ViduVideoRouteAdapter {
       sequence: 1,
       status,
       sourceStage: status === 'unknown_outcome' ? 'submit' : 'result',
-      facts: [],
+      facts,
       observedAt: toIsoTimestamp(
         this.dependencies.now?.() ?? new Date().toISOString()
       )

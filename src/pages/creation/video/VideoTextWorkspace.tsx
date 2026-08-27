@@ -7,6 +7,7 @@ import { GenerationHistory } from '../../../components/GenerationHistory';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import type { VideoWorkspaceDraftDto } from '../../../shared/video-workspace-ipc';
 import { composeVideoPromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
+import { CreationAdvancedSection } from '../CreationAdvancedSection';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import { VideoFeatureSubmissionPanel } from './VideoFeatureSubmissionPanel';
 import { VideoPromptEnhancePanel } from './VideoPromptEnhancePanel';
@@ -36,7 +37,6 @@ export function VideoTextWorkspace({
   onMessage
 }: VideoTextWorkspaceProps) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -47,9 +47,6 @@ export function VideoTextWorkspace({
   ) => {
     setSubmissionProgress({ phase, failureMessage });
   }, []);
-  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(
-    submissionProgress.phase
-  );
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
       reference.kind !== 'project_context' ||
@@ -114,7 +111,7 @@ export function VideoTextWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-video-text__workspace uc-generation-two-pane">
+      <div className="uc-image-workbench__workspace uc-video-text__workspace uc-generation-two-pane uc-creation-simple">
         <section aria-label="提交前准备区域" className="uc-generation-two-pane__controls uc-generation-two-pane__preparation">
           <header className="uc-image-professional__pane-heading">
             <span aria-hidden="true">1</span>
@@ -125,7 +122,7 @@ export function VideoTextWorkspace({
           </header>
           <div className="uc-generation-two-pane__preparation-scroll uc-scrollbar">
           <div className="uc-generation-two-pane__preparation-flow">
-        <Card className="uc-image-workbench__panel uc-video-text__source">
+        <Card className="uc-image-workbench__panel uc-video-text__source uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -144,58 +141,68 @@ export function VideoTextWorkspace({
             />
             <small>{draft.prompt.originalInput.length} / 4000</small>
           </label>
-          <div className="uc-image-professional__prompt-tools">
-            <WorkspaceContextSelector
-              compact
-              disabled={false}
-              onChange={(contextReferences) => changeDraft({
-                ...draft,
-                contextReferences
-              })}
-              onMessage={onMessage}
-              projectContextsOnly
-              references={draft.contextReferences}
-            />
-            <VideoPromptEnhancePanel
-              compact
-              dirty={dirty}
-              draft={draft}
-              onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
-              onFlushDraft={onFlushDraft}
-              onMessage={onMessage}
-            />
-          </div>
-          {unsupportedContexts.length > 0 ? (
-            <div className="uc-image-quick__preflight" role="status">
-              <strong>发现旧上下文</strong>
-              <span>文生视频只接受固定版本的项目上下文。</span>
-              <Button onClick={removeUnsupportedContexts} variant="secondary">
-                <LuTrash2 aria-hidden="true" />
-                明确移除旧上下文
-              </Button>
+          <CreationAdvancedSection
+            defaultOpen={unsupportedContexts.length > 0 || Boolean(draft.textToVideo.materials)}
+            note={`${draft.contextReferences.length} 份上下文`}
+            title="上下文与提示词增强"
+          >
+            <div className="uc-image-professional__prompt-tools">
+              <WorkspaceContextSelector
+                compact
+                disabled={false}
+                onChange={(contextReferences) => changeDraft({
+                  ...draft,
+                  contextReferences
+                })}
+                onMessage={onMessage}
+                projectContextsOnly
+                references={draft.contextReferences}
+              />
+              <VideoPromptEnhancePanel
+                compact
+                dirty={dirty}
+                draft={draft}
+                onDraftPersisted={(next) => onDraftPersisted(next as TextVideoDraftDto)}
+                onFlushDraft={onFlushDraft}
+                onMessage={onMessage}
+              />
             </div>
-          ) : null}
-          {draft.textToVideo.materials ? (
-            <div className="uc-image-quick__preflight" role="status">
-              <strong>发现旧素材槽位</strong>
-              <span>文生视频不再接收图片、视频或其他参考素材。</span>
-              <Button onClick={removeLegacyMaterials} variant="secondary">
-                <LuTrash2 aria-hidden="true" />
-                明确移除旧素材槽位
-              </Button>
-            </div>
-          ) : null}
+            {unsupportedContexts.length > 0 ? (
+              <div className="uc-image-quick__preflight" role="status">
+                <strong>发现旧上下文</strong>
+                <span>文生视频只接受固定版本的项目上下文。</span>
+                <Button onClick={removeUnsupportedContexts} variant="secondary">
+                  <LuTrash2 aria-hidden="true" />
+                  明确移除旧上下文
+                </Button>
+              </div>
+            ) : null}
+            {draft.textToVideo.materials ? (
+              <div className="uc-image-quick__preflight" role="status">
+                <strong>发现旧素材槽位</strong>
+                <span>文生视频不再接收图片、视频或其他参考素材。</span>
+                <Button onClick={removeLegacyMaterials} variant="secondary">
+                  <LuTrash2 aria-hidden="true" />
+                  明确移除旧素材槽位
+                </Button>
+              </div>
+            ) : null}
+          </CreationAdvancedSection>
         </Card>
 
         {enhancementContent ? (
-        <Card className="uc-image-workbench__panel uc-video-text__prompt">
+        <Card className="uc-image-workbench__panel uc-video-text__prompt uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
               <h2>最终提示词</h2>
-              <p>最终提示词是本次外发的唯一文本事实，可在这里直接编辑。</p>
             </div>
           </header>
+          <CreationAdvancedSection
+            defaultOpen
+            note="已增强"
+            title="最终提示词"
+          >
           <label className="uc-image-quick__field">
             <span>最终提示词 <span className="uc-dynamic-parameters__required">必填</span></span>
             <Input
@@ -207,10 +214,11 @@ export function VideoTextWorkspace({
             />
             <small>{draft.prompt.finalPrompt.length} / 6000</small>
           </label>
+          </CreationAdvancedSection>
         </Card>
         ) : null}
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-video-text__submit uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">{enhancementContent ? '3' : '2'}</span>
             <div>
@@ -219,8 +227,9 @@ export function VideoTextWorkspace({
             </div>
           </header>
           <VideoFeatureSubmissionPanel
-            actionHost={actionHost}
             blockedReason={blockedReason}
+            className="uc-image-feature-panel--compact"
+            collapseParameters
             dirty={dirty}
             draft={draft}
             onDraftChange={(next) => onDraftChange(next as TextVideoDraftDto)}
@@ -239,16 +248,6 @@ export function VideoTextWorkspace({
         </Card>
           </div>
           </div>
-          <footer className="uc-image-professional__submit-bar">
-            <span>
-              {generationInFlight
-                ? '请求处理中，请在右侧查看进度'
-                : dirty || draft.state !== 'saved'
-                  ? '正在保存当前配置'
-                  : '当前配置已保存'}
-            </span>
-            <div className="uc-image-professional__submit-action" ref={setActionHost} />
-          </footer>
         </section>
 
         <section aria-label="生成过程与作品区域" className="uc-generation-two-pane__result uc-generation-two-pane__output">

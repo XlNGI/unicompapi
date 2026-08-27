@@ -11,7 +11,8 @@ import {
   type ProviderOperationRecordId,
   type ProviderOperationRepository,
   type ProviderSubmitOutcome,
-  type Task
+  type Task,
+  type UsageFactV1
 } from '../../domain';
 
 export interface ProviderExecutionLifecycleDependencies {
@@ -188,7 +189,7 @@ function transitionForOutcome(
 
 export type ProviderAsyncOperationStatus =
   | { readonly state: 'queued' | 'processing' }
-  | { readonly state: 'completed' }
+  | { readonly state: 'completed'; readonly usageFacts?: readonly UsageFactV1[] }
   | {
       readonly state: 'failed';
       readonly message: string;

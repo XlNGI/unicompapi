@@ -550,18 +550,70 @@ function parseImageResponse(body: Uint8Array): {
   const result = hasUrl
     ? { kind: 'remote_url' as const, value: requireControlledResultUrl(urlCandidate) }
     : inlineResult(base64Candidate);
-  let usage: readonly UsageFactV1[] | undefined;
+  const usageFacts: UsageFactV1[] = [];
   if (value.usage !== undefined) {
     try {
-      usage = mapNewApiImageUsage(value.usage);
+      usageFacts.push(...mapNewApiImageUsage(value.usage));
     } catch {
-      usage = undefined;
+      // Some OpenAI-compatible image providers use usage for credit billing instead of tokens.
     }
   }
+  const creditFacts = parseCreditUsageFacts(item, value);
+  if (creditFacts) usageFacts.push(...creditFacts);
+  const usage = usageFacts.length > 0 ? usageFacts : undefined;
   return {
     result,
     ...(usage ? { usage } : {})
   };
+}
+
+function parseCreditUsageFacts(
+  item: Readonly<Record<string, unknown>>,
+  root: Readonly<Record<string, unknown>>
+): readonly UsageFactV1[] | undefined {
+  const raw = firstCreditCandidate([
+    item.credits,
+    item.credit,
+    item.credit_amount,
+    item.credits_used,
+    item.used_credits,
+    item.point_amount,
+    item.points,
+    item.point,
+    recordValue(item.usage, 'credits'),
+    recordValue(item.usage, 'credit'),
+    recordValue(item.usage, 'credit_amount'),
+    recordValue(item.usage, 'credits_used'),
+    recordValue(item.usage, 'used_credits'),
+    recordValue(item.usage, 'point_amount'),
+    recordValue(item.usage, 'points'),
+    recordValue(item.usage, 'point'),
+    root.credits,
+    root.credit,
+    root.credit_amount,
+    root.credits_used,
+    root.used_credits,
+    root.point_amount,
+    root.points,
+    root.point,
+    recordValue(root.usage, 'credits'),
+    recordValue(root.usage, 'credit'),
+    recordValue(root.usage, 'credit_amount'),
+    recordValue(root.usage, 'credits_used'),
+    recordValue(root.usage, 'used_credits'),
+    recordValue(root.usage, 'point_amount'),
+    recordValue(root.usage, 'points'),
+    recordValue(root.usage, 'point')
+  ]);
+  const quantity = decimalQuantity(raw, 'NewAPI image credits');
+  return quantity
+    ? [{
+        metricId: 'credit_amount',
+        quantity,
+        unit: 'credit',
+        source: 'provider_body'
+      }]
+    : undefined;
 }
 
 function inlineResult(value: unknown): {
@@ -792,6 +844,25 @@ function optionalNonNegativeInteger(value: unknown, label: string): number | und
 
 function tokenFact(metricId: string, quantity: number): UsageFactV1 {
   return { metricId, quantity: String(quantity), unit: 'token', source: 'provider_body' };
+}
+
+function firstCreditCandidate(values: readonly unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function decimalQuantity(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return String(value);
+  }
+  if (typeof value === 'string' && /^(0|[1-9]\d*)(\.\d+)?$/u.test(value.trim())) {
+    return value.trim();
+  }
+  throw invalidResponse(`${label} is invalid`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

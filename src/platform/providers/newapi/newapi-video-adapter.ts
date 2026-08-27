@@ -151,6 +151,7 @@ interface NewApiResultSnapshot {
 interface ParsedNewApiTask {
   readonly status: 'queued' | 'in_progress' | 'completed' | 'failed';
   readonly failureMessage?: string;
+  readonly usageFacts?: readonly UsageFactV1[];
 }
 
 export class NewApiVideoAdapter
@@ -303,11 +304,15 @@ export class NewApiVideoAdapter
       );
       if (task.status === 'queued') return { state: 'queued' };
       if (task.status === 'in_progress') return { state: 'processing' };
-      await this.persistTerminalUsage(context);
       if (task.status === 'completed') {
+        await this.persistUsage(context, task.usageFacts ? 'reported' : 'not_reported', task.usageFacts ?? []);
         this.results.set(remoteId, { completed: true });
-        return { state: 'completed' };
+        return {
+          state: 'completed',
+          ...(task.usageFacts ? { usageFacts: task.usageFacts } : {})
+        };
       }
+      await this.persistTerminalUsage(context);
       this.results.delete(remoteId);
       return {
         state: 'failed',
@@ -1096,6 +1101,7 @@ function parseTaskResponse(
   }
   return {
     status: video.status,
+    ...(video.usageFacts ? { usageFacts: video.usageFacts } : {}),
     ...(video.failureMessage ? { failureMessage: video.failureMessage } : {})
   };
 }
@@ -1109,6 +1115,7 @@ function parseVideoObject(
   readonly id: string;
   readonly status: ParsedNewApiTask['status'];
   readonly failureMessage?: string;
+  readonly usageFacts?: readonly UsageFactV1[];
 } {
   const root = parseJsonObject(body, label);
   rejectErrorEnvelope(root);
@@ -1138,7 +1145,43 @@ function parseVideoObject(
   const failureMessage = status === 'failed'
     ? safeVideoTaskFailureMessage(item, root)
     : undefined;
-  return { id, status, ...(failureMessage ? { failureMessage } : {}) };
+  const usageFacts = status === 'completed'
+    ? parseCreditUsageFacts(item, root)
+    : undefined;
+  return {
+    id,
+    status,
+    ...(usageFacts ? { usageFacts } : {}),
+    ...(failureMessage ? { failureMessage } : {})
+  };
+}
+
+function parseCreditUsageFacts(
+  item: Readonly<Record<string, unknown>>,
+  root: Readonly<Record<string, unknown>>
+): readonly UsageFactV1[] | undefined {
+  const raw = firstCreditCandidate([
+    item.credits,
+    item.credit,
+    item.credit_amount,
+    recordValue(item.usage, 'credits'),
+    recordValue(item.usage, 'credit'),
+    recordValue(item.usage, 'credit_amount'),
+    root.credits,
+    root.credit,
+    root.credit_amount,
+    recordValue(root.usage, 'credits'),
+    recordValue(root.usage, 'credit'),
+    recordValue(root.usage, 'credit_amount')
+  ]);
+  if (raw === undefined) return undefined;
+  const quantity = decimalQuantity(raw, 'NewAPI video credits');
+  return [{
+    metricId: 'credit_amount',
+    quantity,
+    unit: 'credit',
+    source: 'provider_body'
+  }];
 }
 
 function safeVideoTaskFailureMessage(
@@ -1516,6 +1559,24 @@ function taskStatus(value: unknown): ParsedNewApiTask['status'] {
     return 'failed';
   }
   throw invalidResponse('NewApi task status is invalid');
+}
+
+function firstCreditCandidate(values: readonly unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function decimalQuantity(value: unknown, label: string): string {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return String(value);
+  }
+  if (typeof value === 'string' && /^(0|[1-9]\d*)(\.\d+)?$/u.test(value.trim())) {
+    return value.trim();
+  }
+  throw invalidResponse(`${label} is invalid`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

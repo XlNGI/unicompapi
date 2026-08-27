@@ -130,7 +130,16 @@ export const viduUsageSchema: UsageSchemaV1 = createUsageSchema({
   revision: 1,
   completenessRule: 'provider_status_only',
   conflictPolicy: 'mark_invalid_response',
-  metrics: []
+  metrics: [
+    {
+      metricId: 'credit_amount',
+      allowedUnits: ['credit'],
+      numericKind: 'decimal',
+      aggregation: 'final_authoritative',
+      requiredForComplete: false,
+      allowedStages: ['result']
+    }
+  ]
 });
 
 export const viduProviderPackageDescriptor: ProviderPackageDescriptor = {

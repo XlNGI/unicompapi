@@ -97,7 +97,7 @@ test('professional generation save status does not claim submission readiness', 
     path.includes('VideoImage')
   );
   for (const { path, source } of professionalSources) {
-    assert.match(source, /当前配置已保存/, `${path} should report only the saved fact`);
+    assert.doesNotMatch(source, /当前配置已保存/, `${path} should not render a duplicate local save footer`);
     assert.doesNotMatch(source, /可以提交/, `${path} must not imply submission readiness`);
   }
 });

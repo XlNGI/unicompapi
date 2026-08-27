@@ -19,9 +19,16 @@ import {
   type GenerationSafeReason
 } from '../../ui/notifications/generation-failure-reasons';
 import { TaskCenterWorkspace } from './TaskCenterWorkspace';
+import {
+  calculateSuccessfulCallFee,
+  formatCallFee,
+  formatCallFeeFormula
+} from './call-fees';
+
+export type TaskCenterNavigate = (itemId: 'projects' | 'library') => void;
 
 interface CallRecordsViewProps {
-  readonly onNavigate?: (itemId: 'projects' | 'library') => void;
+  readonly onNavigate?: TaskCenterNavigate;
 }
 
 interface CallFilters {
@@ -69,7 +76,7 @@ function parseDateRange(createdFrom: string, createdTo: string): [Date, Date] | 
   return start && end ? [start, end] : null;
 }
 
-const callStates: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
+export const callStates: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
   submitting: { label: '正在提交', tone: 'info' },
   failed_before_submission: { label: '提交失败', tone: 'danger' },
   accepted: { label: '提交成功', tone: 'info' },
@@ -80,7 +87,7 @@ const callStates: Record<string, { readonly label: string; readonly tone: Status
   unknown_outcome: { label: '结果未知', tone: 'warning' }
 };
 
-const featureLabels: Record<string, string> = {
+export const featureLabels: Record<string, string> = {
   text_chat: '文本对话',
   text_to_image: '文生图',
   reference_to_image: '图生图',
@@ -92,7 +99,7 @@ const featureLabels: Record<string, string> = {
   video_edit: '视频编辑'
 };
 
-const usageLabels: Record<string, string> = {
+export const usageLabels: Record<string, string> = {
   reported_complete: '服务商已完整报告',
   reported_partial: '服务商仅部分报告',
   not_reported: '服务商未返回用量',
@@ -239,12 +246,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
   }
 
   return (
-    <div
-      aria-labelledby="call-records-tab"
-      className="uc-task-center__call-view"
-      id="call-records-panel"
-      role="tabpanel"
-    >
+    <div className="uc-task-center__call-view">
       <Card className="uc-task-center__filters uc-task-center__call-filters">
         <SelectFilter
           label="所属项目"
@@ -352,27 +354,14 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
           list={(
             <>
               <h2 id="call-list-title">调用列表（{records.length} / {total}）</h2>
-              {records.map((record) => {
-                const state = callState(record.state);
-                return (
-                  <button
-                    aria-pressed={selectedCallId === record.invocationAttemptId}
-                    className="uc-task-center__task uc-task-center__call"
-                    key={record.invocationAttemptId}
-                    onClick={() => setSelectedCallId(record.invocationAttemptId)}
-                    type="button"
-                  >
-                    <span>
-                      <strong>{featureLabels[record.productFeature] ?? '其他功能'}</strong>
-                      <small>{record.projectName}</small>
-                    </span>
-                    <StatusPill tone={state.tone}>{state.label}</StatusPill>
-                    <small>{displayRoute(record)}</small>
-                    <small>{formatTimestamp(record.createdAt)}</small>
-                    <small>{usageLabels[record.usageAvailability] ?? '用量状态未知'}</small>
-                  </button>
-                );
-              })}
+              {records.map((record) => (
+                <CallRecordButton
+                  key={record.invocationAttemptId}
+                  onSelect={() => setSelectedCallId(record.invocationAttemptId)}
+                  record={record}
+                  selected={selectedCallId === record.invocationAttemptId}
+                />
+              ))}
             </>
           )}
           listLabelledBy="call-list-title"
@@ -384,12 +373,41 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
   );
 }
 
-function CallDetails({
+export function CallRecordButton({
+  onSelect,
+  record,
+  selected
+}: {
+  readonly onSelect: () => void;
+  readonly record: StorageCallRecordSummaryDto;
+  readonly selected: boolean;
+}) {
+  const state = callState(record.state);
+  return (
+    <button
+      aria-pressed={selected}
+      className="uc-task-center__task uc-task-center__call"
+      onClick={onSelect}
+      type="button"
+    >
+      <span>
+        <strong>{featureLabels[record.productFeature] ?? '其他功能'}</strong>
+        <small>{record.projectName}</small>
+      </span>
+      <StatusPill tone={state.tone}>{state.label}</StatusPill>
+      <small>{displayRoute(record)}</small>
+      <small>{formatTimestamp(record.createdAt)}</small>
+      <small>{usageLabels[record.usageAvailability] ?? '用量状态未知'}</small>
+    </button>
+  );
+}
+
+export function CallDetails({
   details,
   onNavigate
 }: {
   readonly details: StorageCallDetailsDto;
-  readonly onNavigate?: CallRecordsViewProps['onNavigate'];
+  readonly onNavigate?: TaskCenterNavigate;
 }) {
   const state = callState(details.state);
   return (
@@ -445,11 +463,12 @@ function CallDetails({
 
       <section className="uc-task-center__call-section">
         <div className="uc-task-center__details-heading">
-          <h3>上游用量</h3>
+          <h3>上游用量与费用</h3>
           <StatusPill tone={usageTone(details.usage.availability)}>
             {usageLabels[details.usage.availability] ?? '用量状态未知'}
           </StatusPill>
         </div>
+        <CallFeeSummary details={details} />
         {details.usage.facts.length === 0 ? (
           <p className="uc-task-center__muted">
             {usageLabels[details.usage.availability] ?? '没有可展示的上游用量事实。'}
@@ -510,6 +529,19 @@ function CallDetails({
   );
 }
 
+function CallFeeSummary({ details }: { readonly details: StorageCallDetailsDto }) {
+  const fee = calculateSuccessfulCallFee(details);
+  return (
+    <dl className="uc-task-center__usage-list uc-task-center__usage-list--fee">
+      <div>
+        <dt>费用</dt>
+        <dd>{formatCallFee(fee)}</dd>
+        <small>{fee.state === 'calculated' ? formatCallFeeFormula(fee) : fee.reason}</small>
+      </div>
+    </dl>
+  );
+}
+
 function callSubjectLabel(kind: 'media' | 'conversation' | 'prompt_once'): string {
   if (kind === 'media') return '媒体任务';
   if (kind === 'conversation') return '项目对话';
@@ -522,7 +554,7 @@ function RegisteredWorkResultCard({
   workId
 }: {
   readonly localResult?: StorageCallDetailsDto['localResults'][number];
-  readonly onNavigate?: CallRecordsViewProps['onNavigate'];
+  readonly onNavigate?: TaskCenterNavigate;
   readonly workId: string;
 }) {
   const storage: StorageApi | undefined = window.unicomp?.storage;
@@ -705,16 +737,16 @@ function uniqueValues(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-function callState(state: string) {
+export function callState(state: string) {
   return callStates[state] ?? { label: '未知调用状态', tone: 'neutral' as const };
 }
 
-function displayRoute(record: StorageCallRecordSummaryDto): string {
+export function displayRoute(record: StorageCallRecordSummaryDto): string {
   if (record.displayNameAvailability !== 'snapshotted') return '提交时路由显示名不可用';
   return [record.providerName, record.connectionName, record.modelName].filter(Boolean).join(' / ');
 }
 
-function formatTimestamp(value: string): string {
+export function formatTimestamp(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '时间不可用' : date.toLocaleString('zh-CN');
 }
@@ -749,9 +781,19 @@ function usageMetricLabel(metric: string): string {
   const labels: Readonly<Record<string, string>> = {
     input_tokens: '输入文本用量',
     output_tokens: '输出文本用量',
+    prompt_tokens: '提示词用量',
+    completion_tokens: '输出用量',
     total_tokens: '总文本用量',
+    cached_tokens: '缓存用量',
+    reasoning_tokens: '推理用量',
+    credit_amount: '积分用量',
+    cash_amount: '现金扣费',
+    cash_list_price: '原价金额',
+    package_unit_amount: '资源包用量',
     input_images: '输入图片数',
     output_images: '输出图片数',
+    image_count: '输出图片数',
+    video_seconds: '视频时长',
     duration_ms: '处理时长'
   };
   return labels[metric] ?? '其他用量';
@@ -761,6 +803,10 @@ function usageUnitLabel(unit: string): string {
   const labels: Readonly<Record<string, string>> = {
     token: '个文本单位',
     tokens: '个文本单位',
+    credit: '积分',
+    credits: '积分',
+    provider_unit: '资源包单位',
+    currency_amount: '金额',
     image: '张',
     images: '张',
     millisecond: '毫秒',

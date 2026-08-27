@@ -963,7 +963,15 @@ export const newApiImageUsageSchema: UsageSchemaV1 = createUsageSchema({
     tokenMetric('output_tokens', false),
     tokenMetric('total_tokens', false),
     tokenMetric('text_tokens', false),
-    tokenMetric('image_tokens', false)
+    tokenMetric('image_tokens', false),
+    {
+      metricId: 'credit_amount',
+      allowedUnits: ['credit', 'provider_unit'],
+      numericKind: 'decimal',
+      aggregation: 'final_authoritative',
+      requiredForComplete: false,
+      allowedStages: ['result']
+    }
   ]
 });
 
@@ -972,7 +980,16 @@ export const newApiVideoUsageSchema: UsageSchemaV1 = createUsageSchema({
   revision: 1,
   completenessRule: 'provider_status_only',
   conflictPolicy: 'mark_invalid_response',
-  metrics: []
+  metrics: [
+    {
+      metricId: 'credit_amount',
+      allowedUnits: ['credit', 'provider_unit'],
+      numericKind: 'decimal',
+      aggregation: 'final_authoritative',
+      requiredForComplete: false,
+      allowedStages: ['poll', 'result']
+    }
+  ]
 });
 
 export const newApiProviderPackageDescriptor: ProviderPackageDescriptor = {
