@@ -1,4 +1,5 @@
 import type { ParameterFieldSchemaV2, ParameterSchemaV2 } from '../../../domain';
+import { createViduModelContract } from '../vidu/vidu-contracts';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 
 export const UNICOMPAPI_SEEDREAM_5_MODEL_KEY = 'doubao-seedream-5-0-260128';
@@ -16,6 +17,12 @@ export const UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.doubao_seedance_2_0_fast_260128.text_to_video.official';
 export const UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.doubao_seedance_2_0_fast_260128.image_to_video.official';
+export const UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.viduq3_turbo.image_to_video.official_mapping';
+export const UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.viduq3_turbo.text_to_video.official_mapping';
+export const UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.viduq3_pro.text_to_video.official_mapping';
 
 
 export const UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
@@ -302,6 +309,52 @@ export const uniCompApiSeedance2FastImageToVideoParameterSchema =
     ['480p', '720p']
   );
 
+function mappedViduVideoParameterSchema(
+  providerModelKey: 'viduq3-turbo' | 'viduq3-pro',
+  productFeature: UniCompApiVideoFeature,
+  schemaId: string
+): ParameterSchemaV2 {
+  const official = createViduModelContract(providerModelKey).parameterSchemas.find(
+    (schema) => schema.productFeature === productFeature
+  );
+  if (!official) {
+    throw new TypeError('UniCompAPI Vidu mapping requires an exact official contract');
+  }
+  return {
+    ...official,
+    schemaId,
+    fields: official.fields.map((field) => ({
+      ...field,
+      ...(field.options ? { options: [...field.options] } : {})
+    }))
+  };
+}
+
+/**
+ * Exact UniCompAPI Vidu mappings reuse the official Vidu parameter semantics,
+ * while submission remains on the UniCompAPI /v1/videos gateway transport.
+ */
+export const uniCompApiViduQ3TurboImageToVideoParameterSchema =
+  mappedViduVideoParameterSchema(
+    'viduq3-turbo',
+    'image_to_video',
+    UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+  );
+
+export const uniCompApiViduQ3TurboTextToVideoParameterSchema =
+  mappedViduVideoParameterSchema(
+    'viduq3-turbo',
+    'text_to_video',
+    UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+  );
+
+export const uniCompApiViduQ3ProTextToVideoParameterSchema =
+  mappedViduVideoParameterSchema(
+    'viduq3-pro',
+    'text_to_video',
+    UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+  );
+
 export type UniCompApiModelFeature =
   | 'text_chat'
   | 'text_reasoning'
@@ -342,8 +395,8 @@ const uniCompApiModelFeatureMap = new Map<string, readonly UniCompApiModelFeatur
   ['qwen-image-edit-2509', ['reference_to_image']],
   ['qwen3-235b-a22b', ['text_chat', 'text_reasoning']],
   ['qwen3-32b', ['text_chat', 'text_reasoning']],
-  ['viduq3', ['image_to_video']],
-  ['viduq3-mix', ['image_to_video']],
+  ['viduq3', []],
+  ['viduq3-mix', []],
   ['viduq3-pro', ['text_to_video']],
   ['viduq3-turbo', ['text_to_video', 'image_to_video']]
 ]);
@@ -404,6 +457,14 @@ export function uniCompApiVideoParameterSchema(
     return feature === 'text_to_video'
       ? uniCompApiSeedance2FastTextToVideoParameterSchema
       : uniCompApiSeedance2FastImageToVideoParameterSchema;
+  }
+  if (providerModelKey === 'viduq3-turbo') {
+    return feature === 'text_to_video'
+      ? uniCompApiViduQ3TurboTextToVideoParameterSchema
+      : uniCompApiViduQ3TurboImageToVideoParameterSchema;
+  }
+  if (providerModelKey === 'viduq3-pro' && feature === 'text_to_video') {
+    return uniCompApiViduQ3ProTextToVideoParameterSchema;
   }
   return undefined;
 }

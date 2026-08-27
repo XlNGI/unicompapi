@@ -33,6 +33,9 @@ import {
   UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   videoDraftRevision
 } from '../../src/platform';
 
@@ -122,7 +125,7 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
       .rejects.toThrow(/exactly one image/);
   });
 
-  it('publishes complete video contracts, including exact UniCompAPI Seedance schemas', () => {
+  it('publishes complete video contracts, including exact UniCompAPI mapped schemas', () => {
     const contracts = createVideoProviderFeatureContracts();
     expect(contracts.length).toBeGreaterThan(0);
     const features = new Set(
@@ -153,6 +156,15 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
     )).toBe(true);
     expect(contracts.some((contract) =>
       contract.parameterSchema.schemaId === UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
     )).toBe(true);
     const registry = new ProviderFeatureContractRegistry(contracts);
     expect(registry.resolve({

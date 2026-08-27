@@ -347,6 +347,13 @@ export function createImageFeatureControllerRuntime(
         outcome: 'failed_before_submission',
         message: localResultError
       });
+    } else if (acceptance.intent.status === 'failed') {
+      const safeCode = latestSafeCode(acceptance.invocationEvents);
+      localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');
+      await lifecycle.applyExplicitSubmissionFailure({
+        executionId: acceptance.subjectArtifacts.execution.id,
+        message: localResultError
+      });
     } else if (acceptance.intent.status === 'unknown_outcome') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
       localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');

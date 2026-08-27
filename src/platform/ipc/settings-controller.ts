@@ -102,6 +102,8 @@ export interface SettingsB4Services {
   readonly applicationData: ApplicationDataService;
 }
 
+export type SettingsDiagnosticsLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
 class UnsupportedSettingsOperationError extends Error {}
 
 const unavailableCapabilities = ['diagnostics', 'updates'] as const;
@@ -125,6 +127,24 @@ export class SettingsController {
     private readonly b3?: SettingsB3Services,
     private readonly b4?: SettingsB4Services
   ) {}
+
+  async writeDiagnosticsLog(
+    level: SettingsDiagnosticsLogLevel,
+    message: string
+  ): Promise<void> {
+    if (!this.b4 || !['debug', 'info', 'warn', 'error'].includes(level)) return;
+    try {
+      const current = await this.repository.load();
+      await this.b4.diagnostics.writeLog(
+        'networkErrors',
+        level,
+        message,
+        current.document.diagnostics
+      );
+    } catch {
+      // Diagnostics must never affect a provider request or its outcome.
+    }
+  }
 
   async getSnapshot(): Promise<SettingsIpcResult<SettingsSnapshotDto>> {
     try {

@@ -30,7 +30,10 @@ import {
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION,
   UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
-  UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+  UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
 } from '../../src/platform';
 import type { ProviderRegistrySnapshot } from '../../src/platform';
 
@@ -144,6 +147,99 @@ describe('openai-compatible video soft routing', () => {
       expect.objectContaining({
         productFeature: 'image_to_video',
         parameterSchemaId: UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+      })
+    ]));
+  });
+
+  it('migrates exact UniCompAPI Vidu profiles from generic schemas', () => {
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const seeded = baseSnapshot('viduq3-turbo');
+    const attached = routeOpenAiCompatibleVideoProfile(
+      seeded,
+      packages,
+      seeded.models[0]!,
+      now
+    );
+    const staleSnapshot: ProviderRegistrySnapshot = {
+      ...attached.snapshot,
+      modelProfiles: attached.snapshot.modelProfiles?.map((profile) => ({
+        ...profile,
+        features: profile.features.map((feature) => ({
+          ...feature,
+          parameterSchemaId: feature.productFeature === 'text_to_video'
+            ? NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+            : NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+        }))
+      }))
+    };
+    const migrated = routeOpenAiCompatibleVideoProfile(
+      staleSnapshot,
+      packages,
+      attached.model,
+      now
+    );
+    expect(migrated.state).toBe('already_attached');
+    expect(migrated.snapshot.modelProfiles?.[0]?.features).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productFeature: 'text_to_video',
+        parameterSchemaId: UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+      }),
+      expect.objectContaining({
+        productFeature: 'image_to_video',
+        parameterSchemaId: UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+      })
+    ]));
+  });
+
+  it('routes viduq3-pro to its exact text-only mapping and skips unsupported Vidu keys', () => {
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const pro = baseSnapshot('viduq3-pro');
+    const routed = routeOpenAiCompatibleVideoProfile(pro, packages, pro.models[0]!, now);
+    expect(routed.state).toBe('attached');
+    expect(routed.snapshot.modelProfiles?.[0]?.features).toEqual([
+      expect.objectContaining({
+        productFeature: 'text_to_video',
+        parameterSchemaId: UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+      })
+    ]);
+
+    for (const providerModelKey of ['viduq3', 'viduq3-mix']) {
+      const unsupported = baseSnapshot(providerModelKey);
+      const skipped = routeOpenAiCompatibleVideoProfile(
+        unsupported,
+        packages,
+        unsupported.models[0]!,
+        now
+      );
+      expect(skipped.state).toBe('skipped');
+      expect(skipped.snapshot.modelProfiles).toEqual([]);
+    }
+  });
+
+  it('keeps same-name Vidu models on generic schemas outside UniCompAPI', () => {
+    const packages = new ProviderPackageRegistry([newApiProviderPackageDescriptor]);
+    const snapshot = baseSnapshot('viduq3-turbo');
+    const connection = {
+      ...snapshot.connections[0]!,
+      packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
+      templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID
+    };
+    const routed = routeOpenAiCompatibleVideoProfile(
+      { ...snapshot, connections: [connection] },
+      packages,
+      snapshot.models[0]!,
+      now
+    );
+    expect(routed.state).toBe('attached');
+    expect(routed.snapshot.modelProfiles?.[0]?.features).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productFeature: 'text_to_video',
+        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+      }),
+      expect.objectContaining({
+        productFeature: 'image_to_video',
+        parameterSchemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
       })
     ]));
   });

@@ -122,6 +122,7 @@ export type SubmissionOrchestrationErrorCode =
   | 'subject_kind_mismatch'
   | 'authorization_not_claimed'
   | 'submission_failed_before_request'
+  | 'provider_rejected'
   | 'submission_outcome_unknown'
   | 'adapter_contract_invalid';
 
@@ -380,8 +381,13 @@ export class ProviderSubmissionOrchestrator {
 
     if (outcome.kind === 'failed_before_submission') {
       if (requestStarted) {
-        // Request already left the process — keep the adapter's safeCode so the
-        // user still receives concrete remote feedback instead of a blank outcome.
+        // The adapter uses this outcome for both local preparation failures and
+        // provider rejections. Once the request-start hook has run, only an
+        // allowlisted explicit rejection can be classified as a confirmed
+        // failure; transport/response failures remain unknown by design.
+        if (isExplicitProviderRejection(outcome.safeCode)) {
+          return this.recordProviderRejection(intent, outcome.safeCode);
+        }
         return this.recordUnknown(
           intent,
           outcome.safeCode || 'adapter.invalid_failed_before_request',
@@ -431,6 +437,36 @@ export class ProviderSubmissionOrchestrator {
     throw new SubmissionOrchestrationError(
       'submission_failed_before_request',
       'The submission failed before any request bytes were sent',
+      result(updated),
+      cause
+    );
+  }
+
+  private async recordProviderRejection(
+    intent: ProjectSubmissionAcceptanceV1['intent'],
+    safeCode: string,
+    cause?: unknown
+  ): Promise<SubmissionOrchestrationResultV1> {
+    const occurredAt = toIsoTimestamp(this.now());
+    const event = this.invocationEvent(
+      intent.providerInvocationAttemptId,
+      2,
+      'failed',
+      occurredAt,
+      safeCode
+    );
+    const next = transitionSubmissionIntent(intent, 'failed', occurredAt, {
+      safeCode
+    });
+    const updated = await this.acceptances.advance({
+      intent: next,
+      invocationEvent: event
+    });
+    await this.appendJournal(next, 'failed');
+    await this.authorization.recordOutcome(intent.authorizationClaimId, occurredAt);
+    throw new SubmissionOrchestrationError(
+      'provider_rejected',
+      'The provider explicitly rejected the submission request',
       result(updated),
       cause
     );
@@ -558,10 +594,10 @@ export class ProviderSubmissionOrchestrator {
       idempotencyKey: intent.idempotencyKey,
       stage,
       recordedAt: intent.updatedAt,
-      ...(['authorization_claimed', 'request_started', 'provider_accepted', 'completed'].includes(stage)
+      ...(['authorization_claimed', 'request_started', 'provider_accepted', 'completed', 'failed'].includes(stage)
         ? { claimId: intent.authorizationClaimId }
         : {}),
-      ...(['request_started', 'provider_accepted', 'completed'].includes(stage)
+      ...(['request_started', 'provider_accepted', 'completed', 'failed'].includes(stage)
         ? { routeSnapshotId: intent.routeSnapshotId }
         : {}),
       ...(['provider_accepted', 'completed'].includes(stage)
@@ -569,6 +605,32 @@ export class ProviderSubmissionOrchestrator {
         : {})
     });
   }
+}
+
+/**
+ * Safe codes that prove the upstream received and deliberately rejected the
+ * request. Network, timeout, proxy, oversized or malformed responses are not
+ * included because their billing/acceptance outcome can still be unknown.
+ */
+function isExplicitProviderRejection(safeCode: string): boolean {
+  const normalized = safeCode.trim().toLowerCase();
+  const suffix = normalized.split('.').at(-1);
+  return [
+    'authentication_failed',
+    'credential_unavailable',
+    'credit_insufficient',
+    'account_unavailable',
+    'permission_denied',
+    'model_not_found',
+    'operation_not_found',
+    'invalid_request',
+    'invalid_parameters',
+    'invalid_image',
+    'parameter_value_invalid',
+    'content_filtered',
+    'rate_limited',
+    'request_too_large'
+  ].includes(suffix ?? '');
 }
 
 function result(

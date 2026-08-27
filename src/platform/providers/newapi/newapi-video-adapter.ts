@@ -150,6 +150,7 @@ interface NewApiResultSnapshot {
 
 interface ParsedNewApiTask {
   readonly status: 'queued' | 'in_progress' | 'completed' | 'failed';
+  readonly failureMessage?: string;
 }
 
 export class NewApiVideoAdapter
@@ -310,7 +311,7 @@ export class NewApiVideoAdapter
       this.results.delete(remoteId);
       return {
         state: 'failed',
-        message: 'NewApi reported that the video task failed',
+        message: task.failureMessage ?? 'NewApi reported that the video task failed',
         retryability: 'not_retryable'
       };
     } catch (error) {
@@ -705,12 +706,34 @@ function serializeVideoRequest(
   }
   validateUniCompApiVideoParameters(route, values);
 
-  // Match UniCompAPI script-verified JSON create shape for POST /v1/videos.
-  const body: Record<string, unknown> = {
+  const isUniCompApiSeedance20 = isUniCompApiSeedance20Request(route);
+  const imageDataUri = image
+    ? `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString('base64')}`
+    : undefined;
+
+  if (isUniCompApiViduOfficialMappingRequest(route)) {
+    const body: Record<string, unknown> = {
+      model: route.providerModelKey,
+      prompt: request.prompt,
+      audio: typeof values.audio === 'boolean' ? values.audio : true
+    };
+    if (typeof values.duration === 'number') body.duration = values.duration;
+    if (typeof values.resolution === 'string') body.resolution = values.resolution.trim();
+    if (typeof values.aspect_ratio === 'string') {
+      body.aspect_ratio = values.aspect_ratio.trim();
+    }
+    if (typeof values.seed === 'number') body.seed = values.seed;
+    if (imageDataUri) body.image = imageDataUri;
+    return encodeVideoRequestBody(body);
+  }
+
+  // UniCompAPI's Seedance route follows its dashboard contract: controls live
+  // in metadata and prompt/media live in content[]. Generic NewAPI routes keep
+  // their legacy top-level prompt/image projection.
+  let body: Record<string, unknown> = {
     model: route.providerModelKey,
     prompt: request.prompt
   };
-  const isUniCompApiSeedance20 = isUniCompApiSeedance20Request(route);
   if (!isUniCompApiSeedance20 && typeof values.mode === 'string' && values.mode.trim().length > 0) {
     body.mode = values.mode.trim();
   }
@@ -808,12 +831,50 @@ function serializeVideoRequest(
     body.metadata = metadata;
   }
 
-  if (image) {
+  if (isUniCompApiSeedance20) {
+    const seedanceMetadata: Record<string, string | number | boolean> = {};
+    for (const key of [
+      'resolution',
+      'ratio',
+      'duration',
+      'frames',
+      'seed',
+      'generate_audio',
+      'watermark',
+      'camera_fixed',
+      'return_last_frame'
+    ] as const) {
+      const value = body[key];
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        seedanceMetadata[key] = value;
+      }
+    }
+    const content: Record<string, unknown>[] = [
+      { type: 'text', text: request.prompt }
+    ];
+    if (imageDataUri) {
+      content.push({
+        type: 'image_url',
+        image_url: { url: imageDataUri },
+        role: 'first_frame'
+      });
+    }
+    body = {
+      model: route.providerModelKey,
+      ...(Object.keys(seedanceMetadata).length > 0 ? { metadata: seedanceMetadata } : {}),
+      content
+    };
+  } else if (image) {
     // Single controlled local frame only — never subjects[].images / images[].
-    body.image =
-      `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString('base64')}`;
+    body.image = imageDataUri;
   }
 
+  return encodeVideoRequestBody(body);
+}
+
+function encodeVideoRequestBody(
+  body: Readonly<Record<string, unknown>>
+): { readonly body: Uint8Array; readonly contentType: string } {
   const encoded = new TextEncoder().encode(JSON.stringify(body));
   if (encoded.byteLength < 1 || encoded.byteLength > maximumRequestBytes) {
     throw invalidRequest(
@@ -831,6 +892,13 @@ function isUniCompApiSeedance20Request(route: ValidatedNewApiRoute): boolean {
   return route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID && (
     route.providerModelKey === 'doubao-seedance-2-0-260128' ||
     route.providerModelKey === 'doubao-seedance-2-0-fast-260128'
+  );
+}
+
+function isUniCompApiViduOfficialMappingRequest(route: ValidatedNewApiRoute): boolean {
+  return route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID && (
+    route.providerModelKey === 'viduq3-turbo' ||
+    route.providerModelKey === 'viduq3-pro'
   );
 }
 
@@ -871,6 +939,9 @@ function validateUniCompApiVideoParameters(
   if (isUniCompApiSeedance20Request(route)) {
     validateSeedance2ParameterValues(route, values);
   }
+  if (isUniCompApiViduOfficialMappingRequest(route)) {
+    validateViduOfficialMappingParameterValues(route, values);
+  }
   if (
     route.productFeature === 'text_to_video' &&
     Object.prototype.hasOwnProperty.call(values, 'image')
@@ -879,6 +950,53 @@ function validateUniCompApiVideoParameters(
       'newapi.invalid_request',
       'Text-to-video does not accept image input'
     );
+  }
+}
+
+function validateViduOfficialMappingParameterValues(
+  route: ValidatedNewApiRoute,
+  values: Readonly<Record<string, ParameterValue>>
+): void {
+  const officialFields = new Set([
+    'audio', 'duration', 'resolution', 'aspect_ratio', 'seed'
+  ]);
+  if (Object.keys(values).some((key) => !officialFields.has(key))) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'The UniCompAPI Vidu mapping accepts official Vidu parameters only'
+    );
+  }
+
+  const duration = values.duration;
+  const minimumDuration = route.productFeature === 'image_to_video' ? 3 : 1;
+  if (
+    duration !== undefined &&
+    (typeof duration !== 'number' || !Number.isSafeInteger(duration) ||
+      duration < minimumDuration || duration > 16)
+  ) {
+    throw invalidRequest('newapi.invalid_request', 'Vidu duration is unsupported');
+  }
+
+  const resolution = optionalTextParameter(values.resolution);
+  if (resolution !== undefined && !['540p', '720p', '1080p'].includes(resolution)) {
+    throw invalidRequest('newapi.invalid_request', 'Vidu resolution is unsupported');
+  }
+
+  const aspectRatio = optionalTextParameter(values.aspect_ratio);
+  const allowedAspectRatios = route.productFeature === 'image_to_video'
+    ? ['16:9', '9:16', '1:1']
+    : ['16:9', '9:16', '3:4', '4:3', '1:1'];
+  if (aspectRatio !== undefined && !allowedAspectRatios.includes(aspectRatio)) {
+    throw invalidRequest('newapi.invalid_request', 'Vidu aspect ratio is unsupported');
+  }
+
+  const seed = values.seed;
+  if (
+    seed !== undefined &&
+    (typeof seed !== 'number' || !Number.isSafeInteger(seed) ||
+      seed < 0 || seed > 2_147_483_647)
+  ) {
+    throw invalidRequest('newapi.invalid_request', 'Vidu seed is unsupported');
   }
 }
 
@@ -976,7 +1094,10 @@ function parseTaskResponse(
   if (video.id !== expectedId) {
     throw invalidResponse('NewApi returned a mismatched operation ID');
   }
-  return { status: video.status };
+  return {
+    status: video.status,
+    ...(video.failureMessage ? { failureMessage: video.failureMessage } : {})
+  };
 }
 
 function parseVideoObject(
@@ -984,7 +1105,11 @@ function parseVideoObject(
   expectedModel: string,
   label: string,
   options: { readonly defaultStatus?: ParsedNewApiTask['status'] } = {}
-): { readonly id: string; readonly status: ParsedNewApiTask['status'] } {
+): {
+  readonly id: string;
+  readonly status: ParsedNewApiTask['status'];
+  readonly failureMessage?: string;
+} {
   const root = parseJsonObject(body, label);
   rejectErrorEnvelope(root);
   const item = unwrapVideoPayload(root);
@@ -1010,7 +1135,63 @@ function parseVideoObject(
   }
   void expectedModel;
   // Optional metadata must not block acceptance when id+status are usable.
-  return { id, status };
+  const failureMessage = status === 'failed'
+    ? safeVideoTaskFailureMessage(item, root)
+    : undefined;
+  return { id, status, ...(failureMessage ? { failureMessage } : {}) };
+}
+
+function safeVideoTaskFailureMessage(
+  item: Readonly<Record<string, unknown>>,
+  root: Readonly<Record<string, unknown>>
+): string | undefined {
+  const error = isRecord(item.error)
+    ? item.error
+    : isRecord(item.failure)
+      ? item.failure
+      : isRecord(root.error)
+        ? root.error
+        : undefined;
+  const rawCode = error?.code ?? error?.type ??
+    item.error_code ?? item.failure_code ?? item.code;
+  const code = safeUpstreamFailureCode(rawCode);
+  const classificationText = [
+    code ?? '',
+    typeof error?.message === 'string' ? error.message : '',
+    typeof item.failure_reason === 'string' ? item.failure_reason : '',
+    typeof item.fail_reason === 'string' ? item.fail_reason : '',
+    typeof item.message === 'string' ? item.message : ''
+  ].join(' ').toLowerCase();
+
+  if (/insufficient|quota|balance|额度不足|余额不足|积分不足|token重算/u.test(
+    classificationText
+  )) {
+    return 'The NewAPI video task failed because the account balance is insufficient';
+  }
+  if (/model[_ -]?not[_ -]?found|unsupported[_ -]?model/u.test(classificationText)) {
+    return 'The NewAPI video task failed because the model is unavailable';
+  }
+  if (/content[_ -]?policy|moderation|safety|sensitive|risk[_ -]?control/u.test(
+    classificationText
+  )) {
+    return 'The NewAPI video task was rejected by the content safety policy';
+  }
+  if (/invalid[_ -]?image|image[_ -]?(download|fetch|decode)|material[_ -]?error/u.test(
+    classificationText
+  )) {
+    return 'The NewAPI video task could not use the source image';
+  }
+  return code
+    ? `The NewAPI video task failed (upstream code: ${code})`
+    : undefined;
+}
+
+function safeUpstreamFailureCode(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9._-]{0,63}$/u.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 function unwrapVideoPayload(value: Record<string, unknown>): Record<string, unknown> {

@@ -2,6 +2,18 @@
 
 日期：2026-08-26
 
+## 后续修正（2026-08-27）
+
+本记录保留 2026-08-26 的字段投影验收事实。两次获批准的真实提交尝试曾短暂
+使用文档建议的 `content[]`（`text` + 单张 `image_url`，`role=first_frame`）结构，
+但该实例前置层返回拒绝且后台没有调用记录。当前精确 UniCompAPI 图生视频路由
+恢复为已验证的顶层 `prompt`/`image` 兼容结构；普通
+NewAPI 路由保持相同结构。两次真实提交均抵达
+固定地址的前置层并返回 HTTP 400、脱敏上游码 `invalid_tokenpony_request`；负责人反馈
+UniCompAPI 后台没有对应调用记录，因此不能证明任一次请求进入业务网关。在取得该
+实例的字段级合同和记录链路确认前不再重试。详见
+`docs/active/UniCompAPI-Seedance图生视频真实验收与拒绝记录-2026-08-27.md`。
+
 适用分支：`feature/model-adaptation-hardening`
 
 ## 范围

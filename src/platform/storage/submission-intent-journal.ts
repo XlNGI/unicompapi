@@ -9,6 +9,7 @@ export const submissionIntentStages = [
   'request_started',
   'provider_accepted',
   'completed',
+  'failed',
   'failed_before_request',
   'cancelled',
   'unknown_outcome'
@@ -213,9 +214,10 @@ function validateTransition(
   const transitions: Record<SubmissionIntentStage, readonly SubmissionIntentStage[]> = {
     intent_recorded: ['authorization_claimed', 'failed_before_request', 'cancelled'],
     authorization_claimed: ['request_started', 'failed_before_request', 'cancelled'],
-    request_started: ['provider_accepted', 'failed_before_request', 'unknown_outcome'],
+    request_started: ['provider_accepted', 'failed', 'failed_before_request', 'unknown_outcome'],
     provider_accepted: ['completed', 'cancelled', 'unknown_outcome'],
     completed: [],
+    failed: [],
     failed_before_request: [],
     cancelled: [],
     unknown_outcome: []
@@ -232,11 +234,11 @@ function validateStageFields(event: SubmissionIntentJournalEventV1): void {
       (event.claimId || event.routeSnapshotId || event.providerOperationId)) {
     throw new JsonDocumentDataError('Recorded intent cannot contain remote state');
   }
-  if (['authorization_claimed', 'request_started', 'provider_accepted', 'completed']
+  if (['authorization_claimed', 'request_started', 'provider_accepted', 'completed', 'failed']
     .includes(event.stage) && !event.claimId) {
     throw new JsonDocumentDataError(`${event.stage} requires a claim ID`);
   }
-  if (['request_started', 'provider_accepted', 'completed'].includes(event.stage) &&
+  if (['request_started', 'provider_accepted', 'completed', 'failed'].includes(event.stage) &&
       !event.routeSnapshotId) {
     throw new JsonDocumentDataError(`${event.stage} requires a route snapshot ID`);
   }

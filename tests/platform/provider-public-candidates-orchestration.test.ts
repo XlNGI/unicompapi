@@ -715,6 +715,60 @@ describe('provider submission orchestration', () => {
     expect((await unknown.ledger.load()).claims[0].state).toBe('outcome_recorded');
   });
 
+  it('records an explicit provider rejection after request start as failed', async () => {
+    const fixture = await storageFixture();
+    await approvedLedger(fixture.ledger);
+    const service = candidateService({ now: () => t0 });
+    const prepared = await service.prepareSubmission({
+      subject: imageSubject,
+      candidateId: 'candidate-text_to_image'
+    });
+    const orchestrator = new ProviderSubmissionOrchestrator(
+      service,
+      fixture.acceptances,
+      fixture.ledger,
+      fixture.journal,
+      mediaArtifacts(),
+      {
+        async submit(input) {
+          await input.beforeRequestStarted();
+          return {
+            kind: 'failed_before_submission',
+            safeCode: 'newapi.invalid_parameters'
+          };
+        }
+      },
+      idFactory(),
+      () => t1
+    );
+    await expect(orchestrator.submitDraft({
+      subject: imageSubject,
+      routeSelectionToken: prepared.routeSelectionToken,
+      confirmation: {
+        schemaVersion: 1,
+        confirmationId: prepared.confirmation.confirmationId,
+        confirmed: true
+      }
+    })).rejects.toMatchObject({
+      code: 'provider_rejected',
+      result: { status: 'failed', retryAllowed: false }
+    });
+    const [acceptance] = await fixture.acceptances.list();
+    expect(acceptance.intent).toMatchObject({
+      status: 'failed',
+      safeCode: 'newapi.invalid_parameters'
+    });
+    expect(acceptance.invocationAttempt.state).toBe('failed');
+    expect(acceptance.invocationEvents.at(-1)).toMatchObject({
+      type: 'failed',
+      safeCode: 'newapi.invalid_parameters'
+    });
+    expect((await fixture.ledger.load()).claims[0].state).toBe('outcome_recorded');
+    await expect(fixture.journal.load()).resolves.toMatchObject({
+      events: expect.arrayContaining([expect.objectContaining({ stage: 'failed' })])
+    });
+  });
+
   it('keeps conversation response submission separate and can complete synchronously', async () => {
     const conversationSubject: FeatureCandidateSubjectV1 = {
       kind: 'conversation_response_draft',
