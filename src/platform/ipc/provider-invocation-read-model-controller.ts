@@ -35,6 +35,7 @@ import {
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import type { ProjectCatalogEntry, ProjectCatalogService } from './project-catalog';
+import { resolveOfficialPricingRule } from '../providers/official-pricing-rules';
 
 export interface ProviderUsageSchemaResolverPort {
   resolve(input: {
@@ -237,6 +238,7 @@ export class ProviderInvocationReadModelController {
       readModel,
       facts.worksByExecution
     );
+    const officialPricingRule = resolveOfficialPricingRule(route);
     const updatedAt = readModel.timeline.at(-1)?.occurredAt ?? readModel.createdAt;
     const providerName = route.providerDisplayName;
     const connectionName = route.connectionDisplayName;
@@ -280,6 +282,7 @@ export class ProviderInvocationReadModelController {
           facts: readModel.usage.facts.map((fact) => ({ ...fact })),
           calculatedAt: readModel.usage.calculatedAt
         },
+        ...(officialPricingRule ? { officialPricingRule } : {}),
         localResults: readModel.localResults.map((result) => ({
           mediaKind: result.mediaKind,
           outputCount: result.outputCount,

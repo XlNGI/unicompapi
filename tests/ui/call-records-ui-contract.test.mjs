@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const page = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
 const calls = await readFile('src/pages/tasks/CallRecordsView.tsx', 'utf8');
+const feeSource = await readFile('src/pages/tasks/call-fees.ts', 'utf8');
 const taskCenterWorkspace = await readFile(
   'src/pages/tasks/TaskCenterWorkspace.tsx',
   'utf8'
@@ -19,15 +20,45 @@ const failureReasons = await readFile(
   'utf8'
 );
 
-test('task center keeps tasks and call records as explicit segmented views', () => {
-  assert.match(page, /role="tablist"/);
-  assert.match(page, /aria-selected=\{view === 'tasks'\}/);
-  assert.match(page, /aria-selected=\{view === 'calls'\}/);
-  assert.match(page, /role="tabpanel"/);
-  assert.match(calls, /role="tabpanel"/);
-  assert.match(page, />\s*任务\s*</);
-  assert.match(page, />\s*调用记录\s*</);
-  assert.match(page, /CallRecordsView/);
+test('task center combines tasks and call records in one selected-task detail view', () => {
+  assert.doesNotMatch(page, /role="tablist"/);
+  assert.doesNotMatch(page, /aria-selected=\{view === 'tasks'\}/);
+  assert.doesNotMatch(page, /aria-selected=\{view === 'calls'\}/);
+  assert.doesNotMatch(page, /<CallRecordsView/);
+  assert.match(page, /TaskUnifiedTimeline/);
+  assert.match(page, /storage\.listCallRecords\(\{ projectId: details\.projectId, limit: 200 \}\)/);
+  assert.match(page, /storage\.getCallDetails\(record\.invocationAttemptId\)/);
+  assert.match(page, /call\?\.subject\.kind === 'media' && call\.subject\.taskId === details\.taskId/);
+  assert.match(page, /calls\.flatMap\(\(call\) => callTimelineItems\(call\)\)/);
+  assert.match(page, />\s*任务时间线\s*</);
+  assert.doesNotMatch(page, /调用尝试|调用详情|variant="embedded"/);
+});
+
+test('unified task timeline replaces nested call detail panels with compact timeline cards', () => {
+  assert.match(page, /function TaskUnifiedTimeline/);
+  assert.match(page, /function TimelineItem/);
+  assert.match(page, /function callTimelineItems/);
+  assert.match(styles, /\.uc-task-center__unified-timeline\s*\{[^}]*gap: var\(--uc-space-1\);/);
+  assert.match(styles, /\.uc-task-center__timeline-card\s*\{[^}]*padding: var\(--uc-space-2\) var\(--uc-space-3\);/);
+  assert.match(styles, /\.uc-task-center__timeline-prompts\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(styles, /\.uc-task-center__timeline-call-summary/);
+  assert.doesNotMatch(styles, /\.uc-task-center__view-tabs/);
+  assert.doesNotMatch(styles, /\.uc-task-center__embedded-calls|\.uc-task-center__details-content--embedded-call|\.uc-task-center__prompt-grid/);
+});
+
+test('task center consumption charts stay compact and theme driven', () => {
+  assert.match(page, /aria-label="消费统计"/);
+  assert.match(page, /aria-label="按时间汇总的消费柱状图"/);
+  assert.match(page, /aria-label="供应商消费占比环形图"/);
+  assert.match(page, /暂无可计算费用的消费柱状图/);
+  assert.match(page, /暂无可计算费用的供应商消费占比环形图/);
+  assert.match(styles, /\.uc-task-center__charts\s*\{[^}]*grid-template-columns: minmax\(0, 1\.24fr\) minmax\(300px, 0\.76fr\);/);
+  assert.match(styles, /\.uc-task-center__bar-chart--empty/);
+  assert.match(styles, /\.uc-task-center__donut--empty/);
+  assert.match(styles, /\.uc-task-center__bar-row\s*\{[^}]*grid-template-columns: minmax\(100px, 0\.7fr\) minmax\(120px, 1fr\) auto;/);
+  assert.match(styles, /\.uc-task-center__donut\s*\{[\s\S]*var\(--uc-task-donut/);
+  assert.match(styles, /\.uc-task-center__donut-legend div\s*\{[^}]*grid-template-columns: 10px minmax\(0, 1fr\) auto;/);
+  assert.doesNotMatch(page, /<canvas|<svg|chartjs|recharts/i);
 });
 
 test('tasks and calls share one independently scrolling workspace component', () => {
@@ -105,6 +136,13 @@ test('call details show snapshot names, timeline, duration, retry, usage and loc
     'resultRegistration'
   ]) assert.match(calls, new RegExp(fact.replace('.', '\\.')));
   assert.match(calls, /服务商未返回用量/);
+  assert.match(calls, /上游用量与费用/);
+  assert.match(calls, /CallFeeSummary/);
+  assert.match(calls, /calculateSuccessfulCallFee\(details\)/);
+  assert.match(feeSource, /call\.state !== 'completed'/);
+  assert.match(feeSource, /call\.officialPricingRule/);
+  assert.match(feeSource, /provider_billing/);
+  assert.match(feeSource, /token_split/);
   assert.match(calls, /调用结果未知，用量无法确认/);
   assert.match(calls, /本地校验通过/);
   assert.match(calls, /已登记作品/);

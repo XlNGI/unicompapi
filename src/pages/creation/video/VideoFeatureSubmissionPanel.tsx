@@ -33,6 +33,7 @@ import {
   describeUnconfirmedGenerationOutcome,
   isUnconfirmedGenerationOutcome
 } from '../../../ui/notifications/generation-failure-reasons';
+import { CreationAdvancedSection } from '../CreationAdvancedSection';
 
 interface VideoFeatureSubmissionPanelProps {
   readonly className?: string;
@@ -43,6 +44,8 @@ interface VideoFeatureSubmissionPanelProps {
   readonly oneShot?: boolean;
   /** Text / image-to-video: show in-page 准备 → 请求中 → 等待上游 → 完成 progress. */
   readonly showProgressSteps?: boolean;
+  /** Text / image-to-video: tuck optional model parameters behind an on-demand section. */
+  readonly collapseParameters?: boolean;
   /** Hosts the primary action in the workbench footer when provided. */
   readonly actionHost?: HTMLDivElement | null;
   /** Exposes real submit stages to the result preview without changing execution state. */
@@ -121,6 +124,7 @@ export function VideoFeatureSubmissionPanel({
   blockedReason,
   oneShot = false,
   showProgressSteps = false,
+  collapseParameters = false,
   actionHost,
   onProgressChange,
   onDraftChange,
@@ -163,6 +167,28 @@ export function VideoFeatureSubmissionPanel({
     dynamicParameterFields,
     featureSelection.parameterValues as Readonly<Record<string, DynamicParameterValue | undefined>>,
     parameterInputErrors
+  );
+  const parameterForm = (
+    <DynamicParameterForm
+      disabled={busy}
+      emptyHint="当前表面没有需要用户填写的参数。"
+      fields={dynamicParameterFields}
+      errors={parameterValidation.errors}
+      onInputErrorChange={(fieldId, error) => {
+        setParameterInputErrors((current) => {
+          const next = { ...current };
+          if (error) next[fieldId] = error;
+          else delete next[fieldId];
+          return next;
+        });
+      }}
+      onChange={(fieldId, value) =>
+        changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
+      }
+      values={featureSelection.parameterValues as Readonly<
+        Record<string, DynamicParameterValue | undefined>
+      >}
+    />
   );
   const requiredInputError = draft.prompt.finalPrompt.trim().length === 0
     ? '提示词为必填项。'
@@ -560,26 +586,15 @@ export function VideoFeatureSubmissionPanel({
               快速视频使用服务默认参数，无需填写动态参数。
             </p>
           ) : (
-            <DynamicParameterForm
-              disabled={busy}
-              emptyHint="当前表面没有需要用户填写的参数。"
-              fields={dynamicParameterFields}
-              errors={parameterValidation.errors}
-              onInputErrorChange={(fieldId, error) => {
-                setParameterInputErrors((current) => {
-                  const next = { ...current };
-                  if (error) next[fieldId] = error;
-                  else delete next[fieldId];
-                  return next;
-                });
-              }}
-              onChange={(fieldId, value) =>
-                changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
-              }
-              values={featureSelection.parameterValues as Readonly<
-                Record<string, DynamicParameterValue | undefined>
-              >}
-            />
+            collapseParameters && dynamicParameterFields.length > 0 ? (
+              <CreationAdvancedSection
+                defaultOpen={!parameterValidation.valid}
+                note={`${dynamicParameterFields.length} 项`}
+                title="模型参数"
+              >
+                {parameterForm}
+              </CreationAdvancedSection>
+            ) : parameterForm
           )}
         </>
       ) : null}

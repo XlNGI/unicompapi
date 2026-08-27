@@ -64,12 +64,6 @@ import {
   type ViduUsageObservationSinkPort
 } from './vidu';
 
-const noopUsage: NewApiVideoUsageObservationSinkPort & ViduUsageObservationSinkPort = {
-  async append() {
-    return;
-  }
-};
-
 export interface VideoFeatureSubmissionRuntimes {
   readonly viduPackage: ViduProviderPackage;
   readonly newApiRuntime?: NewApiSharedRuntime;
@@ -79,6 +73,7 @@ export interface VideoFeatureSubmissionRuntimes {
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
   readonly materials: ControlledImageMaterialPort;
+  readonly usage: NewApiVideoUsageObservationSinkPort & ViduUsageObservationSinkPort;
 }
 
 export function createVideoFeatureSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
@@ -104,7 +99,7 @@ export function createVideoFeatureDispatchBridge(
     routes,
     parameterSchemas: viduSchemas,
     materials: options.materials,
-    usage: noopUsage
+    usage: options.usage
   });
 
   const adapters: ProviderSubmissionAdapterPort[] = [
@@ -166,7 +161,7 @@ export function createVideoFeatureDispatchBridge(
 export function createNewApiVideoAdapterFromRuntimes(
   options: Pick<
     VideoFeatureSubmissionRuntimes,
-    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials'
+    'newApiRuntime' | 'credentialVault' | 'providerRegistry' | 'materials' | 'usage'
   > & {
     readonly newApiRuntime: NewApiSharedRuntime;
   }
@@ -184,7 +179,7 @@ export function createNewApiVideoAdapterFromRuntimes(
     credentials,
     parameterSchemas,
     images,
-    noopUsage,
+    options.usage,
     {
       nextProviderUsageObservationId: () =>
         toProviderUsageObservationId(`usage-${randomUUID()}`)

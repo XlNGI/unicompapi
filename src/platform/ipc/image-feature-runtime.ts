@@ -51,6 +51,7 @@ import {
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
   JsonProviderOperationRepository,
+  JsonProviderUsageObservationRepository,
   JsonTaskRepository,
   JsonWorkRepository
 } from '../repositories';
@@ -73,7 +74,7 @@ export interface ImageFeatureRuntimeOptions {
   readonly submissionAuthorization?: RuntimeAuthorizationOrchestrationPort;
   readonly imageSubmission?: Omit<
     ImageFeatureSubmissionRuntimes,
-    'providerRegistry' | 'providerPackages' | 'materials'
+    'providerRegistry' | 'providerPackages' | 'materials' | 'usage'
   > & {
     readonly viduPackage: ViduProviderPackage;
     readonly credentialVault: SecureCredentialVault;
@@ -103,6 +104,7 @@ export function createImageFeatureControllerRuntime(
   const works = new JsonWorkRepository(storage, options.session.projectId);
   const executions = new JsonExecutionRepository(storage);
   const operations = new JsonProviderOperationRepository(storage);
+  const usage = new JsonProviderUsageObservationRepository(storage);
   const invocations = new JsonProviderInvocationRepository(
     storage,
     options.session.projectId
@@ -239,7 +241,8 @@ export function createImageFeatureControllerRuntime(
     ...imageSubmission,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
-    materials
+    materials,
+    usage
   });
   const orchestrator = new ProviderSubmissionOrchestrator(
     candidates,

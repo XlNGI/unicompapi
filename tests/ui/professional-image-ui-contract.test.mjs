@@ -165,9 +165,13 @@ test('professional image uses a scrollable preparation pane and stable result pa
   assert.match(professionalSource, /aria-label="提交前准备区域"/);
   assert.match(professionalSource, /第一步 · 提交前准备/);
   assert.match(professionalSource, /uc-image-professional__before-scroll/);
-  assert.match(professionalSource, /uc-image-professional__submit-bar/);
-  assert.match(professionalSource, /actionHost={actionHost}/);
+  assert.doesNotMatch(professionalSource, /uc-image-professional__submit-bar/);
+  assert.doesNotMatch(professionalSource, /actionHost={actionHost}/);
+  assert.match(professionalSource, /className="uc-image-feature-panel--compact"/);
+  assert.match(professionalSource, /collapseParameters/);
   assert.match(featurePanelSource, /createPortal\(primaryAction, actionHost\)/);
+  assert.doesNotMatch(pageStyles, /\.uc-creation-simple \.uc-image-professional__submit-bar/);
+  assert.match(pageStyles, /\.uc-image-feature-panel--compact \.uc-image-feature-panel__primary \{[\s\S]*min-height: 44px;/);
   assert.match(professionalSource, /aria-label="生成过程与作品区域"/);
   assert.match(professionalSource, /<GenerationHistory/);
   assert.doesNotMatch(professionalSource, /第二步 · 生成过程与作品/);

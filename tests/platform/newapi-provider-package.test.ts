@@ -1435,6 +1435,96 @@ describe('NewAPI image adapter', () => {
     });
   });
 
+  it('persists UniCompAPI image response-body credits as usage facts', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fixture = runtimeFixture(async () => jsonResponse({
+      usage: { credit_amount: '4.5' },
+      data: [{ b64_json: Buffer.from(png).toString('base64') }]
+    }));
+    const usage = usageSink();
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async (schemaId: string, revision: number) =>
+          schemaId === UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID &&
+          revision === 1
+            ? uniCompApiSeedream5TextToImageParameterSchema
+            : undefined
+      },
+      usage.port,
+      { download: vi.fn() }
+    );
+
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiTextToImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-unicompapi-text-to-image',
+        projectId: 'project-newapi',
+        prompt: 'A synthetic image',
+        parameterValues: { size: '2K' }
+      }
+    })).resolves.toMatchObject({ kind: 'completed_sync' });
+    expect(usage.observations[0].facts).toEqual([{
+      metricId: 'credit_amount',
+      quantity: '4.5',
+      unit: 'credit',
+      source: 'provider_body'
+    }]);
+  });
+
+  it('persists UniCompAPI image item-level response-body credits as usage facts', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const fixture = runtimeFixture(async () => jsonResponse({
+      data: [{
+        b64_json: Buffer.from(png).toString('base64'),
+        usage: { credits_used: '6.75' }
+      }]
+    }));
+    const usage = usageSink();
+    const adapter = new NewApiImageAdapter(
+      fixture.runtime,
+      { get: async () => unicompapiConnection() },
+      {
+        useCredential: async <T>(
+          _input: unknown,
+          operation: (value: StructuredCredentialRecord) => Promise<T>
+        ) => operation(unicompapiCredential())
+      },
+      {
+        get: async (schemaId: string, revision: number) =>
+          schemaId === UNICOMPAPI_SEEDREAM_5_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID &&
+          revision === 1
+            ? uniCompApiSeedream5TextToImageParameterSchema
+            : undefined
+      },
+      usage.port,
+      { download: vi.fn() }
+    );
+
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiTextToImageRoute(),
+      request: {
+        invocationAttemptId: 'attempt-unicompapi-text-to-image-item-usage',
+        projectId: 'project-newapi',
+        prompt: 'A synthetic image',
+        parameterValues: { size: '2K' }
+      }
+    })).resolves.toMatchObject({ kind: 'completed_sync' });
+    expect(usage.observations[0].facts).toEqual([{
+      metricId: 'credit_amount',
+      quantity: '6.75',
+      unit: 'credit',
+      source: 'provider_body'
+    }]);
+  });
+
   it('sends qwen-image size using the upstream width x height format', async () => {
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const fixture = runtimeFixture(async () => jsonResponse({
@@ -2007,6 +2097,46 @@ describe('NewAPI video adapter', () => {
       method: 'GET',
       url: 'https://gateway.example.test/v1/videos/video-1/content',
       headers: { authorization: 'Bearer synthetic-secret' }
+    });
+  });
+
+  it('persists response-body credits for completed video tasks', async () => {
+    const responses = [
+      jsonResponse(videoObject('video-credits', 'queued')),
+      jsonResponse({
+        ...videoObject('video-credits', 'completed'),
+        usage: { credit_amount: '8.25' }
+      })
+    ];
+    const fixture = runtimeFixture(async () => responses.shift()!);
+    const usage = usageSink();
+    const adapter = videoAdapter(fixture.runtime, usage, vi.fn());
+    await adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-credits',
+        projectId: 'project-newapi',
+        prompt: 'Credits are returned in response body',
+        parameterValues: {}
+      }
+    });
+    await expect(adapter.query('video-credits')).resolves.toEqual({
+      state: 'completed',
+      usageFacts: [{
+        metricId: 'credit_amount',
+        quantity: '8.25',
+        unit: 'credit',
+        source: 'provider_body'
+      }]
+    });
+    expect(usage.observations.at(-1)).toMatchObject({
+      status: 'reported',
+      facts: [{
+        metricId: 'credit_amount',
+        quantity: '8.25',
+        unit: 'credit',
+        source: 'provider_body'
+      }]
     });
   });
 

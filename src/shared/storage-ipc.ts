@@ -212,6 +212,41 @@ export interface StorageCallUsageDto {
   readonly calculatedAt: string;
 }
 
+export type StorageCallPricingStrategy =
+  | 'credit'
+  | 'provider_unit'
+  | 'provider_billing'
+  | 'token_split'
+  | 'video_token'
+  | 'image_count'
+  | 'video_second';
+
+export interface StorageCallPricingRateDto {
+  readonly metricId: string;
+  readonly amount: string;
+  readonly unit: string;
+  readonly scale?: string;
+  readonly label?: string;
+}
+
+export interface StorageCallOfficialPricingRuleDto {
+  readonly strategy: StorageCallPricingStrategy;
+  readonly currencyCode: string;
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+  readonly rates: readonly StorageCallPricingRateDto[];
+}
+
+export interface StorageCallOfficialUnitPriceDto {
+  readonly amount: string;
+  readonly currencyCode: string;
+  readonly creditUnit: string;
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+}
+
 export interface StorageCallLocalResultDto {
   readonly mediaKind: 'image' | 'video' | 'text';
   readonly outputCount: number;
@@ -234,6 +269,8 @@ export interface StorageCallDetailsDto extends StorageCallRecordSummaryDto {
   readonly subject: StorageCallSubjectDto;
   readonly timeline: readonly StorageCallTimelineEventDto[];
   readonly usage: StorageCallUsageDto;
+  readonly officialPricingRule?: StorageCallOfficialPricingRuleDto;
+  readonly officialUnitPrice?: StorageCallOfficialUnitPriceDto;
   readonly localResults: readonly StorageCallLocalResultDto[];
   readonly resultRegistration: StorageCallResultRegistrationDto;
 }

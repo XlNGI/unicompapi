@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -6,17 +6,31 @@ import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
 import type { StatusTone } from '../../components/StatusPill';
 import type {
+  StorageCallDetailsDto,
   StorageReadModelIssueDto,
   StorageTaskDetailsDto,
   StorageTaskSummaryDto
 } from '../../shared/storage-ipc';
 import type { TaskReuseTarget } from '../../shared/task-reuse';
 import '../../styles/pages.css';
-import { CallRecordsView } from './CallRecordsView';
+import {
+  callState,
+  displayRoute,
+  featureLabels,
+  formatTimestamp,
+  type TaskCenterNavigate,
+  usageLabels
+} from './CallRecordsView';
 import { TaskCenterWorkspace } from './TaskCenterWorkspace';
+import {
+  calculateSuccessfulCallFee,
+  formatCallFee,
+  formatCallFeeFormula,
+  formatFeeAmount
+} from './call-fees';
 
 interface TasksPageProps {
-  onNavigate?: (itemId: 'projects' | 'library') => void;
+  onNavigate?: TaskCenterNavigate;
   onReuseParameters?: (target: TaskReuseTarget) => void;
 }
 
@@ -64,7 +78,6 @@ function taskState(state?: string) {
 }
 
 export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
-  const [view, setView] = useState<'tasks' | 'calls'>('tasks');
   const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>([]);
   const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
@@ -253,45 +266,15 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
             <StatusPill tone="info">全局视图</StatusPill>
           </div>
           <p className="uc-page-skeleton__description">
-            {view === 'tasks'
-              ? '查看所有本地项目中的真实任务状态、来源和提交内容。'
-              : '查看每次服务商调用的状态、上游用量和本地结果事实。'}
+            查看所有本地项目中的真实任务状态、来源、提交内容和对应调用事实。
           </p>
         </div>
-        <StatusPill>{view === 'tasks' ? `${tasks.length} 个任务` : '只读调用事实'}</StatusPill>
+        <StatusPill>{tasks.length} 个任务</StatusPill>
       </header>
 
-      <div aria-label="任务中心视图" className="uc-task-center__view-tabs" role="tablist">
-        <button
-          aria-controls="task-records-panel"
-          aria-selected={view === 'tasks'}
-          id="task-records-tab"
-          onClick={() => setView('tasks')}
-          role="tab"
-          type="button"
-        >
-          任务
-        </button>
-        <button
-          aria-controls="call-records-panel"
-          aria-selected={view === 'calls'}
-          id="call-records-tab"
-          onClick={() => setView('calls')}
-          role="tab"
-          type="button"
-        >
-          调用记录
-        </button>
-      </div>
+      <TaskConsumptionCharts />
 
-      {view === 'tasks' ? (
-        <div
-          aria-labelledby="task-records-tab"
-          className="uc-task-center__tab-panel"
-          id="task-records-panel"
-          role="tabpanel"
-        >
-          <Card className="uc-task-center__filters">
+      <Card className="uc-task-center__filters">
         <label>
           搜索任务
           <Input
@@ -329,7 +312,7 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
             value={stateFilter}
           />
         </div>
-          </Card>
+      </Card>
 
       {issues.length > 0 && (
         <Card className="uc-task-center__issues" role="status">
@@ -360,7 +343,7 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
         <TaskCenterWorkspace
           details={(
             <>
-              <h2 id="task-details-title">任务详情</h2>
+              <h2 id="task-details-title">任务时间线</h2>
               {detailsLoading ? (
                 <p className="uc-task-center__muted" role="status">正在读取任务详情…</p>
               ) : details ? (
@@ -376,7 +359,7 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
                   onReuseParameters={() => void reuseParameters(details)}
                 />
               ) : (
-                <p className="uc-task-center__muted">选择左侧任务查看提交内容和真实状态。</p>
+                <p className="uc-task-center__muted">选择左侧任务查看提交内容、真实状态和调用记录。</p>
               )}
             </>
           )}
@@ -414,13 +397,428 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
         />
       )}
 
-          <p className="uc-task-center__message" aria-live="polite">{message}</p>
-        </div>
-      ) : (
-        <CallRecordsView onNavigate={onNavigate} />
-      )}
+      <p className="uc-task-center__message" aria-live="polite">{message}</p>
     </section>
   );
+}
+
+interface ConsumptionTimeBar {
+  readonly key: string;
+  readonly label: string;
+  readonly amount: number;
+  readonly callCount: number;
+  readonly ratio: number;
+}
+
+interface ProviderConsumptionSlice {
+  readonly key: string;
+  readonly label: string;
+  readonly amount: number;
+  readonly ratio: number;
+  readonly color: string;
+}
+
+interface ConsumptionChartModel {
+  readonly bars: readonly ConsumptionTimeBar[];
+  readonly amountLabel: string;
+  readonly chartMode: 'fee' | 'credit';
+  readonly providerSlices: readonly ProviderConsumptionSlice[];
+  readonly sampledCallCount: number;
+  readonly successfulCallCount: number;
+  readonly feeCallCount: number;
+  readonly missingFeeCallCount: number;
+  readonly missingPricingRuleCount: number;
+  readonly missingUsageCount: number;
+  readonly invalidFeeCount: number;
+  readonly totalCallCount: number;
+  readonly totalAmount: number;
+}
+
+function TaskConsumptionCharts() {
+  const storage = window.unicomp?.storage;
+  const [model, setModel] = useState<ConsumptionChartModel>({
+    bars: [],
+    amountLabel: '金额单位',
+    chartMode: 'fee',
+    providerSlices: [],
+    sampledCallCount: 0,
+    successfulCallCount: 0,
+    feeCallCount: 0,
+    missingFeeCallCount: 0,
+    missingPricingRuleCount: 0,
+    missingUsageCount: 0,
+    invalidFeeCount: 0,
+    totalCallCount: 0,
+    totalAmount: 0
+  });
+  const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setMessage('');
+    setIssues([]);
+    setLoading(true);
+
+    if (!storage) {
+      setMessage('当前运行环境未连接桌面调用记录能力');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    void storage.listCallRecords({ limit: 200 })
+      .then(async (result) => {
+        if (!active) return;
+        if (!result.ok) {
+          setMessage('读取消费统计失败，请重试');
+          return;
+        }
+        const details = await Promise.all(
+          result.value.items.map(async (record) => {
+            try {
+              const detailsResult = await storage.getCallDetails(record.invocationAttemptId);
+              return detailsResult.ok ? detailsResult.value : undefined;
+            } catch {
+              return undefined;
+            }
+          })
+        );
+        if (!active) return;
+        setModel(buildConsumptionChartModel(
+          details.filter((item): item is StorageCallDetailsDto => Boolean(item)),
+          result.value.items.length,
+          result.value.total
+        ));
+        setIssues(result.value.issues);
+      })
+      .catch(() => {
+        if (active) setMessage('读取消费统计失败，请重试');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [storage]);
+
+  const totalLabel = model.totalCallCount > model.sampledCallCount
+    ? `最近 ${model.sampledCallCount} / ${model.totalCallCount} 次调用`
+    : `${model.sampledCallCount} 次调用`;
+  const chartSummary = model.chartMode === 'fee'
+    ? `${totalLabel} · 成功 ${model.successfulCallCount} 次 · 已计费 ${model.feeCallCount} 次`
+    : `${totalLabel} · 成功 ${model.successfulCallCount} 次 · 已记录积分消耗`;
+
+  return (
+    <section className="uc-task-center__charts" aria-label="消费统计">
+      <Card className="uc-task-center__chart-card">
+        <div className="uc-task-center__chart-heading">
+          <div>
+            <h2>消费柱状图</h2>
+            <p>{loading ? '正在读取成功调用费用' : chartSummary}</p>
+          </div>
+          <StatusPill tone={model.bars.length > 0 ? 'success' : 'neutral'}>
+            {formatFeeAmount(model.totalAmount)} {model.amountLabel}
+          </StatusPill>
+        </div>
+        {loading ? (
+          <p className="uc-task-center__muted" role="status">正在汇总消费数据…</p>
+        ) : model.bars.length === 0 ? (
+          <EmptyBarChart />
+        ) : (
+          <div className="uc-task-center__bar-chart" aria-label="按时间汇总的消费柱状图">
+            {model.bars.map((bar) => (
+              <div className="uc-task-center__bar-row" key={bar.key}>
+                <span>{bar.label}</span>
+                <div>
+                  <i style={{ width: `${bar.ratio}%` }} />
+                </div>
+                <strong>{formatFeeAmount(bar.amount)} {model.amountLabel} · {bar.callCount} 次</strong>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="uc-task-center__chart-card uc-task-center__chart-card--donut">
+        <div className="uc-task-center__chart-heading">
+          <div>
+            <h2>供应商消费占比</h2>
+            <p>{loading ? '正在读取成功调用费用' : model.chartMode === 'fee' ? '按官方计费规则汇总' : '官方单价缺失，先按积分汇总'}</p>
+          </div>
+          <StatusPill>{model.providerSlices.length} 个供应商</StatusPill>
+        </div>
+        {loading ? (
+          <p className="uc-task-center__muted" role="status">正在计算供应商占比…</p>
+        ) : model.providerSlices.length === 0 ? (
+          <EmptyDonutChart />
+        ) : (
+          <div className="uc-task-center__donut-layout">
+            <div
+              aria-label="供应商消费占比环形图"
+              className="uc-task-center__donut"
+              role="img"
+              style={{
+                '--uc-task-donut': donutGradient(model.providerSlices)
+              } as CSSProperties & Record<'--uc-task-donut', string>}
+            >
+              <strong>{model.providerSlices.length}</strong>
+              <span>供应商</span>
+            </div>
+            <div className="uc-task-center__donut-legend">
+              {model.providerSlices.map((slice) => (
+                <div key={slice.key}>
+                  <i style={{ background: slice.color }} />
+                  <span>{slice.label}</span>
+                  <strong>{slice.ratio.toFixed(1)}% · {formatFeeAmount(slice.amount)} {model.amountLabel}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {!loading && (message || issues.length > 0) ? (
+        <p className="uc-task-center__chart-note" role="status">
+          {message || `部分项目无法纳入消费统计：${issues.map((issue) => issue.projectName).join('、')}`}
+        </p>
+      ) : null}
+      {!loading && model.chartMode === 'fee' && model.missingFeeCallCount > 0 ? (
+        <p className="uc-task-center__chart-note" role="status">
+          {model.missingFeeCallCount} 次成功调用未纳入费用图表：
+          缺官方价格规则 {model.missingPricingRuleCount} 次，
+          缺响应体计费用量 {model.missingUsageCount} 次，
+          格式异常 {model.invalidFeeCount} 次。
+        </p>
+      ) : null}
+      {!loading && model.chartMode === 'credit' ? (
+        <p className="uc-task-center__chart-note" role="status">
+          当前成功调用有响应体积分用量，但缺少已核准官方单价；图表暂按积分展示，不折算金额。
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function EmptyBarChart() {
+  return (
+    <div className="uc-task-center__bar-chart uc-task-center__bar-chart--empty" aria-label="暂无可计算费用的消费柱状图">
+      {emptyBarLabels().map((label, index) => (
+        <div className="uc-task-center__bar-row" key={label}>
+          <span>{label}</span>
+          <div>
+            <i style={{ width: `${[18, 32, 24, 42, 28, 36, 22][index]}%` }} />
+          </div>
+          <strong>暂无</strong>
+        </div>
+      ))}
+      <p className="uc-task-center__muted">暂无可计算费用；成功调用缺少官方价格规则或计费用量时不会计入。</p>
+    </div>
+  );
+}
+
+function EmptyDonutChart() {
+  return (
+    <div className="uc-task-center__donut-layout uc-task-center__donut-layout--empty">
+      <div
+        aria-label="暂无可计算费用的供应商消费占比环形图"
+        className="uc-task-center__donut uc-task-center__donut--empty"
+        role="img"
+      >
+        <strong>0</strong>
+        <span>供应商</span>
+      </div>
+      <div className="uc-task-center__donut-legend">
+        <div>
+          <i />
+          <span>暂无可计算费用</span>
+          <strong>0%</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function emptyBarLabels(): readonly string[] {
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+    return dailyBucketLabel(date.toISOString());
+  });
+}
+
+function buildConsumptionChartModel(
+  calls: readonly StorageCallDetailsDto[],
+  sampledCallCount: number,
+  totalCallCount: number
+): ConsumptionChartModel {
+  const feeTimeTotals = new Map<string, { label: string; amount: number; callCount: number }>();
+  const creditTimeTotals = new Map<string, { label: string; amount: number; callCount: number }>();
+  const providerTotals = new Map<string, number>();
+  const creditProviderTotals = new Map<string, number>();
+  const currencyLabels = new Set<string>();
+  let successfulCallCount = 0;
+  let feeCallCount = 0;
+  let missingFeeCallCount = 0;
+  let missingPricingRuleCount = 0;
+  let missingUsageCount = 0;
+  let invalidFeeCount = 0;
+
+  for (const call of calls) {
+    if (call.state !== 'completed') continue;
+    successfulCallCount += 1;
+    const fee = calculateSuccessfulCallFee(call);
+    if (fee.state !== 'calculated') {
+      missingFeeCallCount += 1;
+      const credits = creditQuantity(call);
+      if (credits !== undefined) {
+        addConsumptionBucket(creditTimeTotals, call.createdAt, credits);
+        addProviderConsumption(creditProviderTotals, call, credits);
+      }
+      if (!call.officialPricingRule && !call.officialUnitPrice) {
+        missingPricingRuleCount += 1;
+      } else if (fee.state === 'missing_inputs') {
+        missingUsageCount += 1;
+      } else {
+        invalidFeeCount += 1;
+      }
+      continue;
+    }
+    feeCallCount += 1;
+    currencyLabels.add(fee.currencyLabel);
+
+    addConsumptionBucket(feeTimeTotals, call.createdAt, fee.fee);
+    addProviderConsumption(providerTotals, call, fee.fee);
+  }
+
+  const chartMode = feeCallCount > 0 ? 'fee' : 'credit';
+  const timeTotals = chartMode === 'fee' ? feeTimeTotals : creditTimeTotals;
+  const selectedProviderTotals = chartMode === 'fee' ? providerTotals : creditProviderTotals;
+  const timeGroups = [...timeTotals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-7);
+  const maxAmount = Math.max(...timeGroups.map(([, value]) => value.amount), 0);
+  const bars = timeGroups.map(([key, value]) => ({
+    key,
+    label: value.label,
+    amount: value.amount,
+    callCount: value.callCount,
+    ratio: maxAmount > 0 ? Math.max(4, value.amount / maxAmount * 100) : 0
+  }));
+  const providerConsumptionTotals = [...selectedProviderTotals.entries()]
+    .map(([provider, amount]) => ({ provider, amount }))
+    .filter((item) => item.amount > 0)
+    .sort((left, right) => right.amount - left.amount)
+    .slice(0, 6);
+  const totalAmount = [...selectedProviderTotals.values()].reduce((sum, amount) => sum + amount, 0);
+  const colors = [
+    'var(--uc-color-status-info)',
+    'var(--uc-color-status-success)',
+    'var(--uc-color-status-warning)',
+    'var(--uc-color-status-danger)',
+    'var(--uc-color-text-tertiary)',
+    'var(--uc-color-border-strong)'
+  ];
+
+  return {
+    bars,
+    amountLabel: chartMode === 'fee'
+      ? currencyLabels.size === 1 ? [...currencyLabels][0] : '金额单位'
+      : '积分',
+    chartMode,
+    providerSlices: providerConsumptionTotals.map((item, index) => ({
+      key: item.provider,
+      label: item.provider,
+      amount: item.amount,
+      ratio: totalAmount > 0 ? item.amount / totalAmount * 100 : 0,
+      color: colors[index % colors.length]
+    })),
+    sampledCallCount,
+    successfulCallCount,
+    feeCallCount,
+    missingFeeCallCount,
+    missingPricingRuleCount,
+    missingUsageCount,
+    invalidFeeCount,
+    totalCallCount,
+    totalAmount
+  };
+}
+
+function addConsumptionBucket(
+  totals: Map<string, { label: string; amount: number; callCount: number }>,
+  createdAt: string,
+  amount: number
+): void {
+  const timeKey = dailyBucketKey(createdAt);
+  const currentTime = totals.get(timeKey) ?? {
+    label: dailyBucketLabel(createdAt),
+    amount: 0,
+    callCount: 0
+  };
+  totals.set(timeKey, {
+    ...currentTime,
+    amount: currentTime.amount + amount,
+    callCount: currentTime.callCount + 1
+  });
+}
+
+function addProviderConsumption(
+  totals: Map<string, number>,
+  call: StorageCallDetailsDto,
+  amount: number
+): void {
+  const providerLabel = call.providerName ?? call.providerId;
+  const providerKey = providerLabel || '提交时显示名不可用';
+  totals.set(providerKey, (totals.get(providerKey) ?? 0) + amount);
+}
+
+function creditQuantity(call: StorageCallDetailsDto): number | undefined {
+  for (const fact of call.usage.facts) {
+    if (
+      !['credit_amount', 'credits', 'credit', 'point_amount', 'points', 'point']
+        .includes(fact.metricId) &&
+      !['credit', 'credits', 'point', 'points'].includes(fact.unit)
+    ) {
+      continue;
+    }
+    const quantity = Number(fact.quantity);
+    if (Number.isFinite(quantity) && quantity > 0) return quantity;
+  }
+  return undefined;
+}
+
+function donutGradient(slices: readonly ProviderConsumptionSlice[]): string {
+  let cursor = 0;
+  const segments = slices.map((slice) => {
+    const start = cursor;
+    const end = cursor + slice.ratio / 100 * 360;
+    cursor = end;
+    return `${slice.color} ${start.toFixed(2)}deg ${end.toFixed(2)}deg`;
+  });
+  return `conic-gradient(${segments.join(', ')})`;
+}
+
+function dailyBucketKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown-date';
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function dailyBucketLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  return date.toLocaleDateString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit'
+  });
 }
 
 function TaskDetails({
@@ -439,11 +837,6 @@ function TaskDetails({
   onReuseParameters: () => void;
 }) {
   const state = taskState(details.latestExecutionState);
-  const retryability = details.retryability === 'retryable'
-    ? '可重试'
-    : details.retryability === 'not_retryable'
-      ? '不可恢复'
-      : '重试性未知';
 
   return (
     <div className="uc-task-center__details-content">
@@ -454,20 +847,7 @@ function TaskDetails({
         </div>
         <StatusPill tone={state.tone}>{state.label}</StatusPill>
       </div>
-      <dl className="uc-task-center__facts">
-        <div><dt>所属项目</dt><dd>{details.projectName}</dd></div>
-        <div><dt>创建时间</dt><dd>{new Date(details.createdAt).toLocaleString('zh-CN')}</dd></div>
-        <div><dt>执行次数</dt><dd>{details.executionCount}</dd></div>
-        <div><dt>恢复能力</dt><dd>{retryability}</dd></div>
-      </dl>
-      <div className="uc-task-center__prompt">
-        <h3>原始输入</h3>
-        <p>{details.originalInput}</p>
-      </div>
-      <div className="uc-task-center__prompt">
-        <h3>最终提示词</h3>
-        <p>{details.finalPrompt}</p>
-      </div>
+      <TaskUnifiedTimeline details={details} />
       <div className="uc-task-center__actions">
         <Button
           disabled={reusingParameters}
@@ -491,4 +871,297 @@ function TaskDetails({
       </div>
     </div>
   );
+}
+
+function TaskUnifiedTimeline({ details }: { readonly details: StorageTaskDetailsDto }) {
+  const storage = window.unicomp?.storage;
+  const [calls, setCalls] = useState<readonly StorageCallDetailsDto[]>([]);
+  const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setCalls([]);
+    setIssues([]);
+    setMessage('');
+
+    if (!storage) {
+      setMessage('当前运行环境未连接桌面调用记录能力');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoading(true);
+    void storage.listCallRecords({ projectId: details.projectId, limit: 200 })
+      .then(async (result) => {
+        if (!active) return;
+        if (!result.ok) {
+          setMessage('读取调用记录失败，请重试');
+          return;
+        }
+        const callDetails = await Promise.all(
+          result.value.items
+            .filter((record) => record.subjectKind === 'media')
+            .map(async (record) => {
+              try {
+                const detailsResult = await storage.getCallDetails(record.invocationAttemptId);
+                return detailsResult.ok ? detailsResult.value : undefined;
+              } catch {
+                return undefined;
+              }
+            })
+        );
+        if (!active) return;
+        const taskCalls = callDetails.filter((call): call is StorageCallDetailsDto =>
+          call?.subject.kind === 'media' && call.subject.taskId === details.taskId
+        );
+        setCalls(taskCalls.sort((left, right) =>
+          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+        ));
+        setIssues(result.value.issues);
+      })
+      .catch(() => {
+        if (active) setMessage('读取调用记录失败，请重试');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [details.projectId, details.taskId, storage]);
+
+  const retryability = details.retryability === 'retryable'
+    ? '可重试'
+    : details.retryability === 'not_retryable'
+      ? '不可恢复'
+      : '重试性未知';
+
+  return (
+    <section className="uc-task-center__task-timeline">
+      {issues.length > 0 ? (
+        <div className="uc-task-center__call-issues" role="status">
+          {issues.map((issue) => (
+            <p key={issue.projectId}>
+              {issue.projectName}：{issue.reason === 'unavailable'
+                ? '项目失效或断盘'
+                : '调用数据损坏或缺少精确参数定义'}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      <ol className="uc-task-center__timeline uc-task-center__unified-timeline">
+        <TimelineItem
+          time={formatTimestamp(details.createdAt)}
+          title="创建任务"
+          tone={taskState(details.latestExecutionState).tone}
+        >
+          <dl className="uc-task-center__timeline-facts">
+            <div><dt>所属项目</dt><dd>{details.projectName}</dd></div>
+            <div><dt>执行次数</dt><dd>{details.executionCount} 次</dd></div>
+            <div><dt>恢复能力</dt><dd>{retryability}</dd></div>
+          </dl>
+        </TimelineItem>
+
+        <TimelineItem time={formatTimestamp(details.createdAt)} title="确认输入" tone="neutral">
+          <div className="uc-task-center__timeline-prompts">
+            <div>
+              <strong>原始输入</strong>
+              <p>{details.originalInput}</p>
+            </div>
+            <div>
+              <strong>最终提示词</strong>
+              <p>{details.finalPrompt}</p>
+            </div>
+          </div>
+        </TimelineItem>
+
+        {loading ? (
+          <TimelineItem title="读取调用记录" tone="info">
+            <p className="uc-task-center__muted" role="status">正在归并该任务的调用记录…</p>
+          </TimelineItem>
+        ) : calls.length === 0 ? (
+          <TimelineItem title="调用记录" tone="neutral">
+            <p className="uc-task-center__muted">
+              当前任务没有可展示的业务调用记录；预检、候选读取和连接验证不会计入这里。
+            </p>
+          </TimelineItem>
+        ) : (
+          calls.flatMap((call) => callTimelineItems(call))
+        )}
+      </ol>
+
+      {message ? (
+        <p className="uc-task-center__message" aria-live="polite">{message}</p>
+      ) : null}
+    </section>
+  );
+}
+
+function TimelineItem({
+  children,
+  time,
+  title,
+  tone
+}: {
+  readonly children: ReactNode;
+  readonly time?: string;
+  readonly title: string;
+  readonly tone: StatusTone;
+}) {
+  return (
+    <li className={`uc-task-center__timeline-item uc-task-center__timeline-item--${tone}`}>
+      <span aria-hidden="true" />
+      <div className="uc-task-center__timeline-card">
+        <div className="uc-task-center__timeline-card-heading">
+          <strong>{title}</strong>
+          {time ? <small>{time}</small> : null}
+        </div>
+        {children}
+      </div>
+    </li>
+  );
+}
+
+function callTimelineItems(call: StorageCallDetailsDto) {
+  const fee = calculateSuccessfulCallFee(call);
+  const items = call.timeline.map((event) => (
+    <TimelineItem
+      key={`${call.invocationAttemptId}:${event.sequence}`}
+      time={formatTimestamp(event.occurredAt)}
+      title={`${featureLabels[call.productFeature] ?? '其他功能'} · ${callEventLabel(event.type)}`}
+      tone={callEventTone(event.type)}
+    >
+      <div className="uc-task-center__timeline-call-summary">
+        <StatusPill tone={callState(call.state).tone}>{callState(call.state).label}</StatusPill>
+        <span>{displayRoute(call)}</span>
+        <span>{formatDuration(call.durationMs)}</span>
+      </div>
+      {event.safeCode ? (
+        <code className="uc-task-center__timeline-code">技术代码：{event.safeCode}</code>
+      ) : null}
+    </TimelineItem>
+  ));
+
+  return [
+    ...items,
+    <TimelineItem
+      key={`${call.invocationAttemptId}:facts`}
+      time={formatTimestamp(call.updatedAt)}
+      title={`${featureLabels[call.productFeature] ?? '其他功能'} · 用量与结果`}
+      tone={callState(call.state).tone}
+    >
+      <dl className="uc-task-center__timeline-facts">
+        <div><dt>用量</dt><dd>{usageLabels[call.usageAvailability] ?? '用量状态未知'}</dd></div>
+        <div><dt>费用</dt><dd>{formatCallFee(fee)}</dd></div>
+        <div><dt>本地结果</dt><dd>{callResultLabel(call)}</dd></div>
+        <div><dt>重试归属</dt><dd>{call.retryOfInvocationAttemptId ?? '首次调用'}</dd></div>
+      </dl>
+      {fee.state === 'calculated' ? (
+        <p className="uc-task-center__timeline-fee">{formatCallFeeFormula(fee)}</p>
+      ) : null}
+      {call.usage.facts.length > 0 ? (
+        <dl className="uc-task-center__timeline-usage">
+          {call.usage.facts.map((fact) => (
+            <div key={`${fact.metricId}:${fact.unit}`}>
+              <dt>{usageMetricLabel(fact.metricId)}</dt>
+              <dd>{fact.quantity} {usageUnitLabel(fact.unit)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </TimelineItem>
+  ];
+}
+
+function callEventLabel(type: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    submission_started: '开始提交',
+    submission_failed_before_request: '请求发出前失败',
+    provider_accepted: '服务商已接受',
+    provider_progressed: '状态更新',
+    cancel_requested: '请求取消',
+    cancelled: '已取消',
+    result_received: '已接收结果',
+    completed: '调用完成',
+    failed: '调用失败',
+    outcome_unknown: '结果未知'
+  };
+  return labels[type] ?? '状态更新';
+}
+
+function callEventTone(type: string): StatusTone {
+  if (type === 'completed' || type === 'result_received') return 'success';
+  if (type === 'submission_failed_before_request' || type === 'failed') return 'danger';
+  if (type === 'cancel_requested' || type === 'outcome_unknown') return 'warning';
+  if (type === 'cancelled') return 'neutral';
+  return 'info';
+}
+
+function formatDuration(value?: string): string {
+  if (!value) return '尚未结束';
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '耗时不可用';
+  if (milliseconds < 1000) return `${milliseconds} 毫秒`;
+  const seconds = Math.floor(milliseconds / 1000);
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder === 0 ? `${minutes} 分钟` : `${minutes} 分 ${remainder} 秒`;
+}
+
+function usageMetricLabel(metric: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    input_tokens: '输入文本用量',
+    output_tokens: '输出文本用量',
+    prompt_tokens: '提示词用量',
+    completion_tokens: '输出用量',
+    total_tokens: '总文本用量',
+    cached_tokens: '缓存用量',
+    reasoning_tokens: '推理用量',
+    credit_amount: '积分用量',
+    cash_amount: '现金扣费',
+    cash_list_price: '原价金额',
+    package_unit_amount: '资源包用量',
+    input_images: '输入图片数',
+    output_images: '输出图片数',
+    image_count: '输出图片数',
+    video_seconds: '视频时长',
+    duration_ms: '处理时长'
+  };
+  return labels[metric] ?? metric;
+}
+
+function usageUnitLabel(unit: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    token: '文本单位',
+    tokens: '文本单位',
+    credit: '积分',
+    credits: '积分',
+    provider_unit: '资源包单位',
+    currency_amount: '金额',
+    image: '张',
+    images: '张',
+    millisecond: '毫秒',
+    milliseconds: '毫秒',
+    second: '秒',
+    seconds: '秒',
+    byte: '字节',
+    bytes: '字节'
+  };
+  return labels[unit] ?? unit;
+}
+
+function callResultLabel(call: StorageCallDetailsDto): string {
+  if (call.resultRegistration.state === 'registered') {
+    return `已登记 ${call.resultRegistration.workIds.length} 个作品`;
+  }
+  if (call.resultRegistration.state === 'not_applicable') return '无需登记作品';
+  if (call.localResultCount > 0) return `${call.localResultCount} 个本地结果，尚未登记`;
+  return '没有本地结果';
 }

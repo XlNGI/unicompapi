@@ -47,6 +47,7 @@ import {
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
   JsonProviderOperationRepository,
+  JsonProviderUsageObservationRepository,
   JsonTaskRepository,
   JsonVideoWorkspaceRepository
 } from '../repositories';
@@ -69,7 +70,7 @@ export interface VideoFeatureRuntimeOptions {
   readonly submissionAuthorization?: RuntimeAuthorizationOrchestrationPort;
   readonly videoSubmission?: Omit<
     VideoFeatureSubmissionRuntimes,
-    'providerRegistry' | 'providerPackages' | 'materials'
+    'providerRegistry' | 'providerPackages' | 'materials' | 'usage'
   > & {
     readonly viduPackage: ViduProviderPackage;
     readonly credentialVault: SecureCredentialVault;
@@ -120,6 +121,7 @@ export function createVideoFeatureControllerRuntime(
   const tasks = new JsonTaskRepository(storage, options.session.projectId);
   const executions = new JsonExecutionRepository(storage);
   const operations = new JsonProviderOperationRepository(storage);
+  const usage = new JsonProviderUsageObservationRepository(storage);
   const invocations = new JsonProviderInvocationRepository(
     storage,
     options.session.projectId
@@ -266,7 +268,8 @@ export function createVideoFeatureControllerRuntime(
     ...videoSubmission,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
-    materials
+    materials,
+    usage
   });
   const orchestrator = new ProviderSubmissionOrchestrator(
     candidates,

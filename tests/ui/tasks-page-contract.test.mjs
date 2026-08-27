@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
+const feeSource = await readFile('src/pages/tasks/call-fees.ts', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
 test('task center consumes controlled global task read models', () => {
@@ -42,8 +43,54 @@ test('task center provides filters, details, source navigation, and honest issue
   assert.match(source, /任务数据损坏/);
 });
 
+test('task center folds task and provider call facts into one timeline', () => {
+  assert.match(source, /TaskUnifiedTimeline/);
+  assert.match(source, /storage\.listCallRecords\(\{ projectId: details\.projectId, limit: 200 \}\)/);
+  assert.match(source, /storage\.getCallDetails\(record\.invocationAttemptId\)/);
+  assert.match(source, /call\?\.subject\.kind === 'media' && call\.subject\.taskId === details\.taskId/);
+  assert.match(source, /<TimelineItem[\s\S]*title="创建任务"/);
+  assert.match(source, /<TimelineItem[\s\S]*title="确认输入"/);
+  assert.match(source, /calls\.flatMap\(\(call\) => callTimelineItems\(call\)\)/);
+  assert.match(source, /uc-task-center__unified-timeline/);
+  assert.match(source, /uc-task-center__timeline-prompts/);
+  assert.doesNotMatch(source, /任务中心视图|call-records-tab|task-records-tab/);
+  assert.doesNotMatch(source, /调用尝试|调用详情|variant="embedded"|uc-task-center__embedded-calls/);
+});
+
+test('task center shows successful-call fee charts from official pricing rules', () => {
+  assert.match(source, /TaskConsumptionCharts/);
+  assert.match(source, /EmptyBarChart/);
+  assert.match(source, /EmptyDonutChart/);
+  assert.match(source, /消费柱状图/);
+  assert.match(source, /供应商消费占比/);
+  assert.match(source, /storage\.listCallRecords\(\{ limit: 200 \}\)/);
+  assert.match(source, /storage\.getCallDetails\(record\.invocationAttemptId\)/);
+  assert.match(source, /if \(call\.state !== 'completed'\) continue/);
+  assert.match(source, /addConsumptionBucket\(feeTimeTotals, call\.createdAt, fee\.fee\)/);
+  assert.match(source, /addProviderConsumption\(providerTotals, call, fee\.fee\)/);
+  assert.match(source, /creditQuantity\(call\)/);
+  assert.match(source, /chartMode === 'fee' \? feeTimeTotals : creditTimeTotals/);
+  assert.match(source, /官方单价缺失，先按积分汇总/);
+  assert.match(source, /donutGradient\(model\.providerSlices\)/);
+  assert.match(source, /暂无可计算费用的消费柱状图/);
+  assert.match(source, /暂无可计算费用的供应商消费占比环形图/);
+  assert.match(source, /missingPricingRuleCount/);
+  assert.match(source, /missingUsageCount/);
+  assert.match(source, /缺官方价格规则/);
+  assert.match(source, /缺响应体计费用量/);
+  assert.match(feeSource, /call\.officialPricingRule/);
+  assert.match(feeSource, /provider_billing/);
+  assert.match(feeSource, /token_split/);
+  assert.match(feeSource, /image_count/);
+  assert.match(feeSource, /video_second/);
+  assert.match(feeSource, /缺少官方价格规则/);
+  assert.match(feeSource, /缺少计费用量/);
+  assert.doesNotMatch(feeSource, /official_total_price|explicitUnitPrice/);
+  assert.doesNotMatch(feeSource, /providerId|modelId|viduq3|seedance|doubao|kling|newapi/i);
+});
+
 test('task center does not invent execution metrics or write operations', () => {
-  assert.doesNotMatch(source, /百分比|排队时间|费用|预计剩余|retryTask|cancelTask/);
+  assert.doesNotMatch(source, /百分比|排队时间|预计剩余|retryTask|cancelTask/);
 });
 
 test('task center recovers only an existing remote video result without resubmission', () => {

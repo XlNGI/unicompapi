@@ -4,6 +4,7 @@ import {
   ImageOperationRouter,
   JsonProviderOperationRepository,
   JsonProviderRegistryStore,
+  JsonProviderUsageObservationRepository,
   LocalImageResultReceiver,
   LocalVideoResultReceiver,
   NodeProjectStorage,
@@ -29,7 +30,11 @@ import {
   type VideoResultPort,
   type VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
-import type { ProxyMode } from '../../src/domain';
+import type {
+  ProviderUsageObservationV1,
+  ProxyMode,
+  UsageSchemaV1
+} from '../../src/domain';
 
 export interface ElectronViduCompositionOptions {
   readonly getProxyMode: () => Promise<ProxyMode>;
@@ -127,7 +132,8 @@ export class ElectronViduComposition {
         newApiRuntime: options.newApiRuntime,
         credentialVault: this.credentialVault,
         providerRegistry: this.registry,
-        materials
+        materials,
+        usage: currentSessionUsageSink(options.getSession)
       });
     }
     const newApiVideo = this.newApiVideoAdapter;
@@ -247,6 +253,23 @@ class RegistryVideoOperationContext implements ViduVideoOperationContextPort {
     const binding = candidates[0];
     return { connectionId: binding.connectionId, binding };
   }
+}
+
+function currentSessionUsageSink(
+  getSession: () => StorageProjectSession | undefined
+) {
+  return {
+    append: async (
+      observation: ProviderUsageObservationV1,
+      schema: UsageSchemaV1
+    ) => {
+      const session = getSession();
+      if (!session) return;
+      const storage = new NodeProjectStorage(session.rootDirectory);
+      await new JsonProviderUsageObservationRepository(storage)
+        .append(observation, schema);
+    }
+  };
 }
 
 function createCompositeVideoPort(
