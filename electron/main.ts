@@ -102,7 +102,13 @@ const runtimeAuthorizationSync = new LedgerRuntimeAuthorizationSync(
   runtimeAuthorizationLedger
 );
 const liveProviders = createLiveProviderManagementComposition({
-  getProxyMode: () => settingsLifecycle.getProxyMode()
+  getProxyMode: () => settingsLifecycle.getProxyMode(),
+  logger: (event) => {
+    void settingsLifecycle.writeDiagnosticsLog(
+      event.event === 'request_failed' ? 'error' : 'info',
+      JSON.stringify(event)
+    );
+  }
 });
 const providerManagement = new ProviderManagementFramework(
   providerPackages,

@@ -7,6 +7,9 @@ import {
   uniCompApiSeedance2FastTextToVideoParameterSchema,
   uniCompApiSeedance2ImageToVideoParameterSchema,
   uniCompApiSeedance2TextToVideoParameterSchema,
+  uniCompApiViduQ3ProTextToVideoParameterSchema,
+  uniCompApiViduQ3TurboImageToVideoParameterSchema,
+  uniCompApiViduQ3TurboTextToVideoParameterSchema,
   uniCompApiModelFeatures,
   uniCompApiTextToImageParameterSchema,
   uniCompApiReferenceToImageParameterSchema,
@@ -23,6 +26,9 @@ import {
   UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_ID
 } from '../../src/platform';
 
@@ -80,6 +86,8 @@ describe('UniCompAPI model capability registry', () => {
       'text_to_video',
       'image_to_video'
     ]);
+    expect(uniCompApiModelFeatures('viduq3')).toEqual([]);
+    expect(uniCompApiModelFeatures('viduq3-mix')).toEqual([]);
     expect(uniCompApiModelFeatures('kimi-k3')).toEqual([
       'text_chat',
       'text_reasoning'
@@ -207,6 +215,65 @@ describe('UniCompAPI model capability registry', () => {
     )).toBe(true);
     expect(uniCompApiVideoParameterSchema('seedance-2.0-fast', 'text_to_video'))
       .toBeUndefined();
+  });
+
+  it('maps exact supported Vidu keys to cloned official video contracts', () => {
+    expect(uniCompApiVideoParameterSchema('viduq3-turbo', 'image_to_video'))
+      .toBe(uniCompApiViduQ3TurboImageToVideoParameterSchema);
+    expect(uniCompApiVideoParameterSchema('viduq3-turbo', 'text_to_video'))
+      .toBe(uniCompApiViduQ3TurboTextToVideoParameterSchema);
+    expect(uniCompApiVideoParameterSchema('viduq3-pro', 'text_to_video'))
+      .toBe(uniCompApiViduQ3ProTextToVideoParameterSchema);
+    expect(uniCompApiVideoParameterSchema('viduq3-pro', 'image_to_video'))
+      .toBeUndefined();
+    expect(uniCompApiVideoParameterSchema('viduq3', 'image_to_video'))
+      .toBeUndefined();
+    expect(uniCompApiVideoParameterSchema('viduq3-mix', 'image_to_video'))
+      .toBeUndefined();
+
+    expect(uniCompApiViduQ3TurboImageToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      revision: 2,
+      productFeature: 'image_to_video'
+    });
+    expect(uniCompApiViduQ3TurboTextToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      revision: 2,
+      productFeature: 'text_to_video'
+    });
+    expect(uniCompApiViduQ3ProTextToVideoParameterSchema).toMatchObject({
+      schemaId: UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      revision: 2,
+      productFeature: 'text_to_video'
+    });
+    expect(uniCompApiViduQ3TurboImageToVideoParameterSchema.fields).toEqual([
+      expect.objectContaining({ fieldId: 'audio', valueType: 'boolean' }),
+      expect.objectContaining({ fieldId: 'duration', minimum: 3, maximum: 16 }),
+      expect.objectContaining({
+        fieldId: 'resolution', options: ['540p', '720p', '1080p']
+      }),
+      expect.objectContaining({
+        fieldId: 'aspect_ratio', options: ['16:9', '9:16', '1:1']
+      }),
+      expect.objectContaining({ fieldId: 'seed', minimum: 0, maximum: 2_147_483_647 })
+    ]);
+    for (const schema of [
+      uniCompApiViduQ3TurboTextToVideoParameterSchema,
+      uniCompApiViduQ3ProTextToVideoParameterSchema
+    ]) {
+      expect(schema.fields).toEqual([
+        expect.objectContaining({ fieldId: 'audio', valueType: 'boolean' }),
+        expect.objectContaining({ fieldId: 'duration', minimum: 1, maximum: 16 }),
+        expect.objectContaining({
+          fieldId: 'resolution', options: ['540p', '720p', '1080p']
+        }),
+        expect.objectContaining({
+          fieldId: 'aspect_ratio',
+          options: ['16:9', '9:16', '3:4', '4:3', '1:1']
+        }),
+        expect.objectContaining({ fieldId: 'seed', minimum: 0, maximum: 2_147_483_647 })
+      ]);
+    }
   });
 
   it('limits UniCompAPI text chat parameters to the official Chat Completions contract', () => {

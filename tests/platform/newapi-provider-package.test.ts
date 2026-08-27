@@ -51,6 +51,9 @@ import {
   uniCompApiSeedance2FastTextToVideoParameterSchema,
   uniCompApiSeedance2ImageToVideoParameterSchema,
   uniCompApiSeedance2TextToVideoParameterSchema,
+  uniCompApiViduQ3ProTextToVideoParameterSchema,
+  uniCompApiViduQ3TurboImageToVideoParameterSchema,
+  uniCompApiViduQ3TurboTextToVideoParameterSchema,
   uniCompApiVideoParameterSchema,
   newApiProviderPackageDescriptor,
   NEWAPI_ADAPTER_VERSION,
@@ -606,6 +609,49 @@ describe('NewAPI management and runtime safety', () => {
       connection: connection('saved', 'saved'),
       credentials: credential()
     })).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
+  it('emits status, safe upstream identifiers, and request ID without sensitive data', async () => {
+    const logs: unknown[] = [];
+    const body = new TextEncoder().encode(JSON.stringify({
+      error: {
+        code: 'invalid_parameters',
+        type: 'invalid_request_error',
+        message: 'secret prompt and token must never be logged'
+      }
+    }));
+    const fixture = runtimeFixture(async () => ({
+      status: 422,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(body.byteLength),
+        'x-request-id': 'Req-ABC-123'
+      },
+      body
+    }), logs);
+    await expect(fixture.runtime.requestModelCatalog({
+      connection: connection('saved', 'saved'),
+      credentials: credential()
+    })).rejects.toMatchObject({ code: 'invalid_parameters' });
+    const failed = logs.find((entry) =>
+      typeof entry === 'object' && entry !== null &&
+      (entry as { event?: unknown }).event === 'request_failed'
+    );
+    expect(failed).toMatchObject({
+      event: 'request_failed',
+      operation: 'model_catalog',
+      method: 'GET',
+      status: 422,
+      errorCode: 'invalid_parameters',
+      upstreamCode: 'invalid_parameters',
+      upstreamType: 'invalid_request_error',
+      requestId: 'req-abc-123',
+      requestBytes: 0
+    });
+    const serialized = JSON.stringify(logs);
+    expect(serialized).not.toContain('secret prompt');
+    expect(serialized).not.toContain('token');
+    expect(serialized).not.toContain('gateway.example.test');
   });
 
   it('keeps UniCompAPI streams active beyond the legacy fixed timeout', async () => {
@@ -1863,6 +1909,64 @@ describe('NewAPI video adapter', () => {
     await expect(adapter.query('video-unknown')).resolves.toEqual({ state: 'completed' });
   });
 
+  it('preserves a safe upstream reason when an accepted video task later fails', async () => {
+    const responses = [
+      jsonResponse(videoObject('video-safe-failure', 'queued')),
+      jsonResponse({
+        id: 'video-safe-failure',
+        object: 'video',
+        model: modelKey,
+        status: 'failed',
+        error: {
+          code: 'content_policy_violation',
+          message: 'private provider detail and prompt must not be exposed'
+        }
+      })
+    ];
+    const fixture = runtimeFixture(async () => responses.shift()!);
+    const adapter = videoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await expect(adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-safe-failure',
+        projectId: 'project-newapi',
+        prompt: 'Safe failure parsing',
+        parameterValues: {}
+      }
+    })).resolves.toMatchObject({ kind: 'accepted_async' });
+    const failed = await adapter.query('video-safe-failure');
+    expect(failed).toEqual({
+      state: 'failed',
+      message: 'The NewAPI video task was rejected by the content safety policy',
+      retryability: 'not_retryable'
+    });
+    expect(JSON.stringify(failed)).not.toContain('private provider detail');
+    expect(JSON.stringify(failed)).not.toContain('prompt');
+  });
+
+  it('retains only a bounded machine code for an unknown remote task failure', async () => {
+    const responses = [
+      jsonResponse(videoObject('video-coded-failure', 'queued')),
+      jsonResponse(videoObject('video-coded-failure', 'failed'))
+    ];
+    const fixture = runtimeFixture(async () => responses.shift()!);
+    const adapter = videoAdapter(fixture.runtime, usageSink(), vi.fn());
+    await adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-coded-failure',
+        projectId: 'project-newapi',
+        prompt: 'Coded failure parsing',
+        parameterValues: {}
+      }
+    });
+    await expect(adapter.query('video-coded-failure')).resolves.toEqual({
+      state: 'failed',
+      message: 'The NewAPI video task failed (upstream code: synthetic_failure)',
+      retryability: 'not_retryable'
+    });
+  });
+
   it('submits text-to-video JSON matching UniCompAPI create shape', async () => {
     const responses = [
       jsonResponse(videoObject('video-1', 'queued')),
@@ -2003,17 +2107,18 @@ describe('NewAPI video adapter', () => {
     const body = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
     expect(body).toEqual({
       model: 'doubao-seedance-2-0-fast-260128',
-      prompt: 'A lighthouse beam passes through a storm at night',
-      duration: 5,
-      resolution: '720p',
-      ratio: '16:9',
-      generate_audio: true,
-      watermark: false,
-      camera_fixed: true,
-      return_last_frame: false,
-      seed: 7
+      metadata: {
+        duration: 5,
+        resolution: '720p',
+        ratio: '16:9',
+        generate_audio: true,
+        watermark: false,
+        camera_fixed: true,
+        return_last_frame: false,
+        seed: 7
+      },
+      content: [{ type: 'text', text: 'A lighthouse beam passes through a storm at night' }]
     });
-    expect(body).not.toHaveProperty('metadata');
   });
 
   it('rejects mixed Seedance duration and frames before HTTP', async () => {
@@ -2072,8 +2177,7 @@ describe('NewAPI video adapter', () => {
       }
     })).resolves.toMatchObject({ kind: 'accepted_async' });
     expect(JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'))).toMatchObject({
-      resolution: '4k',
-      duration: -1
+      metadata: { resolution: '4k', duration: -1 }
     });
   });
 
@@ -2095,7 +2199,7 @@ describe('NewAPI video adapter', () => {
     expect(fixture.requests).toHaveLength(0);
   });
 
-  it('keeps a Seedance 2.0 Fast first frame while projecting image-to-video fields to top level', async () => {
+  it('sends a Seedance 2.0 Fast first frame in the UniCompAPI metadata/content envelope', async () => {
     const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_fast_image', 'queued')));
     const resolve = vi.fn(async (): Promise<ControlledNewApiImageV1> => ({
       assetId: 'asset-seedance-first-frame',
@@ -2125,15 +2229,159 @@ describe('NewAPI video adapter', () => {
       state: 'queued'
     });
     const body = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
-    expect(body).toMatchObject({
-      model: 'doubao-seedance-2-0-fast-260128',
-      prompt: 'The cloud bank moves slowly behind the subject',
-      ratio: '9:16',
-      frames: 120,
-      seed: 42
+    expect(body).toMatchObject({ model: 'doubao-seedance-2-0-fast-260128' });
+    expect(body.metadata).toEqual({ ratio: '9:16', frames: 120, seed: 42 });
+    expect(body.content).toEqual([
+      { type: 'text', text: 'The cloud bank moves slowly behind the subject' },
+      {
+        type: 'image_url',
+        image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' },
+        role: 'first_frame'
+      }
+    ]);
+    expect(body).not.toHaveProperty('prompt');
+    expect(body).not.toHaveProperty('image');
+  });
+
+  it('projects viduq3-turbo image-to-video through /v1/videos with official fields', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_vidu_turbo', 'queued')));
+    const resolve = vi.fn(async (): Promise<ControlledNewApiImageV1> => ({
+      assetId: 'asset-vidu-first-frame',
+      mimeType: 'image/png',
+      width: 640,
+      height: 480,
+      sizeBytes: 8,
+      bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    }));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), resolve);
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiVideoRoute('image_to_video', 'viduq3-turbo'),
+      request: {
+        invocationAttemptId: 'attempt-video-vidu-turbo-image',
+        projectId: 'project-newapi',
+        assetId: 'asset-vidu-first-frame',
+        prompt: 'The subject turns toward the camera',
+        parameterValues: {
+          audio: false,
+          duration: 8,
+          resolution: '1080p',
+          aspect_ratio: '9:16',
+          seed: 17
+        }
+      }
+    })).resolves.toMatchObject({
+      kind: 'accepted_async',
+      providerOperationId: 'task_vidu_turbo'
     });
-    expect(body.image).toMatch(/^data:image\/png;base64,/u);
-    expect(body).not.toHaveProperty('metadata');
+
+    expect(fixture.requests[0].url).toBe(`${UNICOMPAPI_OFFICIAL_BASE_URL}/videos`);
+    expect(requestJson(fixture.requests[0])).toEqual({
+      model: 'viduq3-turbo',
+      prompt: 'The subject turns toward the camera',
+      audio: false,
+      duration: 8,
+      resolution: '1080p',
+      aspect_ratio: '9:16',
+      seed: 17,
+      image: 'data:image/png;base64,iVBORw0KGgo='
+    });
+  });
+
+  it('projects Vidu text-to-video models with official top-level defaults and controls', async () => {
+    for (const providerModelKey of ['viduq3-turbo', 'viduq3-pro']) {
+      const fixture = runtimeFixture(async () => jsonResponse(videoObject(
+        `task_${providerModelKey}`,
+        'queued'
+      )));
+      const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+      await expect(adapter.submit({
+        routeSnapshot: unicompapiVideoRoute('text_to_video', providerModelKey),
+        request: {
+          invocationAttemptId: `attempt-video-${providerModelKey}-text`,
+          projectId: 'project-newapi',
+          prompt: 'A paper boat crosses a quiet pond',
+          parameterValues: {
+            duration: 6,
+            resolution: '720p',
+            aspect_ratio: '4:3',
+            seed: 23
+          }
+        }
+      })).resolves.toMatchObject({ kind: 'accepted_async' });
+      expect(fixture.requests[0].url).toBe(`${UNICOMPAPI_OFFICIAL_BASE_URL}/videos`);
+      expect(requestJson(fixture.requests[0])).toEqual({
+        model: providerModelKey,
+        prompt: 'A paper boat crosses a quiet pond',
+        audio: true,
+        duration: 6,
+        resolution: '720p',
+        aspect_ratio: '4:3',
+        seed: 23
+      });
+      expect(requestJson(fixture.requests[0])).not.toHaveProperty('metadata');
+    }
+  });
+
+  it('rejects invalid official Vidu controls before UniCompAPI HTTP', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('must-not-submit', 'queued')));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), vi.fn());
+    for (const parameterValues of [
+      { duration: 0 },
+      { resolution: '4k' },
+      { aspect_ratio: '2:1' },
+      { seed: 2_147_483_648 },
+      { ratio: '16:9' }
+    ]) {
+      await expect(adapter.submit({
+        routeSnapshot: unicompapiVideoRoute('text_to_video', 'viduq3-turbo'),
+        request: {
+          invocationAttemptId: `attempt-video-vidu-invalid-${JSON.stringify(parameterValues)}`,
+          projectId: 'project-newapi',
+          prompt: 'This request must not reach the gateway',
+          parameterValues
+        }
+      })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    }
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('preserves a multi-megabyte first-frame Base64 payload byte-for-byte', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_large_image', 'queued')));
+    const source = Buffer.alloc(2_706_039, 0xab);
+    const resolve = vi.fn(async (): Promise<ControlledNewApiImageV1> => ({
+      assetId: 'asset-seedance-large-frame',
+      mimeType: 'image/png',
+      width: 2048,
+      height: 1365,
+      sizeBytes: source.byteLength,
+      bytes: Uint8Array.from(source)
+    }));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), resolve);
+    await expect(adapter.submit({
+      routeSnapshot: unicompapiVideoRoute(
+        'image_to_video',
+        'doubao-seedance-2-0-fast-260128'
+      ),
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-large-image',
+        projectId: 'project-newapi',
+        assetId: 'asset-seedance-large-frame',
+        prompt: 'Preserve the first frame while animating the scene',
+        parameterValues: {}
+      }
+    })).resolves.toMatchObject({ kind: 'accepted_async' });
+
+    const body = requestJson(fixture.requests[0]);
+    const content = body.content as Array<Record<string, unknown>>;
+    const imageItem = content[1];
+    const image = String((imageItem.image_url as Record<string, unknown>).url);
+    const encoded = image.slice('data:image/png;base64,'.length);
+    const decoded = Buffer.from(encoded, 'base64');
+    expect(decoded.byteLength).toBe(source.byteLength);
+    expect(decoded.equals(source)).toBe(true);
+    expect(fixture.requests[0].body!.byteLength).toBe(
+      Buffer.byteLength(JSON.stringify(body), 'utf8')
+    );
   });
 
   it('accepts exactly one controlled JPG/PNG only for image-to-video', async () => {
@@ -2708,7 +2956,10 @@ function unicompapiVideoAdapter(
     uniCompApiSeedance2TextToVideoParameterSchema,
     uniCompApiSeedance2ImageToVideoParameterSchema,
     uniCompApiSeedance2FastTextToVideoParameterSchema,
-    uniCompApiSeedance2FastImageToVideoParameterSchema
+    uniCompApiSeedance2FastImageToVideoParameterSchema,
+    uniCompApiViduQ3TurboTextToVideoParameterSchema,
+    uniCompApiViduQ3TurboImageToVideoParameterSchema,
+    uniCompApiViduQ3ProTextToVideoParameterSchema
   ];
   return new NewApiVideoAdapter(
     runtime,

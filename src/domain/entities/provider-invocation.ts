@@ -352,6 +352,7 @@ function applyInvocationEvent(
   if (state === 'submitting') {
     if (type === 'submission_failed_before_request') return 'failed_before_submission';
     if (type === 'provider_accepted') return 'accepted';
+    if (type === 'failed') return 'failed';
     if (type === 'outcome_unknown') return 'unknown_outcome';
   } else if (state === 'accepted' || state === 'running') {
     if (type === 'provider_progressed' || type === 'result_received') return 'running';

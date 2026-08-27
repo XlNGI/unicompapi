@@ -21,6 +21,7 @@ export type VideoFeatureIpcErrorCode =
   | 'runtime_not_allowed'
   | 'authorization_not_claimed'
   | 'submission_failed_before_request'
+  | 'provider_rejected'
   | 'submission_outcome_unknown'
   | 'adapter_contract_invalid'
   | 'storage_error';

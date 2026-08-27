@@ -27,6 +27,7 @@ import {
   type NewApiHttpTransportRequest,
   type NewApiHttpTransportResponse,
   type NewApiImageDownloadPort,
+  type NewApiSafeLogEvent,
   type ProviderManagementAdapterPort,
   type ViduHttpTransport,
   type ViduHttpTransportRequest,
@@ -51,6 +52,7 @@ export interface LiveProviderManagementComposition {
 
 export function createLiveProviderManagementComposition(options: {
   readonly getProxyMode: () => Promise<ProxyMode>;
+  readonly logger?: (event: NewApiSafeLogEvent) => void;
 }): LiveProviderManagementComposition {
   let activeProxy: ProxyMode = { kind: 'system_default' };
   void options.getProxyMode().then((proxy) => {
@@ -62,7 +64,8 @@ export function createLiveProviderManagementComposition(options: {
   });
   const newApiRuntime = new NewApiSharedRuntime({
     transport: new ElectronNewApiHttpTransport(),
-    proxy: () => activeProxy
+    proxy: () => activeProxy,
+    logger: options.logger
   });
   const klingRuntime = new KlingSharedRuntime({
     transport: new ElectronKlingHttpTransport(),
@@ -98,6 +101,7 @@ export function createLiveProviderManagementComposition(options: {
 
 export function createLiveProviderManagementAdapters(options: {
   readonly getProxyMode: () => Promise<ProxyMode>;
+  readonly logger?: (event: NewApiSafeLogEvent) => void;
 }): ProviderManagementAdapterPort[] {
   return [...createLiveProviderManagementComposition(options).adapters];
 }
