@@ -138,6 +138,14 @@ export interface NewApiSafeLogEvent {
   readonly method?: 'GET' | 'POST';
   readonly status?: number;
   readonly errorCode?: NewApiRuntimeErrorCode;
+  /** Bounded, allowlisted upstream identifiers only; never raw error text. */
+  readonly upstreamCode?: string;
+  readonly upstreamType?: string;
+  readonly upstreamParam?: string;
+  /** A bounded request/trace identifier returned by the upstream headers. */
+  readonly requestId?: string;
+  /** Serialized request bytes sent to the transport; never request content. */
+  readonly requestBytes?: number;
   readonly elapsedMs?: number;
 }
 
@@ -424,6 +432,11 @@ export class NewApiSharedRuntime {
     let closed = false;
     let timedOut = false;
     let requestStarted = false;
+    let responseStatus: number | undefined;
+    let responseRequestId: string | undefined;
+    let responseUpstreamCode: string | undefined;
+    let responseUpstreamType: string | undefined;
+    let responseUpstreamParam: string | undefined;
     const startedAt = this.now();
     let requestTimeout: ReturnType<typeof setTimeout> | undefined;
     const streamTimeout: ProviderStreamTimeoutController | undefined =
@@ -451,7 +464,12 @@ export class NewApiSharedRuntime {
       }
       await input.beforeRequestStarted?.();
       requestStarted = true;
-      this.log({ event: 'request_started', operation: input.operation, method: input.method });
+      this.log({
+        event: 'request_started',
+        operation: input.operation,
+        method: input.method,
+        requestBytes: input.body?.byteLength ?? 0
+      });
       if (streamTimeout) {
         streamTimeout.start();
       } else {
@@ -482,12 +500,20 @@ export class NewApiSharedRuntime {
           dnsRebindingProtection: 'required'
         }
       });
+      responseStatus = response.status;
+      responseRequestId = safeRequestId(response.headers);
       streamTimeout?.connected();
       validateDeclaredResponseSize(response.headers, input.maximumResponseBytes);
       if (response.status >= 300 && response.status < 400) {
         throw new NewApiRuntimeError('redirect_not_allowed', 'not_retryable');
       }
       if (response.status < 200 || response.status >= 300) {
+        const upstream = safeUpstreamErrorFields(
+          'body' in response ? response.body : undefined
+        );
+        responseUpstreamCode = upstream.code;
+        responseUpstreamType = upstream.type;
+        responseUpstreamParam = upstream.param;
         throw mapHttpStatus(
           response.status,
           response.headers,
@@ -503,7 +529,10 @@ export class NewApiSharedRuntime {
         }
         this.log({
           event: 'request_completed', operation: input.operation, method: input.method,
-          status: response.status, elapsedMs: Math.max(0, this.now() - startedAt)
+          status: response.status,
+          ...(responseRequestId ? { requestId: responseRequestId } : {}),
+          requestBytes: input.body?.byteLength ?? 0,
+          elapsedMs: Math.max(0, this.now() - startedAt)
         });
         return {
           status: response.status,
@@ -537,7 +566,10 @@ export class NewApiSharedRuntime {
       if (input.expectedResponse === 'json') requireContentType(headers, 'application/json');
       this.log({
         event: 'request_completed', operation: input.operation, method: input.method,
-        status: response.status, elapsedMs: Math.max(0, this.now() - startedAt)
+        status: response.status,
+        ...(responseRequestId ? { requestId: responseRequestId } : {}),
+        requestBytes: input.body?.byteLength ?? 0,
+        elapsedMs: Math.max(0, this.now() - startedAt)
       });
       close();
       return { status: response.status, headers, body: Uint8Array.from(response.body) };
@@ -552,7 +584,14 @@ export class NewApiSharedRuntime {
       );
       this.log({
         event: 'request_failed', operation: input.operation, method: input.method,
-        errorCode: mapped.code, elapsedMs: Math.max(0, this.now() - startedAt)
+        ...(responseStatus === undefined ? {} : { status: responseStatus }),
+        ...(responseRequestId ? { requestId: responseRequestId } : {}),
+        ...(responseUpstreamCode ? { upstreamCode: responseUpstreamCode } : {}),
+        ...(responseUpstreamType ? { upstreamType: responseUpstreamType } : {}),
+        ...(responseUpstreamParam ? { upstreamParam: responseUpstreamParam } : {}),
+        requestBytes: input.body?.byteLength ?? 0,
+        errorCode: mapped.code,
+        elapsedMs: Math.max(0, this.now() - startedAt)
       });
       throw mapped;
     }
@@ -781,6 +820,58 @@ function mapHttpStatus(
     return new NewApiRuntimeError('invalid_request', 'not_retryable');
   }
   return new NewApiRuntimeError('invalid_response', 'not_retryable');
+}
+
+interface SafeUpstreamErrorFields {
+  readonly code?: string;
+  readonly type?: string;
+  readonly param?: string;
+}
+
+/** Extract only bounded machine identifiers from an upstream JSON error. */
+function safeUpstreamErrorFields(body: Uint8Array | undefined): SafeUpstreamErrorFields {
+  if (!body || body.byteLength < 2 || body.byteLength > 64 * 1024) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return {};
+  }
+  if (!isRecord(parsed)) return {};
+  const error = isRecord(parsed.error) ? parsed.error : parsed;
+  if (!isRecord(error)) return {};
+  const code = safeDiagnosticToken(error.code);
+  const type = safeDiagnosticToken(error.type);
+  const param = safeDiagnosticToken(error.param);
+  return {
+    ...(code ? { code } : {}),
+    ...(type ? { type } : {}),
+    ...(param ? { param } : {})
+  };
+}
+
+/** Extract request IDs from allowlisted headers without logging arbitrary values. */
+function safeRequestId(headers: Readonly<Record<string, string>>): string | undefined {
+  for (const name of [
+    'x-request-id',
+    'request-id',
+    'trace-id',
+    'x-trace-id',
+    'x-oneapi-request-id'
+  ]) {
+    const value = headerValue(headers, name);
+    const token = safeDiagnosticToken(value);
+    if (token) return token;
+  }
+  return undefined;
+}
+
+function safeDiagnosticToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9_.:-]{0,127}$/u.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 /** Classify OpenAI-style error envelopes by allowlisted code/type only — never echo free text. */

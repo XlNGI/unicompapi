@@ -3,6 +3,7 @@ import type {
   ProviderConnection,
   ProviderProtocolBinding,
   ProviderSubmitOutcome,
+  UsageFactV1,
   VideoDynamicParameterValue
 } from '../../../domain';
 import type {
@@ -120,7 +121,10 @@ export class ViduTextVideoV2Adapter
           : this.now(),
         results: parsed.results
       });
-      return { state: 'completed' };
+      return {
+        state: 'completed',
+        ...(parsed.credits ? { usageFacts: [creditFact(parsed.credits)] } : {})
+      };
     }
     if (parsed.state === 'failed') {
       return {
@@ -451,6 +455,7 @@ function parseTaskId(body: Uint8Array): string {
 function parseTaskResponse(body: Uint8Array): {
   readonly state: 'created' | 'queueing' | 'processing' | 'success' | 'failed';
   readonly results: readonly { readonly id: string; readonly url: string }[];
+  readonly credits?: string;
 } {
   const value = parseJsonObject(body);
   const state = value.state;
@@ -469,7 +474,48 @@ function parseTaskResponse(body: Uint8Array): {
     results: [{
       id: requireRemoteId(creation.id),
       url: requireHttpsUrl(creation.url)
-    }]
+    }],
+    ...parseCreditAmount(value)
+  };
+}
+
+function parseCreditAmount(
+  value: Record<string, unknown>
+): { readonly credits?: string } {
+  const raw = firstCreditCandidate([
+    value.credits,
+    value.credit,
+    value.credit_amount,
+    recordValue(value.usage, 'credits'),
+    recordValue(value.usage, 'credit'),
+    recordValue(value.usage, 'credit_amount')
+  ]);
+  if (raw === undefined) return {};
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return { credits: String(raw) };
+  }
+  if (typeof raw === 'string' && /^(0|[1-9]\d*)(\.\d+)?$/u.test(raw.trim())) {
+    return { credits: raw.trim() };
+  }
+  throw new ViduRuntimeError('invalid_response', 'unknown');
+}
+
+function firstCreditCandidate(values: readonly unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+function creditFact(quantity: string): UsageFactV1 {
+  return {
+    metricId: 'credit_amount',
+    quantity,
+    unit: 'credit',
+    source: 'provider_body'
   };
 }
 

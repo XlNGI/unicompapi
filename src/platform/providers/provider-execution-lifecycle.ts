@@ -11,7 +11,8 @@ import {
   type ProviderOperationRecordId,
   type ProviderOperationRepository,
   type ProviderSubmitOutcome,
-  type Task
+  type Task,
+  type UsageFactV1
 } from '../../domain';
 
 export interface ProviderExecutionLifecycleDependencies {
@@ -76,6 +77,33 @@ export class ProviderExecutionLifecycleService {
           }
         })
       : transitionExecution(submitting, 'submission_outcome_unknown', now);
+    await this.dependencies.executionRepository.save(updated);
+    return updated;
+  }
+
+  /**
+   * Records a provider rejection when the request-start hook already ran but
+   * no remote operation record exists. The execution is failed locally while
+   * retaining the explicit rejection in the submission/invocation facts.
+   */
+  async applyExplicitSubmissionFailure(input: {
+    readonly executionId: Execution['id'];
+    readonly message: string;
+    readonly retryability?: 'retryable' | 'not_retryable' | 'unknown';
+  }): Promise<Execution | undefined> {
+    const current = await this.dependencies.executionRepository.get(
+      input.executionId
+    );
+    if (!current || current.state !== 'created') return current;
+    const now = this.now();
+    const submitting = transitionExecution(current, 'submitting', now);
+    const updated = transitionExecution(submitting, 'failed', now, {
+      failure: {
+        stage: 'submitting',
+        message: input.message,
+        retryability: input.retryability ?? 'not_retryable'
+      }
+    });
     await this.dependencies.executionRepository.save(updated);
     return updated;
   }
@@ -161,7 +189,7 @@ function transitionForOutcome(
 
 export type ProviderAsyncOperationStatus =
   | { readonly state: 'queued' | 'processing' }
-  | { readonly state: 'completed' }
+  | { readonly state: 'completed'; readonly usageFacts?: readonly UsageFactV1[] }
   | {
       readonly state: 'failed';
       readonly message: string;

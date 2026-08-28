@@ -40,12 +40,13 @@ import {
   ProjectImageMaterialResolver,
   SecureCredentialVault,
   ViduBoundedPoller,
-  ViduImmediateImageResultPort,
+  StoredImmediateImageResultPort,
   ViduProviderPackage,
   ViduTransportFailure,
   VideoOperationRouter,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
+  controlledImageResultDownloaderFromRuntime,
   type ControlledImageMaterial,
   type ControlledImageMaterialPort,
   type CredentialProtector,
@@ -351,9 +352,11 @@ describe('Vidu local synthetic service validation', () => {
     const imageReceiver = new LocalImageResultReceiver({
       getSession: session,
       mutations: imageMutations,
-      port: new ViduImmediateImageResultPort({
+      port: new StoredImmediateImageResultPort({
         operations: imageOperations,
-        runtime: fixture.providerPackage.runtime
+        downloader: controlledImageResultDownloaderFromRuntime(
+          fixture.providerPackage.runtime
+        )
       }),
       createFileId: () => 'file-vidu-e2e-image',
       createWorkId: () => 'work-vidu-e2e-image',

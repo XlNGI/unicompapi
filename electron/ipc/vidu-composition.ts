@@ -2,20 +2,24 @@ import { app, net, safeStorage } from 'electron';
 import path from 'node:path';
 import {
   ImageOperationRouter,
+  JsonLineImageResultReceiptLogger,
   JsonProviderOperationRepository,
   JsonProviderRegistryStore,
+  JsonProviderUsageObservationRepository,
   LocalImageResultReceiver,
   LocalVideoResultReceiver,
   NodeProjectStorage,
   ProjectImageMaterialResolver,
   SecureCredentialVault,
-  ViduImmediateImageResultPort,
+  StoredImmediateImageResultPort,
   ViduProviderPackage,
   ViduTransportFailure,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   createNewApiVideoAdapterFromRuntimes,
+  controlledImageResultDownloaderFromRuntime,
   type ImageOperationPorts,
+  type ControlledImmediateImageResultDownloader,
   type ImageSubmissionControllerDependencies,
   type NewApiSharedRuntime,
   type NewApiVideoAdapter,
@@ -29,7 +33,11 @@ import {
   type VideoResultPort,
   type VideoWorkspaceMutationCoordinator
 } from '../../src/platform';
-import type { ProxyMode } from '../../src/domain';
+import type {
+  ProviderUsageObservationV1,
+  ProxyMode,
+  UsageSchemaV1
+} from '../../src/domain';
 
 export interface ElectronViduCompositionOptions {
   readonly getProxyMode: () => Promise<ProxyMode>;
@@ -39,10 +47,14 @@ export class ElectronViduComposition {
   readonly registry: JsonProviderRegistryStore;
   readonly credentialVault: SecureCredentialVault;
   readonly providerPackage: ViduProviderPackage;
+  private readonly imageResultReceiptLogger: JsonLineImageResultReceiptLogger;
   private newApiVideoAdapter: NewApiVideoAdapter | undefined;
 
   constructor(options: ElectronViduCompositionOptions) {
     const userDataPath = app.getPath('userData');
+    this.imageResultReceiptLogger = new JsonLineImageResultReceiptLogger(
+      path.join(userDataPath, 'logs', 'image-result-receipt.log')
+    );
     this.registry = new JsonProviderRegistryStore(
       path.join(userDataPath, 'provider-registry.json')
     );
@@ -70,6 +82,7 @@ export class ElectronViduComposition {
     readonly imageMutations: ImageSubmissionControllerDependencies['mutations'];
     readonly videoMutations: VideoWorkspaceMutationCoordinator;
     readonly newApiRuntime?: NewApiSharedRuntime;
+    readonly imageResultDownloads?: ControlledImmediateImageResultDownloader;
   }): {
     readonly image: ImageOperationPorts;
     readonly imageResultReceiver: NonNullable<
@@ -127,7 +140,8 @@ export class ElectronViduComposition {
         newApiRuntime: options.newApiRuntime,
         credentialVault: this.credentialVault,
         providerRegistry: this.registry,
-        materials
+        materials,
+        usage: currentSessionUsageSink(options.getSession)
       });
     }
     const newApiVideo = this.newApiVideoAdapter;
@@ -179,10 +193,15 @@ export class ElectronViduComposition {
           return new LocalImageResultReceiver({
             getSession: options.getSession,
             mutations: options.imageMutations,
-            port: new ViduImmediateImageResultPort({
+            port: new StoredImmediateImageResultPort({
               operations: new JsonProviderOperationRepository(storage),
-              runtime: this.providerPackage.runtime
-            })
+              downloader:
+                options.imageResultDownloads ??
+                controlledImageResultDownloaderFromRuntime(
+                  this.providerPackage.runtime
+                )
+            }),
+            onEvent: (event) => this.imageResultReceiptLogger.write(event)
           }).receive(executionId);
         }
       },
@@ -247,6 +266,23 @@ class RegistryVideoOperationContext implements ViduVideoOperationContextPort {
     const binding = candidates[0];
     return { connectionId: binding.connectionId, binding };
   }
+}
+
+function currentSessionUsageSink(
+  getSession: () => StorageProjectSession | undefined
+) {
+  return {
+    append: async (
+      observation: ProviderUsageObservationV1,
+      schema: UsageSchemaV1
+    ) => {
+      const session = getSession();
+      if (!session) return;
+      const storage = new NodeProjectStorage(session.rootDirectory);
+      await new JsonProviderUsageObservationRepository(storage)
+        .append(observation, schema);
+    }
+  };
 }
 
 function createCompositeVideoPort(

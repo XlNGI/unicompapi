@@ -47,6 +47,7 @@ import {
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
   JsonProviderOperationRepository,
+  JsonProviderUsageObservationRepository,
   JsonTaskRepository,
   JsonVideoWorkspaceRepository
 } from '../repositories';
@@ -69,7 +70,7 @@ export interface VideoFeatureRuntimeOptions {
   readonly submissionAuthorization?: RuntimeAuthorizationOrchestrationPort;
   readonly videoSubmission?: Omit<
     VideoFeatureSubmissionRuntimes,
-    'providerRegistry' | 'providerPackages' | 'materials'
+    'providerRegistry' | 'providerPackages' | 'materials' | 'usage'
   > & {
     readonly viduPackage: ViduProviderPackage;
     readonly credentialVault: SecureCredentialVault;
@@ -120,6 +121,7 @@ export function createVideoFeatureControllerRuntime(
   const tasks = new JsonTaskRepository(storage, options.session.projectId);
   const executions = new JsonExecutionRepository(storage);
   const operations = new JsonProviderOperationRepository(storage);
+  const usage = new JsonProviderUsageObservationRepository(storage);
   const invocations = new JsonProviderInvocationRepository(
     storage,
     options.session.projectId
@@ -266,7 +268,8 @@ export function createVideoFeatureControllerRuntime(
     ...videoSubmission,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
-    materials
+    materials,
+    usage
   });
   const orchestrator = new ProviderSubmissionOrchestrator(
     candidates,
@@ -440,6 +443,13 @@ export function createVideoFeatureControllerRuntime(
       await lifecycle.applyUnrecordedSubmitOutcome({
         executionId: acceptance.subjectArtifacts.execution.id,
         outcome: 'failed_before_submission',
+        message: localResultError
+      });
+    } else if (acceptance.intent.status === 'failed') {
+      const safeCode = latestSafeCode(acceptance.invocationEvents);
+      localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');
+      await lifecycle.applyExplicitSubmissionFailure({
+        executionId: acceptance.subjectArtifacts.execution.id,
         message: localResultError
       });
     } else if (acceptance.intent.status === 'unknown_outcome') {

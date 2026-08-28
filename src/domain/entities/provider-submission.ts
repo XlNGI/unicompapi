@@ -348,7 +348,7 @@ export function transitionSubmissionIntent(
     authorization_pending: ['authorization_not_claimed', 'authorization_claimed'],
     authorization_not_claimed: [],
     authorization_claimed: ['request_started', 'failed_before_submission', 'cancelled'],
-    request_started: ['provider_accepted', 'completed', 'failed_before_submission', 'unknown_outcome'],
+    request_started: ['provider_accepted', 'completed', 'failed', 'failed_before_submission', 'unknown_outcome'],
     provider_accepted: ['completed', 'failed', 'cancelled', 'unknown_outcome'],
     completed: [],
     failed: [],

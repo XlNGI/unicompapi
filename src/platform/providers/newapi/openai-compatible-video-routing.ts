@@ -24,6 +24,7 @@ import {
   isKnownUniCompApiModel,
   isUniCompApiDeepSeekModel,
   isUniCompApiPackage,
+  uniCompApiVideoParameterSchema,
   uniCompApiVideoFeatures
 } from './unicompapi-model-capabilities';
 
@@ -65,7 +66,14 @@ export function routeOpenAiCompatibleVideoProfile(
     : undefined;
   if (
     isUniCompApiPackage(connection.packageId) &&
-    isKnownUniCompApiModel(model.providerModelKey) &&
+    !isKnownUniCompApiModel(model.providerModelKey)
+  ) {
+    // Closed-world UniCompAPI: unknown catalog/manual keys never receive an
+    // inferred video profile until the capability table is extended.
+    return { snapshot, model, state: 'skipped' };
+  }
+  if (
+    isUniCompApiPackage(connection.packageId) &&
     (!features || features.length === 0)
   ) {
     return { snapshot, model, state: 'skipped' };
@@ -100,10 +108,76 @@ export function routeOpenAiCompatibleVideoProfile(
       feature.productFeature === 'image_to_video'
     )
   );
+  const definition = createOpenAiCompatibleDefaultVideoDefinition({
+    packageId: connection.packageId,
+    packageVersion: connection.packageVersion,
+    providerModelKey: model.providerModelKey,
+    ...(features ? { features } : {}),
+    ...(isUniCompApiPackage(connection.packageId)
+      ? {
+          textToVideoParameterSchemaId: uniCompApiVideoParameterSchema(
+            model.providerModelKey,
+            'text_to_video'
+          )?.schemaId,
+          imageToVideoParameterSchemaId: uniCompApiVideoParameterSchema(
+            model.providerModelKey,
+            'image_to_video'
+          )?.schemaId
+        }
+      : {})
+  });
+  const profileTemplate = definition.profileTemplates[0];
+  if (!profileTemplate) {
+    return { snapshot, model, state: 'skipped' };
+  }
   if (existingVideoProfile) {
     const ensured = ensureVideoGenerationCapabilityEvidence(snapshot, model, now);
     const nextModel = ensured.snapshot.models.find((candidate) => candidate.id === model.id)
       ?? model;
+    const needsMigration = profileTemplate.features.some((desired) =>
+      existingVideoProfile.features.some((current) =>
+        current.productFeature === desired.productFeature &&
+        current.parameterSchemaId !== desired.parameterSchemaId
+      )
+    );
+    if (needsMigration) {
+      const nextModelRevision = nextModel.revision + 1;
+      const migratedModel: ProviderModel = {
+        ...nextModel,
+        revision: nextModelRevision,
+        updatedAt: now
+      };
+      const migratedProfile: ModelFeatureProfile = {
+        ...existingVideoProfile,
+        revision: existingVideoProfile.revision + 1,
+        sourceTemplateId: profileTemplate.templateId,
+        modelRevision: nextModelRevision,
+        features: existingVideoProfile.features.map((current) =>
+          profileTemplate.features.find(
+            (desired) => desired.productFeature === current.productFeature
+          ) ?? current
+        ),
+        recordedAt: now
+      };
+      const definitions = ensured.snapshot.modelDefinitions ?? [];
+      return {
+        snapshot: {
+          ...ensured.snapshot,
+          modelDefinitions: definitions.some(
+            (candidate) => candidate.definitionId === definition.definitionId
+          ) ? definitions : [...definitions, definition],
+          models: ensured.snapshot.models.map((candidate) =>
+            candidate.id === migratedModel.id ? migratedModel : candidate
+          ),
+          modelProfiles: (ensured.snapshot.modelProfiles ?? []).map((candidate) =>
+            candidate.profileId === migratedProfile.profileId ? migratedProfile : candidate
+          )
+        },
+        model: migratedModel,
+        profileId: migratedProfile.profileId,
+        state: 'already_attached'
+      };
+    }
     return {
       snapshot: ensured.snapshot,
       model: nextModel,
@@ -120,16 +194,6 @@ export function routeOpenAiCompatibleVideoProfile(
   }
 
   const binding = ensureVideoCatalogBinding(snapshot, connection, videoAdapter, now);
-  const definition = createOpenAiCompatibleDefaultVideoDefinition({
-    packageId: connection.packageId,
-    packageVersion: connection.packageVersion,
-    providerModelKey: model.providerModelKey,
-    ...(features ? { features } : {})
-  });
-  const profileTemplate = definition.profileTemplates[0];
-  if (!profileTemplate) {
-    return { snapshot, model, state: 'skipped' };
-  }
 
   const withEvidence = ensureVideoGenerationCapabilityEvidence(
     {

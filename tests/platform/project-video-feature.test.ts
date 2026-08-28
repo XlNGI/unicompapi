@@ -22,8 +22,20 @@ import {
 import { composeVideoPromptEnhancementInput } from '../../src/shared/prompt-enhancement-input';
 import {
   assertVideoPromptEnhancementSatisfied,
+  NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID,
+  NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID,
+  NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+  NEWAPI_VIDEO_USAGE_SCHEMA_ID,
   ProjectVideoFeatureSubjectResolver,
+  ProviderFeatureContractRegistry,
   createVideoProviderFeatureContracts,
+  UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+  UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   videoDraftRevision
 } from '../../src/platform';
 
@@ -113,7 +125,7 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
       .rejects.toThrow(/exactly one image/);
   });
 
-  it('publishes complete fixed Vidu image-to-video and text-to-video contracts', () => {
+  it('publishes complete video contracts, including exact UniCompAPI mapped schemas', () => {
     const contracts = createVideoProviderFeatureContracts();
     expect(contracts.length).toBeGreaterThan(0);
     const features = new Set(
@@ -133,6 +145,55 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
     expect(contracts.some((contract) =>
       contract.parameterSchema.schemaId === 'parameters.newapi.image_to_video.default'
     )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+    )).toBe(true);
+    const registry = new ProviderFeatureContractRegistry(contracts);
+    expect(registry.resolve({
+      productFeature: 'text_to_video',
+      parameterSchemaId: UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+      constraintSetId: NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID
+    })?.parameterSchema.schemaId).toBe(
+      UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+    );
+    expect(registry.resolve({
+      productFeature: 'image_to_video',
+      parameterSchemaId: UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+      constraintSetId: NEWAPI_IMAGE_VIDEO_CONSTRAINT_SET_ID
+    })?.parameterSchema.schemaId).toBe(
+      UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+    );
+    expect(registry.resolve({
+      productFeature: 'text_to_video',
+      parameterSchemaId: UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+      resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
+      usageSchemaId: NEWAPI_VIDEO_USAGE_SCHEMA_ID,
+      constraintSetId: NEWAPI_TEXT_VIDEO_CONSTRAINT_SET_ID
+    })?.parameterSchema.fields.find((field) => field.fieldId === 'resolution')?.options).toEqual([
+      '480p', '720p'
+    ]);
   });
 
   it('requires a current adopted enhancement for structured video prompt content', async () => {

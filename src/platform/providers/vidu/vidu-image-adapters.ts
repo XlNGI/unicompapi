@@ -3,7 +3,8 @@ import type {
   DynamicParameterValue,
   ProviderConnection,
   ProviderImmediateResultReference,
-  ProviderSubmitOutcome
+  ProviderSubmitOutcome,
+  UsageFactV1
 } from '../../../domain';
 import type { ProviderProtocolSubmitPort, ProviderProtocolSubmitRequest } from '../provider-operation-router';
 import {
@@ -43,6 +44,10 @@ export interface ViduAdapterRequestControl {
   readonly signal?: AbortSignal;
 }
 
+export type ViduImageSubmitOutcome = ProviderSubmitOutcome & {
+  readonly usageFacts?: readonly UsageFactV1[];
+};
+
 export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
   private readonly options: Required<ViduImageV1AdapterOptions>;
 
@@ -59,7 +64,7 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
   async submit(
     request: ProviderProtocolSubmitRequest,
     control: ViduAdapterRequestControl = {}
-  ): Promise<ProviderSubmitOutcome> {
+  ): Promise<ViduImageSubmitOutcome> {
     const providerOperationId = this.createOperationId();
     let requestStarted = false;
     try {
@@ -124,10 +129,12 @@ export class ViduImageV1Adapter implements ProviderProtocolSubmitPort {
           requestStarted = true;
         }
       });
+      const parsed = parseImageV1Response(response.body);
       return {
         kind: 'completed_sync',
         providerOperationId,
-        results: [parseImageV1Result(response.body)]
+        results: [parsed.result],
+        ...(parsed.credits ? { usageFacts: [creditFact(parsed.credits)] } : {})
       };
     } catch (error) {
       return mapSubmitFailure(error, providerOperationId, requestStarted);
@@ -158,7 +165,7 @@ export class ViduGeminiImageV2Adapter implements ProviderProtocolSubmitPort {
   async submit(
     request: ProviderProtocolSubmitRequest,
     control: ViduAdapterRequestControl = {}
-  ): Promise<ProviderSubmitOutcome> {
+  ): Promise<ViduImageSubmitOutcome> {
     const providerOperationId = this.createOperationId();
     let requestStarted = false;
     try {
@@ -245,10 +252,12 @@ export class ViduGeminiImageV2Adapter implements ProviderProtocolSubmitPort {
           requestStarted = true;
         }
       });
+      const parsed = parseGeminiImageResponse(response.body);
       return {
         kind: 'completed_sync',
         providerOperationId,
-        results: [{ kind: 'file_uri', value: parseGeminiFileUri(response.body) }]
+        results: [{ kind: 'file_uri', value: parsed.fileUri }],
+        ...(parsed.credits ? { usageFacts: [creditFact(parsed.credits)] } : {})
       };
     } catch (error) {
       return mapSubmitFailure(error, providerOperationId, requestStarted);
@@ -429,7 +438,10 @@ function serializeBoundedJson(value: unknown): Uint8Array {
   return bytes;
 }
 
-function parseImageV1Result(body: Uint8Array): ProviderImmediateResultReference {
+function parseImageV1Response(body: Uint8Array): {
+  readonly result: ProviderImmediateResultReference;
+  readonly credits?: string;
+} {
   const value = parseJsonObject(body);
   if (!Array.isArray(value.data) || value.data.length !== 1) {
     throw new ViduRuntimeError('invalid_response', 'unknown');
@@ -440,7 +452,6 @@ function parseImageV1Result(body: Uint8Array): ProviderImmediateResultReference 
   if ((url ? 1 : 0) + (base64 ? 1 : 0) !== 1) {
     throw new ViduRuntimeError('invalid_response', 'unknown');
   }
-  if (url) return { kind: 'remote_url', value: url };
   const outputFormat = optionalNonBlank(value.output_format)?.toLowerCase();
   const mimeTypes: Record<string, string> = {
     png: 'image/png',
@@ -448,12 +459,24 @@ function parseImageV1Result(body: Uint8Array): ProviderImmediateResultReference 
     jpg: 'image/jpeg',
     webp: 'image/webp'
   };
+  if (url) {
+    return {
+      result: { kind: 'remote_url', value: url },
+      ...parseCreditAmount(value)
+    };
+  }
   const mimeType = outputFormat ? mimeTypes[outputFormat] : undefined;
   if (!mimeType) throw new ViduRuntimeError('invalid_response', 'unknown');
-  return { kind: 'base64', value: base64!, mimeType };
+  return {
+    result: { kind: 'base64', value: base64!, mimeType },
+    ...parseCreditAmount(value)
+  };
 }
 
-function parseGeminiFileUri(body: Uint8Array): string {
+function parseGeminiImageResponse(body: Uint8Array): {
+  readonly fileUri: string;
+  readonly credits?: string;
+} {
   const value = parseJsonObject(body);
   if (!Array.isArray(value.candidates) || value.candidates.length !== 1) {
     throw new ViduRuntimeError('invalid_response', 'unknown');
@@ -472,7 +495,48 @@ function parseGeminiFileUri(body: Uint8Array): string {
   if (fileUris.length !== 1) {
     throw new ViduRuntimeError('invalid_response', 'unknown');
   }
-  return fileUris[0];
+  return {
+    fileUri: fileUris[0],
+    ...parseCreditAmount(value)
+  };
+}
+
+function parseCreditAmount(
+  value: Record<string, unknown>
+): { readonly credits?: string } {
+  const raw = firstCreditCandidate([
+    value.credits,
+    value.credit,
+    value.credit_amount,
+    recordValue(value.usage, 'credits'),
+    recordValue(value.usage, 'credit'),
+    recordValue(value.usage, 'credit_amount')
+  ]);
+  if (raw === undefined) return {};
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return { credits: String(raw) };
+  }
+  if (typeof raw === 'string' && /^(0|[1-9]\d*)(\.\d+)?$/u.test(raw.trim())) {
+    return { credits: raw.trim() };
+  }
+  throw new ViduRuntimeError('invalid_response', 'unknown');
+}
+
+function firstCreditCandidate(values: readonly unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function creditFact(quantity: string): UsageFactV1 {
+  return {
+    metricId: 'credit_amount',
+    quantity,
+    unit: 'credit',
+    source: 'provider_body'
+  };
 }
 
 function parseJsonObject(body: Uint8Array): Record<string, unknown> {

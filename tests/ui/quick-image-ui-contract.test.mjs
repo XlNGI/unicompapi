@@ -82,6 +82,7 @@ test('quick image synchronously blocks duplicate one-shot submissions', () => {
   const end = featurePanelSource.indexOf('\n  return (', start);
   const oneShot = featurePanelSource.slice(start, end);
   assert.match(oneShot, /if \(busyRef\.current\) return/);
+  assert.match(oneShot, /if \(!parameterValidation\.valid\) \{[\s\S]*?showGenerationError\(/);
   assert.match(oneShot, /busyRef\.current = true;[\s\S]*api\.generateQuickImage\(/);
   assert.match(oneShot, /finally \{[\s\S]*busyRef\.current = false;/);
 });
@@ -102,7 +103,10 @@ test('quick image autosave coalesces edits behind one in-flight save', () => {
   assert.match(autosaveSource, /private pending\?/);
   assert.match(autosaveSource, /snapshot: this\.options\.rebase\(pending\.snapshot, result\.value\)/);
   assert.doesNotMatch(featurePanelSource, /draftRef\.current !== snapshot/);
-  assert.match(featurePanelSource, /if \(needsSave\) \{[\s\S]*setLoadState\('idle'\);[\s\S]*return;/);
+  const needsSaveBlock = featurePanelSource.match(/if \(needsSave\) \{[\s\S]*?return;\s*\}/)?.[0];
+  assert.ok(needsSaveBlock, 'autosave guard is missing');
+  assert.doesNotMatch(needsSaveBlock, /setLoadState\(/);
+  assert.doesNotMatch(needsSaveBlock, /setCandidates\(\[\]\)/);
 });
 
 test('quick image keeps input, model, and result areas in workflow order', () => {

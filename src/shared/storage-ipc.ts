@@ -12,8 +12,11 @@ export const storageIpcChannels = {
   localStorageChanged: 'storage:local-storage-changed',
   listTasks: 'storage:list-tasks',
   getTaskDetails: 'storage:get-task-details',
+  getTaskTimeline: 'storage:get-task-timeline',
+  listGenerationHistory: 'storage:list-generation-history',
   listCallRecords: 'storage:list-call-records',
   getCallDetails: 'storage:get-call-details',
+  getConsumptionSummary: 'storage:get-consumption-summary',
   listWorks: 'storage:list-works',
   getWorkDetails: 'storage:get-work-details',
   createWorkMediaHandle: 'storage:create-work-media-handle',
@@ -175,6 +178,95 @@ export interface StorageCallRecordListDto {
   readonly issues: readonly StorageReadModelIssueDto[];
 }
 
+export interface StorageTaskTimelineDto {
+  readonly items: readonly StorageCallDetailsDto[];
+  readonly issues: readonly StorageReadModelIssueDto[];
+}
+
+export type StorageGenerationHistoryItemDto =
+  | {
+      readonly kind: 'work';
+      readonly workId: string;
+      readonly projectId: string;
+      readonly name: string;
+      readonly mediaKind: 'image' | 'video';
+      readonly sourceTaskId: string;
+      readonly createdAt: string;
+      readonly verifiedAt: string;
+    }
+  | {
+      readonly kind: 'status';
+      readonly taskId: string;
+      readonly state: string;
+      readonly createdAt: string;
+      readonly occurredAt: string;
+    };
+
+export interface StorageGenerationHistoryPageDto {
+  readonly items: readonly StorageGenerationHistoryItemDto[];
+  readonly nextCursor?: string;
+  readonly issues: readonly StorageReadModelIssueDto[];
+}
+
+export interface StorageConsumptionSummaryRequestDto {
+  readonly calendarDays?: number;
+}
+
+export interface StorageConsumptionTimeBucketDto {
+  readonly date: string;
+  readonly amount: string;
+  readonly callCount: number;
+}
+
+export interface StorageConsumptionProviderSliceDto {
+  readonly key: string;
+  readonly providerId?: string;
+  readonly label: string;
+  readonly amount: string;
+  readonly callCount: number;
+  readonly ratioBasisPoints: number;
+  readonly isOther: boolean;
+}
+
+export interface StorageConsumptionPendingCurrencyDto {
+  readonly currencyCode: string;
+  readonly callCount: number;
+}
+
+export interface StorageConsumptionConversionSourceDto {
+  readonly sourceCurrencyCode: string;
+  readonly targetCurrencyCode: 'CNY';
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+}
+
+export interface StorageConsumptionSummaryDto {
+  readonly currencyCode: 'CNY';
+  readonly currencyLabel: '人民币';
+  readonly period: {
+    readonly startDate: string;
+    readonly endDate: string;
+    readonly calendarDays: number;
+    readonly timeZone: 'UTC';
+  };
+  readonly totalAmount: string;
+  readonly totalCallCount: number;
+  readonly successfulCallCount: number;
+  readonly pricedCallCount: number;
+  readonly includedCallCount: number;
+  readonly pendingConversionCallCount: number;
+  readonly missingPricingRuleCount: number;
+  readonly missingUsageCount: number;
+  readonly invalidFeeCount: number;
+  readonly timeBuckets: readonly StorageConsumptionTimeBucketDto[];
+  readonly providerSlices: readonly StorageConsumptionProviderSliceDto[];
+  readonly pendingCurrencies: readonly StorageConsumptionPendingCurrencyDto[];
+  readonly conversionSources: readonly StorageConsumptionConversionSourceDto[];
+  readonly issues: readonly StorageReadModelIssueDto[];
+  readonly disclaimer: 'local_estimate_not_provider_bill';
+}
+
 export type StorageCallSubjectDto =
   | {
       readonly kind: 'media';
@@ -212,6 +304,41 @@ export interface StorageCallUsageDto {
   readonly calculatedAt: string;
 }
 
+export type StorageCallPricingStrategy =
+  | 'credit'
+  | 'provider_unit'
+  | 'provider_billing'
+  | 'token_split'
+  | 'video_token'
+  | 'image_count'
+  | 'video_second';
+
+export interface StorageCallPricingRateDto {
+  readonly metricId: string;
+  readonly amount: string;
+  readonly unit: string;
+  readonly scale?: string;
+  readonly label?: string;
+}
+
+export interface StorageCallOfficialPricingRuleDto {
+  readonly strategy: StorageCallPricingStrategy;
+  readonly currencyCode: string;
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+  readonly rates: readonly StorageCallPricingRateDto[];
+}
+
+export interface StorageCallOfficialUnitPriceDto {
+  readonly amount: string;
+  readonly currencyCode: string;
+  readonly creditUnit: string;
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+}
+
 export interface StorageCallLocalResultDto {
   readonly mediaKind: 'image' | 'video' | 'text';
   readonly outputCount: number;
@@ -234,6 +361,8 @@ export interface StorageCallDetailsDto extends StorageCallRecordSummaryDto {
   readonly subject: StorageCallSubjectDto;
   readonly timeline: readonly StorageCallTimelineEventDto[];
   readonly usage: StorageCallUsageDto;
+  readonly officialPricingRule?: StorageCallOfficialPricingRuleDto;
+  readonly officialUnitPrice?: StorageCallOfficialUnitPriceDto;
   readonly localResults: readonly StorageCallLocalResultDto[];
   readonly resultRegistration: StorageCallResultRegistrationDto;
 }
@@ -297,12 +426,27 @@ export interface StorageApi {
   getTaskDetails(
     taskId: string
   ): Promise<StorageIpcResult<StorageTaskDetailsDto | undefined>>;
+  getTaskTimeline(
+    projectId: string,
+    taskId: string
+  ): Promise<StorageIpcResult<StorageTaskTimelineDto>>;
+  listGenerationHistory(request: {
+    readonly projectId: string;
+    readonly draftId: string;
+    readonly mediaKind: 'image' | 'video';
+    readonly cursor?: string;
+    readonly limit?: number;
+  }): Promise<StorageIpcResult<StorageGenerationHistoryPageDto>>;
   listCallRecords(
     filter?: StorageCallRecordFilterDto
   ): Promise<StorageIpcResult<StorageCallRecordListDto>>;
   getCallDetails(
+    projectId: string,
     invocationAttemptId: string
   ): Promise<StorageIpcResult<StorageCallDetailsDto | undefined>>;
+  getConsumptionSummary(
+    request?: StorageConsumptionSummaryRequestDto
+  ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>>;
   listWorks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageWorkSummaryDto>>
   >;
@@ -310,7 +454,8 @@ export interface StorageApi {
     workId: string
   ): Promise<StorageIpcResult<StorageWorkDetailsDto | undefined>>;
   createWorkMediaHandle(
-    workId: string
+    workId: string,
+    projectId?: string
   ): Promise<StorageIpcResult<StorageLocalMediaHandleDto>>;
   revealWorkFile(
     workId: string

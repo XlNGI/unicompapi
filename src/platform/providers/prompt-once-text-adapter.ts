@@ -39,10 +39,12 @@ import {
   NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   NEWAPI_TEXT_CONSTRAINT_SET_ID,
+  UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
   matchOpenAiCompatiblePackage,
   mapNewApiUsage,
   newApiChatUsageSchema,
   newApiDefaultTextReasoningParameterSchema,
+  uniCompApiTextReasoningParameterSchema,
   type NewApiSharedRuntime
 } from './newapi';
 import {
@@ -173,12 +175,16 @@ export function validatePromptOnceRoute(value: unknown): ProviderExecutionRouteS
     (!openAiIdentityMatches ||
       route.adapterKey !== NEWAPI_CHAT_ADAPTER_ID ||
       route.adapterVersion !== NEWAPI_ADAPTER_VERSION ||
-      route.parameterSchemaId !== (route.providerModelKey === 'kimi-k3'
-        ? KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID
-        : NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID) ||
-      route.parameterSchemaRevision !== (route.providerModelKey === 'kimi-k3'
-        ? kimiK3TextReasoningParameterSchema.revision
-        : newApiDefaultTextReasoningParameterSchema.revision) ||
+      route.parameterSchemaId !== (route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID
+        ? UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID
+        : route.providerModelKey === 'kimi-k3'
+          ? KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID
+          : NEWAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID) ||
+      route.parameterSchemaRevision !== (route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID
+        ? uniCompApiTextReasoningParameterSchema.revision
+        : route.providerModelKey === 'kimi-k3'
+          ? kimiK3TextReasoningParameterSchema.revision
+          : newApiDefaultTextReasoningParameterSchema.revision) ||
       route.resultSchemaId !== NEWAPI_CHAT_RESULT_SCHEMA_ID ||
       route.resultSchemaRevision !== 1 ||
       route.usageSchemaId !== NEWAPI_CHAT_USAGE_SCHEMA_ID ||
@@ -368,9 +374,11 @@ export function parsePromptOnceCompletion(
 function parameterSchema(route: ProviderExecutionRouteSnapshotV1): ParameterSchemaV2 {
   const schema = route.packageId === DEEPSEEK_PROVIDER_PACKAGE_ID
     ? deepSeekReasoningParameterSchema
-    : route.providerModelKey === 'kimi-k3'
-      ? kimiK3TextReasoningParameterSchema
-      : newApiDefaultTextReasoningParameterSchema;
+    : route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID
+      ? uniCompApiTextReasoningParameterSchema
+      : route.providerModelKey === 'kimi-k3'
+        ? kimiK3TextReasoningParameterSchema
+        : newApiDefaultTextReasoningParameterSchema;
   if (schema.schemaId !== route.parameterSchemaId || schema.revision !== route.parameterSchemaRevision) {
     throw new PromptOnceTextAdapterError(
       'prompt_once.parameter_schema_unavailable',

@@ -18,7 +18,7 @@ test('image-to-video uses exactly one controlled image source', () => {
   assert.match(source, /selectMaterial\([\s\S]*'image'/);
   assert.match(source, /draft\.imageToVideo\.source/);
   assert.match(source, /恰好一张受控图片/);
-  assert.doesNotMatch(source, /首帧|尾帧|主体参考|acceptedMediaKinds/);
+  assert.doesNotMatch(source, /尾帧|主体参考|acceptedMediaKinds/);
   assert.match(
     source,
     /uc-image-professional__prompt-input has-reference[\s\S]*ControlledImageDropZone/
@@ -35,6 +35,18 @@ test('image source selection stays inside controlled media APIs', () => {
     assert.match(source, new RegExp(`\\.${operation}\\(`));
   }
   assert.match(source, /selectMaterial\([\s\S]*createMaterialPreview\(/);
+  assert.match(
+    source,
+    /selectMaterial\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+  );
+  assert.match(
+    source,
+    /importMaterial\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+  );
+  assert.match(
+    source,
+    /clearMaterial\([\s\S]*?onDraftPersisted\(result\.value/
+  );
   assert.doesNotMatch(bundle, /absolutePath|remoteOperationId|upload\(|analy[sz]e\(|fetch\(/);
 });
 
@@ -96,4 +108,12 @@ test('image-to-video uses the unified feature panel and opens derived drafts', (
   assert.match(shell, /drafts\.find\(\(draft\) => draft\.draftId === selectedDraftId\)/);
   assert.match(shell, /usesFlowAutosave/);
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
+});
+
+test('image-to-video identifies and validates real required inputs locally', () => {
+  assert.match(source, /首帧图片必填/);
+  assert.match(source, /uc-dynamic-parameters__required.*必填/);
+  assert.match(panel, /draft\.mode === 'image_to_video' && !draft\.imageToVideo\.source/);
+  assert.match(panel, /首帧图片为必填项/);
+  assert.doesNotMatch(bundle, /可以提交/);
 });

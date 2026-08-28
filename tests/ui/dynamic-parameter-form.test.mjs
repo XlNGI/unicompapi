@@ -33,9 +33,13 @@ test('dynamic parameter form marks required fields visibly', () => {
   assert.match(source, /必填/);
   assert.match(source, /exposure === 'user_required'/);
   assert.match(source, /required=\{field\.required\}/);
+  assert.match(source, /validateDynamicParameterValues/);
+  assert.match(source, /onInputErrorChange/);
+  assert.match(source, /aria-invalid=\{Boolean\(error\)\}/);
+  assert.match(source, /dynamic-parameter-validation/);
 });
 
-test('displayParameterKey behavior matches the component helper', () => {
+test('displayParameterKey keeps unregistered contract keys visible', () => {
   const labels = {
     max_tokens: '最大生成长度',
     aspect_ratio: '画面比例',
@@ -45,21 +49,21 @@ test('displayParameterKey behavior matches the component helper', () => {
     const key = value
       .replace(/^provider\.parameter\./, '')
       .replace(/^provider\./, '');
-    return labels[key] ?? (/[\u3400-\u9fff]/.test(key) ? key : '其他参数');
+    return labels[key] ?? key;
   };
   assert.equal(displayParameterKey('provider.parameter.max_tokens'), '最大生成长度');
   assert.equal(displayParameterKey('provider.parameter.aspect_ratio'), '画面比例');
   assert.equal(displayParameterKey('duration'), '视频时长');
-  assert.equal(displayParameterKey('future_provider_key'), '其他参数');
+  assert.equal(displayParameterKey('future_provider_key'), 'future_provider_key');
 });
 
-test('dynamic enum values use Chinese labels while preserving submitted values', () => {
+test('dynamic enum values use Chinese labels while preserving unregistered values', () => {
   assert.match(source, /value: String\(option\)/);
   assert.match(source, /label: displayParameterOption\(option, index\)/);
   assert.match(source, /disabled: '关闭'/);
   assert.match(source, /high: '高'/);
   assert.match(source, /\\d\+x\\d\+/);
-  assert.match(source, /return `其他选项 \$\{index \+ 1\}`/);
+  assert.match(source, /return text;/);
 });
 
 test('dynamic parameter controls omit persistent state and move constraints into details', () => {

@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createLocalResultObservation,
   createProviderExecutionRouteSnapshot,
@@ -42,8 +42,10 @@ import {
   NodeProjectStorage,
   ProjectCatalogService,
   ProviderInvocationReadModelController,
-  ProviderUsageSchemaRegistry
+  ProviderUsageSchemaRegistry,
+  projectStoragePaths
 } from '../../src/platform';
+import { VIDU_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/vidu/vidu-contracts';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-08-03T10:00:00.000Z');
@@ -65,10 +67,18 @@ const usageSchema = createUsageSchema({
     aggregation: 'cumulative_latest',
     requiredForComplete: true,
     allowedStages: ['submit', 'poll', 'result']
+  }, {
+    metricId: 'credit_amount',
+    allowedUnits: ['credit'],
+    numericKind: 'decimal',
+    aggregation: 'cumulative_latest',
+    requiredForComplete: false,
+    allowedStages: ['submit', 'poll', 'result']
   }]
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) =>
     rm(root, { recursive: true, force: true })
   ));
@@ -137,9 +147,26 @@ describe('provider invocation read model controller', () => {
     });
   });
 
+  it('builds full call records only for the requested page after sorting candidates', async () => {
+    const fixture = await consumptionControllerFixture();
+    const result = await fixture.paged.listCallRecords({ limit: 1 });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        total: 7,
+        offset: 0,
+        limit: 1,
+        items: [{ invocationAttemptId: 'attempt-consumption-1' }]
+      }
+    });
+    expect(fixture.pagedSchemaResolveCount()).toBe(2);
+  });
+
   it('returns safe details with timeline, usage, local result facts and Work registration only', async () => {
     const fixture = await controllerFixture();
     const result = await fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'attempt-media-call'
     });
     expect(result).toMatchObject({
@@ -187,15 +214,60 @@ describe('provider invocation read model controller', () => {
       /routeSnapshot|packageId|adapterKey|endpoint|credential|runtimePolicy|authorization|sourceEventKey|observationId|remoteOperation|prompt|absolutePath|contentHash/i
     );
     await expect(fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'missing-attempt'
     })).resolves.toEqual({ ok: true, value: undefined });
     await expect(fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'attempt-media-call',
       extra: true
     })).resolves.toMatchObject({
       ok: false,
       error: { code: 'invalid_request' }
     });
+  });
+
+  it('returns one project-scoped task timeline query with one read per fact file', async () => {
+    const fixture = await controllerFixture();
+    const reads = new Map<string, number>();
+    const original = NodeProjectStorage.prototype.readJsonWithBackup;
+    vi.spyOn(NodeProjectStorage.prototype, 'readJsonWithBackup')
+      .mockImplementation(async function (this: NodeProjectStorage, relativePath, parse) {
+        const key = String(relativePath);
+        reads.set(key, (reads.get(key) ?? 0) + 1);
+        return original.call(this, relativePath, parse);
+      });
+
+    await expect(fixture.controller.getTaskTimeline({
+      projectId: fixture.mediaProjectId,
+      taskId: 'task-media-call'
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{ invocationAttemptId: 'attempt-media-call' }],
+        issues: []
+      }
+    });
+
+    for (const path of [
+      projectStoragePaths.entities.providerInvocations,
+      projectStoragePaths.entities.providerExecutionRouteSnapshots,
+      projectStoragePaths.entities.providerUsageObservations,
+      projectStoragePaths.entities.localResultObservations,
+      projectStoragePaths.entities.works
+    ]) expect(reads.get(path)).toBe(1);
+  });
+
+  it('fails task and call lookups closed for forged project scope', async () => {
+    const fixture = await controllerFixture();
+    await expect(fixture.controller.getTaskTimeline({
+      projectId: 'project-forged',
+      taskId: 'task-media-call'
+    })).resolves.toEqual({ ok: true, value: { items: [], issues: [] } });
+    await expect(fixture.controller.getCallDetails({
+      projectId: 'project-forged',
+      invocationAttemptId: 'attempt-media-call'
+    })).resolves.toEqual({ ok: true, value: undefined });
   });
 
   it('does not interpret recorded usage without its exact schema and keeps no-observation calls readable', async () => {
@@ -213,6 +285,7 @@ describe('provider invocation read model controller', () => {
       }
     });
     await expect(fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'attempt-media-call'
     })).resolves.toMatchObject({
       ok: false,
@@ -221,7 +294,224 @@ describe('provider invocation read model controller', () => {
     expect(() => new ProviderUsageSchemaRegistry([usageSchema, usageSchema]))
       .toThrow('unique');
   });
+
+  it('returns one controlled CNY summary without mixing currencies or exposing conversion rates', async () => {
+    const fixture = await consumptionControllerFixture();
+    const reads = { count: 0 };
+    const original = NodeProjectStorage.prototype.readJsonWithBackup;
+    vi.spyOn(NodeProjectStorage.prototype, 'readJsonWithBackup')
+      .mockImplementation(async function (this: NodeProjectStorage, relativePath, parse) {
+        reads.count += 1;
+        return original.call(this, relativePath, parse);
+      });
+    const [pending, duplicatePending] = await Promise.all([
+      fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 }),
+      fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 })
+    ]);
+    expect(duplicatePending).toEqual(pending);
+    const cachedReadCount = reads.count;
+    await fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(reads.count).toBe(cachedReadCount);
+    fixture.withoutConversion.invalidate();
+    await fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(reads.count).toBeGreaterThan(cachedReadCount);
+    expect(pending).toMatchObject({
+      ok: true,
+      value: {
+        currencyCode: 'CNY',
+        currencyLabel: '人民币',
+        totalAmount: '0',
+        totalCallCount: 7,
+        successfulCallCount: 7,
+        pricedCallCount: 7,
+        includedCallCount: 0,
+        pendingConversionCallCount: 7,
+        pendingCurrencies: [{ currencyCode: 'USD', callCount: 7 }],
+        conversionSources: [],
+        timeBuckets: expect.arrayContaining([
+          { date: '2026-08-03', amount: '0', callCount: 0 }
+        ]),
+        disclaimer: 'local_estimate_not_provider_bill'
+      }
+    });
+
+    const converted = await fixture.withConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(converted).toMatchObject({
+      ok: true,
+      value: {
+        totalAmount: '2.8',
+        includedCallCount: 7,
+        pendingConversionCallCount: 0,
+        pendingCurrencies: [],
+        conversionSources: [{
+          sourceCurrencyCode: 'USD',
+          targetCurrencyCode: 'CNY',
+          sourceTitle: 'Synthetic approved conversion',
+          sourceCheckedAt: '2026-08-03'
+        }],
+        timeBuckets: expect.arrayContaining([
+          { date: '2026-08-03', amount: '2.8', callCount: 7 }
+        ])
+      }
+    });
+    if (!converted.ok) throw new TypeError('Expected summary');
+    expect(converted.value.timeBuckets).toHaveLength(7);
+    expect(converted.value.providerSlices).toHaveLength(6);
+    expect(converted.value.providerSlices.find((item) => item.key === 'other')).toMatchObject({
+      label: '其他',
+      amount: '0.3',
+      callCount: 2,
+      isOther: true
+    });
+    expect(converted.value.providerSlices.map((item) => item.key).filter((key) => key !== 'other'))
+      .toHaveLength(5);
+    expect(converted.value.providerSlices.reduce(
+      (sum, item) => sum + item.ratioBasisPoints,
+      0
+    )).toBe(10_000);
+    expect(JSON.stringify(converted)).not.toMatch(
+      /"rate"|routeSnapshot|packageId|adapterKey|endpoint|credential|runtimePolicy|authorization/i
+    );
+
+    await expect(fixture.withConversion.getConsumptionSummary({ calendarDays: 32 }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    await expect(fixture.withConversion.getConsumptionSummary({ calendarDays: 7, extra: true }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    await expect(fixture.invalidConversion.getConsumptionSummary({ calendarDays: 7 }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'read_model_failed' } });
+  });
 });
+
+async function consumptionControllerFixture() {
+  const root = await makeRoot('unicomp-consumption-summary-');
+  const projectId = toProjectId('project-consumption-summary');
+  await createConsumptionCalls(root, projectId);
+  const catalog = new ProjectCatalogService(
+    new InMemoryProjectCatalogStore(),
+    () => t5
+  );
+  await catalog.remember({
+    projectId,
+    projectName: 'Consumption project',
+    rootDirectory: root
+  });
+  const conversions = {
+    async listApprovedFacts() {
+      return [{
+        sourceCurrencyCode: 'USD',
+        targetCurrencyCode: 'CNY' as const,
+        rate: '1',
+        sourceTitle: 'Synthetic approved conversion',
+        sourceUrl: 'https://example.com/conversion-fact',
+        sourceCheckedAt: '2026-08-03'
+      }];
+    }
+  };
+  const now = () => new Date('2026-08-05T12:00:00.000Z');
+  const schemaRegistry = new ProviderUsageSchemaRegistry([usageSchema]);
+  let pagedSchemaResolveCount = 0;
+  return {
+    paged: new ProviderInvocationReadModelController(catalog, {
+      async resolve(input) {
+        pagedSchemaResolveCount += 1;
+        return schemaRegistry.resolve(input);
+      }
+    }),
+    pagedSchemaResolveCount: () => pagedSchemaResolveCount,
+    withoutConversion: new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      undefined,
+      now
+    ),
+    withConversion: new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      conversions,
+      now
+    ),
+    invalidConversion: new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      {
+        async listApprovedFacts() {
+          return [{
+            ...(await conversions.listApprovedFacts())[0]!,
+            sourceUrl: 'https://example.com/conversion-fact?token=not-allowed'
+          }];
+        }
+      },
+      now
+    )
+  };
+}
+
+async function createConsumptionCalls(root: string, projectId: ProjectId): Promise<void> {
+  const context = callContext(root, projectId);
+  const creditQuantities = ['20', '40', '60', '80', '100', '120', '140'];
+  for (const [index, creditQuantity] of creditQuantities.entries()) {
+    const suffix = `consumption-${index + 1}`;
+    const route = {
+      ...routeSnapshot(projectId, suffix, 'text_to_video', t0, {
+        providerDisplayName: 'Same Provider',
+        connectionDisplayName: `Connection ${index + 1}`,
+        modelDisplayName: `Model ${index + 1}`
+      }),
+      packageId: VIDU_PROVIDER_PACKAGE_ID
+    };
+    await context.routes.save(route);
+    const attempt = createProviderInvocationAttempt({
+      id: toProviderInvocationAttemptId(`attempt-${suffix}`),
+      projectId,
+      subject: {
+        kind: 'media',
+        taskId: toTaskId(`task-${suffix}`),
+        executionId: toExecutionId(`execution-${suffix}`)
+      },
+      routeSnapshotId: route.id,
+      createdAt: t0
+    });
+    await context.invocations.create(
+      attempt,
+      invocationEvent(attempt.id, 1, 'submission_started', t0)
+    );
+    await context.invocations.appendEvent(invocationEvent(
+      attempt.id,
+      2,
+      'provider_accepted',
+      t1
+    ));
+    await context.invocations.appendEvent(invocationEvent(
+      attempt.id,
+      3,
+      'result_received',
+      t2
+    ));
+    await context.invocations.appendEvent(invocationEvent(
+      attempt.id,
+      4,
+      'completed',
+      t3
+    ));
+    await context.usage.append(createProviderUsageObservation({
+      id: toProviderUsageObservationId(`usage-${suffix}`),
+      invocationAttemptId: attempt.id,
+      usageSchemaId: usageSchema.id,
+      usageSchemaRevision: usageSchema.revision,
+      sourceEventKey: `usage-${suffix}`,
+      sequence: 1,
+      status: 'reported',
+      sourceStage: 'result',
+      facts: [{
+        metricId: 'credit_amount',
+        quantity: creditQuantity,
+        unit: 'credit',
+        source: 'provider_body'
+      }],
+      observedAt: t2
+    }, usageSchema), usageSchema);
+  }
+}
 
 async function controllerFixture(withUsageSchema = true) {
   const mediaRoot = await makeRoot('unicomp-call-media-');

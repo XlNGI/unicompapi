@@ -316,10 +316,27 @@ describe('GlobalReadModelController', () => {
 
     await new JsonExecutionRepository(storage).save({
       ...execution,
+      failure: {
+        stage: 'remote_completed',
+        message: 'Temporary image result discovery failure',
+        retryability: 'retryable'
+      },
+      updatedAt: toIsoTimestamp('2026-08-11T08:02:30.000Z')
+    });
+    openController.invalidate();
+    await expect(openController.getTaskDetails({ taskId: task.id }))
+      .resolves.toMatchObject({
+        ok: true,
+        value: { canRecoverImageResult: true }
+      });
+
+    await new JsonExecutionRepository(storage).save({
+      ...execution,
       state: 'remote_completed',
       failure: undefined,
       updatedAt: toIsoTimestamp('2026-08-11T08:03:00.000Z')
     });
+    openController.invalidate();
     await expect(openController.getTaskDetails({ taskId: task.id }))
       .resolves.toMatchObject({
         ok: true,

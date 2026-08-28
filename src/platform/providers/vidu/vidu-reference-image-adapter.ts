@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type {
   DynamicParameterValue,
   ProviderConnection,
-  ProviderSubmitOutcome
+  ProviderSubmitOutcome,
+  UsageFactV1
 } from '../../../domain';
 import type {
   ProviderProtocolSubmitPort,
@@ -15,7 +16,8 @@ import {
 import type {
   ViduAdapterRequestControl,
   ViduConnectionPort,
-  ViduImageAdapterDependencies
+  ViduImageAdapterDependencies,
+  ViduImageSubmitOutcome
 } from './vidu-image-adapters';
 import { ViduRuntimeError } from './vidu-runtime-errors';
 import type { ViduSharedRuntime } from './vidu-shared-runtime';
@@ -36,7 +38,7 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
   async submit(
     request: ProviderProtocolSubmitRequest,
     control: ViduAdapterRequestControl = {}
-  ): Promise<ProviderSubmitOutcome> {
+  ): Promise<ViduImageSubmitOutcome> {
     const providerOperationId = this.createOperationId();
     let requestStarted = false;
     try {
@@ -106,7 +108,7 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
         }
       });
       const taskId = parseTaskId(createResponse.body);
-      const resultUrl = await this.pollForImageUrl(
+      const result = await this.pollForImageResult(
         connection,
         request,
         taskId,
@@ -115,19 +117,20 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
       return {
         kind: 'completed_sync',
         providerOperationId: taskId || providerOperationId,
-        results: [{ kind: 'remote_url', value: resultUrl }]
+        results: [{ kind: 'remote_url', value: result.url }],
+        ...(result.credits ? { usageFacts: [creditFact(result.credits)] } : {})
       };
     } catch (error) {
       return mapSubmitFailure(error, providerOperationId, requestStarted);
     }
   }
 
-  private async pollForImageUrl(
+  private async pollForImageResult(
     connection: ProviderConnection,
     request: ProviderProtocolSubmitRequest,
     taskId: string,
     signal?: AbortSignal
-  ): Promise<string> {
+  ): Promise<{ readonly url: string; readonly credits?: string }> {
     let delayMs = initialPollDelayMs;
     for (let attempt = 0; attempt < maximumPollAttempts; attempt += 1) {
       if (signal?.aborted) {
@@ -147,7 +150,10 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
         if (!parsed.url) {
           throw new ViduRuntimeError('invalid_response', 'unknown');
         }
-        return parsed.url;
+        return {
+          url: parsed.url,
+          ...(parsed.credits ? { credits: parsed.credits } : {})
+        };
       }
       if (parsed.state === 'failed') {
         throw new ViduReferenceImageAdapterError(
@@ -349,6 +355,7 @@ function parseTaskId(body: Uint8Array): string {
 function parseTaskResponse(body: Uint8Array): {
   readonly state: 'created' | 'queueing' | 'processing' | 'success' | 'failed';
   readonly url?: string;
+  readonly credits?: string;
 } {
   const value = parseJsonObject(body);
   const state = value.state;
@@ -384,7 +391,51 @@ function parseTaskResponse(body: Uint8Array): {
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
     throw new ViduRuntimeError('invalid_response', 'not_retryable');
   }
-  return { state: 'success', url: parsed.toString() };
+  return {
+    state: 'success',
+    url: parsed.toString(),
+    ...parseCreditAmount(value)
+  };
+}
+
+function parseCreditAmount(
+  value: Record<string, unknown>
+): { readonly credits?: string } {
+  const raw = firstCreditCandidate([
+    value.credits,
+    value.credit,
+    value.credit_amount,
+    recordValue(value.usage, 'credits'),
+    recordValue(value.usage, 'credit'),
+    recordValue(value.usage, 'credit_amount')
+  ]);
+  if (raw === undefined) return {};
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return { credits: String(raw) };
+  }
+  if (typeof raw === 'string' && /^(0|[1-9]\d*)(\.\d+)?$/u.test(raw.trim())) {
+    return { credits: raw.trim() };
+  }
+  throw new ViduRuntimeError('invalid_response', 'unknown');
+}
+
+function firstCreditCandidate(values: readonly unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function recordValue(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+function creditFact(quantity: string): UsageFactV1 {
+  return {
+    metricId: 'credit_amount',
+    quantity,
+    unit: 'credit',
+    source: 'provider_body'
+  };
 }
 
 function parseJsonObject(body: Uint8Array): Record<string, unknown> {

@@ -72,12 +72,6 @@ import {
   type ViduUsageObservationSinkPort
 } from './vidu';
 
-const noopUsage: NewApiImageUsageObservationSinkPort & ViduUsageObservationSinkPort = {
-  async append() {
-    return;
-  }
-};
-
 export interface ImageFeatureSubmissionRuntimes {
   readonly viduPackage: ViduProviderPackage;
   readonly newApiRuntime?: NewApiSharedRuntime;
@@ -86,6 +80,7 @@ export interface ImageFeatureSubmissionRuntimes {
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
   readonly materials: ControlledImageMaterialPort;
+  readonly usage: NewApiImageUsageObservationSinkPort & ViduUsageObservationSinkPort;
 }
 
 export function createImageFeatureSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
@@ -117,7 +112,7 @@ export function createImageFeatureDispatchBridge(
     routes,
     parameterSchemas: viduSchemas,
     materials: options.materials,
-    usage: noopUsage
+    usage: options.usage
   });
 
   const adapters: ProviderSubmissionAdapterPort[] = [
@@ -166,7 +161,7 @@ export function createImageFeatureDispatchBridge(
       connections,
       credentials,
       parameterSchemas,
-      noopUsage,
+      options.usage,
       options.newApiDownloads,
       undefined,
       undefined,

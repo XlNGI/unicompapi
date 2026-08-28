@@ -1,4 +1,5 @@
 import type { ParameterFieldSchemaV2, ParameterSchemaV2 } from '../../../domain';
+import { createViduModelContract } from '../vidu/vidu-contracts';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
 
 export const UNICOMPAPI_SEEDREAM_5_MODEL_KEY = 'doubao-seedream-5-0-260128';
@@ -8,6 +9,103 @@ export const UNICOMPAPI_QWEN_IMAGE_TEXT_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image.text_to_image.official';
 export const UNICOMPAPI_QWEN_IMAGE_REFERENCE_TO_IMAGE_PARAMETER_SCHEMA_ID =
   'parameters.unicompapi.qwen_image_edit_2509.reference_to_image.official';
+export const UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0_260128.text_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0_260128.image_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0_fast_260128.text_to_video.official';
+export const UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.doubao_seedance_2_0_fast_260128.image_to_video.official';
+export const UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.viduq3_turbo.image_to_video.official_mapping';
+export const UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.viduq3_turbo.text_to_video.official_mapping';
+export const UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.viduq3_pro.text_to_video.official_mapping';
+
+
+export const UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.text_chat.official';
+export const UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID =
+  'parameters.unicompapi.text_reasoning.official';
+
+function uniCompApiTextField(
+  fieldId: string,
+  valueType: ParameterFieldSchemaV2['valueType'],
+  order: number,
+  extra: Partial<ParameterFieldSchemaV2> = {}
+): ParameterFieldSchemaV2 {
+  return {
+    fieldId,
+    labelId: `provider.parameter.${fieldId}`,
+    groupId: 'provider.parameter.generation',
+    order,
+    valueType,
+    exposure: 'user_optional',
+    defaultPolicy: 'omit_use_provider_default',
+    required: false,
+    ...extra
+  };
+}
+
+/**
+ * UniCompAPI text chat parameters limited to the official OpenAI-compatible
+ * Chat Completions contract. Unverified vendor extensions (thinking, top_k,
+ * chat_template_kwargs, enable_thinking, metadata) are intentionally absent:
+ * UniCompAPI rejects request fields that are not part of its public contract.
+ */
+export const uniCompApiTextChatParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_DEFAULT_TEXT_CHAT_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_chat',
+  fields: [
+    uniCompApiTextField('max_tokens', 'integer', 10, { minimum: 1, maximum: 128_000 }),
+    uniCompApiTextField('temperature', 'number', 20, { minimum: 0, maximum: 2 }),
+    uniCompApiTextField('top_p', 'number', 30, { minimum: 0, maximum: 1 }),
+    uniCompApiTextField('stop', 'string', 40),
+    uniCompApiTextField('n', 'integer', 50, { minimum: 1, maximum: 8 }),
+    uniCompApiTextField('presence_penalty', 'number', 60),
+    uniCompApiTextField('frequency_penalty', 'number', 70),
+    uniCompApiTextField('seed', 'integer', 80),
+    uniCompApiTextField('response_format', 'object', 90),
+    uniCompApiTextField('tool_choice', 'string', 100),
+    uniCompApiTextField('user', 'string', 110),
+    uniCompApiTextField('logit_bias', 'object', 120)
+  ]
+};
+
+/**
+ * UniCompAPI text reasoning parameters limited to the official
+ * Chat Completions contract (reasoning_effort + standard sampling fields).
+ * No thinking / chat_template_kwargs / enable_thinking / top_k: those are not
+ * part of the public UniCompAPI contract and are rejected by the gateway.
+ */
+export const uniCompApiTextReasoningParameterSchema: ParameterSchemaV2 = {
+  schemaVersion: 2,
+  schemaId: UNICOMPAPI_DEFAULT_TEXT_REASONING_PARAMETER_SCHEMA_ID,
+  revision: 1,
+  productFeature: 'text_reasoning',
+  fields: [
+    uniCompApiTextField('max_completion_tokens', 'integer', 10, {
+      minimum: 1,
+      maximum: 128_000
+    }),
+    uniCompApiTextField('reasoning_effort', 'enum', 20, {
+      options: ['low', 'medium', 'high']
+    }),
+    uniCompApiTextField('stop', 'string', 30),
+    uniCompApiTextField('n', 'integer', 40, { minimum: 1, maximum: 8 }),
+    uniCompApiTextField('presence_penalty', 'number', 50),
+    uniCompApiTextField('frequency_penalty', 'number', 60),
+    uniCompApiTextField('seed', 'integer', 70),
+    uniCompApiTextField('response_format', 'object', 80),
+    uniCompApiTextField('tool_choice', 'string', 90),
+    uniCompApiTextField('user', 'string', 100),
+    uniCompApiTextField('logit_bias', 'object', 110)
+  ]
+};
 
 /**
  * Seedream 5.0 lite image-generation parameters supported by the current
@@ -146,6 +244,117 @@ export const uniCompApiQwenImageReferenceToImageParameterSchema: ParameterSchema
 
 export type UniCompApiVideoFeature = 'text_to_video' | 'image_to_video';
 
+const seedance2RatioOptions = [
+  '21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'
+] as const;
+
+const seedance2DurationOptions = [
+  -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+] as const;
+
+/**
+ * Model-specific Seedance 2.0 controls verified against the Volcano Ark
+ * documentation on 2026-08-26. `model` and input `content` are the only
+ * required official API fields; all controls below are intentionally optional.
+ */
+function uniCompApiSeedance2VideoParameterSchema(
+  schemaId: string,
+  productFeature: UniCompApiVideoFeature,
+  resolutionOptions: readonly string[]
+): ParameterSchemaV2 {
+  return {
+    schemaVersion: 2,
+    schemaId,
+    revision: 1,
+    productFeature,
+    fields: [
+      qwenOptionalField('resolution', 'enum', 10, { options: resolutionOptions }),
+      qwenOptionalField('ratio', 'enum', 20, { options: seedance2RatioOptions }),
+      qwenOptionalField('duration', 'enum', 30, { options: seedance2DurationOptions }),
+      qwenOptionalField('frames', 'integer', 40, { minimum: 1 }),
+      qwenOptionalField('seed', 'integer', 50, { minimum: 0 }),
+      qwenOptionalField('camera_fixed', 'boolean', 60),
+      qwenOptionalField('watermark', 'boolean', 70),
+      qwenOptionalField('generate_audio', 'boolean', 80),
+      qwenOptionalField('return_last_frame', 'boolean', 90)
+    ]
+  };
+}
+
+export const uniCompApiSeedance2TextToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'text_to_video',
+    ['480p', '720p', '1080p', '4k']
+  );
+
+export const uniCompApiSeedance2ImageToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'image_to_video',
+    ['480p', '720p', '1080p', '4k']
+  );
+
+export const uniCompApiSeedance2FastTextToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_FAST_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'text_to_video',
+    ['480p', '720p']
+  );
+
+export const uniCompApiSeedance2FastImageToVideoParameterSchema =
+  uniCompApiSeedance2VideoParameterSchema(
+    UNICOMPAPI_SEEDANCE_2_FAST_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
+    'image_to_video',
+    ['480p', '720p']
+  );
+
+function mappedViduVideoParameterSchema(
+  providerModelKey: 'viduq3-turbo' | 'viduq3-pro',
+  productFeature: UniCompApiVideoFeature,
+  schemaId: string
+): ParameterSchemaV2 {
+  const official = createViduModelContract(providerModelKey).parameterSchemas.find(
+    (schema) => schema.productFeature === productFeature
+  );
+  if (!official) {
+    throw new TypeError('UniCompAPI Vidu mapping requires an exact official contract');
+  }
+  return {
+    ...official,
+    schemaId,
+    fields: official.fields.map((field) => ({
+      ...field,
+      ...(field.options ? { options: [...field.options] } : {})
+    }))
+  };
+}
+
+/**
+ * Exact UniCompAPI Vidu mappings reuse the official Vidu parameter semantics,
+ * while submission remains on the UniCompAPI /v1/videos gateway transport.
+ */
+export const uniCompApiViduQ3TurboImageToVideoParameterSchema =
+  mappedViduVideoParameterSchema(
+    'viduq3-turbo',
+    'image_to_video',
+    UNICOMPAPI_VIDUQ3_TURBO_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
+  );
+
+export const uniCompApiViduQ3TurboTextToVideoParameterSchema =
+  mappedViduVideoParameterSchema(
+    'viduq3-turbo',
+    'text_to_video',
+    UNICOMPAPI_VIDUQ3_TURBO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+  );
+
+export const uniCompApiViduQ3ProTextToVideoParameterSchema =
+  mappedViduVideoParameterSchema(
+    'viduq3-pro',
+    'text_to_video',
+    UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
+  );
+
 export type UniCompApiModelFeature =
   | 'text_chat'
   | 'text_reasoning'
@@ -186,8 +395,8 @@ const uniCompApiModelFeatureMap = new Map<string, readonly UniCompApiModelFeatur
   ['qwen-image-edit-2509', ['reference_to_image']],
   ['qwen3-235b-a22b', ['text_chat', 'text_reasoning']],
   ['qwen3-32b', ['text_chat', 'text_reasoning']],
-  ['viduq3', ['image_to_video']],
-  ['viduq3-mix', ['image_to_video']],
+  ['viduq3', []],
+  ['viduq3-mix', []],
   ['viduq3-pro', ['text_to_video']],
   ['viduq3-turbo', ['text_to_video', 'image_to_video']]
 ]);
@@ -199,6 +408,15 @@ export function isUniCompApiPackage(packageId: string): boolean {
 export function isUniCompApiDeepSeekModel(providerModelKey: string): boolean {
   return providerModelKey.startsWith('deepseek-') &&
     (uniCompApiModelFeatureMap.get(providerModelKey)?.includes('text_reasoning') ?? false);
+}
+
+/**
+ * Exact UniCompAPI DeepSeek V4 reasoning models that accept the official
+ * `reasoning_effort` field (low/medium/high, default medium). Older DeepSeek
+ * catalog models are not sent this field.
+ */
+export function isUniCompApiDeepSeekV4Model(providerModelKey: string): boolean {
+  return providerModelKey === 'deepseek-v4-flash' || providerModelKey === 'deepseek-v4-pro';
 }
 
 export function uniCompApiModelFeatures(
@@ -226,6 +444,31 @@ export function uniCompApiReferenceToImageParameterSchema(
     : undefined;
 }
 
+export function uniCompApiVideoParameterSchema(
+  providerModelKey: string,
+  feature: UniCompApiVideoFeature
+): ParameterSchemaV2 | undefined {
+  if (providerModelKey === 'doubao-seedance-2-0-260128') {
+    return feature === 'text_to_video'
+      ? uniCompApiSeedance2TextToVideoParameterSchema
+      : uniCompApiSeedance2ImageToVideoParameterSchema;
+  }
+  if (providerModelKey === 'doubao-seedance-2-0-fast-260128') {
+    return feature === 'text_to_video'
+      ? uniCompApiSeedance2FastTextToVideoParameterSchema
+      : uniCompApiSeedance2FastImageToVideoParameterSchema;
+  }
+  if (providerModelKey === 'viduq3-turbo') {
+    return feature === 'text_to_video'
+      ? uniCompApiViduQ3TurboTextToVideoParameterSchema
+      : uniCompApiViduQ3TurboImageToVideoParameterSchema;
+  }
+  if (providerModelKey === 'viduq3-pro' && feature === 'text_to_video') {
+    return uniCompApiViduQ3ProTextToVideoParameterSchema;
+  }
+  return undefined;
+}
+
 export function isKnownUniCompApiModel(providerModelKey: string): boolean {
   return uniCompApiModelFeatureMap.has(providerModelKey);
 }
@@ -237,10 +480,10 @@ export function uniCompApiSupportsFeature(
 ): boolean {
   if (!isUniCompApiPackage(packageId)) return true;
   const features = uniCompApiModelFeatures(providerModelKey);
-  // Preserve legacy manual-registration behavior for model keys that are not
-  // part of the current UniCompAPI catalog. Exact catalog keys are closed-
-  // world and only receive explicitly declared features.
-  return features === undefined ? true : features.includes(feature);
+  // Closed-world routing: only exact declared capabilities are routable.
+  // Unknown catalog or manual keys stay without any inferred profile until
+  // the capability table, schema and routing tests are explicitly extended.
+  return features === undefined ? false : features.includes(feature);
 }
 
 export function uniCompApiVideoFeatures(
@@ -252,11 +495,6 @@ export function uniCompApiVideoFeatures(
     (feature): feature is UniCompApiVideoFeature =>
       feature === 'text_to_video' || feature === 'image_to_video'
   );
-}
-
-export function isUniCompApiViduModel(providerModelKey: string): boolean {
-  return ['viduq3', 'viduq3-mix', 'viduq3-pro', 'viduq3-turbo']
-    .includes(providerModelKey);
 }
 
 export function uniCompApiSupportsText(

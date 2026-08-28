@@ -1,8 +1,14 @@
 import { stat, statfs } from 'node:fs/promises';
-import type { Execution, Task } from '../../domain';
-import { toTaskId, toWorkId } from '../../domain';
+import type { Execution, FileReference, Task, Work } from '../../domain';
+import {
+  canRecoverRemoteCompletedExecution,
+  toTaskId,
+  toWorkId
+} from '../../domain';
 import type {
   StorageIpcResult,
+  StorageGenerationHistoryItemDto,
+  StorageGenerationHistoryPageDto,
   StorageReadModelIssueDto,
   StorageReadModelListDto,
   StorageLocalStorageSummaryDto,
@@ -31,6 +37,10 @@ interface CurrentProjectStorageSession {
 export class GlobalReadModelController {
   private projectUsageCache: StorageLocalStorageSummaryDto['projectUsage'] | undefined;
   private projectUsageRevision = 0;
+  private readonly taskSnapshots = new Map<string, Promise<readonly Task[]>>();
+  private readonly executionSnapshots = new Map<string, Promise<readonly Execution[]>>();
+  private readonly workSnapshots = new Map<string, Promise<readonly Work[]>>();
+  private readonly fileSnapshots = new Map<string, Promise<readonly FileReference[]>>();
 
   constructor(
     private readonly catalog: ProjectCatalogService,
@@ -40,6 +50,14 @@ export class GlobalReadModelController {
   invalidateLocalStorageSummary(): void {
     this.projectUsageRevision += 1;
     this.projectUsageCache = undefined;
+  }
+
+  invalidate(): void {
+    this.invalidateLocalStorageSummary();
+    this.taskSnapshots.clear();
+    this.executionSnapshots.clear();
+    this.workSnapshots.clear();
+    this.fileSnapshots.clear();
   }
 
   async getLocalStorageSummary(): Promise<
@@ -66,6 +84,112 @@ export class GlobalReadModelController {
     }
   }
 
+  async listGenerationHistory(
+    request: unknown
+  ): Promise<StorageIpcResult<StorageGenerationHistoryPageDto>> {
+    let parsed: ParsedGenerationHistoryRequest;
+    try {
+      parsed = parseGenerationHistoryRequest(request);
+    } catch {
+      return invalidRequestFailure();
+    }
+
+    try {
+      const entry = (await this.catalog.getEntries()).find(
+        (candidate) => candidate.projectId === parsed.projectId
+      );
+      if (!entry) return { ok: true, value: { items: [], issues: [] } };
+      if (!(await isAvailable(entry))) {
+        return {
+          ok: true,
+          value: { items: [], issues: [toIssue(entry, 'unavailable')] }
+        };
+      }
+      try {
+        const [tasks, executions, works, files] = await Promise.all([
+          this.loadTasks(entry),
+          this.loadExecutions(entry),
+          this.loadWorks(entry),
+          this.loadFiles(entry)
+        ]);
+        const executionsByTaskId = groupExecutionsByTaskId(executions);
+        const relevantTasks = tasks.filter((task) =>
+          task.sourceDraftId === parsed.draftId &&
+          task.submission.kind === `${parsed.mediaKind}_generation`
+        );
+        const relevantTaskIds = new Set(relevantTasks.map((task) => task.id));
+        const executionById = new Map(executions.map((execution) => [execution.id, execution]));
+        const fileById = new Map(files.map((file) => [file.id, file]));
+        const items: StorageGenerationHistoryItemDto[] = [];
+
+        for (const task of relevantTasks) {
+          const linked = filterLinkedExecutions(
+            task,
+            executionsByTaskId.get(task.id) ?? []
+          );
+          const latest = [...linked].sort((left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt)
+          )[0];
+          if (latest && historyStatusStates.has(latest.state)) {
+            items.push({
+              kind: 'status',
+              taskId: task.id,
+              state: latest.state,
+              createdAt: task.createdAt,
+              occurredAt: latest.updatedAt
+            });
+          }
+        }
+
+        for (const work of works) {
+          if (
+            work.mediaKind !== parsed.mediaKind ||
+            !relevantTaskIds.has(work.sourceTaskId)
+          ) continue;
+          const execution = executionById.get(work.sourceExecutionId);
+          const file = fileById.get(work.fileId);
+          const verifiedAt = file?.lastVerification?.verifiedAt;
+          if (execution?.state !== 'completed' || file?.state !== 'available' || !verifiedAt) {
+            continue;
+          }
+          items.push({
+            kind: 'work',
+            workId: work.id,
+            projectId: entry.projectId,
+            name: work.name,
+            mediaKind: parsed.mediaKind,
+            sourceTaskId: work.sourceTaskId,
+            createdAt: work.createdAt,
+            verifiedAt
+          });
+        }
+
+        const sorted = items.sort(compareHistoryItems);
+        const afterCursor = parsed.cursor
+          ? sorted.filter((item) => compareHistoryItemToCursor(item, parsed.cursor!) > 0)
+          : sorted;
+        const pageItems = afterCursor.slice(0, parsed.limit);
+        return {
+          ok: true,
+          value: {
+            items: pageItems,
+            ...(afterCursor.length > parsed.limit && pageItems.length > 0
+              ? { nextCursor: encodeHistoryCursor(pageItems.at(-1)!) }
+              : {}),
+            issues: []
+          }
+        };
+      } catch {
+        return {
+          ok: true,
+          value: { items: [], issues: [toIssue(entry, 'invalid_data')] }
+        };
+      }
+    } catch {
+      return readFailure();
+    }
+  }
+
   async listTasks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageTaskSummaryDto>>
   > {
@@ -80,12 +204,15 @@ export class GlobalReadModelController {
         }
 
         try {
-          const context = createContext(entry);
-          const tasks = await context.tasks.list(entry.projectId);
+          const [tasks, executions] = await Promise.all([
+            this.loadTasks(entry),
+            this.loadExecutions(entry)
+          ]);
+          const executionsByTaskId = groupExecutionsByTaskId(executions);
           for (const task of tasks) {
             const executions = filterLinkedExecutions(
               task,
-              await context.executions.list(task.id)
+              executionsByTaskId.get(task.id) ?? []
             );
             items.push(toTaskSummary(entry, task, executions));
           }
@@ -115,17 +242,21 @@ export class GlobalReadModelController {
         if (!(await isAvailable(entry))) continue;
         try {
           const context = createContext(entry);
-          const task = await context.tasks.get(toTaskId(taskId));
+          const task = (await this.loadTasks(entry)).find(
+            (candidate) => candidate.id === toTaskId(taskId)
+          );
           if (!task) continue;
           const executions = filterLinkedExecutions(
             task,
-            await context.executions.list(task.id)
+            (await this.loadExecutions(entry)).filter(
+              (execution) => execution.taskId === task.id
+            )
           );
           const latest = [...executions].sort((a, b) =>
             b.updatedAt.localeCompare(a.updatedAt)
           )[0];
           const hasRegisteredImageWork = latest
-            ? (await context.works.list(entry.projectId)).some(
+            ? (await this.loadWorks(entry)).some(
                 (work) => work.sourceExecutionId === latest.id
               )
             : false;
@@ -181,12 +312,17 @@ export class GlobalReadModelController {
         }
 
         try {
-          const context = createContext(entry);
-          const works = await context.works.list(entry.projectId);
+          const [works, executions, files] = await Promise.all([
+            this.loadWorks(entry),
+            this.loadExecutions(entry),
+            this.loadFiles(entry)
+          ]);
+          const executionById = new Map(executions.map((execution) => [execution.id, execution]));
+          const fileById = new Map(files.map((file) => [file.id, file]));
           for (const work of works) {
-            const execution = await context.executions.get(work.sourceExecutionId);
+            const execution = executionById.get(work.sourceExecutionId);
             if (!execution || execution.state !== 'completed') continue;
-            const file = await context.files.get(work.fileId);
+            const file = fileById.get(work.fileId);
             if (!file) throw new TypeError('Work references a missing file record');
             items.push({
               workId: work.id,
@@ -225,14 +361,19 @@ export class GlobalReadModelController {
       for (const entry of await this.catalog.getEntries()) {
         if (!(await isAvailable(entry))) continue;
         try {
-          const context = createContext(entry);
-          const work = await context.works.get(toWorkId(workId));
+          const work = (await this.loadWorks(entry)).find(
+            (candidate) => candidate.id === toWorkId(workId)
+          );
           if (!work) continue;
-          const execution = await context.executions.get(work.sourceExecutionId);
+          const execution = (await this.loadExecutions(entry)).find(
+            (candidate) => candidate.id === work.sourceExecutionId
+          );
           if (!execution || execution.state !== 'completed') {
             return { ok: true, value: undefined };
           }
-          const file = await context.files.get(work.fileId);
+          const file = (await this.loadFiles(entry)).find(
+            (candidate) => candidate.id === work.fileId
+          );
           if (!file) return { ok: true, value: undefined };
           return {
             ok: true,
@@ -296,6 +437,177 @@ export class GlobalReadModelController {
     if (revision === this.projectUsageRevision) this.projectUsageCache = usage;
     return usage;
   }
+
+  private loadTasks(entry: ProjectCatalogEntry): Promise<readonly Task[]> {
+    return loadSnapshot(
+      this.taskSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).tasks.list(entry.projectId)
+    );
+  }
+
+  private loadExecutions(entry: ProjectCatalogEntry): Promise<readonly Execution[]> {
+    return loadSnapshot(
+      this.executionSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).executions.listAll()
+    );
+  }
+
+  private loadWorks(entry: ProjectCatalogEntry): Promise<readonly Work[]> {
+    return loadSnapshot(
+      this.workSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).works.list(entry.projectId)
+    );
+  }
+
+  private loadFiles(entry: ProjectCatalogEntry): Promise<readonly FileReference[]> {
+    return loadSnapshot(
+      this.fileSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).files.list(entry.projectId)
+    );
+  }
+}
+
+const MAX_PROJECT_SNAPSHOTS = 64;
+
+const historyStatusStates = new Set([
+  'submitting', 'queued', 'processing', 'validating_sources', 'preparing_media',
+  'encoding', 'remote_completed', 'downloading', 'writing', 'verifying',
+  'writing_file', 'verifying_file', 'registering_work', 'cancel_requested',
+  'submission_outcome_unknown', 'cancellation_unknown', 'needs_user_action',
+  'interrupted', 'recovery_required', 'failed', 'expired'
+]);
+
+interface HistoryCursor {
+  readonly createdAt: string;
+  readonly kind: StorageGenerationHistoryItemDto['kind'];
+  readonly id: string;
+}
+
+interface ParsedGenerationHistoryRequest {
+  readonly projectId: string;
+  readonly draftId: string;
+  readonly mediaKind: 'image' | 'video';
+  readonly cursor?: HistoryCursor;
+  readonly limit: number;
+}
+
+function parseGenerationHistoryRequest(value: unknown): ParsedGenerationHistoryRequest {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('Invalid history request');
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) =>
+    !['projectId', 'draftId', 'mediaKind', 'cursor', 'limit'].includes(key)
+  )) throw new TypeError('Invalid history request');
+  const projectId = requiredHistoryId(record.projectId);
+  const draftId = requiredHistoryId(record.draftId);
+  if (!['image', 'video'].includes(String(record.mediaKind))) {
+    throw new TypeError('Invalid history request');
+  }
+  const limit = record.limit === undefined ? 20 : Number(record.limit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+    throw new TypeError('Invalid history request');
+  }
+  return {
+    projectId,
+    draftId,
+    mediaKind: record.mediaKind as 'image' | 'video',
+    ...(record.cursor === undefined ? {} : { cursor: decodeHistoryCursor(record.cursor) }),
+    limit
+  };
+}
+
+function requiredHistoryId(value: unknown): string {
+  if (
+    typeof value !== 'string' || value.trim().length < 1 || value.length > 256 ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) throw new TypeError('Invalid history identifier');
+  return value.trim();
+}
+
+function historyItemCursor(item: StorageGenerationHistoryItemDto): HistoryCursor {
+  return {
+    createdAt: item.kind === 'work' ? item.createdAt : item.occurredAt,
+    kind: item.kind,
+    id: item.kind === 'work' ? item.workId : item.taskId
+  };
+}
+
+function compareHistoryItems(
+  left: StorageGenerationHistoryItemDto,
+  right: StorageGenerationHistoryItemDto
+): number {
+  return compareHistoryCursors(historyItemCursor(left), historyItemCursor(right));
+}
+
+function compareHistoryItemToCursor(
+  item: StorageGenerationHistoryItemDto,
+  cursor: HistoryCursor
+): number {
+  return compareHistoryCursors(historyItemCursor(item), cursor);
+}
+
+function compareHistoryCursors(left: HistoryCursor, right: HistoryCursor): number {
+  return right.createdAt.localeCompare(left.createdAt) ||
+    left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id);
+}
+
+function encodeHistoryCursor(item: StorageGenerationHistoryItemDto): string {
+  return Buffer.from(JSON.stringify(historyItemCursor(item)), 'utf8').toString('base64url');
+}
+
+function decodeHistoryCursor(value: unknown): HistoryCursor {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 1024) {
+    throw new TypeError('Invalid history cursor');
+  }
+  const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as HistoryCursor;
+  if (
+    typeof parsed !== 'object' || parsed === null ||
+    typeof parsed.createdAt !== 'string' || Number.isNaN(Date.parse(parsed.createdAt)) ||
+    !['work', 'status'].includes(parsed.kind) || typeof parsed.id !== 'string' ||
+    parsed.id.length < 1
+  ) throw new TypeError('Invalid history cursor');
+  return parsed;
+}
+
+function snapshotKey(entry: ProjectCatalogEntry): string {
+  return `${entry.projectId}\u0000${entry.rootDirectory}`;
+}
+
+function loadSnapshot<T>(
+  cache: Map<string, Promise<readonly T[]>>,
+  key: string,
+  load: () => Promise<readonly T[]>
+): Promise<readonly T[]> {
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const pending = load().catch((error: unknown) => {
+    cache.delete(key);
+    throw error;
+  });
+  cache.set(key, pending);
+  while (cache.size > MAX_PROJECT_SNAPSHOTS) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  return pending;
+}
+
+function groupExecutionsByTaskId(
+  executions: readonly Execution[]
+): ReadonlyMap<string, readonly Execution[]> {
+  const grouped = new Map<string, Execution[]>();
+  for (const execution of executions) {
+    const current = grouped.get(execution.taskId) ?? [];
+    current.push(execution);
+    grouped.set(execution.taskId, current);
+  }
+  return grouped;
 }
 
 function createContext(entry: ProjectCatalogEntry) {
@@ -375,9 +687,7 @@ function toTaskDetails(
 function canRecoverImageLocalReceipt(execution: Execution | undefined): boolean {
   if (!execution) return false;
   if (execution.state === 'remote_completed') return true;
-  return execution.state === 'failed' &&
-    ['downloading', 'writing'].includes(execution.failure?.stage ?? '') &&
-    execution.failure?.retryability !== 'not_retryable';
+  return canRecoverRemoteCompletedExecution(execution);
 }
 
 function filterLinkedExecutions(
@@ -437,5 +747,12 @@ function readFailure<T>(): StorageIpcResult<T> {
       code: 'read_model_failed',
       message: 'The local read model could not be loaded'
     }
+  };
+}
+
+function invalidRequestFailure<T>(): StorageIpcResult<T> {
+  return {
+    ok: false,
+    error: { code: 'invalid_request', message: 'The history request is invalid' }
   };
 }

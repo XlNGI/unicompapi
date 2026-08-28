@@ -5,6 +5,7 @@ import { EmptyState } from './EmptyState';
 export interface GenerationResultPreviewProps {
   readonly workId?: string;
   readonly mediaKind: 'image' | 'video';
+  readonly projectId?: string;
   readonly remoteUrls?: readonly string[];
   readonly emptyTitle?: string;
   readonly emptyDescription?: string;
@@ -22,6 +23,7 @@ export interface GenerationResultPreviewProps {
 export function GenerationResultPreview({
   workId,
   mediaKind,
+  projectId,
   remoteUrls = [],
   emptyTitle = '尚无真实生成结果',
   emptyDescription = '结果必须经过本地文件校验后才会登记为作品。',
@@ -44,7 +46,7 @@ export function GenerationResultPreview({
     let cancelled = false;
     setLocalUrl(undefined);
     setLocalError(undefined);
-    void storage.createWorkMediaHandle(workId).then((result) => {
+    void storage.createWorkMediaHandle(workId, projectId).then((result) => {
       if (cancelled) return;
       if (result.ok) {
         setLocalUrl(result.value.url);
@@ -57,7 +59,7 @@ export function GenerationResultPreview({
     return () => {
       cancelled = true;
     };
-  }, [storage, workId]);
+  }, [projectId, storage, workId]);
 
   if (loading) {
     return (
@@ -111,7 +113,7 @@ export function GenerationResultPreview({
         >
           {compact ? null : <strong>本地作品预览</strong>}
           {mediaKind === 'image' ? (
-            <img alt="生成结果预览" src={localUrl} />
+            <img alt="生成结果预览" decoding="async" src={localUrl} />
           ) : (
             <video controls playsInline preload="metadata" src={localUrl} />
           )}
@@ -133,7 +135,7 @@ export function GenerationResultPreview({
             </>
           )}
           {mediaKind === 'image' ? (
-            <img alt="生成结果预览" src={url} />
+            <img alt="生成结果预览" decoding="async" loading="lazy" src={url} />
           ) : (
             <video controls playsInline preload="metadata" src={url} />
           )}

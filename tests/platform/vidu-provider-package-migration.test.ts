@@ -41,6 +41,7 @@ import { createUserViduRegistryRecords } from '../fixtures/vidu-user-registry';
 import {
   SyntheticViduService,
   isoBmffVideo,
+  jsonResponse,
   pngBytes
 } from '../fixtures/vidu-synthetic-service';
 
@@ -330,6 +331,37 @@ describe('Vidu RouteSnapshot adapters', () => {
     });
   });
 
+  it('persists Vidu image response-body credits as provider usage facts', async () => {
+    const fixture = await routeFixture();
+    const imageV1Route = routeFor(fixture.snapshot, 'viduimage-2', 'text_to_image');
+    fixture.service.enqueue(
+      'POST',
+      '/ent/v1/images/generations',
+      jsonResponse(200, {
+        usage: { credit_amount: '2.75' },
+        data: [{
+          url: 'https://results.synthetic.invalid/generated.png?signature=private'
+        }]
+      })
+    );
+
+    await expect(fixture.adapters.imageV1.submit(imageV1Route, {
+      request: dispatchRequest(imageV1Route, false)
+    })).resolves.toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url' }]
+    });
+    expect(fixture.usage).toMatchObject([{
+      status: 'reported',
+      facts: [{
+        metricId: 'credit_amount',
+        quantity: '2.75',
+        unit: 'credit',
+        source: 'provider_body'
+      }]
+    }]);
+  });
+
   it('uses the captured route for video query, cancel, restart attach and result receipt', async () => {
     const fixture = await routeFixture();
     const route = routeFor(
@@ -393,6 +425,52 @@ describe('Vidu RouteSnapshot adapters', () => {
     )).toBe(true);
     expect(JSON.stringify({ usage: fixture.usage, requests: fixture.service.requests }))
       .not.toContain(syntheticCredentialValue);
+  });
+
+  it('persists Vidu response-body credits as provider usage facts', async () => {
+    const fixture = await routeFixture();
+    const route = routeFor(
+      fixture.snapshot,
+      'viduq3-turbo',
+      'image_to_video'
+    );
+    fixture.service.enqueue(
+      'GET',
+      '/ent/v2/tasks/synthetic-video-task/creations',
+      jsonResponse(200, {
+        state: 'success',
+        credits: '16.5',
+        creations: [{
+          id: 'synthetic-video-result',
+          url: 'https://results.synthetic.invalid/generated.mp4?signature=private'
+        }]
+      })
+    );
+
+    await fixture.adapters.referenceVideoV2.submit(route, {
+      request: dispatchRequest(route, true, { audio: false, duration: 3 })
+    });
+    await expect(fixture.adapters.referenceVideoV2.query(
+      route,
+      'synthetic-video-task'
+    )).resolves.toMatchObject({
+      state: 'completed',
+      usageFacts: [{
+        metricId: 'credit_amount',
+        quantity: '16.5',
+        unit: 'credit',
+        source: 'provider_body'
+      }]
+    });
+    expect(fixture.usage).toMatchObject([{
+      status: 'reported',
+      facts: [{
+        metricId: 'credit_amount',
+        quantity: '16.5',
+        unit: 'credit',
+        source: 'provider_body'
+      }]
+    }]);
   });
 });
 

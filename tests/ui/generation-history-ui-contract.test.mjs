@@ -28,13 +28,12 @@ test('professional image and video workspaces share one generation history compo
 });
 
 test('shared history accepts only current-draft verified local media works', () => {
-  assert.match(history, /task\.kind === `\$\{mediaKind\}_generation`/);
-  assert.match(history, /task\.sourceDraftId === draftId/);
-  assert.match(history, /work\.mediaKind === mediaKind/);
-  assert.match(history, /work\.fileState === 'available'/);
-  assert.match(history, /details\.value\?\.verifiedAt/);
-  assert.match(history, /taskIds\.has\(details\.value\.sourceTaskId\)/);
-  assert.match(history, /handle\.ok && handle\.value\.mediaKind === mediaKind/);
+  assert.match(history, /storage\.listGenerationHistory\(\{/);
+  assert.match(history, /projectId,/);
+  assert.match(history, /draftId,/);
+  assert.match(history, /mediaKind,/);
+  assert.match(history, /limit: 20/);
+  assert.doesNotMatch(history, /storage\.listTasks|storage\.listWorks|storage\.getTaskDetails|storage\.getWorkDetails/);
   assert.doesNotMatch(history, /remoteUrls|fetch\(|localStorage/);
 });
 
@@ -42,7 +41,10 @@ test('shared history supports image and video previews with stable selection', (
   assert.match(history, /mediaKind === 'image'/);
   assert.match(history, /<img/);
   assert.match(history, /<video/);
-  assert.match(history, /preload="metadata"/);
+  assert.match(history, /preload="none"/);
+  assert.match(history, /loading="lazy"/);
+  assert.match(history, /decoding="async"/);
+  assert.match(history, /IntersectionObserver/);
   assert.match(history, /setSelectedWorkId\(history\.works\[history\.works\.length - 1\]\?\.workId\)/);
   assert.match(history, /setSelectedWorkId\(node\.work\.workId\)/);
   assert.match(styles, /\.uc-generation-history\s*{[\s\S]*width: 100%;[\s\S]*height: 100%;/);

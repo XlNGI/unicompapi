@@ -40,6 +40,7 @@ import {
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
 import {
+  isUniCompApiDeepSeekV4Model,
   isUniCompApiPackage
 } from './unicompapi-model-capabilities';
 import {
@@ -942,9 +943,9 @@ function serializeRequest(
   }
   const modelKey = route.providerModelKey ?? '';
   const isUniCompApiDeepSeekV4 = isUniCompApiPackage(route.packageId) &&
-    (modelKey === 'deepseek-v4-flash' || modelKey === 'deepseek-v4-pro');
+    isUniCompApiDeepSeekV4Model(modelKey);
   const allowReasoningEffort = !modelKey.startsWith('deepseek-') ||
-    modelKey === 'deepseek-v4-flash' || modelKey === 'deepseek-v4-pro';
+    isUniCompApiDeepSeekV4Model(modelKey);
   const reasoningEffort = typeof parameters.reasoning_effort === 'string'
     ? parameters.reasoning_effort.trim()
     : '';
@@ -983,6 +984,9 @@ function serializeRequest(
     if (parameters[key] && typeof parameters[key] === 'object') {
       body[key] = parameters[key];
     }
+  }
+  if (parameters.logit_bias && typeof parameters.logit_bias === 'object') {
+    body.logit_bias = parameters.logit_bias;
   }
   if (modelKey.startsWith('qwen3-') && typeof parameters.enable_thinking === 'boolean') {
     body.enable_thinking = parameters.enable_thinking;

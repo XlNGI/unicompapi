@@ -3,6 +3,7 @@ import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
   createLocalResultObservation,
+  canRecoverRemoteCompletedExecution,
   recoverRemoteCompletedExecution,
   toDraftId,
   toIsoTimestamp,
@@ -10,6 +11,7 @@ import {
   toProviderOperationRecordId,
   toTaskId,
   transitionExecution,
+  type Execution,
   type FeatureCandidateSubjectV1,
   type SubmissionUserConfirmationV1
 } from '../../domain';
@@ -51,6 +53,7 @@ import {
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
   JsonProviderOperationRepository,
+  JsonProviderUsageObservationRepository,
   JsonTaskRepository,
   JsonWorkRepository
 } from '../repositories';
@@ -73,7 +76,7 @@ export interface ImageFeatureRuntimeOptions {
   readonly submissionAuthorization?: RuntimeAuthorizationOrchestrationPort;
   readonly imageSubmission?: Omit<
     ImageFeatureSubmissionRuntimes,
-    'providerRegistry' | 'providerPackages' | 'materials'
+    'providerRegistry' | 'providerPackages' | 'materials' | 'usage'
   > & {
     readonly viduPackage: ViduProviderPackage;
     readonly credentialVault: SecureCredentialVault;
@@ -103,6 +106,7 @@ export function createImageFeatureControllerRuntime(
   const works = new JsonWorkRepository(storage, options.session.projectId);
   const executions = new JsonExecutionRepository(storage);
   const operations = new JsonProviderOperationRepository(storage);
+  const usage = new JsonProviderUsageObservationRepository(storage);
   const invocations = new JsonProviderInvocationRepository(
     storage,
     options.session.projectId
@@ -239,7 +243,8 @@ export function createImageFeatureControllerRuntime(
     ...imageSubmission,
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
-    materials
+    materials,
+    usage
   });
   const orchestrator = new ProviderSubmissionOrchestrator(
     candidates,
@@ -345,6 +350,13 @@ export function createImageFeatureControllerRuntime(
       await lifecycle.applyUnrecordedSubmitOutcome({
         executionId: acceptance.subjectArtifacts.execution.id,
         outcome: 'failed_before_submission',
+        message: localResultError
+      });
+    } else if (acceptance.intent.status === 'failed') {
+      const safeCode = latestSafeCode(acceptance.invocationEvents);
+      localResultError = userFacingSubmissionFeedback(safeCode, 'after_request');
+      await lifecycle.applyExplicitSubmissionFailure({
+        executionId: acceptance.subjectArtifacts.execution.id,
         message: localResultError
       });
     } else if (acceptance.intent.status === 'unknown_outcome') {
@@ -495,17 +507,9 @@ export function createImageFeatureControllerRuntime(
   return runtime;
 }
 
-function canRecoverImageLocalReceipt(execution: {
-  readonly state: string;
-  readonly failure?: {
-    readonly stage: string;
-    readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
-  };
-}): boolean {
+function canRecoverImageLocalReceipt(execution: Execution): boolean {
   if (execution.state === 'remote_completed') return true;
-  return execution.state === 'failed' &&
-    ['downloading', 'writing'].includes(execution.failure?.stage ?? '') &&
-    execution.failure?.retryability !== 'not_retryable';
+  return canRecoverRemoteCompletedExecution(execution);
 }
 
 function latestSafeCode(

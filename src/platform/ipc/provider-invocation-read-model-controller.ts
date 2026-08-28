@@ -23,8 +23,12 @@ import type {
   StorageCallRecordListDto,
   StorageCallRecordSummaryDto,
   StorageCallResultRegistrationDto,
+  StorageConsumptionConversionSourceDto,
+  StorageConsumptionProviderSliceDto,
+  StorageConsumptionSummaryDto,
   StorageIpcResult,
-  StorageReadModelIssueDto
+  StorageReadModelIssueDto,
+  StorageTaskTimelineDto
 } from '../../shared/storage-ipc';
 import {
   JsonLocalResultObservationRepository,
@@ -35,6 +39,17 @@ import {
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import type { ProjectCatalogEntry, ProjectCatalogService } from './project-catalog';
+import { resolveOfficialPricingRule } from '../providers/official-pricing-rules';
+import {
+  addExactDecimal,
+  calculateExactSuccessfulCallFee,
+  compareExactDecimal,
+  formatExactDecimal,
+  multiplyExactDecimal,
+  parseExactDecimal,
+  zeroExactDecimal,
+  type ExactDecimal
+} from '../providers/provider-consumption-calculator';
 
 export interface ProviderUsageSchemaResolverPort {
   resolve(input: {
@@ -68,6 +83,25 @@ export class ProviderUsageSchemaRegistry implements ProviderUsageSchemaResolverP
 
 const noUsageSchemas = new ProviderUsageSchemaRegistry([]);
 
+export interface CurrencyConversionFactV1 {
+  readonly sourceCurrencyCode: string;
+  readonly targetCurrencyCode: 'CNY';
+  readonly rate: string;
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+}
+
+export interface CurrencyConversionFactResolverPort {
+  listApprovedFacts(targetCurrencyCode: 'CNY'): Promise<readonly CurrencyConversionFactV1[]>;
+}
+
+const noCurrencyConversions: CurrencyConversionFactResolverPort = {
+  async listApprovedFacts() {
+    return [];
+  }
+};
+
 interface ParsedCallFilter {
   readonly projectId?: string;
   readonly productFeature?: string;
@@ -95,11 +129,42 @@ interface BuiltCallRecord {
   readonly details: StorageCallDetailsDto;
 }
 
+interface CallRecordCandidate {
+  readonly entry: ProjectCatalogEntry;
+  readonly facts: ProjectCallFacts;
+  readonly attempt: ProviderInvocationAttemptV1;
+}
+
+interface ParsedCurrencyConversionFact extends Omit<CurrencyConversionFactV1, 'rate'> {
+  readonly rate: ExactDecimal;
+}
+
+interface ConsumptionTotal {
+  readonly amount: ExactDecimal;
+  readonly callCount: number;
+}
+
+interface ProviderConsumptionTotal extends ConsumptionTotal {
+  readonly providerId: string;
+  readonly label: string;
+}
+
 export class ProviderInvocationReadModelController {
+  private readonly consumptionCache = new Map<
+    number,
+    Promise<StorageIpcResult<StorageConsumptionSummaryDto>>
+  >();
+
   constructor(
     private readonly catalog: ProjectCatalogService,
-    private readonly usageSchemas: ProviderUsageSchemaResolverPort = noUsageSchemas
+    private readonly usageSchemas: ProviderUsageSchemaResolverPort = noUsageSchemas,
+    private readonly currencyConversions: CurrencyConversionFactResolverPort = noCurrencyConversions,
+    private readonly now: () => Date = () => new Date()
   ) {}
+
+  invalidate(): void {
+    this.consumptionCache.clear();
+  }
 
   async listCallRecords(
     request: unknown = {}
@@ -112,10 +177,14 @@ export class ProviderInvocationReadModelController {
     }
 
     try {
-      const items: StorageCallRecordSummaryDto[] = [];
+      const candidates: CallRecordCandidate[] = [];
       const issues = new Map<string, StorageReadModelIssueDto>();
+      const schemaAvailability = new Map<string, Promise<boolean>>();
 
-      for (const entry of await this.catalog.getEntries()) {
+      const entries = await this.catalog.getEntries();
+      for (const entry of filter.projectId
+        ? entries.filter((candidate) => candidate.projectId === filter.projectId)
+        : entries) {
         if (!(await isAvailable(entry))) {
           addIssue(issues, entry, 'unavailable');
           continue;
@@ -124,8 +193,28 @@ export class ProviderInvocationReadModelController {
           const facts = await loadProjectFacts(entry);
           for (const attempt of facts.attempts) {
             try {
-              const built = await this.buildRecord(entry, facts, attempt);
-              if (matchesFilter(built.summary, filter)) items.push(built.summary);
+              const route = facts.routesById.get(attempt.routeSnapshotId);
+              if (!route || route.projectId !== attempt.projectId) {
+                throw new TypeError('Provider invocation route snapshot is unavailable');
+              }
+              if (!matchesCandidateFilter(entry, attempt, route, filter)) continue;
+              const observations = facts.usageByAttempt.get(attempt.id) ?? [];
+              if (observations.length > 0) {
+                const key = schemaKey(route.usageSchemaId, route.usageSchemaRevision);
+                let availability = schemaAvailability.get(key);
+                if (!availability) {
+                  availability = this.usageSchemas.resolve({
+                    usageSchemaId: route.usageSchemaId,
+                    usageSchemaRevision: route.usageSchemaRevision
+                  }).then(Boolean);
+                  schemaAvailability.set(key, availability);
+                }
+                if (!(await availability)) {
+                  addIssue(issues, entry, 'invalid_data');
+                  continue;
+                }
+              }
+              candidates.push({ entry, facts, attempt });
             } catch {
               addIssue(issues, entry, 'invalid_data');
             }
@@ -135,15 +224,27 @@ export class ProviderInvocationReadModelController {
         }
       }
 
-      const sorted = items.sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt) ||
-        left.projectId.localeCompare(right.projectId) ||
-        left.invocationAttemptId.localeCompare(right.invocationAttemptId)
+      const sorted = candidates.sort((left, right) =>
+        right.attempt.createdAt.localeCompare(left.attempt.createdAt) ||
+        left.entry.projectId.localeCompare(right.entry.projectId) ||
+        left.attempt.id.localeCompare(right.attempt.id)
       );
+      const items: StorageCallRecordSummaryDto[] = [];
+      for (const candidate of sorted.slice(filter.offset, filter.offset + filter.limit)) {
+        try {
+          items.push((await this.buildRecord(
+            candidate.entry,
+            candidate.facts,
+            candidate.attempt
+          )).summary);
+        } catch {
+          addIssue(issues, candidate.entry, 'invalid_data');
+        }
+      }
       return {
         ok: true,
         value: {
-          items: sorted.slice(filter.offset, filter.offset + filter.limit),
+          items,
           total: sorted.length,
           offset: filter.offset,
           limit: filter.limit,
@@ -158,37 +259,244 @@ export class ProviderInvocationReadModelController {
   async getCallDetails(
     request: unknown
   ): Promise<StorageIpcResult<StorageCallDetailsDto | undefined>> {
-    let invocationAttemptId: string;
+    let parsed: { readonly projectId: string; readonly invocationAttemptId: string };
     try {
-      invocationAttemptId = parseDetailsRequest(request);
+      parsed = parseDetailsRequest(request);
     } catch {
       return invalidRequestFailure();
     }
 
     try {
-      let match: StorageCallDetailsDto | undefined;
+      const entry = (await this.catalog.getEntries()).find(
+        (candidate) => candidate.projectId === parsed.projectId
+      );
+      if (!entry || !(await isAvailable(entry))) return { ok: true, value: undefined };
+      const facts = await loadProjectFacts(entry);
+      const attempt = facts.attempts.find(
+        (candidate) => candidate.id === toProviderInvocationAttemptId(parsed.invocationAttemptId)
+      );
+      if (!attempt || attempt.projectId !== parsed.projectId) {
+        return { ok: true, value: undefined };
+      }
+      return { ok: true, value: (await this.buildRecord(entry, facts, attempt)).details };
+    } catch {
+      return readFailure();
+    }
+  }
+
+  async getTaskTimeline(
+    request: unknown
+  ): Promise<StorageIpcResult<StorageTaskTimelineDto>> {
+    let parsed: { readonly projectId: string; readonly taskId: string };
+    try {
+      parsed = parseTaskTimelineRequest(request);
+    } catch {
+      return invalidRequestFailure();
+    }
+
+    try {
+      const entry = (await this.catalog.getEntries()).find(
+        (candidate) => candidate.projectId === parsed.projectId
+      );
+      if (!entry) return { ok: true, value: { items: [], issues: [] } };
+      if (!(await isAvailable(entry))) {
+        return {
+          ok: true,
+          value: { items: [], issues: [toIssue(entry, 'unavailable')] }
+        };
+      }
+      try {
+        const facts = await loadProjectFacts(entry);
+        const attempts = facts.attempts.filter((attempt) =>
+          attempt.projectId === parsed.projectId &&
+          attempt.subject.kind === 'media' &&
+          attempt.subject.taskId === parsed.taskId
+        );
+        const items = await Promise.all(
+          attempts.map(async (attempt) => (await this.buildRecord(entry, facts, attempt)).details)
+        );
+        return {
+          ok: true,
+          value: {
+            items: items.sort((left, right) =>
+              left.createdAt.localeCompare(right.createdAt) ||
+              left.invocationAttemptId.localeCompare(right.invocationAttemptId)
+            ),
+            issues: []
+          }
+        };
+      } catch {
+        return {
+          ok: true,
+          value: { items: [], issues: [toIssue(entry, 'invalid_data')] }
+        };
+      }
+    } catch {
+      return readFailure();
+    }
+  }
+
+  async getConsumptionSummary(
+    request: unknown = {}
+  ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>> {
+    let calendarDays: number;
+    try {
+      calendarDays = parseConsumptionSummaryRequest(request);
+    } catch {
+      return invalidRequestFailure();
+    }
+
+    const cached = this.consumptionCache.get(calendarDays);
+    if (cached) return cached;
+    const pending = this.buildConsumptionSummary(calendarDays).then((result) => {
+      if (!result.ok) this.consumptionCache.delete(calendarDays);
+      return result;
+    });
+    this.consumptionCache.set(calendarDays, pending);
+    return pending;
+  }
+
+  private async buildConsumptionSummary(
+    calendarDays: number
+  ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>> {
+    try {
+      const period = consumptionPeriod(this.now(), calendarDays);
+      const conversionFacts = parseConversionFacts(
+        await this.currencyConversions.listApprovedFacts('CNY')
+      );
+      const conversionsByCurrency = new Map(
+        conversionFacts.map((fact) => [fact.sourceCurrencyCode, fact])
+      );
+      const usedConversionCurrencies = new Set<string>();
+      const issues = new Map<string, StorageReadModelIssueDto>();
+      const bucketTotals = new Map(period.dates.map((date) => [date, emptyConsumptionTotal()]));
+      const providerTotals = new Map<string, ProviderConsumptionTotal>();
+      const pendingCurrencies = new Map<string, number>();
+      let totalAmount = zeroExactDecimal();
+      let totalCallCount = 0;
+      let successfulCallCount = 0;
+      let pricedCallCount = 0;
+      let includedCallCount = 0;
+      let pendingConversionCallCount = 0;
+      let missingPricingRuleCount = 0;
+      let missingUsageCount = 0;
+      let invalidFeeCount = 0;
+
       for (const entry of await this.catalog.getEntries()) {
-        if (!(await isAvailable(entry))) continue;
-        const context = createContext(entry);
-        let attempt: ProviderInvocationAttemptV1 | undefined;
-        try {
-          attempt = await context.invocations.get(
-            toProviderInvocationAttemptId(invocationAttemptId)
-          );
-        } catch {
+        if (!(await isAvailable(entry))) {
+          addIssue(issues, entry, 'unavailable');
           continue;
         }
-        if (!attempt) continue;
         try {
-          const facts = await loadProjectFacts(entry, context);
-          const built = await this.buildRecord(entry, facts, attempt);
-          if (match) return readFailure();
-          match = built.details;
+          const facts = await loadProjectFacts(entry);
+          for (const attempt of facts.attempts) {
+            if (!period.includes(attempt.createdAt)) continue;
+            totalCallCount += 1;
+            try {
+              const call = (await this.buildRecord(entry, facts, attempt)).details;
+              if (call.state !== 'completed') continue;
+              successfulCallCount += 1;
+              const fee = calculateExactSuccessfulCallFee(call);
+              if (fee.state === 'missing_pricing') {
+                missingPricingRuleCount += 1;
+                continue;
+              }
+              if (fee.state === 'missing_usage') {
+                missingUsageCount += 1;
+                continue;
+              }
+              if (fee.state !== 'calculated') {
+                invalidFeeCount += 1;
+                continue;
+              }
+              pricedCallCount += 1;
+              let cnyAmount = fee.amount;
+              if (fee.currencyCode !== 'CNY') {
+                const conversion = conversionsByCurrency.get(fee.currencyCode);
+                if (!conversion) {
+                  pendingConversionCallCount += 1;
+                  pendingCurrencies.set(
+                    fee.currencyCode,
+                    (pendingCurrencies.get(fee.currencyCode) ?? 0) + 1
+                  );
+                  continue;
+                }
+                cnyAmount = multiplyExactDecimal(cnyAmount, conversion.rate);
+                usedConversionCurrencies.add(fee.currencyCode);
+              }
+
+              includedCallCount += 1;
+              totalAmount = addExactDecimal(totalAmount, cnyAmount);
+              const date = utcDateKey(call.createdAt);
+              const bucket = bucketTotals.get(date);
+              if (bucket) {
+                bucketTotals.set(date, {
+                  amount: addExactDecimal(bucket.amount, cnyAmount),
+                  callCount: bucket.callCount + 1
+                });
+              }
+              const providerKey = call.providerId;
+              const provider = providerTotals.get(providerKey) ?? {
+                providerId: providerKey,
+                label: call.providerName ?? providerKey,
+                amount: zeroExactDecimal(),
+                callCount: 0
+              };
+              providerTotals.set(providerKey, {
+                ...provider,
+                label: preferredProviderLabel(provider.label, call.providerName, providerKey),
+                amount: addExactDecimal(provider.amount, cnyAmount),
+                callCount: provider.callCount + 1
+              });
+            } catch {
+              addIssue(issues, entry, 'invalid_data');
+              invalidFeeCount += 1;
+            }
+          }
         } catch {
-          return readFailure();
+          addIssue(issues, entry, 'invalid_data');
         }
       }
-      return { ok: true, value: match };
+
+      return {
+        ok: true,
+        value: {
+          currencyCode: 'CNY',
+          currencyLabel: '人民币',
+          period: {
+            startDate: period.dates[0]!,
+            endDate: period.dates.at(-1)!,
+            calendarDays,
+            timeZone: 'UTC'
+          },
+          totalAmount: formatExactDecimal(totalAmount),
+          totalCallCount,
+          successfulCallCount,
+          pricedCallCount,
+          includedCallCount,
+          pendingConversionCallCount,
+          missingPricingRuleCount,
+          missingUsageCount,
+          invalidFeeCount,
+          timeBuckets: period.dates.map((date) => {
+            const bucket = bucketTotals.get(date)!;
+            return {
+              date,
+              amount: formatExactDecimal(bucket.amount),
+              callCount: bucket.callCount
+            };
+          }),
+          providerSlices: buildProviderSlices(providerTotals, totalAmount),
+          pendingCurrencies: [...pendingCurrencies.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([currencyCode, callCount]) => ({ currencyCode, callCount })),
+          conversionSources: conversionFacts
+            .filter((fact) => usedConversionCurrencies.has(fact.sourceCurrencyCode))
+            .map(toConversionSourceDto),
+          issues: [...issues.values()],
+          disclaimer: 'local_estimate_not_provider_bill'
+        }
+      };
     } catch {
       return readFailure();
     }
@@ -237,6 +545,7 @@ export class ProviderInvocationReadModelController {
       readModel,
       facts.worksByExecution
     );
+    const officialPricingRule = resolveOfficialPricingRule(route);
     const updatedAt = readModel.timeline.at(-1)?.occurredAt ?? readModel.createdAt;
     const providerName = route.providerDisplayName;
     const connectionName = route.connectionDisplayName;
@@ -280,6 +589,7 @@ export class ProviderInvocationReadModelController {
           facts: readModel.usage.facts.map((fact) => ({ ...fact })),
           calculatedAt: readModel.usage.calculatedAt
         },
+        ...(officialPricingRule ? { officialPricingRule } : {}),
         localResults: readModel.localResults.map((result) => ({
           mediaKind: result.mediaKind,
           outputCount: result.outputCount,
@@ -314,17 +624,16 @@ async function loadProjectFacts(
   entry: ProjectCatalogEntry,
   context = createContext(entry)
 ): Promise<ProjectCallFacts> {
-  const [attempts, events, routes, usage, localResults, works] = await Promise.all([
-    context.invocations.list(),
-    context.invocations.listEvents(),
+  const [invocations, routes, usage, localResults, works] = await Promise.all([
+    context.invocations.readAll(),
     context.routes.list(),
     context.usage.list(),
     context.localResults.list(),
     context.works.list(entry.projectId)
   ]);
   return {
-    attempts,
-    eventsByAttempt: groupBy(events, (event) => event.invocationAttemptId),
+    attempts: invocations.attempts,
+    eventsByAttempt: groupBy(invocations.events, (event) => event.invocationAttemptId),
     routesById: new Map(routes.map((route) => [route.id, route])),
     usageByAttempt: groupBy(usage, (observation) => observation.invocationAttemptId),
     localResultsByAttempt: groupBy(
@@ -383,19 +692,21 @@ function latestTimestamp(
   ].sort().at(-1)!);
 }
 
-function matchesFilter(
-  item: StorageCallRecordSummaryDto,
+function matchesCandidateFilter(
+  entry: ProjectCatalogEntry,
+  attempt: ProviderInvocationAttemptV1,
+  route: ProviderExecutionRouteSnapshotV1,
   filter: ParsedCallFilter
 ): boolean {
   return (
-    (filter.projectId === undefined || item.projectId === filter.projectId) &&
-    (filter.productFeature === undefined || item.productFeature === filter.productFeature) &&
-    (filter.providerId === undefined || item.providerId === filter.providerId) &&
-    (filter.connectionId === undefined || item.connectionId === filter.connectionId) &&
-    (filter.modelId === undefined || item.modelId === filter.modelId) &&
-    (filter.state === undefined || item.state === filter.state) &&
-    (filter.createdFrom === undefined || item.createdAt >= filter.createdFrom) &&
-    (filter.createdTo === undefined || item.createdAt <= filter.createdTo)
+    (filter.projectId === undefined || entry.projectId === filter.projectId) &&
+    (filter.productFeature === undefined || route.productFeature === filter.productFeature) &&
+    (filter.providerId === undefined || route.providerId === filter.providerId) &&
+    (filter.connectionId === undefined || route.connectionId === filter.connectionId) &&
+    (filter.modelId === undefined || route.modelId === filter.modelId) &&
+    (filter.state === undefined || attempt.state === filter.state) &&
+    (filter.createdFrom === undefined || attempt.createdAt >= filter.createdFrom) &&
+    (filter.createdTo === undefined || attempt.createdAt <= filter.createdTo)
   );
 }
 
@@ -443,9 +754,215 @@ function parseCallFilter(value: unknown): ParsedCallFilter {
   };
 }
 
-function parseDetailsRequest(value: unknown): string {
-  if (!isRecord(value) || Object.keys(value).length !== 1) throw invalidRequest();
-  return requireId(value.invocationAttemptId);
+function parseConsumptionSummaryRequest(value: unknown): number {
+  if (!isRecord(value)) throw invalidRequest();
+  if (Object.keys(value).some((key) => key !== 'calendarDays')) throw invalidRequest();
+  return boundedInteger(value.calendarDays, 1, 31, 7);
+}
+
+function consumptionPeriod(now: Date, calendarDays: number) {
+  if (Number.isNaN(now.getTime())) throw new TypeError('Invalid current time');
+  const end = new Date(now);
+  const start = new Date(Date.UTC(
+    end.getUTCFullYear(),
+    end.getUTCMonth(),
+    end.getUTCDate() - calendarDays + 1
+  ));
+  const dates = Array.from({ length: calendarDays }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + index);
+    return utcDateKey(date.toISOString());
+  });
+  const startTimestamp = start.toISOString();
+  const endTimestamp = end.toISOString();
+  return {
+    dates,
+    includes(value: string) {
+      return value >= startTimestamp && value <= endTimestamp;
+    }
+  };
+}
+
+function utcDateKey(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new TypeError('Invalid timestamp');
+  return parsed.toISOString().slice(0, 10);
+}
+
+function parseConversionFacts(
+  values: readonly CurrencyConversionFactV1[]
+): readonly ParsedCurrencyConversionFact[] {
+  const currencies = new Set<string>();
+  return values.map((value) => {
+    const sourceCurrencyCode = normalizeCurrencyCode(value.sourceCurrencyCode);
+    if (sourceCurrencyCode === 'CNY' || value.targetCurrencyCode !== 'CNY') {
+      throw new TypeError('Invalid conversion pair');
+    }
+    if (currencies.has(sourceCurrencyCode)) throw new TypeError('Duplicate conversion fact');
+    currencies.add(sourceCurrencyCode);
+    const rate = parseExactDecimal(value.rate);
+    if (rate.numerator <= 0n) throw new TypeError('Invalid conversion rate');
+    if (
+      typeof value.sourceTitle !== 'string' ||
+      value.sourceTitle.trim().length < 1 ||
+      value.sourceTitle.trim().length > 200
+    ) {
+      throw new TypeError('Invalid conversion source');
+    }
+    const sourceUrl = new URL(value.sourceUrl);
+    if (
+      sourceUrl.protocol !== 'https:' ||
+      sourceUrl.username ||
+      sourceUrl.password ||
+      sourceUrl.search ||
+      sourceUrl.hash
+    ) {
+      throw new TypeError('Invalid conversion source URL');
+    }
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/u.test(value.sourceCheckedAt) ||
+      utcDateKey(`${value.sourceCheckedAt}T00:00:00.000Z`) !== value.sourceCheckedAt
+    ) {
+      throw new TypeError('Invalid conversion check date');
+    }
+    return {
+      sourceCurrencyCode,
+      targetCurrencyCode: 'CNY',
+      rate,
+      sourceTitle: value.sourceTitle.trim(),
+      sourceUrl: sourceUrl.toString(),
+      sourceCheckedAt: value.sourceCheckedAt
+    };
+  });
+}
+
+function normalizeCurrencyCode(value: string): string {
+  if (typeof value !== 'string') throw new TypeError('Invalid currency');
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/u.test(normalized)) throw new TypeError('Invalid currency');
+  return normalized;
+}
+
+function emptyConsumptionTotal(): ConsumptionTotal {
+  return { amount: zeroExactDecimal(), callCount: 0 };
+}
+
+function preferredProviderLabel(
+  current: string,
+  candidate: string | undefined,
+  providerId: string
+): string {
+  if (!candidate) return current;
+  if (current === providerId) return candidate;
+  return current.localeCompare(candidate) <= 0 ? current : candidate;
+}
+
+function buildProviderSlices(
+  totals: ReadonlyMap<string, ProviderConsumptionTotal>,
+  totalAmount: ExactDecimal
+): readonly StorageConsumptionProviderSliceDto[] {
+  if (totalAmount.numerator <= 0n) return [];
+  const sorted = [...totals.values()]
+    .filter((item) => item.amount.numerator > 0n)
+    .sort((left, right) =>
+      compareExactDecimal(right.amount, left.amount) ||
+      left.providerId.localeCompare(right.providerId)
+    );
+  const visible = sorted.slice(0, 5).map((item) => ({
+    key: item.providerId,
+    providerId: item.providerId,
+    label: item.label,
+    amount: item.amount,
+    callCount: item.callCount,
+    isOther: false
+  }));
+  const remainder = sorted.slice(5);
+  if (remainder.length > 0) {
+    visible.push({
+      key: 'other',
+      providerId: '',
+      label: '其他',
+      amount: remainder.reduce(
+        (sum, item) => addExactDecimal(sum, item.amount),
+        zeroExactDecimal()
+      ),
+      callCount: remainder.reduce((sum, item) => sum + item.callCount, 0),
+      isOther: true
+    });
+  }
+  const ratios = allocateBasisPoints(visible.map((item) => item.amount), totalAmount);
+  return visible.map((item, index) => ({
+    key: item.key,
+    ...(item.isOther ? {} : { providerId: item.providerId }),
+    label: item.label,
+    amount: formatExactDecimal(item.amount),
+    callCount: item.callCount,
+    ratioBasisPoints: ratios[index]!,
+    isOther: item.isOther
+  }));
+}
+
+function allocateBasisPoints(
+  amounts: readonly ExactDecimal[],
+  total: ExactDecimal
+): readonly number[] {
+  const allocations = amounts.map((amount, index) => {
+    const numerator = amount.numerator * total.denominator * 10_000n;
+    const denominator = amount.denominator * total.numerator;
+    return {
+      index,
+      points: Number(numerator / denominator),
+      remainder: numerator % denominator,
+      denominator
+    };
+  });
+  const missing = 10_000 - allocations.reduce((sum, item) => sum + item.points, 0);
+  const byRemainder = [...allocations].sort((left, right) => {
+    const comparison = left.remainder * right.denominator - right.remainder * left.denominator;
+    return comparison > 0n ? -1 : comparison < 0n ? 1 : left.index - right.index;
+  });
+  for (let index = 0; index < missing; index += 1) {
+    byRemainder[index % byRemainder.length]!.points += 1;
+  }
+  return allocations.sort((left, right) => left.index - right.index).map((item) => item.points);
+}
+
+function toConversionSourceDto(
+  fact: ParsedCurrencyConversionFact
+): StorageConsumptionConversionSourceDto {
+  return {
+    sourceCurrencyCode: fact.sourceCurrencyCode,
+    targetCurrencyCode: 'CNY',
+    sourceTitle: fact.sourceTitle,
+    sourceUrl: fact.sourceUrl,
+    sourceCheckedAt: fact.sourceCheckedAt
+  };
+}
+
+function parseDetailsRequest(
+  value: unknown
+): { readonly projectId: string; readonly invocationAttemptId: string } {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some((key) => !['projectId', 'invocationAttemptId'].includes(key))
+  ) throw invalidRequest();
+  return {
+    projectId: requireId(value.projectId),
+    invocationAttemptId: requireId(value.invocationAttemptId)
+  };
+}
+
+function parseTaskTimelineRequest(
+  value: unknown
+): { readonly projectId: string; readonly taskId: string } {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some((key) => !['projectId', 'taskId'].includes(key))
+  ) throw invalidRequest();
+  return {
+    projectId: requireId(value.projectId),
+    taskId: requireId(value.taskId)
+  };
 }
 
 function optionalId(value: unknown): string | undefined {
@@ -516,6 +1033,17 @@ function addIssue(
     projectName: entry.projectName,
     reason
   });
+}
+
+function toIssue(
+  entry: ProjectCatalogEntry,
+  reason: StorageReadModelIssueDto['reason']
+): StorageReadModelIssueDto {
+  return {
+    projectId: entry.projectId,
+    projectName: entry.projectName,
+    reason
+  };
 }
 
 async function isAvailable(entry: ProjectCatalogEntry): Promise<boolean> {

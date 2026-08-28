@@ -69,3 +69,12 @@ test('text-to-video uses only the unified candidate and submission panel', () =>
   assert.match(panel, /showProgressSteps = false/);
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
 });
+
+test('text-to-video identifies and validates real required inputs locally', () => {
+  assert.match(source, /uc-dynamic-parameters__required.*必填/);
+  assert.match(panel, /requiredInputError/);
+  assert.match(panel, /draft\.prompt\.finalPrompt\.trim\(\)\.length === 0/);
+  assert.match(panel, /提示词为必填项/);
+  assert.match(panel, /required/);
+  assert.doesNotMatch(bundle, /可以提交/);
+});

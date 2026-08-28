@@ -37,6 +37,7 @@ import {
   VideoWorkspaceMutationCoordinator,
   createDevelopmentVideoEditorPreviewAdapter,
   type ProviderUsageSchemaResolverPort,
+  type CurrencyConversionFactResolverPort,
   type StorageProjectSession,
   ProviderPackageRegistry,
   createImageFeatureControllerRuntime,
@@ -82,6 +83,7 @@ export function registerStorageIpcHandlers(options: {
   readonly additionalSessionChangeGuards?: readonly (() => Promise<void>)[];
   readonly vidu?: ElectronViduComposition;
   readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
+  readonly currencyConversions?: CurrencyConversionFactResolverPort;
   readonly providerPackages?: ProviderPackageRegistry;
   readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort &
     Partial<RuntimeAuthorizationOrchestrationPort>;
@@ -127,7 +129,8 @@ export function registerStorageIpcHandlers(options: {
     getSession: () => sessionRegistry.get(),
     imageMutations,
     videoMutations,
-    newApiRuntime: options.textSubmission?.newApiRuntime
+    newApiRuntime: options.textSubmission?.newApiRuntime,
+    imageResultDownloads: options.textSubmission?.newApiImageDownloads
   });
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),
@@ -403,9 +406,17 @@ export function registerStorageIpcHandlers(options: {
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
   const readModels = new GlobalReadModelController(catalog, () => sessionRegistry.get());
+  const callReadModels = new ProviderInvocationReadModelController(
+    catalog,
+    options.providerUsageSchemas,
+    options.currencyConversions
+  );
   const projectStorageMonitor = new ProjectStorageChangeMonitor(
     catalog,
-    () => readModels.invalidateLocalStorageSummary(),
+    () => {
+      readModels.invalidate();
+      callReadModels.invalidate();
+    },
     () => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.webContents.isDestroyed()) {
@@ -415,10 +426,6 @@ export function registerStorageIpcHandlers(options: {
     }
   );
   projectStorageMonitor.start();
-  const callReadModels = new ProviderInvocationReadModelController(
-    catalog,
-    options.providerUsageSchemas
-  );
   const localMedia = new ControlledLocalMediaController({
     catalog,
     handles: mediaHandles,
@@ -484,11 +491,20 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.getTaskDetails, (_event, request: unknown) =>
     readModels.getTaskDetails(request)
   );
+  ipcMain.handle(storageIpcChannels.getTaskTimeline, (_event, request: unknown) =>
+    callReadModels.getTaskTimeline(request)
+  );
+  ipcMain.handle(storageIpcChannels.listGenerationHistory, (_event, request: unknown) =>
+    readModels.listGenerationHistory(request)
+  );
   ipcMain.handle(storageIpcChannels.listCallRecords, (_event, request: unknown) =>
     callReadModels.listCallRecords(request)
   );
   ipcMain.handle(storageIpcChannels.getCallDetails, (_event, request: unknown) =>
     callReadModels.getCallDetails(request)
+  );
+  ipcMain.handle(storageIpcChannels.getConsumptionSummary, (_event, request: unknown) =>
+    callReadModels.getConsumptionSummary(request)
   );
   ipcMain.handle(storageIpcChannels.listWorks, () => readModels.listWorks());
   ipcMain.handle(storageIpcChannels.getWorkDetails, (_event, request: unknown) =>

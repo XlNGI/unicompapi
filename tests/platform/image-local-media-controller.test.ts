@@ -161,6 +161,7 @@ describe('ImageLocalMediaController', () => {
     expect(result.value).toMatchObject({
       cancelled: false,
       draft: {
+        state: 'saved',
         input: { assetId: 'asset-selected-image', role: 'reference' }
       },
       input: {
@@ -198,6 +199,18 @@ describe('ImageLocalMediaController', () => {
     await expect(
       fixture.controller.getInput({ draftId: fixture.draft.id })
     ).resolves.toEqual({ ok: true, value: result.value.input });
+    await expect(
+      fixture.workspaceRepository.get(fixture.draft.id)
+    ).resolves.toMatchObject({ state: 'saved' });
+    await expect(
+      fixture.controller.clearInput({ draftId: fixture.draft.id })
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { state: 'saved', input: undefined }
+    });
+    const cleared = await fixture.workspaceRepository.get(fixture.draft.id);
+    expect(cleared).toMatchObject({ state: 'saved' });
+    expect(cleared?.input).toBeUndefined();
     await expect(
       fixture.storage.readJson(projectStoragePaths.entities.tasks)
     ).resolves.toBeUndefined();

@@ -12,8 +12,8 @@ import {
 import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import type { StorageTaskSummaryDto } from '../../shared/storage-ipc';
 import type { NavigationItemId } from '../navigation/navigationItems';
-import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
 import type { ProjectStatusSnapshot } from '../status/ProjectStatusContext';
+import { tasksForProject, useTaskReadStore } from '../task-read-store';
 
 const visibleTerminalDurationMs = 10 * 60 * 1_000;
 const visibleActiveDurationMs = 60 * 60 * 1_000;
@@ -69,37 +69,10 @@ const taskKindLabels: Readonly<Record<string, string>> = {
 };
 
 export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockProps) {
-  const storage = window.unicomp?.storage;
-  const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>();
+  const { currentProjectId, tasks } = useTaskReadStore();
   const [expanded, setExpanded] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const dockRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let active = true;
-    const refresh = async () => {
-      if (!storage) return;
-      try {
-        const result = await storage.listTasks();
-        if (active && result.ok) setTasks(result.value.items);
-      } catch {
-        // The page-level status remains available if the task read model is unavailable.
-      }
-    };
-    const handleRefresh = () => void refresh();
-    void refresh();
-    const timer = window.setInterval(refresh, 5_000);
-    const unsubscribe = storage?.onLocalStorageChanged(handleRefresh);
-    window.addEventListener('focus', handleRefresh);
-    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, handleRefresh);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      unsubscribe?.();
-      window.removeEventListener('focus', handleRefresh);
-      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, handleRefresh);
-    };
-  }, [storage]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -118,7 +91,14 @@ export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockPro
     return () => document.removeEventListener('pointerdown', collapseOnOutsidePointer);
   }, [expanded]);
 
-  const summary = useMemo(() => summarizeTasks(tasks ?? [], now), [now, tasks]);
+  const currentProjectTasks = useMemo(
+    () => tasksForProject(tasks, currentProjectId),
+    [currentProjectId, tasks]
+  );
+  const summary = useMemo(
+    () => summarizeTasks(currentProjectTasks, now),
+    [currentProjectTasks, now]
+  );
   const showsTasks = summary.inProgress > 0 || summary.attention > 0 || summary.visibleTasks.length > 0;
   const taskPanelId = 'uc-global-task-status-panel';
 

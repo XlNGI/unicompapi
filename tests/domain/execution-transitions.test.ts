@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canRecoverRemoteCompletedExecution,
   createRetryExecution,
   recoverRemoteCompletedExecution,
   InvalidStateTransitionError,
@@ -139,6 +140,20 @@ describe('execution state machine', () => {
       id: failed.id,
       state: 'remote_completed',
       providerOperationRecordId: 'provider-operation-1'
+    });
+
+    const discoveryFailure = {
+      ...synchronousImage,
+      failure: {
+        ...synchronousImage.failure!,
+        stage: 'remote_completed' as const
+      }
+    };
+    expect(canRecoverRemoteCompletedExecution(discoveryFailure)).toBe(true);
+    expect(recoverRemoteCompletedExecution(discoveryFailure, t7)).toMatchObject({
+      id: failed.id,
+      state: 'remote_completed',
+      failure: undefined
     });
   });
 

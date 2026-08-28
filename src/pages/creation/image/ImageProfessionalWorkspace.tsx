@@ -15,6 +15,7 @@ import { StatusPill } from '../../../components/StatusPill';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
 import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
+import { CreationAdvancedSection } from '../CreationAdvancedSection';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
 import { ImageFeatureSubmissionPanel } from './ImageFeatureSubmissionPanel';
@@ -44,7 +45,6 @@ export function ImageProfessionalWorkspace({
   const [previewUrl, setPreviewUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -55,10 +55,6 @@ export function ImageProfessionalWorkspace({
   ) => {
     setSubmissionProgress({ phase, failureMessage });
   }, []);
-  const generationInFlight =
-    submissionProgress.phase === 'preparing' ||
-    submissionProgress.phase === 'requesting' ||
-    submissionProgress.phase === 'waiting';
   useEffect(() => {
     setHistoryRefreshKey(0);
     setSubmissionProgress({ phase: 'idle' });
@@ -194,7 +190,7 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(
         result.value.draft.draftId
@@ -231,7 +227,7 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(
         result.value.draft.draftId
@@ -261,7 +257,7 @@ export function ImageProfessionalWorkspace({
         onMessage('添加本地作品失败，请确认作品文件仍然可用。');
         return;
       }
-      onDraftChange(result.value.draft as GenerationImageDraftDto);
+      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
       setInput(result.value.input);
       const preview = await imageWorkspaces.createInputPreview(saved.draftId);
       setPreviewUrl(preview.ok ? preview.value.url : '');
@@ -285,7 +281,7 @@ export function ImageProfessionalWorkspace({
         onMessage('清除图片失败，请重试。');
         return;
       }
-      onDraftChange(result.value as GenerationImageDraftDto);
+      onDraftPersisted(result.value as GenerationImageDraftDto);
       setInput(undefined);
       setPreviewUrl('');
       onMessage('已从当前草稿清除图片引用；项目内原始素材记录保持不变。');
@@ -311,7 +307,7 @@ export function ImageProfessionalWorkspace({
 
   return (
     <>
-      <div className="uc-image-professional__workspace uc-generation-two-pane">
+      <div className="uc-image-professional__workspace uc-generation-two-pane uc-creation-simple">
         <section
           aria-label="提交前准备区域"
           className="uc-image-professional__before-pane"
@@ -326,7 +322,7 @@ export function ImageProfessionalWorkspace({
           </header>
 
           <div className="uc-image-professional__before-scroll uc-scrollbar">
-        <Card className="uc-image-workbench__panel">
+        <Card className="uc-image-workbench__panel uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">1</span>
             <div>
@@ -425,51 +421,61 @@ export function ImageProfessionalWorkspace({
             <small>{draft.prompt.originalInput.length} / 1000</small>
           </div>
 
-          <div className="uc-image-professional__prompt-tools">
-            <WorkspaceContextSelector
-              compact
-              disabled={busy}
-              onChange={(contextReferences) => changeDraft({
-                ...draft,
-                contextReferences
-              })}
-              onMessage={onMessage}
-              projectContextsOnly
-              references={draft.contextReferences}
-            />
-            <ImagePromptEnhancePanel
-              compact
-              dirty={dirty}
-              draft={draft}
-              onFlushDraft={onFlushDraft}
-              onDraftPersisted={(next) =>
-                onDraftPersisted(next as GenerationImageDraftDto)
-              }
-              onMessage={onMessage}
-            />
-          </div>
-          {unsupportedContexts.length > 0 ? (
-            <div className="uc-image-quick__preflight" role="status">
-              <strong>发现旧上下文引用</strong>
-              <span>专业生图只接受固定版本的项目上下文。</span>
-              <Button onClick={clearUnsupportedContexts} variant="secondary">
-                <LuTrash2 aria-hidden="true" />
-                清理旧上下文
-              </Button>
+          <CreationAdvancedSection
+            defaultOpen={unsupportedContexts.length > 0}
+            note={`${draft.contextReferences.length} 份上下文`}
+            title="上下文与提示词增强"
+          >
+            <div className="uc-image-professional__prompt-tools">
+              <WorkspaceContextSelector
+                compact
+                disabled={busy}
+                onChange={(contextReferences) => changeDraft({
+                  ...draft,
+                  contextReferences
+                })}
+                onMessage={onMessage}
+                projectContextsOnly
+                references={draft.contextReferences}
+              />
+              <ImagePromptEnhancePanel
+                compact
+                dirty={dirty}
+                draft={draft}
+                onFlushDraft={onFlushDraft}
+                onDraftPersisted={(next) =>
+                  onDraftPersisted(next as GenerationImageDraftDto)
+                }
+                onMessage={onMessage}
+              />
             </div>
-          ) : null}
+            {unsupportedContexts.length > 0 ? (
+              <div className="uc-image-quick__preflight" role="status">
+                <strong>发现旧上下文引用</strong>
+                <span>专业生图只接受固定版本的项目上下文。</span>
+                <Button onClick={clearUnsupportedContexts} variant="secondary">
+                  <LuTrash2 aria-hidden="true" />
+                  清理旧上下文
+                </Button>
+              </div>
+            ) : null}
+          </CreationAdvancedSection>
 
         </Card>
 
         {enhancementContent ? (
-        <Card className="uc-image-workbench__panel">
+        <Card className="uc-image-workbench__panel uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">2</span>
             <div>
               <h2>最终提示词</h2>
-              <p>增强结果自动写入最终提示词；最终提示词是本次外发的唯一文本事实。</p>
             </div>
           </header>
+          <CreationAdvancedSection
+            defaultOpen
+            note="已增强"
+            title="最终提示词"
+          >
           <div className="uc-image-professional__prompt-columns">
             <section>
               <StatusPill tone="success">最终提交提示词</StatusPill>
@@ -500,10 +506,11 @@ export function ImageProfessionalWorkspace({
               恢复原始输入
             </Button>
           </div>
+          </CreationAdvancedSection>
         </Card>
         ) : null}
 
-        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities">
+        <Card className="uc-image-workbench__panel uc-image-workbench__capabilities uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">
             <span aria-hidden="true">{enhancementContent ? '3' : '2'}</span>
             <div>
@@ -516,8 +523,9 @@ export function ImageProfessionalWorkspace({
             </div>
           </header>
           <ImageFeatureSubmissionPanel
-            actionHost={actionHost}
             blockedReason={blockedReason}
+            className="uc-image-feature-panel--compact"
+            collapseParameters
             dirty={dirty}
             draft={draft}
             onDraftChange={onDraftChange}
@@ -535,19 +543,6 @@ export function ImageProfessionalWorkspace({
         </Card>
           </div>
 
-          <footer className="uc-image-professional__submit-bar">
-            <span>
-              {generationInFlight
-                ? '请求处理中，请在右侧查看进度'
-                : dirty || draft.state !== 'saved'
-                  ? '正在保存当前配置'
-                  : '草稿已保存，可以提交'}
-            </span>
-            <div
-              className="uc-image-professional__submit-action"
-              ref={setActionHost}
-            />
-          </footer>
         </section>
 
         <Card

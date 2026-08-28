@@ -5,6 +5,7 @@ import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
   toDynamicParameterFields,
+  validateDynamicParameterValues,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
 import {
@@ -32,6 +33,7 @@ import {
   describeUnconfirmedGenerationOutcome,
   isUnconfirmedGenerationOutcome
 } from '../../../ui/notifications/generation-failure-reasons';
+import { CreationAdvancedSection } from '../CreationAdvancedSection';
 
 interface VideoFeatureSubmissionPanelProps {
   readonly className?: string;
@@ -42,6 +44,8 @@ interface VideoFeatureSubmissionPanelProps {
   readonly oneShot?: boolean;
   /** Text / image-to-video: show in-page 准备 → 请求中 → 等待上游 → 完成 progress. */
   readonly showProgressSteps?: boolean;
+  /** Text / image-to-video: tuck optional model parameters behind an on-demand section. */
+  readonly collapseParameters?: boolean;
   /** Hosts the primary action in the workbench footer when provided. */
   readonly actionHost?: HTMLDivElement | null;
   /** Exposes real submit stages to the result preview without changing execution state. */
@@ -120,6 +124,7 @@ export function VideoFeatureSubmissionPanel({
   blockedReason,
   oneShot = false,
   showProgressSteps = false,
+  collapseParameters = false,
   actionHost,
   onProgressChange,
   onDraftChange,
@@ -135,6 +140,7 @@ export function VideoFeatureSubmissionPanel({
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
+  const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
   const trackProgress = showProgressSteps || Boolean(onProgressChange);
   const featureSelection = draft.featureSelection ?? {
     productFeature: draft.mode === 'image_to_video'
@@ -154,6 +160,41 @@ export function VideoFeatureSubmissionPanel({
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
+  const dynamicParameterFields = selectedCandidate
+    ? toDynamicParameterFields(selectedCandidate.parameterSchema.fields)
+    : [];
+  const parameterValidation = validateDynamicParameterValues(
+    dynamicParameterFields,
+    featureSelection.parameterValues as Readonly<Record<string, DynamicParameterValue | undefined>>,
+    parameterInputErrors
+  );
+  const parameterForm = (
+    <DynamicParameterForm
+      disabled={busy}
+      emptyHint="当前表面没有需要用户填写的参数。"
+      fields={dynamicParameterFields}
+      errors={parameterValidation.errors}
+      onInputErrorChange={(fieldId, error) => {
+        setParameterInputErrors((current) => {
+          const next = { ...current };
+          if (error) next[fieldId] = error;
+          else delete next[fieldId];
+          return next;
+        });
+      }}
+      onChange={(fieldId, value) =>
+        changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
+      }
+      values={featureSelection.parameterValues as Readonly<
+        Record<string, DynamicParameterValue | undefined>
+      >}
+    />
+  );
+  const requiredInputError = draft.prompt.finalPrompt.trim().length === 0
+    ? '提示词为必填项。'
+    : draft.mode === 'image_to_video' && !draft.imageToVideo.source
+      ? '首帧图片为必填项。'
+      : undefined;
 
   function silentlyFinishRuntimeGate() {
     onMessage('');
@@ -234,8 +275,10 @@ export function VideoFeatureSubmissionPanel({
     if (busyRef.current) return;
     const needsSave = dirty || draft.state !== 'saved';
     if (needsSave) {
-      // Keep the active parameter contract mounted while autosave persists edits.
-      setLoadState('idle');
+      // Keep an already resolved contract interactive while autosave persists
+      // a local selection or parameter edit. A fresh candidate read still
+      // waits for the saved revision, but users can switch among the current
+      // candidates instead of being locked out by the debounce window.
       return;
     }
     setLoadState('loading');
@@ -292,6 +335,7 @@ export function VideoFeatureSubmissionPanel({
           )
         )
       : {};
+    setParameterInputErrors({});
     onDraftChange({
       ...draft,
       state: 'editing',
@@ -314,6 +358,12 @@ export function VideoFeatureSubmissionPanel({
     fieldId: string,
     value: VideoWorkspaceParameterValueDto | undefined
   ) {
+    setParameterInputErrors((current) => {
+      if (!(fieldId in current)) return current;
+      const next = { ...current };
+      delete next[fieldId];
+      return next;
+    });
     const parameterValues = { ...featureSelection.parameterValues } as Record<
       string,
       VideoWorkspaceParameterValueDto
@@ -356,6 +406,14 @@ export function VideoFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
+    if (requiredInputError) {
+      showSubmissionError(requiredInputError);
+      return;
+    }
+    if (!parameterValidation.valid) {
+      showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
+      return;
+    }
     setBusy(true);
     busyRef.current = true;
     clearGenerationMessage();
@@ -498,6 +556,7 @@ export function VideoFeatureSubmissionPanel({
           available: candidate.available,
           unavailableReasons: candidate.unavailableReasons
         }))}
+        required
         reasonLabels={unavailableReasonLabels}
         value={featureSelection.candidateId ?? ''}
       />
@@ -522,22 +581,20 @@ export function VideoFeatureSubmissionPanel({
               ))}
             </div>
           ) : null}
-          {oneShot ? (
+          {oneShot && dynamicParameterFields.length === 0 ? (
             <p className="uc-model-select__hint" role="status">
               快速视频使用服务默认参数，无需填写动态参数。
             </p>
           ) : (
-            <DynamicParameterForm
-              disabled={busy}
-              emptyHint="当前表面没有需要用户填写的参数。"
-              fields={toDynamicParameterFields(selectedCandidate.parameterSchema.fields)}
-              onChange={(fieldId, value) =>
-                changeParameter(fieldId, value as VideoWorkspaceParameterValueDto | undefined)
-              }
-              values={featureSelection.parameterValues as Readonly<
-                Record<string, DynamicParameterValue | undefined>
-              >}
-            />
+            collapseParameters && dynamicParameterFields.length > 0 ? (
+              <CreationAdvancedSection
+                defaultOpen={!parameterValidation.valid}
+                note={`${dynamicParameterFields.length} 项`}
+                title="模型参数"
+              >
+                {parameterForm}
+              </CreationAdvancedSection>
+            ) : parameterForm
           )}
         </>
       ) : null}
@@ -546,6 +603,13 @@ export function VideoFeatureSubmissionPanel({
         <div className="uc-image-quick__preflight" role="status">
           <strong>当前不能生成</strong>
           <span>{blockedReason}</span>
+        </div>
+      ) : null}
+
+      {requiredInputError ? (
+        <div className="uc-image-quick__preflight" role="alert">
+          <strong>请补全必填项</strong>
+          <span>{requiredInputError}</span>
         </div>
       ) : null}
 
@@ -562,6 +626,7 @@ export function VideoFeatureSubmissionPanel({
           disabled={
             Boolean(blockedReason) ||
             busy ||
+            !parameterValidation.valid ||
             !selectedCandidate?.available
           }
           onClick={() => void prepare()}
@@ -575,6 +640,7 @@ export function VideoFeatureSubmissionPanel({
         disabled={
           Boolean(blockedReason) ||
           busy ||
+          !parameterValidation.valid ||
           !selectedCandidate?.available
         }
         onClick={() => void prepare()}

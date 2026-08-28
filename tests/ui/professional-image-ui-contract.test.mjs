@@ -165,9 +165,13 @@ test('professional image uses a scrollable preparation pane and stable result pa
   assert.match(professionalSource, /aria-label="提交前准备区域"/);
   assert.match(professionalSource, /第一步 · 提交前准备/);
   assert.match(professionalSource, /uc-image-professional__before-scroll/);
-  assert.match(professionalSource, /uc-image-professional__submit-bar/);
-  assert.match(professionalSource, /actionHost={actionHost}/);
+  assert.doesNotMatch(professionalSource, /uc-image-professional__submit-bar/);
+  assert.doesNotMatch(professionalSource, /actionHost={actionHost}/);
+  assert.match(professionalSource, /className="uc-image-feature-panel--compact"/);
+  assert.match(professionalSource, /collapseParameters/);
   assert.match(featurePanelSource, /createPortal\(primaryAction, actionHost\)/);
+  assert.doesNotMatch(pageStyles, /\.uc-creation-simple \.uc-image-professional__submit-bar/);
+  assert.match(pageStyles, /\.uc-image-feature-panel--compact \.uc-image-feature-panel__primary \{[\s\S]*min-height: 44px;/);
   assert.match(professionalSource, /aria-label="生成过程与作品区域"/);
   assert.match(professionalSource, /<GenerationHistory/);
   assert.doesNotMatch(professionalSource, /第二步 · 生成过程与作品/);
@@ -219,21 +223,14 @@ test('professional image preserves the current result after submission', () => {
 });
 
 test('professional image history uses current-draft verified local works only', () => {
-  for (const operation of [
-    'listTasks',
-    'listWorks',
-    'getTaskDetails',
-    'getWorkDetails',
-    'createWorkMediaHandle'
-  ]) {
+  for (const operation of ['listGenerationHistory', 'createWorkMediaHandle']) {
     assert.match(historySource, new RegExp(`storage\\.${operation}\\(`));
   }
-  assert.match(historySource, /task\.sourceDraftId === draftId/);
-  assert.match(historySource, /taskIds\.has\(details\.value\.sourceTaskId\)/);
-  assert.match(historySource, /work\.mediaKind === mediaKind/);
-  assert.match(historySource, /work\.fileState === 'available'/);
-  assert.match(historySource, /details\.value\?\.verifiedAt/);
-  assert.match(historySource, /handle\.ok && handle\.value\.mediaKind === mediaKind/);
+  assert.doesNotMatch(historySource, /storage\.listTasks|storage\.listWorks|storage\.getTaskDetails|storage\.getWorkDetails/);
+  assert.match(historySource, /projectId,/);
+  assert.match(historySource, /draftId,/);
+  assert.match(historySource, /mediaKind,/);
+  assert.match(historySource, /limit: 20/);
   assert.match(historySource, /a\.createdAt\.localeCompare\(b\.createdAt\)/);
   assert.match(historySource, /aria-pressed={node\.work\.workId === selectedWorkId}/);
   assert.match(historySource, /setSelectedWorkId\(node\.work\.workId\)/);
@@ -241,9 +238,27 @@ test('professional image history uses current-draft verified local works only', 
 });
 
 test('professional image history keeps concise truthful timeline states', () => {
-  for (const text of ['生成历史', '张作品', '最新在右侧', '生成中', '失败']) {
+  for (const text of [
+    '生成历史',
+    '张作品',
+    '最新在右侧',
+    '生成中',
+    '结果待接收',
+    '正在接收',
+    '失败'
+  ]) {
     assert.match(historySource, new RegExp(text));
   }
+  assert.match(historySource, /const awaitingReceiptExecutionStates = new Set\(\[[\s\S]*'remote_completed'/);
+  assert.match(historySource, /const receivingExecutionStates = new Set\(\[[\s\S]*'downloading'[\s\S]*'writing'[\s\S]*'verifying'/);
+  const pendingStates = historySource.match(
+    /const pendingExecutionStates = new Set\(\[([\s\S]*?)\]\);/
+  )?.[1] ?? '';
+  assert.doesNotMatch(pendingStates, /remote_completed|downloading|writing|verifying/);
+  assert.match(pageStyles, /\.uc-generation-history__status--awaiting-receipt\s*{[\s\S]*status-warning/);
+  assert.match(pageStyles, /\.uc-generation-history__status--receiving\s*{[\s\S]*status-info/);
+  assert.match(pageStyles, /\.uc-generation-history__marker--awaiting_receipt\s*{/);
+  assert.match(pageStyles, /\.uc-generation-history__marker--receiving\s*{/);
   assert.doesNotMatch(historySource, /当前草稿的生成历史|按生成时间排列/);
   assert.match(historySource, /latestExecutionUpdatedAt \?\? task\.createdAt/);
   assert.match(historySource, /startedAt \?\? new Date\(\)\.toISOString\(\)/);
@@ -381,15 +396,19 @@ test('professional image uses controlled local media and the safe feature API', 
   }
   assert.match(
     professionalSource,
-    /selectInput\([\s\S]*?onDraftChange\(result\.value\.draft/
+    /selectInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
   );
   assert.match(
     professionalSource,
-    /importInput\([\s\S]*?onDraftChange\(result\.value\.draft/
+    /importInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
   );
   assert.match(
     professionalSource,
-    /clearInput\([\s\S]*?onDraftChange\(result\.value/
+    /useWorkAsInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+  );
+  assert.match(
+    professionalSource,
+    /clearInput\([\s\S]*?onDraftPersisted\(result\.value/
   );
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));

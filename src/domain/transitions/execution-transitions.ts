@@ -134,12 +134,7 @@ export function transitionExecution(
   if (
     execution.state === 'failed' &&
     nextState === 'remote_completed' &&
-    (
-      !['downloading', 'writing'].includes(execution.failure?.stage ?? '') ||
-      execution.failure?.retryability === 'not_retryable' ||
-      !execution.providerOperationRecordId ||
-      (!execution.remoteOperationId && execution.submissionOutcome !== 'completed_sync')
-    )
+    !canRecoverRemoteCompletedExecution(execution)
   ) {
     throw new RetryNotAllowedError(
       'only a safely retryable failed local result receipt can resume remote completion'
@@ -275,17 +270,25 @@ export function recoverRemoteCompletedExecution(
   execution: Execution,
   updatedAt: IsoTimestamp
 ): Execution {
-  if (
-    execution.state !== 'failed' ||
-    !['downloading', 'writing'].includes(execution.failure?.stage ?? '') ||
-    execution.failure?.retryability === 'not_retryable' ||
-    !execution.providerOperationRecordId ||
-    (!execution.remoteOperationId && execution.submissionOutcome !== 'completed_sync')
-  ) {
+  if (!canRecoverRemoteCompletedExecution(execution)) {
     throw new RetryNotAllowedError(
       'only a safely retryable failed local result receipt can resume remote completion'
     );
   }
 
   return transitionExecution(execution, 'remote_completed', updatedAt);
+}
+
+export function canRecoverRemoteCompletedExecution(
+  execution: Execution
+): boolean {
+  return execution.state === 'failed' &&
+    ['remote_completed', 'downloading', 'writing'].includes(
+      execution.failure?.stage ?? ''
+    ) &&
+    execution.failure?.retryability !== 'not_retryable' &&
+    Boolean(execution.providerOperationRecordId) &&
+    Boolean(
+      execution.remoteOperationId || execution.submissionOutcome === 'completed_sync'
+    );
 }

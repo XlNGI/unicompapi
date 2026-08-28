@@ -40,6 +40,10 @@ export interface SettingsIpcLifecycle {
     readonly pauseOnLowBattery: boolean;
   }>;
   getProxyMode(): Promise<ProxyMode>;
+  writeDiagnosticsLog(
+    level: 'debug' | 'info' | 'warn' | 'error',
+    message: string
+  ): Promise<void>;
   dispose(): void;
 }
 
@@ -68,6 +72,11 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
     process.platform === 'darwin' ? 'macos' : 'windows',
     new ElectronShortcutAdapter()
   );
+  const diagnostics = new DiagnosticsService(
+    userDataPath,
+    undefined,
+    new ElectronDiagnosticLocationAdapter(userDataPath)
+  );
   const controller = new SettingsController(
     repository,
     undefined,
@@ -89,11 +98,7 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
       shortcuts
     },
     {
-      diagnostics: new DiagnosticsService(
-        userDataPath,
-        undefined,
-        new ElectronDiagnosticLocationAdapter(userDataPath)
-      ),
+      diagnostics,
       updates: new UpdatesService(app.getVersion()),
       applicationData: new ApplicationDataService(userDataPath)
     }
@@ -214,6 +219,9 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
     },
     async getProxyMode() {
       return (await repository.load()).document.network.proxy;
+    },
+    writeDiagnosticsLog(level, message) {
+      return controller.writeDiagnosticsLog(level, message);
     },
     dispose() {
       shortcuts.release();
