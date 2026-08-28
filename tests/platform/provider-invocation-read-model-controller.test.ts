@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createLocalResultObservation,
   createProviderExecutionRouteSnapshot,
@@ -42,7 +42,8 @@ import {
   NodeProjectStorage,
   ProjectCatalogService,
   ProviderInvocationReadModelController,
-  ProviderUsageSchemaRegistry
+  ProviderUsageSchemaRegistry,
+  projectStoragePaths
 } from '../../src/platform';
 import { VIDU_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/vidu/vidu-contracts';
 
@@ -77,6 +78,7 @@ const usageSchema = createUsageSchema({
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) =>
     rm(root, { recursive: true, force: true })
   ));
@@ -148,6 +150,7 @@ describe('provider invocation read model controller', () => {
   it('returns safe details with timeline, usage, local result facts and Work registration only', async () => {
     const fixture = await controllerFixture();
     const result = await fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'attempt-media-call'
     });
     expect(result).toMatchObject({
@@ -195,15 +198,60 @@ describe('provider invocation read model controller', () => {
       /routeSnapshot|packageId|adapterKey|endpoint|credential|runtimePolicy|authorization|sourceEventKey|observationId|remoteOperation|prompt|absolutePath|contentHash/i
     );
     await expect(fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'missing-attempt'
     })).resolves.toEqual({ ok: true, value: undefined });
     await expect(fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'attempt-media-call',
       extra: true
     })).resolves.toMatchObject({
       ok: false,
       error: { code: 'invalid_request' }
     });
+  });
+
+  it('returns one project-scoped task timeline query with one read per fact file', async () => {
+    const fixture = await controllerFixture();
+    const reads = new Map<string, number>();
+    const original = NodeProjectStorage.prototype.readJsonWithBackup;
+    vi.spyOn(NodeProjectStorage.prototype, 'readJsonWithBackup')
+      .mockImplementation(async function (this: NodeProjectStorage, relativePath, parse) {
+        const key = String(relativePath);
+        reads.set(key, (reads.get(key) ?? 0) + 1);
+        return original.call(this, relativePath, parse);
+      });
+
+    await expect(fixture.controller.getTaskTimeline({
+      projectId: fixture.mediaProjectId,
+      taskId: 'task-media-call'
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{ invocationAttemptId: 'attempt-media-call' }],
+        issues: []
+      }
+    });
+
+    for (const path of [
+      projectStoragePaths.entities.providerInvocations,
+      projectStoragePaths.entities.providerExecutionRouteSnapshots,
+      projectStoragePaths.entities.providerUsageObservations,
+      projectStoragePaths.entities.localResultObservations,
+      projectStoragePaths.entities.works
+    ]) expect(reads.get(path)).toBe(1);
+  });
+
+  it('fails task and call lookups closed for forged project scope', async () => {
+    const fixture = await controllerFixture();
+    await expect(fixture.controller.getTaskTimeline({
+      projectId: 'project-forged',
+      taskId: 'task-media-call'
+    })).resolves.toEqual({ ok: true, value: { items: [], issues: [] } });
+    await expect(fixture.controller.getCallDetails({
+      projectId: 'project-forged',
+      invocationAttemptId: 'attempt-media-call'
+    })).resolves.toEqual({ ok: true, value: undefined });
   });
 
   it('does not interpret recorded usage without its exact schema and keeps no-observation calls readable', async () => {
@@ -221,6 +269,7 @@ describe('provider invocation read model controller', () => {
       }
     });
     await expect(fixture.controller.getCallDetails({
+      projectId: fixture.mediaProjectId,
       invocationAttemptId: 'attempt-media-call'
     })).resolves.toMatchObject({
       ok: false,

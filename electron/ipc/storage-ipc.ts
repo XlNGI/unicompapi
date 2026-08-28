@@ -487,6 +487,9 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.getTaskDetails, (_event, request: unknown) =>
     readModels.getTaskDetails(request)
   );
+  ipcMain.handle(storageIpcChannels.getTaskTimeline, (_event, request: unknown) =>
+    callReadModels.getTaskTimeline(request)
+  );
   ipcMain.handle(storageIpcChannels.listCallRecords, (_event, request: unknown) =>
     callReadModels.listCallRecords(request)
   );

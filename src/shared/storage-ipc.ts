@@ -12,6 +12,7 @@ export const storageIpcChannels = {
   localStorageChanged: 'storage:local-storage-changed',
   listTasks: 'storage:list-tasks',
   getTaskDetails: 'storage:get-task-details',
+  getTaskTimeline: 'storage:get-task-timeline',
   listCallRecords: 'storage:list-call-records',
   getCallDetails: 'storage:get-call-details',
   getConsumptionSummary: 'storage:get-consumption-summary',
@@ -173,6 +174,11 @@ export interface StorageCallRecordListDto {
   readonly total: number;
   readonly offset: number;
   readonly limit: number;
+  readonly issues: readonly StorageReadModelIssueDto[];
+}
+
+export interface StorageTaskTimelineDto {
+  readonly items: readonly StorageCallDetailsDto[];
   readonly issues: readonly StorageReadModelIssueDto[];
 }
 
@@ -394,10 +400,15 @@ export interface StorageApi {
   getTaskDetails(
     taskId: string
   ): Promise<StorageIpcResult<StorageTaskDetailsDto | undefined>>;
+  getTaskTimeline(
+    projectId: string,
+    taskId: string
+  ): Promise<StorageIpcResult<StorageTaskTimelineDto>>;
   listCallRecords(
     filter?: StorageCallRecordFilterDto
   ): Promise<StorageIpcResult<StorageCallRecordListDto>>;
   getCallDetails(
+    projectId: string,
     invocationAttemptId: string
   ): Promise<StorageIpcResult<StorageCallDetailsDto | undefined>>;
   getConsumptionSummary(

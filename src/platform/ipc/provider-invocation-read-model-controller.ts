@@ -27,7 +27,8 @@ import type {
   StorageConsumptionProviderSliceDto,
   StorageConsumptionSummaryDto,
   StorageIpcResult,
-  StorageReadModelIssueDto
+  StorageReadModelIssueDto,
+  StorageTaskTimelineDto
 } from '../../shared/storage-ipc';
 import {
   JsonLocalResultObservationRepository,
@@ -164,7 +165,10 @@ export class ProviderInvocationReadModelController {
       const items: StorageCallRecordSummaryDto[] = [];
       const issues = new Map<string, StorageReadModelIssueDto>();
 
-      for (const entry of await this.catalog.getEntries()) {
+      const entries = await this.catalog.getEntries();
+      for (const entry of filter.projectId
+        ? entries.filter((candidate) => candidate.projectId === filter.projectId)
+        : entries) {
         if (!(await isAvailable(entry))) {
           addIssue(issues, entry, 'unavailable');
           continue;
@@ -207,37 +211,78 @@ export class ProviderInvocationReadModelController {
   async getCallDetails(
     request: unknown
   ): Promise<StorageIpcResult<StorageCallDetailsDto | undefined>> {
-    let invocationAttemptId: string;
+    let parsed: { readonly projectId: string; readonly invocationAttemptId: string };
     try {
-      invocationAttemptId = parseDetailsRequest(request);
+      parsed = parseDetailsRequest(request);
     } catch {
       return invalidRequestFailure();
     }
 
     try {
-      let match: StorageCallDetailsDto | undefined;
-      for (const entry of await this.catalog.getEntries()) {
-        if (!(await isAvailable(entry))) continue;
-        const context = createContext(entry);
-        let attempt: ProviderInvocationAttemptV1 | undefined;
-        try {
-          attempt = await context.invocations.get(
-            toProviderInvocationAttemptId(invocationAttemptId)
-          );
-        } catch {
-          continue;
-        }
-        if (!attempt) continue;
-        try {
-          const facts = await loadProjectFacts(entry, context);
-          const built = await this.buildRecord(entry, facts, attempt);
-          if (match) return readFailure();
-          match = built.details;
-        } catch {
-          return readFailure();
-        }
+      const entry = (await this.catalog.getEntries()).find(
+        (candidate) => candidate.projectId === parsed.projectId
+      );
+      if (!entry || !(await isAvailable(entry))) return { ok: true, value: undefined };
+      const facts = await loadProjectFacts(entry);
+      const attempt = facts.attempts.find(
+        (candidate) => candidate.id === toProviderInvocationAttemptId(parsed.invocationAttemptId)
+      );
+      if (!attempt || attempt.projectId !== parsed.projectId) {
+        return { ok: true, value: undefined };
       }
-      return { ok: true, value: match };
+      return { ok: true, value: (await this.buildRecord(entry, facts, attempt)).details };
+    } catch {
+      return readFailure();
+    }
+  }
+
+  async getTaskTimeline(
+    request: unknown
+  ): Promise<StorageIpcResult<StorageTaskTimelineDto>> {
+    let parsed: { readonly projectId: string; readonly taskId: string };
+    try {
+      parsed = parseTaskTimelineRequest(request);
+    } catch {
+      return invalidRequestFailure();
+    }
+
+    try {
+      const entry = (await this.catalog.getEntries()).find(
+        (candidate) => candidate.projectId === parsed.projectId
+      );
+      if (!entry) return { ok: true, value: { items: [], issues: [] } };
+      if (!(await isAvailable(entry))) {
+        return {
+          ok: true,
+          value: { items: [], issues: [toIssue(entry, 'unavailable')] }
+        };
+      }
+      try {
+        const facts = await loadProjectFacts(entry);
+        const attempts = facts.attempts.filter((attempt) =>
+          attempt.projectId === parsed.projectId &&
+          attempt.subject.kind === 'media' &&
+          attempt.subject.taskId === parsed.taskId
+        );
+        const items = await Promise.all(
+          attempts.map(async (attempt) => (await this.buildRecord(entry, facts, attempt)).details)
+        );
+        return {
+          ok: true,
+          value: {
+            items: items.sort((left, right) =>
+              left.createdAt.localeCompare(right.createdAt) ||
+              left.invocationAttemptId.localeCompare(right.invocationAttemptId)
+            ),
+            issues: []
+          }
+        };
+      } catch {
+        return {
+          ok: true,
+          value: { items: [], issues: [toIssue(entry, 'invalid_data')] }
+        };
+      }
     } catch {
       return readFailure();
     }
@@ -518,17 +563,16 @@ async function loadProjectFacts(
   entry: ProjectCatalogEntry,
   context = createContext(entry)
 ): Promise<ProjectCallFacts> {
-  const [attempts, events, routes, usage, localResults, works] = await Promise.all([
-    context.invocations.list(),
-    context.invocations.listEvents(),
+  const [invocations, routes, usage, localResults, works] = await Promise.all([
+    context.invocations.readAll(),
     context.routes.list(),
     context.usage.list(),
     context.localResults.list(),
     context.works.list(entry.projectId)
   ]);
   return {
-    attempts,
-    eventsByAttempt: groupBy(events, (event) => event.invocationAttemptId),
+    attempts: invocations.attempts,
+    eventsByAttempt: groupBy(invocations.events, (event) => event.invocationAttemptId),
     routesById: new Map(routes.map((route) => [route.id, route])),
     usageByAttempt: groupBy(usage, (observation) => observation.invocationAttemptId),
     localResultsByAttempt: groupBy(
@@ -832,9 +876,30 @@ function toConversionSourceDto(
   };
 }
 
-function parseDetailsRequest(value: unknown): string {
-  if (!isRecord(value) || Object.keys(value).length !== 1) throw invalidRequest();
-  return requireId(value.invocationAttemptId);
+function parseDetailsRequest(
+  value: unknown
+): { readonly projectId: string; readonly invocationAttemptId: string } {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some((key) => !['projectId', 'invocationAttemptId'].includes(key))
+  ) throw invalidRequest();
+  return {
+    projectId: requireId(value.projectId),
+    invocationAttemptId: requireId(value.invocationAttemptId)
+  };
+}
+
+function parseTaskTimelineRequest(
+  value: unknown
+): { readonly projectId: string; readonly taskId: string } {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some((key) => !['projectId', 'taskId'].includes(key))
+  ) throw invalidRequest();
+  return {
+    projectId: requireId(value.projectId),
+    taskId: requireId(value.taskId)
+  };
 }
 
 function optionalId(value: unknown): string | undefined {
@@ -905,6 +970,17 @@ function addIssue(
     projectName: entry.projectName,
     reason
   });
+}
+
+function toIssue(
+  entry: ProjectCatalogEntry,
+  reason: StorageReadModelIssueDto['reason']
+): StorageReadModelIssueDto {
+  return {
+    projectId: entry.projectId,
+    projectName: entry.projectName,
+    reason
+  };
 }
 
 async function isAvailable(entry: ProjectCatalogEntry): Promise<boolean> {
