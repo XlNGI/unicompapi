@@ -39,6 +39,10 @@ import type {
   ImageResultPort
 } from './image-result-port';
 import { ImageResultPortError } from './image-result-port';
+import type {
+  ImageResultReceiptEvent,
+  ImageResultReceiptStage
+} from './image-result-receipt-events';
 
 export interface LocalImageResultReceiverDependencies {
   getSession(): StorageProjectSession | undefined;
@@ -49,6 +53,7 @@ export interface LocalImageResultReceiverDependencies {
   publishFile?(temporaryPath: string, finalPath: string): Promise<void>;
   now?(): string;
   onError?(error: unknown): void;
+  onEvent?(event: ImageResultReceiptEvent): void;
   downloadRetry?: {
     readonly maxAttempts?: number;
     readonly backoffMs?: readonly number[];
@@ -75,6 +80,7 @@ export class LocalImageResultReceiver {
       let temporaryPath: string | undefined;
       let finalPath: string | undefined;
       let finalFileRecorded = false;
+      let receiptStage: ImageResultReceiptStage = 'loading_execution';
 
       try {
         context = this.createContext();
@@ -84,6 +90,13 @@ export class LocalImageResultReceiver {
         if (!execution) {
           throw receiverError('execution_not_found', 'Execution not found');
         }
+        receiptStage = 'loading_descriptor';
+        this.emit({
+          event: 'receipt_started',
+          taskId: execution.taskId,
+          executionId: execution.id,
+          stage: receiptStage
+        });
         const existingWork = (
           await context.workRepository.list(context.session.projectId)
         ).find((work) => work.sourceExecutionId === execution?.id);
@@ -107,6 +120,13 @@ export class LocalImageResultReceiver {
               'Registered image work has an incompatible execution state'
             );
           }
+          receiptStage = 'registering_work';
+          this.emit({
+            event: 'work_registered',
+            taskId: execution.taskId,
+            executionId: execution.id,
+            stage: receiptStage
+          });
           return {
             ok: true,
             value: {
@@ -137,8 +157,15 @@ export class LocalImageResultReceiver {
           );
         }
         validateDescriptor(descriptor);
+        this.emit({
+          event: 'descriptor_loaded',
+          taskId: execution.taskId,
+          executionId: execution.id,
+          stage: receiptStage
+        });
 
         if (execution.state === 'verifying') {
+          receiptStage = 'verifying';
           const availableFile = (
             await context.fileRepository.list(context.session.projectId)
           ).find(
@@ -163,6 +190,13 @@ export class LocalImageResultReceiver {
             checksumSha256: availableFile.checksumSha256,
             updatedAt: availableFile.updatedAt
           });
+          this.emit({
+            event: 'verification_completed',
+            taskId: execution.taskId,
+            executionId: execution.id,
+            stage: receiptStage
+          });
+          receiptStage = 'registering_work';
           const workId = this.createWorkId();
           const completed = transitionExecution(
             execution,
@@ -182,6 +216,12 @@ export class LocalImageResultReceiver {
           });
           await context.workRepository.save(work);
           await context.executionRepository.save(completed);
+          this.emit({
+            event: 'work_registered',
+            taskId: execution.taskId,
+            executionId: execution.id,
+            stage: receiptStage
+          });
           return {
             ok: true,
             value: { workId: work.id, executionId: completed.id, name: work.name }
@@ -211,8 +251,22 @@ export class LocalImageResultReceiver {
           temporaryName
         );
         await mkdir(path.dirname(temporaryPath), { recursive: true });
+        receiptStage = 'downloading';
+        this.emit({
+          event: 'download_started',
+          taskId: execution.taskId,
+          executionId: execution.id,
+          stage: receiptStage
+        });
         await this.downloadWithRetry(operation, temporaryPath);
+        this.emit({
+          event: 'download_completed',
+          taskId: execution.taskId,
+          executionId: execution.id,
+          stage: receiptStage
+        });
 
+        receiptStage = 'verifying';
         const downloadedMetadata = await lstat(temporaryPath);
         if (!downloadedMetadata.isFile() || downloadedMetadata.isSymbolicLink()) {
           throw receiverError(
@@ -244,6 +298,7 @@ export class LocalImageResultReceiver {
           execution = transitionExecution(execution, 'writing', this.now());
           await context.executionRepository.save(execution);
         }
+        receiptStage = 'writing';
         const workId = this.createWorkId();
         const extension = extensionForMime(inspection.mimeType);
         const relativePath = toProjectRelativePath(
@@ -279,6 +334,7 @@ export class LocalImageResultReceiver {
             'Saved image result does not match downloaded bytes'
           );
         }
+        receiptStage = 'verifying';
         const availableFile: FileReference = {
           ...transitionFile(verifyingFile, 'available', this.now(), {
             sizeBytes: finalVerification.sizeBytes,
@@ -286,7 +342,14 @@ export class LocalImageResultReceiver {
           }),
           lastVerification: { ...finalVerification }
         };
+        this.emit({
+          event: 'verification_completed',
+          taskId: execution.taskId,
+          executionId: execution.id,
+          stage: receiptStage
+        });
 
+        receiptStage = 'registering_work';
         execution = transitionExecution(execution, 'verifying', this.now());
         await context.executionRepository.save(execution);
         await context.indexRepository.load();
@@ -318,6 +381,12 @@ export class LocalImageResultReceiver {
         await context.workRepository.save(work);
         await context.executionRepository.save(completed);
         execution = completed;
+        this.emit({
+          event: 'work_registered',
+          taskId: execution.taskId,
+          executionId: execution.id,
+          stage: receiptStage
+        });
         finalPath = undefined;
         return {
           ok: true,
@@ -328,7 +397,11 @@ export class LocalImageResultReceiver {
           }
         };
       } catch (error) {
-        this.dependencies.onError?.(error);
+        try {
+          this.dependencies.onError?.(error);
+        } catch {
+          // Diagnostics must not replace the receipt failure.
+        }
         if (execution && canFailExecution(execution, finalFileRecorded)) {
           try {
             const failure = transitionExecution(execution, 'failed', this.now(), {
@@ -344,7 +417,16 @@ export class LocalImageResultReceiver {
             // Preserve the original failure response if failure persistence also fails.
           }
         }
-        return { ok: false, error: mapReceiverError(error) };
+        const mapped = mapReceiverError(error);
+        this.emit({
+          event: 'receipt_failed',
+          taskId: execution?.taskId,
+          executionId,
+          stage: receiptStage,
+          safeCode: mapped.code,
+          retryability: retryabilityForError(error)
+        });
+        return { ok: false, error: mapped };
       } finally {
         if (temporaryPath) await rm(temporaryPath, { force: true });
         if (finalPath && !finalFileRecorded) {
@@ -403,6 +485,19 @@ export class LocalImageResultReceiver {
     return toFileReferenceId(
       this.dependencies.createFileId?.() ?? `file-result-${randomUUID()}`
     );
+  }
+
+  private emit(
+    event: Omit<ImageResultReceiptEvent, 'occurredAt'>
+  ): void {
+    try {
+      this.dependencies.onEvent?.(Object.freeze({
+        ...event,
+        occurredAt: this.now()
+      }));
+    } catch {
+      // Receipt diagnostics are best effort and never affect the main flow.
+    }
   }
 
   private createWorkId() {
@@ -540,6 +635,7 @@ function canFailExecution(
     'submitting',
     'queued',
     'processing',
+    'remote_completed',
     'downloading',
     'writing',
     'verifying'

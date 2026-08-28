@@ -13,7 +13,7 @@ import { StatusPill, type StatusTone } from '../../components/StatusPill';
 import type { StorageTaskSummaryDto } from '../../shared/storage-ipc';
 import type { NavigationItemId } from '../navigation/navigationItems';
 import type { ProjectStatusSnapshot } from '../status/ProjectStatusContext';
-import { useTaskReadStore } from '../task-read-store';
+import { tasksForProject, useTaskReadStore } from '../task-read-store';
 
 const visibleTerminalDurationMs = 10 * 60 * 1_000;
 const visibleActiveDurationMs = 60 * 60 * 1_000;
@@ -69,7 +69,7 @@ const taskKindLabels: Readonly<Record<string, string>> = {
 };
 
 export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockProps) {
-  const { tasks } = useTaskReadStore();
+  const { currentProjectId, tasks } = useTaskReadStore();
   const [expanded, setExpanded] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const dockRef = useRef<HTMLDivElement>(null);
@@ -91,7 +91,14 @@ export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockPro
     return () => document.removeEventListener('pointerdown', collapseOnOutsidePointer);
   }, [expanded]);
 
-  const summary = useMemo(() => summarizeTasks(tasks, now), [now, tasks]);
+  const currentProjectTasks = useMemo(
+    () => tasksForProject(tasks, currentProjectId),
+    [currentProjectId, tasks]
+  );
+  const summary = useMemo(
+    () => summarizeTasks(currentProjectTasks, now),
+    [currentProjectTasks, now]
+  );
   const showsTasks = summary.inProgress > 0 || summary.attention > 0 || summary.visibleTasks.length > 0;
   const taskPanelId = 'uc-global-task-status-panel';
 

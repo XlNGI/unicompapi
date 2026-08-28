@@ -3,6 +3,7 @@ import type { DragEvent, RefObject, WheelEvent } from 'react';
 import {
   LuCircleAlert,
   LuCircleX,
+  LuDownload,
   LuLoaderCircle,
   LuShieldCheck
 } from 'react-icons/lu';
@@ -32,7 +33,12 @@ interface HistoryTask {
   readonly latestExecutionUpdatedAt: string;
 }
 
-type HistoryStatus = 'pending' | 'failed' | 'uncertain';
+type HistoryStatus =
+  | 'pending'
+  | 'awaiting_receipt'
+  | 'receiving'
+  | 'failed'
+  | 'uncertain';
 
 interface HistoryStatusNode {
   readonly id: string;
@@ -44,21 +50,27 @@ type HistoryNode =
   | { readonly kind: 'work'; readonly work: HistoryWork }
   | HistoryStatusNode;
 
-const activeExecutionStates = new Set([
+const pendingExecutionStates = new Set([
   'submitting',
   'queued',
   'processing',
   'validating_sources',
   'preparing_media',
   'encoding',
-  'remote_completed',
+  'cancel_requested'
+]);
+
+const awaitingReceiptExecutionStates = new Set([
+  'remote_completed'
+]);
+
+const receivingExecutionStates = new Set([
   'downloading',
   'writing',
   'verifying',
   'writing_file',
   'verifying_file',
-  'registering_work',
-  'cancel_requested'
+  'registering_work'
 ]);
 
 const uncertainExecutionStates = new Set([
@@ -430,9 +442,23 @@ function buildHistoryNodes(
     const state = task.latestExecutionState;
     const occurredAt = task.latestExecutionUpdatedAt ?? task.createdAt;
     if (!state) continue;
-    if (activeExecutionStates.has(state)) {
+    if (pendingExecutionStates.has(state)) {
       nodes.push({ id: `task-${task.taskId}-pending`, kind: 'pending', occurredAt });
       taskStates.add('pending');
+    } else if (awaitingReceiptExecutionStates.has(state)) {
+      nodes.push({
+        id: `task-${task.taskId}-awaiting-receipt`,
+        kind: 'awaiting_receipt',
+        occurredAt
+      });
+      taskStates.add('awaiting_receipt');
+    } else if (receivingExecutionStates.has(state)) {
+      nodes.push({
+        id: `task-${task.taskId}-receiving`,
+        kind: 'receiving',
+        occurredAt
+      });
+      taskStates.add('receiving');
     } else if (state === 'failed' || state === 'expired') {
       nodes.push({ id: `task-${task.taskId}-failed`, kind: 'failed', occurredAt });
       taskStates.add('failed');
@@ -536,6 +562,22 @@ function HistoryStatusCard({ status }: { readonly status: HistoryStatus }) {
       <div className="uc-generation-history__status uc-generation-history__status--pending">
         <LuLoaderCircle aria-hidden="true" />
         <span>生成中</span>
+      </div>
+    );
+  }
+  if (status === 'awaiting_receipt') {
+    return (
+      <div className="uc-generation-history__status uc-generation-history__status--awaiting-receipt">
+        <LuDownload aria-hidden="true" />
+        <span>结果待接收</span>
+      </div>
+    );
+  }
+  if (status === 'receiving') {
+    return (
+      <div className="uc-generation-history__status uc-generation-history__status--receiving">
+        <LuLoaderCircle aria-hidden="true" />
+        <span>正在接收</span>
       </div>
     );
   }

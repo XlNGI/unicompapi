@@ -1320,6 +1320,22 @@
   animation: uc-generation-result-preview-spin 1.8s linear infinite;
 }
 
+.uc-generation-history__status--awaiting-receipt {
+  border-color: var(--uc-color-status-warning-border);
+  color: var(--uc-color-status-warning);
+  background: var(--uc-color-status-warning-bg);
+}
+
+.uc-generation-history__status--receiving {
+  border-color: var(--uc-color-status-info-border);
+  color: var(--uc-color-status-info);
+  background: var(--uc-color-status-info-bg);
+}
+
+.uc-generation-history__status--receiving svg {
+  animation: uc-generation-result-preview-spin 1.8s linear infinite;
+}
+
 .uc-generation-history__status--failed {
   border-color: var(--uc-color-status-danger-border);
   color: var(--uc-color-status-danger);
@@ -1344,6 +1360,14 @@
 }
 
 .uc-generation-history__marker--pending {
+  background: var(--uc-color-status-info);
+}
+
+.uc-generation-history__marker--awaiting_receipt {
+  background: var(--uc-color-status-warning);
+}
+
+.uc-generation-history__marker--receiving {
   background: var(--uc-color-status-info);
 }
 
@@ -7456,6 +7480,7 @@ button.uc-project-center__project-card:disabled {
 @media (prefers-reduced-motion: reduce) {
   .uc-generation-result-preview__ring,
   .uc-generation-history__status--pending svg,
+  .uc-generation-history__status--receiving svg,
   .uc-generation-result-preview--animated img {
     animation: none;
   }

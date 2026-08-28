@@ -3,6 +3,7 @@ import {
   createEmptyImageWorkspaceDraft,
   createImageWorkspaceDraft,
   createLocalResultObservation,
+  canRecoverRemoteCompletedExecution,
   recoverRemoteCompletedExecution,
   toDraftId,
   toIsoTimestamp,
@@ -10,6 +11,7 @@ import {
   toProviderOperationRecordId,
   toTaskId,
   transitionExecution,
+  type Execution,
   type FeatureCandidateSubjectV1,
   type SubmissionUserConfirmationV1
 } from '../../domain';
@@ -505,17 +507,9 @@ export function createImageFeatureControllerRuntime(
   return runtime;
 }
 
-function canRecoverImageLocalReceipt(execution: {
-  readonly state: string;
-  readonly failure?: {
-    readonly stage: string;
-    readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
-  };
-}): boolean {
+function canRecoverImageLocalReceipt(execution: Execution): boolean {
   if (execution.state === 'remote_completed') return true;
-  return execution.state === 'failed' &&
-    ['downloading', 'writing'].includes(execution.failure?.stage ?? '') &&
-    execution.failure?.retryability !== 'not_retryable';
+  return canRecoverRemoteCompletedExecution(execution);
 }
 
 function latestSafeCode(
