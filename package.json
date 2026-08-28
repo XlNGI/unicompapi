@@ -26,6 +26,7 @@
     "test:domain": "vitest run tests/domain",
     "test:platform": "vitest run tests/platform",
     "test:application": "vitest run tests/application",
+    "test:read-model-performance": "vitest run tests/platform/read-model-performance-baseline.test.ts",
     "test:vidu-e2e": "vitest run tests/platform/vidu-e2e-validation.test.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",
