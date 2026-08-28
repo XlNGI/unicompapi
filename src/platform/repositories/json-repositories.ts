@@ -479,6 +479,10 @@ export class JsonFileReferenceRepository implements FileReferenceRepository {
   save(file: FileReference) {
     return this.collection.save(file);
   }
+
+  remove(id: FileReferenceId) {
+    return this.collection.remove(id);
+  }
 }
 
 export class JsonTaskRepository implements TaskRepository {

@@ -9096,6 +9096,17 @@ button.uc-project-center__project-card:disabled {
   color: var(--uc-accent, #4f8cff);
   font-weight: 600;
 }
+.uc-chat-page__presentation-template {
+  width: 112px;
+  flex: 0 0 auto;
+}
+.uc-chat-page__presentation-template .rs-picker,
+.uc-chat-page__presentation-template .rs-picker-toggle {
+  width: 100%;
+}
+.uc-chat-page__presentation-template-popup {
+  min-width: 180px;
+}
 .uc-chat-page__composer--document {
   outline: 1px dashed color-mix(in srgb, var(--uc-accent, #4f8cff) 55%, transparent);
   outline-offset: 2px;

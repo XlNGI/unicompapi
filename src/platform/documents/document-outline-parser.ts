@@ -1,36 +1,22 @@
 import {
   documentWorkspaceKinds,
-  type DocumentWorkspaceKind
+  presentationPageKinds,
+  type DocumentOutline,
+  type DocumentOutlineBlock,
+  type DocumentOutlineSection,
+  type DocumentWorkspaceKind,
+  type PresentationPageKind,
+  type PresentationSectionMetadata
 } from '../../domain';
 
-export type DocumentOutlineBlock =
-  | { readonly type: 'paragraph'; readonly text: string }
-  | { readonly type: 'bullets'; readonly items: readonly string[] }
-  | { readonly type: 'numbered'; readonly items: readonly string[] }
-  | { readonly type: 'quote'; readonly text: string }
-  | {
-      readonly type: 'chart';
-      readonly chartKind: 'bar' | 'pie';
-      readonly title?: string;
-      readonly data: readonly { readonly label: string; readonly value: number }[];
-    }
-  | {
-      readonly type: 'table';
-      readonly header: readonly string[];
-      readonly rows: readonly (readonly string[])[];
-    };
-
-export interface DocumentOutlineSection {
-  readonly heading: string;
-  readonly level: 1 | 2 | 3;
-  readonly blocks: readonly DocumentOutlineBlock[];
-}
-
-export interface DocumentOutline {
-  readonly kind: DocumentWorkspaceKind;
-  readonly title: string;
-  readonly sections: readonly DocumentOutlineSection[];
-}
+export { presentationPageKinds } from '../../domain';
+export type {
+  DocumentOutline,
+  DocumentOutlineBlock,
+  DocumentOutlineSection,
+  PresentationPageKind,
+  PresentationSectionMetadata
+} from '../../domain';
 
 export class DocumentOutlineError extends Error {
   constructor(
@@ -52,6 +38,11 @@ const MAX_TABLE_ROWS = 200;
 const MAX_TABLE_CELL_LENGTH = 1000;
 const MAX_CHART_ITEMS = 50;
 const MAX_CHART_LABEL_LENGTH = 100;
+export const presentationOutlineLimits = {
+  maxTotalCharacters: 48_000,
+  maxContentGroups: 80,
+  maxEstimatedPages: 40
+} as const;
 
 export function parseDocumentOutline(jsonText: string): DocumentOutline {
   let parsed: unknown;
@@ -72,7 +63,11 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
     );
   }
   const kind = parseKind(parsed.kind);
-  const title = parseBoundedText(parsed.title, 'outline.title', MAX_TITLE_LENGTH);
+  const title = parseBoundedText(
+    parsed.title,
+    'outline.title',
+    MAX_TITLE_LENGTH
+  );
   if (!Array.isArray(parsed.sections)) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
@@ -86,9 +81,9 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
     );
   }
   const sections = parsed.sections.map((item, index) =>
-    parseSection(item, index)
+    parseSection(item, index, kind)
   );
-  return { kind, title, sections };
+  return validateDocumentOutline({ kind, title, sections });
 }
 
 export function parseDocumentContent(
@@ -97,17 +92,12 @@ export function parseDocumentContent(
 ): DocumentOutline {
   const cleaned = stripPreamble(content);
   const candidate = unwrapJsonFence(cleaned);
-  const jsonCandidate = candidate.startsWith('{')
-    ? extractBalancedJsonObject(candidate)
-    : candidate.startsWith('[')
-      ? candidate
-      : extractBalancedJsonObject(candidate);
-  if (!jsonCandidate) {
+  if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
     return parseMarkdownToOutline(cleaned, kind);
   }
-  const parsed = parseJsonRecord(jsonCandidate);
+  const parsed = parseJsonRecord(candidate);
   if ('kind' in parsed) {
-    const outline = parseDocumentOutline(jsonCandidate);
+    const outline = parseDocumentOutline(candidate);
     if (outline.kind !== kind) {
       throw new DocumentOutlineError(
         'document_invalid_outline',
@@ -116,14 +106,177 @@ export function parseDocumentContent(
     }
     return outline;
   }
-  if (isCanonicalOutlineRecord(parsed)) {
-    return parseDocumentOutline(JSON.stringify({
-      ...parsed,
-      kind,
-      title: parsed.title ?? '文档'
-    }));
-  }
   return normalizeObservedDocument(parsed, kind);
+}
+
+export function recoverDocumentContent(
+  content: string,
+  kind: DocumentWorkspaceKind
+): DocumentOutline {
+  const cleaned = stripPreamble(content);
+  const candidate = unwrapJsonFence(cleaned);
+  if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
+    return parseMarkdownToOutline(cleaned, kind);
+  }
+
+  const sections: Array<{
+    heading: string;
+    level: 1;
+    blocks: DocumentOutlineBlock[];
+    pageKind?: PresentationPageKind;
+    takeaway?: string;
+    action?: string;
+  }> = [];
+  const tokens = extractJsonStringTokens(candidate);
+  let title = '';
+  let currentSection: (typeof sections)[number] | undefined;
+  let activeKey: string | undefined;
+  let previousEnd = 0;
+  let pendingItems: string[] = [];
+  const unassigned: string[] = [];
+
+  const ensureSection = () => {
+    if (currentSection) return currentSection;
+    currentSection = { heading: '内容概览', level: 1, blocks: [] };
+    sections.push(currentSection);
+    return currentSection;
+  };
+  const flushItems = () => {
+    if (pendingItems.length > 0) {
+      ensureSection().blocks.push({ type: 'bullets', items: pendingItems });
+      pendingItems = [];
+    }
+  };
+
+  for (const token of tokens) {
+    const between = candidate.slice(previousEnd, token.start);
+    if (activeKey === 'items' && between.includes(']')) {
+      flushItems();
+      activeKey = undefined;
+    }
+    const after = candidate.slice(token.end);
+    if (/^\s*:/.test(after)) {
+      if (activeKey === 'items') flushItems();
+      activeKey = token.value;
+      previousEnd = token.end;
+      continue;
+    }
+
+    switch (activeKey) {
+      case 'title':
+        title ||= token.value;
+        activeKey = undefined;
+        break;
+      case 'heading':
+        flushItems();
+        currentSection = {
+          heading: token.value,
+          level: 1,
+          blocks: []
+        };
+        sections.push(currentSection);
+        activeKey = undefined;
+        break;
+      case 'takeaway':
+        ensureSection().takeaway = token.value;
+        activeKey = undefined;
+        break;
+      case 'action':
+        ensureSection().action = token.value;
+        activeKey = undefined;
+        break;
+      case 'items':
+        pendingItems.push(token.value);
+        break;
+      case 'text':
+      case 'caption':
+        ensureSection().blocks.push({ type: 'paragraph', text: token.value });
+        activeKey = undefined;
+        break;
+      case 'pageKind':
+        if (presentationPageKinds.includes(token.value as PresentationPageKind)) {
+          ensureSection().pageKind = token.value as PresentationPageKind;
+        }
+        activeKey = undefined;
+        break;
+      case 'label':
+        unassigned.push(token.value);
+        activeKey = undefined;
+        break;
+      default:
+        if (!presentationStructuralValues.has(token.value)) {
+          unassigned.push(token.value);
+        }
+        activeKey = undefined;
+        break;
+    }
+    previousEnd = token.end;
+  }
+  flushItems();
+
+  const used = new Set([
+    title,
+    ...sections.flatMap((section) => [
+      section.heading,
+      section.takeaway ?? '',
+      section.action ?? '',
+      ...section.blocks.flatMap((block) =>
+        block.type === 'paragraph' || block.type === 'quote'
+          ? [block.text]
+          : block.type === 'bullets' || block.type === 'numbered'
+            ? [...block.items]
+            : []
+      )
+    ])
+  ]);
+  const remaining = unassigned.filter(
+    (value) => value.length > 1 && !used.has(value)
+  );
+  if (remaining.length > 0) {
+    ensureSection().blocks.push({ type: 'bullets', items: remaining });
+  }
+  if (!title) {
+    const candidateTitle =
+      sections[0]?.heading ??
+      remaining[0] ??
+      (kind === 'ppt' ? '演示文稿' : kind === 'excel' ? '数据表格' : '文档');
+    title = candidateTitle.length <= MAX_TITLE_LENGTH
+      ? candidateTitle
+      : kind === 'ppt'
+        ? '演示文稿'
+        : kind === 'excel'
+          ? '数据表格'
+          : '文档';
+  }
+  if (sections.length === 0) {
+    sections.push({
+      heading: '内容概览',
+      level: 1,
+      blocks: [{ type: 'paragraph', text: cleaned }]
+    });
+  }
+  return validateDocumentOutline({
+    kind,
+    title,
+    sections: sections.map((section) => ({
+      heading: section.heading,
+      level: section.level,
+      blocks: section.blocks,
+      ...(kind === 'ppt' && section.pageKind !== undefined
+        ? { pageKind: section.pageKind }
+        : {}),
+      ...(kind === 'ppt' && section.takeaway !== undefined
+        ? { takeaway: section.takeaway }
+        : {}),
+      ...(kind === 'ppt' && section.action !== undefined
+        ? { action: section.action }
+        : {})
+    }))
+  });
+}
+
+export function recoverPresentationContent(content: string): DocumentOutline {
+  return recoverDocumentContent(content, 'ppt');
 }
 
 export function parseMarkdownToOutline(
@@ -221,11 +374,11 @@ export function parseMarkdownToOutline(
       });
     }
   }
-  return {
+  return validateDocumentOutline({
     kind,
     title: title || stripInlineMarkdown(lines.map((line) => line.trim()).find(Boolean) ?? '')?.slice(0, 40) || '文档',
     sections
-  };
+  });
 
   function ensureSection(): DocumentOutlineSection {
     if (currentSection) return currentSection;
@@ -248,9 +401,15 @@ export function parseMarkdownToOutline(
     if (type === 'paragraph' || type === 'quote') {
       blocks.push({ type, text });
     } else if (last && last.type === type) {
+      if (last.items.length >= MAX_ITEMS) {
+        throw new DocumentOutlineError(
+          'document_invalid_outline',
+          `Markdown list exceeds ${MAX_ITEMS} items`
+        );
+      }
       blocks[blocks.length - 1] = {
         type,
-        items: [...last.items, text].slice(-50)
+        items: [...last.items, text]
       };
     } else {
       blocks.push({ type, items: [text] });
@@ -263,7 +422,11 @@ function splitTableRow(line: string): string[] {
   return inner.split('|').map((cell) => cell.trim());
 }
 
-function parseSection(value: unknown, index: number): DocumentOutlineSection {
+function parseSection(
+  value: unknown,
+  index: number,
+  kind: DocumentWorkspaceKind
+): DocumentOutlineSection {
   if (!isRecord(value)) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
@@ -275,14 +438,7 @@ function parseSection(value: unknown, index: number): DocumentOutlineSection {
     `outline.sections[${index}].heading`,
     MAX_TITLE_LENGTH
   );
-  const level = value.level === 1 || value.level === '1'
-    ? 1
-    : value.level === 2 || value.level === '2'
-      ? 2
-      : value.level === 3 || value.level === '3'
-        ? 3
-        : undefined;
-  if (level === undefined) {
+  if (value.level !== 1 && value.level !== 2 && value.level !== 3) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
       `outline.sections[${index}].level must be 1, 2 or 3`
@@ -303,7 +459,132 @@ function parseSection(value: unknown, index: number): DocumentOutlineSection {
   const blocks = value.blocks.map((block, blockIndex) =>
     parseBlock(block, index, blockIndex)
   );
-  return { heading, level, blocks };
+  return {
+    heading,
+    level: value.level as 1 | 2 | 3,
+    blocks,
+    ...(kind === 'ppt' ? parsePresentationSectionMetadata(value, index) : {})
+  };
+}
+
+function parsePresentationSectionMetadata(
+  value: Record<string, unknown>,
+  index: number
+): PresentationSectionMetadata {
+  const label = `outline.sections[${index}]`;
+  if (
+    value.pageKind !== undefined &&
+    (typeof value.pageKind !== 'string' ||
+      !presentationPageKinds.includes(value.pageKind as PresentationPageKind))
+  ) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label}.pageKind is invalid`
+    );
+  }
+  const takeaway = parseOptionalBoundedText(
+    value.takeaway,
+    `${label}.takeaway`,
+    MAX_TEXT_LENGTH
+  );
+  const action = parseOptionalBoundedText(
+    value.action,
+    `${label}.action`,
+    MAX_TEXT_LENGTH
+  );
+  return {
+    ...(value.pageKind !== undefined
+      ? { pageKind: value.pageKind as PresentationPageKind }
+      : {}),
+    ...(takeaway !== undefined ? { takeaway } : {}),
+    ...(action !== undefined ? { action } : {})
+  };
+}
+
+function parseOptionalBoundedText(
+  value: unknown,
+  label: string,
+  maximumLength = MAX_TEXT_LENGTH
+): string | undefined {
+  return value === undefined
+    ? undefined
+    : parseBoundedText(value, label, maximumLength);
+}
+
+function validateDocumentOutline(outline: DocumentOutline): DocumentOutline {
+  if (outline.kind !== 'ppt') return outline;
+
+  let totalCharacters = outline.title.length;
+  let contentGroups = 0;
+  let estimatedPages = 2;
+  for (const section of outline.sections) {
+    totalCharacters += section.heading.length;
+    totalCharacters += section.takeaway?.length ?? 0;
+    totalCharacters += section.action?.length ?? 0;
+    const sectionContentGroups = section.blocks.reduce(
+      (total, block) => total + countBlockContentGroups(block),
+      0
+    );
+    contentGroups += sectionContentGroups;
+    estimatedPages += Math.max(1, Math.ceil(sectionContentGroups / 4));
+    for (const block of section.blocks) {
+      totalCharacters += countBlockCharacters(block);
+    }
+  }
+
+  if (totalCharacters > presentationOutlineLimits.maxTotalCharacters) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      'PPT outline exceeds the total text budget'
+    );
+  }
+  if (contentGroups > presentationOutlineLimits.maxContentGroups) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      'PPT outline exceeds the content-group budget'
+    );
+  }
+  if (estimatedPages > presentationOutlineLimits.maxEstimatedPages) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      'PPT outline exceeds the estimated page budget'
+    );
+  }
+  return outline;
+}
+
+function countBlockContentGroups(block: DocumentOutlineBlock): number {
+  return block.type === 'bullets' || block.type === 'numbered'
+    ? block.items.length
+    : 1;
+}
+
+function countBlockCharacters(block: DocumentOutlineBlock): number {
+  switch (block.type) {
+    case 'paragraph':
+    case 'quote':
+      return block.text.length;
+    case 'bullets':
+    case 'numbered':
+      return block.items.reduce((total, item) => total + item.length, 0);
+    case 'chart':
+      return (
+        (block.title?.length ?? 0) +
+        block.data.reduce(
+          (total, item) => total + item.label.length + String(item.value).length,
+          0
+        )
+      );
+    case 'table':
+      return (
+        block.header.reduce((total, cell) => total + cell.length, 0) +
+        block.rows.reduce(
+          (total, row) =>
+            total + row.reduce((rowTotal, cell) => rowTotal + cell.length, 0),
+          0
+        )
+      );
+  }
 }
 
 function parseBlock(
@@ -428,6 +709,12 @@ function parseTable(
         `${label}.rows[${rowIndex}] must be an array`
       );
     }
+    if (row.length !== header.length) {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label}.rows[${rowIndex}] must contain ${header.length} cells`
+      );
+    }
     return row.map((cell, cellIndex) => {
       if (
         typeof cell !== 'string' ||
@@ -509,36 +796,6 @@ export function stripPreamble(content: string): string {
   return lines.slice(start).join('\n').trim();
 }
 
-function extractBalancedJsonObject(value: string): string | undefined {
-  const start = value.indexOf('{');
-  if (start < 0) return undefined;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < value.length; index += 1) {
-    const character = value[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (character === '"') {
-      inString = true;
-    } else if (character === '{') {
-      depth += 1;
-    } else if (character === '}') {
-      depth -= 1;
-      if (depth === 0) return value.slice(start, index + 1);
-    }
-  }
-  return undefined;
-}
-
 export function stripInlineMarkdown(value: string): string {
   return value
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -549,6 +806,45 @@ export function stripInlineMarkdown(value: string): string {
     .replace(/`([^`]+)`/g, '$1')
     .replace(/~~([^~]+)~~/g, '$1')
     .trim();
+}
+
+const presentationStructuralValues = new Set([
+  'ppt',
+  'word',
+  'excel',
+  'paragraph',
+  'bullets',
+  'numbered',
+  'quote',
+  'table',
+  'chart',
+  'bar',
+  'pie',
+  ...presentationPageKinds
+]);
+
+function extractJsonStringTokens(
+  content: string
+): readonly { readonly value: string; readonly start: number; readonly end: number }[] {
+  const tokens: Array<{ value: string; start: number; end: number }> = [];
+  const pattern = /"(?:\\.|[^"\\])*"/g;
+  let match = pattern.exec(content);
+  while (match) {
+    try {
+      const value = JSON.parse(match[0]);
+      if (typeof value === 'string' && value.trim()) {
+        tokens.push({
+          value: stripInlineMarkdown(value),
+          start: match.index,
+          end: match.index + match[0].length
+        });
+      }
+    } catch {
+      // Skip one malformed string and continue recovering the remaining text.
+    }
+    match = pattern.exec(content);
+  }
+  return tokens;
 }
 
 function parseKind(value: unknown): DocumentWorkspaceKind {
@@ -589,6 +885,10 @@ function normalizeObservedDocument(
   value: Record<string, unknown>,
   kind: DocumentWorkspaceKind
 ): DocumentOutline {
+  if (kind === 'excel') {
+    const excel = normalizeObservedExcel(value);
+    if (excel) return parseDocumentOutline(JSON.stringify(excel));
+  }
   if (!Array.isArray(value.sections)) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
@@ -617,17 +917,6 @@ function normalizeObservedDocument(
   return parseDocumentOutline(JSON.stringify(normalized));
 }
 
-function isCanonicalOutlineRecord(
-  value: Record<string, unknown>
-): value is Record<string, unknown> & {
-  readonly title?: string;
-  readonly sections: readonly Record<string, unknown>[];
-} {
-  return Array.isArray(value.sections) && value.sections.every(
-    (section) => isRecord(section) && Array.isArray(section.blocks)
-  );
-}
-
 function normalizeObservedBlock(
   value: unknown,
   label: string,
@@ -647,13 +936,15 @@ function normalizeObservedBlock(
     case 'unordered_list':
     case 'bullet_list':
       return [{ type: 'bullets', items: value.items }];
-    case 'table':
+    case 'table': {
+      const table = normalizeObservedTable(value, label);
       return [
         ...(value.caption === undefined
           ? []
           : [{ type: 'paragraph', text: value.caption }]),
-        { type: 'table', header: value.headers, rows: value.rows }
+        { type: 'table', header: table.header, rows: table.rows }
       ];
+    }
     case 'subsection': {
       if (!Array.isArray(value.content)) {
         throw new DocumentOutlineError(
@@ -674,6 +965,95 @@ function normalizeObservedBlock(
         `${label}.type is unsupported`
       );
   }
+}
+
+function normalizeObservedExcel(
+  value: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const sources = Array.isArray(value.sheets)
+    ? value.sheets
+    : value.headers !== undefined || value.columns !== undefined
+      ? [value]
+      : undefined;
+  if (!sources) return undefined;
+  return {
+    kind: 'excel',
+    title: value.title,
+    sections: sources.map((source, index) => {
+      if (!isRecord(source)) {
+        throw new DocumentOutlineError(
+          'document_invalid_outline',
+          `sheets[${index}] must be an object`
+        );
+      }
+      const table = normalizeObservedTable(source, `sheets[${index}]`);
+      return {
+        heading: source.name ?? source.title ?? `工作表 ${index + 1}`,
+        level: 1,
+        blocks: [{ type: 'table', ...table }]
+      };
+    })
+  };
+}
+
+function normalizeObservedTable(
+  value: Record<string, unknown>,
+  label: string
+): { readonly header: readonly string[]; readonly rows: readonly string[][] } {
+  const rawColumns = value.header ?? value.headers ?? value.columns;
+  if (!Array.isArray(rawColumns) || rawColumns.length === 0) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} table columns must be a non-empty array`
+    );
+  }
+  const keys: string[] = [];
+  const header = rawColumns.map((column, index) => {
+    if (typeof column === 'string') {
+      keys.push(column);
+      return column;
+    }
+    if (!isRecord(column)) {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label} column ${index} is invalid`
+      );
+    }
+    const key = column.key ?? column.field ?? column.name ?? column.title;
+    const title = column.title ?? column.name ?? column.label ?? key;
+    if (typeof key !== 'string' || typeof title !== 'string') {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label} column ${index} is invalid`
+      );
+    }
+    keys.push(key);
+    return title;
+  });
+  const rawRows = value.rows ?? value.data;
+  if (!Array.isArray(rawRows)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} table rows must be an array`
+    );
+  }
+  const rows = rawRows.map((row, rowIndex) => {
+    const cells = Array.isArray(row)
+      ? row
+      : isRecord(row)
+        ? keys.map((key) => row[key])
+        : undefined;
+    if (!cells) {
+      throw new DocumentOutlineError(
+        'document_invalid_outline',
+        `${label} row ${rowIndex} is invalid`
+      );
+    }
+    return cells.map((cell) =>
+      cell === null || cell === undefined ? '' : String(cell)
+    );
+  });
+  return { header, rows };
 }
 
 export function isDocumentOutline(value: unknown): value is DocumentOutline {

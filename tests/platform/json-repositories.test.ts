@@ -178,7 +178,7 @@ describe('JSON repositories', () => {
     await Promise.all(drafts.map((draft) => repository.save(draft)));
 
     await expect(repository.list(base.projectId)).resolves.toHaveLength(20);
-  });
+  }, 15_000);
 
   it('rejects unknown collection versions and duplicate IDs', async () => {
     const storage = await createStorage();

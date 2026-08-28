@@ -5,6 +5,7 @@ import {
   parseDocumentContent,
   parseDocumentOutline,
   parseMarkdownToOutline,
+  recoverPresentationContent,
   stripPreamble,
   unwrapJsonFence
 } from '../../src/platform';
@@ -48,6 +49,185 @@ describe('document outline parser', () => {
     expect(isDocumentOutline(outline)).toBe(true);
   });
 
+  it('keeps PPT page semantics for layout planning', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].pageKind = 'insight';
+    value.sections[0].takeaway = '本季度增长主要来自重点行业客户。';
+    value.sections[0].action = '下季度优先复制高转化行业方案。';
+
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0]).toMatchObject({
+      pageKind: 'insight',
+      takeaway: '本季度增长主要来自重点行业客户。',
+      action: '下季度优先复制高转化行业方案。'
+    });
+  });
+
+  it('accepts normal long PPT text for layout-time wrapping and pagination', () => {
+    const longTitle = JSON.parse(validOutline());
+    longTitle.title = '人工智能智能体从对话到行动的企业级能力革命';
+
+    const longHeading = JSON.parse(validOutline());
+    longHeading.sections[0].heading = '智能体正在从辅助问答工具升级为企业数字执行者';
+
+    const longTakeaway = JSON.parse(validOutline());
+    longTakeaway.sections[0].takeaway =
+      '企业需要的已经不只是回答问题的模型，而是能够理解目标、调用工具并交付结果的数字执行者。';
+
+    const longAction = JSON.parse(validOutline());
+    longAction.sections[0].action =
+      '选择一个高频、规则明确、结果可度量的业务场景启动试点，并在四周内评估效率和质量。';
+
+    expect(parseDocumentOutline(JSON.stringify(longTitle)).title).toBe(
+      longTitle.title
+    );
+    expect(parseDocumentOutline(JSON.stringify(longHeading)).sections[0].heading)
+      .toBe(longHeading.sections[0].heading);
+    expect(parseDocumentOutline(JSON.stringify(longTakeaway)).sections[0].takeaway)
+      .toBe(longTakeaway.sections[0].takeaway);
+    expect(parseDocumentOutline(JSON.stringify(longAction)).sections[0].action)
+      .toBe(longAction.sections[0].action);
+  });
+
+  it('keeps a long Markdown PPT title for the layout layer', () => {
+    const title = '人工智能智能体从对话到行动的企业级能力革命';
+    expect(parseDocumentContent(`# ${title}\n\n## 结论\n\n- 要点`, 'ppt').title)
+      .toBe(title);
+  });
+
+  it('recovers useful PPT content from malformed JSON without another model call', () => {
+    const malformed = [
+      '{',
+      '  "kind": "ppt",',
+      '  "title": "人工智能智能体从对话到行动的革命"',
+      '  "sections": [',
+      '    {',
+      '      "heading": "智能体正在改变企业软件的使用方式",',
+      '      "takeaway": "企业需要的已经不只是回答问题的模型，而是能够理解目标、调用工具并交付结果的数字执行者。",',
+      '      "blocks": [{"type":"bullets","items":[',
+      '        "能力变化：从单轮问答升级为多步骤任务执行。",',
+      '        "业务变化：从提供建议升级为直接推动流程完成。",',
+      '        "组织变化：人负责目标和判断，智能体负责重复执行。"',
+      '      ]}],',
+      '      "action": "选择一个高频、规则明确、结果可度量的业务场景启动试点。"',
+      '    }',
+      '  ]',
+      '}'
+    ].join('\n');
+
+    const recovered = recoverPresentationContent(malformed);
+    expect(recovered.title).toBe('人工智能智能体从对话到行动的革命');
+    expect(recovered.sections[0]).toMatchObject({
+      heading: '智能体正在改变企业软件的使用方式',
+      takeaway:
+        '企业需要的已经不只是回答问题的模型，而是能够理解目标、调用工具并交付结果的数字执行者。',
+      action: '选择一个高频、规则明确、结果可度量的业务场景启动试点。'
+    });
+    expect(recovered.sections[0].blocks).toContainEqual({
+      type: 'bullets',
+      items: [
+        '能力变化：从单轮问答升级为多步骤任务执行。',
+        '业务变化：从提供建议升级为直接推动流程完成。',
+        '组织变化：人负责目标和判断，智能体负责重复执行。'
+      ]
+    });
+  });
+
+  it('rejects an unsupported PPT page kind', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].pageKind = 'graphic';
+
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects PPT outlines that exceed the total text budget', () => {
+    const value = JSON.parse(validOutline());
+    value.sections = [
+      {
+        heading: '详细说明',
+        level: 1,
+        blocks: Array.from({ length: 30 }, () => ({
+          type: 'paragraph',
+          text: '内容'.repeat(1000)
+        }))
+      }
+    ];
+
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects PPT outlines that exceed the content-group budget', () => {
+    const value = JSON.parse(validOutline());
+    value.sections = [
+      {
+        heading: '内容分组',
+        level: 1,
+        blocks: Array.from({ length: 81 }, (_, index) => ({
+          type: 'paragraph',
+          text: `第 ${index + 1} 组说明`
+        }))
+      }
+    ];
+
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('counts every list item toward the PPT content-group budget', () => {
+    const value = JSON.parse(validOutline());
+    value.sections = [
+      {
+        heading: '内容分组',
+        level: 1,
+        blocks: [
+          {
+            type: 'bullets',
+            items: Array.from({ length: 50 }, (_, index) => `第一组 ${index + 1}`)
+          },
+          {
+            type: 'numbered',
+            items: Array.from({ length: 31 }, (_, index) => `第二组 ${index + 1}`)
+          }
+        ]
+      }
+    ];
+
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects PPT outlines that exceed the estimated page budget', () => {
+    const value = JSON.parse(validOutline());
+    value.sections = Array.from({ length: 41 }, (_, index) => ({
+      heading: `第 ${index + 1} 页主题`,
+      level: 1,
+      blocks: [{ type: 'paragraph', text: '用于验证页面预算。' }]
+    }));
+
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('applies the PPT page budget to Markdown fallback content', () => {
+    const markdown = [
+      '# 项目方案',
+      ...Array.from(
+        { length: 41 },
+        (_, index) => `## 第 ${index + 1} 个主题\n\n说明内容。`
+      )
+    ].join('\n\n');
+
+    expect(() => parseMarkdownToOutline(markdown, 'ppt')).toThrow(
+      DocumentOutlineError
+    );
+  });
+
   it('rejects invalid JSON', () => {
     expect(() => parseDocumentOutline('{bad json')).toThrow(
       DocumentOutlineError
@@ -88,6 +268,22 @@ describe('document outline parser', () => {
     const badTable = JSON.parse(validOutline());
     badTable.sections[0].blocks[1].rows = [[1, 2]];
     expect(() => parseDocumentOutline(JSON.stringify(badTable))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
+  it('rejects table rows whose column count differs from the header', () => {
+    const missingCell = JSON.parse(validOutline());
+    missingCell.sections[0].blocks[1].rows = [['only-one-cell']];
+    expect(() => parseDocumentOutline(JSON.stringify(missingCell))).toThrow(
+      DocumentOutlineError
+    );
+
+    const extraCell = JSON.parse(validOutline());
+    extraCell.sections[0].blocks[1].rows = [
+      ['first-cell', 'second-cell', 'silent-extra-cell']
+    ];
+    expect(() => parseDocumentOutline(JSON.stringify(extraCell))).toThrow(
       DocumentOutlineError
     );
   });
@@ -195,6 +391,18 @@ describe('markdown to outline parser', () => {
     expect(bullet.items[0]).not.toContain('*');
     expect(bullet.items[0]).not.toContain('`');
   });
+
+  it('rejects oversized Markdown lists instead of silently dropping items', () => {
+    const markdown = [
+      '# 汇报',
+      '## 全部事项',
+      ...Array.from({ length: 51 }, (_, index) => `- 唯一标记 ${index + 1}`)
+    ].join('\n');
+
+    expect(() => parseMarkdownToOutline(markdown, 'ppt')).toThrow(
+      DocumentOutlineError
+    );
+  });
 });
 
 describe('content contract helpers', () => {
@@ -282,6 +490,50 @@ describe('content contract helpers', () => {
     });
   });
 
+  it('normalizes common Excel columns/data and headers/rows shapes', () => {
+    expect(
+      parseDocumentContent(
+        JSON.stringify({
+          title: '员工表',
+          columns: [
+            { key: 'name', title: '姓名' },
+            { key: 'department', title: '部门' }
+          ],
+          data: [{ name: '示例员工', department: '待填写' }]
+        }),
+        'excel'
+      ).sections[0].blocks[0]
+    ).toEqual({
+      type: 'table',
+      header: ['姓名', '部门'],
+      rows: [['示例员工', '待填写']]
+    });
+    expect(
+      parseDocumentContent(
+        JSON.stringify({
+          title: '项目清单',
+          sheets: [
+            {
+              name: '清单',
+              headers: ['项目', '状态'],
+              rows: [['示例项目', '待确认']]
+            }
+          ]
+        }),
+        'excel'
+      ).sections[0]
+    ).toMatchObject({
+      heading: '清单',
+      blocks: [
+        {
+          type: 'table',
+          header: ['项目', '状态'],
+          rows: [['示例项目', '待确认']]
+        }
+      ]
+    });
+  });
+
   it('fails closed for unsupported JSON-shaped content', () => {
     expect(() =>
       parseDocumentContent(
@@ -302,19 +554,6 @@ describe('content contract helpers', () => {
 
   it('keeps Markdown fallback for non-JSON content', () => {
     expect(parseDocumentContent('# 周报\n\n正文。', 'word').title).toBe('周报');
-  });
-
-  it('recovers a canonical outline without kind and with surrounding prose', () => {
-    const outline = parseDocumentContent(
-      '下面是生成结果：\n{"title":"课堂汇报","sections":[{"heading":"核心概念","level":"1","blocks":[{"type":"bullets","items":["数据","算法"]}]}]}\n以上。',
-      'ppt'
-    );
-    expect(outline.kind).toBe('ppt');
-    expect(outline.sections[0].level).toBe(1);
-    expect(outline.sections[0].blocks[0]).toEqual({
-      type: 'bullets',
-      items: ['数据', '算法']
-    });
   });
 
   it('fails closed for JSON arrays instead of rendering them as Markdown', () => {

@@ -13,6 +13,7 @@ import {
   InvalidStateTransitionError,
   renameConversation,
   restoreConversation,
+  setDocumentGenerationStatusOnMessage,
   startAssistantMessageStreaming,
   toIsoTimestamp,
   type Conversation,
@@ -20,6 +21,7 @@ import {
   type ConversationListOptions,
   type ConversationRepository,
   type DocumentMessageResult,
+  type DocumentGenerationStatus,
   type MessageFailureReason,
   type MessageId,
   type ProjectId
@@ -116,11 +118,15 @@ export class ConversationApplicationService {
     readonly conversationId: ConversationId;
     readonly expectedRevision: number;
     readonly content: string;
+    readonly displayContent?: string;
   }): Promise<Conversation> {
     return this.update(input, (conversation) =>
       addUserMessage(conversation, {
         id: this.ids.nextMessageId(),
         content: input.content,
+        ...(input.displayContent !== undefined
+          ? { displayContent: input.displayContent }
+          : {}),
         createdAt: toIsoTimestamp(this.now())
       })
     );
@@ -131,12 +137,16 @@ export class ConversationApplicationService {
     readonly expectedRevision: number;
     readonly messageId: MessageId;
     readonly content: string;
+    readonly displayContent?: string;
   }): Promise<Conversation> {
     try {
       return await this.update(input, (conversation) =>
         editUserMessageAfterCancelledResponse(conversation, {
           messageId: input.messageId,
           content: input.content,
+          ...(input.displayContent !== undefined
+            ? { displayContent: input.displayContent }
+            : {}),
           editedAt: toIsoTimestamp(this.now())
         })
       );
@@ -292,6 +302,22 @@ export class ConversationStreamingService
         conversation,
         input.messageId,
         input.documentResult,
+        toIsoTimestamp(this.now())
+      )
+    );
+  }
+
+  async updateDocumentGenerationStatus(input: {
+    readonly conversationId: ConversationId;
+    readonly messageId: MessageId;
+    readonly expectedRevision: number;
+    readonly status: DocumentGenerationStatus;
+  }): Promise<Conversation> {
+    return this.update(input, (conversation) =>
+      setDocumentGenerationStatusOnMessage(
+        conversation,
+        input.messageId,
+        input.status,
         toIsoTimestamp(this.now())
       )
     );

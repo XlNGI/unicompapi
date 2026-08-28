@@ -22,7 +22,7 @@ export interface ProviderStreamTimeoutController {
 
 export const defaultTextStreamTimeoutPolicy: ProviderStreamTimeoutPolicy =
   Object.freeze({
-    connectionTimeoutMs: 60_000,
+    connectionTimeoutMs: 5 * 60_000,
     idleTimeoutMs: 60_000,
     totalTimeoutMs: 15 * 60_000
   });

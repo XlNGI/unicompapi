@@ -278,9 +278,12 @@ function toMessageDto(message: Message): MessageDto {
     revision: message.revision,
     role: message.role,
     state: message.state,
-    content: message.content,
+    content: message.displayContent ?? message.content,
     ...(message.reasoningContent !== undefined
       ? { reasoningContent: message.reasoningContent }
+      : {}),
+    ...(message.documentGenerationStatus !== undefined
+      ? { documentGenerationStatus: message.documentGenerationStatus }
       : {}),
     ...(message.documentResult !== undefined
       ? { documentResult: message.documentResult }

@@ -15,6 +15,7 @@ import {
   parseConversation,
   renameConversation,
   restoreConversation,
+  setDocumentGenerationStatusOnMessage,
   startAssistantMessageStreaming,
   toAssetId,
   toConversationId,
@@ -100,6 +101,22 @@ describe('conversation lifecycle', () => {
 });
 
 describe('message lifecycle', () => {
+  it('keeps an internal model prompt separate from the user-visible request', () => {
+    const withUser = addUserMessage(conversation(), {
+      id: toMessageId('message-document-request'),
+      content: '内部 PPT JSON 生成指令\n\n用户主题',
+      displayContent: '帮我生成用户主题的 PPT',
+      createdAt: t1
+    });
+
+    expect(withUser.messages[0]).toMatchObject({
+      role: 'user',
+      content: '内部 PPT JSON 生成指令\n\n用户主题',
+      displayContent: '帮我生成用户主题的 PPT'
+    });
+    expect(parseConversation(withUser)).toEqual(withUser);
+  });
+
   it('moves assistant content through pending, streaming and completed revisions', () => {
     const pending = beginAssistantMessage(conversation(), {
       id: toMessageId('assistant-complete'),
@@ -389,5 +406,54 @@ describe('conversation runtime validation', () => {
         role: 'assistant'
       }]
     })).toThrow('unexpected or missing fields');
+  });
+
+  it('persists an Office generation terminal state independently from the model message state', () => {
+    const pending = beginAssistantMessage(conversation(), {
+      id: toMessageId('message-office-status'),
+      createdAt: t1
+    });
+    const streaming = startAssistantMessageStreaming(
+      pending,
+      toMessageId('message-office-status'),
+      t2
+    );
+    const content = appendAssistantMessageChunk(
+      streaming,
+      toMessageId('message-office-status'),
+      '{"kind":"excel"}',
+      t2
+    );
+    const completed = completeAssistantMessage(
+      content,
+      toMessageId('message-office-status'),
+      t3
+    );
+    const failed = setDocumentGenerationStatusOnMessage(
+      completed,
+      toMessageId('message-office-status'),
+      { state: 'failed', kind: 'excel', errorCode: 'invalid_outline' },
+      t4
+    );
+
+    const restored = parseConversation(JSON.parse(JSON.stringify(failed)));
+    expect(restored.messages[0]).toMatchObject({
+      state: 'completed',
+      completedAt: t4,
+      updatedAt: t4,
+      documentGenerationStatus: {
+        state: 'failed',
+        kind: 'excel',
+        errorCode: 'invalid_outline'
+      }
+    });
+    expect(() =>
+      setDocumentGenerationStatusOnMessage(
+        completed,
+        toMessageId('message-office-status'),
+        { state: 'completed', kind: 'excel' },
+        t4
+      )
+    ).toThrow('completed document generation requires a document result');
   });
 });

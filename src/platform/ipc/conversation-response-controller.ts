@@ -467,18 +467,27 @@ export class ConversationResponseController {
             conversationId: conversation.id,
             expectedRevision: input.conversation.expectedRevision,
             messageId: toMessageId(input.conversation.editedMessageId),
-            content: input.content
+            content: input.content,
+            ...(input.displayContent !== undefined
+              ? { displayContent: input.displayContent }
+              : {})
           })
         : await runtime.conversationService.addUserMessage({
             conversationId: conversation.id,
             expectedRevision: input.conversation.expectedRevision,
-            content: input.content
+            content: input.content,
+            ...(input.displayContent !== undefined
+              ? { displayContent: input.displayContent }
+              : {})
           });
     } else {
       conversation = await runtime.conversationService.addUserMessage({
         conversationId: conversation.id,
         expectedRevision: conversation.revision,
-        content: input.content
+        content: input.content,
+        ...(input.displayContent !== undefined
+          ? { displayContent: input.displayContent }
+          : {})
       });
     }
     const userMessage = input.conversation?.editedMessageId

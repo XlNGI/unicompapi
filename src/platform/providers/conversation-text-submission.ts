@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   appendAssistantMessageChunk,
+  cancelAssistantMessage,
   completeAssistantMessage,
   failAssistantMessage,
   startAssistantMessageStreaming,
@@ -315,7 +316,7 @@ function createTextParameterSchemaResolver(): NewApiParameterSchemaResolverPort 
   };
 }
 
-function createConversationLinkedLifecycle(
+export function createConversationLinkedLifecycle(
   lifecycle: ConversationResponseExecutionLifecycle,
   conversations: ProjectConversationRepository,
   now: () => string
@@ -502,8 +503,18 @@ function createConversationLinkedLifecycle(
       await sealAndDrainDeltas(executionId);
       await enqueue(executionId, async () => {
         await flushPending(executionId);
-        await lifecycle.confirmCancelled(executionId);
-        releaseProjection(executionId);
+        const event = await lifecycle.confirmCancelledDeferredPublish(executionId);
+        try {
+          await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => cancelAssistantMessage(
+            conversation,
+            assistantMessageId,
+            toIsoTimestamp(now()),
+            reasoningContent || undefined
+          ));
+        } finally {
+          releaseProjection(executionId);
+          await lifecycle.publish(event);
+        }
       });
     },
     fail: async (executionId, safeCode) => {
@@ -537,6 +548,9 @@ function createConversationLinkedLifecycle(
 }
 
 function failureReasonFromSafeCode(safeCode: string): MessageFailureReason {
+  if (safeCode.includes('timeout')) {
+    return 'unknown';
+  }
   if (safeCode.includes('finish.length')) {
     return 'truncated';
   }

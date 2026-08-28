@@ -171,6 +171,25 @@ describe('execution state machine', () => {
     ).toThrow(RetryNotAllowedError);
   });
 
+  it('allows local document verification to acknowledge cancellation', () => {
+    const { execution } = createLinkedExecutionFixture();
+    const queued = transitionExecution(execution, 'queued', t3);
+    const validating = transitionExecution(queued, 'validating_sources', t4);
+    const preparing = transitionExecution(validating, 'preparing_media', t5);
+    const encoding = transitionExecution(preparing, 'encoding', t6);
+    const writing = transitionExecution(encoding, 'writing_file', t7);
+    const verifying = transitionExecution(writing, 'verifying_file', t7);
+    const cancelRequested = transitionExecution(
+      verifying,
+      'cancel_requested',
+      t7
+    );
+    const cancelled = transitionExecution(cancelRequested, 'cancelled', t7);
+
+    expect(cancelRequested.cancelRequestedAt).toBe(t7);
+    expect(cancelled.state).toBe('cancelled');
+  });
+
   it('rejects timestamps that move backwards', () => {
     const { execution } = createLinkedExecutionFixture();
 

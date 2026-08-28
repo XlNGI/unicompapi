@@ -104,6 +104,24 @@ export interface MessageDto {
   readonly state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled';
   readonly content: string;
   readonly reasoningContent?: string;
+  readonly documentGenerationStatus?: {
+    readonly state:
+      | 'generating_content'
+      | 'validating_outline'
+      | 'generating_file'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted';
+    readonly kind: 'word' | 'excel' | 'ppt';
+    readonly errorCode?:
+      | 'response_failed'
+      | 'invalid_outline'
+      | 'resource_limit'
+      | 'document_layout_overflow'
+      | 'generation_failed'
+      | 'storage_error';
+  };
   readonly documentResult?: {
     readonly workId: string;
     readonly fileName: string;
@@ -407,6 +425,7 @@ export interface StartResponseRequest {
   } | null;
   readonly title: string;
   readonly content: string;
+  readonly displayContent?: string;
   readonly productFeature: 'text_chat' | 'text_reasoning';
   readonly candidateId: string;
   readonly contextSelections: readonly {
@@ -645,11 +664,17 @@ export const chatContextRequestParsers = {
     };
   },
   startResponse(value: unknown): StartResponseRequest {
+    const hasDisplayContent =
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, 'displayContent');
     const record = exactRecord(value, [
       'clientCommandId',
       'conversation',
       'title',
       'content',
+      ...(hasDisplayContent ? ['displayContent'] : []),
       'productFeature',
       'candidateId',
       'contextSelections',
@@ -698,6 +723,16 @@ export const chatContextRequestParsers = {
         : null,
       title: boundedText(record.title, 'title', 200, false),
       content: boundedText(record.content, 'content', 1_000_000, false),
+      ...(record.displayContent !== undefined
+        ? {
+            displayContent: boundedText(
+              record.displayContent,
+              'displayContent',
+              8_000,
+              false
+            )
+          }
+        : {}),
       productFeature: record.productFeature,
       candidateId: controlledId(record.candidateId, 'candidateId'),
       contextSelections,

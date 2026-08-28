@@ -17,7 +17,9 @@ import {
   type IsoTimestamp
 } from '../timestamps';
 import {
+  parseDocumentGenerationStatus,
   parseDocumentMessageResult,
+  type DocumentGenerationStatus,
   type DocumentMessageResult
 } from './document-generation';
 
@@ -64,7 +66,9 @@ interface MessageBase {
   readonly revision: number;
   readonly role: MessageRole;
   readonly content: string;
+  readonly displayContent?: string;
   readonly reasoningContent?: string;
+  readonly documentGenerationStatus?: DocumentGenerationStatus;
   readonly documentResult?: DocumentMessageResult;
   readonly attachments: readonly ConversationAttachmentReference[];
   readonly createdAt: IsoTimestamp;
@@ -152,6 +156,7 @@ export interface CreateConversationInput {
 export interface AddUserMessageInput {
   readonly id: MessageId;
   readonly content: string;
+  readonly displayContent?: string;
   readonly attachments?: readonly ConversationAttachmentReference[];
   readonly createdAt: IsoTimestamp;
 }
@@ -159,6 +164,7 @@ export interface AddUserMessageInput {
 export interface EditCancelledUserMessageInput {
   readonly messageId: MessageId;
   readonly content: string;
+  readonly displayContent?: string;
   readonly editedAt: IsoTimestamp;
 }
 
@@ -306,6 +312,9 @@ export function addUserMessage(
     role: 'user',
     state: 'completed',
     content: input.content,
+    ...(input.displayContent !== undefined
+      ? { displayContent: input.displayContent }
+      : {}),
     attachments: input.attachments ?? [],
     streamSequence: 0,
     createdAt: input.createdAt,
@@ -337,10 +346,15 @@ export function editUserMessageAfterCancelledResponse(
     );
   }
   const messages = [...conversation.messages];
+  const messageWithoutDisplayContent = { ...message };
+  delete messageWithoutDisplayContent.displayContent;
   messages[index] = parseMessage({
-    ...message,
+    ...messageWithoutDisplayContent,
     revision: message.revision + 1,
     content: input.content,
+    ...(input.displayContent !== undefined
+      ? { displayContent: input.displayContent }
+      : {}),
     completedAt: input.editedAt,
     updatedAt: input.editedAt
   });
@@ -460,8 +474,44 @@ export function attachDocumentResultToMessage(
     return parseMessage({
       ...message,
       revision: message.revision + 1,
+      documentGenerationStatus: {
+        state: 'completed',
+        kind: documentResult.kind
+      },
       documentResult,
       completedAt: updatedAt,
+      updatedAt
+    });
+  });
+}
+
+export function setDocumentGenerationStatusOnMessage(
+  conversation: Conversation,
+  messageId: MessageId,
+  status: DocumentGenerationStatus,
+  updatedAt: IsoTimestamp
+): ActiveConversation {
+  assertConversationActive(conversation, 'update document generation status');
+  return replaceAssistantMessage(conversation, messageId, updatedAt, (message) => {
+    if (message.role !== 'assistant') {
+      throw new InvalidStateTransitionError(
+        'message',
+        message.role,
+        'update_document_generation_status'
+      );
+    }
+    if (status.state === 'completed' && message.documentResult === undefined) {
+      throw new InvariantViolationError(
+        'completed document generation requires a document result'
+      );
+    }
+    return parseMessage({
+      ...message,
+      revision: message.revision + 1,
+      documentGenerationStatus: status,
+      ...(message.state === 'completed' ? { completedAt: updatedAt } : {}),
+      ...(message.state === 'failed' ? { failedAt: updatedAt } : {}),
+      ...(message.state === 'cancelled' ? { cancelledAt: updatedAt } : {}),
       updatedAt
     });
   });
@@ -604,9 +654,17 @@ export function parseMessage(value: unknown): Message {
     record,
     'reasoningContent'
   );
+  const hasDisplayContent = Object.prototype.hasOwnProperty.call(
+    record,
+    'displayContent'
+  );
   const hasDocumentResult = Object.prototype.hasOwnProperty.call(
     record,
     'documentResult'
+  );
+  const hasDocumentGenerationStatus = Object.prototype.hasOwnProperty.call(
+    record,
+    'documentGenerationStatus'
   );
   const stateKeys: Record<MessageState, readonly string[]> = {
     pending: [],
@@ -619,7 +677,9 @@ export function parseMessage(value: unknown): Message {
     record,
     [
       ...messageBaseKeys,
+      ...(hasDisplayContent ? ['displayContent'] : []),
       ...(hasReasoningContent ? ['reasoningContent'] : []),
+      ...(hasDocumentGenerationStatus ? ['documentGenerationStatus'] : []),
       ...(hasDocumentResult ? ['documentResult'] : []),
       ...stateKeys[state]
     ],
@@ -638,11 +698,25 @@ export function parseMessage(value: unknown): Message {
   if (content.length > 1_000_000) {
     throw new TypeError('message.content exceeds the maximum length');
   }
+  const displayContent = hasDisplayContent
+    ? requireString(record.displayContent, 'message.displayContent')
+    : undefined;
+  if (
+    displayContent !== undefined &&
+    (role !== 'user' ||
+      displayContent.trim().length === 0 ||
+      displayContent.length > 8_000)
+  ) {
+    throw new TypeError('message.displayContent is invalid');
+  }
   const reasoningContent = hasReasoningContent
     ? requireString(record.reasoningContent, 'message.reasoningContent')
     : undefined;
   const documentResult = hasDocumentResult
     ? parseDocumentMessageResult(record.documentResult)
+    : undefined;
+  const documentGenerationStatus = hasDocumentGenerationStatus
+    ? parseDocumentGenerationStatus(record.documentGenerationStatus)
     : undefined;
   if (
     reasoningContent !== undefined &&
@@ -665,7 +739,11 @@ export function parseMessage(value: unknown): Message {
     revision,
     role,
     content,
+    ...(displayContent !== undefined ? { displayContent } : {}),
     ...(reasoningContent !== undefined ? { reasoningContent } : {}),
+    ...(documentGenerationStatus !== undefined
+      ? { documentGenerationStatus }
+      : {}),
     ...(documentResult !== undefined ? { documentResult } : {}),
     attachments,
     createdAt,
@@ -676,6 +754,20 @@ export function parseMessage(value: unknown): Message {
   }
   if (role !== 'assistant' && reasoningContent !== undefined) {
     throw new TypeError('only assistant messages can persist reasoning content');
+  }
+  if (role !== 'assistant' && documentGenerationStatus !== undefined) {
+    throw new TypeError(
+      'only assistant messages can persist document generation status'
+    );
+  }
+  if (
+    documentGenerationStatus?.state === 'completed' &&
+    (documentResult === undefined ||
+      documentResult.kind !== documentGenerationStatus.kind)
+  ) {
+    throw new TypeError(
+      'completed document generation status requires a matching document result'
+    );
   }
   if (
     documentResult !== undefined &&
