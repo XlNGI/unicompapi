@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, WheelEvent } from 'react';
+import type { DragEvent, RefObject, WheelEvent } from 'react';
 import {
   LuCircleAlert,
   LuCircleX,
@@ -9,10 +9,7 @@ import {
 import { GenerationResultPreview } from './GenerationResultPreview';
 import { StatusPill } from './StatusPill';
 import type { SubmissionProgressPhase } from './SubmissionProgressSteps';
-import type {
-  StorageTaskDetailsDto,
-  StorageWorkSummaryDto
-} from '../shared/storage-ipc';
+import type { StorageGenerationHistoryItemDto } from '../shared/storage-ipc';
 import { imageWorkDragDataType } from '../shared/image-workspace-ipc';
 
 interface GenerationHistoryProps {
@@ -26,10 +23,13 @@ interface GenerationHistoryProps {
   };
 }
 
-interface HistoryWork extends StorageWorkSummaryDto {
-  readonly localUrl: string;
-  readonly sourceTaskId: string;
-  readonly verifiedAt: string;
+type HistoryWork = Extract<StorageGenerationHistoryItemDto, { readonly kind: 'work' }>;
+
+interface HistoryTask {
+  readonly taskId: string;
+  readonly createdAt: string;
+  readonly latestExecutionState: string;
+  readonly latestExecutionUpdatedAt: string;
 }
 
 type HistoryStatus = 'pending' | 'failed' | 'uncertain';
@@ -94,7 +94,9 @@ export function GenerationHistory({
 }: GenerationHistoryProps) {
   const storage = window.unicomp?.storage;
   const [works, setWorks] = useState<readonly HistoryWork[]>([]);
-  const [tasks, setTasks] = useState<readonly StorageTaskDetailsDto[]>([]);
+  const [tasks, setTasks] = useState<readonly HistoryTask[]>([]);
+  const [nextCursor, setNextCursor] = useState<string>();
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [liveStartedAt, setLiveStartedAt] = useState<string>();
@@ -112,6 +114,7 @@ export function GenerationHistory({
     if (!storage) {
       setWorks([]);
       setTasks([]);
+      setNextCursor(undefined);
       setLoadFailed(true);
       setHistoryLoaded(true);
       return;
@@ -122,6 +125,7 @@ export function GenerationHistory({
       if (cancelled) return;
       setWorks(history.works);
       setTasks(history.tasks);
+      setNextCursor(history.nextCursor);
       setSelectedWorkId(history.works[history.works.length - 1]?.workId);
       setLoadFailed(false);
       setHistoryLoaded(true);
@@ -129,6 +133,7 @@ export function GenerationHistory({
       if (cancelled) return;
       setWorks([]);
       setTasks([]);
+      setNextCursor(undefined);
       setLoadFailed(true);
       setHistoryLoaded(true);
     });
@@ -213,6 +218,28 @@ export function GenerationHistory({
     event.dataTransfer.setData('text/plain', workId);
   }
 
+  async function loadOlderHistory() {
+    if (!storage || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const history = await loadHistory(
+        storage,
+        draftId,
+        projectId,
+        mediaKind,
+        nextCursor
+      );
+      setWorks((current) => sortHistoryWorks([...history.works, ...current]));
+      setTasks((current) => sortHistoryTasks([...history.tasks, ...current]));
+      setNextCursor(history.nextCursor);
+      setLoadFailed(false);
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   return (
     <div className="uc-generation-history">
       <section
@@ -268,6 +295,7 @@ export function GenerationHistory({
             loadingDescription="完成后将校验并登记到本地。"
             loadingTitle={`正在生成${mediaKind === 'image' ? '图片' : '视频'}`}
             mediaKind={mediaKind}
+            projectId={projectId}
             workId={selectedWorkId}
           />
         </div>
@@ -283,7 +311,11 @@ export function GenerationHistory({
             <strong>生成历史</strong>
             <span>{works.length} 张作品</span>
           </div>
-          <span>最新在右侧</span>
+          {nextCursor ? (
+            <button disabled={loadingMore} onClick={() => void loadOlderHistory()} type="button">
+              {loadingMore ? '正在加载' : '加载更早记录'}
+            </button>
+          ) : <span>最新在右侧</span>}
         </header>
 
         <div
@@ -305,20 +337,10 @@ export function GenerationHistory({
                     }
                     type="button"
                   >
-                    {mediaKind === 'image' ? (
-                      <img
-                        alt={`${node.work.name} 缩略图`}
-                        src={node.work.localUrl}
-                      />
-                    ) : (
-                      <video
-                        aria-label={`${node.work.name} 视频缩略图`}
-                        muted
-                        playsInline
-                        preload="metadata"
-                        src={node.work.localUrl}
-                      />
-                    )}
+                    <HistoryMediaThumbnail
+                      selected={node.work.workId === selectedWorkId}
+                      work={node.work}
+                    />
                   </button>
                   <TimelineMarker tone="work" />
                   <time dateTime={node.work.createdAt}>
@@ -350,74 +372,54 @@ async function loadHistory(
   storage: NonNullable<typeof window.unicomp>['storage'],
   draftId: string,
   projectId: string,
-  mediaKind: 'image' | 'video'
+  mediaKind: 'image' | 'video',
+  cursor?: string
 ): Promise<{
   readonly works: readonly HistoryWork[];
-  readonly tasks: readonly StorageTaskDetailsDto[];
+  readonly tasks: readonly HistoryTask[];
+  readonly nextCursor?: string;
 }> {
-  const [taskList, workList] = await Promise.all([
-    storage.listTasks(),
-    storage.listWorks()
-  ]);
-  if (!taskList.ok || !workList.ok) throw new Error('history_read_failed');
+  const result = await storage.listGenerationHistory({
+    projectId,
+    draftId,
+    mediaKind,
+    ...(cursor ? { cursor } : {}),
+    limit: 20
+  });
+  if (!result.ok) throw new Error('history_read_failed');
+  if (result.value.issues.length > 0 && result.value.items.length === 0) {
+    throw new Error('history_read_failed');
+  }
+  const works = sortHistoryWorks(
+    result.value.items.filter((item): item is HistoryWork => item.kind === 'work')
+  );
+  const tasks = sortHistoryTasks(result.value.items.flatMap((item) => item.kind === 'status'
+    ? [{
+        taskId: item.taskId,
+        createdAt: item.createdAt,
+        latestExecutionState: item.state,
+        latestExecutionUpdatedAt: item.occurredAt
+      }]
+    : []));
+  return { works, tasks, nextCursor: result.value.nextCursor };
+}
 
-  const taskDetails = await Promise.all(
-    taskList.value.items
-      .filter((task) => task.projectId === projectId && task.kind === `${mediaKind}_generation`)
-      .map((task) => storage.getTaskDetails(task.taskId))
+function sortHistoryWorks(works: readonly HistoryWork[]): readonly HistoryWork[] {
+  return [...new Map(works.map((work) => [work.workId, work])).values()].sort((a, b) =>
+    a.createdAt.localeCompare(b.createdAt) || a.workId.localeCompare(b.workId)
   );
-  const tasks = taskDetails
-    .flatMap((result) => result.ok && result.value ? [result.value] : [])
-    .filter((task) => task.sourceDraftId === draftId);
-  const taskIds = new Set(tasks.map((task) => task.taskId));
+}
 
-  const workDetails = await Promise.all(
-    workList.value.items
-      .filter((work) =>
-        work.projectId === projectId &&
-        work.mediaKind === mediaKind &&
-        work.fileState === 'available'
-      )
-      .map(async (work) => ({
-        summary: work,
-        details: await storage.getWorkDetails(work.workId)
-      }))
+function sortHistoryTasks(tasks: readonly HistoryTask[]): readonly HistoryTask[] {
+  return [...new Map(tasks.map((task) => [task.taskId, task])).values()].sort((a, b) =>
+    a.latestExecutionUpdatedAt.localeCompare(b.latestExecutionUpdatedAt) ||
+    a.taskId.localeCompare(b.taskId)
   );
-  const verifiedWorks = workDetails.flatMap(({ summary, details }) =>
-    details.ok &&
-    details.value?.verifiedAt &&
-    taskIds.has(details.value.sourceTaskId)
-      ? [{ summary, details: details.value }]
-      : []
-  );
-  const mediaHandles = await Promise.all(
-    verifiedWorks.map(async ({ summary, details }) => ({
-      summary,
-      details,
-      handle: await storage.createWorkMediaHandle(summary.workId)
-    }))
-  );
-  const works = mediaHandles
-    .flatMap(({ summary, details, handle }) =>
-      handle.ok && handle.value.mediaKind === mediaKind
-        ? [{
-            ...summary,
-            localUrl: handle.value.url,
-            sourceTaskId: details.sourceTaskId,
-            verifiedAt: details.verifiedAt as string
-          }]
-        : []
-    )
-    .sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt) || a.workId.localeCompare(b.workId)
-    );
-
-  return { works, tasks };
 }
 
 function buildHistoryNodes(
   works: readonly HistoryWork[],
-  tasks: readonly StorageTaskDetailsDto[],
+  tasks: readonly HistoryTask[],
   livePhase: SubmissionProgressPhase,
   liveStartedAt?: string
 ): readonly HistoryNode[] {
@@ -460,6 +462,72 @@ function buildHistoryNodes(
     const bTime = b.kind === 'work' ? b.work.createdAt : b.occurredAt;
     return aTime.localeCompare(bTime);
   });
+}
+
+function HistoryMediaThumbnail({
+  selected,
+  work
+}: {
+  readonly selected: boolean;
+  readonly work: HistoryWork;
+}) {
+  const storage = window.unicomp?.storage;
+  const elementRef = useRef<HTMLImageElement | HTMLVideoElement>(null);
+  const [visible, setVisible] = useState(selected);
+  const [localUrl, setLocalUrl] = useState<string>();
+
+  useEffect(() => {
+    if (selected) setVisible(true);
+  }, [selected]);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element || visible) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '120px' });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !storage) return;
+    let cancelled = false;
+    void storage.createWorkMediaHandle(work.workId, work.projectId).then((result) => {
+      if (!cancelled && result.ok && result.value.mediaKind === work.mediaKind) {
+        setLocalUrl(result.value.url);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [storage, visible, work.mediaKind, work.projectId, work.workId]);
+
+  return work.mediaKind === 'image' ? (
+    <img
+      alt={`${work.name} 缩略图`}
+      decoding="async"
+      loading="lazy"
+      ref={elementRef as RefObject<HTMLImageElement>}
+      src={localUrl}
+    />
+  ) : (
+    <video
+      aria-label={`${work.name} 视频缩略图`}
+      muted
+      playsInline
+      preload="none"
+      ref={elementRef as RefObject<HTMLVideoElement>}
+      src={visible ? localUrl : undefined}
+    />
+  );
 }
 
 function HistoryStatusCard({ status }: { readonly status: HistoryStatus }) {

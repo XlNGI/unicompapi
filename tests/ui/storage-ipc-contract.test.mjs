@@ -22,6 +22,7 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'listTasks',
     'getTaskDetails',
     'getTaskTimeline',
+    'listGenerationHistory',
     'listCallRecords',
     'getCallDetails',
     'getConsumptionSummary',

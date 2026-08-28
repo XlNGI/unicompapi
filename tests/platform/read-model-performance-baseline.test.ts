@@ -110,9 +110,67 @@ describe('read-model I/O performance gate', () => {
     expect(reads.get(projectStoragePaths.entities.tasks)).toBe(1);
     expect(reads.get(projectStoragePaths.entities.executions)).toBe(1);
   });
+
+  it('pages one draft history without reading any other project', async () => {
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    const targetRoot = await createProjectFixture(0, 25, true);
+    const otherRoot = await createProjectFixture(1, 25, true);
+    await catalog.remember({
+      projectId: toProjectId('project-performance-0'),
+      projectName: 'Performance project 0',
+      rootDirectory: targetRoot
+    });
+    await catalog.remember({
+      projectId: toProjectId('project-performance-1'),
+      projectName: 'Performance project 1',
+      rootDirectory: otherRoot
+    });
+    const reads = new Map<string, number>();
+    const original = NodeProjectStorage.prototype.readJsonWithBackup;
+    vi.spyOn(NodeProjectStorage.prototype, 'readJsonWithBackup')
+      .mockImplementation(async function (this: NodeProjectStorage, relativePath, parse) {
+        const key = String(relativePath);
+        reads.set(key, (reads.get(key) ?? 0) + 1);
+        return original.call(this, relativePath, parse);
+      });
+
+    const controller = new GlobalReadModelController(catalog);
+    const first = await controller.listGenerationHistory({
+      projectId: 'project-performance-0',
+      draftId: 'draft-performance-shared-0',
+      mediaKind: 'image',
+      limit: 20
+    });
+    expect(first).toMatchObject({
+      ok: true,
+      value: { items: { length: 20 }, nextCursor: expect.any(String) }
+    });
+    if (!first.ok || !first.value.nextCursor) throw new TypeError('Missing cursor');
+    const second = await controller.listGenerationHistory({
+      projectId: 'project-performance-0',
+      draftId: 'draft-performance-shared-0',
+      mediaKind: 'image',
+      cursor: first.value.nextCursor,
+      limit: 20
+    });
+    expect(second).toMatchObject({ ok: true, value: { items: { length: 5 } } });
+    const ids = [...first.value.items, ...(second.ok ? second.value.items : [])]
+      .map((item) => item.kind === 'work' ? item.workId : item.taskId);
+    expect(new Set(ids).size).toBe(25);
+    for (const path of [
+      projectStoragePaths.entities.tasks,
+      projectStoragePaths.entities.executions,
+      projectStoragePaths.entities.works,
+      projectStoragePaths.entities.fileReferences
+    ]) expect(reads.get(path)).toBe(1);
+  });
 });
 
-async function createProjectFixture(projectIndex: number, itemCount: number): Promise<string> {
+async function createProjectFixture(
+  projectIndex: number,
+  itemCount: number,
+  sharedDraft = false
+): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-read-performance-'));
   roots.push(root);
   const projectId = toProjectId(`project-performance-${projectIndex}`);
@@ -125,7 +183,12 @@ async function createProjectFixture(projectIndex: number, itemCount: number): Pr
     const taskId = toTaskId(`task-performance-${suffix}`);
     const executionId = toExecutionId(`execution-performance-${suffix}`);
     const fileId = toFileReferenceId(`file-performance-${suffix}`);
-    tasks.push(task(projectId, taskId, executionId, suffix));
+    tasks.push(task(
+      projectId,
+      taskId,
+      executionId,
+      sharedDraft ? `shared-${projectIndex}` : suffix
+    ));
     executions.push(execution(taskId, executionId));
     files.push(file(projectId, fileId, executionId, suffix));
     works.push(work(projectId, taskId, executionId, fileId, suffix));

@@ -21,6 +21,7 @@ interface MediaHandleEntry {
 
 export class LocalMediaHandleRegistry {
   private readonly handles = new Map<string, MediaHandleEntry>();
+  private readonly reusableHandles = new Map<string, string>();
 
   constructor(
     private readonly now: () => number = () => Date.now(),
@@ -29,12 +30,23 @@ export class LocalMediaHandleRegistry {
 
   create(
     target: string,
-    mimeType?: string
+    mimeType?: string,
+    reuseKey?: string
   ): { readonly url: string; readonly expiresAt: string } {
     this.removeExpired();
+    const reusableToken = reuseKey ? this.reusableHandles.get(reuseKey) : undefined;
+    const reusable = reusableToken ? this.resolveEntry(reusableToken) : undefined;
+    if (reusableToken && reusable?.target === target && reusable.mimeType === mimeType) {
+      return {
+        url: `unicomp-media://local/${reusableToken}`,
+        expiresAt: new Date(reusable.expiresAtMs).toISOString()
+      };
+    }
+    if (reuseKey) this.reusableHandles.delete(reuseKey);
     const token = randomUUID();
     const expiresAtMs = this.now() + this.ttlMs;
     this.handles.set(token, { target, mimeType, expiresAtMs });
+    if (reuseKey) this.reusableHandles.set(reuseKey, token);
     return {
       url: `unicomp-media://local/${token}`,
       expiresAt: new Date(expiresAtMs).toISOString()
@@ -57,12 +69,16 @@ export class LocalMediaHandleRegistry {
 
   clear(): void {
     this.handles.clear();
+    this.reusableHandles.clear();
   }
 
   private removeExpired(): void {
     const now = this.now();
     for (const [token, entry] of this.handles) {
       if (entry.expiresAtMs <= now) this.handles.delete(token);
+    }
+    for (const [key, token] of this.reusableHandles) {
+      if (!this.handles.has(token)) this.reusableHandles.delete(key);
     }
   }
 }
@@ -80,11 +96,16 @@ export class ControlledLocalMediaController {
     request: unknown
   ): Promise<StorageIpcResult<StorageLocalMediaHandleDto>> {
     try {
-      const resolved = await this.resolveWorkFile(parseWorkId(request));
+      const parsed = parseWorkRequest(request);
+      const resolved = await this.resolveWorkFile(parsed.workId, parsed.projectId);
       if (!['image', 'video', 'audio'].includes(resolved.mediaKind)) {
         throw new LocalMediaError('media_unavailable');
       }
-      const handle = this.dependencies.handles.create(resolved.target);
+      const handle = this.dependencies.handles.create(
+        resolved.target,
+        undefined,
+        `${resolved.projectId}:${parsed.workId}`
+      );
       return {
         ok: true,
         value: { ...handle, mediaKind: resolved.mediaKind }
@@ -98,7 +119,8 @@ export class ControlledLocalMediaController {
     request: unknown
   ): Promise<StorageIpcResult<{ readonly revealed: true }>> {
     try {
-      const resolved = await this.resolveWorkFile(parseWorkId(request));
+      const parsed = parseWorkRequest(request);
+      const resolved = await this.resolveWorkFile(parsed.workId, parsed.projectId);
       this.dependencies.revealFile(resolved.target);
       return { ok: true, value: { revealed: true } };
     } catch (error) {
@@ -106,8 +128,11 @@ export class ControlledLocalMediaController {
     }
   }
 
-  private async resolveWorkFile(workId: string) {
-    for (const entry of await this.dependencies.catalog.getEntries()) {
+  private async resolveWorkFile(workId: string, projectId?: string) {
+    const entries = await this.dependencies.catalog.getEntries();
+    for (const entry of projectId
+      ? entries.filter((candidate) => candidate.projectId === projectId)
+      : entries) {
       let work;
       try {
         const storage = new NodeProjectStorage(entry.rootDirectory);
@@ -134,7 +159,7 @@ export class ControlledLocalMediaController {
         if (!metadata.isFile()) {
           throw new LocalMediaError('media_unavailable');
         }
-        return { target, mediaKind: work.mediaKind };
+        return { target, mediaKind: work.mediaKind, projectId: entry.projectId };
       } catch (error) {
         if (error instanceof LocalMediaError) throw error;
         throw new LocalMediaError('media_unavailable');
@@ -151,7 +176,10 @@ class LocalMediaError extends Error {
   }
 }
 
-function parseWorkId(request: unknown): string {
+function parseWorkRequest(request: unknown): {
+  readonly workId: string;
+  readonly projectId?: string;
+} {
   if (
     typeof request !== 'object' ||
     request === null ||
@@ -161,7 +189,14 @@ function parseWorkId(request: unknown): string {
   ) {
     throw new LocalMediaError('work_not_found');
   }
-  return request.workId.trim();
+  const projectId = 'projectId' in request ? request.projectId : undefined;
+  if (projectId !== undefined && (
+    typeof projectId !== 'string' || projectId.trim().length === 0
+  )) throw new LocalMediaError('work_not_found');
+  return {
+    workId: request.workId.trim(),
+    ...(typeof projectId === 'string' ? { projectId: projectId.trim() } : {})
+  };
 }
 
 function mapError<T>(error: unknown): StorageIpcResult<T> {

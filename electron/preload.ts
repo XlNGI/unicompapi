@@ -115,6 +115,8 @@ const storage: StorageApi = {
     ipcRenderer.invoke(storageIpcChannels.getTaskDetails, { taskId }),
   getTaskTimeline: (projectId, taskId) =>
     ipcRenderer.invoke(storageIpcChannels.getTaskTimeline, { projectId, taskId }),
+  listGenerationHistory: (request) =>
+    ipcRenderer.invoke(storageIpcChannels.listGenerationHistory, request),
   listCallRecords: (filter) =>
     ipcRenderer.invoke(storageIpcChannels.listCallRecords, filter ?? {}),
   getCallDetails: (projectId, invocationAttemptId) =>
@@ -124,8 +126,11 @@ const storage: StorageApi = {
   listWorks: () => ipcRenderer.invoke(storageIpcChannels.listWorks),
   getWorkDetails: (workId) =>
     ipcRenderer.invoke(storageIpcChannels.getWorkDetails, { workId }),
-  createWorkMediaHandle: (workId) =>
-    ipcRenderer.invoke(storageIpcChannels.createWorkMediaHandle, { workId }),
+  createWorkMediaHandle: (workId, projectId) =>
+    ipcRenderer.invoke(storageIpcChannels.createWorkMediaHandle, {
+      workId,
+      ...(projectId ? { projectId } : {})
+    }),
   revealWorkFile: (workId) =>
     ipcRenderer.invoke(storageIpcChannels.revealWorkFile, { workId }),
   closeProject: () => ipcRenderer.invoke(storageIpcChannels.closeProject),

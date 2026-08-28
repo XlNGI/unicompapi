@@ -223,21 +223,14 @@ test('professional image preserves the current result after submission', () => {
 });
 
 test('professional image history uses current-draft verified local works only', () => {
-  for (const operation of [
-    'listTasks',
-    'listWorks',
-    'getTaskDetails',
-    'getWorkDetails',
-    'createWorkMediaHandle'
-  ]) {
+  for (const operation of ['listGenerationHistory', 'createWorkMediaHandle']) {
     assert.match(historySource, new RegExp(`storage\\.${operation}\\(`));
   }
-  assert.match(historySource, /task\.sourceDraftId === draftId/);
-  assert.match(historySource, /taskIds\.has\(details\.value\.sourceTaskId\)/);
-  assert.match(historySource, /work\.mediaKind === mediaKind/);
-  assert.match(historySource, /work\.fileState === 'available'/);
-  assert.match(historySource, /details\.value\?\.verifiedAt/);
-  assert.match(historySource, /handle\.ok && handle\.value\.mediaKind === mediaKind/);
+  assert.doesNotMatch(historySource, /storage\.listTasks|storage\.listWorks|storage\.getTaskDetails|storage\.getWorkDetails/);
+  assert.match(historySource, /projectId,/);
+  assert.match(historySource, /draftId,/);
+  assert.match(historySource, /mediaKind,/);
+  assert.match(historySource, /limit: 20/);
   assert.match(historySource, /a\.createdAt\.localeCompare\(b\.createdAt\)/);
   assert.match(historySource, /aria-pressed={node\.work\.workId === selectedWorkId}/);
   assert.match(historySource, /setSelectedWorkId\(node\.work\.workId\)/);
