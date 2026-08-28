@@ -3498,8 +3498,35 @@ button.uc-project-center__project-card:disabled {
 .uc-task-center__charts {
   display: grid;
   grid-template-columns: minmax(0, 1.24fr) minmax(300px, 0.76fr);
-  gap: var(--uc-space-3);
   min-width: 0;
+}
+
+.uc-task-center__charts-reveal {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.2, 0, 0, 1),
+    margin-bottom 320ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 180ms ease-out,
+    transform 320ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.uc-task-center__charts-reveal--collapsed {
+  grid-template-rows: minmax(0, 0fr);
+  margin-bottom: calc(-1 * var(--uc-space-4));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-12px);
+}
+
+.uc-task-center__charts-mask {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .uc-task-center__chart-card {
@@ -3508,6 +3535,10 @@ button.uc-project-center__project-card:disabled {
   align-content: start;
   gap: var(--uc-space-3);
   padding: var(--uc-space-3);
+}
+
+.uc-task-center__chart-card--donut {
+  border-left: 1px solid var(--uc-color-border-subtle);
 }
 
 .uc-task-center__chart-heading {
@@ -4271,6 +4302,11 @@ button.uc-project-center__project-card:disabled {
   .uc-task-center__filters,
   .uc-task-center__workspace {
     grid-template-columns: 1fr;
+  }
+
+  .uc-task-center__chart-card--donut {
+    border-top: 1px solid var(--uc-color-border-subtle);
+    border-left: 0;
   }
 
   .uc-task-center__call-filters {

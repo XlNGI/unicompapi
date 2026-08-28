@@ -1,4 +1,11 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type WheelEvent
+} from 'react';
 import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -88,8 +95,52 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [reusingParameters, setReusingParameters] = useState(false);
+  const [consumptionChartsCollapsed, setConsumptionChartsCollapsed] = useState(false);
   const [message, setMessage] = useState('');
+  const consumptionChartsCollapsedRef = useRef(false);
+  const taskCenterWheelDelta = useRef(0);
+  const taskCenterWheelDirection = useRef(0);
+  const taskCenterWheelLastAt = useRef(0);
+  const taskCenterWheelLockedUntil = useRef(0);
   const storage = window.unicomp?.storage;
+
+  function handleTaskCenterWheel(event: WheelEvent<HTMLElement>) {
+    if (event.deltaY === 0) return;
+    const direction = Math.sign(event.deltaY);
+    const sincePreviousWheel = event.timeStamp - taskCenterWheelLastAt.current;
+    taskCenterWheelLastAt.current = event.timeStamp;
+
+    if (
+      taskCenterWheelDirection.current !== 0 &&
+      direction !== taskCenterWheelDirection.current &&
+      sincePreviousWheel < 180
+    ) {
+      taskCenterWheelDelta.current = 0;
+      return;
+    }
+    if (direction !== taskCenterWheelDirection.current) {
+      taskCenterWheelDirection.current = direction;
+      taskCenterWheelDelta.current = 0;
+    }
+    if (event.timeStamp < taskCenterWheelLockedUntil.current) return;
+    taskCenterWheelDelta.current += event.deltaY;
+
+    if (taskCenterWheelDelta.current >= 16) {
+      taskCenterWheelDelta.current = 0;
+      if (!consumptionChartsCollapsedRef.current) {
+        consumptionChartsCollapsedRef.current = true;
+        taskCenterWheelLockedUntil.current = event.timeStamp + 420;
+        setConsumptionChartsCollapsed(true);
+      }
+    } else if (taskCenterWheelDelta.current <= -12) {
+      taskCenterWheelDelta.current = 0;
+      if (consumptionChartsCollapsedRef.current) {
+        consumptionChartsCollapsedRef.current = false;
+        taskCenterWheelLockedUntil.current = event.timeStamp + 420;
+        setConsumptionChartsCollapsed(false);
+      }
+    }
+  }
 
   useEffect(() => {
     if (!selectedTaskId && tasks.length > 0) setSelectedTaskId(tasks[0]?.taskId);
@@ -230,7 +281,11 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   }
 
   return (
-    <section className="uc-task-center" aria-labelledby="tasks-page-title">
+    <section
+      className="uc-task-center"
+      aria-labelledby="tasks-page-title"
+      onWheelCapture={handleTaskCenterWheel}
+    >
       <header className="uc-task-center__header">
         <div>
           <div className="uc-page-skeleton__heading-row">
@@ -244,7 +299,15 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
         <StatusPill>{tasks.length} 个任务</StatusPill>
       </header>
 
-      <TaskConsumptionCharts />
+      <div
+        aria-hidden={consumptionChartsCollapsed}
+        className={`uc-task-center__charts-reveal${consumptionChartsCollapsed
+          ? ' uc-task-center__charts-reveal--collapsed'
+          : ''}`}
+        data-consumption-charts-collapsed={consumptionChartsCollapsed}
+      >
+        <TaskConsumptionCharts />
+      </div>
 
       <Card className="uc-task-center__filters">
         <label>
@@ -441,108 +504,95 @@ function TaskConsumptionCharts() {
     : '尚未读取消费摘要';
 
   return (
-    <section className="uc-task-center__charts" aria-label="消费统计">
-      <Card className="uc-task-center__chart-card">
-        <div className="uc-task-center__chart-heading">
-          <div>
-            <h2>人民币消费柱状图</h2>
-            <p>{loading ? '正在读取成功调用费用' : chartSummary}</p>
-          </div>
-          <StatusPill tone={hasRenminbiAmount ? 'success' : 'neutral'}>
-            {formatRenminbiAmount(summary?.totalAmount ?? '0')}
-          </StatusPill>
-        </div>
-        {loading ? (
-          <p className="uc-task-center__muted" role="status">正在汇总消费数据…</p>
-        ) : !summary || !hasRenminbiAmount ? (
-          <EmptyBarChart dates={summary?.timeBuckets.map((bucket) => bucket.date)} />
-        ) : (
-          <div className="uc-task-center__bar-chart" aria-label="按时间汇总的消费柱状图">
-            {summary.timeBuckets.map((bucket) => (
-              <div className="uc-task-center__bar-row" key={bucket.date}>
-                <span>{dailyBucketLabel(bucket.date)}</span>
-                <div>
-                  <i style={{ width: `${consumptionBarRatio(bucket.amount, maximumBucketAmount)}%` }} />
-                </div>
-                <strong>{formatRenminbiAmount(bucket.amount)} · {bucket.callCount} 次</strong>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <Card className="uc-task-center__chart-card uc-task-center__chart-card--donut">
-        <div className="uc-task-center__chart-heading">
-          <div>
-            <h2>供应商人民币消费占比</h2>
-            <p>{loading ? '正在读取成功调用费用' : '按人民币本地估算汇总，前 5 个供应商外归入“其他”'}</p>
-          </div>
-          <StatusPill>{providerSlices.length} 个分组</StatusPill>
-        </div>
-        {loading ? (
-          <p className="uc-task-center__muted" role="status">正在计算供应商占比…</p>
-        ) : providerSlices.length === 0 ? (
-          <EmptyDonutChart />
-        ) : (
-          <div className="uc-task-center__donut-layout">
-            <div
-              aria-label="供应商消费占比环形图"
-              className="uc-task-center__donut"
-              role="img"
-              style={{
-                '--uc-task-donut': donutGradient(providerSlices)
-              } as CSSProperties & Record<'--uc-task-donut', string>}
-            >
-              <strong>{providerSlices.length}</strong>
-              <span>分组</span>
+    <Card className="uc-task-center__charts-mask">
+      <section className="uc-task-center__charts" aria-label="消费统计">
+        <article className="uc-task-center__chart-card">
+          <div className="uc-task-center__chart-heading">
+            <div>
+              <h2>人民币消费柱状图</h2>
+              <p>{loading ? '正在读取成功调用费用' : chartSummary}</p>
             </div>
-            <div className="uc-task-center__donut-legend">
-              {providerSlices.map((slice) => (
-                <div key={slice.key}>
-                  <i style={{ background: slice.color }} />
-                  <span>{slice.label}</span>
-                  <strong>{slice.ratio.toFixed(2)}% · {formatRenminbiAmount(slice.amount)}</strong>
+            <StatusPill tone={hasRenminbiAmount ? 'success' : 'neutral'}>
+              {formatRenminbiAmount(summary?.totalAmount ?? '0')}
+            </StatusPill>
+          </div>
+          {loading ? (
+            <p className="uc-task-center__muted" role="status">正在汇总消费数据…</p>
+          ) : !summary || !hasRenminbiAmount ? (
+            <EmptyBarChart dates={summary?.timeBuckets.map((bucket) => bucket.date)} />
+          ) : (
+            <div className="uc-task-center__bar-chart" aria-label="按时间汇总的消费柱状图">
+              {summary.timeBuckets.map((bucket) => (
+                <div className="uc-task-center__bar-row" key={bucket.date}>
+                  <span>{dailyBucketLabel(bucket.date)}</span>
+                  <div>
+                    <i style={{ width: `${consumptionBarRatio(bucket.amount, maximumBucketAmount)}%` }} />
+                  </div>
+                  <strong>{formatRenminbiAmount(bucket.amount)} · {bucket.callCount} 次</strong>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-      </Card>
+          )}
+        </article>
 
-      {!loading && (message || (summary?.issues.length ?? 0) > 0) ? (
-        <p className="uc-task-center__chart-note" role="status">
-          {message || `部分项目无法纳入消费统计：${summary?.issues.map((issue) => issue.projectName).join('、')}`}
-        </p>
-      ) : null}
-      {!loading && summary && summary.pendingConversionCallCount > 0 ? (
-        <p className="uc-task-center__chart-note" role="status">
-          {summary.pendingConversionCallCount} 次非人民币费用待换算，未混入人民币总额
-          {summary.pendingCurrencies.length > 0
-            ? `（${summary.pendingCurrencies.map((item) => `${item.currencyCode} ${item.callCount} 次`).join('、')}）`
-            : ''}。
-        </p>
-      ) : null}
-      {!loading && summary && (
-        summary.missingPricingRuleCount > 0 ||
-        summary.missingUsageCount > 0 ||
-        summary.invalidFeeCount > 0
-      ) ? (
-        <p className="uc-task-center__chart-note" role="status">
-          成功调用中另有：缺官方价格规则 {summary.missingPricingRuleCount} 次，
-          缺响应体计费用量 {summary.missingUsageCount} 次，格式异常 {summary.invalidFeeCount} 次。
-        </p>
-      ) : null}
-      {!loading && summary?.conversionSources.map((source) => (
-        <p className="uc-task-center__chart-note" key={source.sourceCurrencyCode} role="status">
-          {source.sourceCurrencyCode} → 人民币换算来源：{source.sourceTitle}（核对于 {source.sourceCheckedAt}）。
-        </p>
-      ))}
-      {!loading && summary ? (
-        <p className="uc-task-center__chart-note" role="note">
-          金额为基于本地调用事实、已核准价格与换算事实生成的估算，不等于服务商正式账单。
-        </p>
-      ) : null}
-    </section>
+        <article className="uc-task-center__chart-card uc-task-center__chart-card--donut">
+          <div className="uc-task-center__chart-heading">
+            <div>
+              <h2>供应商人民币消费占比</h2>
+              <p>{loading ? '正在读取成功调用费用' : '按人民币本地估算汇总，前 5 个供应商外归入“其他”'}</p>
+            </div>
+            <StatusPill>{providerSlices.length} 个分组</StatusPill>
+          </div>
+          {loading ? (
+            <p className="uc-task-center__muted" role="status">正在计算供应商占比…</p>
+          ) : providerSlices.length === 0 ? (
+            <EmptyDonutChart />
+          ) : (
+            <div className="uc-task-center__donut-layout">
+              <div
+                aria-label="供应商消费占比环形图"
+                className="uc-task-center__donut"
+                role="img"
+                style={{
+                  '--uc-task-donut': donutGradient(providerSlices)
+                } as CSSProperties & Record<'--uc-task-donut', string>}
+              >
+                <strong>{providerSlices.length}</strong>
+                <span>分组</span>
+              </div>
+              <div className="uc-task-center__donut-legend">
+                {providerSlices.map((slice) => (
+                  <div key={slice.key}>
+                    <i style={{ background: slice.color }} />
+                    <span>{slice.label}</span>
+                    <strong>{slice.ratio.toFixed(2)}% · {formatRenminbiAmount(slice.amount)}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </article>
+
+        {!loading && message ? (
+          <p className="uc-task-center__chart-note" role="status">
+            {message}
+          </p>
+        ) : null}
+        {!loading && summary && summary.pendingConversionCallCount > 0 ? (
+          <p className="uc-task-center__chart-note" role="status">
+            {summary.pendingConversionCallCount} 次非人民币费用待换算，未混入人民币总额
+            {summary.pendingCurrencies.length > 0
+              ? `（${summary.pendingCurrencies.map((item) => `${item.currencyCode} ${item.callCount} 次`).join('、')}）`
+              : ''}。
+          </p>
+        ) : null}
+        {!loading && summary?.conversionSources.map((source) => (
+          <p className="uc-task-center__chart-note" key={source.sourceCurrencyCode} role="status">
+            {source.sourceCurrencyCode} → 人民币换算来源：{source.sourceTitle}（核对于 {source.sourceCheckedAt}）。
+          </p>
+        ))}
+      </section>
+    </Card>
   );
 }
 

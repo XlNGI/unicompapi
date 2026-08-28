@@ -73,11 +73,11 @@ test('task center shows successful-call fee charts from official pricing rules',
   assert.match(source, /donutGradient\(providerSlices\)/);
   assert.match(source, /暂无可计算费用的消费柱状图/);
   assert.match(source, /暂无可计算费用的供应商消费占比环形图/);
-  assert.match(source, /missingPricingRuleCount/);
-  assert.match(source, /missingUsageCount/);
-  assert.match(source, /缺官方价格规则/);
-  assert.match(source, /缺响应体计费用量/);
-  assert.match(source, /不等于服务商正式账单/);
+  assert.match(source, /!loading && message/);
+  assert.doesNotMatch(source, /部分项目无法纳入消费统计/);
+  assert.doesNotMatch(source, /缺官方价格规则/);
+  assert.doesNotMatch(source, /缺响应体计费用量/);
+  assert.doesNotMatch(source, /不等于服务商正式账单/);
   assert.match(feeSource, /call\.officialPricingRule/);
   assert.match(feeSource, /provider_billing/);
   assert.match(feeSource, /token_split/);
@@ -87,6 +87,19 @@ test('task center shows successful-call fee charts from official pricing rules',
   assert.match(feeSource, /缺少计费用量/);
   assert.doesNotMatch(feeSource, /official_total_price|explicitUnitPrice/);
   assert.doesNotMatch(feeSource, /providerId|modelId|viduq3|seedance|doubao|kling|newapi/i);
+});
+
+test('task center groups consumption charts in one mask and collapses it on page-wide scrolling', () => {
+  assert.match(source, /uc-task-center__charts-mask/);
+  assert.match(source, /onWheelCapture=\{handleTaskCenterWheel\}/);
+  assert.match(source, /taskCenterWheelDelta\.current >= 16/);
+  assert.match(source, /taskCenterWheelDelta\.current <= -12/);
+  assert.match(source, /taskCenterWheelLockedUntil\.current = event\.timeStamp \+ 420/);
+  assert.match(source, /sincePreviousWheel < 180/);
+  assert.match(source, /direction !== taskCenterWheelDirection\.current/);
+  assert.match(source, /!consumptionChartsCollapsedRef\.current/);
+  assert.doesNotMatch(source, /handleTaskPaneScroll|onPaneScroll/);
+  assert.match(source, /data-consumption-charts-collapsed=\{consumptionChartsCollapsed\}/);
 });
 
 test('task center does not invent execution metrics or write operations', () => {
