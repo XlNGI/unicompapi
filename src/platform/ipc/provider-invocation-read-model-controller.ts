@@ -129,6 +129,12 @@ interface BuiltCallRecord {
   readonly details: StorageCallDetailsDto;
 }
 
+interface CallRecordCandidate {
+  readonly entry: ProjectCatalogEntry;
+  readonly facts: ProjectCallFacts;
+  readonly attempt: ProviderInvocationAttemptV1;
+}
+
 interface ParsedCurrencyConversionFact extends Omit<CurrencyConversionFactV1, 'rate'> {
   readonly rate: ExactDecimal;
 }
@@ -171,8 +177,9 @@ export class ProviderInvocationReadModelController {
     }
 
     try {
-      const items: StorageCallRecordSummaryDto[] = [];
+      const candidates: CallRecordCandidate[] = [];
       const issues = new Map<string, StorageReadModelIssueDto>();
+      const schemaAvailability = new Map<string, Promise<boolean>>();
 
       const entries = await this.catalog.getEntries();
       for (const entry of filter.projectId
@@ -186,8 +193,28 @@ export class ProviderInvocationReadModelController {
           const facts = await loadProjectFacts(entry);
           for (const attempt of facts.attempts) {
             try {
-              const built = await this.buildRecord(entry, facts, attempt);
-              if (matchesFilter(built.summary, filter)) items.push(built.summary);
+              const route = facts.routesById.get(attempt.routeSnapshotId);
+              if (!route || route.projectId !== attempt.projectId) {
+                throw new TypeError('Provider invocation route snapshot is unavailable');
+              }
+              if (!matchesCandidateFilter(entry, attempt, route, filter)) continue;
+              const observations = facts.usageByAttempt.get(attempt.id) ?? [];
+              if (observations.length > 0) {
+                const key = schemaKey(route.usageSchemaId, route.usageSchemaRevision);
+                let availability = schemaAvailability.get(key);
+                if (!availability) {
+                  availability = this.usageSchemas.resolve({
+                    usageSchemaId: route.usageSchemaId,
+                    usageSchemaRevision: route.usageSchemaRevision
+                  }).then(Boolean);
+                  schemaAvailability.set(key, availability);
+                }
+                if (!(await availability)) {
+                  addIssue(issues, entry, 'invalid_data');
+                  continue;
+                }
+              }
+              candidates.push({ entry, facts, attempt });
             } catch {
               addIssue(issues, entry, 'invalid_data');
             }
@@ -197,15 +224,27 @@ export class ProviderInvocationReadModelController {
         }
       }
 
-      const sorted = items.sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt) ||
-        left.projectId.localeCompare(right.projectId) ||
-        left.invocationAttemptId.localeCompare(right.invocationAttemptId)
+      const sorted = candidates.sort((left, right) =>
+        right.attempt.createdAt.localeCompare(left.attempt.createdAt) ||
+        left.entry.projectId.localeCompare(right.entry.projectId) ||
+        left.attempt.id.localeCompare(right.attempt.id)
       );
+      const items: StorageCallRecordSummaryDto[] = [];
+      for (const candidate of sorted.slice(filter.offset, filter.offset + filter.limit)) {
+        try {
+          items.push((await this.buildRecord(
+            candidate.entry,
+            candidate.facts,
+            candidate.attempt
+          )).summary);
+        } catch {
+          addIssue(issues, candidate.entry, 'invalid_data');
+        }
+      }
       return {
         ok: true,
         value: {
-          items: sorted.slice(filter.offset, filter.offset + filter.limit),
+          items,
           total: sorted.length,
           offset: filter.offset,
           limit: filter.limit,
@@ -653,19 +692,21 @@ function latestTimestamp(
   ].sort().at(-1)!);
 }
 
-function matchesFilter(
-  item: StorageCallRecordSummaryDto,
+function matchesCandidateFilter(
+  entry: ProjectCatalogEntry,
+  attempt: ProviderInvocationAttemptV1,
+  route: ProviderExecutionRouteSnapshotV1,
   filter: ParsedCallFilter
 ): boolean {
   return (
-    (filter.projectId === undefined || item.projectId === filter.projectId) &&
-    (filter.productFeature === undefined || item.productFeature === filter.productFeature) &&
-    (filter.providerId === undefined || item.providerId === filter.providerId) &&
-    (filter.connectionId === undefined || item.connectionId === filter.connectionId) &&
-    (filter.modelId === undefined || item.modelId === filter.modelId) &&
-    (filter.state === undefined || item.state === filter.state) &&
-    (filter.createdFrom === undefined || item.createdAt >= filter.createdFrom) &&
-    (filter.createdTo === undefined || item.createdAt <= filter.createdTo)
+    (filter.projectId === undefined || entry.projectId === filter.projectId) &&
+    (filter.productFeature === undefined || route.productFeature === filter.productFeature) &&
+    (filter.providerId === undefined || route.providerId === filter.providerId) &&
+    (filter.connectionId === undefined || route.connectionId === filter.connectionId) &&
+    (filter.modelId === undefined || route.modelId === filter.modelId) &&
+    (filter.state === undefined || attempt.state === filter.state) &&
+    (filter.createdFrom === undefined || attempt.createdAt >= filter.createdFrom) &&
+    (filter.createdTo === undefined || attempt.createdAt <= filter.createdTo)
   );
 }
 

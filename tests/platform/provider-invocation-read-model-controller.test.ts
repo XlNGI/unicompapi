@@ -147,6 +147,22 @@ describe('provider invocation read model controller', () => {
     });
   });
 
+  it('builds full call records only for the requested page after sorting candidates', async () => {
+    const fixture = await consumptionControllerFixture();
+    const result = await fixture.paged.listCallRecords({ limit: 1 });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        total: 7,
+        offset: 0,
+        limit: 1,
+        items: [{ invocationAttemptId: 'attempt-consumption-1' }]
+      }
+    });
+    expect(fixture.pagedSchemaResolveCount()).toBe(2);
+  });
+
   it('returns safe details with timeline, usage, local result facts and Work registration only', async () => {
     const fixture = await controllerFixture();
     const result = await fixture.controller.getCallDetails({
@@ -392,7 +408,16 @@ async function consumptionControllerFixture() {
     }
   };
   const now = () => new Date('2026-08-05T12:00:00.000Z');
+  const schemaRegistry = new ProviderUsageSchemaRegistry([usageSchema]);
+  let pagedSchemaResolveCount = 0;
   return {
+    paged: new ProviderInvocationReadModelController(catalog, {
+      async resolve(input) {
+        pagedSchemaResolveCount += 1;
+        return schemaRegistry.resolve(input);
+      }
+    }),
+    pagedSchemaResolveCount: () => pagedSchemaResolveCount,
     withoutConversion: new ProviderInvocationReadModelController(
       catalog,
       new ProviderUsageSchemaRegistry([usageSchema]),
