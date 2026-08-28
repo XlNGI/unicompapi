@@ -44,6 +44,7 @@ import {
   ProviderInvocationReadModelController,
   ProviderUsageSchemaRegistry
 } from '../../src/platform';
+import { VIDU_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/vidu/vidu-contracts';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-08-03T10:00:00.000Z');
@@ -64,6 +65,13 @@ const usageSchema = createUsageSchema({
     numericKind: 'integer',
     aggregation: 'cumulative_latest',
     requiredForComplete: true,
+    allowedStages: ['submit', 'poll', 'result']
+  }, {
+    metricId: 'credit_amount',
+    allowedUnits: ['credit'],
+    numericKind: 'decimal',
+    aggregation: 'cumulative_latest',
+    requiredForComplete: false,
     allowedStages: ['submit', 'poll', 'result']
   }]
 });
@@ -221,7 +229,198 @@ describe('provider invocation read model controller', () => {
     expect(() => new ProviderUsageSchemaRegistry([usageSchema, usageSchema]))
       .toThrow('unique');
   });
+
+  it('returns one controlled CNY summary without mixing currencies or exposing conversion rates', async () => {
+    const fixture = await consumptionControllerFixture();
+    const pending = await fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(pending).toMatchObject({
+      ok: true,
+      value: {
+        currencyCode: 'CNY',
+        currencyLabel: '人民币',
+        totalAmount: '0',
+        totalCallCount: 7,
+        successfulCallCount: 7,
+        pricedCallCount: 7,
+        includedCallCount: 0,
+        pendingConversionCallCount: 7,
+        pendingCurrencies: [{ currencyCode: 'USD', callCount: 7 }],
+        conversionSources: [],
+        timeBuckets: expect.arrayContaining([
+          { date: '2026-08-03', amount: '0', callCount: 0 }
+        ]),
+        disclaimer: 'local_estimate_not_provider_bill'
+      }
+    });
+
+    const converted = await fixture.withConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(converted).toMatchObject({
+      ok: true,
+      value: {
+        totalAmount: '2.8',
+        includedCallCount: 7,
+        pendingConversionCallCount: 0,
+        pendingCurrencies: [],
+        conversionSources: [{
+          sourceCurrencyCode: 'USD',
+          targetCurrencyCode: 'CNY',
+          sourceTitle: 'Synthetic approved conversion',
+          sourceCheckedAt: '2026-08-03'
+        }],
+        timeBuckets: expect.arrayContaining([
+          { date: '2026-08-03', amount: '2.8', callCount: 7 }
+        ])
+      }
+    });
+    if (!converted.ok) throw new TypeError('Expected summary');
+    expect(converted.value.timeBuckets).toHaveLength(7);
+    expect(converted.value.providerSlices).toHaveLength(6);
+    expect(converted.value.providerSlices.find((item) => item.key === 'other')).toMatchObject({
+      label: '其他',
+      amount: '0.3',
+      callCount: 2,
+      isOther: true
+    });
+    expect(converted.value.providerSlices.map((item) => item.key).filter((key) => key !== 'other'))
+      .toHaveLength(5);
+    expect(converted.value.providerSlices.reduce(
+      (sum, item) => sum + item.ratioBasisPoints,
+      0
+    )).toBe(10_000);
+    expect(JSON.stringify(converted)).not.toMatch(
+      /"rate"|routeSnapshot|packageId|adapterKey|endpoint|credential|runtimePolicy|authorization/i
+    );
+
+    await expect(fixture.withConversion.getConsumptionSummary({ calendarDays: 32 }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    await expect(fixture.withConversion.getConsumptionSummary({ calendarDays: 7, extra: true }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    await expect(fixture.invalidConversion.getConsumptionSummary({ calendarDays: 7 }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'read_model_failed' } });
+  });
 });
+
+async function consumptionControllerFixture() {
+  const root = await makeRoot('unicomp-consumption-summary-');
+  const projectId = toProjectId('project-consumption-summary');
+  await createConsumptionCalls(root, projectId);
+  const catalog = new ProjectCatalogService(
+    new InMemoryProjectCatalogStore(),
+    () => t5
+  );
+  await catalog.remember({
+    projectId,
+    projectName: 'Consumption project',
+    rootDirectory: root
+  });
+  const conversions = {
+    async listApprovedFacts() {
+      return [{
+        sourceCurrencyCode: 'USD',
+        targetCurrencyCode: 'CNY' as const,
+        rate: '1',
+        sourceTitle: 'Synthetic approved conversion',
+        sourceUrl: 'https://example.com/conversion-fact',
+        sourceCheckedAt: '2026-08-03'
+      }];
+    }
+  };
+  const now = () => new Date('2026-08-05T12:00:00.000Z');
+  return {
+    withoutConversion: new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      undefined,
+      now
+    ),
+    withConversion: new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      conversions,
+      now
+    ),
+    invalidConversion: new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      {
+        async listApprovedFacts() {
+          return [{
+            ...(await conversions.listApprovedFacts())[0]!,
+            sourceUrl: 'https://example.com/conversion-fact?token=not-allowed'
+          }];
+        }
+      },
+      now
+    )
+  };
+}
+
+async function createConsumptionCalls(root: string, projectId: ProjectId): Promise<void> {
+  const context = callContext(root, projectId);
+  const creditQuantities = ['20', '40', '60', '80', '100', '120', '140'];
+  for (const [index, creditQuantity] of creditQuantities.entries()) {
+    const suffix = `consumption-${index + 1}`;
+    const route = {
+      ...routeSnapshot(projectId, suffix, 'text_to_video', t0, {
+        providerDisplayName: 'Same Provider',
+        connectionDisplayName: `Connection ${index + 1}`,
+        modelDisplayName: `Model ${index + 1}`
+      }),
+      packageId: VIDU_PROVIDER_PACKAGE_ID
+    };
+    await context.routes.save(route);
+    const attempt = createProviderInvocationAttempt({
+      id: toProviderInvocationAttemptId(`attempt-${suffix}`),
+      projectId,
+      subject: {
+        kind: 'media',
+        taskId: toTaskId(`task-${suffix}`),
+        executionId: toExecutionId(`execution-${suffix}`)
+      },
+      routeSnapshotId: route.id,
+      createdAt: t0
+    });
+    await context.invocations.create(
+      attempt,
+      invocationEvent(attempt.id, 1, 'submission_started', t0)
+    );
+    await context.invocations.appendEvent(invocationEvent(
+      attempt.id,
+      2,
+      'provider_accepted',
+      t1
+    ));
+    await context.invocations.appendEvent(invocationEvent(
+      attempt.id,
+      3,
+      'result_received',
+      t2
+    ));
+    await context.invocations.appendEvent(invocationEvent(
+      attempt.id,
+      4,
+      'completed',
+      t3
+    ));
+    await context.usage.append(createProviderUsageObservation({
+      id: toProviderUsageObservationId(`usage-${suffix}`),
+      invocationAttemptId: attempt.id,
+      usageSchemaId: usageSchema.id,
+      usageSchemaRevision: usageSchema.revision,
+      sourceEventKey: `usage-${suffix}`,
+      sequence: 1,
+      status: 'reported',
+      sourceStage: 'result',
+      facts: [{
+        metricId: 'credit_amount',
+        quantity: creditQuantity,
+        unit: 'credit',
+        source: 'provider_body'
+      }],
+      observedAt: t2
+    }, usageSchema), usageSchema);
+  }
+}
 
 async function controllerFixture(withUsageSchema = true) {
   const mediaRoot = await makeRoot('unicomp-call-media-');

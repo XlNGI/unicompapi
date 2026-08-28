@@ -14,6 +14,7 @@ export const storageIpcChannels = {
   getTaskDetails: 'storage:get-task-details',
   listCallRecords: 'storage:list-call-records',
   getCallDetails: 'storage:get-call-details',
+  getConsumptionSummary: 'storage:get-consumption-summary',
   listWorks: 'storage:list-works',
   getWorkDetails: 'storage:get-work-details',
   createWorkMediaHandle: 'storage:create-work-media-handle',
@@ -173,6 +174,65 @@ export interface StorageCallRecordListDto {
   readonly offset: number;
   readonly limit: number;
   readonly issues: readonly StorageReadModelIssueDto[];
+}
+
+export interface StorageConsumptionSummaryRequestDto {
+  readonly calendarDays?: number;
+}
+
+export interface StorageConsumptionTimeBucketDto {
+  readonly date: string;
+  readonly amount: string;
+  readonly callCount: number;
+}
+
+export interface StorageConsumptionProviderSliceDto {
+  readonly key: string;
+  readonly providerId?: string;
+  readonly label: string;
+  readonly amount: string;
+  readonly callCount: number;
+  readonly ratioBasisPoints: number;
+  readonly isOther: boolean;
+}
+
+export interface StorageConsumptionPendingCurrencyDto {
+  readonly currencyCode: string;
+  readonly callCount: number;
+}
+
+export interface StorageConsumptionConversionSourceDto {
+  readonly sourceCurrencyCode: string;
+  readonly targetCurrencyCode: 'CNY';
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+}
+
+export interface StorageConsumptionSummaryDto {
+  readonly currencyCode: 'CNY';
+  readonly currencyLabel: '人民币';
+  readonly period: {
+    readonly startDate: string;
+    readonly endDate: string;
+    readonly calendarDays: number;
+    readonly timeZone: 'UTC';
+  };
+  readonly totalAmount: string;
+  readonly totalCallCount: number;
+  readonly successfulCallCount: number;
+  readonly pricedCallCount: number;
+  readonly includedCallCount: number;
+  readonly pendingConversionCallCount: number;
+  readonly missingPricingRuleCount: number;
+  readonly missingUsageCount: number;
+  readonly invalidFeeCount: number;
+  readonly timeBuckets: readonly StorageConsumptionTimeBucketDto[];
+  readonly providerSlices: readonly StorageConsumptionProviderSliceDto[];
+  readonly pendingCurrencies: readonly StorageConsumptionPendingCurrencyDto[];
+  readonly conversionSources: readonly StorageConsumptionConversionSourceDto[];
+  readonly issues: readonly StorageReadModelIssueDto[];
+  readonly disclaimer: 'local_estimate_not_provider_bill';
 }
 
 export type StorageCallSubjectDto =
@@ -340,6 +400,9 @@ export interface StorageApi {
   getCallDetails(
     invocationAttemptId: string
   ): Promise<StorageIpcResult<StorageCallDetailsDto | undefined>>;
+  getConsumptionSummary(
+    request?: StorageConsumptionSummaryRequestDto
+  ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>>;
   listWorks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageWorkSummaryDto>>
   >;

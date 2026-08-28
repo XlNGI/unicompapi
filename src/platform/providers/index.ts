@@ -33,6 +33,7 @@ export * from './provider-invocation-supervisor';
 export * from './provider-contracts-data-migration';
 export * from './provider-management-framework';
 export * from './provider-execution-lifecycle';
+export * from './provider-consumption-calculator';
 export * from './runtime-authorization-ledger';
 export * from './vidu';
 export * from './deepseek';

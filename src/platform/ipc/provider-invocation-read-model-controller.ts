@@ -23,6 +23,9 @@ import type {
   StorageCallRecordListDto,
   StorageCallRecordSummaryDto,
   StorageCallResultRegistrationDto,
+  StorageConsumptionConversionSourceDto,
+  StorageConsumptionProviderSliceDto,
+  StorageConsumptionSummaryDto,
   StorageIpcResult,
   StorageReadModelIssueDto
 } from '../../shared/storage-ipc';
@@ -36,6 +39,16 @@ import {
 import { NodeProjectStorage } from '../storage';
 import type { ProjectCatalogEntry, ProjectCatalogService } from './project-catalog';
 import { resolveOfficialPricingRule } from '../providers/official-pricing-rules';
+import {
+  addExactDecimal,
+  calculateExactSuccessfulCallFee,
+  compareExactDecimal,
+  formatExactDecimal,
+  multiplyExactDecimal,
+  parseExactDecimal,
+  zeroExactDecimal,
+  type ExactDecimal
+} from '../providers/provider-consumption-calculator';
 
 export interface ProviderUsageSchemaResolverPort {
   resolve(input: {
@@ -69,6 +82,25 @@ export class ProviderUsageSchemaRegistry implements ProviderUsageSchemaResolverP
 
 const noUsageSchemas = new ProviderUsageSchemaRegistry([]);
 
+export interface CurrencyConversionFactV1 {
+  readonly sourceCurrencyCode: string;
+  readonly targetCurrencyCode: 'CNY';
+  readonly rate: string;
+  readonly sourceTitle: string;
+  readonly sourceUrl: string;
+  readonly sourceCheckedAt: string;
+}
+
+export interface CurrencyConversionFactResolverPort {
+  listApprovedFacts(targetCurrencyCode: 'CNY'): Promise<readonly CurrencyConversionFactV1[]>;
+}
+
+const noCurrencyConversions: CurrencyConversionFactResolverPort = {
+  async listApprovedFacts() {
+    return [];
+  }
+};
+
 interface ParsedCallFilter {
   readonly projectId?: string;
   readonly productFeature?: string;
@@ -96,10 +128,26 @@ interface BuiltCallRecord {
   readonly details: StorageCallDetailsDto;
 }
 
+interface ParsedCurrencyConversionFact extends Omit<CurrencyConversionFactV1, 'rate'> {
+  readonly rate: ExactDecimal;
+}
+
+interface ConsumptionTotal {
+  readonly amount: ExactDecimal;
+  readonly callCount: number;
+}
+
+interface ProviderConsumptionTotal extends ConsumptionTotal {
+  readonly providerId: string;
+  readonly label: string;
+}
+
 export class ProviderInvocationReadModelController {
   constructor(
     private readonly catalog: ProjectCatalogService,
-    private readonly usageSchemas: ProviderUsageSchemaResolverPort = noUsageSchemas
+    private readonly usageSchemas: ProviderUsageSchemaResolverPort = noUsageSchemas,
+    private readonly currencyConversions: CurrencyConversionFactResolverPort = noCurrencyConversions,
+    private readonly now: () => Date = () => new Date()
   ) {}
 
   async listCallRecords(
@@ -190,6 +238,159 @@ export class ProviderInvocationReadModelController {
         }
       }
       return { ok: true, value: match };
+    } catch {
+      return readFailure();
+    }
+  }
+
+  async getConsumptionSummary(
+    request: unknown = {}
+  ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>> {
+    let calendarDays: number;
+    try {
+      calendarDays = parseConsumptionSummaryRequest(request);
+    } catch {
+      return invalidRequestFailure();
+    }
+
+    try {
+      const period = consumptionPeriod(this.now(), calendarDays);
+      const conversionFacts = parseConversionFacts(
+        await this.currencyConversions.listApprovedFacts('CNY')
+      );
+      const conversionsByCurrency = new Map(
+        conversionFacts.map((fact) => [fact.sourceCurrencyCode, fact])
+      );
+      const usedConversionCurrencies = new Set<string>();
+      const issues = new Map<string, StorageReadModelIssueDto>();
+      const bucketTotals = new Map(period.dates.map((date) => [date, emptyConsumptionTotal()]));
+      const providerTotals = new Map<string, ProviderConsumptionTotal>();
+      const pendingCurrencies = new Map<string, number>();
+      let totalAmount = zeroExactDecimal();
+      let totalCallCount = 0;
+      let successfulCallCount = 0;
+      let pricedCallCount = 0;
+      let includedCallCount = 0;
+      let pendingConversionCallCount = 0;
+      let missingPricingRuleCount = 0;
+      let missingUsageCount = 0;
+      let invalidFeeCount = 0;
+
+      for (const entry of await this.catalog.getEntries()) {
+        if (!(await isAvailable(entry))) {
+          addIssue(issues, entry, 'unavailable');
+          continue;
+        }
+        try {
+          const facts = await loadProjectFacts(entry);
+          for (const attempt of facts.attempts) {
+            if (!period.includes(attempt.createdAt)) continue;
+            totalCallCount += 1;
+            try {
+              const call = (await this.buildRecord(entry, facts, attempt)).details;
+              if (call.state !== 'completed') continue;
+              successfulCallCount += 1;
+              const fee = calculateExactSuccessfulCallFee(call);
+              if (fee.state === 'missing_pricing') {
+                missingPricingRuleCount += 1;
+                continue;
+              }
+              if (fee.state === 'missing_usage') {
+                missingUsageCount += 1;
+                continue;
+              }
+              if (fee.state !== 'calculated') {
+                invalidFeeCount += 1;
+                continue;
+              }
+              pricedCallCount += 1;
+              let cnyAmount = fee.amount;
+              if (fee.currencyCode !== 'CNY') {
+                const conversion = conversionsByCurrency.get(fee.currencyCode);
+                if (!conversion) {
+                  pendingConversionCallCount += 1;
+                  pendingCurrencies.set(
+                    fee.currencyCode,
+                    (pendingCurrencies.get(fee.currencyCode) ?? 0) + 1
+                  );
+                  continue;
+                }
+                cnyAmount = multiplyExactDecimal(cnyAmount, conversion.rate);
+                usedConversionCurrencies.add(fee.currencyCode);
+              }
+
+              includedCallCount += 1;
+              totalAmount = addExactDecimal(totalAmount, cnyAmount);
+              const date = utcDateKey(call.createdAt);
+              const bucket = bucketTotals.get(date);
+              if (bucket) {
+                bucketTotals.set(date, {
+                  amount: addExactDecimal(bucket.amount, cnyAmount),
+                  callCount: bucket.callCount + 1
+                });
+              }
+              const providerKey = call.providerId;
+              const provider = providerTotals.get(providerKey) ?? {
+                providerId: providerKey,
+                label: call.providerName ?? providerKey,
+                amount: zeroExactDecimal(),
+                callCount: 0
+              };
+              providerTotals.set(providerKey, {
+                ...provider,
+                label: preferredProviderLabel(provider.label, call.providerName, providerKey),
+                amount: addExactDecimal(provider.amount, cnyAmount),
+                callCount: provider.callCount + 1
+              });
+            } catch {
+              addIssue(issues, entry, 'invalid_data');
+              invalidFeeCount += 1;
+            }
+          }
+        } catch {
+          addIssue(issues, entry, 'invalid_data');
+        }
+      }
+
+      return {
+        ok: true,
+        value: {
+          currencyCode: 'CNY',
+          currencyLabel: '人民币',
+          period: {
+            startDate: period.dates[0]!,
+            endDate: period.dates.at(-1)!,
+            calendarDays,
+            timeZone: 'UTC'
+          },
+          totalAmount: formatExactDecimal(totalAmount),
+          totalCallCount,
+          successfulCallCount,
+          pricedCallCount,
+          includedCallCount,
+          pendingConversionCallCount,
+          missingPricingRuleCount,
+          missingUsageCount,
+          invalidFeeCount,
+          timeBuckets: period.dates.map((date) => {
+            const bucket = bucketTotals.get(date)!;
+            return {
+              date,
+              amount: formatExactDecimal(bucket.amount),
+              callCount: bucket.callCount
+            };
+          }),
+          providerSlices: buildProviderSlices(providerTotals, totalAmount),
+          pendingCurrencies: [...pendingCurrencies.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([currencyCode, callCount]) => ({ currencyCode, callCount })),
+          conversionSources: conversionFacts
+            .filter((fact) => usedConversionCurrencies.has(fact.sourceCurrencyCode))
+            .map(toConversionSourceDto),
+          issues: [...issues.values()],
+          disclaimer: 'local_estimate_not_provider_bill'
+        }
+      };
     } catch {
       return readFailure();
     }
@@ -443,6 +644,191 @@ function parseCallFilter(value: unknown): ParsedCallFilter {
     ...(createdTo ? { createdTo } : {}),
     offset: boundedInteger(value.offset, 0, Number.MAX_SAFE_INTEGER, 0),
     limit: boundedInteger(value.limit, 1, 200, 50)
+  };
+}
+
+function parseConsumptionSummaryRequest(value: unknown): number {
+  if (!isRecord(value)) throw invalidRequest();
+  if (Object.keys(value).some((key) => key !== 'calendarDays')) throw invalidRequest();
+  return boundedInteger(value.calendarDays, 1, 31, 7);
+}
+
+function consumptionPeriod(now: Date, calendarDays: number) {
+  if (Number.isNaN(now.getTime())) throw new TypeError('Invalid current time');
+  const end = new Date(now);
+  const start = new Date(Date.UTC(
+    end.getUTCFullYear(),
+    end.getUTCMonth(),
+    end.getUTCDate() - calendarDays + 1
+  ));
+  const dates = Array.from({ length: calendarDays }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + index);
+    return utcDateKey(date.toISOString());
+  });
+  const startTimestamp = start.toISOString();
+  const endTimestamp = end.toISOString();
+  return {
+    dates,
+    includes(value: string) {
+      return value >= startTimestamp && value <= endTimestamp;
+    }
+  };
+}
+
+function utcDateKey(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new TypeError('Invalid timestamp');
+  return parsed.toISOString().slice(0, 10);
+}
+
+function parseConversionFacts(
+  values: readonly CurrencyConversionFactV1[]
+): readonly ParsedCurrencyConversionFact[] {
+  const currencies = new Set<string>();
+  return values.map((value) => {
+    const sourceCurrencyCode = normalizeCurrencyCode(value.sourceCurrencyCode);
+    if (sourceCurrencyCode === 'CNY' || value.targetCurrencyCode !== 'CNY') {
+      throw new TypeError('Invalid conversion pair');
+    }
+    if (currencies.has(sourceCurrencyCode)) throw new TypeError('Duplicate conversion fact');
+    currencies.add(sourceCurrencyCode);
+    const rate = parseExactDecimal(value.rate);
+    if (rate.numerator <= 0n) throw new TypeError('Invalid conversion rate');
+    if (
+      typeof value.sourceTitle !== 'string' ||
+      value.sourceTitle.trim().length < 1 ||
+      value.sourceTitle.trim().length > 200
+    ) {
+      throw new TypeError('Invalid conversion source');
+    }
+    const sourceUrl = new URL(value.sourceUrl);
+    if (
+      sourceUrl.protocol !== 'https:' ||
+      sourceUrl.username ||
+      sourceUrl.password ||
+      sourceUrl.search ||
+      sourceUrl.hash
+    ) {
+      throw new TypeError('Invalid conversion source URL');
+    }
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/u.test(value.sourceCheckedAt) ||
+      utcDateKey(`${value.sourceCheckedAt}T00:00:00.000Z`) !== value.sourceCheckedAt
+    ) {
+      throw new TypeError('Invalid conversion check date');
+    }
+    return {
+      sourceCurrencyCode,
+      targetCurrencyCode: 'CNY',
+      rate,
+      sourceTitle: value.sourceTitle.trim(),
+      sourceUrl: sourceUrl.toString(),
+      sourceCheckedAt: value.sourceCheckedAt
+    };
+  });
+}
+
+function normalizeCurrencyCode(value: string): string {
+  if (typeof value !== 'string') throw new TypeError('Invalid currency');
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/u.test(normalized)) throw new TypeError('Invalid currency');
+  return normalized;
+}
+
+function emptyConsumptionTotal(): ConsumptionTotal {
+  return { amount: zeroExactDecimal(), callCount: 0 };
+}
+
+function preferredProviderLabel(
+  current: string,
+  candidate: string | undefined,
+  providerId: string
+): string {
+  if (!candidate) return current;
+  if (current === providerId) return candidate;
+  return current.localeCompare(candidate) <= 0 ? current : candidate;
+}
+
+function buildProviderSlices(
+  totals: ReadonlyMap<string, ProviderConsumptionTotal>,
+  totalAmount: ExactDecimal
+): readonly StorageConsumptionProviderSliceDto[] {
+  if (totalAmount.numerator <= 0n) return [];
+  const sorted = [...totals.values()]
+    .filter((item) => item.amount.numerator > 0n)
+    .sort((left, right) =>
+      compareExactDecimal(right.amount, left.amount) ||
+      left.providerId.localeCompare(right.providerId)
+    );
+  const visible = sorted.slice(0, 5).map((item) => ({
+    key: item.providerId,
+    providerId: item.providerId,
+    label: item.label,
+    amount: item.amount,
+    callCount: item.callCount,
+    isOther: false
+  }));
+  const remainder = sorted.slice(5);
+  if (remainder.length > 0) {
+    visible.push({
+      key: 'other',
+      providerId: '',
+      label: '其他',
+      amount: remainder.reduce(
+        (sum, item) => addExactDecimal(sum, item.amount),
+        zeroExactDecimal()
+      ),
+      callCount: remainder.reduce((sum, item) => sum + item.callCount, 0),
+      isOther: true
+    });
+  }
+  const ratios = allocateBasisPoints(visible.map((item) => item.amount), totalAmount);
+  return visible.map((item, index) => ({
+    key: item.key,
+    ...(item.isOther ? {} : { providerId: item.providerId }),
+    label: item.label,
+    amount: formatExactDecimal(item.amount),
+    callCount: item.callCount,
+    ratioBasisPoints: ratios[index]!,
+    isOther: item.isOther
+  }));
+}
+
+function allocateBasisPoints(
+  amounts: readonly ExactDecimal[],
+  total: ExactDecimal
+): readonly number[] {
+  const allocations = amounts.map((amount, index) => {
+    const numerator = amount.numerator * total.denominator * 10_000n;
+    const denominator = amount.denominator * total.numerator;
+    return {
+      index,
+      points: Number(numerator / denominator),
+      remainder: numerator % denominator,
+      denominator
+    };
+  });
+  const missing = 10_000 - allocations.reduce((sum, item) => sum + item.points, 0);
+  const byRemainder = [...allocations].sort((left, right) => {
+    const comparison = left.remainder * right.denominator - right.remainder * left.denominator;
+    return comparison > 0n ? -1 : comparison < 0n ? 1 : left.index - right.index;
+  });
+  for (let index = 0; index < missing; index += 1) {
+    byRemainder[index % byRemainder.length]!.points += 1;
+  }
+  return allocations.sort((left, right) => left.index - right.index).map((item) => item.points);
+}
+
+function toConversionSourceDto(
+  fact: ParsedCurrencyConversionFact
+): StorageConsumptionConversionSourceDto {
+  return {
+    sourceCurrencyCode: fact.sourceCurrencyCode,
+    targetCurrencyCode: 'CNY',
+    sourceTitle: fact.sourceTitle,
+    sourceUrl: fact.sourceUrl,
+    sourceCheckedAt: fact.sourceCheckedAt
   };
 }
 

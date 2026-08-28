@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const preloadSource = await readFile('electron/preload.ts', 'utf8');
 const sharedContractSource = await readFile('src/shared/storage-ipc.ts', 'utf8');
+const mainProcessSource = await readFile('electron/ipc/storage-ipc.ts', 'utf8');
 
 test('keeps the storage IPC surface narrow and path-free', () => {
   for (const operation of [
@@ -22,6 +23,7 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'getTaskDetails',
     'listCallRecords',
     'getCallDetails',
+    'getConsumptionSummary',
     'listWorks',
     'getWorkDetails',
     'createWorkMediaHandle',
@@ -39,4 +41,8 @@ test('keeps the storage IPC surface narrow and path-free', () => {
   );
   assert.doesNotMatch(preloadSource, /rootDirectory|absolutePath/);
   assert.match(preloadSource, /\{ fileId \}/);
+  assert.match(
+    mainProcessSource,
+    /storageIpcChannels\.getConsumptionSummary[\s\S]*callReadModels\.getConsumptionSummary\(request\)/
+  );
 });
