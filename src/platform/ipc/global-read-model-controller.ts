@@ -1,5 +1,5 @@
 import { stat, statfs } from 'node:fs/promises';
-import type { Execution, Task } from '../../domain';
+import type { Execution, FileReference, Task, Work } from '../../domain';
 import { toTaskId, toWorkId } from '../../domain';
 import type {
   StorageIpcResult,
@@ -31,6 +31,10 @@ interface CurrentProjectStorageSession {
 export class GlobalReadModelController {
   private projectUsageCache: StorageLocalStorageSummaryDto['projectUsage'] | undefined;
   private projectUsageRevision = 0;
+  private readonly taskSnapshots = new Map<string, Promise<readonly Task[]>>();
+  private readonly executionSnapshots = new Map<string, Promise<readonly Execution[]>>();
+  private readonly workSnapshots = new Map<string, Promise<readonly Work[]>>();
+  private readonly fileSnapshots = new Map<string, Promise<readonly FileReference[]>>();
 
   constructor(
     private readonly catalog: ProjectCatalogService,
@@ -40,6 +44,14 @@ export class GlobalReadModelController {
   invalidateLocalStorageSummary(): void {
     this.projectUsageRevision += 1;
     this.projectUsageCache = undefined;
+  }
+
+  invalidate(): void {
+    this.invalidateLocalStorageSummary();
+    this.taskSnapshots.clear();
+    this.executionSnapshots.clear();
+    this.workSnapshots.clear();
+    this.fileSnapshots.clear();
   }
 
   async getLocalStorageSummary(): Promise<
@@ -80,12 +92,15 @@ export class GlobalReadModelController {
         }
 
         try {
-          const context = createContext(entry);
-          const tasks = await context.tasks.list(entry.projectId);
+          const [tasks, executions] = await Promise.all([
+            this.loadTasks(entry),
+            this.loadExecutions(entry)
+          ]);
+          const executionsByTaskId = groupExecutionsByTaskId(executions);
           for (const task of tasks) {
             const executions = filterLinkedExecutions(
               task,
-              await context.executions.list(task.id)
+              executionsByTaskId.get(task.id) ?? []
             );
             items.push(toTaskSummary(entry, task, executions));
           }
@@ -115,17 +130,21 @@ export class GlobalReadModelController {
         if (!(await isAvailable(entry))) continue;
         try {
           const context = createContext(entry);
-          const task = await context.tasks.get(toTaskId(taskId));
+          const task = (await this.loadTasks(entry)).find(
+            (candidate) => candidate.id === toTaskId(taskId)
+          );
           if (!task) continue;
           const executions = filterLinkedExecutions(
             task,
-            await context.executions.list(task.id)
+            (await this.loadExecutions(entry)).filter(
+              (execution) => execution.taskId === task.id
+            )
           );
           const latest = [...executions].sort((a, b) =>
             b.updatedAt.localeCompare(a.updatedAt)
           )[0];
           const hasRegisteredImageWork = latest
-            ? (await context.works.list(entry.projectId)).some(
+            ? (await this.loadWorks(entry)).some(
                 (work) => work.sourceExecutionId === latest.id
               )
             : false;
@@ -181,12 +200,17 @@ export class GlobalReadModelController {
         }
 
         try {
-          const context = createContext(entry);
-          const works = await context.works.list(entry.projectId);
+          const [works, executions, files] = await Promise.all([
+            this.loadWorks(entry),
+            this.loadExecutions(entry),
+            this.loadFiles(entry)
+          ]);
+          const executionById = new Map(executions.map((execution) => [execution.id, execution]));
+          const fileById = new Map(files.map((file) => [file.id, file]));
           for (const work of works) {
-            const execution = await context.executions.get(work.sourceExecutionId);
+            const execution = executionById.get(work.sourceExecutionId);
             if (!execution || execution.state !== 'completed') continue;
-            const file = await context.files.get(work.fileId);
+            const file = fileById.get(work.fileId);
             if (!file) throw new TypeError('Work references a missing file record');
             items.push({
               workId: work.id,
@@ -225,14 +249,19 @@ export class GlobalReadModelController {
       for (const entry of await this.catalog.getEntries()) {
         if (!(await isAvailable(entry))) continue;
         try {
-          const context = createContext(entry);
-          const work = await context.works.get(toWorkId(workId));
+          const work = (await this.loadWorks(entry)).find(
+            (candidate) => candidate.id === toWorkId(workId)
+          );
           if (!work) continue;
-          const execution = await context.executions.get(work.sourceExecutionId);
+          const execution = (await this.loadExecutions(entry)).find(
+            (candidate) => candidate.id === work.sourceExecutionId
+          );
           if (!execution || execution.state !== 'completed') {
             return { ok: true, value: undefined };
           }
-          const file = await context.files.get(work.fileId);
+          const file = (await this.loadFiles(entry)).find(
+            (candidate) => candidate.id === work.fileId
+          );
           if (!file) return { ok: true, value: undefined };
           return {
             ok: true,
@@ -296,6 +325,76 @@ export class GlobalReadModelController {
     if (revision === this.projectUsageRevision) this.projectUsageCache = usage;
     return usage;
   }
+
+  private loadTasks(entry: ProjectCatalogEntry): Promise<readonly Task[]> {
+    return loadSnapshot(
+      this.taskSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).tasks.list(entry.projectId)
+    );
+  }
+
+  private loadExecutions(entry: ProjectCatalogEntry): Promise<readonly Execution[]> {
+    return loadSnapshot(
+      this.executionSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).executions.listAll()
+    );
+  }
+
+  private loadWorks(entry: ProjectCatalogEntry): Promise<readonly Work[]> {
+    return loadSnapshot(
+      this.workSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).works.list(entry.projectId)
+    );
+  }
+
+  private loadFiles(entry: ProjectCatalogEntry): Promise<readonly FileReference[]> {
+    return loadSnapshot(
+      this.fileSnapshots,
+      snapshotKey(entry),
+      () => createContext(entry).files.list(entry.projectId)
+    );
+  }
+}
+
+const MAX_PROJECT_SNAPSHOTS = 64;
+
+function snapshotKey(entry: ProjectCatalogEntry): string {
+  return `${entry.projectId}\u0000${entry.rootDirectory}`;
+}
+
+function loadSnapshot<T>(
+  cache: Map<string, Promise<readonly T[]>>,
+  key: string,
+  load: () => Promise<readonly T[]>
+): Promise<readonly T[]> {
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const pending = load().catch((error: unknown) => {
+    cache.delete(key);
+    throw error;
+  });
+  cache.set(key, pending);
+  while (cache.size > MAX_PROJECT_SNAPSHOTS) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  return pending;
+}
+
+function groupExecutionsByTaskId(
+  executions: readonly Execution[]
+): ReadonlyMap<string, readonly Execution[]> {
+  const grouped = new Map<string, Execution[]>();
+  for (const execution of executions) {
+    const current = grouped.get(execution.taskId) ?? [];
+    current.push(execution);
+    grouped.set(execution.taskId, current);
+  }
+  return grouped;
 }
 
 function createContext(entry: ProjectCatalogEntry) {

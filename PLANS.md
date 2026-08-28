@@ -1340,3 +1340,5 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
 2026-08-28 项目负责人批准直接执行本优化方案，并要求每支先推送、非快进合并 `develop`、保留本地与远程分支。PR0 `feature/read-model-performance-baseline` 已启动，只建立合成项目 I/O 计数基线和独立门禁，不修改生产查询结果。基线固定为 2 个项目、每项目 25 个 Task/Execution/Work/FileReference：优化前 `listTasks()` 按 Task 重读 `executions.json` 共 50 次，`listWorks()` 按 Work 重读 `executions.json` 与 `file-references.json` 各 50 次。记录见 `docs/active/生成历史与任务中心性能优化-PR0-基线记录.md`。
 
 PR0 基线实现已完成：独立性能门禁 1/1、TypeScript、定向 ESLint 与差异检查通过；生产读模型、IPC 和页面零修改，真实服务商 HTTP、凭证读取和收费调用均为 0。允许提交、推送并非快进合并 `develop`，随后从最新 `develop` 创建 PR1 `feature/project-read-snapshots`。
+
+2026-08-28 性能专项 PR1 工程补充：`feature/project-read-snapshots` 已把全局 Task/Work 读模型改为按项目实体文件的有界 Promise 快照与并发请求合并。合成门禁中，冷读 Task 的 Tasks/Executions 与冷读 Work 的 Works/Executions/FileReferences 均降为每项目每文件 1 次，20 个相同并发查询也只建立 1 次底层读取；存储变更会同步清理快照与容量摘要，失败快照不保留，项目 JSON 仍是唯一权威事实源。记录见 `docs/active/生成历史与任务中心性能优化-PR1-项目读快照记录.md`；下一步为 PR2 单次任务时间线与调用分页前置。

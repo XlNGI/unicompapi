@@ -407,7 +407,7 @@ export function registerStorageIpcHandlers(options: {
   const readModels = new GlobalReadModelController(catalog, () => sessionRegistry.get());
   const projectStorageMonitor = new ProjectStorageChangeMonitor(
     catalog,
-    () => readModels.invalidateLocalStorageSummary(),
+    () => readModels.invalidate(),
     () => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.webContents.isDestroyed()) {
