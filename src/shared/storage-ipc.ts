@@ -13,6 +13,7 @@ export const storageIpcChannels = {
   listTasks: 'storage:list-tasks',
   getTaskDetails: 'storage:get-task-details',
   getTaskTimeline: 'storage:get-task-timeline',
+  listGenerationHistory: 'storage:list-generation-history',
   listCallRecords: 'storage:list-call-records',
   getCallDetails: 'storage:get-call-details',
   getConsumptionSummary: 'storage:get-consumption-summary',
@@ -179,6 +180,31 @@ export interface StorageCallRecordListDto {
 
 export interface StorageTaskTimelineDto {
   readonly items: readonly StorageCallDetailsDto[];
+  readonly issues: readonly StorageReadModelIssueDto[];
+}
+
+export type StorageGenerationHistoryItemDto =
+  | {
+      readonly kind: 'work';
+      readonly workId: string;
+      readonly projectId: string;
+      readonly name: string;
+      readonly mediaKind: 'image' | 'video';
+      readonly sourceTaskId: string;
+      readonly createdAt: string;
+      readonly verifiedAt: string;
+    }
+  | {
+      readonly kind: 'status';
+      readonly taskId: string;
+      readonly state: string;
+      readonly createdAt: string;
+      readonly occurredAt: string;
+    };
+
+export interface StorageGenerationHistoryPageDto {
+  readonly items: readonly StorageGenerationHistoryItemDto[];
+  readonly nextCursor?: string;
   readonly issues: readonly StorageReadModelIssueDto[];
 }
 
@@ -404,6 +430,13 @@ export interface StorageApi {
     projectId: string,
     taskId: string
   ): Promise<StorageIpcResult<StorageTaskTimelineDto>>;
+  listGenerationHistory(request: {
+    readonly projectId: string;
+    readonly draftId: string;
+    readonly mediaKind: 'image' | 'video';
+    readonly cursor?: string;
+    readonly limit?: number;
+  }): Promise<StorageIpcResult<StorageGenerationHistoryPageDto>>;
   listCallRecords(
     filter?: StorageCallRecordFilterDto
   ): Promise<StorageIpcResult<StorageCallRecordListDto>>;
@@ -421,7 +454,8 @@ export interface StorageApi {
     workId: string
   ): Promise<StorageIpcResult<StorageWorkDetailsDto | undefined>>;
   createWorkMediaHandle(
-    workId: string
+    workId: string,
+    projectId?: string
   ): Promise<StorageIpcResult<StorageLocalMediaHandleDto>>;
   revealWorkFile(
     workId: string

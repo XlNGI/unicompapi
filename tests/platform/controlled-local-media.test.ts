@@ -96,7 +96,18 @@ describe('ControlledLocalMediaController', () => {
       }
     });
 
-    const handle = await controller.createHandle({ workId: 'work-media' });
+    const handle = await controller.createHandle({
+      projectId: 'project-media',
+      workId: 'work-media'
+    });
+    const reused = await controller.createHandle({
+      projectId: 'project-media',
+      workId: 'work-media'
+    });
+    const forged = await controller.createHandle({
+      projectId: 'project-forged',
+      workId: 'work-media'
+    });
     const reveal = await controller.revealWorkFile({ workId: 'work-media' });
 
     expect(handle).toMatchObject({
@@ -107,6 +118,8 @@ describe('ControlledLocalMediaController', () => {
       }
     });
     if (!handle.ok) throw new Error('Expected a media handle');
+    expect(reused).toEqual(handle);
+    expect(forged).toMatchObject({ ok: false, error: { code: 'work_not_found' } });
     const token = new URL(handle.value.url).pathname.slice(1);
     expect(handles.resolve(token)).toBe(fixture.mediaPath);
     expect(reveal).toEqual({ ok: true, value: { revealed: true } });
