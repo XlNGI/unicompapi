@@ -15,6 +15,7 @@ import {
   toModelId,
   toProjectId,
   toProviderId,
+  toProviderOperationRecordId,
   toTaskId,
   transitionExecution
 } from '../../src/domain';
@@ -50,9 +51,11 @@ function pngBytes(width: number, height: number) {
 
 async function createFixture(options: {
   readonly badChecksum?: boolean;
+  readonly descriptorFailure?: 'retryable' | 'not_retryable' | 'unknown';
   readonly diskFull?: boolean;
   readonly downloadFailure?: boolean;
   readonly downloadFailuresBeforeSuccess?: number;
+  readonly startsRemoteCompleted?: boolean;
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-image-result-'));
   roots.push(root);
@@ -108,9 +111,17 @@ async function createFixture(options: {
   const processing = transitionExecution(submitting, 'processing', t0, {
     remoteOperationId: 'remote-image-result'
   });
-  const linkedTask = addExecutionToTask(task, processing);
+  const initialExecution = options.startsRemoteCompleted
+    ? transitionExecution(submitting, 'remote_completed', t0, {
+        providerOperationRecordId: toProviderOperationRecordId(
+          'provider-operation-image-result'
+        ),
+        submissionOutcome: 'completed_sync'
+      })
+    : processing;
+  const linkedTask = addExecutionToTask(task, initialExecution);
   await new JsonTaskRepository(storage, projectId).save(linkedTask);
-  await new JsonExecutionRepository(storage).save(processing);
+  await new JsonExecutionRepository(storage).save(initialExecution);
   const times = [
     '2026-07-23T06:01:00.000Z',
     '2026-07-23T06:02:00.000Z',
@@ -129,14 +140,22 @@ async function createFixture(options: {
       rootDirectory: root
     }),
     port: {
-      getCompletedResult: async () => ({
-        name: '../result-image.png',
-        declaredMimeType: 'image/png',
-        expectedSizeBytes: bytes.length,
-        expectedChecksumSha256: options.badChecksum
-          ? '0'.repeat(64)
-          : undefined
-      }),
+      getCompletedResult: async () => {
+        if (options.descriptorFailure) {
+          throw new ImageResultPortError(
+            options.descriptorFailure,
+            'Synthetic result discovery failure'
+          );
+        }
+        return {
+          name: '../result-image.png',
+          declaredMimeType: 'image/png',
+          expectedSizeBytes: bytes.length,
+          expectedChecksumSha256: options.badChecksum
+            ? '0'.repeat(64)
+            : undefined
+        };
+      },
       download: async (_remoteOperationId, destinationPath) => {
         downloadAttempts += 1;
         if (
@@ -261,6 +280,32 @@ describe('LocalImageResultReceiver', () => {
       state: 'failed',
       failure: { stage: 'downloading', retryability: 'retryable' }
     });
+  });
+
+  it('closes a result discovery failure instead of leaving remote completion stuck', async () => {
+    const fixture = await createFixture({
+      descriptorFailure: 'retryable',
+      startsRemoteCompleted: true
+    });
+
+    await expect(fixture.receiver.receive('execution-image-result'))
+      .resolves.toMatchObject({
+        ok: false,
+        error: { code: 'download_failed' }
+      });
+    await expect(
+      new JsonExecutionRepository(fixture.storage).get(
+        toExecutionId('execution-image-result')
+      )
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failure: { stage: 'remote_completed', retryability: 'retryable' }
+    });
+    await expect(
+      new JsonWorkRepository(fixture.storage, fixture.projectId).list(
+        fixture.projectId
+      )
+    ).resolves.toEqual([]);
   });
 
   it('retries a transient remote download before failing the local receipt', async () => {

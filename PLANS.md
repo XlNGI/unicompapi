@@ -1352,3 +1352,7 @@ PR0 基线实现已完成：独立性能门禁 1/1、TypeScript、定向 ESLint 
 2026-08-28 性能专项 PR5 条件判断：当前 Windows x64 健康 NVMe SSD 的 10 项目/1,000 Task 合成门禁实测冷任务列表 19.49 ms、20 次热读 median 0.62 ms/P95 0.91 ms、单草稿历史冷读 2.92 ms，均达到 800/300/600 ms 目标；结构性单文件单读门禁也保持通过。因此 `feature/rebuildable-read-index` 只固化大规模回归门禁与判断记录，不实现磁盘索引、缩略图缓存或数据库，避免当前收益不足的复杂度；慢盘与断盘不作同等绝对耗时承诺。记录见 `docs/active/生成历史与任务中心性能优化-PR5-条件判断记录.md`；下一步进入 PR6 Windows Electron 收口。
 
 2026-08-28 性能专项 PR6 Windows 收口：`feature/read-model-performance-closeout` 补齐调用列表的分页前置，先按项目与 Entry/Attempt/Route 轻量字段筛选、稳定排序和 `offset/limit`，只为当前页构建完整安全 DTO；7 条候选、`limit=1` 的回归门禁确认页外 6 条不执行完整构建，缺失精确 Usage Schema 的候选仍登记 `invalid_data`。最终 Windows/NVMe/10 项目/1,000 Task 复测为冷任务列表 18.62 ms、热读 median 0.69 ms/P95 1.21 ms、单草稿历史冷读 3.49 ms；PR5 条件仍不成立，未加入磁盘索引、缩略图缓存或数据库。全量 Node/UI 327 项与 Vitest 887 项，共 1,214 项通过，0 失败、0 跳过；独立性能门禁 4/4、TypeScript、ESLint、生产构建、交接校验、平台审计、恢复审计、阶段 9 收口、运行时集成、安全存储及差异检查全部通过。Windows 生产 Electron 4/4 响应、1 个可见窗口、stderr 0、正常关闭后残留 0。真实服务商 HTTP/DNS、凭证读取/验证、收费调用与费用均为 0；macOS 保持 `not_run/deferred`，阶段 10 未启动。记录见 `docs/active/生成历史与任务中心性能优化-PR6-Windows收口记录.md`。
+
+## 图片结果接收状态优化专项（2026-08-28）
+
+2026-08-28 项目负责人批准直接执行图片结果接收优化。PR1 `feature/image-result-receipt-state-fix` 已把 `remote_completed` 纳入图片本地接收失败收口，并由领域层统一限定 `remote_completed/downloading/writing` 的安全恢复资格；结果描述读取失败不再永久显示为远端完成，任务中心仍只复用原 Task、Execution 与持久化结果引用，不重新提交生成。定向领域/平台测试 23/23、TypeScript 与定向 ESLint 通过；未调用真实服务商、未读取凭证、未产生费用。记录见 `docs/active/图片结果接收优化-PR1-状态闭环记录.md`；下一步为 PR2 生成历史接收状态语义。
