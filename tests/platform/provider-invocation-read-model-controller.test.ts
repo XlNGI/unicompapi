@@ -281,7 +281,24 @@ describe('provider invocation read model controller', () => {
 
   it('returns one controlled CNY summary without mixing currencies or exposing conversion rates', async () => {
     const fixture = await consumptionControllerFixture();
-    const pending = await fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 });
+    const reads = { count: 0 };
+    const original = NodeProjectStorage.prototype.readJsonWithBackup;
+    vi.spyOn(NodeProjectStorage.prototype, 'readJsonWithBackup')
+      .mockImplementation(async function (this: NodeProjectStorage, relativePath, parse) {
+        reads.count += 1;
+        return original.call(this, relativePath, parse);
+      });
+    const [pending, duplicatePending] = await Promise.all([
+      fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 }),
+      fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 })
+    ]);
+    expect(duplicatePending).toEqual(pending);
+    const cachedReadCount = reads.count;
+    await fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(reads.count).toBe(cachedReadCount);
+    fixture.withoutConversion.invalidate();
+    await fixture.withoutConversion.getConsumptionSummary({ calendarDays: 7 });
+    expect(reads.count).toBeGreaterThan(cachedReadCount);
     expect(pending).toMatchObject({
       ok: true,
       value: {

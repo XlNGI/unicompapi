@@ -1344,3 +1344,5 @@ PR0 基线实现已完成：独立性能门禁 1/1、TypeScript、定向 ESLint 
 2026-08-28 性能专项 PR1 工程补充：`feature/project-read-snapshots` 已把全局 Task/Work 读模型改为按项目实体文件的有界 Promise 快照与并发请求合并。合成门禁中，冷读 Task 的 Tasks/Executions 与冷读 Work 的 Works/Executions/FileReferences 均降为每项目每文件 1 次，20 个相同并发查询也只建立 1 次底层读取；存储变更会同步清理快照与容量摘要，失败快照不保留，项目 JSON 仍是唯一权威事实源。记录见 `docs/active/生成历史与任务中心性能优化-PR1-项目读快照记录.md`；下一步为 PR2 单次任务时间线与调用分页前置。
 
 2026-08-28 性能专项 PR2 工程补充：`feature/task-timeline-batch-read-model` 新增按 `projectId + taskId` 的单次任务时间线 IPC，删除任务页“调用列表 + 最多 200 次逐条详情 + renderer 末端过滤”链路；目标项目 Invocation Attempt/Event 同文档只读 1 次，其余 Route、Usage、LocalResult、Work 事实文件各读 1 次。调用详情强制携带项目范围，调用列表在读取事实前先过滤项目，伪造或跨项目范围失败关闭。记录见 `docs/active/生成历史与任务中心性能优化-PR2-任务时间线记录.md`；下一步为 PR3 共享任务 Store 与消费汇总缓存。
+
+2026-08-28 性能专项 PR3 工程补充：`feature/shared-task-read-store` 已让全局状态监控、底部任务活动条与任务中心订阅唯一 renderer 任务 snapshot/in-flight，删除两份独立 5 秒轮询，存储通知在 100ms 内合并并保留单一 60 秒健康检查。消费汇总按查询周期缓存并合并并发请求，存储变更时同步失效，图表延后 150ms 后台读取；容量摘要兜底也降为 60 秒。记录见 `docs/active/生成历史与任务中心性能优化-PR3-共享任务Store记录.md`；下一步为 PR4 生成历史分页与按需媒体。

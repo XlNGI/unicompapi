@@ -10,10 +10,10 @@ import type {
   StorageConsumptionProviderSliceDto,
   StorageConsumptionSummaryDto,
   StorageReadModelIssueDto,
-  StorageTaskDetailsDto,
-  StorageTaskSummaryDto
+  StorageTaskDetailsDto
 } from '../../shared/storage-ipc';
 import type { TaskReuseTarget } from '../../shared/task-reuse';
+import { refreshTaskReadStore, useTaskReadStore } from '../../ui/task-read-store';
 import '../../styles/pages.css';
 import {
   callState,
@@ -79,14 +79,12 @@ function taskState(state?: string) {
 }
 
 export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
-  const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>([]);
-  const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
+  const { tasks, issues, loading, error } = useTaskReadStore();
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [details, setDetails] = useState<StorageTaskDetailsDto>();
   const [query, setQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [reusingParameters, setReusingParameters] = useState(false);
@@ -94,35 +92,12 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   const storage = window.unicomp?.storage;
 
   useEffect(() => {
-    let active = true;
-    if (!storage) {
-      setMessage('当前运行环境未连接桌面任务能力');
-      setLoading(false);
-      return () => {
-        active = false;
-      };
-    }
+    if (!selectedTaskId && tasks.length > 0) setSelectedTaskId(tasks[0]?.taskId);
+  }, [selectedTaskId, tasks]);
 
-    void storage.listTasks()
-      .then((result) => {
-        if (!active) return;
-        if (result.ok) {
-          setTasks(result.value.items);
-          setIssues(result.value.issues);
-          setSelectedTaskId(result.value.items[0]?.taskId);
-        } else setMessage('读取任务失败，请重试');
-      })
-      .catch(() => {
-        if (active) setMessage('读取任务失败，请重试');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [storage]);
+  useEffect(() => {
+    if (error) setMessage('读取任务失败，请重试');
+  }, [error]);
 
   useEffect(() => {
     let active = true;
@@ -178,14 +153,10 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
         return;
       }
       setMessage(`${mediaKind === 'image' ? '图片' : '视频'}结果已下载、校验并登记到作品库。`);
-      const [taskList, taskDetails] = await Promise.all([
-        storage?.listTasks(),
+      const [, taskDetails] = await Promise.all([
+        refreshTaskReadStore(),
         storage?.getTaskDetails(taskId)
       ]);
-      if (taskList?.ok) {
-        setTasks(taskList.value.items);
-        setIssues(taskList.value.issues);
-      }
       if (taskDetails?.ok) setDetails(taskDetails.value);
     } catch {
       setMessage('重新接收失败，请稍后重试。');
@@ -435,24 +406,27 @@ function TaskConsumptionCharts() {
       };
     }
 
-    void storage.getConsumptionSummary()
-      .then((result) => {
-        if (!active) return;
-        if (!result.ok) {
-          setMessage('读取消费统计失败，请重试');
-          return;
-        }
-        setSummary(result.value);
-      })
-      .catch(() => {
-        if (active) setMessage('读取消费统计失败，请重试');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    const timer = window.setTimeout(() => {
+      void storage.getConsumptionSummary()
+        .then((result) => {
+          if (!active) return;
+          if (!result.ok) {
+            setMessage('读取消费统计失败，请重试');
+            return;
+          }
+          setSummary(result.value);
+        })
+        .catch(() => {
+          if (active) setMessage('读取消费统计失败，请重试');
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 150);
 
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
   }, [refreshRevision, storage]);
 

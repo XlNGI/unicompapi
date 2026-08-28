@@ -7,7 +7,8 @@ const feeSource = await readFile('src/pages/tasks/call-fees.ts', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 
 test('task center consumes controlled global task read models', () => {
-  assert.match(source, /storage\.listTasks\(\)/);
+  assert.match(source, /useTaskReadStore\(\)/);
+  assert.doesNotMatch(source, /storage\.listTasks\(\)/);
   assert.match(source, /storage\.getTaskDetails\(selectedTaskId\)/);
   assert.doesNotMatch(source, /rootDirectory|absolutePath|readFile|writeFile/);
 });
