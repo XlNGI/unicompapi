@@ -73,7 +73,10 @@ import {
   type ViduImageSubmitOutcome
 } from './vidu-image-adapters';
 import { ViduReferenceImageV2Adapter } from './vidu-reference-image-adapter';
-import { readViduImmediateImageResult } from './vidu-image-result-port';
+import {
+  controlledImageResultDownloaderFromRuntime,
+  readStoredImmediateImageResult
+} from '../../images/stored-immediate-image-result-port';
 import type { ControlledImageMaterialPort } from './controlled-image-material';
 import type { ViduSharedRuntime } from './vidu-shared-runtime';
 import {
@@ -359,9 +362,9 @@ export class ViduImageRouteAdapter {
         'The Vidu image result has no matching persisted route attachment'
       );
     }
-    const bytes = await readViduImmediateImageResult(
+    const bytes = await readStoredImmediateImageResult(
       parsed.result,
-      this.dependencies.runtime,
+      controlledImageResultDownloaderFromRuntime(this.dependencies.runtime),
       128 * 1024 * 1024,
       reference.signal
     );
