@@ -91,6 +91,10 @@ class JsonEntityCollection<TEntity extends PersistedEntity, TScopeId extends str
         );
   }
 
+  async listAll(): Promise<readonly TEntity[]> {
+    return (await this.read()).entities;
+  }
+
   async save(entity: TEntity): Promise<void> {
     if (this.exclusiveScope) {
       this.assertScope(this.getScopeId(entity));
@@ -523,6 +527,10 @@ export class JsonExecutionRepository implements ExecutionRepository {
 
   list(taskId: TaskId) {
     return this.collection.list(taskId);
+  }
+
+  listAll() {
+    return this.collection.listAll();
   }
 
   save(execution: Execution) {

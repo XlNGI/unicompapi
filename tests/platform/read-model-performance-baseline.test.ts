@@ -35,8 +35,8 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('read-model I/O performance baseline', () => {
-  it('captures the pre-optimization task and work read amplification deterministically', async () => {
+describe('read-model I/O performance gate', () => {
+  it('reads each project entity file at most once per task and work snapshot', async () => {
     const projectCount = 2;
     const tasksPerProject = 25;
     const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
@@ -68,6 +68,7 @@ describe('read-model I/O performance baseline', () => {
     const taskDurationMs = performance.now() - taskStart;
     const taskReads = new Map(reads);
     reads.clear();
+    controller.invalidate();
     const workStart = performance.now();
     const works = await controller.listWorks();
     const workDurationMs = performance.now() - workStart;
@@ -75,18 +76,39 @@ describe('read-model I/O performance baseline', () => {
     expect(tasks).toMatchObject({ ok: true, value: { items: { length: 50 } } });
     expect(works).toMatchObject({ ok: true, value: { items: { length: 50 } } });
     expect(taskReads.get(projectStoragePaths.entities.tasks)).toBe(projectCount);
-    expect(taskReads.get(projectStoragePaths.entities.executions)).toBe(
-      projectCount * tasksPerProject
-    );
+    expect(taskReads.get(projectStoragePaths.entities.executions)).toBe(projectCount);
     expect(reads.get(projectStoragePaths.entities.works)).toBe(projectCount);
-    expect(reads.get(projectStoragePaths.entities.executions)).toBe(
-      projectCount * tasksPerProject
-    );
-    expect(reads.get(projectStoragePaths.entities.fileReferences)).toBe(
-      projectCount * tasksPerProject
-    );
+    expect(reads.get(projectStoragePaths.entities.executions)).toBe(projectCount);
+    expect(reads.get(projectStoragePaths.entities.fileReferences)).toBe(projectCount);
     expect(taskDurationMs).toBeGreaterThanOrEqual(0);
     expect(workDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('coalesces concurrent identical queries into one read per project file', async () => {
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    const root = await createProjectFixture(0, 25);
+    await catalog.remember({
+      projectId: toProjectId('project-performance-0'),
+      projectName: 'Performance project 0',
+      rootDirectory: root
+    });
+    const reads = new Map<string, number>();
+    const original = NodeProjectStorage.prototype.readJsonWithBackup;
+    vi.spyOn(NodeProjectStorage.prototype, 'readJsonWithBackup')
+      .mockImplementation(async function (this: NodeProjectStorage, relativePath, parse) {
+        const key = String(relativePath);
+        reads.set(key, (reads.get(key) ?? 0) + 1);
+        return original.call(this, relativePath, parse);
+      });
+
+    const controller = new GlobalReadModelController(catalog);
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => controller.listTasks())
+    );
+
+    expect(results.every((result) => result.ok && result.value.items.length === 25)).toBe(true);
+    expect(reads.get(projectStoragePaths.entities.tasks)).toBe(1);
+    expect(reads.get(projectStoragePaths.entities.executions)).toBe(1);
   });
 });
 
