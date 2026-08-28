@@ -66,10 +66,14 @@ const autosaveDiagnostics: AutosaveDiagnosticsApi = {
 const getPathForFile = (file: File) => webUtils.getPathForFile(file);
 
 const documentGeneration: DocumentGenerationApi = {
-  generateFromConversation: (request) =>
-    ipcRenderer.invoke(documentGenerationIpcChannels.generateFromConversation, request),
+  prepareGeneration: (request) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.prepareGeneration, request),
+  reconcileGeneration: (request) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.reconcileGeneration, request),
   generateFromMessage: (request) =>
     ipcRenderer.invoke(documentGenerationIpcChannels.generateFromMessage, request),
+  cancelGeneration: (request) =>
+    ipcRenderer.invoke(documentGenerationIpcChannels.cancelGeneration, request),
   openDocument: (workId) =>
     ipcRenderer.invoke(documentGenerationIpcChannels.openDocument, { workId })
 };

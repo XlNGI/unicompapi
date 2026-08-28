@@ -3,6 +3,65 @@ import { toWorkId, type WorkId } from '../ids';
 export const documentWorkspaceKinds = ['word', 'excel', 'ppt'] as const;
 export type DocumentWorkspaceKind = (typeof documentWorkspaceKinds)[number];
 
+export const presentationPageKinds = [
+  'cover',
+  'section',
+  'insight',
+  'comparison',
+  'process',
+  'data',
+  'image_text',
+  'closing'
+] as const;
+export type PresentationPageKind = (typeof presentationPageKinds)[number];
+
+export const presentationTemplateIds = [
+  'work_report',
+  'natural_minimal',
+  'business_minimal',
+  'technology',
+  'financing'
+] as const;
+export type PresentationTemplateId = (typeof presentationTemplateIds)[number];
+
+export type DocumentOutlineBlock =
+  | { readonly type: 'paragraph'; readonly text: string }
+  | { readonly type: 'bullets'; readonly items: readonly string[] }
+  | { readonly type: 'numbered'; readonly items: readonly string[] }
+  | { readonly type: 'quote'; readonly text: string }
+  | {
+      readonly type: 'table';
+      readonly header: readonly string[];
+      readonly rows: readonly (readonly string[])[];
+    }
+  | {
+      readonly type: 'chart';
+      readonly chartKind: 'bar' | 'pie';
+      readonly title?: string;
+      readonly data: readonly {
+        readonly label: string;
+        readonly value: number;
+      }[];
+    };
+
+export interface PresentationSectionMetadata {
+  readonly pageKind?: PresentationPageKind;
+  readonly takeaway?: string;
+  readonly action?: string;
+}
+
+export interface DocumentOutlineSection extends PresentationSectionMetadata {
+  readonly heading: string;
+  readonly level: 1 | 2 | 3;
+  readonly blocks: readonly DocumentOutlineBlock[];
+}
+
+export interface DocumentOutline {
+  readonly kind: DocumentWorkspaceKind;
+  readonly title: string;
+  readonly sections: readonly DocumentOutlineSection[];
+}
+
 export const documentWorkspaceKindExtensions: Readonly<
   Record<DocumentWorkspaceKind, string>
 > = {
@@ -16,6 +75,86 @@ export interface DocumentMessageResult {
   readonly fileName: string;
   readonly kind: DocumentWorkspaceKind;
   readonly sizeBytes: number;
+}
+
+export const documentGenerationStates = [
+  'generating_content',
+  'validating_outline',
+  'generating_file',
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted'
+] as const;
+export type DocumentGenerationState = (typeof documentGenerationStates)[number];
+
+export const documentGenerationFailureCodes = [
+  'response_failed',
+  'invalid_outline',
+  'resource_limit',
+  'document_layout_overflow',
+  'generation_failed',
+  'storage_error'
+] as const;
+export type DocumentGenerationFailureCode =
+  (typeof documentGenerationFailureCodes)[number];
+
+export type DocumentGenerationStatus =
+  | {
+      readonly state:
+        | 'generating_content'
+        | 'validating_outline'
+        | 'generating_file';
+      readonly kind: DocumentWorkspaceKind;
+    }
+  | {
+      readonly state: 'completed';
+      readonly kind: DocumentWorkspaceKind;
+    }
+  | {
+      readonly state: 'failed';
+      readonly kind: DocumentWorkspaceKind;
+      readonly errorCode: DocumentGenerationFailureCode;
+    }
+  | {
+      readonly state: 'cancelled' | 'interrupted';
+      readonly kind: DocumentWorkspaceKind;
+    };
+
+export function parseDocumentGenerationStatus(
+  value: unknown
+): DocumentGenerationStatus {
+  if (!isRecord(value)) {
+    throw new TypeError('message.documentGenerationStatus must be an object');
+  }
+  const state = value.state;
+  if (
+    typeof state !== 'string' ||
+    !documentGenerationStates.includes(state as DocumentGenerationState)
+  ) {
+    throw new TypeError('message.documentGenerationStatus.state is invalid');
+  }
+  const kind = requireKind(value.kind);
+  if (state === 'failed') {
+    requireExactKeys(value, ['state', 'kind', 'errorCode']);
+    if (
+      typeof value.errorCode !== 'string' ||
+      !documentGenerationFailureCodes.includes(
+        value.errorCode as DocumentGenerationFailureCode
+      )
+    ) {
+      throw new TypeError(
+        'message.documentGenerationStatus.errorCode is invalid'
+      );
+    }
+    return {
+      state,
+      kind,
+      errorCode: value.errorCode as DocumentGenerationFailureCode
+    };
+  }
+  requireExactKeys(value, ['state', 'kind']);
+  return { state, kind } as DocumentGenerationStatus;
 }
 
 export function parseDocumentMessageResult(
@@ -79,4 +218,15 @@ function requireNonNegativeInteger(value: unknown, label: string): number {
     throw new TypeError(`${label} must be a non-negative integer`);
   }
   return Number(value);
+}
+
+function requireExactKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[]
+): void {
+  const unsupported = Object.keys(value).find((key) => !allowed.includes(key));
+  const missing = allowed.find((key) => !(key in value));
+  if (unsupported || missing) {
+    throw new TypeError('message.documentGenerationStatus has invalid fields');
+  }
 }

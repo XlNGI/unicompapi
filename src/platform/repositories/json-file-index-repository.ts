@@ -8,6 +8,7 @@ import {
   createEmptyProjectFileIndex,
   findFileIndexEntry,
   projectStoragePaths,
+  removeFileIndexEntry,
   toProjectRelativePath,
   upsertFileIndexEntry,
   type FileIndexEntry,
@@ -54,6 +55,18 @@ export class JsonFileIndexRepository {
       await this.storage.writeJsonAtomically(
         projectStoragePaths.index,
         { ...index, revision: current.revision + 1 },
+        { backup: true }
+      );
+    });
+  }
+
+  async remove(fileId: FileReferenceId): Promise<void> {
+    await this.storage.withExclusiveAccess([projectStoragePaths.index], async () => {
+      const index = await this.read();
+      if (!findFileIndexEntry(index, fileId)) return;
+      await this.storage.writeJsonAtomically(
+        projectStoragePaths.index,
+        removeFileIndexEntry(index, fileId),
         { backup: true }
       );
     });

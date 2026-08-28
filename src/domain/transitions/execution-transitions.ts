@@ -36,7 +36,7 @@ const allowedTransitions: Record<ExecutionState, readonly ExecutionState[]> = {
   preparing_media: ['encoding', 'needs_user_action', 'cancel_requested', 'failed', 'interrupted'],
   encoding: ['writing_file', 'cancel_requested', 'failed', 'interrupted'],
   writing_file: ['verifying_file', 'cancel_requested', 'failed', 'interrupted', 'recovery_required'],
-  verifying_file: ['registering_work', 'failed', 'interrupted', 'recovery_required'],
+  verifying_file: ['registering_work', 'cancel_requested', 'failed', 'interrupted', 'recovery_required'],
   registering_work: ['completed', 'failed', 'interrupted', 'recovery_required'],
   processing: [
     'remote_completed',

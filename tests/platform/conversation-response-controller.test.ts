@@ -106,6 +106,7 @@ function fixture() {
     ready: Promise.resolve(),
     start: vi.fn(async () => startedExecution)
   } as unknown as ConversationResponseControllerRuntime;
+  const errors: unknown[] = [];
   const controller = new ConversationResponseController({
     getSession: () => ({
       projectId,
@@ -114,9 +115,10 @@ function fixture() {
     }),
     getRuntime: () => runtime,
     nextResponseDraftId: () => 'response-draft-controller',
-    now: () => createdAt
+    now: () => createdAt,
+    onError: (error) => errors.push(error)
   });
-  return { controller, runtime, service, candidateService };
+  return { controller, runtime, service, candidateService, errors };
 }
 
 function startRequest(clientCommandId = 'client-command-controller') {
@@ -141,6 +143,7 @@ describe('ConversationResponseController', () => {
       value.controller.start(startRequest())
     ]);
 
+    expect(value.errors).toEqual([]);
     expect(first).toMatchObject({
       ok: true,
       value: {
@@ -152,6 +155,58 @@ describe('ConversationResponseController', () => {
     expect(value.service.addUserMessage).toHaveBeenCalledTimes(1);
     expect(value.candidateService.prepareSubmission).toHaveBeenCalledTimes(1);
     expect(value.runtime.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the provider prompt internal while returning the user request in the conversation DTO', async () => {
+    const value = fixture();
+    const internalPrompt = '内部模型指令：输出完整且可解析的 PPT 结构';
+    const userRequest = '帮我生成 AI Agent PPT';
+    const displayedConversation = addUserMessage(
+      createConversation({
+        id: toConversationId('conversation-controller'),
+        title: 'Controller test',
+        projectId,
+        createdAt
+      }),
+      {
+        id: toMessageId('message-user-controller'),
+        content: internalPrompt,
+        displayContent: userRequest,
+        createdAt
+      }
+    );
+    value.service.addUserMessage.mockResolvedValue(displayedConversation);
+    value.service.get.mockResolvedValue(displayedConversation);
+
+    const result = await value.controller.start({
+      ...startRequest('client-command-display-content'),
+      content: internalPrompt,
+      displayContent: userRequest
+    });
+
+    expect(value.errors).toEqual([]);
+    expect(value.service.addUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: internalPrompt,
+        displayContent: userRequest
+      })
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        conversation: {
+          messages: [
+            expect.objectContaining({
+              role: 'user',
+              content: userRequest
+            })
+          ]
+        }
+      }
+    });
+    if (result.ok) {
+      expect(JSON.stringify(result.value.conversation)).not.toContain(internalPrompt);
+    }
   });
 
   it('passes a transport interruption callback for a cancellation that outlives the request', async () => {

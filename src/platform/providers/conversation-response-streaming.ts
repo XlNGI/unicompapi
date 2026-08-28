@@ -84,6 +84,13 @@ export class ConversationResponseExecutionLifecycle {
     return this.append(executionId, 'stream_cancelled');
   }
 
+  /** Persists terminal cancellation before its dependent conversation projection. */
+  confirmCancelledDeferredPublish(
+    executionId: ConversationResponseExecutionId
+  ): Promise<ConversationResponseStreamEventV1> {
+    return this.append(executionId, 'stream_cancelled', {}, false);
+  }
+
   fail(
     executionId: ConversationResponseExecutionId,
     safeCode: string

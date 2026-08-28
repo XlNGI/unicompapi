@@ -1,10 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import AdmZip from 'adm-zip';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConversationApplicationService,
-  ConversationStreamingService
+  ConversationStreamingService,
+  DocumentGenerationApplicationService
 } from '../../src/application';
 import {
   appendAssistantMessageChunk,
@@ -21,9 +24,12 @@ import {
 import {
   DocumentGenerationController,
   DocumentGenerationRunner,
+  generateDocumentFile,
   JsonProjectConversationRepository,
   JsonWorkRepository,
   NodeProjectStorage,
+  PlatformDocumentDraftCompiler,
+  PlatformDocumentGenerationExecutor,
   type StorageProjectSession
 } from '../../src/platform';
 
@@ -35,7 +41,12 @@ afterEach(async () => {
   );
 });
 
-async function createEnvironment() {
+async function createEnvironment(options: {
+  readonly runnerOptions?: Partial<
+    ConstructorParameters<typeof DocumentGenerationRunner>[0]
+  >;
+  readonly onLoadConversation?: (count: number) => void | Promise<void>;
+} = {}) {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-doc-ipc-'));
   temporaryRoots.push(rootDirectory);
   const projectId = toProjectId('doc-ipc-project');
@@ -54,24 +65,42 @@ async function createEnvironment() {
     projectName: '文档 IPC 项目'
   };
   const openedPaths: string[] = [];
+  let conversationLoadCount = 0;
+  const streaming = new ConversationStreamingService(repository, ids, now);
+  const runner = new DocumentGenerationRunner({
+    rootDirectory,
+    projectId,
+    now,
+    createId: () => `id-${Math.random()}`,
+    ...options.runnerOptions
+  });
+  const documentApplication = new DocumentGenerationApplicationService({
+    projectId,
+    conversations: {
+      load: async (conversationId) => {
+        conversationLoadCount += 1;
+        await options.onLoadConversation?.(conversationLoadCount);
+        return repository.get(conversationId);
+      },
+      attachDocumentResult: async (input) => {
+        await streaming.attachDocumentResult(input);
+      },
+      updateDocumentGenerationStatus: async (input) => {
+        await streaming.updateDocumentGenerationStatus(input);
+      }
+    },
+    compiler: new PlatformDocumentDraftCompiler(),
+    generator: new PlatformDocumentGenerationExecutor(runner),
+    fingerprint: (content) =>
+      createHash('sha256').update(content).digest('hex')
+  });
   const controller = new DocumentGenerationController({
     getSession: () => session,
-    getStreaming: () => new ConversationStreamingService(repository, ids, now),
-    loadConversation: async (_currentSession, conversationId) =>
-      repository.get(conversationId),
-    getRunner: () =>
-      new DocumentGenerationRunner({
-        rootDirectory,
-        projectId,
-        now,
-        createId: () => `id-${Math.random()}`
-      }),
+    getApplication: () => documentApplication,
     openPath: async (absolutePath) => {
       openedPaths.push(absolutePath);
       return '';
-    },
-    now,
-    createId: () => `id-${Math.random()}`
+    }
   });
   const created = await application.create({
     title: '周报生成',
@@ -86,20 +115,6 @@ async function createEnvironment() {
     rootDirectory,
     session
   };
-}
-
-function outlineJson() {
-  return JSON.stringify({
-    kind: 'word',
-    title: '项目周报',
-    sections: [
-      {
-        heading: '本周进展',
-        level: 1,
-        blocks: [{ type: 'bullets', items: ['完成方案评审'] }]
-      }
-    ]
-  });
 }
 
 async function storeCompletedAssistantMessage(input: {
@@ -140,88 +155,31 @@ async function storeCompletedAssistantMessage(input: {
 }
 
 describe('document generation controller', () => {
-  it('generates a document and completes the assistant message with a result', async () => {
-    const { controller, conversationId, repository, rootDirectory } =
-      await createEnvironment();
-    const result = await controller.generateFromConversation({
-      conversationId,
-      expectedRevision: 0,
-      kind: 'word',
-      title: '项目周报',
-      outlineJson: outlineJson(),
-      contentFingerprint: 'd'.repeat(64),
-      draftRevision: 1,
-      sourceDraftId: 'response-draft-1'
-    });
-    if (!result.ok) {
-      throw new Error(`generation failed: ${result.error.code} ${result.error.message}`);
-    }
-    expect(result.ok).toBe(true);
-    expect(result.value.workId).toMatch(/^work-document-/);
-    expect(result.value.fileName.endsWith('.docx')).toBe(true);
-
-    const conversation = await repository.get(toConversationId(conversationId));
-    const message = conversation?.messages.find(
-      (item) => item.id === result.value.messageId
-    );
-    expect(message?.state).toBe('completed');
-    if (message?.state !== 'completed') throw new Error('message not completed');
-    expect(message.documentResult?.workId).toBe(result.value.workId);
-    expect(message.content).toContain('本周进展');
-
-    const works = new JsonWorkRepository(
-      new NodeProjectStorage(rootDirectory),
-      toProjectId('doc-ipc-project')
-    );
-    const work = await works.get(toWorkId(result.value.workId));
-    expect(work?.mediaKind).toBe('document');
-  });
-
-  it('rejects invalid outline JSON', async () => {
-    const { controller, conversationId } = await createEnvironment();
-    const result = await controller.generateFromConversation({
-      conversationId,
-      expectedRevision: 0,
-      kind: 'word',
-      title: '项目周报',
-      outlineJson: '{bad json',
-      contentFingerprint: 'd'.repeat(64),
-      draftRevision: 1,
-      sourceDraftId: 'response-draft-1'
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('expected failure');
-    expect(result.error.code).toBe('invalid_outline');
-  });
-
-  it('rejects stale revisions', async () => {
-    const { controller, conversationId } = await createEnvironment();
-    const result = await controller.generateFromConversation({
-      conversationId,
-      expectedRevision: 99,
-      kind: 'word',
-      title: '项目周报',
-      outlineJson: outlineJson(),
-      contentFingerprint: 'd'.repeat(64),
-      draftRevision: 1,
-      sourceDraftId: 'response-draft-1'
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('expected failure');
-    expect(result.error.code).toBe('revision_conflict');
+  it('only exposes message-based generation that can be cancelled and deduplicated', async () => {
+    const { controller } = await createEnvironment();
+    expect(controller).not.toHaveProperty('generateFromConversation');
+    expect(controller).toHaveProperty('generateFromMessage');
+    expect(controller).toHaveProperty('prepareGeneration');
+    expect(controller).toHaveProperty('reconcileGeneration');
+    expect(controller).toHaveProperty('cancelGeneration');
   });
 
   it('opens the registered document file', async () => {
-    const { controller, conversationId, openedPaths } = await createEnvironment();
-    const result = await controller.generateFromConversation({
+    const { controller, conversationId, now, openedPaths, repository } =
+      await createEnvironment();
+    const messageId = 'message-open-document';
+    const conversation = await storeCompletedAssistantMessage({
       conversationId,
-      expectedRevision: 0,
-      kind: 'word',
-      title: '项目周报',
-      outlineJson: outlineJson(),
-      contentFingerprint: 'd'.repeat(64),
-      draftRevision: 1,
-      sourceDraftId: 'response-draft-1'
+      messageId,
+      now,
+      repository,
+      content: '# 项目周报\n\n## 本周进展\n\n- 完成方案评审'
+    });
+    const result = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'word'
     });
     if (!result.ok) throw new Error('generation failed');
     const opened = await controller.openDocument({ workId: result.value.workId });
@@ -293,6 +251,91 @@ describe('document generation controller', () => {
     );
   });
 
+  it('recovers malformed presentation JSON and completes the full PPTX workflow', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const messageId = 'message-malformed-ppt';
+    const title = '人工智能智能体从对话到行动的革命';
+    const heading = '智能体正在改变企业软件的使用方式';
+    const takeaway =
+      'AI Agent 的核心变化不是让对话更像人，而是把理解目标、拆解任务、调用工具和核验结果连接成可以持续执行的工作闭环。';
+    const action =
+      '建议先选择一个高频、边界清晰且结果可核验的办公流程，在保留人工确认与失败回退的前提下完成小范围试点，再根据准确率、节省时间和异常处理成本决定扩展范围。';
+    const details = [
+      '目标理解：从用户自然语言中识别业务目标、限制条件和预期交付物',
+      '任务编排：把复杂工作拆成可观察、可取消、可恢复的执行步骤',
+      '工具协同：在权限边界内调用文档、数据和业务系统完成实际动作',
+      '结果核验：用结构校验、状态记录和人工确认避免把模型输出直接当成事实'
+    ];
+    const malformed = `{
+      "kind": "ppt",
+      "title": "${title}"
+      "sections": [{
+        "heading": "${heading}",
+        "pageKind": "insight",
+        "takeaway": "${takeaway}",
+        "content": [{"type": "bullets", "items": ${JSON.stringify(details)}}],
+        "action": "${action}"
+      }]
+    }`;
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: malformed
+    });
+
+    const result = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'ppt',
+      presentationTemplate: 'technology'
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.fileName.endsWith('.pptx')).toBe(true);
+    const refreshed = await repository.get(toConversationId(conversationId));
+    const attachedMessages = refreshed?.messages.filter(
+      (message) => message.role === 'assistant' && message.documentResult !== undefined
+    );
+    expect(attachedMessages).toHaveLength(1);
+    expect(attachedMessages?.[0]?.documentResult?.workId).toBe(result.value.workId);
+
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    const storedWorks = await works.list(toProjectId('doc-ipc-project'));
+    expect(storedWorks).toHaveLength(1);
+    expect(storedWorks[0]?.id).toBe(toWorkId(result.value.workId));
+
+    const pptxPath = path.join(
+      rootDirectory,
+      'files',
+      'documents',
+      result.value.fileName
+    );
+    const zip = new AdmZip(Buffer.from(await readFile(pptxPath)));
+    expect(zip.getEntry('ppt/presentation.xml')).toBeTruthy();
+    const slideXml = zip
+      .getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry.entryName))
+      .map((entry) => zip.readAsText(entry))
+      .join('\n');
+    for (const expectedText of [
+      title,
+      heading,
+      takeaway,
+      action,
+      ...details.flatMap((detail) => detail.split('：'))
+    ]) {
+      expect(slideXml).toContain(expectedText);
+    }
+  });
+
   it('generates a titled Word document from the observed model JSON shape', async () => {
     const { controller, conversationId, now, repository } =
       await createEnvironment();
@@ -350,6 +393,17 @@ describe('document generation controller', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('expected invalid outline');
     expect(result.error.code).toBe('invalid_outline');
+    const persistedConversation = await repository.get(
+      toConversationId(conversationId)
+    );
+    expect(
+      persistedConversation?.messages.find((item) => item.id === messageId)
+        ?.documentGenerationStatus
+    ).toEqual({
+      state: 'failed',
+      kind: 'word',
+      errorCode: 'invalid_outline'
+    });
     const works = new JsonWorkRepository(
       new NodeProjectStorage(rootDirectory),
       toProjectId('doc-ipc-project')
@@ -496,5 +550,326 @@ describe('document generation controller', () => {
       toProjectId('doc-ipc-project')
     );
     expect(await works.list(toProjectId('doc-ipc-project'))).toHaveLength(2);
+  }, 15_000);
+
+  it('registers a revision as a new work and preserves the previous document', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const firstMessageId = 'message-word-version-1';
+    const firstConversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId: firstMessageId,
+      now,
+      repository,
+      content: '# 项目方案\n\n## 背景\n\n第一版内容。'
+    });
+    const first = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: firstConversation.revision,
+      messageId: firstMessageId,
+      kind: 'word'
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error(first.error.message);
+
+    const secondMessageId = 'message-word-version-2';
+    const secondConversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId: secondMessageId,
+      now,
+      repository,
+      content: '# 项目方案\n\n## 背景\n\n第一版内容。\n\n## 风险\n\n新增风险说明。'
+    });
+    const second = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: secondConversation.revision,
+      messageId: secondMessageId,
+      kind: 'word',
+      parentWorkId: first.value.workId
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error(second.error.message);
+
+    const works = await new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    ).list(toProjectId('doc-ipc-project'));
+    expect(works).toHaveLength(2);
+    expect(works.find((work) => work.id === second.value.workId)?.parentWorkId)
+      .toBe(first.value.workId);
+    expect(works.some((work) => work.id === first.value.workId)).toBe(true);
+  }, 15_000);
+
+  it('rejects an unknown presentation template at the IPC boundary', async () => {
+    const { controller, conversationId, now, repository } =
+      await createEnvironment();
+    const messageId = 'message-invalid-presentation-template';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        kind: 'ppt',
+        title: '模板校验',
+        sections: [
+          {
+            heading: '结论',
+            level: 1,
+            blocks: [{ type: 'bullets', items: ['结论：说明'] }]
+          }
+        ]
+      })
+    });
+
+    const result = await controller.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'ppt',
+      presentationTemplate: 'unknown-template'
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_request',
+        message:
+          'presentationTemplate must be work_report, natural_minimal, business_minimal, technology or financing'
+      }
+    });
+  });
+
+  it('rejects undeclared document generation fields at the IPC boundary', async () => {
+    const { controller } = await createEnvironment();
+
+    const result = await controller.generateFromMessage({
+      conversationId: 'conversation-unknown-field',
+      expectedRevision: 0,
+      messageId: 'message-unknown-field',
+      kind: 'ppt',
+      outputPath: 'D:\\untrusted\\result.pptx'
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_request',
+        message: 'generateFromMessage contains unsupported field outputPath'
+      }
+    });
+  });
+
+  it('rejects a non-boolean AI image flag at the IPC boundary', async () => {
+    const { controller } = await createEnvironment();
+
+    const result = await controller.generateFromMessage({
+      conversationId: 'conversation-invalid-ai-images',
+      expectedRevision: 0,
+      messageId: 'message-invalid-ai-images',
+      kind: 'ppt',
+      aiImages: 'true'
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_request',
+        message: 'aiImages must be a boolean'
+      }
+    });
+  });
+
+  it('deduplicates the same PPT template while keeping different templates independent', async () => {
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment();
+    const messageId = 'message-template-deduplication';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        kind: 'ppt',
+        title: '模板并发验证',
+        sections: [
+          {
+            heading: '关键判断',
+            level: 1,
+            takeaway: '不同模板应生成独立作品。',
+            blocks: [{ type: 'bullets', items: ['依据：版式选择不同。'] }]
+          }
+        ]
+      })
+    });
+    const shared = {
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'ppt' as const
+    };
+
+    const [workReport, duplicateWorkReport, technology] = await Promise.all([
+      controller.generateFromMessage({
+        ...shared,
+        presentationTemplate: 'work_report'
+      }),
+      controller.generateFromMessage({
+        ...shared,
+        presentationTemplate: 'work_report'
+      }),
+      controller.generateFromMessage({
+        ...shared,
+        presentationTemplate: 'technology'
+      })
+    ]);
+
+    expect(workReport).toEqual(duplicateWorkReport);
+    expect(workReport.ok).toBe(true);
+    expect(technology.ok).toBe(true);
+    if (!workReport.ok || !technology.ok) return;
+    expect(workReport.value.workId).not.toBe(technology.value.workId);
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect(await works.list(toProjectId('doc-ipc-project'))).toHaveLength(2);
+  }, 15_000);
+
+  it('cancels the matching active message generation idempotently', async () => {
+    let markTemporaryWritten!: () => void;
+    let releaseGeneration!: () => void;
+    const temporaryWritten = new Promise<void>((resolve) => {
+      markTemporaryWritten = resolve;
+    });
+    const generationReleased = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
+    const { controller, conversationId, now, repository, rootDirectory } =
+      await createEnvironment({
+        runnerOptions: {
+          generateTemporaryFile: async (input) => {
+            const generated = await generateDocumentFile(input);
+            const temporaryPath = `${generated.absolutePath}.tmp`;
+            await rename(generated.absolutePath, temporaryPath);
+            markTemporaryWritten();
+            await generationReleased;
+            return {
+              fileName: generated.fileName,
+              temporaryPath,
+              finalPath: generated.absolutePath,
+              sizeBytes: generated.sizeBytes
+            };
+          }
+        }
+      });
+    const messageId = 'message-cancel-generation';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId,
+      messageId,
+      now,
+      repository,
+      content: JSON.stringify({
+        kind: 'ppt',
+        title: '取消验证',
+        sections: [
+          {
+            heading: '执行中取消',
+            level: 1,
+            blocks: [{ type: 'bullets', items: ['状态：等待取消。'] }]
+          }
+        ]
+      })
+    });
+    const request = {
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'ppt' as const,
+      presentationTemplate: 'technology' as const
+    };
+    const generation = controller.generateFromMessage(request);
+    await temporaryWritten;
+
+    const cancelled = await controller.cancelGeneration({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId
+    });
+    expect(cancelled).toEqual({ ok: true, value: { cancelled: true } });
+    releaseGeneration();
+    const generationResult = await generation;
+    expect(generationResult).toEqual({
+      ok: false,
+      error: {
+        code: 'generation_cancelled',
+        message: 'Document generation was cancelled'
+      }
+    });
+
+    const repeated = await controller.cancelGeneration({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId
+    });
+    expect(repeated).toEqual({ ok: true, value: { cancelled: false } });
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      toProjectId('doc-ipc-project')
+    );
+    expect(await works.list(toProjectId('doc-ipc-project'))).toEqual([]);
+  });
+
+  it('does not report cancellation after the document work has been registered', async () => {
+    let controller!: DocumentGenerationController;
+    let conversationId = '';
+    let expectedRevision = 0;
+    let cancellation: ReturnType<
+      DocumentGenerationController['cancelGeneration']
+    > | undefined;
+    const environment = await createEnvironment({
+      onLoadConversation: (count) => {
+        if (count === 4) {
+          cancellation = controller.cancelGeneration({
+            conversationId,
+            expectedRevision,
+            messageId: 'message-after-work-registration'
+          });
+        }
+      }
+    });
+    controller = environment.controller;
+    const messageId = 'message-after-work-registration';
+    const conversation = await storeCompletedAssistantMessage({
+      conversationId: environment.conversationId,
+      messageId,
+      now: environment.now,
+      repository: environment.repository,
+      content: JSON.stringify({
+        kind: 'ppt',
+        title: '取消边界验证',
+        sections: [
+          {
+            heading: '作品登记后继续挂接',
+            level: 1,
+            blocks: [{ type: 'bullets', items: ['已登记作品不再接受取消'] }]
+          }
+        ]
+      })
+    });
+    conversationId = environment.conversationId;
+    expectedRevision = conversation.revision;
+
+    const generation = await controller.generateFromMessage({
+      conversationId: environment.conversationId,
+      expectedRevision: conversation.revision,
+      messageId,
+      kind: 'ppt',
+      presentationTemplate: 'work_report'
+    });
+
+    if (!cancellation) throw new Error('cancellation was not attempted');
+    expect(await cancellation).toEqual({ ok: true, value: { cancelled: false } });
+    expect(generation.ok).toBe(true);
   });
 });

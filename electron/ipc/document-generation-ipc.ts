@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { app, ipcMain, shell } from 'electron';
 import {
-  ConversationStreamingService
+  ConversationStreamingService,
+  DocumentGenerationApplicationService
 } from '../../src/application';
 import { toConversationId, toFileReferenceId, toMessageId } from '../../src/domain';
 import {
@@ -16,6 +17,8 @@ import {
   JsonFileReferenceRepository,
   JsonProjectConversationRepository,
   NodeProjectStorage,
+  PlatformDocumentDraftCompiler,
+  PlatformDocumentGenerationExecutor,
   extractPptxThemeColors,
   RagRetrievalService,
   resolveFileReferencePathSafely,
@@ -29,6 +32,7 @@ import {
   type DocumentAttachmentIpcResult
 } from '../../src/shared/document-attachment-ipc';
 import { documentGenerationIpcChannels } from '../../src/shared/document-generation-ipc';
+import { toDocumentGenerationLogError } from './document-generation-logging';
 
 export function registerDocumentGenerationIpcHandlers(options: {
   readonly sessionRegistry: StorageProjectSessionRegistry;
@@ -38,39 +42,50 @@ export function registerDocumentGenerationIpcHandlers(options: {
     nextConversationId: () => toConversationId(`conversation-${randomUUID()}`),
     nextMessageId: () => toMessageId(`message-${randomUUID()}`)
   };
+  const applications = new Map<string, DocumentGenerationApplicationService>();
   const controller = new DocumentGenerationController({
     getSession: () => options.sessionRegistry.get(),
-    getStreaming: (session) => createStreaming(session, now, ids),
-    loadConversation: async (session, conversationId) => {
+    getApplication: (session) => {
+      const key = `${session.projectId}:${session.rootDirectory}`;
+      const existing = applications.get(key);
+      if (existing) return existing;
       const storage = new NodeProjectStorage(session.rootDirectory);
       const repository = new JsonProjectConversationRepository(
         storage,
         session.projectId,
         now
       );
-      return repository.get(conversationId);
-    },
-    getRunner: (session) =>
-      new DocumentGenerationRunner({
+      const streaming = new ConversationStreamingService(repository, ids, now);
+      const runner = new DocumentGenerationRunner({
         rootDirectory: session.rootDirectory,
         projectId: session.projectId,
         now,
         createId: () => randomUUID()
-      }),
+      });
+      const application = new DocumentGenerationApplicationService({
+        projectId: session.projectId,
+        conversations: {
+          load: (conversationId) => repository.get(conversationId),
+          attachDocumentResult: async (input) => {
+            await streaming.attachDocumentResult(input);
+          },
+          updateDocumentGenerationStatus: async (input) => {
+            await streaming.updateDocumentGenerationStatus(input);
+          }
+        },
+        compiler: new PlatformDocumentDraftCompiler(),
+        generator: new PlatformDocumentGenerationExecutor(runner),
+        fingerprint: (content) =>
+          createHash('sha256').update(content).digest('hex')
+      });
+      applications.set(key, application);
+      return application;
+    },
     openPath: async (absolutePath) => shell.openPath(absolutePath),
-    now,
-    createId: () => randomUUID(),
     onError: (error) => {
       const line = `${JSON.stringify({
         at: new Date().toISOString(),
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-                code: (error as { code?: unknown }).code ?? undefined
-              }
-            : String(error)
+        error: toDocumentGenerationLogError(error)
       })}\n`;
       const logsDirectory = path.join(app.getPath('userData'), 'logs');
       void mkdir(logsDirectory, { recursive: true })
@@ -86,12 +101,20 @@ export function registerDocumentGenerationIpcHandlers(options: {
   });
 
   ipcMain.handle(
-    documentGenerationIpcChannels.generateFromConversation,
-    (_event, request: unknown) => controller.generateFromConversation(request)
+    documentGenerationIpcChannels.prepareGeneration,
+    (_event, request: unknown) => controller.prepareGeneration(request)
+  );
+  ipcMain.handle(
+    documentGenerationIpcChannels.reconcileGeneration,
+    (_event, request: unknown) => controller.reconcileGeneration(request)
   );
   ipcMain.handle(
     documentGenerationIpcChannels.generateFromMessage,
     (_event, request: unknown) => controller.generateFromMessage(request)
+  );
+  ipcMain.handle(
+    documentGenerationIpcChannels.cancelGeneration,
+    (_event, request: unknown) => controller.cancelGeneration(request)
   );
   ipcMain.handle(
     documentGenerationIpcChannels.openDocument,
@@ -178,23 +201,6 @@ export function registerDocumentGenerationIpcHandlers(options: {
       await controller.waitForOperations();
     }
   };
-}
-
-function createStreaming(
-  session: StorageProjectSession,
-  now: () => string,
-  ids: {
-    nextConversationId(): ReturnType<typeof toConversationId>;
-    nextMessageId(): ReturnType<typeof toMessageId>;
-  }
-): ConversationStreamingService {
-  const storage = new NodeProjectStorage(session.rootDirectory);
-  const repository = new JsonProjectConversationRepository(
-    storage,
-    session.projectId,
-    now
-  );
-  return new ConversationStreamingService(repository, ids, now);
 }
 
 function requireSession(

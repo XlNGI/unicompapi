@@ -18,7 +18,7 @@ import {
   LuTrash2,
   LuX
 } from 'react-icons/lu';
-import { Checkbox, Drawer, Input, Modal, Tooltip, Whisper } from 'rsuite';
+import { Checkbox, Drawer, Input, Modal, SelectPicker, Tooltip, Whisper } from 'rsuite';
 import { ActionMenu } from '../../components/ActionMenu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
@@ -39,16 +39,22 @@ import type {
 } from '../../shared/chat-context-ipc';
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
-import type { DocumentThemeColorsDto } from '../../shared/document-attachment-ipc';
 import {
   composeDocumentRevisionInput,
-  detectDocumentIntent,
+  documentResponseParameterValues,
   documentKindInstruction,
   extractSectionHeadings,
   inferDocumentKind,
+  resolvePresentationTemplate,
+  type PresentationTemplateSelection,
   type DocumentKindOption
 } from './documentDrafting';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
+import {
+  analyzeOfficeRequest,
+  waitForDocumentResponseCompletion,
+  type OfficeRequestAction
+} from '../../application';
 import '../../styles/pages.css';
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
@@ -92,7 +98,10 @@ const documentErrorMessages: Record<string, string> = {
   conversation_not_active: '请先恢复已归档对话。',
   revision_conflict: '内容已变化，请重试。',
   invalid_outline: '文档大纲无效，请调整需求后重试。',
-  generation_failed: '文档生成失败，请重试。',
+  document_layout_overflow:
+    '单个内容组过长，无法在可读字号下排版，请拆分内容后重试。',
+  generation_cancelled: '文档生成已取消，未保存文件。',
+  generation_failed: '文档生成或写入失败，未登记作品，请重试。',
   ai_images_unavailable: 'AI 配图执行器尚未接入，请先关闭“AI 配图”开关。',
   work_not_found: '文档作品不存在。',
   file_unavailable: '文档文件不可用。',
@@ -116,6 +125,18 @@ const documentThemeOptions: readonly {
   { value: 'blueprint', label: '商务蓝' },
   { value: 'ink', label: '墨色' },
   { value: 'forest', label: '松绿' },
+  { value: 'financing', label: '融资演讲稿' }
+];
+
+const presentationTemplateOptions: {
+  readonly value: PresentationTemplateSelection;
+  readonly label: string;
+}[] = [
+  { value: 'auto', label: '自动匹配' },
+  { value: 'work_report', label: '工作汇报' },
+  { value: 'natural_minimal', label: '自然简约' },
+  { value: 'business_minimal', label: '极简商务' },
+  { value: 'technology', label: '科技风' },
   { value: 'financing', label: '融资演讲稿' }
 ];
 
@@ -167,6 +188,9 @@ function failedResponseNotice(message?: MessageDto, safeCode?: string): string {
   }
   if (safeCode?.includes('finish.insufficient_system_resource')) {
     return `模型服务资源不足${diagnostic}${preserved}。请稍后重试或切换模型。`;
+  }
+  if (safeCode?.includes('timeout') || message?.failureReason === 'unknown') {
+    return `本地等待模型响应超时${preserved}。远端状态和费用可能已经产生，请先核对服务商后台，避免立即重复发送。`;
   }
   if (message?.failureReason === 'truncated') {
     return `回答达到当前输出长度上限${preserved}。可以继续追问，或调整输出长度后重试。`;
@@ -346,7 +370,31 @@ function describeDocumentError(error: {
   readonly code: string;
   readonly message: string;
 }): string {
-  return `${documentErrorMessages[error.code] ?? error.message}（${error.code}）`;
+  return documentErrorMessages[error.code] ?? '文档生成失败，请稍后重试。';
+}
+
+function documentGenerationMessage(
+  status: MessageDto['documentGenerationStatus']
+): string {
+  if (!status) return '正在生成 Office 文档…';
+  if (status.state === 'cancelled') return '文档生成已取消，未保存文件。';
+  if (status.state === 'interrupted') {
+    return '文档生成已中断，未保存文件，请重试。';
+  }
+  if (status.state !== 'failed') return '正在生成 Office 文档…';
+  switch (status.errorCode) {
+    case 'response_failed':
+      return 'AI 内容生成未完成，文档未生成。';
+    case 'invalid_outline':
+      return 'AI 内容格式异常，文档未生成，请重试或切换模型。';
+    case 'resource_limit':
+    case 'document_layout_overflow':
+      return '内容超出当前文档生成限制，请精简或拆分后重试。';
+    case 'storage_error':
+      return '本地保存失败，请检查存储状态后重试。';
+    default:
+      return '文档生成失败，未保存文件，请重试。';
+  }
 }
 
 interface AttachmentDraft {
@@ -381,6 +429,12 @@ export function ChatPage({
   const [documentTheme, setDocumentTheme] = useState<
     'blueprint' | 'ink' | 'forest' | 'financing'
   >('blueprint');
+  const [presentationTemplate, setPresentationTemplate] =
+    useState<PresentationTemplateSelection>('auto');
+  const [documentGenerationActive, setDocumentGenerationActive] =
+    useState(false);
+  const [documentCancelRequested, setDocumentCancelRequested] =
+    useState(false);
   const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
   const [imageCandidateOptions, setImageCandidateOptions] = useState<
     readonly { readonly candidateId: string; readonly label: string }[]
@@ -388,13 +442,7 @@ export function ChatPage({
   const [selectedImageCandidateId, setSelectedImageCandidateId] =
     useState<string>();
   const [ragEnabled, setRagEnabled] = useState(false);
-  const [pendingDocumentKind, setPendingDocumentKind] =
-    useState<DocumentKindOption>();
-  const [pendingDocumentClarification, setPendingDocumentClarification] =
-    useState(false);
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
-  const [templateFileId, setTemplateFileId] = useState<string>();
-  const [templateColors, setTemplateColors] = useState<DocumentThemeColorsDto>();
   const [dragging, setDragging] = useState(false);
   const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
@@ -429,6 +477,11 @@ export function ChatPage({
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
   const documentGenerationInFlightRef = useRef(false);
+  const activeDocumentGenerationRef = useRef<{
+    readonly conversationId: string;
+    readonly expectedRevision: number;
+    readonly messageId: string;
+  }>();
   const responseFailureSafeCodeRef = useRef<{
     readonly executionId: string;
     readonly safeCode?: string;
@@ -508,6 +561,32 @@ export function ChatPage({
   const canCompose = Boolean(
     session && (!selected || (!selected.readOnly && selected.status === 'active'))
   );
+  const completedDocumentMessages = selected
+    ? selected.messages.filter(
+        (message) =>
+          message.role === 'assistant' &&
+          message.state === 'completed' &&
+          message.documentResult
+      )
+    : [];
+  const officeDocuments = completedDocumentMessages.flatMap((message) =>
+    message.documentResult
+      ? [{
+          messageId: message.messageId,
+          kind: message.documentResult.kind,
+          fileName: message.documentResult.fileName
+        }]
+      : []
+  );
+  const officeIntent = analyzeOfficeRequest(input, { documents: officeDocuments });
+  const composerDocumentKind =
+    documentKind !== 'auto'
+      ? documentKind
+      : officeIntent.kind === 'document' && officeIntent.documentKind
+        ? officeIntent.documentKind
+        : input.trim()
+          ? inferDocumentKind(input)
+          : documentKind;
 
   useEffect(() => {
     let active = true;
@@ -532,9 +611,34 @@ export function ChatPage({
         }
         else setNotice('读取当前项目失败，请重试。');
         if (conversationResult.ok) {
-          setConversations(conversationResult.value);
+          let loadedConversations = conversationResult.value;
+          let reconciledInterruptedRun = false;
+          if (sessionResult.ok && sessionResult.value && documentGeneration) {
+            for (const conversation of loadedConversations) {
+              for (const message of conversation.messages) {
+                if (
+                  message.documentGenerationStatus &&
+                  ['generating_content', 'validating_outline', 'generating_file'].includes(
+                    message.documentGenerationStatus.state
+                  )
+                ) {
+                  const result = await documentGeneration.reconcileGeneration({
+                    conversationId: conversation.conversationId,
+                    expectedRevision: conversation.revision,
+                    messageId: message.messageId
+                  });
+                  reconciledInterruptedRun ||= result.ok && result.value.interrupted;
+                }
+              }
+            }
+            if (reconciledInterruptedRun) {
+              const refreshed = await chat.listConversations(true, false);
+              if (refreshed.ok) loadedConversations = refreshed.value;
+            }
+          }
+          setConversations(loadedConversations);
           setSelectedId((current) =>
-            current && conversationResult.value.some((item) => item.conversationId === current)
+            current && loadedConversations.some((item) => item.conversationId === current)
               ? current
               : undefined
           );
@@ -562,7 +666,7 @@ export function ChatPage({
       window.removeEventListener('focus', refresh);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
     };
-  }, [chat, storage]);
+  }, [chat, documentGeneration, storage]);
 
   useEffect(() => {
     onConversationChange?.(selectedId);
@@ -1012,31 +1116,22 @@ export function ChatPage({
     ) {
       return;
     }
-    const documentIntent = detectDocumentIntent(input.trim());
-    if (pendingDocumentClarification) {
-      setPendingDocumentClarification(false);
-      if (documentIntent.documentKind) setDocumentKind(documentIntent.documentKind);
-      else if (pendingDocumentKind) setDocumentKind(pendingDocumentKind);
-      setPendingDocumentKind(undefined);
-      await sendDocumentMessage();
-      return;
-    }
+    const documentIntent = analyzeOfficeRequest(input.trim(), {
+      documents: officeDocuments
+    });
     if (documentIntent.kind === 'document') {
       const kind = documentIntent.documentKind ?? 'auto';
       setDocumentKind(kind);
+      setDocumentMode(true);
       if (documentIntent.missing.length > 0) {
-        setPendingDocumentClarification(true);
-        setPendingDocumentKind(kind);
-        setNotice(
-          `好的，帮你生成${documentKindLabel(
-            documentIntent.documentKind ?? 'word'
-          )}。请补充：${documentIntent.missing.join(
-            '、'
-          )}。例如：主题是什么、给谁看、需要包含哪些内容。`
-        );
+        setNotice(`请补充：${documentIntent.missing.join('、')}。`);
         return;
       }
-      await sendDocumentMessage();
+      await sendDocumentMessage(
+        documentIntent.documentKind,
+        documentIntent.action,
+        documentIntent.targetMessageId
+      );
       return;
     }
     rendererTrace('sendMessage:start', {
@@ -1202,36 +1297,13 @@ export function ChatPage({
     setAttachments((current) =>
       current.filter((attachment) => attachment.fileId !== fileId)
     );
-    if (templateFileId === fileId) {
-      setTemplateFileId(undefined);
-      setTemplateColors(undefined);
-    }
   }
 
-  async function toggleTemplate(attachment: AttachmentDraft) {
-    if (!documentAttachments) return;
-    if (templateFileId === attachment.fileId) {
-      setTemplateFileId(undefined);
-      setTemplateColors(undefined);
-      return;
-    }
-    try {
-      const result = await documentAttachments.extractTheme({
-        fileId: attachment.fileId
-      });
-      if (!result.ok) {
-        setNotice('该文件无法作为样式模板，请上传含主题的 PPTX。');
-        return;
-      }
-      setTemplateFileId(attachment.fileId);
-      setTemplateColors(result.value);
-      setNotice(`已应用模板「${attachment.fileName}」的主题色。`);
-    } catch {
-      setNotice('读取模板主题失败，请重试。');
-    }
-  }
-
-  async function sendDocumentMessage() {
+  async function sendDocumentMessage(
+    resolvedKind?: 'word' | 'excel' | 'ppt',
+    requestedAction?: OfficeRequestAction,
+    requestedTargetMessageId?: string
+  ) {
     if (documentGenerationInFlightRef.current) return;
     if (
       !chat ||
@@ -1246,6 +1318,53 @@ export function ChatPage({
     ) {
       return;
     }
+    const requirements = input.trim();
+    const currentIntent = analyzeOfficeRequest(requirements, {
+      documents: officeDocuments
+    });
+    const unresolvedMissing =
+      currentIntent.kind === 'document'
+        ? currentIntent.missing.filter(
+            (item) =>
+              !(
+                documentKind !== 'auto' &&
+                item === '文档类型（Word、Excel 或 PPT）'
+              )
+          )
+        : [];
+    if (unresolvedMissing.length > 0) {
+      setNotice(`请补充：${unresolvedMissing.join('、')}。`);
+      return;
+    }
+    const action =
+      requestedAction ??
+      (currentIntent.kind === 'document' ? currentIntent.action : 'create');
+    const kind =
+      resolvedKind ??
+      (documentKind === 'auto'
+        ? currentIntent.kind === 'document' && currentIntent.documentKind
+          ? currentIntent.documentKind
+          : inferDocumentKind(requirements)
+        : documentKind);
+    const targetMessageId =
+      requestedTargetMessageId ??
+      (currentIntent.kind === 'document'
+        ? currentIntent.targetMessageId
+        : undefined);
+    const previousDocument =
+      action === 'revise'
+        ? targetMessageId
+          ? completedDocumentMessages.find(
+              (item) => item.messageId === targetMessageId
+            )
+          : [...completedDocumentMessages]
+              .reverse()
+              .find((item) => item.documentResult?.kind === kind)
+        : undefined;
+    if (action === 'revise' && !previousDocument) {
+      setNotice(`请先生成或选择一份可修改的上一版 ${documentKindLabel(kind)}。`);
+      return;
+    }
     documentGenerationInFlightRef.current = true;
     responseFailureSafeCodeRef.current = undefined;
     setBusy(true);
@@ -1253,10 +1372,10 @@ export function ChatPage({
     rendererTrace('sendDocumentMessage:start', JSON.stringify({
       selectedId,
       documentKind,
+      action,
       candidateId: selectedCandidateId,
       productFeature: responseFeature
     }));
-    const requirements = input.trim();
     const attachmentText = attachments
       .filter((attachment) => attachment.status === 'extracted')
       .map(
@@ -1264,23 +1383,15 @@ export function ChatPage({
           `【附件：${attachment.fileName}】\n${attachment.preview.slice(0, 2000)}`
       )
       .join('\n\n');
-    const previousDocument = selected
-      ? [...selected.messages]
-          .reverse()
-          .find(
-            (item) =>
-              item.role === 'assistant' &&
-              item.state === 'completed' &&
-              item.documentResult
-          )
-      : undefined;
     const revisionInput = composeDocumentRevisionInput(
       previousDocument?.content,
       requirements
     );
-    const kind = documentKind === 'auto'
-      ? inferDocumentKind(requirements)
-      : documentKind;
+    const resolvedPresentationTemplate = resolvePresentationTemplate(
+      presentationTemplate,
+      requirements
+    );
+    const responseParameterValues = documentResponseParameterValues(selectedCandidate);
     const combined = attachmentText
       ? `${revisionInput}\n\n${attachmentText}`
       : revisionInput;
@@ -1309,46 +1420,50 @@ export function ChatPage({
       }
     }
     try {
-      const started = await chat.startResponse({
-        clientCommandId: `chat-doc-${crypto.randomUUID()}`,
-        conversation: selected
-          ? {
-              conversationId: selected.conversationId,
-              expectedRevision: selected.revision,
-              editedMessageId: null
-            }
-          : null,
-        title: conversationTitleFromMessage(requirements),
-        content: modelContent,
-        productFeature: responseFeature,
-        candidateId: selectedCandidateId,
-        contextSelections: includedContextIds.flatMap((contextId) => {
-          const context = viewedContexts[contextId];
-          return context
-            ? [{
-                contextId,
-                contextRevision: context.revision,
-                includeInPrompt: true
-              }]
-            : [];
-        }),
-        parameterValues: {},
-        confirmed: true
-      });
+      const startDocumentResponse = (
+        conversation?: Pick<ConversationDto, 'conversationId' | 'revision'>
+      ) =>
+        chat.startResponse({
+          clientCommandId: `chat-doc-${crypto.randomUUID()}`,
+          conversation: conversation
+            ? {
+                conversationId: conversation.conversationId,
+                expectedRevision: conversation.revision,
+                editedMessageId: null
+              }
+            : null,
+          title: conversationTitleFromMessage(requirements),
+          content: modelContent,
+          displayContent: requirements,
+          productFeature: responseFeature,
+          candidateId: selectedCandidateId,
+          contextSelections: includedContextIds.flatMap((contextId) => {
+            const context = viewedContexts[contextId];
+            return context
+              ? [{
+                  contextId,
+                  contextRevision: context.revision,
+                  includeInPrompt: true
+                }]
+              : [];
+          }),
+          parameterValues: responseParameterValues,
+          confirmed: true
+        });
+      let started = await startDocumentResponse(selected);
+      if (!started.ok && started.error.code === 'revision_conflict' && selected) {
+        setNotice('会话刚刚更新，正在同步后继续生成…');
+        const refreshed = await chat.getConversation(selected.conversationId);
+        if (refreshed.ok) {
+          replaceConversation(refreshed.value);
+          setSelectedId(refreshed.value.conversationId);
+          started = await startDocumentResponse(refreshed.value);
+        }
+      }
       if (!started.ok) {
         rendererTrace('sendDocumentMessage:startResponse-error', JSON.stringify({
-          code: started.error.code,
-          message: started.error.message
+          code: started.error.code
         }));
-        if (started.error.code === 'revision_conflict' && selected) {
-          const refreshed = await chat.getConversation(selected.conversationId);
-          if (refreshed.ok) {
-            replaceConversation(refreshed.value);
-            setSelectedId(refreshed.value.conversationId);
-          }
-          setNotice('会话已更新并刷新，请再次发送。');
-          return;
-        }
         setNotice(describeDocumentError(started.error));
         if (selected) {
           const refreshedFailed = await chat.getConversation(selected.conversationId);
@@ -1364,10 +1479,25 @@ export function ChatPage({
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
+      const prepared = await documentGeneration.prepareGeneration({
+        conversationId: started.value.conversation.conversationId,
+        expectedRevision: started.value.conversation.revision,
+        messageId: started.value.execution.assistantMessageId,
+        kind
+      });
+      if (!prepared.ok) {
+        rendererTrace('sendDocumentMessage:prepare-error', JSON.stringify({
+          code: prepared.error.code
+        }));
+        setNotice(describeDocumentError(prepared.error));
+      } else {
+        const preparedConversation = await chat.getConversation(
+          started.value.conversation.conversationId
+        );
+        if (preparedConversation.ok) replaceConversation(preparedConversation.value);
+      }
       updateInput('');
       setAttachments([]);
-      setTemplateFileId(undefined);
-      setTemplateColors(undefined);
       const targetId = started.value.conversation.conversationId;
       const completion = await awaitDocumentCompletion(
         chat,
@@ -1393,6 +1523,17 @@ export function ChatPage({
           finalCheckOk: finalCheck.ok
         }));
         const latest = await chat.getConversation(targetId);
+        if (latest.ok) {
+          await documentGeneration.generateFromMessage({
+            conversationId: targetId,
+            expectedRevision: latest.value.revision,
+            messageId: started.value.execution.assistantMessageId,
+            kind,
+            images: []
+          });
+          const terminalConversation = await chat.getConversation(targetId);
+          if (terminalConversation.ok) replaceConversation(terminalConversation.value);
+        }
         const failedMessage = latest.ok
           ? [...latest.value.messages]
               .reverse()
@@ -1425,41 +1566,72 @@ export function ChatPage({
         completion.content,
         attachments.filter((attachment) => isImageFileName(attachment.fileName)).length
       );
-      const generated = await documentGeneration.generateFromMessage({
+      const documentImages = [
+        ...attachments
+          .filter((attachment) => isImageFileName(attachment.fileName))
+          .map((attachment) => ({
+            fileId: attachment.fileId,
+            caption: attachment.fileName
+          })),
+        ...aiImages
+      ];
+      const runDocumentGeneration = async (generationContext: {
+        readonly conversationId: string;
+        readonly expectedRevision: number;
+        readonly messageId: string;
+      }) => {
+        activeDocumentGenerationRef.current = generationContext;
+        setDocumentGenerationActive(true);
+        setDocumentCancelRequested(false);
+        try {
+          return await documentGeneration.generateFromMessage({
+            ...generationContext,
+            kind,
+            ...(previousDocument?.documentResult
+              ? { parentWorkId: previousDocument.documentResult.workId }
+              : {}),
+            ...(kind === 'ppt'
+              ? { presentationTemplate: resolvedPresentationTemplate }
+              : {}),
+            ...(kind !== 'ppt' ? { theme: documentTheme } : {}),
+            images: documentImages,
+            ...(aiImagesEnabled ? { aiImages: true } : {})
+          });
+        } finally {
+          activeDocumentGenerationRef.current = undefined;
+          setDocumentGenerationActive(false);
+          setDocumentCancelRequested(false);
+        }
+      };
+      const generated = await runDocumentGeneration({
         conversationId: targetId,
         expectedRevision: refreshedBefore.value.revision,
-        messageId: completion.assistantMessageId,
-        kind,
-        theme: documentTheme,
-        images: [
-          ...attachments
-            .filter((attachment) => isImageFileName(attachment.fileName))
-            .map((attachment) => ({
-              fileId: attachment.fileId,
-              caption: attachment.fileName
-            })),
-          ...aiImages
-        ],
-        ...(templateColors ? { customTheme: templateColors } : {}),
-        ...(aiImagesEnabled ? { aiImages: true } : {})
+        messageId: completion.assistantMessageId
       });
       rendererTrace('sendDocumentMessage:generate-result', JSON.stringify({
         ok: generated.ok,
-        code: generated.ok ? undefined : generated.error.code,
-        message: generated.ok ? undefined : generated.error.message
+        code: generated.ok ? undefined : generated.error.code
       }));
       if (!generated.ok) {
         setNotice(describeDocumentError(generated.error));
+        updateInput(requirements);
+        setAttachments(attachments);
       } else {
-        setNotice('文档已生成。');
+        setNotice(
+          previousDocument?.documentResult
+            ? `新版文档已生成，基于 ${previousDocument.documentResult.fileName} 修改，原文件已保留。`
+            : '文档已生成。'
+        );
+        setDocumentMode(false);
       }
       const refreshed = await chat.getConversation(targetId);
       if (refreshed.ok) {
         replaceConversation(refreshed.value);
         setSelectedId(refreshed.value.conversationId);
       }
-      setDocumentMode(false);
     } catch {
+      updateInput(requirements);
+      setAttachments(attachments);
       setNotice('文档生成失败，请重试。');
     } finally {
       documentGenerationInFlightRef.current = false;
@@ -1471,20 +1643,15 @@ export function ChatPage({
     api: NonNullable<typeof chat>,
     responseExecutionId: string
   ): Promise<ConversationResponseExecutionDto | undefined> {
-    for (let attempt = 0; attempt < 300; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-      const result = await api.getResponseExecution(responseExecutionId);
-      if (!result.ok) continue;
-      if (result.value.state === 'completed') return result.value;
-      if (
-        result.value.state === 'failed' ||
-        result.value.state === 'cancelled' ||
-        result.value.state === 'interrupted'
-      ) {
-        return undefined;
-      }
-    }
-    return undefined;
+    return waitForDocumentResponseCompletion({
+      read: async () => {
+        const result = await api.getResponseExecution(responseExecutionId);
+        if (!result.ok) throw new Error(result.error.code);
+        return result.value;
+      },
+      wait: (milliseconds) =>
+        new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+    });
   }
 
   async function generateAiSlideImages(
@@ -1570,6 +1737,28 @@ export function ChatPage({
     return generated;
   }
 
+  async function cancelDocumentGeneration() {
+    const active = activeDocumentGenerationRef.current;
+    if (!documentGeneration || !active || documentCancelRequested) return;
+    setDocumentCancelRequested(true);
+    setNotice('已发出文档停止请求，正在清理临时文件…');
+    try {
+      const result = await documentGeneration.cancelGeneration(active);
+      if (!result.ok) {
+        setNotice(describeDocumentError(result.error));
+        setDocumentCancelRequested(false);
+        return;
+      }
+      if (!result.value.cancelled) {
+        setNotice('当前文档生成已结束，无需取消。');
+        setDocumentCancelRequested(false);
+      }
+    } catch {
+      setNotice('停止文档生成失败，请重试。');
+      setDocumentCancelRequested(false);
+    }
+  }
+
   async function cancelResponse() {
     if (responseStarting) {
       if (cancelRequested) return;
@@ -1584,7 +1773,6 @@ export function ChatPage({
       !selected ||
       !responseExecution ||
       !responseInProgress ||
-      busy ||
       cancelRequested
     ) return;
     await requestResponseCancellation(responseExecution, selected);
@@ -1982,6 +2170,10 @@ export function ChatPage({
                     item.messageId === editableCancelledUserMessage?.messageId &&
                     !responseInProgress &&
                     !cancelRequested;
+                  const isDocumentDraftMessage =
+                    item.role === 'assistant' &&
+                    (Boolean(item.documentResult) ||
+                      Boolean(item.documentGenerationStatus));
                   const activityLabel = cancelRequested
                     ? '正在停止'
                     : responseExecution?.state === 'pending'
@@ -2049,9 +2241,19 @@ export function ChatPage({
                       ) : null}
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">
-                          <MarkdownMessage
-                            content={item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
-                          />
+                          {isDocumentDraftMessage ? (
+                            <p>
+                              {item.documentResult
+                                ? 'Office 文档已生成。'
+                                : documentGenerationMessage(
+                                    item.documentGenerationStatus
+                                  )}
+                            </p>
+                          ) : (
+                            <MarkdownMessage
+                              content={item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                            />
+                          )}
                           {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
                         </div>
                       ) : (
@@ -2173,22 +2375,6 @@ export function ChatPage({
                   <li key={attachment.fileId}>
                     <LuPaperclip aria-hidden="true" />
                     <span title={attachment.fileName}>{attachment.fileName}</span>
-                    {/\.pptx$/i.test(attachment.fileName) ? (
-                      <button
-                        aria-pressed={templateFileId === attachment.fileId}
-                        className={templateFileId === attachment.fileId ? 'is-template' : ''}
-                        disabled={busy}
-                        onClick={() => void toggleTemplate(attachment)}
-                        title={
-                          templateFileId === attachment.fileId
-                            ? '取消作为样式模板'
-                            : '作为样式模板'
-                        }
-                        type="button"
-                      >
-                        {templateFileId === attachment.fileId ? '模板' : '模板'}
-                      </button>
-                    ) : null}
                     <button
                       aria-label={`移除附件 ${attachment.fileName}`}
                       disabled={busy}
@@ -2252,7 +2438,28 @@ export function ChatPage({
                     ))}
                   </div>
                 ) : null}
-                {documentMode ? (
+                {documentMode && composerDocumentKind === 'ppt' ? (
+                  <div className="uc-chat-page__presentation-template">
+                    <SelectPicker
+                      aria-label="PPT 模板"
+                      cleanable={false}
+                      data={presentationTemplateOptions}
+                      disabled={!canCompose || !session || busy}
+                      onChange={(value) => {
+                        const option = presentationTemplateOptions.find(
+                          (item) => item.value === value
+                        );
+                        if (option) setPresentationTemplate(option.value);
+                      }}
+                      placement="topStart"
+                      popupClassName="uc-chat-page__presentation-template-popup"
+                      preventOverflow
+                      size="xs"
+                      value={presentationTemplate}
+                    />
+                  </div>
+                ) : null}
+                {documentMode && composerDocumentKind !== 'ppt' ? (
                   <div
                     aria-label="文档主题"
                     className="uc-chat-page__doc-kind"
@@ -2399,27 +2606,41 @@ export function ChatPage({
                 />
                 {input.length >= 7000 ? <span className="uc-chat-page__composer-count">{input.length} / 8000</span> : null}
                 <button
-                  aria-label={responseInProgress ? cancelRequested ? '正在停止生成' : '停止生成' : '发送消息'}
-                  className={`uc-chat-page__submit${responseInProgress ? ' uc-chat-page__submit--stop' : ''}`}
-                  disabled={responseInProgress
-                    ? busy || cancelRequested
-                    : !chat ||
-                      !canCompose ||
-                      !input.trim() ||
-                      (!documentMode && !selectedCandidate?.available) ||
-                      busy ||
-                      cancelRequested}
+                  aria-label={documentGenerationActive
+                    ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
+                    : responseInProgress
+                      ? cancelRequested ? '正在停止生成' : '停止生成'
+                      : '发送消息'}
+                  className={`uc-chat-page__submit${responseInProgress || documentGenerationActive ? ' uc-chat-page__submit--stop' : ''}`}
+                  disabled={documentGenerationActive
+                    ? documentCancelRequested
+                    : responseInProgress
+                      ? cancelRequested
+                      : !chat ||
+                        !canCompose ||
+                        !input.trim() ||
+                        !selectedCandidate?.available ||
+                        busy ||
+                        cancelRequested}
                   onClick={() =>
-                    responseInProgress
-                      ? void cancelResponse()
-                      : documentMode
-                        ? void sendDocumentMessage()
-                        : void sendMessage()
+                    documentGenerationActive
+                      ? void cancelDocumentGeneration()
+                      : responseInProgress
+                        ? void cancelResponse()
+                        : documentMode
+                          ? void sendDocumentMessage()
+                          : void sendMessage()
                   }
-                  title={responseInProgress ? cancelRequested ? '正在停止' : '停止生成' : '发送'}
+                  title={documentGenerationActive
+                    ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
+                    : responseInProgress
+                      ? cancelRequested ? '正在停止' : '停止生成'
+                      : '发送'}
                   type="button"
                 >
-                  {responseInProgress ? <LuSquare aria-hidden="true" /> : <LuArrowUp aria-hidden="true" />}
+                  {responseInProgress || documentGenerationActive
+                    ? <LuSquare aria-hidden="true" />
+                    : <LuArrowUp aria-hidden="true" />}
                 </button>
               </div>
             </div>

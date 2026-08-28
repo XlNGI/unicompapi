@@ -1,8 +1,20 @@
 export const documentGenerationIpcChannels = {
-  generateFromConversation: 'document-generation:generate-from-conversation',
+  prepareGeneration: 'document-generation:prepare-generation',
+  reconcileGeneration: 'document-generation:reconcile-generation',
   generateFromMessage: 'document-generation:generate-from-message',
+  cancelGeneration: 'document-generation:cancel-generation',
   openDocument: 'document-generation:open-document'
 } as const;
+
+export const presentationTemplateIds = [
+  'work_report',
+  'natural_minimal',
+  'business_minimal',
+  'technology',
+  'financing'
+] as const;
+
+export type PresentationTemplateId = (typeof presentationTemplateIds)[number];
 
 export type DocumentGenerationIpcErrorCode =
   | 'invalid_request'
@@ -11,6 +23,8 @@ export type DocumentGenerationIpcErrorCode =
   | 'conversation_not_active'
   | 'revision_conflict'
   | 'invalid_outline'
+  | 'document_layout_overflow'
+  | 'generation_cancelled'
   | 'generation_failed'
   | 'ai_images_unavailable'
   | 'work_not_found'
@@ -41,16 +55,8 @@ export interface DocumentOpenResultDto {
   readonly opened: boolean;
 }
 
-export interface DocumentGenerationRequest {
-  readonly conversationId: string;
-  readonly expectedRevision: number;
-  readonly kind: 'word' | 'excel' | 'ppt';
-  readonly title: string;
-  readonly outlineJson: string;
-  readonly contentFingerprint: string;
-  readonly draftRevision: number;
-  readonly sourceDraftId: string;
-  readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
+export interface DocumentGenerationCancelResultDto {
+  readonly cancelled: boolean;
 }
 
 export interface DocumentGenerationFromMessageRequest {
@@ -59,18 +65,41 @@ export interface DocumentGenerationFromMessageRequest {
   readonly messageId: string;
   readonly kind: 'word' | 'excel' | 'ppt';
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
+  readonly presentationTemplate?: PresentationTemplateId;
   readonly images?: readonly {
     readonly fileId?: string;
     readonly workId?: string;
     readonly caption?: string;
   }[];
-  readonly customTheme?: {
-    readonly accent: string;
-    readonly background: string;
-    readonly text: string;
-    readonly muted: string;
-  };
   readonly aiImages?: boolean;
+}
+
+export interface DocumentGenerationPrepareRequest {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly messageId: string;
+  readonly kind: 'word' | 'excel' | 'ppt';
+  readonly parentWorkId?: string;
+}
+
+export interface DocumentGenerationPrepareResultDto {
+  readonly prepared: true;
+}
+
+export interface DocumentGenerationReconcileRequest {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly messageId: string;
+}
+
+export interface DocumentGenerationReconcileResultDto {
+  readonly interrupted: boolean;
+}
+
+export interface DocumentGenerationCancelRequest {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly messageId: string;
 }
 
 export interface OpenDocumentRequest {
@@ -89,36 +118,72 @@ function requireString(value: unknown, label: string): string {
 }
 
 export const documentGenerationRequestParsers = {
-  generateFromConversation(value: unknown): DocumentGenerationRequest {
+  prepareGeneration(value: unknown): DocumentGenerationPrepareRequest {
     if (!isRecord(value)) {
-      throw new TypeError('Invalid document generation request');
+      throw new TypeError('Invalid document generation preparation request');
     }
+    requireExactKeys(
+      value,
+      ['conversationId', 'expectedRevision', 'messageId', 'kind'],
+      'prepareGeneration'
+    );
     return {
       conversationId: requireString(value.conversationId, 'conversationId'),
       expectedRevision: requireNonNegativeInteger(
         value.expectedRevision,
         'expectedRevision'
       ),
-      kind: requireKind(value.kind),
-      title: requireString(value.title, 'title'),
-      outlineJson: requireString(value.outlineJson, 'outlineJson'),
-      contentFingerprint: requireString(
-        value.contentFingerprint,
-        'contentFingerprint'
+      messageId: requireString(value.messageId, 'messageId'),
+      kind: requireKind(value.kind)
+    };
+  },
+  reconcileGeneration(value: unknown): DocumentGenerationReconcileRequest {
+    if (!isRecord(value)) {
+      throw new TypeError('Invalid document generation reconciliation request');
+    }
+    requireExactKeys(
+      value,
+      ['conversationId', 'expectedRevision', 'messageId'],
+      'reconcileGeneration'
+    );
+    return {
+      conversationId: requireString(value.conversationId, 'conversationId'),
+      expectedRevision: requireNonNegativeInteger(
+        value.expectedRevision,
+        'expectedRevision'
       ),
-      draftRevision: requireNonNegativeInteger(
-        value.draftRevision,
-        'draftRevision'
-      ),
-      sourceDraftId: requireString(value.sourceDraftId, 'sourceDraftId'),
-      ...(value.theme !== undefined
-        ? { theme: requireTheme(value.theme) }
-        : {})
+      messageId: requireString(value.messageId, 'messageId')
     };
   },
   generateFromMessage(value: unknown): DocumentGenerationFromMessageRequest {
     if (!isRecord(value)) {
       throw new TypeError('Invalid document generation from message request');
+    }
+    requireExactKeys(
+      value,
+      [
+        'conversationId',
+        'expectedRevision',
+        'messageId',
+        'kind',
+        'parentWorkId',
+        'theme',
+        'presentationTemplate',
+        'images',
+        'aiImages'
+      ],
+      'generateFromMessage'
+    );
+    const kind = requireKind(value.kind);
+    const theme =
+      value.theme === undefined ? undefined : requireTheme(value.theme);
+    const presentationTemplate = resolvePresentationTemplate(
+      kind,
+      value.presentationTemplate,
+      theme
+    );
+    if (value.aiImages !== undefined && typeof value.aiImages !== 'boolean') {
+      throw new TypeError('aiImages must be a boolean');
     }
     return {
       conversationId: requireString(value.conversationId, 'conversationId'),
@@ -127,28 +192,59 @@ export const documentGenerationRequestParsers = {
         'expectedRevision'
       ),
       messageId: requireString(value.messageId, 'messageId'),
-      kind: requireKind(value.kind),
-      ...(value.theme !== undefined
-        ? { theme: requireTheme(value.theme) }
+      kind,
+      ...(value.parentWorkId !== undefined
+        ? { parentWorkId: requireString(value.parentWorkId, 'parentWorkId') }
+        : {}),
+      ...(theme !== undefined ? { theme } : {}),
+      ...(presentationTemplate !== undefined
+        ? { presentationTemplate }
         : {}),
       ...(value.images !== undefined
         ? { images: parseImages(value.images) }
         : {}),
-      ...(value.customTheme !== undefined
-        ? { customTheme: parseThemeColors(value.customTheme) }
-        : {}),
       ...(value.aiImages !== undefined
-        ? { aiImages: value.aiImages === true }
+        ? { aiImages: value.aiImages }
         : {})
+    };
+  },
+  cancelGeneration(value: unknown): DocumentGenerationCancelRequest {
+    if (!isRecord(value)) {
+      throw new TypeError('Invalid document generation cancellation request');
+    }
+    requireExactKeys(
+      value,
+      ['conversationId', 'expectedRevision', 'messageId'],
+      'cancelGeneration'
+    );
+    return {
+      conversationId: requireString(value.conversationId, 'conversationId'),
+      expectedRevision: requireNonNegativeInteger(
+        value.expectedRevision,
+        'expectedRevision'
+      ),
+      messageId: requireString(value.messageId, 'messageId')
     };
   },
   openDocument(value: unknown): OpenDocumentRequest {
     if (!isRecord(value)) {
       throw new TypeError('Invalid open document request');
     }
+    requireExactKeys(value, ['workId'], 'openDocument');
     return { workId: requireString(value.workId, 'workId') };
   }
 };
+
+function requireExactKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string
+): void {
+  const unsupported = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unsupported) {
+    throw new TypeError(`${label} contains unsupported field ${unsupported}`);
+  }
+}
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
@@ -178,6 +274,31 @@ function requireTheme(
   return value;
 }
 
+function resolvePresentationTemplate(
+  kind: 'word' | 'excel' | 'ppt',
+  value: unknown,
+  legacyTheme: 'blueprint' | 'ink' | 'forest' | 'financing' | undefined
+): PresentationTemplateId | undefined {
+  if (kind !== 'ppt') {
+    if (value !== undefined) {
+      throw new TypeError('presentationTemplate is only valid for ppt');
+    }
+    return undefined;
+  }
+  if (value === undefined) {
+    return legacyTheme === 'financing' ? 'financing' : 'work_report';
+  }
+  if (
+    typeof value !== 'string' ||
+    !presentationTemplateIds.includes(value as PresentationTemplateId)
+  ) {
+    throw new TypeError(
+      'presentationTemplate must be work_report, natural_minimal, business_minimal, technology or financing'
+    );
+  }
+  return value as PresentationTemplateId;
+}
+
 function parseImages(
   value: unknown
 ): readonly {
@@ -192,6 +313,7 @@ function parseImages(
     if (!isRecord(item)) {
       throw new TypeError(`images[${index}] must be an object`);
     }
+    requireExactKeys(item, ['fileId', 'workId', 'caption'], `images[${index}]`);
     const fileId = item.fileId === undefined ? undefined : requireString(item.fileId, `images[${index}].fileId`);
     const workId = item.workId === undefined ? undefined : requireString(item.workId, `images[${index}].workId`);
     if (!fileId && !workId) {
@@ -207,39 +329,19 @@ function parseImages(
   });
 }
 
-function parseThemeColors(
-  value: unknown
-): {
-  readonly accent: string;
-  readonly background: string;
-  readonly text: string;
-  readonly muted: string;
-} {
-  if (!isRecord(value)) {
-    throw new TypeError('customTheme must be an object');
-  }
-  const requireHex = (name: string): string => {
-    const color = requireString(value[name], `customTheme.${name}`);
-    if (!/^[0-9A-Fa-f]{6}$/.test(color)) {
-      throw new TypeError(`customTheme.${name} must be a hex color`);
-    }
-    return color.toUpperCase();
-  };
-  return {
-    accent: requireHex('accent'),
-    background: requireHex('background'),
-    text: requireHex('text'),
-    muted: requireHex('muted')
-  };
-}
-
 export interface DocumentGenerationApi {
-  generateFromConversation(
-    request: DocumentGenerationRequest
-  ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>>;
+  prepareGeneration(
+    request: DocumentGenerationPrepareRequest
+  ): Promise<DocumentGenerationIpcResult<DocumentGenerationPrepareResultDto>>;
+  reconcileGeneration(
+    request: DocumentGenerationReconcileRequest
+  ): Promise<DocumentGenerationIpcResult<DocumentGenerationReconcileResultDto>>;
   generateFromMessage(
     request: DocumentGenerationFromMessageRequest
   ): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>>;
+  cancelGeneration(
+    request: DocumentGenerationCancelRequest
+  ): Promise<DocumentGenerationIpcResult<DocumentGenerationCancelResultDto>>;
   openDocument(
     workId: string
   ): Promise<DocumentGenerationIpcResult<DocumentOpenResultDto>>;
