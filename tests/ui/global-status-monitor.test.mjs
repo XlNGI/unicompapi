@@ -14,6 +14,7 @@ test('global shell monitor reads real storage and task projections', () => {
   assert.match(sidebar, /GlobalStatusMonitor/);
   assert.match(monitor, /useTaskReadStore\(\)/);
   assert.match(taskStore, /storage\.listTasks\(\)/);
+  assert.match(taskStore, /storage\.getProjectSession\(\)/);
   assert.match(monitor, /storageApi\.getLocalStorageSummary\(\)/);
   assert.match(monitor, /storageApi\?\.onLocalStorageChanged/);
   assert.match(monitor, /PROJECT_SESSION_CHANGED_EVENT/);
@@ -40,7 +41,9 @@ test('task activity bar exposes only truthful compact status counts', () => {
     '最近任务活动', '运行中', '需处理', '等待处理', '已完成'
   ]) assert.match(monitor, new RegExp(label));
   assert.match(monitor, /aria-expanded=\{expanded\}/);
-  assert.match(monitor, /summarizeTasks\(taskRead\.tasks, Date\.now\(\)\)/);
+  assert.match(monitor, /tasksForProject\(taskRead\.tasks, taskRead\.currentProjectId\)/);
+  assert.match(monitor, /summarizeTasks\(currentProjectTasks, Date\.now\(\)\)/);
+  assert.doesNotMatch(monitor, /summarizeTasks\(taskRead\.tasks, Date\.now\(\)\)/);
   assert.match(taskStatusDock, /visibleTerminalDurationMs = 10 \* 60 \* 1_000/);
   assert.match(taskStatusDock, /visibleActiveDurationMs = 60 \* 60 \* 1_000/);
   assert.match(taskStatusDock, /task\.latestExecutionState === 'failed'/);
@@ -53,9 +56,11 @@ test('task activity bar exposes only truthful compact status counts', () => {
 
 test('task counts refresh from project file changes with a periodic fallback', () => {
   assert.match(taskStore, /storage\.onLocalStorageChanged\(schedule\)/);
-  assert.match(taskStore, /window\.addEventListener\(PROJECT_SESSION_CHANGED_EVENT, schedule\)/);
+  assert.match(taskStore, /window\.addEventListener\(PROJECT_SESSION_CHANGED_EVENT, handleProjectChange\)/);
+  assert.match(taskStore, /currentProjectId: undefined/);
   assert.match(taskStore, /window\.setInterval\(\(\) => scheduleRefresh\(0\), 60_000\)/);
-  assert.match(taskStore, /if \(inFlight\) return inFlight/);
+  assert.match(taskStore, /if \(inFlight\) \{/);
+  assert.match(taskStore, /refreshRequested = true/);
   assert.match(monitor, /aria-live="polite"/);
   assert.match(monitor, /aria-atomic="true"/);
 });

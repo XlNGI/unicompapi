@@ -42,6 +42,8 @@ test('workspace feedback uses one reusable floating status bar', () => {
 test('global status dock aggregates concurrent production tasks without fake percentages', () => {
   assert.match(taskStatusDockSource, /useTaskReadStore\(\)/);
   assert.doesNotMatch(taskStatusDockSource, /listTasks\(/);
+  assert.match(taskStatusDockSource, /tasksForProject\(tasks, currentProjectId\)/);
+  assert.doesNotMatch(taskStatusDockSource, /summarizeTasks\(tasks, now\)/);
   assert.match(taskStatusDockSource, /maximumVisibleTasks = 4/);
   assert.match(taskStatusDockSource, /正在处理 \{summary\.inProgress\} 个任务/);
   assert.match(taskStatusDockSource, /\{summary\.attention\} 个需要处理/);

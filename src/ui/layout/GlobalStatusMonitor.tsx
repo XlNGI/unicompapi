@@ -9,7 +9,7 @@ import type {
   StorageLocalStorageSummaryDto
 } from '../../shared/storage-ipc';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
-import { useTaskReadStore } from '../task-read-store';
+import { tasksForProject, useTaskReadStore } from '../task-read-store';
 import { summarizeTasks } from './TaskStatusDock';
 
 export function GlobalStatusMonitor() {
@@ -55,9 +55,13 @@ export function GlobalStatusMonitor() {
     };
   }, [storageApi]);
 
+  const currentProjectTasks = useMemo(
+    () => tasksForProject(taskRead.tasks, taskRead.currentProjectId),
+    [taskRead.currentProjectId, taskRead.tasks]
+  );
   const summary = useMemo(
-    () => summarizeTasks(taskRead.tasks, Date.now()),
-    [taskRead.tasks]
+    () => summarizeTasks(currentProjectTasks, Date.now()),
+    [currentProjectTasks]
   );
   const projectUsageWarning = storage ? [
     storage.projectUsage.unavailableProjectCount > 0

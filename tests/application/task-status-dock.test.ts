@@ -5,6 +5,7 @@ import {
   taskDisplayGroup,
   taskPriority
 } from '../../src/ui/layout/TaskStatusDock';
+import { tasksForProject } from '../../src/ui/task-read-store';
 
 const now = Date.parse('2026-08-21T04:00:00.000Z');
 
@@ -26,6 +27,57 @@ function task(
 }
 
 describe('task status dock projection', () => {
+  it('limits dock tasks to the currently open project', () => {
+    const currentProjectTask = task('current-project', 'processing');
+    const otherProjectTask = {
+      ...task('other-project', 'needs_user_action'),
+      projectId: 'other-project',
+      projectName: '其他项目'
+    };
+
+    const scopedTasks = tasksForProject(
+      [otherProjectTask, currentProjectTask],
+      'project-status'
+    );
+    const summary = summarizeTasks(scopedTasks, now);
+
+    expect(scopedTasks.map((item) => item.taskId)).toEqual(['current-project']);
+    expect(summary.visibleTasks.map((item) => item.taskId)).toEqual(['current-project']);
+    expect(summary.inProgress).toBe(1);
+    expect(summary.attention).toBe(0);
+  });
+
+  it('does not fall back to global tasks when no project is open', () => {
+    const scopedTasks = tasksForProject([
+      task('global-running', 'processing'),
+      task('global-attention', 'needs_user_action')
+    ]);
+
+    expect(scopedTasks).toEqual([]);
+    expect(summarizeTasks(scopedTasks, now)).toMatchObject({
+      attention: 0,
+      completed: 0,
+      inProgress: 0,
+      visibleTasks: []
+    });
+  });
+
+  it('drops the previous project tasks after the project scope changes', () => {
+    const tasks = [
+      task('previous-project', 'processing'),
+      {
+        ...task('next-project', 'queued'),
+        projectId: 'next-project',
+        projectName: '新项目'
+      }
+    ];
+
+    expect(tasksForProject(tasks, 'project-status').map((item) => item.taskId))
+      .toEqual(['previous-project']);
+    expect(tasksForProject(tasks, 'next-project').map((item) => item.taskId))
+      .toEqual(['next-project']);
+  });
+
   it('sorts actionable and failed tasks before localizing and generating tasks', () => {
     const tasks = [
       task('generating', 'processing'),
