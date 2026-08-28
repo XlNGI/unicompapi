@@ -21,6 +21,7 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'onLocalStorageChanged',
     'listTasks',
     'getTaskDetails',
+    'getTaskTimeline',
     'listCallRecords',
     'getCallDetails',
     'getConsumptionSummary',

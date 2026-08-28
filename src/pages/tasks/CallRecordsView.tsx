@@ -134,6 +134,9 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const selectedCallProjectId = records.find(
+    (record) => record.invocationAttemptId === selectedCallId
+  )?.projectId;
 
   useEffect(() => {
     let active = true;
@@ -202,7 +205,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
 
   useEffect(() => {
     let active = true;
-    if (!storage || !selectedCallId) {
+    if (!storage || !selectedCallId || !selectedCallProjectId) {
       setDetails(undefined);
       return () => {
         active = false;
@@ -211,7 +214,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
 
     setDetails(undefined);
     setDetailsLoading(true);
-    void storage.getCallDetails(selectedCallId)
+    void storage.getCallDetails(selectedCallProjectId, selectedCallId)
       .then((result) => {
         if (!active) return;
         if (!result.ok) {
@@ -231,7 +234,7 @@ export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
     return () => {
       active = false;
     };
-  }, [selectedCallId, storage]);
+  }, [selectedCallId, selectedCallProjectId, storage]);
 
   const options = useMemo(() => ({
     projects: uniqueOptions(catalogRecords, 'projectId', 'projectName'),

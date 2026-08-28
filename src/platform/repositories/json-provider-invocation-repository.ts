@@ -39,9 +39,7 @@ export class JsonProviderInvocationRepository
   }
 
   async list(): Promise<readonly ProviderInvocationAttemptV1[]> {
-    return [...(await this.read()).attempts].sort((left, right) =>
-      right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id)
-    );
+    return (await this.readAll()).attempts;
   }
 
   async getEvent(
@@ -53,14 +51,26 @@ export class JsonProviderInvocationRepository
   async listEvents(
     attemptId?: ProviderInvocationAttemptId
   ): Promise<readonly ProviderInvocationEventV1[]> {
-    return (await this.read()).events
+    return (await this.readAll()).events
       .filter((event) =>
         attemptId === undefined || event.invocationAttemptId === attemptId
-      )
-      .sort((left, right) =>
+      );
+  }
+
+  async readAll(): Promise<{
+    readonly attempts: readonly ProviderInvocationAttemptV1[];
+    readonly events: readonly ProviderInvocationEventV1[];
+  }> {
+    const document = await this.read();
+    return {
+      attempts: [...document.attempts].sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id)
+      ),
+      events: [...document.events].sort((left, right) =>
         left.invocationAttemptId.localeCompare(right.invocationAttemptId) ||
         left.sequence - right.sequence
-      );
+      )
+    };
   }
 
   async create(

@@ -752,32 +752,14 @@ function TaskUnifiedTimeline({ details }: { readonly details: StorageTaskDetails
     }
 
     setLoading(true);
-    void storage.listCallRecords({ projectId: details.projectId, limit: 200 })
-      .then(async (result) => {
+    void storage.getTaskTimeline(details.projectId, details.taskId)
+      .then((result) => {
         if (!active) return;
         if (!result.ok) {
           setMessage('读取调用记录失败，请重试');
           return;
         }
-        const callDetails = await Promise.all(
-          result.value.items
-            .filter((record) => record.subjectKind === 'media')
-            .map(async (record) => {
-              try {
-                const detailsResult = await storage.getCallDetails(record.invocationAttemptId);
-                return detailsResult.ok ? detailsResult.value : undefined;
-              } catch {
-                return undefined;
-              }
-            })
-        );
-        if (!active) return;
-        const taskCalls = callDetails.filter((call): call is StorageCallDetailsDto =>
-          call?.subject.kind === 'media' && call.subject.taskId === details.taskId
-        );
-        setCalls(taskCalls.sort((left, right) =>
-          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
-        ));
+        setCalls(result.value.items);
         setIssues(result.value.issues);
       })
       .catch(() => {

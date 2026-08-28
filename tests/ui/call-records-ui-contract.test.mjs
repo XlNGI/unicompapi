@@ -26,9 +26,8 @@ test('task center combines tasks and call records in one selected-task detail vi
   assert.doesNotMatch(page, /aria-selected=\{view === 'calls'\}/);
   assert.doesNotMatch(page, /<CallRecordsView/);
   assert.match(page, /TaskUnifiedTimeline/);
-  assert.match(page, /storage\.listCallRecords\(\{ projectId: details\.projectId, limit: 200 \}\)/);
-  assert.match(page, /storage\.getCallDetails\(record\.invocationAttemptId\)/);
-  assert.match(page, /call\?\.subject\.kind === 'media' && call\.subject\.taskId === details\.taskId/);
+  assert.match(page, /storage\.getTaskTimeline\(details\.projectId, details\.taskId\)/);
+  assert.doesNotMatch(page, /storage\.listCallRecords|storage\.getCallDetails/);
   assert.match(page, /calls\.flatMap\(\(call\) => callTimelineItems\(call\)\)/);
   assert.match(page, />\s*任务时间线\s*</);
   assert.doesNotMatch(page, /调用尝试|调用详情|variant="embedded"/);
@@ -77,7 +76,7 @@ test('tasks and calls share one independently scrolling workspace component', ()
 
 test('call records use the controlled list and detail read ports', () => {
   assert.match(calls, /storage\.listCallRecords\(toRequest\(filters\)\)/);
-  assert.match(calls, /storage\.getCallDetails\(selectedCallId\)/);
+  assert.match(calls, /storage\.getCallDetails\(selectedCallProjectId, selectedCallId\)/);
   for (const filter of [
     'projectId',
     'productFeature',

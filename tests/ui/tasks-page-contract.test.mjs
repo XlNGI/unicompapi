@@ -45,9 +45,8 @@ test('task center provides filters, details, source navigation, and honest issue
 
 test('task center folds task and provider call facts into one timeline', () => {
   assert.match(source, /TaskUnifiedTimeline/);
-  assert.match(source, /storage\.listCallRecords\(\{ projectId: details\.projectId, limit: 200 \}\)/);
-  assert.match(source, /storage\.getCallDetails\(record\.invocationAttemptId\)/);
-  assert.match(source, /call\?\.subject\.kind === 'media' && call\.subject\.taskId === details\.taskId/);
+  assert.match(source, /storage\.getTaskTimeline\(details\.projectId, details\.taskId\)/);
+  assert.doesNotMatch(source, /storage\.listCallRecords|storage\.getCallDetails/);
   assert.match(source, /<TimelineItem[\s\S]*title="创建任务"/);
   assert.match(source, /<TimelineItem[\s\S]*title="确认输入"/);
   assert.match(source, /calls\.flatMap\(\(call\) => callTimelineItems\(call\)\)/);

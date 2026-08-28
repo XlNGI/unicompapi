@@ -1342,3 +1342,5 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
 PR0 基线实现已完成：独立性能门禁 1/1、TypeScript、定向 ESLint 与差异检查通过；生产读模型、IPC 和页面零修改，真实服务商 HTTP、凭证读取和收费调用均为 0。允许提交、推送并非快进合并 `develop`，随后从最新 `develop` 创建 PR1 `feature/project-read-snapshots`。
 
 2026-08-28 性能专项 PR1 工程补充：`feature/project-read-snapshots` 已把全局 Task/Work 读模型改为按项目实体文件的有界 Promise 快照与并发请求合并。合成门禁中，冷读 Task 的 Tasks/Executions 与冷读 Work 的 Works/Executions/FileReferences 均降为每项目每文件 1 次，20 个相同并发查询也只建立 1 次底层读取；存储变更会同步清理快照与容量摘要，失败快照不保留，项目 JSON 仍是唯一权威事实源。记录见 `docs/active/生成历史与任务中心性能优化-PR1-项目读快照记录.md`；下一步为 PR2 单次任务时间线与调用分页前置。
+
+2026-08-28 性能专项 PR2 工程补充：`feature/task-timeline-batch-read-model` 新增按 `projectId + taskId` 的单次任务时间线 IPC，删除任务页“调用列表 + 最多 200 次逐条详情 + renderer 末端过滤”链路；目标项目 Invocation Attempt/Event 同文档只读 1 次，其余 Route、Usage、LocalResult、Work 事实文件各读 1 次。调用详情强制携带项目范围，调用列表在读取事实前先过滤项目，伪造或跨项目范围失败关闭。记录见 `docs/active/生成历史与任务中心性能优化-PR2-任务时间线记录.md`；下一步为 PR3 共享任务 Store 与消费汇总缓存。
