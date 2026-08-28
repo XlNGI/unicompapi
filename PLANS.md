@@ -1356,3 +1356,5 @@ PR0 基线实现已完成：独立性能门禁 1/1、TypeScript、定向 ESLint 
 ## 图片结果接收状态优化专项（2026-08-28）
 
 2026-08-28 项目负责人批准直接执行图片结果接收优化。PR1 `feature/image-result-receipt-state-fix` 已把 `remote_completed` 纳入图片本地接收失败收口，并由领域层统一限定 `remote_completed/downloading/writing` 的安全恢复资格；结果描述读取失败不再永久显示为远端完成，任务中心仍只复用原 Task、Execution 与持久化结果引用，不重新提交生成。定向领域/平台测试 23/23、TypeScript 与定向 ESLint 通过；未调用真实服务商、未读取凭证、未产生费用。记录见 `docs/active/图片结果接收优化-PR1-状态闭环记录.md`；下一步为 PR2 生成历史接收状态语义。
+
+2026-08-28 图片结果接收优化 PR2：`feature/image-history-receipt-status` 已将共用生成历史的服务商生成与本地接收状态分开，`remote_completed` 显示“结果待接收”，下载、写入、校验及登记阶段显示“正在接收”，只有真实提交/排队/生成阶段显示“生成中”；正式作品计数与本地校验登记门禁不变。定向 UI 合同 45/45、TypeScript 与定向 ESLint 通过；本地真实 CSS 在 `1280x720`、`800x720` 均无横向溢出。未调用真实服务商、未读取凭证、未产生费用。记录见 `docs/active/图片结果接收优化-PR2-生成历史状态记录.md`；下一步为 PR3 服务商无关即时图片结果接收端口与安全事件。

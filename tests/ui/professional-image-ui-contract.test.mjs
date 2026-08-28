@@ -238,9 +238,27 @@ test('professional image history uses current-draft verified local works only', 
 });
 
 test('professional image history keeps concise truthful timeline states', () => {
-  for (const text of ['生成历史', '张作品', '最新在右侧', '生成中', '失败']) {
+  for (const text of [
+    '生成历史',
+    '张作品',
+    '最新在右侧',
+    '生成中',
+    '结果待接收',
+    '正在接收',
+    '失败'
+  ]) {
     assert.match(historySource, new RegExp(text));
   }
+  assert.match(historySource, /const awaitingReceiptExecutionStates = new Set\(\[[\s\S]*'remote_completed'/);
+  assert.match(historySource, /const receivingExecutionStates = new Set\(\[[\s\S]*'downloading'[\s\S]*'writing'[\s\S]*'verifying'/);
+  const pendingStates = historySource.match(
+    /const pendingExecutionStates = new Set\(\[([\s\S]*?)\]\);/
+  )?.[1] ?? '';
+  assert.doesNotMatch(pendingStates, /remote_completed|downloading|writing|verifying/);
+  assert.match(pageStyles, /\.uc-generation-history__status--awaiting-receipt\s*{[\s\S]*status-warning/);
+  assert.match(pageStyles, /\.uc-generation-history__status--receiving\s*{[\s\S]*status-info/);
+  assert.match(pageStyles, /\.uc-generation-history__marker--awaiting_receipt\s*{/);
+  assert.match(pageStyles, /\.uc-generation-history__marker--receiving\s*{/);
   assert.doesNotMatch(historySource, /当前草稿的生成历史|按生成时间排列/);
   assert.match(historySource, /latestExecutionUpdatedAt \?\? task\.createdAt/);
   assert.match(historySource, /startedAt \?\? new Date\(\)\.toISOString\(\)/);
