@@ -9,12 +9,12 @@ files:
   - dist-electron/**/*
   - package.json
   - '!**/*.map'
-  - '!**/tests{,/**}'
-  - '!**/docs{,/**}'
-  - '!**/.tools{,/**}'
-  - '!**/.cache{,/**}'
-  - '!**/tmp{,/**}'
-  - '!**/temp{,/**}'
+  - '!tests{,/**}'
+  - '!docs{,/**}'
+  - '!.tools{,/**}'
+  - '!.cache{,/**}'
+  - '!tmp{,/**}'
+  - '!temp{,/**}'
 asar: true
 compression: maximum
 npmRebuild: false

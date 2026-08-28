@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+2026-08-28 Windows 本地未签名测试包修复：首次安装包启动时主进程因 `Cannot find module 'tmp'` 崩溃。根因是 `electron-builder.yml` 的递归排除规则 `!**/tmp{,/**}` 将 `exceljs@4.4.0` 的生产依赖 `tmp@0.2.7` 一并从 ASAR 删除；现将 tests/docs/.tools/.cache/tmp/temp 排除限定到项目根目录，并增加 Windows 打包合同测试，禁止重新引入会删除同名生产依赖的递归规则。修复 ASAR 已确认包含 `node_modules/tmp/package.json` 与 `lib/tmp.js`，解包生产应用真实启动 4/4 进程并在 10 秒观察期保持运行，关闭后残留 0；全量测试、typecheck、lint、build、差异检查与 NSIS 生成通过。安装包仍为未签名、本地测试产物，默认 Electron 图标且未完成阶段 10 的签名、SBOM、生产更新、正式媒体组件分发或发布准入。记录见 `docs/active/Windows安装包ExcelJS运行时依赖修复-2026-08-28.md`。
+
 2026-08-28 人工验收修复：对话内 Office 修改补齐 Excel 口语表达，“给表格加几列”“当前工资表在加年龄跟性别”在当前对话存在可修改表格时进入 revise；Office 问句和“加油”等非修改表达仍走普通聊天。一次已在服务商后台产生费用的 PPT 请求在本地 62.5 秒报 `newapi.timeout`，证据确认客户端命中既有 60 秒响应头等待上限；默认首包等待已改为 5 分钟，流空闲 60 秒和总上限 15 分钟不变。timeout 现在标记为远端结果/费用未知，UI 要求先核对服务商后台并避免立即重复发送，不自动重试。定向与相邻回归为 Vitest 75/75、Node UI 18/18，typecheck、lint、build 通过；本轮未调用真实 Provider，未运行默认全量测试，Windows Electron 口语修改和长首包/费用提示仍待人工复验。详见 `docs/active/对话内Office文档生成-PPT质量优化验收记录.md` 第 12 节。
 
 2026-08-24 工程补充：按用户需求在“对话内 Office 文档生成”系列内新增 EPUB 电子书上传与解析（分支 `feature/chat-epub-upload`）。对话页文档模式附件白名单扩展为 txt/md/csv/docx/pdf/xlsx/pptx/epub：EPUB 按 mimetype/container.xml/OPF 的 manifest+spine 顺序解析 XHTML 章节正文（标签剥离、HTML 实体解码、章节标题分隔），沿用文件 20MB/ZIP 条目 500/全文 2,000,000 字符/预览 4,000 字符上限，非法 EPUB 返回 failed 并给中文警告；RAG 检索复用全文提取自动纳入。UI 文案补充“EPUB 电子书”提示。全量门禁 146 文件 / 822 项通过，0 失败、0 跳过；typecheck/lint/build/git diff --check 通过。记录见 `docs/active/对话内Office文档生成-EPUB电子书上传解析验收记录.md`。
