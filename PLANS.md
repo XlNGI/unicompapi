@@ -1348,3 +1348,5 @@ PR0 基线实现已完成：独立性能门禁 1/1、TypeScript、定向 ESLint 
 2026-08-28 性能专项 PR3 工程补充：`feature/shared-task-read-store` 已让全局状态监控、底部任务活动条与任务中心订阅唯一 renderer 任务 snapshot/in-flight，删除两份独立 5 秒轮询，存储通知在 100ms 内合并并保留单一 60 秒健康检查。消费汇总按查询周期缓存并合并并发请求，存储变更时同步失效，图表延后 150ms 后台读取；容量摘要兜底也降为 60 秒。记录见 `docs/active/生成历史与任务中心性能优化-PR3-共享任务Store记录.md`；下一步为 PR4 生成历史分页与按需媒体。
 
 2026-08-28 性能专项 PR4 工程补充：`feature/generation-history-pagination` 新增项目/草稿/媒体范围的稳定游标历史 IPC，默认最近 20 条；主进程一次关联目标项目 Tasks、Executions、Works 与 FileReferences，renderer 删除全局列表、逐详情和整页句柄预创建。图片 lazy/async decode，视频缩略项进入视口或选中后才设置受控 `src`；句柄按项目校验并复用。25 条同草稿夹具分页为 20+5、无重复，目标项目 4 类事实文件各读 1 次，其他项目 0 次。记录见 `docs/active/生成历史与任务中心性能优化-PR4-生成历史分页记录.md`；下一步执行 PR5 条件判断。
+
+2026-08-28 性能专项 PR5 条件判断：当前 Windows x64 健康 NVMe SSD 的 10 项目/1,000 Task 合成门禁实测冷任务列表 19.49 ms、20 次热读 median 0.62 ms/P95 0.91 ms、单草稿历史冷读 2.92 ms，均达到 800/300/600 ms 目标；结构性单文件单读门禁也保持通过。因此 `feature/rebuildable-read-index` 只固化大规模回归门禁与判断记录，不实现磁盘索引、缩略图缓存或数据库，避免当前收益不足的复杂度；慢盘与断盘不作同等绝对耗时承诺。记录见 `docs/active/生成历史与任务中心性能优化-PR5-条件判断记录.md`；下一步进入 PR6 Windows Electron 收口。

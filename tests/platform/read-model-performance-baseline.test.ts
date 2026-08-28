@@ -164,7 +164,67 @@ describe('read-model I/O performance gate', () => {
       projectStoragePaths.entities.fileReferences
     ]) expect(reads.get(path)).toBe(1);
   });
+
+  it('meets the Windows synthetic 10-project and 1000-entity read targets', async () => {
+    const projectCount = 10;
+    const itemsPerProject = 100;
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    for (let projectIndex = 0; projectIndex < projectCount; projectIndex += 1) {
+      const root = await createProjectFixture(projectIndex, itemsPerProject, true);
+      await catalog.remember({
+        projectId: toProjectId(`project-performance-${projectIndex}`),
+        projectName: `Performance project ${projectIndex}`,
+        rootDirectory: root
+      });
+    }
+
+    const controller = new GlobalReadModelController(catalog);
+    const coldStartedAt = performance.now();
+    const cold = await controller.listTasks();
+    const coldTaskMs = performance.now() - coldStartedAt;
+    expect(cold).toMatchObject({ ok: true, value: { items: { length: 1_000 } } });
+
+    const warmDurations: number[] = [];
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      const startedAt = performance.now();
+      await controller.listTasks();
+      warmDurations.push(performance.now() - startedAt);
+    }
+
+    controller.invalidate();
+    const historyStartedAt = performance.now();
+    const history = await controller.listGenerationHistory({
+      projectId: 'project-performance-0',
+      draftId: 'draft-performance-shared-0',
+      mediaKind: 'image',
+      limit: 20
+    });
+    const coldHistoryMs = performance.now() - historyStartedAt;
+    expect(history).toMatchObject({ ok: true, value: { items: { length: 20 } } });
+
+    const metrics = {
+      projectCount,
+      taskCount: projectCount * itemsPerProject,
+      coldTaskMs: roundMetric(coldTaskMs),
+      warmTaskMedianMs: roundMetric(percentile(warmDurations, 0.5)),
+      warmTaskP95Ms: roundMetric(percentile(warmDurations, 0.95)),
+      coldHistoryMs: roundMetric(coldHistoryMs)
+    };
+    console.info(`read-model-performance ${JSON.stringify(metrics)}`);
+    expect(metrics.coldTaskMs).toBeLessThan(800);
+    expect(metrics.warmTaskP95Ms).toBeLessThan(300);
+    expect(metrics.coldHistoryMs).toBeLessThan(600);
+  }, 30_000);
 });
+
+function percentile(values: readonly number[], ratio: number): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)] ?? 0;
+}
+
+function roundMetric(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 async function createProjectFixture(
   projectIndex: number,
