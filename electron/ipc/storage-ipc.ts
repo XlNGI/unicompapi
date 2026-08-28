@@ -129,7 +129,8 @@ export function registerStorageIpcHandlers(options: {
     getSession: () => sessionRegistry.get(),
     imageMutations,
     videoMutations,
-    newApiRuntime: options.textSubmission?.newApiRuntime
+    newApiRuntime: options.textSubmission?.newApiRuntime,
+    imageResultDownloads: options.textSubmission?.newApiImageDownloads
   });
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),

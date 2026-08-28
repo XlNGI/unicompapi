@@ -2,6 +2,7 @@ import { app, net, safeStorage } from 'electron';
 import path from 'node:path';
 import {
   ImageOperationRouter,
+  JsonLineImageResultReceiptLogger,
   JsonProviderOperationRepository,
   JsonProviderRegistryStore,
   JsonProviderUsageObservationRepository,
@@ -10,13 +11,15 @@ import {
   NodeProjectStorage,
   ProjectImageMaterialResolver,
   SecureCredentialVault,
-  ViduImmediateImageResultPort,
+  StoredImmediateImageResultPort,
   ViduProviderPackage,
   ViduTransportFailure,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   createNewApiVideoAdapterFromRuntimes,
+  controlledImageResultDownloaderFromRuntime,
   type ImageOperationPorts,
+  type ControlledImmediateImageResultDownloader,
   type ImageSubmissionControllerDependencies,
   type NewApiSharedRuntime,
   type NewApiVideoAdapter,
@@ -44,10 +47,14 @@ export class ElectronViduComposition {
   readonly registry: JsonProviderRegistryStore;
   readonly credentialVault: SecureCredentialVault;
   readonly providerPackage: ViduProviderPackage;
+  private readonly imageResultReceiptLogger: JsonLineImageResultReceiptLogger;
   private newApiVideoAdapter: NewApiVideoAdapter | undefined;
 
   constructor(options: ElectronViduCompositionOptions) {
     const userDataPath = app.getPath('userData');
+    this.imageResultReceiptLogger = new JsonLineImageResultReceiptLogger(
+      path.join(userDataPath, 'logs', 'image-result-receipt.log')
+    );
     this.registry = new JsonProviderRegistryStore(
       path.join(userDataPath, 'provider-registry.json')
     );
@@ -75,6 +82,7 @@ export class ElectronViduComposition {
     readonly imageMutations: ImageSubmissionControllerDependencies['mutations'];
     readonly videoMutations: VideoWorkspaceMutationCoordinator;
     readonly newApiRuntime?: NewApiSharedRuntime;
+    readonly imageResultDownloads?: ControlledImmediateImageResultDownloader;
   }): {
     readonly image: ImageOperationPorts;
     readonly imageResultReceiver: NonNullable<
@@ -185,10 +193,15 @@ export class ElectronViduComposition {
           return new LocalImageResultReceiver({
             getSession: options.getSession,
             mutations: options.imageMutations,
-            port: new ViduImmediateImageResultPort({
+            port: new StoredImmediateImageResultPort({
               operations: new JsonProviderOperationRepository(storage),
-              runtime: this.providerPackage.runtime
-            })
+              downloader:
+                options.imageResultDownloads ??
+                controlledImageResultDownloaderFromRuntime(
+                  this.providerPackage.runtime
+                )
+            }),
+            onEvent: (event) => this.imageResultReceiptLogger.write(event)
           }).receive(executionId);
         }
       },

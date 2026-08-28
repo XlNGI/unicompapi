@@ -30,6 +30,7 @@ import {
   ImageWorkspaceMutationCoordinator,
   JsonExecutionRepository,
   JsonFileReferenceRepository,
+  JsonLineImageResultReceiptLogger,
   JsonProviderOperationRepository,
   JsonProviderRegistryStore,
   JsonTaskRepository,
@@ -38,10 +39,12 @@ import {
   NodeProjectStorage,
   ProviderPackageRegistry,
   SecureCredentialVault,
-  ViduImmediateImageResultPort,
+  StoredImmediateImageResultPort,
   ViduSharedRuntime,
+  controlledImageResultDownloaderFromRuntime,
   createImageFeatureControllerRuntime,
   type CredentialProtector,
+  type ImageResultReceiptEvent,
   type ViduHttpTransport,
   type ViduHttpTransportRequest,
   type ViduHttpTransportResponse
@@ -56,7 +59,7 @@ afterEach(async () => {
   );
 });
 
-describe('ViduImmediateImageResultPort', () => {
+describe('StoredImmediateImageResultPort', () => {
   it('decodes a private base64 receipt without exposing it through the descriptor', async () => {
     const fixture = await createPortFixture({
       kind: 'base64',
@@ -68,7 +71,7 @@ describe('ViduImmediateImageResultPort', () => {
     await expect(
       fixture.port.getCompletedResult(fixture.reference)
     ).resolves.toEqual({
-      name: 'vidu-image-result.png',
+      name: 'image-result.png',
       declaredMimeType: 'image/png',
       expectedSizeBytes: 24
     });
@@ -78,11 +81,11 @@ describe('ViduImmediateImageResultPort', () => {
       .not.toContain('iVBOR');
   });
 
-  it('downloads HTTPS URL and file URI results with bounded no-redirect transport', async () => {
+  it('downloads UniCompAPI-style HTTPS URL and file URI results with bounded no-redirect transport', async () => {
     const bytes = pngBytes(3, 4);
     const fixture = await createPortFixture({
       kind: 'file_uri',
-      value: 'https://files.synthetic.invalid/result.png?signature=private'
+      value: 'https://results.unicompapi.example/result.png?signature=private'
     });
     fixture.transport.responses.push({
       status: 200,
@@ -117,14 +120,22 @@ describe('ViduImmediateImageResultPort', () => {
       )
     ).rejects.toMatchObject({ retryability: 'not_retryable' });
 
-    const unsafe = await createPortFixture({
-      kind: 'remote_url',
-      value: 'https://127.0.0.1/private.png'
-    });
-    await expect(
-      unsafe.port.download(unsafe.reference, path.join(unsafe.root, 'unsafe.png'))
-    ).rejects.toMatchObject({ retryability: 'not_retryable' });
-    expect(unsafe.transport.requests).toHaveLength(0);
+    for (const [index, value] of [
+      'https://127.0.0.1/private.png',
+      'https://localhost/private.png',
+      'https://user:password@results.example/private.png',
+      'https://results.example/private.png#fragment',
+      'http://results.example/private.png'
+    ].entries()) {
+      const unsafe = await createPortFixture({ kind: 'remote_url', value });
+      await expect(
+        unsafe.port.download(
+          unsafe.reference,
+          path.join(unsafe.root, `unsafe-${index}.png`)
+        )
+      ).rejects.toMatchObject({ retryability: 'not_retryable' });
+      expect(unsafe.transport.requests).toHaveLength(0);
+    }
 
     const wrongType = await createPortFixture({
       kind: 'remote_url',
@@ -142,6 +153,41 @@ describe('ViduImmediateImageResultPort', () => {
       )
     ).rejects.toMatchObject({ retryability: 'not_retryable' });
   });
+
+  it('rejects redirects and oversized downloads with safe retryability', async () => {
+    const redirected = await createPortFixture({
+      kind: 'remote_url',
+      value: 'https://results.example/redirect.png'
+    });
+    redirected.transport.responses.push({
+      status: 302,
+      headers: { location: 'https://attacker.example/result.png?token=private' },
+      body: new Uint8Array()
+    });
+    await expect(
+      redirected.port.download(
+        redirected.reference,
+        path.join(redirected.root, 'redirected.png')
+      )
+    ).rejects.toMatchObject({ retryability: 'not_retryable' });
+    expect(redirected.transport.requests).toHaveLength(1);
+
+    const oversized = await createPortFixture({
+      kind: 'remote_url',
+      value: 'https://results.example/oversized.png'
+    }, 8);
+    oversized.transport.responses.push({
+      status: 200,
+      headers: { 'content-type': 'image/png', 'content-length': '24' },
+      body: pngBytes(1, 1)
+    });
+    await expect(
+      oversized.port.download(
+        oversized.reference,
+        path.join(oversized.root, 'oversized.png')
+      )
+    ).rejects.toMatchObject({ retryability: 'not_retryable' });
+  });
 });
 
 describe('synchronous image receipt integration', () => {
@@ -153,7 +199,7 @@ describe('synchronous image receipt integration', () => {
       value: {
         workId: 'work-sync-image',
         executionId: fixture.execution.id,
-        name: 'vidu-image-result.png'
+        name: 'image-result.png'
       }
     });
     const execution = await new JsonExecutionRepository(fixture.storage).get(
@@ -169,6 +215,112 @@ describe('synchronous image receipt integration', () => {
       fixture.projectId
     ).list(fixture.projectId);
     expect(works).toHaveLength(1);
+    expect(fixture.events.map((event) => event.event)).toEqual([
+      'receipt_started',
+      'descriptor_loaded',
+      'download_started',
+      'download_completed',
+      'verification_completed',
+      'work_registered'
+    ]);
+    await fixture.logger.flush();
+    const log = await readFile(fixture.logPath, 'utf8');
+    expect(log).not.toContain(pngBytes(10, 12).toString('base64'));
+    for (const line of log.trim().split('\n')) {
+      const keys = Object.keys(JSON.parse(line));
+      expect(keys).toEqual(expect.arrayContaining([
+        'event', 'taskId', 'executionId', 'stage', 'occurredAt'
+      ]));
+      expect(keys.every((key) => [
+        'event',
+        'taskId',
+        'executionId',
+        'stage',
+        'safeCode',
+        'retryability',
+        'occurredAt'
+      ].includes(key))).toBe(true);
+    }
+  });
+
+  it('keeps a successful signed URL and response body out of receipt logs', async () => {
+    const secretUrl =
+      'https://results.unicompapi.example/result.png?signature=private-signature&token=private-token';
+    const secretBodyMarker = 'private-response-body-token';
+    const fixture = await createReceiverFixture('remote_completed', {
+      result: { kind: 'remote_url', value: secretUrl },
+      responseBytes: Buffer.concat([
+        pngBytes(10, 12),
+        Buffer.from(secretBodyMarker, 'utf8')
+      ])
+    });
+
+    await expect(fixture.receiver.receive(fixture.execution.id)).resolves.toMatchObject({
+      ok: true,
+      value: { workId: 'work-sync-image', executionId: fixture.execution.id }
+    });
+    expect(fixture.events.map((event) => event.event)).toEqual([
+      'receipt_started',
+      'descriptor_loaded',
+      'download_started',
+      'download_completed',
+      'verification_completed',
+      'work_registered'
+    ]);
+    await fixture.logger.flush();
+    const log = await readFile(fixture.logPath, 'utf8');
+    expect(log).not.toContain(secretUrl);
+    expect(log).not.toContain('private-signature');
+    expect(log).not.toContain('private-token');
+    expect(log).not.toContain(secretBodyMarker);
+  });
+
+  it('emits a safe failure event without logging URL, query, token or body', async () => {
+    const secretUrl =
+      'https://127.0.0.1/private.png?signature=private-signature&token=private-token';
+    const fixture = await createReceiverFixture('remote_completed', {
+      result: { kind: 'remote_url', value: secretUrl }
+    });
+
+    await expect(fixture.receiver.receive(fixture.execution.id)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'download_failed',
+        message: 'The image result could not be downloaded and verified'
+      }
+    });
+    expect(fixture.transport.requests).toHaveLength(0);
+    expect(fixture.events.map((event) => event.event)).toEqual([
+      'receipt_started',
+      'receipt_failed'
+    ]);
+    expect(fixture.events.at(-1)).toMatchObject({
+      stage: 'loading_descriptor',
+      safeCode: 'download_failed',
+      retryability: 'not_retryable'
+    });
+    await fixture.logger.flush();
+    const log = await readFile(fixture.logPath, 'utf8');
+    expect(log).not.toContain(secretUrl);
+    expect(log).not.toContain('private-signature');
+    expect(log).not.toContain('private-token');
+    expect(log).not.toContain('127.0.0.1');
+  });
+
+  it('does not let receipt log write failures block Work registration', async () => {
+    const fixture = await createReceiverFixture('remote_completed', {
+      failEventWrites: true
+    });
+
+    await expect(fixture.receiver.receive(fixture.execution.id)).resolves.toMatchObject({
+      ok: true,
+      value: { workId: 'work-sync-image', executionId: fixture.execution.id }
+    });
+    await expect(
+      new JsonWorkRepository(fixture.storage, fixture.projectId).list(
+        fixture.projectId
+      )
+    ).resolves.toHaveLength(1);
   });
 
   it('recovers idempotently when a verified file exists before Work registration', async () => {
@@ -247,12 +399,12 @@ describe('synchronous image receipt integration', () => {
       path.join(root, 'credentials.json'),
       reversibleProtector()
     );
-    const resultPort = new ViduImmediateImageResultPort({
+    const resultPort = new StoredImmediateImageResultPort({
       operations: new JsonProviderOperationRepository(storage),
-      runtime: new ViduSharedRuntime({
+      downloader: controlledImageResultDownloaderFromRuntime(new ViduSharedRuntime({
         credentialVault: vault,
         transport: new FixtureTransport()
-      })
+      }))
     });
     const mutations = new ImageWorkspaceMutationCoordinator();
     const session = {
@@ -347,9 +499,10 @@ function createRecoveryTask(projectId: ReturnType<typeof toProjectId>) {
 }
 
 async function createPortFixture(
-  result: ProviderImmediateResultReference
+  result: ProviderImmediateResultReference,
+  maximumResultBytes?: number
 ) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-vidu-result-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-stored-result-'));
   roots.push(root);
   const storage = new NodeProjectStorage(root);
   const operations = new JsonProviderOperationRepository(storage);
@@ -378,19 +531,39 @@ async function createPortFixture(
     root,
     transport,
     reference: { kind: 'provider_operation_record' as const, id: recordId },
-    port: new ViduImmediateImageResultPort({ operations, runtime })
+    port: new StoredImmediateImageResultPort({
+      operations,
+      downloader: controlledImageResultDownloaderFromRuntime(runtime),
+      maximumResultBytes
+    })
   };
 }
 
 async function createReceiverFixture(
-  state: 'remote_completed' | 'verifying'
+  state: 'remote_completed' | 'verifying',
+  options: {
+    readonly result?: ProviderImmediateResultReference;
+    readonly responseBytes?: Buffer;
+    readonly failEventWrites?: boolean;
+  } = {}
 ) {
   const resultBytes = pngBytes(10, 12);
-  const portFixture = await createPortFixture({
+  const result = options.result ?? {
     kind: 'base64',
     value: resultBytes.toString('base64'),
     mimeType: 'image/png'
-  });
+  } as const;
+  const portFixture = await createPortFixture(result);
+  if (result.kind !== 'base64' && options.responseBytes) {
+    portFixture.transport.responses.push({
+      status: 200,
+      headers: {
+        'content-type': 'image/png',
+        'content-length': String(options.responseBytes.byteLength)
+      },
+      body: options.responseBytes
+    });
+  }
   const root = portFixture.root;
   await mkdir(path.join(root, 'tmp'), { recursive: true });
   const storage = new NodeProjectStorage(root);
@@ -416,9 +589,9 @@ async function createReceiverFixture(
       purpose: 'image_generation',
       modelId: toModelId('model-sync-image'),
       capabilityEvidenceId: toCapabilityEvidenceId('evidence-sync-image'),
-      providerId: toProviderId('provider-vidu'),
-      connectionId: toConnectionId('connection-vidu-default'),
-      recipientName: 'Vidu',
+      providerId: toProviderId('provider-unicompapi'),
+      connectionId: toConnectionId('connection-unicompapi-default'),
+      recipientName: 'UniCompAPI',
       accessCategory: 'online',
       outboundScope: 'external_service',
       costState: 'unknown',
@@ -460,6 +633,9 @@ async function createReceiverFixture(
   const times = Array.from({ length: 16 }, (_, index) =>
     `2026-07-29T02:${String(index + 1).padStart(2, '0')}:00.000Z`
   );
+  const events: ImageResultReceiptEvent[] = [];
+  const logPath = path.join(root, 'logs', 'image-result-receipt.log');
+  const logger = new JsonLineImageResultReceiptLogger(logPath);
   const receiver = new LocalImageResultReceiver({
     getSession: () => ({
       projectId,
@@ -470,9 +646,26 @@ async function createReceiverFixture(
     mutations: new ImageWorkspaceMutationCoordinator(),
     createFileId: () => 'file-sync-image',
     createWorkId: () => 'work-sync-image',
-    now: () => times.shift() ?? '2026-07-29T02:59:00.000Z'
+    now: () => times.shift() ?? '2026-07-29T02:59:00.000Z',
+    onEvent: (event) => {
+      events.push(event);
+      if (options.failEventWrites) {
+        throw new Error('synthetic receipt log failure');
+      }
+      logger.write(event);
+    }
   });
-  return { root, storage, projectId, execution, receiver };
+  return {
+    root,
+    storage,
+    projectId,
+    execution,
+    receiver,
+    events,
+    logger,
+    logPath,
+    transport: portFixture.transport
+  };
 }
 
 async function saveAvailableResultFile(
