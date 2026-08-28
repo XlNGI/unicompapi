@@ -144,12 +144,21 @@ interface ProviderConsumptionTotal extends ConsumptionTotal {
 }
 
 export class ProviderInvocationReadModelController {
+  private readonly consumptionCache = new Map<
+    number,
+    Promise<StorageIpcResult<StorageConsumptionSummaryDto>>
+  >();
+
   constructor(
     private readonly catalog: ProjectCatalogService,
     private readonly usageSchemas: ProviderUsageSchemaResolverPort = noUsageSchemas,
     private readonly currencyConversions: CurrencyConversionFactResolverPort = noCurrencyConversions,
     private readonly now: () => Date = () => new Date()
   ) {}
+
+  invalidate(): void {
+    this.consumptionCache.clear();
+  }
 
   async listCallRecords(
     request: unknown = {}
@@ -298,6 +307,19 @@ export class ProviderInvocationReadModelController {
       return invalidRequestFailure();
     }
 
+    const cached = this.consumptionCache.get(calendarDays);
+    if (cached) return cached;
+    const pending = this.buildConsumptionSummary(calendarDays).then((result) => {
+      if (!result.ok) this.consumptionCache.delete(calendarDays);
+      return result;
+    });
+    this.consumptionCache.set(calendarDays, pending);
+    return pending;
+  }
+
+  private async buildConsumptionSummary(
+    calendarDays: number
+  ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>> {
     try {
       const period = consumptionPeriod(this.now(), calendarDays);
       const conversionFacts = parseConversionFacts(

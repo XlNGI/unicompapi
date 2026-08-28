@@ -6,55 +6,18 @@ import {
   LuHardDrive
 } from 'react-icons/lu';
 import type {
-  StorageLocalStorageSummaryDto,
-  StorageTaskSummaryDto
+  StorageLocalStorageSummaryDto
 } from '../../shared/storage-ipc';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../project-session-events';
+import { useTaskReadStore } from '../task-read-store';
 import { summarizeTasks } from './TaskStatusDock';
 
 export function GlobalStatusMonitor() {
   const storageApi = window.unicomp?.storage;
-  const [tasks, setTasks] = useState<readonly StorageTaskSummaryDto[]>();
-  const [tasksUnavailable, setTasksUnavailable] = useState(false);
+  const taskRead = useTaskReadStore();
   const [storage, setStorage] = useState<StorageLocalStorageSummaryDto>();
   const [storageUnavailable, setStorageUnavailable] = useState(false);
   const [expanded, setExpanded] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    const refresh = async () => {
-      if (!storageApi) {
-        if (active) setTasksUnavailable(true);
-        return;
-      }
-      try {
-        const result = await storageApi.listTasks();
-        if (!active) return;
-        if (result.ok) {
-          setTasks(result.value.items);
-          setTasksUnavailable(false);
-        } else {
-          setTasksUnavailable(true);
-        }
-      } catch {
-        if (active) setTasksUnavailable(true);
-      }
-    };
-    const handleFocus = () => void refresh();
-    const handleTaskChange = () => void refresh();
-    void refresh();
-    const timer = window.setInterval(refresh, 5_000);
-    const unsubscribeTasks = storageApi?.onLocalStorageChanged(handleTaskChange);
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, handleTaskChange);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      unsubscribeTasks?.();
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, handleTaskChange);
-    };
-  }, [storageApi]);
 
   useEffect(() => {
     let active = true;
@@ -79,7 +42,7 @@ export function GlobalStatusMonitor() {
     const handleFocus = () => void refresh();
     const handleProjectChange = () => void refresh();
     void refresh();
-    const timer = window.setInterval(refresh, 5_000);
+    const timer = window.setInterval(refresh, 60_000);
     const unsubscribe = storageApi?.onLocalStorageChanged(handleProjectChange);
     window.addEventListener('focus', handleFocus);
     window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, handleProjectChange);
@@ -92,7 +55,10 @@ export function GlobalStatusMonitor() {
     };
   }, [storageApi]);
 
-  const summary = useMemo(() => summarizeTasks(tasks ?? [], Date.now()), [tasks]);
+  const summary = useMemo(
+    () => summarizeTasks(taskRead.tasks, Date.now()),
+    [taskRead.tasks]
+  );
   const projectUsageWarning = storage ? [
     storage.projectUsage.unavailableProjectCount > 0
       ? `${storage.projectUsage.unavailableProjectCount} 个项目未统计`
@@ -176,9 +142,9 @@ export function GlobalStatusMonitor() {
 
         {expanded ? (
           <div
-            aria-label={tasks
+            aria-label={!taskRead.loading
               ? '任务状态统计'
-              : tasksUnavailable
+              : taskRead.error
                 ? '任务状态暂不可用'
                 : '正在读取任务状态'}
             className="global-status-monitor__task-details"
@@ -192,11 +158,11 @@ export function GlobalStatusMonitor() {
               <TaskCount
                 label="运行中"
                 tone="active"
-                value={tasks ? summary.generating + summary.receiving : '—'}
+                value={!taskRead.loading ? summary.generating + summary.receiving : '—'}
               />
-              <TaskCount label="需处理" tone="attention" value={tasks ? summary.attention : '—'} />
-              <TaskCount label="等待处理" tone="waiting" value={tasks ? summary.waiting : '—'} />
-              <TaskCount label="已完成" tone="completed" value={tasks ? summary.completed : '—'} />
+              <TaskCount label="需处理" tone="attention" value={!taskRead.loading ? summary.attention : '—'} />
+              <TaskCount label="等待处理" tone="waiting" value={!taskRead.loading ? summary.waiting : '—'} />
+              <TaskCount label="已完成" tone="completed" value={!taskRead.loading ? summary.completed : '—'} />
             </dl>
           </div>
         ) : null}

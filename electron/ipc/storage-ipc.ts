@@ -405,9 +405,17 @@ export function registerStorageIpcHandlers(options: {
     new JsonProjectCatalogStore(path.join(app.getPath('userData'), 'project-catalog.json'))
   );
   const readModels = new GlobalReadModelController(catalog, () => sessionRegistry.get());
+  const callReadModels = new ProviderInvocationReadModelController(
+    catalog,
+    options.providerUsageSchemas,
+    options.currencyConversions
+  );
   const projectStorageMonitor = new ProjectStorageChangeMonitor(
     catalog,
-    () => readModels.invalidate(),
+    () => {
+      readModels.invalidate();
+      callReadModels.invalidate();
+    },
     () => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.webContents.isDestroyed()) {
@@ -417,11 +425,6 @@ export function registerStorageIpcHandlers(options: {
     }
   );
   projectStorageMonitor.start();
-  const callReadModels = new ProviderInvocationReadModelController(
-    catalog,
-    options.providerUsageSchemas,
-    options.currencyConversions
-  );
   const localMedia = new ControlledLocalMediaController({
     catalog,
     handles: mediaHandles,
