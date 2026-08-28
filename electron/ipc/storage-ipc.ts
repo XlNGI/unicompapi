@@ -37,6 +37,7 @@ import {
   VideoWorkspaceMutationCoordinator,
   createDevelopmentVideoEditorPreviewAdapter,
   type ProviderUsageSchemaResolverPort,
+  type CurrencyConversionFactResolverPort,
   type StorageProjectSession,
   ProviderPackageRegistry,
   createImageFeatureControllerRuntime,
@@ -82,6 +83,7 @@ export function registerStorageIpcHandlers(options: {
   readonly additionalSessionChangeGuards?: readonly (() => Promise<void>)[];
   readonly vidu?: ElectronViduComposition;
   readonly providerUsageSchemas?: ProviderUsageSchemaResolverPort;
+  readonly currencyConversions?: CurrencyConversionFactResolverPort;
   readonly providerPackages?: ProviderPackageRegistry;
   readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort &
     Partial<RuntimeAuthorizationOrchestrationPort>;
@@ -417,7 +419,8 @@ export function registerStorageIpcHandlers(options: {
   projectStorageMonitor.start();
   const callReadModels = new ProviderInvocationReadModelController(
     catalog,
-    options.providerUsageSchemas
+    options.providerUsageSchemas,
+    options.currencyConversions
   );
   const localMedia = new ControlledLocalMediaController({
     catalog,
@@ -489,6 +492,9 @@ export function registerStorageIpcHandlers(options: {
   );
   ipcMain.handle(storageIpcChannels.getCallDetails, (_event, request: unknown) =>
     callReadModels.getCallDetails(request)
+  );
+  ipcMain.handle(storageIpcChannels.getConsumptionSummary, (_event, request: unknown) =>
+    callReadModels.getConsumptionSummary(request)
   );
   ipcMain.handle(storageIpcChannels.listWorks, () => readModels.listWorks());
   ipcMain.handle(storageIpcChannels.getWorkDetails, (_event, request: unknown) =>

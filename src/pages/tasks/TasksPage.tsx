@@ -7,6 +7,8 @@ import { StatusPill } from '../../components/StatusPill';
 import type { StatusTone } from '../../components/StatusPill';
 import type {
   StorageCallDetailsDto,
+  StorageConsumptionProviderSliceDto,
+  StorageConsumptionSummaryDto,
   StorageReadModelIssueDto,
   StorageTaskDetailsDto,
   StorageTaskSummaryDto
@@ -25,8 +27,7 @@ import { TaskCenterWorkspace } from './TaskCenterWorkspace';
 import {
   calculateSuccessfulCallFee,
   formatCallFee,
-  formatCallFeeFormula,
-  formatFeeAmount
+  formatCallFeeFormula
 } from './call-fees';
 
 interface TasksPageProps {
@@ -402,63 +403,28 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   );
 }
 
-interface ConsumptionTimeBar {
-  readonly key: string;
-  readonly label: string;
-  readonly amount: number;
-  readonly callCount: number;
-  readonly ratio: number;
-}
-
 interface ProviderConsumptionSlice {
   readonly key: string;
   readonly label: string;
-  readonly amount: number;
+  readonly amount: string;
   readonly ratio: number;
   readonly color: string;
 }
 
-interface ConsumptionChartModel {
-  readonly bars: readonly ConsumptionTimeBar[];
-  readonly amountLabel: string;
-  readonly chartMode: 'fee' | 'credit';
-  readonly providerSlices: readonly ProviderConsumptionSlice[];
-  readonly sampledCallCount: number;
-  readonly successfulCallCount: number;
-  readonly feeCallCount: number;
-  readonly missingFeeCallCount: number;
-  readonly missingPricingRuleCount: number;
-  readonly missingUsageCount: number;
-  readonly invalidFeeCount: number;
-  readonly totalCallCount: number;
-  readonly totalAmount: number;
-}
-
 function TaskConsumptionCharts() {
   const storage = window.unicomp?.storage;
-  const [model, setModel] = useState<ConsumptionChartModel>({
-    bars: [],
-    amountLabel: '金额单位',
-    chartMode: 'fee',
-    providerSlices: [],
-    sampledCallCount: 0,
-    successfulCallCount: 0,
-    feeCallCount: 0,
-    missingFeeCallCount: 0,
-    missingPricingRuleCount: 0,
-    missingUsageCount: 0,
-    invalidFeeCount: 0,
-    totalCallCount: 0,
-    totalAmount: 0
-  });
-  const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
+  const [summary, setSummary] = useState<StorageConsumptionSummaryDto>();
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+
+  useEffect(() => storage?.onLocalStorageChanged(() => {
+    setRefreshRevision((current) => current + 1);
+  }), [storage]);
 
   useEffect(() => {
     let active = true;
     setMessage('');
-    setIssues([]);
     setLoading(true);
 
     if (!storage) {
@@ -469,30 +435,14 @@ function TaskConsumptionCharts() {
       };
     }
 
-    void storage.listCallRecords({ limit: 200 })
-      .then(async (result) => {
+    void storage.getConsumptionSummary()
+      .then((result) => {
         if (!active) return;
         if (!result.ok) {
           setMessage('读取消费统计失败，请重试');
           return;
         }
-        const details = await Promise.all(
-          result.value.items.map(async (record) => {
-            try {
-              const detailsResult = await storage.getCallDetails(record.invocationAttemptId);
-              return detailsResult.ok ? detailsResult.value : undefined;
-            } catch {
-              return undefined;
-            }
-          })
-        );
-        if (!active) return;
-        setModel(buildConsumptionChartModel(
-          details.filter((item): item is StorageCallDetailsDto => Boolean(item)),
-          result.value.items.length,
-          result.value.total
-        ));
-        setIssues(result.value.issues);
+        setSummary(result.value);
       })
       .catch(() => {
         if (active) setMessage('读取消费统计失败，请重试');
@@ -504,40 +454,43 @@ function TaskConsumptionCharts() {
     return () => {
       active = false;
     };
-  }, [storage]);
+  }, [refreshRevision, storage]);
 
-  const totalLabel = model.totalCallCount > model.sampledCallCount
-    ? `最近 ${model.sampledCallCount} / ${model.totalCallCount} 次调用`
-    : `${model.sampledCallCount} 次调用`;
-  const chartSummary = model.chartMode === 'fee'
-    ? `${totalLabel} · 成功 ${model.successfulCallCount} 次 · 已计费 ${model.feeCallCount} 次`
-    : `${totalLabel} · 成功 ${model.successfulCallCount} 次 · 已记录积分消耗`;
+  const providerSlices = summary ? consumptionProviderSlices(summary.providerSlices) : [];
+  const maximumBucketAmount = Math.max(
+    ...(summary?.timeBuckets.map((bucket) => Number(bucket.amount)) ?? []),
+    0
+  );
+  const hasRenminbiAmount = Number(summary?.totalAmount ?? '0') > 0;
+  const chartSummary = summary
+    ? `近 ${summary.period.calendarDays} 日 · 调用 ${summary.totalCallCount} 次 · 成功 ${summary.successfulCallCount} 次 · 人民币计入 ${summary.includedCallCount} 次`
+    : '尚未读取消费摘要';
 
   return (
     <section className="uc-task-center__charts" aria-label="消费统计">
       <Card className="uc-task-center__chart-card">
         <div className="uc-task-center__chart-heading">
           <div>
-            <h2>消费柱状图</h2>
+            <h2>人民币消费柱状图</h2>
             <p>{loading ? '正在读取成功调用费用' : chartSummary}</p>
           </div>
-          <StatusPill tone={model.bars.length > 0 ? 'success' : 'neutral'}>
-            {formatFeeAmount(model.totalAmount)} {model.amountLabel}
+          <StatusPill tone={hasRenminbiAmount ? 'success' : 'neutral'}>
+            {formatRenminbiAmount(summary?.totalAmount ?? '0')}
           </StatusPill>
         </div>
         {loading ? (
           <p className="uc-task-center__muted" role="status">正在汇总消费数据…</p>
-        ) : model.bars.length === 0 ? (
-          <EmptyBarChart />
+        ) : !summary || !hasRenminbiAmount ? (
+          <EmptyBarChart dates={summary?.timeBuckets.map((bucket) => bucket.date)} />
         ) : (
           <div className="uc-task-center__bar-chart" aria-label="按时间汇总的消费柱状图">
-            {model.bars.map((bar) => (
-              <div className="uc-task-center__bar-row" key={bar.key}>
-                <span>{bar.label}</span>
+            {summary.timeBuckets.map((bucket) => (
+              <div className="uc-task-center__bar-row" key={bucket.date}>
+                <span>{dailyBucketLabel(bucket.date)}</span>
                 <div>
-                  <i style={{ width: `${bar.ratio}%` }} />
+                  <i style={{ width: `${consumptionBarRatio(bucket.amount, maximumBucketAmount)}%` }} />
                 </div>
-                <strong>{formatFeeAmount(bar.amount)} {model.amountLabel} · {bar.callCount} 次</strong>
+                <strong>{formatRenminbiAmount(bucket.amount)} · {bucket.callCount} 次</strong>
               </div>
             ))}
           </div>
@@ -547,14 +500,14 @@ function TaskConsumptionCharts() {
       <Card className="uc-task-center__chart-card uc-task-center__chart-card--donut">
         <div className="uc-task-center__chart-heading">
           <div>
-            <h2>供应商消费占比</h2>
-            <p>{loading ? '正在读取成功调用费用' : model.chartMode === 'fee' ? '按官方计费规则汇总' : '官方单价缺失，先按积分汇总'}</p>
+            <h2>供应商人民币消费占比</h2>
+            <p>{loading ? '正在读取成功调用费用' : '按人民币本地估算汇总，前 5 个供应商外归入“其他”'}</p>
           </div>
-          <StatusPill>{model.providerSlices.length} 个供应商</StatusPill>
+          <StatusPill>{providerSlices.length} 个分组</StatusPill>
         </div>
         {loading ? (
           <p className="uc-task-center__muted" role="status">正在计算供应商占比…</p>
-        ) : model.providerSlices.length === 0 ? (
+        ) : providerSlices.length === 0 ? (
           <EmptyDonutChart />
         ) : (
           <div className="uc-task-center__donut-layout">
@@ -563,18 +516,18 @@ function TaskConsumptionCharts() {
               className="uc-task-center__donut"
               role="img"
               style={{
-                '--uc-task-donut': donutGradient(model.providerSlices)
+                '--uc-task-donut': donutGradient(providerSlices)
               } as CSSProperties & Record<'--uc-task-donut', string>}
             >
-              <strong>{model.providerSlices.length}</strong>
-              <span>供应商</span>
+              <strong>{providerSlices.length}</strong>
+              <span>分组</span>
             </div>
             <div className="uc-task-center__donut-legend">
-              {model.providerSlices.map((slice) => (
+              {providerSlices.map((slice) => (
                 <div key={slice.key}>
                   <i style={{ background: slice.color }} />
                   <span>{slice.label}</span>
-                  <strong>{slice.ratio.toFixed(1)}% · {formatFeeAmount(slice.amount)} {model.amountLabel}</strong>
+                  <strong>{slice.ratio.toFixed(2)}% · {formatRenminbiAmount(slice.amount)}</strong>
                 </div>
               ))}
             </div>
@@ -582,32 +535,48 @@ function TaskConsumptionCharts() {
         )}
       </Card>
 
-      {!loading && (message || issues.length > 0) ? (
+      {!loading && (message || (summary?.issues.length ?? 0) > 0) ? (
         <p className="uc-task-center__chart-note" role="status">
-          {message || `部分项目无法纳入消费统计：${issues.map((issue) => issue.projectName).join('、')}`}
+          {message || `部分项目无法纳入消费统计：${summary?.issues.map((issue) => issue.projectName).join('、')}`}
         </p>
       ) : null}
-      {!loading && model.chartMode === 'fee' && model.missingFeeCallCount > 0 ? (
+      {!loading && summary && summary.pendingConversionCallCount > 0 ? (
         <p className="uc-task-center__chart-note" role="status">
-          {model.missingFeeCallCount} 次成功调用未纳入费用图表：
-          缺官方价格规则 {model.missingPricingRuleCount} 次，
-          缺响应体计费用量 {model.missingUsageCount} 次，
-          格式异常 {model.invalidFeeCount} 次。
+          {summary.pendingConversionCallCount} 次非人民币费用待换算，未混入人民币总额
+          {summary.pendingCurrencies.length > 0
+            ? `（${summary.pendingCurrencies.map((item) => `${item.currencyCode} ${item.callCount} 次`).join('、')}）`
+            : ''}。
         </p>
       ) : null}
-      {!loading && model.chartMode === 'credit' ? (
+      {!loading && summary && (
+        summary.missingPricingRuleCount > 0 ||
+        summary.missingUsageCount > 0 ||
+        summary.invalidFeeCount > 0
+      ) ? (
         <p className="uc-task-center__chart-note" role="status">
-          当前成功调用有响应体积分用量，但缺少已核准官方单价；图表暂按积分展示，不折算金额。
+          成功调用中另有：缺官方价格规则 {summary.missingPricingRuleCount} 次，
+          缺响应体计费用量 {summary.missingUsageCount} 次，格式异常 {summary.invalidFeeCount} 次。
+        </p>
+      ) : null}
+      {!loading && summary?.conversionSources.map((source) => (
+        <p className="uc-task-center__chart-note" key={source.sourceCurrencyCode} role="status">
+          {source.sourceCurrencyCode} → 人民币换算来源：{source.sourceTitle}（核对于 {source.sourceCheckedAt}）。
+        </p>
+      ))}
+      {!loading && summary ? (
+        <p className="uc-task-center__chart-note" role="note">
+          金额为基于本地调用事实、已核准价格与换算事实生成的估算，不等于服务商正式账单。
         </p>
       ) : null}
     </section>
   );
 }
 
-function EmptyBarChart() {
+function EmptyBarChart({ dates }: { readonly dates?: readonly string[] }) {
+  const labels = dates?.map(dailyBucketLabel) ?? emptyBarLabels();
   return (
     <div className="uc-task-center__bar-chart uc-task-center__bar-chart--empty" aria-label="暂无可计算费用的消费柱状图">
-      {emptyBarLabels().map((label, index) => (
+      {labels.map((label, index) => (
         <div className="uc-task-center__bar-row" key={label}>
           <span>{label}</span>
           <div>
@@ -616,7 +585,7 @@ function EmptyBarChart() {
           <strong>暂无</strong>
         </div>
       ))}
-      <p className="uc-task-center__muted">暂无可计算费用；成功调用缺少官方价格规则或计费用量时不会计入。</p>
+      <p className="uc-task-center__muted">暂无可纳入的人民币估算；非人民币费用在缺少已核准换算事实时保持待换算。</p>
     </div>
   );
 }
@@ -647,74 +616,13 @@ function emptyBarLabels(): readonly string[] {
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date();
     date.setDate(date.getDate() - (6 - index));
-    return dailyBucketLabel(date.toISOString());
+    return dailyBucketLabel(date.toISOString().slice(0, 10));
   });
 }
 
-function buildConsumptionChartModel(
-  calls: readonly StorageCallDetailsDto[],
-  sampledCallCount: number,
-  totalCallCount: number
-): ConsumptionChartModel {
-  const feeTimeTotals = new Map<string, { label: string; amount: number; callCount: number }>();
-  const creditTimeTotals = new Map<string, { label: string; amount: number; callCount: number }>();
-  const providerTotals = new Map<string, number>();
-  const creditProviderTotals = new Map<string, number>();
-  const currencyLabels = new Set<string>();
-  let successfulCallCount = 0;
-  let feeCallCount = 0;
-  let missingFeeCallCount = 0;
-  let missingPricingRuleCount = 0;
-  let missingUsageCount = 0;
-  let invalidFeeCount = 0;
-
-  for (const call of calls) {
-    if (call.state !== 'completed') continue;
-    successfulCallCount += 1;
-    const fee = calculateSuccessfulCallFee(call);
-    if (fee.state !== 'calculated') {
-      missingFeeCallCount += 1;
-      const credits = creditQuantity(call);
-      if (credits !== undefined) {
-        addConsumptionBucket(creditTimeTotals, call.createdAt, credits);
-        addProviderConsumption(creditProviderTotals, call, credits);
-      }
-      if (!call.officialPricingRule && !call.officialUnitPrice) {
-        missingPricingRuleCount += 1;
-      } else if (fee.state === 'missing_inputs') {
-        missingUsageCount += 1;
-      } else {
-        invalidFeeCount += 1;
-      }
-      continue;
-    }
-    feeCallCount += 1;
-    currencyLabels.add(fee.currencyLabel);
-
-    addConsumptionBucket(feeTimeTotals, call.createdAt, fee.fee);
-    addProviderConsumption(providerTotals, call, fee.fee);
-  }
-
-  const chartMode = feeCallCount > 0 ? 'fee' : 'credit';
-  const timeTotals = chartMode === 'fee' ? feeTimeTotals : creditTimeTotals;
-  const selectedProviderTotals = chartMode === 'fee' ? providerTotals : creditProviderTotals;
-  const timeGroups = [...timeTotals.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .slice(-7);
-  const maxAmount = Math.max(...timeGroups.map(([, value]) => value.amount), 0);
-  const bars = timeGroups.map(([key, value]) => ({
-    key,
-    label: value.label,
-    amount: value.amount,
-    callCount: value.callCount,
-    ratio: maxAmount > 0 ? Math.max(4, value.amount / maxAmount * 100) : 0
-  }));
-  const providerConsumptionTotals = [...selectedProviderTotals.entries()]
-    .map(([provider, amount]) => ({ provider, amount }))
-    .filter((item) => item.amount > 0)
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, 6);
-  const totalAmount = [...selectedProviderTotals.values()].reduce((sum, amount) => sum + amount, 0);
+function consumptionProviderSlices(
+  slices: readonly StorageConsumptionProviderSliceDto[]
+): readonly ProviderConsumptionSlice[] {
   const colors = [
     'var(--uc-color-status-info)',
     'var(--uc-color-status-success)',
@@ -724,72 +632,13 @@ function buildConsumptionChartModel(
     'var(--uc-color-border-strong)'
   ];
 
-  return {
-    bars,
-    amountLabel: chartMode === 'fee'
-      ? currencyLabels.size === 1 ? [...currencyLabels][0] : '金额单位'
-      : '积分',
-    chartMode,
-    providerSlices: providerConsumptionTotals.map((item, index) => ({
-      key: item.provider,
-      label: item.provider,
-      amount: item.amount,
-      ratio: totalAmount > 0 ? item.amount / totalAmount * 100 : 0,
-      color: colors[index % colors.length]
-    })),
-    sampledCallCount,
-    successfulCallCount,
-    feeCallCount,
-    missingFeeCallCount,
-    missingPricingRuleCount,
-    missingUsageCount,
-    invalidFeeCount,
-    totalCallCount,
-    totalAmount
-  };
-}
-
-function addConsumptionBucket(
-  totals: Map<string, { label: string; amount: number; callCount: number }>,
-  createdAt: string,
-  amount: number
-): void {
-  const timeKey = dailyBucketKey(createdAt);
-  const currentTime = totals.get(timeKey) ?? {
-    label: dailyBucketLabel(createdAt),
-    amount: 0,
-    callCount: 0
-  };
-  totals.set(timeKey, {
-    ...currentTime,
-    amount: currentTime.amount + amount,
-    callCount: currentTime.callCount + 1
-  });
-}
-
-function addProviderConsumption(
-  totals: Map<string, number>,
-  call: StorageCallDetailsDto,
-  amount: number
-): void {
-  const providerLabel = call.providerName ?? call.providerId;
-  const providerKey = providerLabel || '提交时显示名不可用';
-  totals.set(providerKey, (totals.get(providerKey) ?? 0) + amount);
-}
-
-function creditQuantity(call: StorageCallDetailsDto): number | undefined {
-  for (const fact of call.usage.facts) {
-    if (
-      !['credit_amount', 'credits', 'credit', 'point_amount', 'points', 'point']
-        .includes(fact.metricId) &&
-      !['credit', 'credits', 'point', 'points'].includes(fact.unit)
-    ) {
-      continue;
-    }
-    const quantity = Number(fact.quantity);
-    if (Number.isFinite(quantity) && quantity > 0) return quantity;
-  }
-  return undefined;
+  return slices.map((slice, index) => ({
+    key: slice.key,
+    label: slice.label,
+    amount: slice.amount,
+    ratio: slice.ratioBasisPoints / 100,
+    color: colors[index % colors.length]
+  }));
 }
 
 function donutGradient(slices: readonly ProviderConsumptionSlice[]): string {
@@ -803,19 +652,27 @@ function donutGradient(slices: readonly ProviderConsumptionSlice[]): string {
   return `conic-gradient(${segments.join(', ')})`;
 }
 
-function dailyBucketKey(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'unknown-date';
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function consumptionBarRatio(amount: string, maximumAmount: number): number {
+  const value = Number(amount);
+  return value > 0 && maximumAmount > 0 ? Math.max(4, value / maximumAmount * 100) : 0;
+}
+
+function formatRenminbiAmount(value: string): string {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '人民币金额不可用';
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency: 'CNY',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: Math.abs(amount) < 1 && amount !== 0 ? 4 : 2
+  }).format(amount);
 }
 
 function dailyBucketLabel(value: string): string {
-  const date = new Date(value);
+  const date = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return '时间未知';
   return date.toLocaleDateString('zh-CN', {
+    timeZone: 'UTC',
     month: '2-digit',
     day: '2-digit'
   });
