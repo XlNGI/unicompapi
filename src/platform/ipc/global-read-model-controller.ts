@@ -1,6 +1,10 @@
 import { stat, statfs } from 'node:fs/promises';
 import type { Execution, FileReference, Task, Work } from '../../domain';
-import { toTaskId, toWorkId } from '../../domain';
+import {
+  canRecoverRemoteCompletedExecution,
+  toTaskId,
+  toWorkId
+} from '../../domain';
 import type {
   StorageIpcResult,
   StorageGenerationHistoryItemDto,
@@ -683,9 +687,7 @@ function toTaskDetails(
 function canRecoverImageLocalReceipt(execution: Execution | undefined): boolean {
   if (!execution) return false;
   if (execution.state === 'remote_completed') return true;
-  return execution.state === 'failed' &&
-    ['downloading', 'writing'].includes(execution.failure?.stage ?? '') &&
-    execution.failure?.retryability !== 'not_retryable';
+  return canRecoverRemoteCompletedExecution(execution);
 }
 
 function filterLinkedExecutions(

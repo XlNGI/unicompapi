@@ -540,6 +540,7 @@ function canFailExecution(
     'submitting',
     'queued',
     'processing',
+    'remote_completed',
     'downloading',
     'writing',
     'verifying'
