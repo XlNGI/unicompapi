@@ -1,0 +1,50 @@
+# 服务商画廊与连接编排 PR 2｜服务商画廊 UI 工程记录
+
+日期：2026-08-05
+
+分支：`feature/provider-gallery-ui`（自 `develop` 建立，含 PR 1 合并 `32e3751`）
+
+权威计划：`docs/active/服务商画廊与连接编排分阶段实施计划.md`（项目负责人 2026-08-05 批准并授权连续托管）。
+
+## 一、本支范围
+
+只做 PR 2「画廊首屏、画廊/管理双视图切换、求适配卡、墓碑默认隐藏 + 显式开关」。不含火山/可灵探针（PR 3）、路由动态化与 Vidu 拉平（PR 4）、执行收敛（PR 5）。
+
+## 二、实现内容
+
+1. `src/pages/providers/provider-page-shared.ts`（新增）：双视图共享的类型、标签映射与助手（`DetailTab`、`tabLabels`、`connectionLabels`、`credentialLabels`、`profileLabels`、`toneForState`、`describeError`、`templateKeyOf`，模板键用 ` ` 转义分隔避免与 id 内字符冲突）。
+2. `src/pages/providers/ProviderGalleryView.tsx`（新增）：画廊网格，按模板动态渲染卡片（首字母头像、供应商名、模板显示名、连接聚合状态、能力标签、「保存时自动验证 / 保存后待验证」标签、「添加连接 / 管理」操作）；末尾固定「求适配」卡。无任何写死的供应商名。
+3. `src/pages/providers/ProviderManageView.tsx`（新增）：连接侧栏（状态过滤 全部/可用/已禁用/异常、搜索、连接列表）+ 详情区（模型/连接/凭证 三个标签页 + 模型摘要侧栏）；「显示已删除」显式开关，默认隐藏墓碑。
+4. `src/pages/providers/ProvidersPage.tsx`（重写为壳）：保留全部状态与处理器；新增视图切换（供应商画廊 / 连接管理），默认画廊；添加连接表单由画廊卡片触发、模板预选且固定；保存走 PR 1 编排管线（进度提示、失败确认强存）。
+5. `src/styles/pages.css`：新增视图开关、已删除开关、表单模板锁定行与全部画廊样式；网格 `auto-fill minmax` 自适应。
+6. 合同测试：`providers-page-contract.test.mjs` 重写为三文件源码拼接断言；`cross-platform-workspace-ui.test.mjs` 拼接四文件；`provider-ui-acceptance-closeout.test.mjs` 改从 `ProviderManageView.tsx` 断言空态动作。
+7. 携带 PR 1 遗留修复：`tests/platform/provider-connection-orchestration.test.ts` 的导入修正（`CredentialProtector` 改自 `src/platform`、`ProviderPackageDescriptor` 改自 `src/domain`、保护器参数显式类型）。该修复在 PR 1 会话中已应用于工作树但未提交；缺失时 `develop` 上 `npm run typecheck` 必挂，本支一并提交。
+
+## 三、验收结果
+
+- `npm test`：Node 195 项 + Vitest 588 项（113 文件），共 783 项通过，0 失败、0 跳过。
+- `npm run typecheck`：通过（src + tests 双工程）。
+- `npm run lint`：ESLint 0 问题。
+- `npm run build`：渲染端 + Electron 生产构建通过。
+- `npm run audit:platform`：0 违规。
+- `npm run verify:handoff`：50 校验项、27 资源，0 失败。
+- `npm run verify:recovery-audit`：702 跟踪文件，0 违禁、0 违规。
+- `git diff --check`：通过。
+- 窗口档验收（一次性 Electron 线束、隔离 userData、生产 `dist` 构建，用完即删）：画廊列数 640→1、768→2、1024→2、1280→3、1600→5；五档均 6 张卡片（5 模板 + 求适配）；各档横向滚动宽度与外壳基线逐档相等（外壳 800px 内容下限为全部页面共有的既有全局属性，生产窗口 `minWidth` 为 800），画廊与管理视图零新增横向溢出；800/1280 截图人工核验布局干净。
+- 深浅主题验收（同上一次性线束）：画廊与管理视图在 dark/light 下各截图人工核验，令牌全部正确切换。
+- 生产 Electron 烟测：12 秒存活、4 个进程 4/4 响应、1 个「UniComp」窗口、优雅关闭退出码 0、进程树残留 0、stdout/stderr 全空。
+
+## 四、安全与费用边界
+
+- 真实服务商 HTTP/DNS 0 次、真实凭证读取/验证 0 次、收费调用 0 次、费用 0；线束使用临时 userData 目录，一次性脚本运行后即删除、不进入 Git。
+- 凭证保持只写不回显；本支为纯 UI 重组，未触碰凭证与网络路径。
+
+## 五、已知边界
+
+- 外壳 800px 内容宽度下限为全部页面共有的既有全局属性（生产窗口最小宽 800），非本支引入，本支不改动。
+- 管理视图为既有结构的平移重组，交互行为与 PR 1 保持一致；空态引导按钮改为「前往画廊添加」。
+- 画廊聚合状态角标当前为「连接 N · 可用 N」文字形式；Logo 图标位为首字母占位，品牌资产属未来增强。
+
+## 六、下一步
+
+按计划进入 PR 3 `feature/provider-management-probes-expansion`：火山、可灵管理探针与 Vidu deferred 策略定案，每家探针合同证据 + 合成测试。

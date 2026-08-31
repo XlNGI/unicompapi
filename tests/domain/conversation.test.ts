@@ -1,0 +1,459 @@
+import { describe, expect, it } from 'vitest';
+import {
+  InvalidStateTransitionError,
+  InvariantViolationError,
+  addUserMessage,
+  appendAssistantMessageChunk,
+  archiveConversation,
+  beginAssistantMessage,
+  cancelAssistantMessage,
+  completeAssistantMessage,
+  createConversation,
+  deleteConversation,
+  editUserMessageAfterCancelledResponse,
+  failAssistantMessage,
+  parseConversation,
+  renameConversation,
+  restoreConversation,
+  setDocumentGenerationStatusOnMessage,
+  startAssistantMessageStreaming,
+  toAssetId,
+  toConversationId,
+  toFileReferenceId,
+  toIsoTimestamp,
+  toMessageId,
+  toProjectId
+} from '../../src/domain';
+
+const t0 = toIsoTimestamp('2026-07-28T00:00:00.000Z');
+const t1 = toIsoTimestamp('2026-07-28T00:01:00.000Z');
+const t2 = toIsoTimestamp('2026-07-28T00:02:00.000Z');
+const t3 = toIsoTimestamp('2026-07-28T00:03:00.000Z');
+const t4 = toIsoTimestamp('2026-07-28T00:04:00.000Z');
+const projectId = toProjectId('project-chat-domain');
+
+function conversation() {
+  return createConversation({
+    id: toConversationId('conversation-domain'),
+    title: '  项目讨论  ',
+    projectId,
+    createdAt: t0
+  });
+}
+
+describe('conversation lifecycle', () => {
+  it('creates, renames, archives, restores and soft-deletes without losing messages', () => {
+    const created = addUserMessage(conversation(), {
+      id: toMessageId('message-user'),
+      content: '保留这条事实',
+      createdAt: t1
+    });
+    expect(created).toMatchObject({
+      revision: 1,
+      title: '项目讨论',
+      status: 'active'
+    });
+
+    const renamed = renameConversation(created, '已重命名', t2);
+    const archived = archiveConversation(renamed, t3);
+    expect(archived).toMatchObject({
+      revision: 3,
+      status: 'archived',
+      archivedAt: t3
+    });
+
+    const renamedWhileArchived = renameConversation(archived, '归档记录', t4);
+    const restored = restoreConversation(
+      renamedWhileArchived,
+      toIsoTimestamp('2026-07-28T00:05:00.000Z')
+    );
+    const deleted = deleteConversation(
+      restored,
+      toIsoTimestamp('2026-07-28T00:06:00.000Z')
+    );
+    expect(deleted).toMatchObject({
+      status: 'deleted',
+      title: '归档记录',
+      messages: [{ content: '保留这条事实' }]
+    });
+    expect(() => renameConversation(deleted, '禁止', deleted.deletedAt)).toThrow(
+      InvariantViolationError
+    );
+    expect(() => deleteConversation(deleted, deleted.deletedAt)).toThrow(
+      InvalidStateTransitionError
+    );
+  });
+
+  it('does not allow archived or deleted conversations to accept messages', () => {
+    const archived = archiveConversation(conversation(), t1);
+    expect(() => addUserMessage(archived, {
+      id: toMessageId('message-archived'),
+      content: '不应写入',
+      createdAt: t2
+    })).toThrow('cannot append messages while conversation is archived');
+
+    const deleted = deleteConversation(archived, t2);
+    expect(() => beginAssistantMessage(deleted, {
+      id: toMessageId('message-deleted'),
+      createdAt: t3
+    })).toThrow('cannot append messages while conversation is deleted');
+  });
+});
+
+describe('message lifecycle', () => {
+  it('keeps an internal model prompt separate from the user-visible request', () => {
+    const withUser = addUserMessage(conversation(), {
+      id: toMessageId('message-document-request'),
+      content: '内部 PPT JSON 生成指令\n\n用户主题',
+      displayContent: '帮我生成用户主题的 PPT',
+      createdAt: t1
+    });
+
+    expect(withUser.messages[0]).toMatchObject({
+      role: 'user',
+      content: '内部 PPT JSON 生成指令\n\n用户主题',
+      displayContent: '帮我生成用户主题的 PPT'
+    });
+    expect(parseConversation(withUser)).toEqual(withUser);
+  });
+
+  it('moves assistant content through pending, streaming and completed revisions', () => {
+    const pending = beginAssistantMessage(conversation(), {
+      id: toMessageId('assistant-complete'),
+      createdAt: t1
+    });
+    expect(pending.messages[0]).toMatchObject({
+      role: 'assistant',
+      state: 'pending',
+      revision: 0,
+      content: ''
+    });
+
+    const streaming = startAssistantMessageStreaming(
+      pending,
+      toMessageId('assistant-complete'),
+      t2
+    );
+    const chunked = appendAssistantMessageChunk(
+      streaming,
+      toMessageId('assistant-complete'),
+      '第一段 ',
+      t3
+    );
+    const chunkedAgain = appendAssistantMessageChunk(
+      chunked,
+      toMessageId('assistant-complete'),
+      '第二段',
+      t4
+    );
+    const completed = completeAssistantMessage(
+      chunkedAgain,
+      toMessageId('assistant-complete'),
+      toIsoTimestamp('2026-07-28T00:05:00.000Z'),
+      '模型实际返回的分析'
+    );
+
+    expect(completed.messages[0]).toMatchObject({
+      state: 'completed',
+      revision: 4,
+      streamSequence: 2,
+      content: '第一段 第二段',
+      reasoningContent: '模型实际返回的分析'
+    });
+    expect(() => appendAssistantMessageChunk(
+      completed,
+      toMessageId('assistant-complete'),
+      '禁止追加',
+      toIsoTimestamp('2026-07-28T00:06:00.000Z')
+    )).toThrow(InvalidStateTransitionError);
+  });
+
+  it('allows pending or streaming assistant messages to fail or cancel', () => {
+    const pendingFailure = beginAssistantMessage(conversation(), {
+      id: toMessageId('assistant-failed'),
+      createdAt: t1
+    });
+    const failed = failAssistantMessage(
+      pendingFailure,
+      toMessageId('assistant-failed'),
+      'unavailable',
+      t2,
+      '失败前返回的分析'
+    );
+    expect(failed.messages[0]).toMatchObject({
+      state: 'failed',
+      failureReason: 'unavailable',
+      reasoningContent: '失败前返回的分析',
+      streamSequence: 0
+    });
+
+    const pendingCancel = beginAssistantMessage(conversation(), {
+      id: toMessageId('assistant-cancelled'),
+      createdAt: t1
+    });
+    const streaming = startAssistantMessageStreaming(
+      pendingCancel,
+      toMessageId('assistant-cancelled'),
+      t2
+    );
+    const chunked = appendAssistantMessageChunk(
+      streaming,
+      toMessageId('assistant-cancelled'),
+      '保留的部分结果',
+      t3
+    );
+    const cancelled = cancelAssistantMessage(
+      chunked,
+      toMessageId('assistant-cancelled'),
+      t4,
+      '取消前返回的分析'
+    );
+    expect(cancelled.messages[0]).toMatchObject({
+      state: 'cancelled',
+      content: '保留的部分结果',
+      reasoningContent: '取消前返回的分析',
+      streamSequence: 1
+    });
+  });
+
+  it('accepts persisted reasoning only on assistant messages', () => {
+    const userConversation = addUserMessage(conversation(), {
+      id: toMessageId('message-user-reasoning'),
+      content: '用户输入',
+      createdAt: t1
+    });
+    expect(() => parseConversation({
+      ...userConversation,
+      messages: userConversation.messages.map((message) => ({
+        ...message,
+        reasoningContent: '不允许的字段'
+      }))
+    })).toThrow('only assistant messages can persist reasoning content');
+
+    expect(parseConversation(userConversation).messages[0]).not.toHaveProperty(
+      'reasoningContent'
+    );
+  });
+
+  it('keeps completed user messages immutable and rejects direct state shortcuts', () => {
+    const userMessage = addUserMessage(conversation(), {
+      id: toMessageId('immutable-user'),
+      content: '用户事实',
+      createdAt: t1
+    });
+    expect(() => startAssistantMessageStreaming(
+      userMessage,
+      toMessageId('immutable-user'),
+      t2
+    )).toThrow('user messages are immutable facts');
+
+    const pending = beginAssistantMessage(conversation(), {
+      id: toMessageId('assistant-shortcut'),
+      createdAt: t1
+    });
+    expect(() => completeAssistantMessage(
+      pending,
+      toMessageId('assistant-shortcut'),
+      t2
+    )).toThrow(InvalidStateTransitionError);
+  });
+
+  it('edits only the last user turn after every following response is cancelled', () => {
+    const withUser = addUserMessage(conversation(), {
+      id: toMessageId('editable-user'),
+      content: 'original request',
+      createdAt: t1
+    });
+    const firstPending = beginAssistantMessage(withUser, {
+      id: toMessageId('cancelled-first'),
+      createdAt: t2
+    });
+    const firstCancelled = cancelAssistantMessage(
+      firstPending,
+      toMessageId('cancelled-first'),
+      t3
+    );
+    const secondPending = beginAssistantMessage(firstCancelled, {
+      id: toMessageId('cancelled-second'),
+      createdAt: t3
+    });
+    const secondCancelled = cancelAssistantMessage(
+      secondPending,
+      toMessageId('cancelled-second'),
+      t4
+    );
+    const edited = editUserMessageAfterCancelledResponse(secondCancelled, {
+      messageId: toMessageId('editable-user'),
+      content: 'edited request',
+      editedAt: t4
+    });
+
+    expect(edited).toMatchObject({
+      revision: secondCancelled.revision + 1,
+      messages: [
+        { id: 'editable-user', revision: 1, content: 'edited request', completedAt: t4 },
+        { id: 'cancelled-first', state: 'cancelled' },
+        { id: 'cancelled-second', state: 'cancelled' }
+      ]
+    });
+    expect(() => editUserMessageAfterCancelledResponse(withUser, {
+      messageId: toMessageId('editable-user'),
+      content: 'not allowed yet',
+      editedAt: t2
+    })).toThrow(InvalidStateTransitionError);
+  });
+});
+
+describe('conversation runtime validation', () => {
+  it('persists only project-scoped asset or file-reference identifiers', () => {
+    const withAttachment = addUserMessage(conversation(), {
+      id: toMessageId('message-attachment'),
+      content: '分析已登记素材',
+      attachments: [{
+        kind: 'asset',
+        projectId,
+        assetId: toAssetId('asset-safe-reference')
+      }, {
+        kind: 'file_reference',
+        projectId,
+        fileReferenceId: toFileReferenceId('file-safe-reference')
+      }],
+      createdAt: t1
+    });
+    expect(withAttachment.messages[0].attachments).toEqual([
+      {
+        kind: 'asset',
+        projectId,
+        assetId: 'asset-safe-reference'
+      },
+      {
+        kind: 'file_reference',
+        projectId,
+        fileReferenceId: 'file-safe-reference'
+      }
+    ]);
+
+    expect(() => addUserMessage(conversation(), {
+      id: toMessageId('message-cross-project'),
+      content: '禁止跨项目附件',
+      attachments: [{
+        kind: 'asset',
+        projectId: toProjectId('another-project'),
+        assetId: toAssetId('asset-cross-project')
+      }],
+      createdAt: t1
+    })).toThrow('message attachment belongs to another project');
+
+    const unbound = createConversation({
+      id: toConversationId('conversation-unbound'),
+      title: '未绑定项目',
+      createdAt: t0
+    });
+    expect(() => addUserMessage(unbound, {
+      id: toMessageId('message-unbound-attachment'),
+      content: '禁止持久化附件',
+      attachments: [{
+        kind: 'asset',
+        projectId,
+        assetId: toAssetId('asset-not-allowed')
+      }],
+      createdAt: t1
+    })).toThrow('unbound conversations cannot persist attachments');
+  });
+
+  it('rejects unknown fields, raw paths, hashes and malformed discriminated states', () => {
+    const valid = addUserMessage(conversation(), {
+      id: toMessageId('message-strict'),
+      content: '严格校验',
+      createdAt: t1
+    });
+    expect(() => parseConversation({ ...valid, endpoint: 'https://example.invalid' }))
+      .toThrow('unexpected or missing fields');
+
+    const message = valid.messages[0];
+    expect(() => parseConversation({
+      ...valid,
+      messages: [{
+        ...message,
+        attachments: [{
+          kind: 'asset',
+          projectId,
+          assetId: 'asset-safe',
+          absolutePath: 'C:\\secret\\asset.png',
+          sha256: 'a'.repeat(64)
+        }]
+      }]
+    })).toThrow('unexpected or missing fields');
+
+    expect(() => parseConversation({
+      ...valid,
+      messages: [{
+        ...message,
+        role: 'assistant',
+        attachments: [{
+          kind: 'asset',
+          projectId,
+          assetId: 'asset-input-only'
+        }]
+      }]
+    })).toThrow('assistant messages cannot persist input attachments');
+
+    expect(() => parseConversation({
+      ...valid,
+      messages: [{
+        ...message,
+        state: 'pending',
+        role: 'assistant'
+      }]
+    })).toThrow('unexpected or missing fields');
+  });
+
+  it('persists an Office generation terminal state independently from the model message state', () => {
+    const pending = beginAssistantMessage(conversation(), {
+      id: toMessageId('message-office-status'),
+      createdAt: t1
+    });
+    const streaming = startAssistantMessageStreaming(
+      pending,
+      toMessageId('message-office-status'),
+      t2
+    );
+    const content = appendAssistantMessageChunk(
+      streaming,
+      toMessageId('message-office-status'),
+      '{"kind":"excel"}',
+      t2
+    );
+    const completed = completeAssistantMessage(
+      content,
+      toMessageId('message-office-status'),
+      t3
+    );
+    const failed = setDocumentGenerationStatusOnMessage(
+      completed,
+      toMessageId('message-office-status'),
+      { state: 'failed', kind: 'excel', errorCode: 'invalid_outline' },
+      t4
+    );
+
+    const restored = parseConversation(JSON.parse(JSON.stringify(failed)));
+    expect(restored.messages[0]).toMatchObject({
+      state: 'completed',
+      completedAt: t4,
+      updatedAt: t4,
+      documentGenerationStatus: {
+        state: 'failed',
+        kind: 'excel',
+        errorCode: 'invalid_outline'
+      }
+    });
+    expect(() =>
+      setDocumentGenerationStatusOnMessage(
+        completed,
+        toMessageId('message-office-status'),
+        { state: 'completed', kind: 'excel' },
+        t4
+      )
+    ).toThrow('completed document generation requires a document result');
+  });
+});
