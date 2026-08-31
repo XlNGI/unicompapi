@@ -13,10 +13,13 @@ import {
   type MessageFailureReason,
   type ParameterSchemaV2,
   type Conversation,
+  type ConversationId,
   type ConversationResponseExecutionId,
-  type ProviderUsageObservationRepository,
+  type MessageId,
   type ProjectConversationRepository,
+  type ProjectId,
   type ProviderConnection,
+  type ProviderUsageObservationRepository,
   type StructuredCredentialRecord
 } from '../../domain';
 import type { SecureCredentialVault } from './credential-vault';
@@ -98,6 +101,7 @@ export function createConversationTextDispatchBridge(
     readonly lifecycle: ConversationResponseExecutionLifecycle;
     readonly conversations: ProjectConversationRepository;
     readonly coordinator: ConversationExecutionCoordinator;
+    readonly onAssistantMessageCompleted?: AssistantMessageCompletedHook;
     now?: () => string;
   }
 ): ProviderSubmissionDispatchBridge {
@@ -111,7 +115,8 @@ export function createConversationTextDispatchBridge(
   const linkedLifecycle = createConversationLinkedLifecycle(
     options.lifecycle,
     options.conversations,
-    now
+    now,
+    options.onAssistantMessageCompleted
   );
   const deepSeekAdapter = new DeepSeekChatAdapter(
     options.deepSeekRuntime,
@@ -316,10 +321,22 @@ function createTextParameterSchemaResolver(): NewApiParameterSchemaResolverPort 
   };
 }
 
+export interface AssistantMessageCompletedEvent {
+  readonly projectId: ProjectId | null;
+  readonly conversationId: ConversationId;
+  readonly messageId: MessageId;
+  readonly messageContent: string;
+}
+
+export type AssistantMessageCompletedHook = (
+  event: AssistantMessageCompletedEvent
+) => Promise<void>;
+
 export function createConversationLinkedLifecycle(
   lifecycle: ConversationResponseExecutionLifecycle,
   conversations: ProjectConversationRepository,
-  now: () => string
+  now: () => string,
+  onAssistantMessageCompleted?: AssistantMessageCompletedHook
 ): DeepSeekConversationLifecyclePort & NewApiConversationLifecyclePort {
   const projectionFlushDelayMs = 120;
   const queues = new Map<string, Promise<void>>();
@@ -489,6 +506,30 @@ export function createConversationLinkedLifecycle(
           toIsoTimestamp(now()),
           reasoningContent || undefined
         ));
+        if (onAssistantMessageCompleted) {
+          try {
+            const model = await lifecycle.readModel(executionId);
+            const conversation = await conversations.get(model.conversationId);
+            const message = conversation?.messages.find(
+              (item) => item.id === model.assistantMessageId
+            );
+            if (
+              conversation &&
+              message &&
+              message.role === 'assistant' &&
+              message.state === 'completed'
+            ) {
+              await onAssistantMessageCompleted({
+                projectId: conversation.projectId,
+                conversationId: conversation.id,
+                messageId: message.id,
+                messageContent: message.content
+              });
+            }
+          } catch {
+            // 登记 hook 失败不影响消息完成流程。
+          }
+        }
         releaseProjection(executionId);
       });
     },

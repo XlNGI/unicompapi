@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
   ConversationApplicationService,
+  DocumentDraftRegistryService,
   ProjectContextRegistryService,
   type ConversationIdFactory,
+  type DocumentDraftIdFactory,
   type ProjectContextIdFactory
 } from '../../application';
 import {
@@ -17,6 +19,7 @@ import {
   startAssistantMessageStreaming,
   toConversationId,
   toConversationResponseStreamEventId,
+  toDocumentDraftId,
   toIsoTimestamp,
   toMessageId,
   toProjectContextDraftId,
@@ -30,6 +33,7 @@ import {
   JsonConversationRepository,
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
+  JsonDocumentDraftRepository,
   JsonProviderUsageObservationRepository,
   JsonProjectConversationRepository,
   JsonProjectContextRepository,
@@ -277,6 +281,19 @@ export function createChatContextRuntime(
         nextMessageId: () => conversationIds.nextMessageId(),
         now
       });
+      const documentDraftRepository = new JsonDocumentDraftRepository(
+        storage,
+        session.projectId
+      );
+      const documentDraftIds: DocumentDraftIdFactory = {
+        nextDocumentDraftId: () =>
+          toDocumentDraftId(`document-draft-${randomUUID()}`)
+      };
+      const documentDraftRegistry = new DocumentDraftRegistryService(
+        documentDraftRepository,
+        documentDraftIds,
+        now
+      );
       const dispatch = createConversationTextDispatchBridge({
         ...textSubmission,
         providerRegistry,
@@ -290,6 +307,20 @@ export function createChatContextRuntime(
           authorization as RuntimeAuthorizationOrchestrationPort,
           now
         ),
+        onAssistantMessageCompleted: async ({
+          projectId,
+          conversationId,
+          messageId,
+          messageContent
+        }) => {
+          if (!projectId) return;
+          await documentDraftRegistry.registerFromMessage({
+            projectId,
+            conversationId,
+            messageId,
+            messageContent
+          });
+        },
         now
       });
       const orchestrator = new ProviderSubmissionOrchestrator(

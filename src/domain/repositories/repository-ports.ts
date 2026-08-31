@@ -1,5 +1,6 @@
 import type { Asset } from '../entities/asset';
 import type { Draft } from '../entities/draft';
+import type { DocumentDraft } from '../entities/document-draft';
 import type { Execution } from '../entities/execution';
 import type { FileReference } from '../entities/file-reference';
 import type { ImageWorkspaceDraft } from '../entities/image-workspace';
@@ -50,6 +51,7 @@ import type {
   ConversationResponseDraftId,
   ConversationResponseExecutionId,
   ConversationResponseStreamEventId,
+  DocumentDraftId,
   DraftId,
   ExecutionId,
   FileReferenceId,
@@ -187,6 +189,13 @@ export interface DraftRepository {
   get(id: DraftId): Promise<Draft | undefined>;
   list(projectId: ProjectId): Promise<readonly Draft[]>;
   save(draft: Draft): Promise<void>;
+}
+
+export interface DocumentDraftRepository {
+  get(id: DocumentDraftId): Promise<DocumentDraft | undefined>;
+  list(projectId: ProjectId): Promise<readonly DocumentDraft[]>;
+  save(draft: DocumentDraft): Promise<void>;
+  remove(id: DocumentDraftId): Promise<void>;
 }
 
 export interface ImageWorkspaceRepository {

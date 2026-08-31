@@ -30,6 +30,7 @@ export type ConversationResponseStreamEventId = DomainId<'ConversationResponseSt
 export type ProjectContextId = DomainId<'ProjectContextId'>;
 export type ProjectContextDraftId = DomainId<'ProjectContextDraftId'>;
 export type ProjectContextFragmentId = DomainId<'ProjectContextFragmentId'>;
+export type DocumentDraftId = DomainId<'DocumentDraftId'>;
 export type ProviderInvocationAttemptId = DomainId<'ProviderInvocationAttemptId'>;
 export type ProviderInvocationEventId = DomainId<'ProviderInvocationEventId'>;
 export type ProviderUsageObservationId = DomainId<'ProviderUsageObservationId'>;
@@ -93,6 +94,8 @@ export const toProjectContextDraftId = (value: string) =>
   toDomainId(value, 'ProjectContextDraftId');
 export const toProjectContextFragmentId = (value: string) =>
   toDomainId(value, 'ProjectContextFragmentId');
+export const toDocumentDraftId = (value: string) =>
+  toDomainId(value, 'DocumentDraftId');
 export const toProviderInvocationAttemptId = (value: string) =>
   toDomainId(value, 'ProviderInvocationAttemptId');
 export const toProviderInvocationEventId = (value: string) =>

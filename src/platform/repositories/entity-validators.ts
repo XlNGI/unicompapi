@@ -1,6 +1,7 @@
 import {
   assetOrigins,
   creationKinds,
+  documentDraftSources,
   draftStates,
   documentWorkspaceKinds,
   executionStates,
@@ -29,6 +30,19 @@ export const isDraftEntity: EntityValidator = (value) =>
   isStringArray(value.selectedAssetIds) &&
   isCanonicalIsoTimestamp(value.createdAt) &&
   isCanonicalIsoTimestamp(value.updatedAt);
+
+export const isDocumentDraftEntity: EntityValidator = (value) =>
+  isNonBlankString(value.projectId) &&
+  isNonBlankString(value.conversationId) &&
+  isNonBlankString(value.messageId) &&
+  isOneOf(value.source, documentDraftSources) &&
+  isOneOf(value.format, documentWorkspaceKinds) &&
+  typeof value.summary === 'string' &&
+  typeof value.rawJson === 'string' &&
+  (value.rowCount === undefined || isNonNegativeInteger(value.rowCount)) &&
+  (value.columnCount === undefined || isNonNegativeInteger(value.columnCount)) &&
+  (value.supersedes === undefined || isNonBlankString(value.supersedes)) &&
+  isCanonicalIsoTimestamp(value.createdAt);
 
 export const isImageWorkspaceEntity: EntityValidator = (value) =>
   isImageWorkspaceDraft(value);

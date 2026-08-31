@@ -2,6 +2,9 @@ import type {
   Asset,
   AssetId,
   AssetRepository,
+  DocumentDraft,
+  DocumentDraftId,
+  DocumentDraftRepository,
   Draft,
   DraftId,
   DraftRepository,
@@ -41,6 +44,7 @@ import { hasValidVideoExportPlanHash } from './video-export-plan-integrity';
 import {
   isAssetEntity,
   isCanonicalIsoTimestamp,
+  isDocumentDraftEntity,
   isDraftEntity,
   isExecutionEntity,
   isFileReferenceEntity,
@@ -291,6 +295,36 @@ export class JsonDraftRepository implements DraftRepository {
 
   save(draft: Draft) {
     return this.collection.save(draft);
+  }
+}
+
+export class JsonDocumentDraftRepository implements DocumentDraftRepository {
+  private readonly collection: JsonEntityCollection<DocumentDraft, ProjectId>;
+
+  constructor(storage: ProjectStorageAdapter, projectId: ProjectId) {
+    this.collection = new JsonEntityCollection(
+      storage,
+      projectStoragePaths.entities.documentDrafts,
+      projectId,
+      (draft) => draft.projectId,
+      isDocumentDraftEntity
+    );
+  }
+
+  get(id: DocumentDraftId) {
+    return this.collection.get(id);
+  }
+
+  list(projectId: ProjectId) {
+    return this.collection.list(projectId);
+  }
+
+  save(draft: DocumentDraft) {
+    return this.collection.save(draft);
+  }
+
+  remove(id: DocumentDraftId) {
+    return this.collection.remove(id);
   }
 }
 
