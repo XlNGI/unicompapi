@@ -2,10 +2,12 @@ import { InvariantViolationError } from '../errors';
 import {
   toConversationId,
   toConversationResponseDraftId,
+  toDocumentDraftId,
   toMessageId,
   toProjectId,
   type ConversationId,
   type ConversationResponseDraftId,
+  type DocumentDraftId,
   type MessageId,
   type ProjectId
 } from '../ids';
@@ -37,6 +39,8 @@ export interface ConversationResponseDraftV1 {
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
+  readonly sourceDraftId?: DocumentDraftId;
+  readonly targetDocumentMessageId?: MessageId;
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -51,6 +55,8 @@ export interface CreateConversationResponseDraftInput {
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections?: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues?: Readonly<Record<string, ParameterValue>>;
+  readonly sourceDraftId?: DocumentDraftId;
+  readonly targetDocumentMessageId?: MessageId;
   readonly createdAt: IsoTimestamp;
 }
 
@@ -69,6 +75,8 @@ export function createConversationResponseDraft(
     productFeature: input.productFeature,
     contextSelections: input.contextSelections ?? [],
     parameterValues: input.parameterValues ?? {},
+    ...(input.sourceDraftId ? { sourceDraftId: input.sourceDraftId } : {}),
+    ...(input.targetDocumentMessageId ? { targetDocumentMessageId: input.targetDocumentMessageId } : {}),
     createdAt: input.createdAt,
     updatedAt: input.createdAt
   });
@@ -133,9 +141,12 @@ export function parseConversationResponseDraft(
   ]);
   const keys = Object.keys(item);
   const hasParameterValues = Object.prototype.hasOwnProperty.call(item, 'parameterValues');
+  const hasSourceDraftId = Object.prototype.hasOwnProperty.call(item, 'sourceDraftId');
+  const hasTargetDocumentMessageId = Object.prototype.hasOwnProperty.call(item, 'targetDocumentMessageId');
+  const allowedOptionalKeys = ['parameterValues', 'sourceDraftId', 'targetDocumentMessageId'];
   if (
-    keys.some((key) => !requiredKeys.has(key) && key !== 'parameterValues') ||
-    requiredKeys.size + (hasParameterValues ? 1 : 0) !== keys.length ||
+    keys.some((key) => !requiredKeys.has(key) && !allowedOptionalKeys.includes(key)) ||
+    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasSourceDraftId ? 1 : 0) + (hasTargetDocumentMessageId ? 1 : 0) !== keys.length ||
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
     Number(item.revision) < 0 ||
@@ -179,6 +190,8 @@ export function parseConversationResponseDraft(
     parameterValues: hasParameterValues
       ? parseParameterValuesRecord(item.parameterValues)
       : {},
+    ...(hasSourceDraftId ? { sourceDraftId: toDocumentDraftId(nonBlank(item.sourceDraftId, 'draft.sourceDraftId')) } : {}),
+    ...(hasTargetDocumentMessageId ? { targetDocumentMessageId: toMessageId(nonBlank(item.targetDocumentMessageId, 'draft.targetDocumentMessageId')) } : {}),
     createdAt,
     updatedAt
   };

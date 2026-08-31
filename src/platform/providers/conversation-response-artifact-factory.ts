@@ -9,6 +9,7 @@ import {
   toMessageId,
   type ConversationResponseDraftRepository,
   type ConversationResponseExecutionRepository,
+  type DocumentDraftRepository,
   type MessageId,
   type ProjectContextRepository,
   type ProjectConversationRepository
@@ -26,6 +27,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
+  readonly documentDrafts?: DocumentDraftRepository;
   nextMessageId?: () => MessageId;
   nextExecutionId?: () => string;
   nextStreamEventId?: () => string;
@@ -89,6 +91,23 @@ export class ConversationResponseArtifactFactory
           content: message.content
         }))
     ];
+
+    // P0-6: 如果有 sourceDraftId，读取 draft 并注入到 messages 最前面（作为 user role）
+    if (draft.sourceDraftId && this.dependencies.documentDrafts) {
+      try {
+        const sourceDraft = await this.dependencies.documentDrafts.get(draft.sourceDraftId);
+        if (sourceDraft) {
+          const draftSystemMessage = {
+            role: 'user' as const,
+            content: buildDraftSystemPrompt(sourceDraft.rawJson, sourceDraft.summary)
+          };
+          messages.unshift(draftSystemMessage);
+        }
+      } catch {
+        // draft 读取失败不影响主流程
+      }
+    }
+
     const createdAt = toIsoTimestamp(input.createdAt);
     const assistantMessageId = this.nextMessageId();
     const pendingConversation = beginAssistantMessage(conversation, {
@@ -171,4 +190,23 @@ function runtimeSourceForPackage(
     return 'official_direct';
   }
   return 'official_direct';
+}
+
+function buildDraftSystemPrompt(rawJson: string, summary: string): string {
+  return `# 用户已提供的结构化数据草稿
+
+**摘要**：${summary}
+
+**原始数据**（JSON格式）：
+\`\`\`json
+${rawJson}
+\`\`\`
+
+**重要提示**：
+- 用户在对话中明确引用了这份数据（如"根据上面"、"把刚才的"）
+- 你必须严格基于这份数据进行后续操作，不得擅自修改、替换或忽略其中的内容
+- 如果用户要求生成文档，必须完整继承这份数据，不能用示例占位符替代
+- 如果用户要求修改，只修改指定的部分，其余部分保持原样
+
+现在请根据用户的下一条指令，严格基于上述数据完成任务。`;
 }

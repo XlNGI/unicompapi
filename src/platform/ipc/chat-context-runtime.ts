@@ -273,14 +273,6 @@ export function createChatContextRuntime(
         new ProjectMetadataUnitOfWork(storage, now)
       );
       const journal = new SubmissionIntentJournal(storage, now);
-      const artifacts = new ConversationResponseArtifactFactory({
-        conversations: projectConversations,
-        drafts: responseDrafts,
-        contexts: contextRepository,
-        executions: responseExecutions,
-        nextMessageId: () => conversationIds.nextMessageId(),
-        now
-      });
       const documentDraftRepository = new JsonDocumentDraftRepository(
         storage,
         session.projectId
@@ -294,6 +286,15 @@ export function createChatContextRuntime(
         documentDraftIds,
         now
       );
+      const artifacts = new ConversationResponseArtifactFactory({
+        conversations: projectConversations,
+        drafts: responseDrafts,
+        contexts: contextRepository,
+        executions: responseExecutions,
+        documentDrafts: documentDraftRepository,
+        nextMessageId: () => conversationIds.nextMessageId(),
+        now
+      });
       const dispatch = createConversationTextDispatchBridge({
         ...textSubmission,
         providerRegistry,

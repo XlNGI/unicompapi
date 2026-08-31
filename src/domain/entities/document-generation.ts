@@ -33,6 +33,12 @@ export type DocumentOutlineBlock =
       readonly type: 'table';
       readonly header: readonly string[];
       readonly rows: readonly (readonly string[])[];
+      readonly columns?: readonly {
+        readonly name: string;
+        readonly width?: number;
+        readonly numFmt?: string;
+        readonly dataType?: 'text' | 'number' | 'date' | 'currency';
+      }[];
     }
   | {
       readonly type: 'chart';
