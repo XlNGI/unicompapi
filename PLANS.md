@@ -127,6 +127,12 @@ E7 验收门禁：
 - tool calling、取消、超时、预算、revision 冲突、重复诊断和失败恢复均有结构化状态与审计记录；
 - 自动化门禁、Windows Office 人工证据、失败矩阵和交付审计全部完成后，E7 才能标记 `passed`。在此之前状态为 `approved/not_started` 或对应失败状态。
 
+### E7.1 实施登记（2026-09-01，进行中）
+
+已从最新 `develop` 建立 `feature/phase9-e7-agent-integration`，开始 E7 第一增量：明确的“清空第 N 章/节/页/部分”请求进入 Application 层的有界本地 Agent 工作流，按“读取结构 → `clear_section` 补丁 → 渲染预览 → 布局检查”顺序最多执行一个白名单工具；补丁保持章节标题、层级和非目标内容不变。`clear_section` 已加入受控 Revision 操作，Electron 文档生成组合根已接入该本地规则端口。
+
+同时增强 Agent 观察结果的递归脱敏，并支持决策/工具执行中的 AbortSignal 立即取消。当前增量尚未接入真实 Office 文件 I/O、Provider tool calling、渲染器视觉诊断或 Windows Office GUI；E7 整体仍为 `approved/in_progress`，不得标记 `passed`。
+
 2026-09-01 Excel 大纲兼容性修复：负责人实际验收发现 DeepSeek 返回的合法 Excel JSON 使用数值单元格（金额、年龄）并以 `footers.label/values` 表达汇总行，旧解析器仅接受字符串行且未归一化 footer，因而在文件生成前错误返回 `invalid_outline`。现仅对 Excel 表格接受有限值类型并统一转为内部字符串契约，同时把受控 footer 归一化为“合计”行；Word/PPT 仍拒绝数值表格单元格。结合本轮 Excel 生成器改进，工资模板的金额字段转为可填写数值、实发工资和合计使用公式，表头/列宽/冻结/筛选补齐。新增解析与生成回归，完整 168 个 Vitest 文件、1014 个测试通过，typecheck、lint、build、平台审计、交接校验和差异检查通过。原始验收文件保持不变，需重新构建并生成新版 XLSX。
 
 ## 当前状态

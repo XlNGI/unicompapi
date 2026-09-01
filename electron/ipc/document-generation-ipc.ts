@@ -6,6 +6,7 @@ import {
   ConversationStreamingService,
   DocumentGenerationApplicationService
 } from '../../src/application';
+import { runLocalDocumentRevisionAgent } from '../../src/application';
 import { toConversationId, toFileReferenceId, toMessageId } from '../../src/domain';
 import {
   AttachmentImportError,
@@ -19,6 +20,8 @@ import {
   NodeProjectStorage,
   PlatformDocumentDraftCompiler,
   PlatformDocumentGenerationExecutor,
+  applyStructuredDocumentPatch,
+  readStructuredDocument,
   extractPptxThemeColors,
   RagRetrievalService,
   resolveFileReferencePathSafely,
@@ -75,6 +78,18 @@ export function registerDocumentGenerationIpcHandlers(options: {
         },
         compiler: new PlatformDocumentDraftCompiler(),
         generator: new PlatformDocumentGenerationExecutor(runner),
+        revisionAgent: (input) =>
+          runLocalDocumentRevisionAgent(input, {
+            readStructure: (outline) => readStructuredDocument(outline),
+            applyPatch: (outline, patch) => {
+              const result = applyStructuredDocumentPatch(outline, patch);
+              return {
+                document: result.document,
+                changed: result.change.changed,
+                affectedSections: result.change.affectedSections
+              };
+            }
+          }),
         fingerprint: (content) =>
           createHash('sha256').update(content).digest('hex')
       });
