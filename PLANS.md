@@ -133,6 +133,8 @@ E7 验收门禁：
 
 同时增强 Agent 观察结果的递归脱敏，并支持决策/工具执行中的 AbortSignal 立即取消。当前增量尚未接入真实 Office 文件 I/O、Provider tool calling、渲染器视觉诊断或 Windows Office GUI；E7 整体仍为 `approved/in_progress`，不得标记 `passed`。
 
+本增量验证：定向应用/平台测试 13/13 通过；完整 `pnpm.cmd test` 为 169 个 Vitest 文件、1029 项及 Node/UI 合同全部通过；`typecheck`、`lint`、`build`、`audit:platform`、`verify:handoff` 和 `git diff --check` 通过。未调用真实 Provider、未读取凭证、未发起联网或收费请求。
+
 2026-09-01 Excel 大纲兼容性修复：负责人实际验收发现 DeepSeek 返回的合法 Excel JSON 使用数值单元格（金额、年龄）并以 `footers.label/values` 表达汇总行，旧解析器仅接受字符串行且未归一化 footer，因而在文件生成前错误返回 `invalid_outline`。现仅对 Excel 表格接受有限值类型并统一转为内部字符串契约，同时把受控 footer 归一化为“合计”行；Word/PPT 仍拒绝数值表格单元格。结合本轮 Excel 生成器改进，工资模板的金额字段转为可填写数值、实发工资和合计使用公式，表头/列宽/冻结/筛选补齐。新增解析与生成回归，完整 168 个 Vitest 文件、1014 个测试通过，typecheck、lint、build、平台审计、交接校验和差异检查通过。原始验收文件保持不变，需重新构建并生成新版 XLSX。
 
 ## 当前状态
