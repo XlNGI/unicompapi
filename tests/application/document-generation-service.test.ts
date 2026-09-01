@@ -3,6 +3,7 @@ import {
   ConversationApplicationError,
   DocumentDraftCompilationError,
   DocumentGenerationApplicationService,
+  preserveUntargetedDocumentSections,
   waitForDocumentResponseCompletion
 } from '../../src/application';
 import {
@@ -25,6 +26,55 @@ const projectId = toProjectId('document-application-project');
 const conversationId = toConversationId('document-application-conversation');
 const messageId = toMessageId('document-application-message');
 const now = toIsoTimestamp('2026-08-27T00:00:00.000Z');
+
+describe('semantic document revisions', () => {
+  it('preserves untargeted chapters while applying the requested ordinal chapter', () => {
+    const previous = {
+      kind: 'ppt' as const,
+      title: '运营方案',
+      sections: [
+        { heading: '第一章', level: 1 as const, pageKind: 'insight' as const, blocks: [{ type: 'bullets' as const, items: ['原章节一'] }] },
+        { heading: '第二章', level: 1 as const, pageKind: 'insight' as const, blocks: [{ type: 'bullets' as const, items: ['原章节二'] }] },
+        { heading: '第三章', level: 1 as const, pageKind: 'closing' as const, blocks: [{ type: 'bullets' as const, items: ['原章节三'] }] }
+      ]
+    };
+    const next = {
+      ...previous,
+      title: '被模型改写的标题',
+      sections: [
+        { ...previous.sections[0], blocks: [{ type: 'bullets' as const, items: ['被错误改写一'] }] },
+        { ...previous.sections[1], blocks: [{ type: 'bullets' as const, items: ['面向管理者的表达'] }] },
+        { ...previous.sections[2], blocks: [{ type: 'bullets' as const, items: ['被错误改写三'] }] }
+      ]
+    };
+
+    const revised = preserveUntargetedDocumentSections(previous, next, '把第二章改成面向非技术管理者的表达');
+    expect(revised.title).toBe('运营方案');
+    expect(revised.sections[0]).toEqual(previous.sections[0]);
+    expect(revised.sections[1].blocks).toEqual([{ type: 'bullets', items: ['面向管理者的表达'] }]);
+    expect(revised.sections[1].heading).toBe('第二章');
+    expect(revised.sections[2]).toEqual(previous.sections[2]);
+  });
+
+  it('does not silently deliver unchanged technical copy for a management audience', () => {
+    const previous = {
+      kind: 'ppt' as const,
+      title: '运营方案',
+      sections: [
+        { heading: '第一章', level: 1 as const, pageKind: 'insight' as const, blocks: [{ type: 'bullets' as const, items: ['保持不变'] }] },
+        { heading: '第二章', level: 1 as const, pageKind: 'insight' as const, blocks: [{ type: 'bullets' as const, items: ['API 参数决定生成效果'] }] }
+      ]
+    };
+    const revised = preserveUntargetedDocumentSections(
+      previous,
+      structuredClone(previous),
+      '把第二章改成面向非技术管理者的表达'
+    );
+    expect(revised.sections[1].blocks).not.toEqual(previous.sections[1].blocks);
+    expect(JSON.stringify(revised.sections[1])).toContain('系统能力');
+    expect(revised.sections[1].action).toContain('试点');
+  });
+});
 
 function completedConversation(content: string) {
   const created = createConversation({

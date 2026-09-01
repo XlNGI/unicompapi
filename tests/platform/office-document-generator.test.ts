@@ -10,9 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import AdmZip from 'adm-zip';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateDocumentFile,
+  applyLocalPptRevision,
   parseDocumentOutline,
   sanitizeFileName
 } from '../../src/platform';
@@ -71,6 +73,35 @@ const outlineText = JSON.stringify({
 });
 
 describe('office document generator', () => {
+  it('patches only the targeted PPT slide text on top of the parent package', async () => {
+    const outputDirectory = await createOutputDirectory();
+    await mkdir(outputDirectory, { recursive: true });
+    const sourcePath = path.join(outputDirectory, 'parent.pptx');
+    const sourceZip = new JSZip();
+    const generatedZip = new JSZip();
+    const slide = (heading: string, value: string) =>
+      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${value}</a:t></p:sld>`;
+    sourceZip.file('ppt/slides/slide1.xml', slide('核心价值', '原始内容'));
+    sourceZip.file('ppt/slides/slide2.xml', slide('未修改章节', '未修改章节'));
+    generatedZip.file('ppt/slides/slide1.xml', slide('核心价值', '管理者表达'));
+    generatedZip.file('ppt/slides/slide2.xml', slide('未修改章节', '模型误改内容'));
+    await writeFixture(sourcePath, await sourceZip.generateAsync({ type: 'nodebuffer' }));
+    const patched = await applyLocalPptRevision(
+      {
+        kind: 'ppt',
+        outline: parseDocumentOutline(JSON.stringify({ kind: 'ppt', title: '测试', sections: [] })),
+        outputDirectory,
+        now: '20260901160000',
+        revisionSourcePath: sourcePath,
+        revisionTargetSectionHeading: '核心价值'
+      },
+      await generatedZip.generateAsync({ type: 'nodebuffer' })
+    );
+    const resultZip = await JSZip.loadAsync(patched);
+    expect(await resultZip.file('ppt/slides/slide1.xml')!.async('string')).toContain('管理者表达');
+    expect(await resultZip.file('ppt/slides/slide2.xml')!.async('string')).toContain('未修改章节');
+  });
+
   it('generates a real Word document', async () => {
     const outputDirectory = await createOutputDirectory();
     const outline = parseDocumentOutline(outlineText);
@@ -206,6 +237,75 @@ describe('office document generator', () => {
     expect(sheet!.getCell('A2').value).toBe('3000 万');
   });
 
+  it('turns payroll placeholders into an editable numeric template with formulas', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'excel',
+      title: '部门员工工资表',
+      sections: [{
+        heading: '工资明细',
+        level: 1,
+        blocks: [{
+          type: 'table',
+          header: ['姓名', '部门', '基本工资', '绩效', '补贴', '扣款', '实发工资', '年龄', '性别'],
+          rows: [
+            ['示例姓名1', '示例部门1', '示例基本工资1', '示例绩效1', '示例补贴1', '示例扣款1', '示例实发工资1', '示例年龄1', '示例性别1'],
+            ['合计', '待确认', '待确认', '待确认', '待确认', '待确认', '待确认', '待确认', '待确认']
+          ]
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'excel',
+      outline,
+      outputDirectory,
+      now: '2026-09-01T05:42:20.000Z'
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(result.absolutePath);
+    const sheet = workbook.getWorksheet('工资明细');
+    expect(sheet).toBeTruthy();
+    expect(sheet!.getCell('C2').value).toBeNull();
+    expect(sheet!.getCell('G2').value).toMatchObject({
+      formula: '=IF(COUNT(C2:F2)<4,"",C2+D2+E2-F2)'
+    });
+    expect(sheet!.getCell('G3').value).toMatchObject({
+      formula: '=IF(COUNT(G2:G2)=0,"",SUM(G2:G2))'
+    });
+    expect(sheet!.getColumn(3).width).toBeGreaterThanOrEqual(12);
+    expect(sheet!.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 });
+    expect(sheet!.autoFilter).toBeTruthy();
+  });
+
+  it('keeps payroll formulas when the model supplies numeric sample amounts', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'excel',
+      title: '部门员工工资表（模板）',
+      sections: [{
+        heading: '工资明细',
+        level: 1,
+        blocks: [{
+          type: 'table',
+          header: ['姓名', '基本工资', '绩效', '补贴', '扣款', '实发工资'],
+          rows: [['示例姓名1', 5000, 2000, 500, 300, 7200]]
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'excel',
+      outline,
+      outputDirectory,
+      now: '2026-09-01T05:59:06.000Z'
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(result.absolutePath);
+    const sheet = workbook.getWorksheet('工资明细');
+    expect(sheet!.getCell('F2').value).toMatchObject({
+      formula: '=IF(COUNT(B2:E2)<4,"",B2+C2+D2-E2)'
+    });
+  });
+
   it('generates a real PowerPoint deck', async () => {
     const outputDirectory = await createOutputDirectory();
     const outline = parseDocumentOutline(outlineText);
@@ -228,6 +328,128 @@ describe('office document generator', () => {
     expect(secondSlide).toContain('业绩概览');
     const closingSlide = zip.readAsText('ppt/slides/slide4.xml');
     expect(closingSlide).toContain('谢谢观看');
+  });
+
+  it('does not render model-supplied decorative cover or thank-you sections as content pages', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '管理层汇报',
+      sections: [
+        { heading: '封面', level: 1, pageKind: 'cover', blocks: [{ type: 'paragraph', text: '封面说明' }] },
+        { heading: '核心判断', level: 1, pageKind: 'insight', blocks: [{ type: 'bullets', items: ['业务影响：提升效率'] }] },
+        { heading: '谢谢', level: 1, pageKind: 'closing', blocks: [{ type: 'table', header: ['误放'], rows: [['不应分页']] }] }
+      ]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-09-01T08:00:00.000Z'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slides = zip.getEntries().filter((entry) => /^ppt\/slides\/slide\d+\.xml$/u.test(entry.entryName));
+    expect(slides).toHaveLength(3);
+    const allText = slides.map((entry) => zip.readAsText(entry)).join('\n');
+    expect(allText).toContain('核心判断');
+    expect(allText).not.toContain('不应分页');
+  });
+
+  it('does not add sparse pptxgenjs continuation slides for application-paginated tables', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const lineWrappedCell = Array.from({ length: 8 }, (_, index) => `绗${index + 1}琛?`).join('\\n');
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '琛ㄦ牸缁х画椤甸洩鍥炲綊',
+      sections: [
+        {
+          heading: '鍏抽敭鎸囨爣',
+          level: 1,
+          pageKind: 'data',
+          blocks: [{
+            type: 'table',
+            header: ['鎸囨爣', '鏈湀', '澶囨敞'],
+            rows: Array.from({ length: 7 }, (_, index) => [
+              `鎸囨爣 ${index + 1}`,
+              `${index + 1}00`,
+              Array.from({ length: 18 }, () => 'x').join('\n')
+            ])
+          }]
+        }
+      ]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-09-01T08:00:00.000Z',
+      presentationTemplate: 'work_report'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slideEntries = zip
+      .getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/u.test(entry.entryName));
+    const slideTexts = slideEntries.map((entry) => zip.readAsText(entry));
+
+    void lineWrappedCell;
+    // One generated data page plus the system cover/closing is expected. A
+    // second continuation page with only a "续" title indicates that the
+    // underlying table renderer paginated a page already split by the app.
+    expect(slideEntries).toHaveLength(3);
+    expect(slideTexts.join('\\n')).not.toMatch(/续\\s*2/u);
+    expect(slideTexts.some((text) => text.includes('鎸囨爣 7'))).toBe(true);
+  });
+
+  it('keeps a dense five-column table on the page units produced by the app', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const cell = 'abcdefghijklmn';
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: 'Table pagination regression',
+      sections: [{
+        heading: 'Key metrics',
+        level: 1,
+        pageKind: 'data',
+        takeaway: 'Use the table to make one decision.',
+        blocks: [{
+          type: 'table',
+          header: ['Metric', 'Jan', 'Feb', 'Mar', 'Owner'],
+          rows: Array.from({ length: 7 }, (_, index) => [
+            `${cell}${index}`,
+            cell,
+            cell,
+            cell,
+            cell
+          ])
+        }]
+      }]
+    }));
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-09-01T08:00:00.000Z',
+      presentationTemplate: 'work_report'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const slideEntries = zip
+      .getEntries()
+      .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/u.test(entry.entryName));
+    const slideTexts = slideEntries.map((entry) => zip.readAsText(entry));
+
+    expect(slideEntries).toHaveLength(3);
+    expect(slideTexts.join('\n')).not.toMatch(/\(续\s*2\)/u);
+    expect(slideTexts.join('\n')).toContain(`${cell}6`);
+
+    // Guard the renderer contract directly: application-level table splitting
+    // must never be delegated back to pptxgenjs.
+    const generatorSource = await readFile(
+      path.resolve('src/platform/documents/office-document-generator.ts'),
+      'utf8'
+    );
+    expect(generatorSource).toMatch(
+      /slide\.addTable\(rows,[\s\S]{0,1600}autoPage:\s*false/u
+    );
   });
 
   it('keeps cover and section titles wrappable without automatic shrinking', async () => {

@@ -111,7 +111,7 @@ export function composeDocumentRevisionInput(
 ): string {
   const body =
     previousContent && previousContent.trim().length > 0
-      ? `上一版文档内容：\n${previousContent}\n\n这是一次局部修改：只修改用户明确指出的页面、分节、表格、图表或单元格，其他内容、顺序、标题和样式保持不变。输出时仍需返回完整文档大纲，以便生成新版文件。\n\n修改要求：\n${requirements}`
+      ? `上一版文档内容：\n${previousContent}\n\n这是一次局部修改：只修改用户明确指出的页面、分节、表格、图表或单元格，其他内容、顺序、标题和样式保持不变。输出时仍需返回完整文档大纲，以便生成新版文件。\n\n局部修改的语义验收规则：\n- 如果用户指定了受众（例如“面向非技术管理者”），必须对目标范围做实质性语义改写，而不是只改标题、同义替换或重新排版。\n- 面向非技术管理者时，优先使用业务目标、经营影响、决策依据、风险和下一步行动来表达；首次出现的技术术语要用一句白话解释，删除不影响决策的 API、模型、协议和实现细节。\n- 保留上一版中有依据的事实、数字和结论；不得为了改写而编造数据。目标范围至少应有一处完整句式、解释或行动建议发生变化，且要能看出受众变化。\n- 非目标范围必须逐字保持原内容、顺序、标题、页面类型和数据不变。\n\n修改要求：\n${requirements}`
       : requirements;
   return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}`;
 }
@@ -144,6 +144,8 @@ export function documentKindInstruction(
   if (kind === 'ppt') {
     return [
       '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。',
+      'pageKind 只能使用以下值：cover（封面）、section（章节页）、insight（结论/总结/详情/风险）、comparison（对比）、process（路线图/行动建议）、data（数据）、image_text（图文）、closing（结束页）。不要输出 summary、detail、roadmap、risk、action 等其他值。',
+      '封面和结束页由系统统一生成；sections 只填写正文内容。不要把“封面”“谢谢”“谢谢观看”“感谢观看”作为正文 section，也不要把表格或图表挂在致谢页下。用户明确要求页数时，按总页数预算组织内容，避免通过重复页或碎片页凑页数。',
       '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
       '{"kind":"ppt","title":"标题","sections":[{"heading":"分节标题","level":1,"pageKind":"insight","takeaway":"明确结论","action":"下一步行动","blocks":[{"type":"bullets","items":["短标题：解释文字"]},{"type":"table","header":["列名"],"rows":[["数据"]]},{"type":"chart","chartKind":"bar","title":"图表标题","data":[{"label":"分类","value":1}]}]}]}。',
       '只在资料中有足够数据时输出 table 或 chart；需要比较数值时必须同时提供 table 和 chart，chartKind 使用 bar 或 pie，value 必须是数字。没有可靠数据时不要编造。资料不足时写明建议、假设或待确认项，不能虚构业绩、客户、预算或收益。',
@@ -155,7 +157,7 @@ export function documentKindInstruction(
       '这是 Excel 表格：以清晰的列名与数据行为主，避免大段文字，需要汇总时给出合计行。',
       '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
       '{"kind":"excel","title":"表格标题","sections":[{"heading":"工作表名称","level":1,"blocks":[{"type":"table","header":["姓名","部门","状态"],"rows":[["示例姓名","示例部门","待确认"]]}]}]}。',
-      '用户没有提供真实数据时，生成可直接填写的通用模板；示例值必须明确是示例或待确认，不能虚构真实员工、金额或经营数据。不要使用 columns、data、headers 或 content 字段。'
+      '用户没有提供真实数据时，生成可直接填写的通用模板；文本字段可以使用“示例姓名1”这类占位符，数值字段必须留空或输出纯数字，不能把“示例基本工资1”写进金额列。涉及基本工资、绩效、补贴、扣款、实发工资时，实发工资应按“基本工资+绩效+补贴-扣款”计算；汇总行只放可核对的合计公式或留空，不要用“待确认”填满数值列。请在表格外的说明中标明“示例数据，仅供模板演示”，不能虚构真实员工、金额或经营数据。不要使用 columns、data、headers 或 content 字段。'
     ].join('\n');
   }
   return [

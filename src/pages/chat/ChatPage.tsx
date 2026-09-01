@@ -397,6 +397,14 @@ function documentGenerationMessage(
   }
 }
 
+function isMachineReadableDocumentOutline(content: string): boolean {
+  const text = content.trim();
+  if (!text.startsWith('{')) return false;
+  // Match partial streaming payloads too; the first chunk may only contain
+  // `kind` before `sections` arrives.
+  return /["'](?:kind|sections|title)\s*:/u.test(text);
+}
+
 interface AttachmentDraft {
   readonly fileId: string;
   readonly fileName: string;
@@ -433,6 +441,9 @@ export function ChatPage({
     useState<PresentationTemplateSelection>('auto');
   const [documentGenerationActive, setDocumentGenerationActive] =
     useState(false);
+  // Document requests stream a machine-readable outline internally. Keep that
+  // payload out of the visible chat and show only the controlled progress copy.
+  const [documentResponseActive, setDocumentResponseActive] = useState(false);
   const [documentCancelRequested, setDocumentCancelRequested] =
     useState(false);
   const [aiImagesEnabled, setAiImagesEnabled] = useState(false);
@@ -1419,6 +1430,7 @@ export function ChatPage({
         // 检索失败不阻断生成。
       }
     }
+    setDocumentResponseActive(true);
     try {
       const startDocumentResponse = (
         conversation?: Pick<ConversationDto, 'conversationId' | 'revision'>
@@ -1529,6 +1541,9 @@ export function ChatPage({
             expectedRevision: latest.value.revision,
             messageId: started.value.execution.assistantMessageId,
             kind,
+            ...(previousDocument?.documentResult
+              ? { parentWorkId: previousDocument.documentResult.workId }
+              : {}),
             images: []
           });
           const terminalConversation = await chat.getConversation(targetId);
@@ -1635,6 +1650,7 @@ export function ChatPage({
       setNotice('文档生成失败，请重试。');
     } finally {
       documentGenerationInFlightRef.current = false;
+      setDocumentResponseActive(false);
       setBusy(false);
     }
   }
@@ -2174,17 +2190,25 @@ export function ChatPage({
                     item.role === 'assistant' &&
                     (Boolean(item.documentResult) ||
                       Boolean(item.documentGenerationStatus));
-                  const activityLabel = cancelRequested
-                    ? '正在停止'
-                    : responseExecution?.state === 'pending'
-                      ? reasoningMode ? '正在推理' : '正在处理'
-                      : responseExecution?.state === 'streaming'
-                        ? reasoningContent && !item.content ? '正在思考' : '正在回答'
-                        : responseExecution?.state === 'completed'
-                          ? `已处理${executionDuration ? ` ${executionDuration}` : ''}`
-                          : responseExecution?.state === 'cancelled'
-                            ? '已停止'
-                            : item.content ? '回答已中断' : '处理失败';
+                  const hideDocumentDraftContent =
+                    item.role === 'assistant' &&
+                    (isCurrentAssistant || documentResponseActive ||
+                      Boolean(item.documentGenerationStatus) ||
+                      (documentMode && ['pending', 'streaming'].includes(item.state))) &&
+                    isMachineReadableDocumentOutline(item.content);
+                  const activityLabel = (documentResponseActive || hideDocumentDraftContent)
+                    ? documentGenerationMessage(item.documentGenerationStatus)
+                    : cancelRequested
+                      ? '正在停止'
+                      : responseExecution?.state === 'pending'
+                        ? reasoningMode ? '正在推理' : '正在处理'
+                        : responseExecution?.state === 'streaming'
+                          ? reasoningContent && !item.content ? '正在思考' : '正在回答'
+                          : responseExecution?.state === 'completed'
+                            ? `已处理${executionDuration ? ` ${executionDuration}` : ''}`
+                            : responseExecution?.state === 'cancelled'
+                              ? '已停止'
+                              : item.content ? '回答已中断' : '处理失败';
                   return (
                     <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
                       {isCurrentAssistant ? (
@@ -2241,7 +2265,7 @@ export function ChatPage({
                       ) : null}
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">
-                          {isDocumentDraftMessage ? (
+                          {isDocumentDraftMessage || hideDocumentDraftContent ? (
                             <p>
                               {item.documentResult
                                 ? 'Office 文档已生成。'

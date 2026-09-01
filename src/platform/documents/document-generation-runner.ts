@@ -74,6 +74,7 @@ export interface DocumentGenerationPlanInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
+  readonly revisionTargetSectionHeading?: string;
   readonly theme?: DocumentThemeId;
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal?: AbortSignal;
@@ -179,6 +180,7 @@ export class DocumentGenerationRunner {
         ...(input.presentationTemplate !== undefined
           ? { presentationTemplate: input.presentationTemplate }
           : {}),
+        ...(await this.resolveRevisionSource(context, input)),
         ...(input.images !== undefined && input.images.length > 0
           ? { images: await this.resolveImages(context, input.images) }
           : {})
@@ -281,6 +283,39 @@ export class DocumentGenerationRunner {
       if (finalPath && !workRegistered) {
         await rm(finalPath, { force: true });
       }
+    }
+  }
+
+  private async resolveRevisionSource(
+    context: RunnerContext,
+    input: DocumentGenerationPlanInput
+  ): Promise<{
+    readonly revisionSourcePath?: string;
+    readonly revisionTargetSectionHeading?: string;
+  }> {
+    if (
+      input.kind !== 'ppt' ||
+      input.parentWorkId === undefined ||
+      input.revisionTargetSectionHeading === undefined
+    ) {
+      return {};
+    }
+    try {
+      const parent = await context.works.get(input.parentWorkId);
+      if (!parent) return {};
+      const file = await context.files.get(parent.fileId);
+      if (!file) return {};
+      const sourcePath = await resolveFileReferencePathSafely(
+        this.options.rootDirectory,
+        file
+      );
+      return {
+        revisionSourcePath: sourcePath,
+        revisionTargetSectionHeading: input.revisionTargetSectionHeading
+      };
+    } catch {
+      // A missing or stale parent file must not block a valid regenerated copy.
+      return {};
     }
   }
 
@@ -554,9 +589,25 @@ async function assertExpectedDocumentContent(
   const searchable = normalizeOfficeText(
     `${xml}\n${xml.replace(/<[^>]+>/g, ' ')}`
   );
+  const presentationSections = kind === 'ppt'
+    ? outline.sections.filter((section, index, all) => {
+        const heading = section.heading.trim().toLocaleLowerCase();
+        if (
+          section.pageKind === 'cover' &&
+          index === 0 &&
+          /^(?:封面|cover|title)$/iu.test(heading)
+        ) return false;
+        if (
+          section.pageKind === 'closing' &&
+          index === all.length - 1 &&
+          /^(?:谢谢|谢谢观看|感谢观看|thank\s*you)$/iu.test(heading)
+        ) return false;
+        return true;
+      })
+    : outline.sections;
   const requiredText = [
     ...(kind === 'excel' ? [] : [outline.title]),
-    ...outline.sections.map((section) => section.heading),
+    ...presentationSections.map((section) => section.heading),
     ...(kind === 'excel'
       ? outline.sections.flatMap((section) =>
           section.blocks.flatMap((block) =>

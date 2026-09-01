@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   AlignmentType,
@@ -17,6 +17,7 @@ import {
 } from 'docx';
 import ExcelJS from 'exceljs';
 import PptxGenJS from 'pptxgenjs';
+import JSZip from 'jszip';
 import {
   documentWorkspaceKindExtensions,
   type DocumentWorkspaceKind
@@ -68,6 +69,9 @@ export interface GenerateDocumentFileInput {
     readonly absolutePath: string;
     readonly caption?: string;
   }[];
+  /** Optional parent PPTX used for a safe text-only local revision. */
+  readonly revisionSourcePath?: string;
+  readonly revisionTargetSectionHeading?: string;
 }
 
 export async function generateDocumentFile(
@@ -120,8 +124,104 @@ async function buildDocumentOutput(
                 (input.theme === 'financing' ? 'financing' : 'work_report')
             ),
             input.images ?? []
-          );
-  return { fileName, buffer };
+        );
+  const revisedBuffer = await applyLocalPptRevision(input, buffer);
+  return { fileName, buffer: revisedBuffer };
+}
+
+/**
+ * Applies a conservative local PPTX revision. The parent package is used as
+ * the base and only text runs on slides matching the requested section heading
+ * are replaced. If slide structure differs, the freshly generated package is
+ * returned unchanged; this fail-open fallback keeps export reliable.
+ */
+export async function applyLocalPptRevision(
+  input: GenerateDocumentFileInput,
+  generated: Buffer
+): Promise<Buffer> {
+  if (
+    input.kind !== 'ppt' ||
+    !input.revisionSourcePath ||
+    !input.revisionTargetSectionHeading
+  ) {
+    return generated;
+  }
+  try {
+    const source = await readFile(input.revisionSourcePath);
+    const sourceZip = await JSZip.loadAsync(source);
+    const generatedZip = await JSZip.loadAsync(generated);
+    const sourceSlides = slidePartNames(sourceZip);
+    const generatedSlides = slidePartNames(generatedZip);
+    if (sourceSlides.length !== generatedSlides.length) return generated;
+    const target = input.revisionTargetSectionHeading;
+    const sourceTargetIndexes = await matchingSlideIndexes(sourceZip, sourceSlides, target);
+    const generatedTargetIndexes = await matchingSlideIndexes(generatedZip, generatedSlides, target);
+    if (
+      sourceTargetIndexes.length === 0 ||
+      sourceTargetIndexes.length !== generatedTargetIndexes.length
+    ) {
+      return generated;
+    }
+    const patchedZip = sourceZip;
+    for (let index = 0; index < sourceTargetIndexes.length; index += 1) {
+      const sourceName = sourceSlides[sourceTargetIndexes[index]];
+      const generatedName = generatedSlides[generatedTargetIndexes[index]];
+      const sourceXml = await sourceZip.file(sourceName)!.async('string');
+      const generatedXml = await generatedZip.file(generatedName)!.async('string');
+      const patchedXml = replaceTextRuns(sourceXml, generatedXml);
+      if (!patchedXml) return generated;
+      patchedZip.file(sourceName, patchedXml);
+    }
+    return patchedZip.generateAsync({ type: 'nodebuffer' });
+  } catch {
+    return generated;
+  }
+}
+
+function slidePartNames(zip: JSZip): string[] {
+  return Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
+    .sort((left, right) => slideNumber(left) - slideNumber(right));
+}
+
+function slideNumber(name: string): number {
+  return Number(/slide(\d+)\.xml$/u.exec(name)?.[1] ?? 0);
+}
+
+async function matchingSlideIndexes(
+  zip: JSZip,
+  slides: readonly string[],
+  heading: string
+): Promise<number[]> {
+  const indexes: number[] = [];
+  for (let index = 0; index < slides.length; index += 1) {
+    const xml = await zip.file(slides[index])!.async('string');
+    const texts = extractTextRuns(xml);
+    if (texts.some((text) => text === heading)) indexes.push(index);
+  }
+  return indexes;
+}
+
+function replaceTextRuns(sourceXml: string, generatedXml: string): string | undefined {
+  const generatedRuns = [...generatedXml.matchAll(/(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu)].map(
+    (match) => match[2]
+  );
+  const sourceRuns = [...sourceXml.matchAll(/(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu)];
+  if (sourceRuns.length === 0 || sourceRuns.length !== generatedRuns.length) return undefined;
+  let offset = 0;
+  return sourceXml.replace(
+    /(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu,
+    (_match, open: string, _text: string, close: string) => {
+      const next = generatedRuns[offset++];
+      return `${open}${next}${close}`;
+    }
+  );
+}
+
+function extractTextRuns(xml: string): string[] {
+  return [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)].map(
+    (match) => match[1]
+  );
 }
 
 function resolveGenerationTheme(
@@ -398,12 +498,175 @@ async function buildExcelBuffer(outline: DocumentOutline): Promise<Buffer> {
         }
         usedNames.add(name);
         const sheet = workbook.addWorksheet(name.slice(0, 31));
-        sheet.addRow([...block.header]);
-        block.rows.forEach((row) => sheet.addRow([...row]));
+        const header = [...block.header];
+        const payroll = createPayrollColumnMap(header);
+        const dataRows = block.rows.filter((row) => !isTotalRow(row));
+        const totalRow = block.rows.find((row) => isTotalRow(row));
+        sheet.addRow(header);
+        block.rows.forEach((row, rowIndex) => {
+          const isTotal = isTotalRow(row);
+          const values = normalizeExcelRow(row, header, payroll, isTotal);
+          const excelRow = sheet.addRow(values);
+          if (payroll.netSalaryIndex !== undefined &&
+              (isTotal || shouldAddNetSalaryFormula(row, payroll))) {
+            const netCell = excelRow.getCell(payroll.netSalaryIndex + 1);
+            const netColumn = excelColumnName(payroll.netSalaryIndex + 1);
+            if (isTotal) {
+              const firstDataRow = 2;
+              const lastDataRow = dataRows.length + 1;
+              netCell.value = {
+                formula: `=IF(COUNT(${netColumn}${firstDataRow}:${netColumn}${lastDataRow})=0,"",SUM(${netColumn}${firstDataRow}:${netColumn}${lastDataRow}))`
+              };
+            } else {
+              const rowNumber = rowIndex + 2;
+              const basic = excelColumnName(payroll.basicSalaryIndex! + 1);
+              const performance = excelColumnName(payroll.performanceIndex! + 1);
+              const allowance = excelColumnName(payroll.allowanceIndex! + 1);
+              const deduction = excelColumnName(payroll.deductionIndex! + 1);
+              netCell.value = {
+                formula: `=IF(COUNT(${basic}${rowNumber}:${deduction}${rowNumber})<4,"",${basic}${rowNumber}+${performance}${rowNumber}+${allowance}${rowNumber}-${deduction}${rowNumber})`
+              };
+            }
+          }
+        });
+        styleExcelTable(sheet, header.length, block.rows.length + 1);
+        if (totalRow) {
+          const total = sheet.getRow(block.rows.length + 1);
+          total.font = { bold: true };
+        }
       });
     });
   }
   return workbook.xlsx.writeBuffer() as unknown as Promise<Buffer>;
+}
+
+interface PayrollColumnMap {
+  readonly basicSalaryIndex?: number;
+  readonly performanceIndex?: number;
+  readonly allowanceIndex?: number;
+  readonly deductionIndex?: number;
+  readonly netSalaryIndex?: number;
+}
+
+function createPayrollColumnMap(header: readonly string[]): PayrollColumnMap {
+  const indexOf = (name: string): number | undefined => {
+    const index = header.findIndex((value) => value.trim() === name);
+    return index >= 0 ? index : undefined;
+  };
+  return {
+    basicSalaryIndex: indexOf('基本工资'),
+    performanceIndex: indexOf('绩效'),
+    allowanceIndex: indexOf('补贴'),
+    deductionIndex: indexOf('扣款'),
+    netSalaryIndex: indexOf('实发工资')
+  };
+}
+
+function normalizeExcelRow(
+  row: readonly string[],
+  header: readonly string[],
+  payroll: PayrollColumnMap,
+  isTotal: boolean
+): (string | number | null)[] {
+  return header.map((column, index) => {
+    const raw = row[index] ?? '';
+    if (isTotal) {
+      if (
+        index === payroll.basicSalaryIndex ||
+        index === payroll.performanceIndex ||
+        index === payroll.allowanceIndex ||
+        index === payroll.deductionIndex
+      ) {
+        return null;
+      }
+      if (index === payroll.netSalaryIndex) return null;
+      if (column === '年龄' || column === '性别') return null;
+      return index === 0 ? '合计' : raw.trim() === '待确认' ? null : raw;
+    }
+    if (index === payroll.netSalaryIndex) return null;
+    if (isPayrollNumericColumn(column)) {
+      if (isPlaceholderValue(raw, column) || raw.trim() === '待确认') return null;
+      const numeric = Number(raw.trim());
+      return Number.isFinite(numeric) ? numeric : raw;
+    }
+    if (column === '性别' && /^示例性别\d+$/.test(raw.trim())) return '';
+    return raw;
+  });
+}
+
+function isPayrollNumericColumn(column: string): boolean {
+  return ['基本工资', '绩效', '补贴', '扣款', '年龄'].includes(column.trim());
+}
+
+function isPlaceholderValue(value: string, column: string): boolean {
+  const normalized = value.trim();
+  return new RegExp(`^示例${column}\\d+$`).test(normalized);
+}
+
+function isTotalRow(row: readonly string[]): boolean {
+  return row[0]?.trim() === '合计';
+}
+
+function shouldAddNetSalaryFormula(
+  _row: readonly string[],
+  payroll: PayrollColumnMap
+): boolean {
+  // The net salary column is always a derived value. `normalizeExcelRow`
+  // intentionally clears any model-provided value (including a numeric one),
+  // so leaving the formula conditional would produce a blank column whenever
+  // the model supplied sample amounts instead of placeholders.
+  return (
+    payroll.netSalaryIndex !== undefined &&
+    payroll.basicSalaryIndex !== undefined &&
+    payroll.performanceIndex !== undefined &&
+    payroll.allowanceIndex !== undefined &&
+    payroll.deductionIndex !== undefined
+  );
+}
+
+function excelColumnName(columnNumber: number): string {
+  let value = columnNumber;
+  let name = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+function styleExcelTable(
+  sheet: ExcelJS.Worksheet,
+  columnCount: number,
+  rowCount: number
+): void {
+  const header = sheet.getRow(1);
+  header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  header.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF1F4E78' }
+  };
+  header.alignment = { horizontal: 'center', vertical: 'middle' };
+  header.height = 24;
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: rowCount, column: columnCount }
+  };
+  for (let column = 1; column <= columnCount; column += 1) {
+    const values = Array.from({ length: rowCount }, (_, index) =>
+      String(sheet.getCell(index + 1, column).value ?? '')
+    );
+    const contentWidth = Math.max(
+      String(sheet.getCell(1, column).value ?? '').length,
+      ...values.slice(1).map((value) => value.length)
+    );
+    sheet.getColumn(column).width = Math.min(24, Math.max(12, contentWidth + 2));
+  }
+  for (let row = 2; row <= rowCount; row += 1) {
+    sheet.getRow(row).alignment = { vertical: 'middle', wrapText: true };
+  }
 }
 
 function sanitizeSheetName(value: string): string {
@@ -474,9 +737,15 @@ async function buildPptBuffer(
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = outline.title;
 
-  const pages = expandPresentationSections(outline, template, images);
+  // The renderer owns the cover and closing slides. Models sometimes return
+  // decorative "封面"/"谢谢" sections as well; treating those as content
+  // creates duplicate covers and can spill trailing tables into fake thank-you
+  // pages. Keep the original outline for validation, but render only semantic
+  // content sections here.
+  const renderOutline = normalizePresentationOutline(outline);
+  const pages = expandPresentationSections(renderOutline, template, images);
   const totalPages =
-    1 + pages.length + (outline.sections.length > 0 ? 1 : 0);
+    1 + pages.length + (renderOutline.sections.length > 0 ? 1 : 0);
   if (totalPages > presentationOutlineLimits.maxEstimatedPages) {
     throw new PresentationLayoutError(
       `PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`
@@ -487,10 +756,29 @@ async function buildPptBuffer(
   pages.forEach((page, index) => {
     renderPresentationPage(pptx, page, template, index + 2);
   });
-  if (outline.sections.length > 0) {
-    renderPresentationClosing(pptx, outline, template);
+  if (renderOutline.sections.length > 0) {
+    renderPresentationClosing(pptx, renderOutline, template);
   }
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+}
+
+function normalizePresentationOutline(outline: DocumentOutline): DocumentOutline {
+  if (outline.kind !== 'ppt') return outline;
+  const sections = outline.sections.filter((section, index, all) => {
+    const heading = section.heading.trim().toLocaleLowerCase();
+    if (
+      section.pageKind === 'cover' &&
+      index === 0 &&
+      /^(?:封面|cover|title)$/iu.test(heading)
+    ) return false;
+    if (
+      section.pageKind === 'closing' &&
+      index === all.length - 1 &&
+      /^(?:谢谢|谢谢观看|感谢观看|thank\s*you)$/iu.test(heading)
+    ) return false;
+    return true;
+  });
+  return { ...outline, sections };
 }
 
 function expandPresentationSections(
@@ -1402,7 +1690,12 @@ function renderDataPage(
       color: template.tokens.text,
       border: { pt: 0.6, color: tintColor(template.tokens.accent, 0.62) },
       margin: 0.08,
-      valign: 'middle'
+      valign: 'middle',
+      // Table pagination is handled by splitTableRows/splitTableColumns above.
+      // Disable pptxgenjs' own pagination to avoid sparse "续" slides when the
+      // application-level page already fits the table within its allocated box.
+      autoPage: false,
+      autoPageRepeatHeader: false
     });
     return;
   }

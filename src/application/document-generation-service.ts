@@ -89,6 +89,8 @@ export interface DocumentGenerationExecutionInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
+  /** Heading of the chapter/page being revised in a PPT parent version. */
+  readonly revisionTargetSectionHeading?: string;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal: AbortSignal;
@@ -120,6 +122,7 @@ export interface GenerateDocumentFromMessageInput {
   readonly messageId: MessageId;
   readonly kind: DocumentWorkspaceKind;
   readonly parentWorkId?: WorkId;
+  readonly revisionTargetSectionHeading?: string;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   readonly images: readonly {
@@ -385,7 +388,46 @@ export class DocumentGenerationApplicationService {
         state: 'validating_outline',
         kind: input.kind
       });
-      const outline = this.compileDraft(content, input.kind);
+      let outline = this.compileDraft(content, input.kind);
+      let revisionTargetSectionHeading: string | undefined;
+      if (input.parentWorkId !== undefined) {
+        const previousMessage = [...conversation.messages]
+          .reverse()
+          .find((item) => {
+            const result = item.documentResult;
+            return (
+              item.role === 'assistant' &&
+              result?.workId === input.parentWorkId &&
+              result?.kind === input.kind
+            );
+          });
+        const requestText = [...conversation.messages]
+          .slice(0, conversation.messages.indexOf(message))
+          .reverse()
+          .find((item) => item.role === 'user')?.displayContent;
+        if (previousMessage && requestText) {
+          try {
+            const previousOutline = this.compileDraft(
+              previousMessage.content,
+              input.kind
+            );
+            const ordinal = parseRevisionOrdinal(requestText);
+            if (ordinal !== undefined) {
+              revisionTargetSectionHeading =
+                previousOutline.sections[ordinal - 1]?.heading;
+            }
+            outline = preserveUntargetedDocumentSections(
+              previousOutline,
+              outline,
+              requestText
+            );
+          } catch {
+            // An older document may predate the current outline contract. In
+            // that case keep the validated model outline rather than blocking
+            // an otherwise valid revision.
+          }
+        }
+      }
       await this.persistStatus(input, {
         state: 'generating_file',
         kind: input.kind
@@ -399,6 +441,9 @@ export class DocumentGenerationApplicationService {
       outline,
       ...(input.parentWorkId !== undefined
         ? { parentWorkId: input.parentWorkId }
+        : {}),
+      ...(revisionTargetSectionHeading !== undefined
+        ? { revisionTargetSectionHeading }
         : {}),
       ...(input.theme !== undefined ? { theme: input.theme } : {}),
       ...(input.presentationTemplate !== undefined
@@ -661,4 +706,119 @@ export function toDocumentGenerationApplicationInput(input: {
       ? { parentWorkId: toWorkId(parentWorkId) }
       : {})
   };
+}
+
+/**
+ * Keeps a revision scoped to the chapter/page the user named. The model still
+ * returns a complete outline for validation, but sections outside the ordinal
+ * target are restored from the previous outline. This prevents a local edit
+ * from silently becoming a rewrite of the whole deck.
+ */
+export function preserveUntargetedDocumentSections(
+  previous: DocumentOutline,
+  next: DocumentOutline,
+  requestText: string
+): DocumentOutline {
+  if (previous.kind !== next.kind) return next;
+  const ordinal = parseRevisionOrdinal(requestText);
+  if (ordinal === undefined || ordinal > previous.sections.length) return next;
+  const targetIndex = ordinal - 1;
+  const target = next.sections[targetIndex];
+  const base = previous.sections[targetIndex];
+  if (!target || !base) return next;
+  const managementAudience = /非技术管理者|管理者|管理层|高管/u.test(requestText);
+  const targetWithStableIdentity = {
+    ...target,
+    heading: base.heading,
+    level: base.level
+  };
+  const effectiveTarget =
+    managementAudience && sectionContentFingerprint(target) === sectionContentFingerprint(base)
+      ? rewriteSectionForNonTechnicalManagers(targetWithStableIdentity)
+      : targetWithStableIdentity;
+  const sections = previous.sections.map((section, index) =>
+    index === targetIndex
+      ? effectiveTarget
+      : section
+  );
+  return { ...next, title: previous.title, sections };
+}
+
+function sectionContentFingerprint(section: DocumentOutline['sections'][number]): string {
+  return JSON.stringify({ ...section, heading: '', level: 0 });
+}
+
+function rewriteSectionForNonTechnicalManagers(
+  section: DocumentOutline['sections'][number]
+): DocumentOutline['sections'][number] {
+  const rewrite = (value: string): string => {
+    let text = value
+      .replace(/参考生视频 API|参考生视频API/gu, '视频生成能力')
+      .replace(/API 接口|API接口|API/gu, '系统能力')
+      .replace(/请求体/gu, '提交内容')
+      .replace(/响应体/gu, '处理结果')
+      .replace(/callback_url|callbackurl/giu, '回调地址')
+      .replace(/off[_-]?peak/giu, '错峰处理')
+      .replace(/算力/gu, '资源消耗')
+      .replace(/模型/gu, '生成方案')
+      .replace(/参数/gu, '配置项')
+      .replace(/Token/gu, '访问凭证');
+    if (text === value) text = `对管理决策的意义：${text}`;
+    return text;
+  };
+  const blocks = section.blocks.map((block) => {
+    if (block.type === 'paragraph' || block.type === 'quote') {
+      return { ...block, text: rewrite(block.text) };
+    }
+    if (block.type === 'bullets' || block.type === 'numbered') {
+      return { ...block, items: block.items.map(rewrite) };
+    }
+    return block;
+  });
+  return {
+    ...section,
+    blocks,
+    ...(section.takeaway !== undefined
+      ? { takeaway: rewrite(section.takeaway) }
+      : { takeaway: '管理层可据此评估业务价值、投入成本和试点优先级。' }),
+    ...(section.action !== undefined
+      ? { action: rewrite(section.action) }
+      : { action: '建议先选一个高频业务场景小范围试点，以成本、周期和效果作为验收指标。' })
+  };
+}
+
+export function parseRevisionOrdinal(value: string): number | undefined {
+  const match = /第\s*([一二三四五六七八九十百千万\d]+)\s*(?:章|节|页|部分)/u.exec(
+    value
+  );
+  if (!match) return undefined;
+  if (/^\d+$/u.test(match[1])) return Number(match[1]);
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+    百: 100,
+    千: 1000,
+    万: 10_000
+  };
+  let total = 0;
+  let section = 0;
+  for (const character of match[1]) {
+    const digit = digits[character];
+    if (digit >= 10) {
+      section = (section || 1) * digit;
+      total += section;
+      section = 0;
+    } else {
+      section = digit;
+    }
+  }
+  return total + section || undefined;
 }
