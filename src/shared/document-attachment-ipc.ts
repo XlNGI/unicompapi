@@ -85,9 +85,27 @@ export interface RagContextRequest {
   readonly k?: number;
 }
 
+export type RagSourceKind =
+  | 'project_attachment'
+  | 'product_information'
+  | 'brand_guideline'
+  | 'template_metadata'
+  | 'confirmed_history';
+
 export interface RagContextChunkDto {
+  readonly chunkId: string;
+  readonly sourceId: string;
+  readonly sourceKind: RagSourceKind;
   readonly source: string;
   readonly text: string;
+  readonly contentHash: string;
+  readonly indexVersion: string;
+  readonly score: number;
+  readonly rank: number;
+  readonly fileId?: string;
+  readonly page?: number;
+  readonly sheet?: string;
+  readonly section?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

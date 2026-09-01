@@ -95,7 +95,23 @@ export function parseDocumentContent(
   if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
     return parseMarkdownToOutline(cleaned, kind);
   }
-  const parsed = parseJsonRecord(candidate);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = parseJsonRecord(candidate);
+  } catch (error) {
+    // Excel responses are often emitted as a large JSON object. A common
+    // provider truncation is one missing closing bracket for the `rows` array
+    // immediately before the table object closes (`]}` instead of `]]}`).
+    // Repair only that narrowly identifiable shape, then run the canonical
+    // outline parser so the result is still subject to all normal limits and
+    // type checks. Other malformed responses continue through the existing
+    // recovery path in the application service.
+    if (kind === 'excel') {
+      const repaired = repairExcelRowsArray(candidate);
+      if (repaired) return repaired;
+    }
+    throw error;
+  }
   if ('kind' in parsed) {
     const outline = parseDocumentOutline(candidate);
     if (outline.kind !== kind) {
@@ -194,8 +210,9 @@ export function recoverDocumentContent(
         activeKey = undefined;
         break;
       case 'pageKind':
-        if (presentationPageKinds.includes(token.value as PresentationPageKind)) {
-          ensureSection().pageKind = token.value as PresentationPageKind;
+        {
+          const pageKind = normalizePresentationPageKind(token.value);
+          if (pageKind) ensureSection().pageKind = pageKind;
         }
         activeKey = undefined;
         break;
@@ -456,9 +473,12 @@ function parseSection(
       `outline.sections[${index}] exceeds ${MAX_BLOCKS_PER_SECTION} blocks`
     );
   }
-  const blocks = value.blocks.map((block, blockIndex) =>
-    parseBlock(block, index, blockIndex)
+  let blocks = value.blocks.map((block, blockIndex) =>
+    parseBlock(block, index, blockIndex, kind)
   );
+  if (kind === 'excel') {
+    blocks = appendExcelFooter(blocks, value.footers, index);
+  }
   return {
     heading,
     level: value.level as 1 | 2 | 3,
@@ -467,20 +487,131 @@ function parseSection(
   };
 }
 
+function repairExcelRowsArray(candidate: string): DocumentOutline | undefined {
+  // Another frequent shape error is a table followed by a paragraph where
+  // the model closed both `blocks` and its section before emitting that
+  // paragraph. In that case the tail is `]}]},{"type":"paragraph"` but the
+  // valid table tail is `]]},{"type":"paragraph"` (the second bracket closes
+  // `rows`). Try this targeted rewrite first.
+  const misplacedParagraph = /\]\s*}\s*]\s*}\s*,\s*(?=\{\s*"type"\s*:\s*"paragraph")/g;
+  let match: RegExpExecArray | null;
+  while ((match = misplacedParagraph.exec(candidate)) !== null) {
+    const before = candidate.slice(0, match.index);
+    if (!/"rows"\s*:\s*\[[\s\S]*$/u.test(before)) continue;
+    const repaired =
+      before +
+      ']]},' +
+      candidate.slice(match.index + match[0].length);
+    try {
+      const parsed = parseJsonRecord(repaired);
+      if (parsed.kind === 'excel') return parseDocumentOutline(repaired);
+    } catch {
+      // Continue with the bracket-only candidates below.
+    }
+  }
+
+  const insertionPoints: number[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < candidate.length - 1; index += 1) {
+    const character = candidate[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character !== ']') continue;
+    let next = index + 1;
+    while (/\s/.test(candidate[next] ?? '')) next += 1;
+    if (candidate[next] === '}') insertionPoints.push(index + 1);
+  }
+
+  for (const insertionPoint of insertionPoints) {
+    const repaired =
+      candidate.slice(0, insertionPoint) +
+      ']' +
+      candidate.slice(insertionPoint);
+    try {
+      const parsed = parseJsonRecord(repaired);
+      if (parsed.kind !== 'excel') continue;
+      return parseDocumentOutline(repaired);
+    } catch {
+      // Try the next narrowly scoped insertion point, if any.
+    }
+  }
+  return undefined;
+}
+
+function appendExcelFooter(
+  blocks: DocumentOutlineBlock[],
+  value: unknown,
+  sectionIndex: number
+): DocumentOutlineBlock[] {
+  if (value === undefined) return blocks;
+  if (!isRecord(value) || !Array.isArray(value.values)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `outline.sections[${sectionIndex}].footers must contain a values array`
+    );
+  }
+  const tableIndex = blocks.reduce(
+    (last, block, blockIndex) => (block.type === 'table' ? blockIndex : last),
+    -1
+  );
+  if (tableIndex < 0) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `outline.sections[${sectionIndex}].footers requires a table block`
+    );
+  }
+  const table = blocks[tableIndex];
+  if (table.type !== 'table') return blocks;
+  const label =
+    typeof value.label === 'string' && value.label.trim().length > 0
+      ? value.label
+      : '合计';
+  const footerValues = value.values.map((cell, cellIndex) => {
+    if (typeof cell === 'string') return cell;
+    if (typeof cell === 'number' && Number.isFinite(cell)) return String(cell);
+    if (cell === null || cell === undefined) return '';
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `outline.sections[${sectionIndex}].footers.values[${cellIndex}] is invalid`
+    );
+  });
+  const row =
+    footerValues.length === table.header.length
+      ? [label, ...footerValues.slice(1)]
+      : footerValues.length === table.header.length - 1
+        ? [label, ...footerValues]
+        : undefined;
+  if (!row) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `outline.sections[${sectionIndex}].footers.values must contain ${table.header.length} or ${table.header.length - 1} cells`
+    );
+  }
+  const next = [...blocks];
+  next[tableIndex] = { ...table, rows: [...table.rows, row] };
+  return next;
+}
+
 function parsePresentationSectionMetadata(
   value: Record<string, unknown>,
   index: number
 ): PresentationSectionMetadata {
   const label = `outline.sections[${index}]`;
-  if (
-    value.pageKind !== undefined &&
-    (typeof value.pageKind !== 'string' ||
-      !presentationPageKinds.includes(value.pageKind as PresentationPageKind))
-  ) {
-    throw new DocumentOutlineError(
-      'document_invalid_outline',
-      `${label}.pageKind is invalid`
-    );
+  const pageKind =
+    value.pageKind === undefined
+      ? undefined
+      : normalizePresentationPageKind(value.pageKind);
+  if (value.pageKind !== undefined && pageKind === undefined) {
+    throw new DocumentOutlineError('document_invalid_outline', `${label}.pageKind is invalid`);
   }
   const takeaway = parseOptionalBoundedText(
     value.takeaway,
@@ -493,12 +624,31 @@ function parsePresentationSectionMetadata(
     MAX_TEXT_LENGTH
   );
   return {
-    ...(value.pageKind !== undefined
-      ? { pageKind: value.pageKind as PresentationPageKind }
-      : {}),
+    ...(pageKind !== undefined ? { pageKind } : {}),
     ...(takeaway !== undefined ? { takeaway } : {}),
     ...(action !== undefined ? { action } : {})
   };
+}
+
+const presentationPageKindAliases: Readonly<Record<string, PresentationPageKind>> = {
+  // Models commonly use these semantic labels even when the prompt lists the
+  // renderer's canonical layout enum. Keep the compatibility surface small
+  // and map only to existing, supported layouts.
+  summary: 'insight',
+  detail: 'insight',
+  roadmap: 'process',
+  risk: 'insight',
+  action: 'process'
+};
+
+function normalizePresentationPageKind(
+  value: unknown
+): PresentationPageKind | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (presentationPageKinds.includes(value as PresentationPageKind)) {
+    return value as PresentationPageKind;
+  }
+  return presentationPageKindAliases[value];
 }
 
 function parseOptionalBoundedText(
@@ -590,7 +740,8 @@ function countBlockCharacters(block: DocumentOutlineBlock): number {
 function parseBlock(
   value: unknown,
   sectionIndex: number,
-  blockIndex: number
+  blockIndex: number,
+  kind: DocumentWorkspaceKind
 ): DocumentOutlineBlock {
   if (!isRecord(value) || typeof value.type !== 'string') {
     throw new DocumentOutlineError(
@@ -617,7 +768,7 @@ function parseBlock(
         items: parseItems(value.items, `${label}.items`)
       };
     case 'table':
-      return parseTable(value, label);
+      return parseTable(value, label, kind);
     case 'chart':
       return parseChart(value, label);
     default:
@@ -687,7 +838,8 @@ function parseChart(
 
 function parseTable(
   value: Record<string, unknown>,
-  label: string
+  label: string,
+  kind: DocumentWorkspaceKind = 'word'
 ): DocumentOutlineBlock {
   const header = parseItems(value.header, `${label}.header`, MAX_TABLE_COLUMNS);
   if (!Array.isArray(value.rows)) {
@@ -717,15 +869,16 @@ function parseTable(
     }
     return row.map((cell, cellIndex) => {
       if (
-        typeof cell !== 'string' ||
-        cell.length > MAX_TABLE_CELL_LENGTH
+        (typeof cell !== 'string' && !(kind === 'excel' && typeof cell === 'number')) ||
+        (typeof cell === 'number' && !Number.isFinite(cell)) ||
+        String(cell).length > MAX_TABLE_CELL_LENGTH
       ) {
         throw new DocumentOutlineError(
           'document_invalid_outline',
           `${label}.rows[${rowIndex}][${cellIndex}] is invalid`
         );
       }
-      return cell;
+      return String(cell);
     });
   });
   return { type: 'table', header, rows };

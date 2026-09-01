@@ -49,6 +49,31 @@ describe('document outline parser', () => {
     expect(isDocumentOutline(outline)).toBe(true);
   });
 
+  it('normalizes numeric Excel cells and footer summaries', () => {
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'excel',
+      title: '部门员工工资表',
+      sections: [{
+        heading: '员工工资明细',
+        level: 1,
+        blocks: [{
+          type: 'table',
+          header: ['姓名', '基本工资', '实发工资'],
+          rows: [['示例员工01', 5000, 5200]]
+        }],
+        footers: { label: '合计', values: ['', 5000, 5200] }
+      }]
+    }));
+    const table = outline.sections[0].blocks[0];
+    expect(table).toMatchObject({
+      type: 'table',
+      rows: [
+        ['示例员工01', '5000', '5200'],
+        ['合计', '5000', '5200']
+      ]
+    });
+  });
+
   it('keeps PPT page semantics for layout planning', () => {
     const value = JSON.parse(validOutline());
     value.sections[0].pageKind = 'insight';
@@ -531,6 +556,76 @@ describe('content contract helpers', () => {
           rows: [['示例项目', '待确认']]
         }
       ]
+    });
+  });
+
+  it('normalizes common semantic PPT page-kind aliases', () => {
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '企业 AI',
+      sections: [
+        {
+          heading: '价值总结',
+          level: 1,
+          pageKind: 'summary',
+          blocks: [{ type: 'bullets', items: ['效率提升：减少重复工作。'] }]
+        },
+        {
+          heading: '落地路线',
+          level: 1,
+          pageKind: 'roadmap',
+          blocks: [{ type: 'bullets', items: ['先试点，再扩展。'] }]
+        },
+        {
+          heading: '风险控制',
+          level: 1,
+          pageKind: 'risk',
+          blocks: [{ type: 'bullets', items: ['保留人工复核。'] }]
+        },
+        {
+          heading: '行动建议',
+          level: 1,
+          pageKind: 'action',
+          blocks: [{ type: 'bullets', items: ['先试点，再规模化。'] }]
+        }
+      ]
+    }));
+    expect(outline.sections.map((section) => section.pageKind)).toEqual([
+      'insight',
+      'process',
+      'insight',
+      'process'
+    ]);
+  });
+
+  it('repairs a missing closing bracket in malformed Excel rows JSON', () => {
+    const valid = JSON.stringify({
+      kind: 'excel',
+      title: '部门员工工资表（模板）',
+      sections: [{
+        heading: '工资明细',
+        level: 1,
+        blocks: [{
+          type: 'table',
+          header: ['姓名', '基本工资', '实发工资'],
+          rows: [['示例姓名1', 5000, 5000], ['合计', 5000, 5000]]
+        }, { type: 'paragraph', text: '示例数据，仅供模板演示' }]
+      }]
+    });
+    const malformed = valid.replace(
+      ']]},{"type":"paragraph"',
+      ']},{"type":"paragraph"'
+    );
+
+    const outline = parseDocumentContent(malformed, 'excel');
+    expect(outline.sections[0].blocks[0]).toEqual({
+      type: 'table',
+      header: ['姓名', '基本工资', '实发工资'],
+      rows: [['示例姓名1', '5000', '5000'], ['合计', '5000', '5000']]
+    });
+    expect(outline.sections[0].blocks[1]).toEqual({
+      type: 'paragraph',
+      text: '示例数据，仅供模板演示'
     });
   });
 

@@ -124,6 +124,16 @@ test('document outline generation uses one model response and local application 
   assert.match(page, /Office 文档已生成/);
 });
 
+test('document outline payload is never rendered as ordinary chat markdown', () => {
+  assert.match(page, /documentResponseActive/);
+  assert.match(page, /hideDocumentDraftContent/);
+  assert.match(page, /isMachineReadableDocumentOutline/);
+  assert.match(page, /isDocumentDraftMessage \|\| hideDocumentDraftContent/);
+  assert.match(page, /setDocumentResponseActive\(true\)/);
+  assert.match(page, /setDocumentResponseActive\(false\)/);
+  assert.match(page, /documentResponseActive\s*\|\|\s*hideDocumentDraftContent/);
+});
+
 test('document intent passes the resolved kind without waiting for React state', () => {
   assert.match(page, /analyzeOfficeRequest/);
   assert.match(page, /sendDocumentMessage\([\s\S]*?documentIntent\.action/);

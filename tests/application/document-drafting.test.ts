@@ -50,6 +50,10 @@ describe('document drafting helpers', () => {
     expect(input).toContain('# 项目周报');
     expect(input).toContain('这是一次局部修改');
     expect(input).toContain('其他内容、顺序、标题和样式保持不变');
+    expect(input).toContain('局部修改的语义验收规则');
+    expect(input).toContain('面向非技术管理者');
+    expect(input).toContain('必须对目标范围做实质性语义改写');
+    expect(input).toContain('非目标范围必须逐字保持原内容');
     expect(input).toContain('修改要求');
     expect(input).toContain('强调风险');
     expect(composeDocumentRevisionInput(undefined, '新需求')).toContain(
@@ -73,6 +77,9 @@ describe('document drafting helpers', () => {
     expect(pptInstruction).toContain('"type":"table"');
     expect(pptInstruction).toContain('"type":"chart"');
     expect(pptInstruction).toContain('必须同时提供 table 和 chart');
+    expect(pptInstruction).toContain('pageKind 只能使用以下值');
+    expect(pptInstruction).toContain('不要输出 summary、detail、roadmap、risk、action');
+    expect(pptInstruction).toContain('封面和结束页由系统统一生成');
     expect(documentKindInstruction('excel')).toContain('列名');
     const wordInstruction = documentKindInstruction('word');
     expect(wordInstruction).toContain('标题层级');

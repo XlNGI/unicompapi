@@ -44,6 +44,10 @@ describe('RAG retrieval service', () => {
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0].source).toContain('调研.txt');
     expect(chunks[0].text).toContain('3000 万');
+    expect(chunks[0].sourceKind).toBe('project_attachment');
+    expect(chunks[0].contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(chunks[0].indexVersion).toBe('document-bm25-v2');
+    expect(chunks[0].rank).toBe(1);
   });
 
   it('returns no chunks when nothing matches', async () => {
@@ -51,5 +55,60 @@ describe('RAG retrieval service', () => {
     const service = new RagRetrievalService({ rootDirectory: root, projectId });
     const chunks = await service.retrieve({ query: '不存在的关键词xyz', k: 2 });
     expect(chunks).toHaveLength(0);
+  });
+
+  it('unifies injected enterprise sources and exposes a rebuildable snapshot', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-rag-source-'));
+    temporaryRoots.push(root);
+    const projectId = toProjectId('rag-source-project');
+    const service = new RagRetrievalService({
+      rootDirectory: root,
+      projectId,
+      now: () => '2026-09-01T00:00:00.000Z',
+      sourceProviders: [
+        {
+          async listSources() {
+            return [
+              {
+                sourceId: 'product:pricing',
+                sourceKind: 'product_information' as const,
+                sourceName: '产品资料',
+                content: '企业版产品支持按年订阅和项目级权限。'
+              }
+            ];
+          }
+        }
+      ]
+    });
+
+    const snapshot = await service.buildIndexSnapshot();
+    expect(snapshot.projectId).toBe(projectId);
+    expect(snapshot.indexVersion).toBe('document-bm25-v2');
+    expect(snapshot.builtAt).toBe('2026-09-01T00:00:00.000Z');
+    expect(snapshot.chunks[0]?.sourceKind).toBe('product_information');
+    const results = await service.retrieve({ query: '项目级权限', k: 1 });
+    expect(results[0]?.sourceId).toBe('product:pricing');
+  });
+
+  it('isolates a failed source provider and keeps retrieval available', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-rag-failure-'));
+    temporaryRoots.push(root);
+    const service = new RagRetrievalService({
+      rootDirectory: root,
+      projectId: toProjectId('rag-failure-project'),
+      sourceProviders: [
+        {
+          async listSources() {
+            throw new Error('provider unavailable');
+          }
+        }
+      ]
+    });
+    const snapshot = await service.buildIndexSnapshot();
+    expect(snapshot.chunks).toHaveLength(0);
+    expect(snapshot.failures).toMatchObject([
+      { sourceId: 'provider:0', code: 'provider_failed' }
+    ]);
+    await expect(service.retrieve({ query: '仍可执行', k: 1 })).resolves.toEqual([]);
   });
 });
