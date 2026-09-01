@@ -7,6 +7,7 @@ import {
   createProviderExecutionRouteSnapshot,
   createProviderInvocationAttempt,
   createProviderInvocationEvent,
+  createProviderOperationRecord,
   createProviderUsageObservation,
   createUsageSchema,
   toConnectionId,
@@ -24,6 +25,7 @@ import {
   toProviderId,
   toProviderInvocationAttemptId,
   toProviderInvocationEventId,
+  toProviderOperationRecordId,
   toProviderUsageObservationId,
   toTaskId,
   toUsageSchemaId,
@@ -37,6 +39,7 @@ import {
   JsonLocalResultObservationRepository,
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
+  JsonProviderOperationRepository,
   JsonProviderUsageObservationRepository,
   JsonWorkRepository,
   NodeProjectStorage,
@@ -46,6 +49,7 @@ import {
   projectStoragePaths
 } from '../../src/platform';
 import { VIDU_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/vidu/vidu-contracts';
+import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/newapi';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-08-03T10:00:00.000Z');
@@ -54,6 +58,10 @@ const t2 = toIsoTimestamp('2026-08-03T10:02:00.000Z');
 const t3 = toIsoTimestamp('2026-08-03T10:03:00.000Z');
 const t4 = toIsoTimestamp('2026-08-03T11:00:00.000Z');
 const t5 = toIsoTimestamp('2026-08-03T11:01:00.000Z');
+const t6 = toIsoTimestamp('2026-08-05T10:00:00.000Z');
+const t7 = toIsoTimestamp('2026-08-05T10:01:00.000Z');
+const t8 = toIsoTimestamp('2026-08-05T10:02:00.000Z');
+const t9 = toIsoTimestamp('2026-08-05T10:03:00.000Z');
 
 const usageSchema = createUsageSchema({
   id: toUsageSchemaId('usage-schema.call-records'),
@@ -157,7 +165,7 @@ describe('provider invocation read model controller', () => {
         total: 7,
         offset: 0,
         limit: 1,
-        items: [{ invocationAttemptId: 'attempt-consumption-1' }]
+        items: [{ invocationAttemptId: 'attempt-consumption-7' }]
       }
     });
     expect(fixture.pagedSchemaResolveCount()).toBe(2);
@@ -320,6 +328,7 @@ describe('provider invocation read model controller', () => {
       value: {
         currencyCode: 'CNY',
         currencyLabel: '人民币',
+        period: { timeZone: 'Asia/Shanghai' },
         totalAmount: '0',
         totalCallCount: 7,
         successfulCallCount: 7,
@@ -331,7 +340,7 @@ describe('provider invocation read model controller', () => {
         timeBuckets: expect.arrayContaining([
           { date: '2026-08-03', amount: '0', callCount: 0 }
         ]),
-        disclaimer: 'local_estimate_not_provider_bill'
+        disclaimer: 'provider_bill_preferred_with_estimate_fallback'
       }
     });
 
@@ -350,21 +359,26 @@ describe('provider invocation read model controller', () => {
           sourceCheckedAt: '2026-08-03'
         }],
         timeBuckets: expect.arrayContaining([
-          { date: '2026-08-03', amount: '2.8', callCount: 7 }
+          { date: '2026-08-03', amount: '2.1', callCount: 6 },
+          { date: '2026-08-05', amount: '0.7', callCount: 1 }
         ])
       }
     });
     if (!converted.ok) throw new TypeError('Expected summary');
     expect(converted.value.timeBuckets).toHaveLength(7);
-    expect(converted.value.providerSlices).toHaveLength(6);
-    expect(converted.value.providerSlices.find((item) => item.key === 'other')).toMatchObject({
-      label: '其他',
-      amount: '0.3',
-      callCount: 2,
-      isOther: true
-    });
-    expect(converted.value.providerSlices.map((item) => item.key).filter((key) => key !== 'other'))
-      .toHaveLength(5);
+    expect(converted.value.providerSlices).toEqual([expect.objectContaining({
+      amount: '0.7',
+      callCount: 1,
+      isOther: false
+    })]);
+    expect(converted.value.providerSlices.reduce(
+      (sum, item) => sum + Number(item.amount),
+      0
+    )).toBeCloseTo(Number(converted.value.timeBuckets.at(-1)?.amount));
+    expect(converted.value.providerSlices.reduce(
+      (sum, item) => sum + Number(item.amount),
+      0
+    )).not.toBeCloseTo(Number(converted.value.totalAmount));
     expect(converted.value.providerSlices.reduce(
       (sum, item) => sum + item.ratioBasisPoints,
       0
@@ -379,6 +393,50 @@ describe('provider invocation read model controller', () => {
       .resolves.toMatchObject({ ok: false, error: { code: 'invalid_request' } });
     await expect(fixture.invalidConversion.getConsumptionSummary({ calendarDays: 7 }))
       .resolves.toMatchObject({ ok: false, error: { code: 'read_model_failed' } });
+  });
+
+  it('subtracts an async video task refund from its request charge', async () => {
+    const root = await makeRoot('unicomp-consumption-refund-');
+    const projectId = toProjectId('project-consumption-refund');
+    await createRefundedNewApiVideoCall(root, projectId);
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore(), () => t9);
+    await catalog.remember({ projectId, projectName: 'Refund project', rootDirectory: root });
+    const billing = {
+      async reconcile() {
+        return new Map([
+          ['req-video-consume', {
+            requestId: 'req-video-consume', quota: 6_570_000n, consumedQuota: 6_570_000n,
+            type: 2, createdAt: 1, amountCny: '13.14'
+          }],
+          ['task:task_remote_video_1', {
+            taskId: 'task_remote_video_1', quota: -3_708_100n, refundedQuota: 3_708_100n,
+            type: 6, createdAt: 2, amountCny: '-7.4162', refundAmountCny: '7.4162'
+          }]
+        ]);
+      },
+      async estimate() {
+        return undefined;
+      },
+      invalidate() {}
+    };
+    const controller = new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      undefined,
+      () => new Date('2026-08-05T12:00:00.000Z'),
+      billing
+    );
+    const result = await controller.getConsumptionSummary({ calendarDays: 1 });
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        totalAmount: '5.7238',
+        actualBillAmount: '5.7238',
+        refundedAmount: '7.4162',
+        timeBuckets: [{ date: '2026-08-05', amount: '5.7238', callCount: 1 }],
+        providerSlices: [expect.objectContaining({ amount: '5.7238', callCount: 1 })]
+      }
+    });
   });
 });
 
@@ -451,8 +509,12 @@ async function createConsumptionCalls(root: string, projectId: ProjectId): Promi
   const creditQuantities = ['20', '40', '60', '80', '100', '120', '140'];
   for (const [index, creditQuantity] of creditQuantities.entries()) {
     const suffix = `consumption-${index + 1}`;
+    const timestamps = index === creditQuantities.length - 1
+      ? [t6, t7, t8, t9]
+      : [t0, t1, t2, t3];
+    const [createdAt, acceptedAt, resultAt, completedAt] = timestamps;
     const route = {
-      ...routeSnapshot(projectId, suffix, 'text_to_video', t0, {
+      ...routeSnapshot(projectId, suffix, 'text_to_video', createdAt, {
         providerDisplayName: 'Same Provider',
         connectionDisplayName: `Connection ${index + 1}`,
         modelDisplayName: `Model ${index + 1}`
@@ -469,29 +531,29 @@ async function createConsumptionCalls(root: string, projectId: ProjectId): Promi
         executionId: toExecutionId(`execution-${suffix}`)
       },
       routeSnapshotId: route.id,
-      createdAt: t0
+      createdAt
     });
     await context.invocations.create(
       attempt,
-      invocationEvent(attempt.id, 1, 'submission_started', t0)
+      invocationEvent(attempt.id, 1, 'submission_started', createdAt)
     );
     await context.invocations.appendEvent(invocationEvent(
       attempt.id,
       2,
       'provider_accepted',
-      t1
+      acceptedAt
     ));
     await context.invocations.appendEvent(invocationEvent(
       attempt.id,
       3,
       'result_received',
-      t2
+      resultAt
     ));
     await context.invocations.appendEvent(invocationEvent(
       attempt.id,
       4,
       'completed',
-      t3
+      completedAt
     ));
     await context.usage.append(createProviderUsageObservation({
       id: toProviderUsageObservationId(`usage-${suffix}`),
@@ -508,7 +570,7 @@ async function createConsumptionCalls(root: string, projectId: ProjectId): Promi
         unit: 'credit',
         source: 'provider_body'
       }],
-      observedAt: t2
+      observedAt: resultAt
     }, usageSchema), usageSchema);
   }
 }
@@ -664,6 +726,62 @@ function callContext(root: string, projectId: ProjectId) {
     localResults: new JsonLocalResultObservationRepository(storage),
     works: new JsonWorkRepository(storage, projectId)
   };
+}
+
+async function createRefundedNewApiVideoCall(root: string, projectId: ProjectId): Promise<void> {
+  const context = callContext(root, projectId);
+  const executionId = toExecutionId('execution-refunded-newapi-video');
+  const taskId = toTaskId('task-refunded-newapi-video');
+  const route = {
+    ...routeSnapshot(projectId, 'refunded-newapi-video', 'text_to_video', t6, {
+      providerDisplayName: 'UniCompAPI',
+      connectionDisplayName: 'Connection',
+      modelDisplayName: 'Video Model'
+    }),
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    providerModelKey: 'video-model'
+  };
+  await context.routes.save(route);
+  const attempt = createProviderInvocationAttempt({
+    id: toProviderInvocationAttemptId('attempt-refunded-newapi-video'),
+    projectId,
+    subject: { kind: 'media', taskId, executionId },
+    routeSnapshotId: route.id,
+    createdAt: t6
+  });
+  await context.invocations.create(attempt, invocationEvent(attempt.id, 1, 'submission_started', t6));
+  await context.invocations.appendEvent(invocationEvent(attempt.id, 2, 'provider_accepted', t7));
+  await context.invocations.appendEvent(invocationEvent(attempt.id, 3, 'result_received', t8));
+  await context.invocations.appendEvent(invocationEvent(attempt.id, 4, 'completed', t9));
+  await context.usage.append(createProviderUsageObservation({
+    id: toProviderUsageObservationId('usage-refunded-newapi-video'),
+    invocationAttemptId: attempt.id,
+    usageSchemaId: usageSchema.id,
+    usageSchemaRevision: usageSchema.revision,
+    sourceEventKey: 'usage-refunded-newapi-video',
+    sequence: 1,
+    status: 'not_reported',
+    sourceStage: 'poll',
+    facts: [],
+    providerRequestId: 'req-video-consume',
+    observedAt: t8
+  }, usageSchema), usageSchema);
+  await new JsonProviderOperationRepository(new NodeProjectStorage(root)).save(
+    createProviderOperationRecord({
+      id: toProviderOperationRecordId('operation-refunded-newapi-video'),
+      taskId,
+      executionId,
+      mediaKind: 'video',
+      executionLifecycle: 'asynchronous_polling',
+      outcome: {
+        kind: 'accepted_async',
+        providerOperationId: 'task_remote_video_1',
+        state: 'queued'
+      },
+      createdAt: t6,
+      updatedAt: t7
+    })
+  );
 }
 
 function routeSnapshot(

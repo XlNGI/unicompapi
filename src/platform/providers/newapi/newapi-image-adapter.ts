@@ -148,6 +148,7 @@ export class NewApiImageAdapter {
   }): Promise<ProviderSubmitOutcome> {
     let requestStarted = false;
     let attemptId: ProviderInvocationAttemptId | undefined;
+    let providerRequestId: string | undefined;
     try {
       const route = validateRoute(input.routeSnapshot);
       const [connection, schema] = await Promise.all([
@@ -177,6 +178,9 @@ export class NewApiImageAdapter {
           beforeRequestStarted: async () => {
             await input.beforeRequestStarted?.();
             requestStarted = true;
+          },
+          onResponseRequestId: (requestId) => {
+            providerRequestId = requestId;
           }
         })
       );
@@ -188,7 +192,8 @@ export class NewApiImageAdapter {
       await this.persistUsage(
         request.invocationAttemptId,
         providerOperationId,
-        parsed.usage
+        parsed.usage,
+        providerRequestId
       );
       return {
         kind: 'completed_sync',
@@ -197,7 +202,7 @@ export class NewApiImageAdapter {
       };
     } catch (error) {
       if (attemptId) {
-        await this.persistFailureUsage(attemptId, error, requestStarted)
+        await this.persistFailureUsage(attemptId, error, requestStarted, providerRequestId)
           .catch(() => undefined);
       }
       return mapSubmissionFailure(error, requestStarted);
@@ -296,7 +301,8 @@ export class NewApiImageAdapter {
   private async persistUsage(
     invocationAttemptId: ProviderInvocationAttemptId,
     providerOperationId: string,
-    facts: readonly UsageFactV1[] | undefined
+    facts: readonly UsageFactV1[] | undefined,
+    providerRequestId?: string
   ): Promise<void> {
     await this.usage.append(createProviderUsageObservation({
       id: this.ids.nextProviderUsageObservationId(),
@@ -308,6 +314,7 @@ export class NewApiImageAdapter {
       status: facts ? 'reported' : 'not_reported',
       sourceStage: 'result',
       facts: facts ?? [],
+      ...(providerRequestId ? { providerRequestId } : {}),
       observedAt: this.now()
     }, newApiImageUsageSchema), newApiImageUsageSchema);
   }
@@ -315,7 +322,8 @@ export class NewApiImageAdapter {
   private async persistFailureUsage(
     invocationAttemptId: ProviderInvocationAttemptId,
     error: unknown,
-    requestStarted: boolean
+    requestStarted: boolean,
+    providerRequestId?: string
   ): Promise<void> {
     await this.usage.append(createProviderUsageObservation({
       id: this.ids.nextProviderUsageObservationId(),
@@ -329,6 +337,7 @@ export class NewApiImageAdapter {
         : requestStarted ? 'unknown_outcome' : 'not_reported',
       sourceStage: 'result',
       facts: [],
+      ...(providerRequestId ? { providerRequestId } : {}),
       observedAt: this.now()
     }, newApiImageUsageSchema), newApiImageUsageSchema);
   }

@@ -21,6 +21,7 @@ import {
 import { TaskCenterWorkspace } from './TaskCenterWorkspace';
 import {
   calculateSuccessfulCallFee,
+  formatCallBilling,
   formatCallFee,
   formatCallFeeFormula
 } from './call-fees';
@@ -466,7 +467,7 @@ export function CallDetails({
 
       <section className="uc-task-center__call-section">
         <div className="uc-task-center__details-heading">
-          <h3>上游用量与费用</h3>
+          <h3>上游用量与费用（含中转站账单）</h3>
           <StatusPill tone={usageTone(details.usage.availability)}>
             {usageLabels[details.usage.availability] ?? '用量状态未知'}
           </StatusPill>
@@ -534,12 +535,14 @@ export function CallDetails({
 
 function CallFeeSummary({ details }: { readonly details: StorageCallDetailsDto }) {
   const fee = calculateSuccessfulCallFee(details);
+  const billingLabel = formatCallBilling(details.billing);
+  const billingDescription = details.billing?.sourceLabel ?? billingLabel;
   return (
     <dl className="uc-task-center__usage-list uc-task-center__usage-list--fee">
       <div>
         <dt>费用</dt>
-        <dd>{formatCallFee(fee)}</dd>
-        <small>{fee.state === 'calculated' ? formatCallFeeFormula(fee) : fee.reason}</small>
+        <dd>{billingLabel ?? formatCallFee(fee)}</dd>
+        <small>{billingDescription ?? (fee.state === 'calculated' ? formatCallFeeFormula(fee) : fee.reason)}</small>
       </div>
     </dl>
   );

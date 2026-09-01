@@ -654,6 +654,28 @@ describe('NewAPI management and runtime safety', () => {
     expect(serialized).not.toContain('gateway.example.test');
   });
 
+  it('keeps read-only NewAPI billing probes on the configured origin', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({ success: true, data: [] }));
+    await fixture.runtime.requestTokenLogs({
+      connection: connection('saved', 'saved'),
+      credentials: credential()
+    });
+    await fixture.runtime.requestSiteStatus({
+      connection: connection('saved', 'saved'),
+      credentials: credential()
+    });
+    await fixture.runtime.requestModelPricing({
+      connection: connection('saved', 'saved'),
+      credentials: credential()
+    });
+    expect(fixture.requests.map((request) => new URL(request.url).pathname)).toEqual([
+      '/api/log/token',
+      '/api/status',
+      '/api/pricing'
+    ]);
+    expect(fixture.requests.every((request) => request.method === 'GET')).toBe(true);
+  });
+
   it('keeps UniCompAPI streams active beyond the legacy fixed timeout', async () => {
     vi.useFakeTimers();
     try {
@@ -2589,6 +2611,40 @@ describe('NewAPI video adapter', () => {
     await expect(adapter.query('video-restart')).resolves.toEqual({ state: 'completed' });
   });
 
+  it('retains the submit request ID when the operation is re-attached before polling', async () => {
+    const usage = usageSink();
+    let submit = true;
+    const fixture = runtimeFixture(async () => {
+      if (submit) {
+        submit = false;
+        return jsonResponse(videoObject('video-request-id', 'queued'), 200, {
+          'x-oneapi-request-id': 'request-video-request-id'
+        });
+      }
+      return jsonResponse(videoObject('video-request-id', 'completed'));
+    });
+    const adapter = videoAdapter(fixture.runtime, usage, vi.fn());
+
+    await expect(adapter.submit({
+      routeSnapshot: routeFor('text_to_video'),
+      request: {
+        invocationAttemptId: 'attempt-video-request-id',
+        projectId: 'project-newapi',
+        prompt: 'Retain the request identifier',
+        parameterValues: {}
+      }
+    })).resolves.toMatchObject({ kind: 'accepted_async' });
+    await adapter.attachOperation({
+      routeSnapshot: routeFor('text_to_video'),
+      providerOperationId: 'video-request-id',
+      invocationAttemptId: toProviderInvocationAttemptId('attempt-video-request-id')
+    });
+
+    await expect(adapter.query('video-request-id')).resolves.toEqual({ state: 'completed' });
+    expect(usage.observations).toHaveLength(1);
+    expect(usage.observations[0]?.providerRequestId).toBe('request-video-request-id');
+  });
+
   it('marks network failures after request start as unknown without auto retry', async () => {
     const fixture = runtimeFixture(async () => {
       throw new NewApiTransportFailure('network');
@@ -3130,13 +3186,18 @@ function videoObject(
   };
 }
 
-function jsonResponse(value: unknown, status = 200): NewApiHttpTransportResponse {
+function jsonResponse(
+  value: unknown,
+  status = 200,
+  extraHeaders: Readonly<Record<string, string>> = {}
+): NewApiHttpTransportResponse {
   const body = new TextEncoder().encode(JSON.stringify(value));
   return {
     status,
     headers: {
       'content-type': 'application/json',
-      'content-length': String(body.byteLength)
+      'content-length': String(body.byteLength),
+      ...extraHeaders
     },
     body
   };

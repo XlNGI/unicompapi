@@ -26,10 +26,19 @@ import {
   ProviderManagementAdapterRegistry,
   ProviderManagementFramework,
   ProviderPackageRegistry,
+  ProviderUsageSchemaRegistry,
   RuntimeAuthorizationLedger,
   StorageProjectSessionRegistry,
   viduProviderPackageDescriptor,
-  volcengineProviderPackageDescriptor
+  volcengineProviderPackageDescriptor,
+  deepSeekUsageSchema,
+  doubaoVisionUsageSchema,
+  klingVideoUsageSchema,
+  newApiChatUsageSchema,
+  newApiImageUsageSchema,
+  newApiVideoUsageSchema,
+  seedanceVideoUsageSchema,
+  viduUsageSchema
 } from '../src/platform';
 import { ElectronViduComposition } from './ipc/vidu-composition';
 import { createLiveProviderManagementComposition } from './ipc/management-adapters';
@@ -93,6 +102,16 @@ const providerPackages = new ProviderPackageRegistry([
   unicompapiProviderPackageDescriptor,
   viduProviderPackageDescriptor
 ]);
+const providerUsageSchemas = new ProviderUsageSchemaRegistry([
+  deepSeekUsageSchema,
+  doubaoVisionUsageSchema,
+  klingVideoUsageSchema,
+  newApiChatUsageSchema,
+  newApiImageUsageSchema,
+  newApiVideoUsageSchema,
+  seedanceVideoUsageSchema,
+  viduUsageSchema
+]);
 const runtimeAuthorizationLedger = new RuntimeAuthorizationLedger(
   new JsonRuntimeAuthorizationLedgerStore(
     path.join(app.getPath('userData'), 'runtime-authorization-ledger.json')
@@ -146,6 +165,7 @@ const storageLifecycle = registerStorageIpcHandlers({
     documentLifecycle.waitForOperations
   ],
   vidu: viduComposition,
+  providerUsageSchemas,
   runtimeAuthorization: runtimeAuthorizationLedger,
   textSubmission: {
     credentialVault: viduComposition.credentialVault,

@@ -33,6 +33,7 @@ import {
 import { TaskCenterWorkspace } from './TaskCenterWorkspace';
 import {
   calculateSuccessfulCallFee,
+  formatCallBilling,
   formatCallFee,
   formatCallFeeFormula
 } from './call-fees';
@@ -457,6 +458,13 @@ function TaskConsumptionCharts() {
   }), [storage]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRefreshRevision((current) => current + 1);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     setMessage('');
     setLoading(true);
@@ -538,8 +546,8 @@ function TaskConsumptionCharts() {
         <article className="uc-task-center__chart-card uc-task-center__chart-card--donut">
           <div className="uc-task-center__chart-heading">
             <div>
-              <h2>供应商人民币消费占比</h2>
-              <p>{loading ? '正在读取成功调用费用' : '按人民币本地估算汇总，前 5 个供应商外归入“其他”'}</p>
+              <h2>今日供应商人民币消费占比</h2>
+              <p>{loading ? '正在读取消费账单' : '优先显示中转站实际账单；未确认记录按价格估算，前 5 个供应商外归入“其他”'}</p>
             </div>
             <StatusPill>{providerSlices.length} 个分组</StatusPill>
           </div>
@@ -578,9 +586,18 @@ function TaskConsumptionCharts() {
             {message}
           </p>
         ) : null}
+        {!loading && summary ? (
+          <p className="uc-task-center__chart-note" role="status">
+            实际账单 {formatRenminbiAmount(summary.actualBillAmount)} ·
+            估算 {formatRenminbiAmount(summary.estimatedAmount)} ·
+            待确认 {summary.pendingReconciliationCallCount} 次 ·
+            无法估算 {summary.unestimatedCallCount} 次 ·
+            退款 {formatRenminbiAmount(summary.refundedAmount)}
+          </p>
+        ) : null}
         {!loading && summary && summary.pendingConversionCallCount > 0 ? (
           <p className="uc-task-center__chart-note" role="status">
-            {summary.pendingConversionCallCount} 次非人民币费用待换算，未混入人民币总额
+            {summary.pendingConversionCallCount} 次非人民币费用待换算，未混入人民币总额；另有 {summary.pendingReconciliationCallCount} 次中转站账单待确认
             {summary.pendingCurrencies.length > 0
               ? `（${summary.pendingCurrencies.map((item) => `${item.currencyCode} ${item.callCount} 次`).join('、')}）`
               : ''}。
@@ -609,7 +626,7 @@ function EmptyBarChart({ dates }: { readonly dates?: readonly string[] }) {
           <strong>暂无</strong>
         </div>
       ))}
-      <p className="uc-task-center__muted">暂无可纳入的人民币估算；非人民币费用在缺少已核准换算事实时保持待换算。</p>
+      <p className="uc-task-center__muted">暂无可纳入的人民币账单或估算；无法确认的费用不会显示为 0 元。</p>
     </div>
   );
 }
@@ -893,6 +910,7 @@ function TimelineItem({
 
 function callTimelineItems(call: StorageCallDetailsDto) {
   const fee = calculateSuccessfulCallFee(call);
+  const billingLabel = formatCallBilling(call.billing);
   const items = call.timeline.map((event) => (
     <TimelineItem
       key={`${call.invocationAttemptId}:${event.sequence}`}
@@ -921,7 +939,7 @@ function callTimelineItems(call: StorageCallDetailsDto) {
     >
       <dl className="uc-task-center__timeline-facts">
         <div><dt>用量</dt><dd>{usageLabels[call.usageAvailability] ?? '用量状态未知'}</dd></div>
-        <div><dt>费用</dt><dd>{formatCallFee(fee)}</dd></div>
+        <div><dt>费用</dt><dd>{billingLabel ?? formatCallFee(fee)}</dd></div>
         <div><dt>本地结果</dt><dd>{callResultLabel(call)}</dd></div>
         <div><dt>重试归属</dt><dd>{call.retryOfInvocationAttemptId ?? '首次调用'}</dd></div>
       </dl>

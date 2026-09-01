@@ -9,6 +9,7 @@ import {
   toProviderInvocationAttemptId,
   type IsoTimestamp,
   type LocalResultObservationV1,
+  type ProviderOperationRecord,
   type ProviderExecutionRouteSnapshotV1,
   type ProviderInvocationAttemptV1,
   type ProviderInvocationEventV1,
@@ -20,6 +21,8 @@ import {
 } from '../../domain';
 import type {
   StorageCallDetailsDto,
+  StorageCallBillingDto,
+  StorageCallOfficialPricingRuleDto,
   StorageCallRecordListDto,
   StorageCallRecordSummaryDto,
   StorageCallResultRegistrationDto,
@@ -30,16 +33,26 @@ import type {
   StorageReadModelIssueDto,
   StorageTaskTimelineDto
 } from '../../shared/storage-ipc';
+import type {
+  NewApiBillingReconciliationPort,
+  NewApiTokenLogRecord
+} from '../providers/newapi/newapi-billing';
 import {
   JsonLocalResultObservationRepository,
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
+  JsonProviderOperationRepository,
   JsonProviderUsageObservationRepository,
   JsonWorkRepository
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import type { ProjectCatalogEntry, ProjectCatalogService } from './project-catalog';
 import { resolveOfficialPricingRule } from '../providers/official-pricing-rules';
+import {
+  NEWAPI_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_PROVIDER_PACKAGE_ID
+} from '../providers/newapi';
+import { KIMI_PROVIDER_PACKAGE_ID } from '../providers/kimi';
 import {
   addExactDecimal,
   calculateExactSuccessfulCallFee,
@@ -122,6 +135,7 @@ interface ProjectCallFacts {
   readonly usageByAttempt: ReadonlyMap<string, readonly ProviderUsageObservationV1[]>;
   readonly localResultsByAttempt: ReadonlyMap<string, readonly LocalResultObservationV1[]>;
   readonly worksByExecution: ReadonlyMap<string, readonly Work[]>;
+  readonly operationsByExecution: ReadonlyMap<string, ProviderOperationRecord>;
 }
 
 interface BuiltCallRecord {
@@ -154,16 +168,23 @@ export class ProviderInvocationReadModelController {
     number,
     Promise<StorageIpcResult<StorageConsumptionSummaryDto>>
   >();
+  private readonly billingCache = new Map<
+    string,
+    Promise<ReadonlyMap<string, NewApiTokenLogRecord>>
+  >();
 
   constructor(
     private readonly catalog: ProjectCatalogService,
     private readonly usageSchemas: ProviderUsageSchemaResolverPort = noUsageSchemas,
     private readonly currencyConversions: CurrencyConversionFactResolverPort = noCurrencyConversions,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly billingReconciliation?: NewApiBillingReconciliationPort
   ) {}
 
   invalidate(): void {
     this.consumptionCache.clear();
+    this.billingCache.clear();
+    this.billingReconciliation?.invalidate();
   }
 
   async listCallRecords(
@@ -346,13 +367,15 @@ export class ProviderInvocationReadModelController {
       return invalidRequestFailure();
     }
 
-    const cached = this.consumptionCache.get(calendarDays);
+    const cached = this.billingReconciliation
+      ? undefined
+      : this.consumptionCache.get(calendarDays);
     if (cached) return cached;
     const pending = this.buildConsumptionSummary(calendarDays).then((result) => {
       if (!result.ok) this.consumptionCache.delete(calendarDays);
       return result;
     });
-    this.consumptionCache.set(calendarDays, pending);
+    if (!this.billingReconciliation) this.consumptionCache.set(calendarDays, pending);
     return pending;
   }
 
@@ -360,6 +383,10 @@ export class ProviderInvocationReadModelController {
     calendarDays: number
   ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>> {
     try {
+      if (this.billingReconciliation) {
+        this.billingReconciliation.invalidate();
+        this.billingCache.clear();
+      }
       const period = consumptionPeriod(this.now(), calendarDays);
       const conversionFacts = parseConversionFacts(
         await this.currencyConversions.listApprovedFacts('CNY')
@@ -370,9 +397,13 @@ export class ProviderInvocationReadModelController {
       const usedConversionCurrencies = new Set<string>();
       const issues = new Map<string, StorageReadModelIssueDto>();
       const bucketTotals = new Map(period.dates.map((date) => [date, emptyConsumptionTotal()]));
-      const providerTotals = new Map<string, ProviderConsumptionTotal>();
+      const currentDate = period.dates.at(-1)!;
+      const currentDayProviderTotals = new Map<string, ProviderConsumptionTotal>();
       const pendingCurrencies = new Map<string, number>();
       let totalAmount = zeroExactDecimal();
+      let actualBillAmount = zeroExactDecimal();
+      let estimatedAmount = zeroExactDecimal();
+      let refundedAmount = zeroExactDecimal();
       let totalCallCount = 0;
       let successfulCallCount = 0;
       let pricedCallCount = 0;
@@ -381,6 +412,8 @@ export class ProviderInvocationReadModelController {
       let missingPricingRuleCount = 0;
       let missingUsageCount = 0;
       let invalidFeeCount = 0;
+      let pendingReconciliationCallCount = 0;
+      let unestimatedCallCount = 0;
 
       for (const entry of await this.catalog.getEntries()) {
         if (!(await isAvailable(entry))) {
@@ -396,38 +429,64 @@ export class ProviderInvocationReadModelController {
               const call = (await this.buildRecord(entry, facts, attempt)).details;
               if (call.state !== 'completed') continue;
               successfulCallCount += 1;
-              const fee = calculateExactSuccessfulCallFee(call);
-              if (fee.state === 'missing_pricing') {
-                missingPricingRuleCount += 1;
-                continue;
+              if (call.billing?.state === 'pending_reconciliation') {
+                pendingReconciliationCallCount += 1;
+              } else if (call.billing?.state === 'unestimated') {
+                unestimatedCallCount += 1;
               }
-              if (fee.state === 'missing_usage') {
-                missingUsageCount += 1;
-                continue;
-              }
-              if (fee.state !== 'calculated') {
-                invalidFeeCount += 1;
-                continue;
-              }
-              pricedCallCount += 1;
-              let cnyAmount = fee.amount;
-              if (fee.currencyCode !== 'CNY') {
-                const conversion = conversionsByCurrency.get(fee.currencyCode);
-                if (!conversion) {
-                  pendingConversionCallCount += 1;
-                  pendingCurrencies.set(
-                    fee.currencyCode,
-                    (pendingCurrencies.get(fee.currencyCode) ?? 0) + 1
+              let cnyAmount: ExactDecimal;
+              if (call.billing?.amount !== undefined) {
+                cnyAmount = parseExactDecimal(call.billing.amount);
+                pricedCallCount += 1;
+                if (call.billing.refundAmount !== undefined) {
+                  refundedAmount = addExactDecimal(
+                    refundedAmount,
+                    parseExactDecimal(call.billing.refundAmount)
                   );
+                }
+                if (call.billing.state === 'actual_bill') {
+                  actualBillAmount = addExactDecimal(actualBillAmount, cnyAmount);
+                } else if (call.billing.state === 'refunded') {
+                  // Refunds are reported separately and must not make the
+                  // consumption total diverge from provider slices.
+                  continue;
+                } else {
+                  estimatedAmount = addExactDecimal(estimatedAmount, cnyAmount);
+                }
+              } else {
+                const fee = calculateExactSuccessfulCallFee(call);
+                if (fee.state === 'missing_pricing') {
+                  missingPricingRuleCount += 1;
                   continue;
                 }
-                cnyAmount = multiplyExactDecimal(cnyAmount, conversion.rate);
-                usedConversionCurrencies.add(fee.currencyCode);
+                if (fee.state === 'missing_usage') {
+                  missingUsageCount += 1;
+                  continue;
+                }
+                if (fee.state !== 'calculated') {
+                  invalidFeeCount += 1;
+                  continue;
+                }
+                pricedCallCount += 1;
+                cnyAmount = fee.amount;
+                if (fee.currencyCode !== 'CNY') {
+                  const conversion = conversionsByCurrency.get(fee.currencyCode);
+                  if (!conversion) {
+                    pendingConversionCallCount += 1;
+                    pendingCurrencies.set(
+                      fee.currencyCode,
+                      (pendingCurrencies.get(fee.currencyCode) ?? 0) + 1
+                    );
+                    continue;
+                  }
+                  cnyAmount = multiplyExactDecimal(cnyAmount, conversion.rate);
+                  usedConversionCurrencies.add(fee.currencyCode);
+                }
               }
 
               includedCallCount += 1;
               totalAmount = addExactDecimal(totalAmount, cnyAmount);
-              const date = utcDateKey(call.createdAt);
+              const date = shanghaiDateKey(call.createdAt);
               const bucket = bucketTotals.get(date);
               if (bucket) {
                 bucketTotals.set(date, {
@@ -435,19 +494,21 @@ export class ProviderInvocationReadModelController {
                   callCount: bucket.callCount + 1
                 });
               }
-              const providerKey = call.providerId;
-              const provider = providerTotals.get(providerKey) ?? {
-                providerId: providerKey,
-                label: call.providerName ?? providerKey,
-                amount: zeroExactDecimal(),
-                callCount: 0
-              };
-              providerTotals.set(providerKey, {
-                ...provider,
-                label: preferredProviderLabel(provider.label, call.providerName, providerKey),
-                amount: addExactDecimal(provider.amount, cnyAmount),
-                callCount: provider.callCount + 1
-              });
+              if (date === currentDate) {
+                const providerKey = call.providerId;
+                const provider = currentDayProviderTotals.get(providerKey) ?? {
+                  providerId: providerKey,
+                  label: call.providerName ?? providerKey,
+                  amount: zeroExactDecimal(),
+                  callCount: 0
+                };
+                currentDayProviderTotals.set(providerKey, {
+                  ...provider,
+                  label: preferredProviderLabel(provider.label, call.providerName, providerKey),
+                  amount: addExactDecimal(provider.amount, cnyAmount),
+                  callCount: provider.callCount + 1
+                });
+              }
             } catch {
               addIssue(issues, entry, 'invalid_data');
               invalidFeeCount += 1;
@@ -467,9 +528,12 @@ export class ProviderInvocationReadModelController {
             startDate: period.dates[0]!,
             endDate: period.dates.at(-1)!,
             calendarDays,
-            timeZone: 'UTC'
+            timeZone: 'Asia/Shanghai'
           },
           totalAmount: formatExactDecimal(totalAmount),
+          actualBillAmount: formatExactDecimal(actualBillAmount),
+          estimatedAmount: formatExactDecimal(estimatedAmount),
+          refundedAmount: formatExactDecimal(refundedAmount),
           totalCallCount,
           successfulCallCount,
           pricedCallCount,
@@ -478,6 +542,8 @@ export class ProviderInvocationReadModelController {
           missingPricingRuleCount,
           missingUsageCount,
           invalidFeeCount,
+          pendingReconciliationCallCount,
+          unestimatedCallCount,
           timeBuckets: period.dates.map((date) => {
             const bucket = bucketTotals.get(date)!;
             return {
@@ -486,7 +552,10 @@ export class ProviderInvocationReadModelController {
               callCount: bucket.callCount
             };
           }),
-          providerSlices: buildProviderSlices(providerTotals, totalAmount),
+          providerSlices: buildProviderSlices(
+            currentDayProviderTotals,
+            bucketTotals.get(currentDate)!.amount
+          ),
           pendingCurrencies: [...pendingCurrencies.entries()]
             .sort(([left], [right]) => left.localeCompare(right))
             .map(([currencyCode, callCount]) => ({ currencyCode, callCount })),
@@ -494,7 +563,7 @@ export class ProviderInvocationReadModelController {
             .filter((fact) => usedConversionCurrencies.has(fact.sourceCurrencyCode))
             .map(toConversionSourceDto),
           issues: [...issues.values()],
-          disclaimer: 'local_estimate_not_provider_bill'
+          disclaimer: 'provider_bill_preferred_with_estimate_fallback'
         }
       };
     } catch {
@@ -546,6 +615,18 @@ export class ProviderInvocationReadModelController {
       facts.worksByExecution
     );
     const officialPricingRule = resolveOfficialPricingRule(route);
+    const billing = await this.resolveBilling(
+      route.connectionId,
+      route.providerModelKey ?? route.modelDisplayName ?? route.modelId,
+      [NEWAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_PROVIDER_PACKAGE_ID, KIMI_PROVIDER_PACKAGE_ID]
+        .includes(route.packageId),
+      readModel.state,
+      readModel.usage.providerRequestId,
+      providerOperationId(readModel, facts.operationsByExecution),
+      readModel.usage.facts,
+      billableUnits(readModel.localResults),
+      officialPricingRule
+    );
     const updatedAt = readModel.timeline.at(-1)?.occurredAt ?? readModel.createdAt;
     const providerName = route.providerDisplayName;
     const connectionName = route.connectionDisplayName;
@@ -576,7 +657,8 @@ export class ProviderInvocationReadModelController {
         : {}),
       usageAvailability: readModel.usage.availability,
       localResultCount: readModel.localResults.length,
-      resultRegistrationState: registration.state
+      resultRegistrationState: registration.state,
+      billing
     };
     return {
       summary,
@@ -587,8 +669,12 @@ export class ProviderInvocationReadModelController {
         usage: {
           availability: readModel.usage.availability,
           facts: readModel.usage.facts.map((fact) => ({ ...fact })),
+          ...(readModel.usage.providerRequestId
+            ? { providerRequestId: readModel.usage.providerRequestId }
+            : {}),
           calculatedAt: readModel.usage.calculatedAt
         },
+        billing,
         ...(officialPricingRule ? { officialPricingRule } : {}),
         localResults: readModel.localResults.map((result) => ({
           mediaKind: result.mediaKind,
@@ -607,6 +693,93 @@ export class ProviderInvocationReadModelController {
       }
     };
   }
+
+  private async resolveBilling(
+    connectionId: string,
+    modelName: string,
+    supportsNewApiBilling: boolean,
+    state: string,
+    providerRequestId: string | undefined,
+    providerOperationId: string | undefined,
+    usageFacts: readonly { readonly metricId: string; readonly quantity: string }[],
+    billableUnitCount: number | undefined,
+    pricingRule: StorageCallOfficialPricingRuleDto | undefined
+  ): Promise<StorageCallBillingDto> {
+    const fallback = billingState(state, providerRequestId, pricingRule);
+    if (!supportsNewApiBilling || !this.billingReconciliation || state !== 'completed') {
+      return fallback;
+    }
+    try {
+      if (providerRequestId || providerOperationId) {
+        const logs = await this.billingLogs(connectionId);
+        const consume = providerRequestId ? logs.get(providerRequestId) : undefined;
+        const refund = providerOperationId ? logs.get(`task:${providerOperationId}`) : undefined;
+        if (consume?.amountCny !== undefined || refund?.refundAmountCny !== undefined) {
+          const consumedAmount = consume?.amountCny === undefined
+            ? zeroExactDecimal()
+            : parseExactDecimal(consume.amountCny);
+          const matchedRefund = consume?.refundAmountCny !== undefined ? consume : refund;
+          const refundAmount = matchedRefund?.refundAmountCny === undefined
+            ? zeroExactDecimal()
+            : parseExactDecimal(matchedRefund.refundAmountCny);
+          const netAmount = addExactDecimal(consumedAmount, {
+            numerator: -refundAmount.numerator,
+            denominator: refundAmount.denominator
+          });
+          const nonNegativeNet = netAmount.numerator < 0n ? zeroExactDecimal() : netAmount;
+          const consumedQuota = consume?.consumedQuota ?? consume?.quota ?? 0n;
+          const refundedQuota = matchedRefund?.refundedQuota ?? 0n;
+          const netQuota = consumedQuota > refundedQuota ? consumedQuota - refundedQuota : 0n;
+          return {
+            state: refundedQuota > 0n && netQuota === 0n ? 'refunded' : 'actual_bill',
+            currencyCode: 'CNY',
+            amount: formatExactDecimal(nonNegativeNet),
+            ...(refundAmount.numerator > 0n
+              ? { refundAmount: formatExactDecimal(refundAmount) }
+              : {}),
+            actualQuota: netQuota.toString(),
+            sourceLabel: consume?.amountSource ?? refund?.amountSource ?? 'NewAPI 使用日志 quota',
+            reconciledAt: new Date(this.now()).toISOString()
+          };
+        }
+      }
+      const promptTokens = usageFacts.find((fact) =>
+        fact.metricId === 'prompt_tokens' || fact.metricId === 'input_tokens'
+      )?.quantity;
+      const completionTokens = usageFacts.find((fact) =>
+        fact.metricId === 'completion_tokens' || fact.metricId === 'output_tokens'
+      )?.quantity;
+      const estimate = await this.billingReconciliation.estimate({
+        connectionId,
+        modelName,
+        ...(promptTokens === undefined ? {} : { promptTokens }),
+        ...(completionTokens === undefined ? {} : { completionTokens }),
+        ...(billableUnitCount === undefined
+          ? {}
+          : { billableUnits: String(billableUnitCount) })
+      });
+      return estimate
+        ? {
+            state: 'estimated_station_price',
+            currencyCode: 'CNY',
+            amount: estimate.amountCny,
+            sourceLabel: estimate.source
+          }
+        : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private billingLogs(
+    connectionId: string
+  ): Promise<ReadonlyMap<string, NewApiTokenLogRecord>> {
+    const cached = this.billingCache.get(connectionId);
+    if (cached) return cached;
+    const pending = this.billingReconciliation!.reconcile({ connectionId });
+    this.billingCache.set(connectionId, pending);
+    return pending;
+  }
 }
 
 function createContext(entry: ProjectCatalogEntry) {
@@ -616,7 +789,8 @@ function createContext(entry: ProjectCatalogEntry) {
     routes: new JsonProviderExecutionRouteSnapshotRepository(storage, entry.projectId),
     usage: new JsonProviderUsageObservationRepository(storage),
     localResults: new JsonLocalResultObservationRepository(storage),
-    works: new JsonWorkRepository(storage, entry.projectId)
+    works: new JsonWorkRepository(storage, entry.projectId),
+    operations: new JsonProviderOperationRepository(storage)
   };
 }
 
@@ -624,12 +798,13 @@ async function loadProjectFacts(
   entry: ProjectCatalogEntry,
   context = createContext(entry)
 ): Promise<ProjectCallFacts> {
-  const [invocations, routes, usage, localResults, works] = await Promise.all([
+  const [invocations, routes, usage, localResults, works, operations] = await Promise.all([
     context.invocations.readAll(),
     context.routes.list(),
     context.usage.list(),
     context.localResults.list(),
-    context.works.list(entry.projectId)
+    context.works.list(entry.projectId),
+    context.operations.list()
   ]);
   return {
     attempts: invocations.attempts,
@@ -640,8 +815,23 @@ async function loadProjectFacts(
       localResults,
       (observation) => observation.invocationAttemptId
     ),
-    worksByExecution: groupBy(works, (work) => work.sourceExecutionId)
+    worksByExecution: groupBy(works, (work) => work.sourceExecutionId),
+    operationsByExecution: new Map(operations.map((operation) => [operation.executionId, operation]))
   };
+}
+
+function providerOperationId(
+  readModel: ProviderInvocationReadModelV1,
+  operationsByExecution: ReadonlyMap<string, ProviderOperationRecord>
+): string | undefined {
+  if (readModel.subject.kind !== 'media') return undefined;
+  const operation = operationsByExecution.get(readModel.subject.executionId);
+  const outcome = operation?.outcome;
+  return outcome?.kind === 'accepted_async' || outcome?.kind === 'completed_sync'
+    ? outcome.providerOperationId
+    : outcome?.kind === 'submission_outcome_unknown'
+      ? outcome.providerOperationId
+      : undefined;
 }
 
 function resultRegistration(
@@ -763,15 +953,13 @@ function parseConsumptionSummaryRequest(value: unknown): number {
 function consumptionPeriod(now: Date, calendarDays: number) {
   if (Number.isNaN(now.getTime())) throw new TypeError('Invalid current time');
   const end = new Date(now);
-  const start = new Date(Date.UTC(
-    end.getUTCFullYear(),
-    end.getUTCMonth(),
-    end.getUTCDate() - calendarDays + 1
-  ));
+  const endDate = shanghaiDateKey(end.toISOString());
+  const [year, month, day] = endDate.split('-').map(Number);
+  const endDayStart = new Date(Date.UTC(year!, month! - 1, day!) - 8 * 60 * 60 * 1000);
+  const start = new Date(endDayStart.getTime() - (calendarDays - 1) * 24 * 60 * 60 * 1000);
   const dates = Array.from({ length: calendarDays }, (_, index) => {
-    const date = new Date(start);
-    date.setUTCDate(start.getUTCDate() + index);
-    return utcDateKey(date.toISOString());
+    const date = new Date(start.getTime() + index * 24 * 60 * 60 * 1000);
+    return shanghaiDateKey(date.toISOString());
   });
   const startTimestamp = start.toISOString();
   const endTimestamp = end.toISOString();
@@ -783,10 +971,46 @@ function consumptionPeriod(now: Date, calendarDays: number) {
   };
 }
 
-function utcDateKey(value: string): string {
+function shanghaiDateKey(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) throw new TypeError('Invalid timestamp');
-  return parsed.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(parsed);
+}
+
+function billingState(
+  state: string,
+  providerRequestId: string | undefined,
+  pricingRule: StorageCallOfficialPricingRuleDto | undefined
+): StorageCallBillingDto {
+  if (state === 'unknown_outcome') {
+    return { state: 'unknown_need_check', currencyCode: 'CNY' };
+  }
+  if (state !== 'completed') {
+    return { state: 'failed_no_charge', currencyCode: 'CNY' };
+  }
+  if (providerRequestId) {
+    return {
+      state: 'pending_reconciliation',
+      currencyCode: 'CNY'
+    };
+  }
+  if (pricingRule?.currencyCode.trim().toUpperCase() === 'CNY') {
+    return { state: 'estimated_official_price', currencyCode: 'CNY' };
+  }
+  return { state: 'unestimated', currencyCode: 'CNY' };
+}
+
+function billableUnits(
+  localResults: readonly { readonly outputCount: number }[]
+): number | undefined {
+  if (localResults.length === 0) return undefined;
+  const count = localResults.reduce((sum, result) => sum + result.outputCount, 0);
+  return Number.isSafeInteger(count) && count > 0 ? count : undefined;
 }
 
 function parseConversionFacts(
@@ -820,8 +1044,7 @@ function parseConversionFacts(
       throw new TypeError('Invalid conversion source URL');
     }
     if (
-      !/^\d{4}-\d{2}-\d{2}$/u.test(value.sourceCheckedAt) ||
-      utcDateKey(`${value.sourceCheckedAt}T00:00:00.000Z`) !== value.sourceCheckedAt
+      !isValidDateOnly(value.sourceCheckedAt)
     ) {
       throw new TypeError('Invalid conversion check date');
     }
@@ -834,6 +1057,12 @@ function parseConversionFacts(
       sourceCheckedAt: value.sourceCheckedAt
     };
   });
+}
+
+function isValidDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function normalizeCurrencyCode(value: string): string {

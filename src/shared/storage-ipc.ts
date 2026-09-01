@@ -168,6 +168,27 @@ export interface StorageCallRecordSummaryDto {
   readonly usageAvailability: string;
   readonly localResultCount: number;
   readonly resultRegistrationState: 'registered' | 'not_registered' | 'not_applicable';
+  readonly billing?: StorageCallBillingDto;
+}
+
+export type StorageCallBillingState =
+  | 'actual_bill'
+  | 'estimated_station_price'
+  | 'estimated_official_price'
+  | 'pending_reconciliation'
+  | 'unestimated'
+  | 'failed_no_charge'
+  | 'unknown_need_check'
+  | 'refunded';
+
+export interface StorageCallBillingDto {
+  readonly state: StorageCallBillingState;
+  readonly currencyCode: 'CNY';
+  readonly amount?: string;
+  readonly refundAmount?: string;
+  readonly actualQuota?: string;
+  readonly sourceLabel?: string;
+  readonly reconciledAt?: string;
 }
 
 export interface StorageCallRecordListDto {
@@ -248,9 +269,12 @@ export interface StorageConsumptionSummaryDto {
     readonly startDate: string;
     readonly endDate: string;
     readonly calendarDays: number;
-    readonly timeZone: 'UTC';
+    readonly timeZone: 'Asia/Shanghai';
   };
   readonly totalAmount: string;
+  readonly actualBillAmount: string;
+  readonly estimatedAmount: string;
+  readonly refundedAmount: string;
   readonly totalCallCount: number;
   readonly successfulCallCount: number;
   readonly pricedCallCount: number;
@@ -259,12 +283,14 @@ export interface StorageConsumptionSummaryDto {
   readonly missingPricingRuleCount: number;
   readonly missingUsageCount: number;
   readonly invalidFeeCount: number;
+  readonly pendingReconciliationCallCount: number;
+  readonly unestimatedCallCount: number;
   readonly timeBuckets: readonly StorageConsumptionTimeBucketDto[];
   readonly providerSlices: readonly StorageConsumptionProviderSliceDto[];
   readonly pendingCurrencies: readonly StorageConsumptionPendingCurrencyDto[];
   readonly conversionSources: readonly StorageConsumptionConversionSourceDto[];
   readonly issues: readonly StorageReadModelIssueDto[];
-  readonly disclaimer: 'local_estimate_not_provider_bill';
+  readonly disclaimer: 'provider_bill_preferred_with_estimate_fallback';
 }
 
 export type StorageCallSubjectDto =
@@ -301,6 +327,7 @@ export interface StorageCallUsageFactDto {
 export interface StorageCallUsageDto {
   readonly availability: string;
   readonly facts: readonly StorageCallUsageFactDto[];
+  readonly providerRequestId?: string;
   readonly calculatedAt: string;
 }
 
