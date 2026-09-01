@@ -139,7 +139,7 @@ E7 验收门禁：
 
 新增 `office-document-tool-executor` 第一版真实文件适配器：仅接受项目内相对路径，执行 DOCX/XLSX/PPTX 格式、大小和 OOXML 包校验；`readOfficeDocumentStructure` 从实际 Office 包生成脱敏结构摘要；`applyOfficeDocumentPatch` 当前支持 `clear_section`，对 Word/PPT 保留段落/文本节点结构，对 Excel 保留首行表头并清空目标工作表数据行，结果只写调用方提供的临时目标，禁止覆盖源文件。
 
-E7.2 当前仍未完成真实 Electron 文件句柄/Work 解析接线，尚未替换现有生成器的正式发布路径，也未完成渲染视觉诊断、取消恢复端到端和 Windows Office GUI 签署。适配器定向测试 2/2、`typecheck` 通过；E7 整体仍为 `approved/in_progress`。
+E7.2 当前仍未完成真实 Electron 文件句柄/Work 解析接线，尚未替换现有生成器的正式发布路径，也未完成渲染视觉诊断、取消恢复端到端和 Windows Office GUI 签署。适配器定向测试 2/2 通过；随后完整 `pnpm.cmd test` 为 170 个 Vitest 文件、1031 项及 Node/UI 合同全部通过，`typecheck`、`lint`、`build`、`audit:platform` 和差异检查通过。未调用真实 Provider、未读取凭证、未发起联网或收费请求；E7 整体仍为 `approved/in_progress`。
 
 2026-09-01 Excel 大纲兼容性修复：负责人实际验收发现 DeepSeek 返回的合法 Excel JSON 使用数值单元格（金额、年龄）并以 `footers.label/values` 表达汇总行，旧解析器仅接受字符串行且未归一化 footer，因而在文件生成前错误返回 `invalid_outline`。现仅对 Excel 表格接受有限值类型并统一转为内部字符串契约，同时把受控 footer 归一化为“合计”行；Word/PPT 仍拒绝数值表格单元格。结合本轮 Excel 生成器改进，工资模板的金额字段转为可填写数值、实发工资和合计使用公式，表头/列宽/冻结/筛选补齐。新增解析与生成回归，完整 168 个 Vitest 文件、1014 个测试通过，typecheck、lint、build、平台审计、交接校验和差异检查通过。原始验收文件保持不变，需重新构建并生成新版 XLSX。
 
