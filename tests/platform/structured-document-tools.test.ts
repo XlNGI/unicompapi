@@ -76,4 +76,24 @@ describe('structured document tools', () => {
     const result = applyStructuredDocumentPatch(outline, patch);
     expect(result.document.sections[0].blocks.at(-1)).toMatchObject({ type: 'chart', chartKind: 'bar' });
   });
+
+  it('clears one section while retaining its identity and all other sections', () => {
+    const result = applyStructuredDocumentPatch(outline, {
+      operation: 'clear_section',
+      target: { sectionIndex: 1, pageNumber: 2 }
+    });
+
+    expect(result.document.sections[0]).toEqual(outline.sections[0]);
+    expect(result.document.sections[1]).toEqual({
+      heading: '结论',
+      level: 1,
+      blocks: []
+    });
+    expect(result.change).toEqual({
+      operation: 'clear_section',
+      affectedSections: [1],
+      affectedBlocks: [],
+      changed: true
+    });
+  });
 });

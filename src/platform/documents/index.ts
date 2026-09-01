@@ -14,3 +14,4 @@ export * from './document-theme';
 export * from './document-layout';
 export * from './document-components';
 export * from './pptx-theme-extractor';
+export * from './office-document-tool-executor';

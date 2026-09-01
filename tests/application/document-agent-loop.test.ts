@@ -14,7 +14,15 @@ describe('bounded document agent loop', () => {
       maxSteps: 3,
       execute: async () => {
         calls += 1;
-        return { revision: 2, path: 'C:\\private\\file.pptx', status: 'ok' };
+        return {
+          revision: 2,
+          path: 'C:\\private\\file.pptx',
+          status: 'ok',
+          nested: {
+            filePath: 'C:\\private\\nested.pptx',
+            result: 'safe'
+          }
+        };
       },
       nextDecision: async (observations) =>
         observations.length === 0
@@ -23,7 +31,11 @@ describe('bounded document agent loop', () => {
     });
     expect(calls).toBe(1);
     expect(result.state).toBe('completed');
-    expect(result.observations[0].data).toEqual({ revision: 2, status: 'ok' });
+    expect(result.observations[0].data).toEqual({
+      revision: 2,
+      status: 'ok',
+      nested: { result: 'safe' }
+    });
   });
 
   it('stops on budget and repeated diagnostics', async () => {
@@ -54,6 +66,21 @@ describe('bounded document agent loop', () => {
     });
     expect(result.state).toBe('cancelled');
     expect(result.steps).toBe(0);
+  });
+
+  it('interrupts an in-flight tool when cancellation is requested', async () => {
+    const controller = new AbortController();
+    const resultPromise = runDocumentAgentLoop({
+      signal: controller.signal,
+      execute: async () => new Promise(() => undefined),
+      nextDecision: async () => ({ kind: 'tool', request })
+    });
+    setTimeout(() => controller.abort(), 5);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      state: 'cancelled',
+      steps: 0
+    });
   });
 
   it('enforces a total timeout around model decisions and tool execution', async () => {

@@ -76,8 +76,10 @@ export async function runDocumentAgentLoop(
     try {
       const decisionResult = await awaitWithin(
         options.nextDecision(observations),
-        Math.max(1, timeoutMs - (Date.now() - startedAt))
+        Math.max(1, timeoutMs - (Date.now() - startedAt)),
+        options.signal
       );
+      if (decisionResult.cancelled) return result('cancelled', observations, costUnits);
       if (decisionResult.timedOut) return result('timeout', observations, costUnits);
       decision = decisionResult.value;
     } catch (error) {
@@ -107,8 +109,10 @@ export async function runDocumentAgentLoop(
           step,
           signal: options.signal ?? new AbortController().signal
         }),
-        Math.max(1, timeoutMs - (Date.now() - startedAt))
+        Math.max(1, timeoutMs - (Date.now() - startedAt)),
+        options.signal
       );
+      if (executionResult.cancelled) return result('cancelled', observations, costUnits);
       if (executionResult.timedOut) return result('timeout', observations, costUnits);
       const data = executionResult.value;
       const observation = makeObservation(step, request.toolId, true, data);
@@ -150,17 +154,36 @@ function sanitizeRecord(value: Readonly<Record<string, unknown>>): Readonly<Reco
   const result: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value)) {
     if (/(?:path|url|token|secret|password|credential|api[_-]?key)/i.test(key)) continue;
-    if (typeof raw === 'string') {
-      result[key] = raw.slice(0, 2_000);
-    } else if (typeof raw === 'number' || typeof raw === 'boolean' || raw === null) {
-      result[key] = raw;
-    } else if (Array.isArray(raw)) {
-      result[key] = raw.slice(0, 32).map((item) =>
-        typeof item === 'string' ? item.slice(0, 500) : item
-      );
-    }
+    const sanitized = sanitizeValue(raw, 0);
+    if (sanitized !== undefined) result[key] = sanitized;
   }
   return result;
+}
+
+function sanitizeValue(value: unknown, depth: number): unknown {
+  if (depth > 4) return undefined;
+  if (typeof value === 'string') return value.slice(0, depth === 0 ? 2_000 : 500);
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 32)
+      .map((item) => sanitizeValue(item, depth + 1))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === 'object' && value !== null) {
+    const result: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(value).slice(0, 64)) {
+      if (/(?:path|url|token|secret|password|credential|api[_-]?key)/i.test(key)) {
+        continue;
+      }
+      const sanitized = sanitizeValue(raw, depth + 1);
+      if (sanitized !== undefined) result[key] = sanitized;
+    }
+    return result;
+  }
+  return undefined;
 }
 
 function result(
@@ -196,19 +219,44 @@ function safeError(error: unknown): string {
 
 async function awaitWithin<T>(
   promise: Promise<T>,
-  timeoutMs: number
-): Promise<{ readonly timedOut: true } | { readonly timedOut: false; readonly value: T }> {
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<
+  | { readonly timedOut: true; readonly cancelled: false }
+  | { readonly timedOut: false; readonly cancelled: true }
+  | { readonly timedOut: false; readonly cancelled: false; readonly value: T }
+> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<{ readonly timedOut: true }>((resolve) => {
-    timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+  let onAbort: (() => void) | undefined;
+  const timeout = new Promise<{
+    readonly timedOut: true;
+    readonly cancelled: false;
+  }>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ timedOut: true, cancelled: false }),
+      timeoutMs
+    );
+  });
+  const cancelled = new Promise<{
+    readonly timedOut: false;
+    readonly cancelled: true;
+  }>((resolve) => {
+    onAbort = () => resolve({ timedOut: false, cancelled: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
   try {
     const value = await Promise.race([
-      promise.then((resolved) => ({ timedOut: false as const, value: resolved })),
-      timeout
+      promise.then((resolved) => ({
+        timedOut: false as const,
+        cancelled: false as const,
+        value: resolved
+      })),
+      timeout,
+      cancelled
     ]);
     return value;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
   }
 }

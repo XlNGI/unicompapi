@@ -18,6 +18,7 @@ import {
   type WorkId
 } from '../domain';
 import { ConversationApplicationError } from './conversation-service';
+import type { DocumentRevisionAgentResult } from './document-revision-agent';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
@@ -182,6 +183,17 @@ export class DocumentGenerationApplicationService {
       readonly conversations: DocumentGenerationConversationPort;
       readonly compiler: DocumentDraftCompilerPort;
       readonly generator: DocumentGenerationExecutorPort;
+      /** Optional bounded local/provider-backed revision workflow. */
+      readonly revisionAgent?: (
+        input: {
+          readonly baseWorkId: WorkId;
+          readonly expectedRevision: number;
+          readonly kind: DocumentWorkspaceKind;
+          readonly requestText: string;
+          readonly outline: DocumentOutline;
+          readonly signal: AbortSignal;
+        }
+      ) => Promise<DocumentRevisionAgentResult>;
       readonly fingerprint: (content: string) => string;
       readonly wait?: (milliseconds: number) => Promise<void>;
     }
@@ -411,17 +423,41 @@ export class DocumentGenerationApplicationService {
               previousMessage.content,
               input.kind
             );
+            let revisionApplied = false;
+            if (this.dependencies.revisionAgent !== undefined) {
+              const revision = await this.dependencies.revisionAgent({
+                baseWorkId: input.parentWorkId,
+                expectedRevision: input.expectedRevision,
+                kind: input.kind,
+                requestText,
+                outline: previousOutline,
+                signal: abortController.signal
+              });
+              if (revision.agent.state !== 'completed') {
+                throw new DocumentGenerationApplicationError(
+                  revision.agent.state === 'cancelled' ? 'cancelled' : 'generation_failed',
+                  'Document revision workflow did not complete'
+                );
+              }
+              if (revision.changed) {
+                outline = revision.outline;
+                revisionApplied = true;
+              }
+            }
             const ordinal = parseRevisionOrdinal(requestText);
             if (ordinal !== undefined) {
               revisionTargetSectionHeading =
                 previousOutline.sections[ordinal - 1]?.heading;
             }
-            outline = preserveUntargetedDocumentSections(
-              previousOutline,
-              outline,
-              requestText
-            );
-          } catch {
+            if (!revisionApplied) {
+              outline = preserveUntargetedDocumentSections(
+                previousOutline,
+                outline,
+                requestText
+              );
+            }
+          } catch (error) {
+            if (error instanceof DocumentGenerationApplicationError) throw error;
             // An older document may predate the current outline contract. In
             // that case keep the validated model outline rather than blocking
             // an otherwise valid revision.

@@ -40,6 +40,7 @@ export const documentRevisionOperations = [
   'replace_text',
   'insert_text',
   'delete_text',
+  'clear_section',
   'replace_page_layout',
   'add_section',
   'remove_section',

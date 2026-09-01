@@ -138,6 +138,15 @@ export function applyStructuredDocumentPatch(
   };
 
   switch (patch.operation) {
+    case 'clear_section': {
+      const sectionIndex = requireSectionIndex(patch.target, sections.length);
+      sections[sectionIndex] = {
+        ...sections[sectionIndex],
+        blocks: []
+      };
+      mark(sectionIndex);
+      break;
+    }
     case 'add_section': {
       const heading = requirePatchValue(patch);
       sections.push({ heading, level: 1, blocks: [] });
