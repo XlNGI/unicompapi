@@ -1008,9 +1008,16 @@ export function VideoEditingPage({
           </div>
           {mediaTab === 'timeline' ? (
             <MediaList
+              disabled={operationBlocked}
               draft={currentDraft}
               loading={loading}
               onRelink={(clipId) => void relinkSource(clipId)}
+              onRemove={(clipId) =>
+                void runCommand(
+                  { kind: 'remove_clip', clipId },
+                  '片段已从主轨移除，源文件没有删除。'
+                )
+              }
               onSelect={selectClip}
               selectedClipId={selectedClipId}
               session={session}
@@ -1054,8 +1061,7 @@ export function VideoEditingPage({
           </p>
         </Card>
 
-        <div className="uc-video-editor__center">
-          <Card className="uc-video-editor__preview">
+        <Card className="uc-video-editor__preview">
             <PanelHeading
               description={
                 currentDraft
@@ -1299,7 +1305,6 @@ export function VideoEditingPage({
               label="背景音乐"
             />
           </Card>
-        </div>
 
         <Card className="uc-video-editor__inspector">
           <PanelHeading
@@ -1376,6 +1381,22 @@ export function VideoEditingPage({
               value={title}
             />
           </label>
+          {selectedClip ? (
+            <div className="uc-video-editor__clip-summary" role="status">
+              <strong>片段 {selectedIndex + 1}</strong>
+              <span>{formatTime(effectiveClipDurationUs(selectedClip))}</span>
+              <span>
+                {selectedClip.source.identity.width}×
+                {selectedClip.source.identity.height}
+              </span>
+              <StatusPill
+                tone={sourceStatusDisplay(sourceStatuses[selectedClip.clipId]).tone}
+              >
+                {sourceStatusDisplay(sourceStatuses[selectedClip.clipId]).label}
+              </StatusPill>
+            </div>
+          ) : null}
+          <div className="uc-video-editor__inspector-scroll">
           {inspectorTab === 'clip' ? (
             selectedClip ? (
               <ClipInspector
@@ -1485,6 +1506,7 @@ export function VideoEditingPage({
               title="暂无画布设置"
             />
           )}
+          </div>
         </Card>
       </div>
 
@@ -1529,22 +1551,34 @@ export function VideoEditingPage({
 }
 
 function MediaList({
+  disabled,
   draft,
   loading,
   onRelink,
+  onRemove,
   onSelect,
   selectedClipId,
   session,
   statuses
 }: {
+  readonly disabled: boolean;
   readonly draft?: VideoEditorDraftDto;
   readonly loading: boolean;
   readonly onRelink: (clipId: string) => void;
+  readonly onRemove: (clipId: string) => void;
   readonly onSelect: (clipId: string) => void;
   readonly selectedClipId: string;
   readonly session?: StorageProjectSessionDto;
   readonly statuses: Readonly<Record<string, VideoEditorSourceStatusDto>>;
 }) {
+  const [armedClipId, setArmedClipId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!armedClipId) return;
+    const timer = setTimeout(() => setArmedClipId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [armedClipId]);
+
   if (loading) {
     return (
       <EmptyState
@@ -1587,10 +1621,16 @@ function MediaList({
     );
   }
   return (
-    <ul className="uc-video-editor__media-list">
+    <div className="uc-video-editor__media-list-wrap">
+      <div className="uc-video-editor__media-list-head">
+        <span>{draft.videoTrack.length} 个片段</span>
+        <span>选中片段后可编辑属性</span>
+      </div>
+      <ul className="uc-video-editor__media-list">
       {draft.videoTrack.map((clip, index) => {
         const status = statuses[clip.clipId];
         const display = sourceStatusDisplay(status);
+        const armed = armedClipId === clip.clipId;
         return (
           <li
             className={
@@ -1621,10 +1661,28 @@ function MediaList({
                 重新定位
               </Button>
             ) : null}
+            <button
+              aria-label={armed ? `确认删除片段 ${index + 1}` : `删除片段 ${index + 1}`}
+              className={`uc-video-editor__clip-delete${armed ? ' is-armed' : ''}`}
+              disabled={disabled}
+              onClick={() => {
+                if (armed) {
+                  setArmedClipId(null);
+                  onRemove(clip.clipId);
+                } else {
+                  setArmedClipId(clip.clipId);
+                }
+              }}
+              title={armed ? '再次点击确认删除（源文件保留）' : '删除片段（源文件保留）'}
+              type="button"
+            >
+              {armed ? '确认' : '×'}
+            </button>
           </li>
         );
       })}
-    </ul>
+      </ul>
+    </div>
   );
 }
 
