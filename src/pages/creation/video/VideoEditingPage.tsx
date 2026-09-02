@@ -1631,33 +1631,41 @@ function MediaList({
         const status = statuses[clip.clipId];
         const display = sourceStatusDisplay(status);
         const armed = armedClipId === clip.clipId;
+        const posterIndex = (index % 6) + 1;
         return (
           <li
             className={
               selectedClipId === clip.clipId
                 ? 'uc-video-editor__media-item--selected'
-                : undefined
+                : ''
             }
+            data-poster={posterIndex}
             key={clip.clipId}
           >
             <button
+              aria-label={`选中片段 ${index + 1}（${formatTime(effectiveClipDurationUs(clip))}）`}
               className="uc-video-editor__media-select"
               onClick={() => onSelect(clip.clipId)}
               type="button"
             >
-              <span aria-hidden="true">视</span>
-              <span>
-                <strong>片段 {index + 1}</strong>
+              <span aria-hidden="true" className="uc-video-editor__media-poster">
+                <strong>{index + 1}</strong>
                 <small>
-                  {clip.source.identity.container.toUpperCase()} ·{' '}
-                  {clip.source.identity.width}×{clip.source.identity.height} ·{' '}
-                  {formatTime(effectiveClipDurationUs(clip))}
+                  {clip.source.identity.container.toUpperCase()} · {formatTime(effectiveClipDurationUs(clip))}
+                </small>
+              </span>
+              <span className="uc-video-editor__media-body">
+                <strong className="uc-video-editor__media-name">片段 {index + 1}</strong>
+                <small className="uc-video-editor__media-meta">
+                  {clip.source.identity.width}×{clip.source.identity.height}
                 </small>
               </span>
             </button>
-            <StatusPill tone={display.tone}>{display.label}</StatusPill>
+            <StatusPill tone={display.tone} className="uc-video-editor__media-status">
+              {display.label}
+            </StatusPill>
             {status?.relinkRequired ? (
-              <Button onClick={() => onRelink(clip.clipId)} variant="ghost">
+              <Button className="uc-video-editor__media-relink" onClick={() => onRelink(clip.clipId)} variant="ghost">
                 重新定位
               </Button>
             ) : null}
