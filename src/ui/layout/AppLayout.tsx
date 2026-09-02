@@ -61,6 +61,10 @@ export function AppLayout({
     });
     return () => unregister(sceneStatusId);
   }, [activeItemId, activeSubItemId, register, sceneLabel, sceneStatusId, unregister]);
+  const workspaceVariant =
+    activeItemId === 'chat' ? ' workspace--chat' :
+    activeItemId === 'tasks' ? ' workspace--tasks' :
+    activeSubItemId === 'video-editing' ? ' workspace--video-editing' : '';
   return (
     <div className="app-shell app-shell--compact">
       <a className="skip-link" href="#main-content">
@@ -75,7 +79,7 @@ export function AppLayout({
           onSecondaryNavigate={onSecondaryNavigate}
         />
         <main
-          className={`workspace uc-scrollbar${activeItemId === 'chat' ? ' workspace--chat' : ''}${activeItemId === 'tasks' ? ' workspace--tasks' : ''}`}
+          className={`workspace uc-scrollbar${workspaceVariant}`}
           id="main-content"
           tabIndex={-1}
         >

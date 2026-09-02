@@ -1111,195 +1111,195 @@ export function VideoEditingPage({
               </span>
             </div>
           </Card>
+        </div>
 
-          <Card className="uc-video-editor__timeline">
-            <div className="uc-video-editor__timeline-heading">
-              <PanelHeading
-                description="片段起点由顺序、裁剪、速度和转场实时计算，不另存第二份事实。"
-                title="轻量单轨时间线"
-              />
-              <div className="uc-video-editor__timeline-actions">
-                <Button
-                  disabled={
+        <Card className="uc-video-editor__timeline">
+          <div className="uc-video-editor__timeline-heading">
+            <PanelHeading
+              description="片段起点由顺序、裁剪、速度和转场实时计算，不另存第二份事实。"
+              title="轻量单轨时间线"
+            />
+            <div className="uc-video-editor__timeline-actions">
+              <Button
+                disabled={
                     !selectedClip ||
                     !selectedSegment ||
                     playheadUs <= selectedSegment.startUs ||
                     playheadUs >= selectedSegment.endUs ||
                     operationBlocked
                   }
-                  onClick={() => {
-                    if (!selectedClip || !selectedSegment) return;
-                    const timelineOffset = playheadUs - selectedSegment.startUs;
-                    const sourceOffset = Number(
-                      (BigInt(timelineOffset) *
-                        BigInt(selectedSegment.speedNumerator)) /
-                        BigInt(selectedSegment.speedDenominator)
-                    );
-                    void runCommand(
-                      {
-                        kind: 'split_clip',
-                        clipId: selectedClip.clipId,
-                        atSourceUs: selectedClip.sourceRange.inUs + sourceOffset
-                      },
-                      '已在播放头位置分割片段。'
-                    );
-                  }}
-                  variant="ghost"
-                >
-                  分割
-                </Button>
-                <Button
-                  disabled={!selectedClip || operationBlocked}
-                  onClick={() =>
-                    selectedClip &&
-                    void runCommand(
-                      { kind: 'remove_clip', clipId: selectedClip.clipId },
-                      '片段已从主轨移除，源文件没有删除。'
-                    )
-                  }
-                  variant="ghost"
-                >
-                  删除
-                </Button>
-                <Button
-                  disabled={!selectedClip || operationBlocked}
-                  onClick={() =>
-                    selectedClip &&
-                    void runCommand(
-                      { kind: 'duplicate_clip', clipId: selectedClip.clipId },
-                      '片段已复制到主轨。'
-                    )
-                  }
-                  variant="ghost"
-                >
-                  复制片段
-                </Button>
-                <Button
-                  disabled={selectedIndex <= 0 || operationBlocked}
-                  onClick={() =>
-                    selectedClip &&
-                    void runCommand(
-                      {
-                        kind: 'move_clip',
-                        clipId: selectedClip.clipId,
-                        toIndex: selectedIndex - 1
-                      },
-                      '片段已向前移动。'
-                    )
-                  }
-                  variant="ghost"
-                >
-                  左移
-                </Button>
-                <Button
-                  disabled={
+                onClick={() => {
+                  if (!selectedClip || !selectedSegment) return;
+                  const timelineOffset = playheadUs - selectedSegment.startUs;
+                  const sourceOffset = Number(
+                    (BigInt(timelineOffset) *
+                      BigInt(selectedSegment.speedNumerator)) /
+                      BigInt(selectedSegment.speedDenominator)
+                  );
+                  void runCommand(
+                    {
+                      kind: 'split_clip',
+                      clipId: selectedClip.clipId,
+                      atSourceUs: selectedClip.sourceRange.inUs + sourceOffset
+                    },
+                    '已在播放头位置分割片段。'
+                  );
+                }}
+                variant="ghost"
+              >
+                分割
+              </Button>
+              <Button
+                disabled={!selectedClip || operationBlocked}
+                onClick={() =>
+                  selectedClip &&
+                  void runCommand(
+                    { kind: 'remove_clip', clipId: selectedClip.clipId },
+                    '片段已从主轨移除，源文件没有删除。'
+                  )
+                }
+                variant="ghost"
+              >
+                删除
+              </Button>
+              <Button
+                disabled={!selectedClip || operationBlocked}
+                onClick={() =>
+                  selectedClip &&
+                  void runCommand(
+                    { kind: 'duplicate_clip', clipId: selectedClip.clipId },
+                    '片段已复制到主轨。'
+                  )
+                }
+                variant="ghost"
+              >
+                复制片段
+              </Button>
+              <Button
+                disabled={selectedIndex <= 0 || operationBlocked}
+                onClick={() =>
+                  selectedClip &&
+                  void runCommand(
+                    {
+                      kind: 'move_clip',
+                      clipId: selectedClip.clipId,
+                      toIndex: selectedIndex - 1
+                    },
+                    '片段已向前移动。'
+                  )
+                }
+                variant="ghost"
+              >
+                左移
+              </Button>
+              <Button
+                disabled={
                     selectedIndex < 0 ||
                     selectedIndex >= (currentDraft?.videoTrack.length ?? 0) - 1 ||
                     operationBlocked
                   }
-                  onClick={() =>
-                    selectedClip &&
-                    void runCommand(
-                      {
-                        kind: 'move_clip',
-                        clipId: selectedClip.clipId,
-                        toIndex: selectedIndex + 1
-                      },
-                      '片段已向后移动。'
-                    )
-                  }
-                  variant="ghost"
-                >
-                  右移
-                </Button>
-                <Button
-                  disabled={!currentDraft?.removedClips.length || operationBlocked}
-                  onClick={() => {
-                    const removed = currentDraft?.removedClips.at(-1);
-                    if (!removed) return;
-                    void runCommand(
-                      {
-                        kind: 'restore_clip',
-                        clipId: removed.clip.clipId,
-                        targetIndex: Math.min(
-                          removed.previousIndex,
-                          currentDraft?.videoTrack.length ?? 0
-                        )
-                      },
-                      '最近删除的片段已恢复。'
-                    );
-                  }}
-                  variant="ghost"
-                >
-                  恢复删除
-                </Button>
-                <Button
-                  disabled={!currentDraft || totalDurationUs <= 0}
-                  onClick={() => setInspectorTab('text')}
-                  variant="ghost"
-                >
-                  文字
-                </Button>
-                <Button
-                  disabled={!currentDraft || totalDurationUs <= 0}
-                  onClick={() => setInspectorTab('audio')}
-                  variant="ghost"
-                >
-                  音乐
-                </Button>
-                <Button
-                  disabled={!currentDraft || totalDurationUs <= 0}
-                  onClick={() => setInspectorTab('cover')}
-                  variant="ghost"
-                >
-                  封面
-                </Button>
-              </div>
+                onClick={() =>
+                  selectedClip &&
+                  void runCommand(
+                    {
+                      kind: 'move_clip',
+                      clipId: selectedClip.clipId,
+                      toIndex: selectedIndex + 1
+                    },
+                    '片段已向后移动。'
+                  )
+                }
+                variant="ghost"
+              >
+                右移
+              </Button>
+              <Button
+                disabled={!currentDraft?.removedClips.length || operationBlocked}
+                onClick={() => {
+                  const removed = currentDraft?.removedClips.at(-1);
+                  if (!removed) return;
+                  void runCommand(
+                    {
+                      kind: 'restore_clip',
+                      clipId: removed.clip.clipId,
+                      targetIndex: Math.min(
+                        removed.previousIndex,
+                        currentDraft?.videoTrack.length ?? 0
+                      )
+                    },
+                    '最近删除的片段已恢复。'
+                  );
+                }}
+                variant="ghost"
+              >
+                恢复删除
+              </Button>
+              <Button
+                disabled={!currentDraft || totalDurationUs <= 0}
+                onClick={() => setInspectorTab('text')}
+                variant="ghost"
+              >
+                文字
+              </Button>
+              <Button
+                disabled={!currentDraft || totalDurationUs <= 0}
+                onClick={() => setInspectorTab('audio')}
+                variant="ghost"
+              >
+                音乐
+              </Button>
+              <Button
+                disabled={!currentDraft || totalDurationUs <= 0}
+                onClick={() => setInspectorTab('cover')}
+                variant="ghost"
+              >
+                封面
+              </Button>
             </div>
-            <div className="uc-video-editor__ruler" aria-hidden="true">
-              <span>00:00.000</span>
-              <span>{segments.length} 个片段</span>
-              <span>{formatTime(totalDurationUs)}</span>
-            </div>
-            <Slider
-              aria-label="时间线播放头"
-              className="uc-video-editor__playhead"
-              disabled={totalDurationUs === 0}
-              max={Math.max(1, totalDurationUs)}
-              min={0}
-              onChange={seekTimeline}
-              step={1000}
-              value={Math.min(playheadUs, Math.max(1, totalDurationUs))}
-            />
-            <VideoTimelineTrack
-              onSelect={selectClip}
-              segments={segments}
-              selectedClipId={selectedClipId}
-            />
-            <TimelineTrack
-              items={
-                currentDraft?.textTrack.map((text) => ({
-                  id: text.textId,
-                  label: text.content || '空文字层'
-                })) ?? []
-              }
-              label="文字轨"
-              onSelect={(textId) => {
-                setSelectedTextId(textId);
-                setInspectorTab('text');
-              }}
-              selectedId={selectedTextId}
-            />
-            <TimelineTrack
-              items={
-                currentDraft?.backgroundMusic
-                  ? [{ id: currentDraft.backgroundMusic.fileId, label: '背景音乐' }]
-                  : []
-              }
-              label="背景音乐"
-            />
-          </Card>
-        </div>
+          </div>
+          <div className="uc-video-editor__ruler" aria-hidden="true">
+            <span>00:00.000</span>
+            <span>{segments.length} 个片段</span>
+            <span>{formatTime(totalDurationUs)}</span>
+          </div>
+          <Slider
+            aria-label="时间线播放头"
+            className="uc-video-editor__playhead"
+            disabled={totalDurationUs === 0}
+            max={Math.max(1, totalDurationUs)}
+            min={0}
+            onChange={seekTimeline}
+            step={1000}
+            value={Math.min(playheadUs, Math.max(1, totalDurationUs))}
+          />
+          <VideoTimelineTrack
+            onSelect={selectClip}
+            segments={segments}
+            selectedClipId={selectedClipId}
+          />
+          <TimelineTrack
+            items={
+              currentDraft?.textTrack.map((text) => ({
+                id: text.textId,
+                label: text.content || '空文字层'
+              })) ?? []
+            }
+            label="文字轨"
+            onSelect={(textId) => {
+              setSelectedTextId(textId);
+              setInspectorTab('text');
+            }}
+            selectedId={selectedTextId}
+          />
+          <TimelineTrack
+            items={
+              currentDraft?.backgroundMusic
+                ? [{ id: currentDraft.backgroundMusic.fileId, label: '背景音乐' }]
+                : []
+            }
+            label="背景音乐"
+          />
+        </Card>
 
         <Card className="uc-video-editor__inspector">
           <PanelHeading
