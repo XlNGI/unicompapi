@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import {
   documentRevisionOperations,
   type DocumentOutline,
   type DocumentOutlineBlock,
+  type DocumentOutlineSection,
   type DocumentRevisionOperation,
   type DocumentWorkspaceKind,
   type PresentationPageKind
@@ -13,6 +15,9 @@ export interface DocumentStructureBlockSummary {
   readonly type: DocumentOutlineBlock['type'];
   readonly itemCount: number;
   readonly characterCount: number;
+  readonly contentHash: string;
+  readonly itemContentHashes: readonly string[];
+  readonly columnCount?: number;
 }
 
 export interface DocumentStructureSectionSummary {
@@ -20,6 +25,7 @@ export interface DocumentStructureSectionSummary {
   readonly heading: string;
   readonly level: 1 | 2 | 3;
   readonly blockCount: number;
+  readonly contentHash: string;
   readonly blocks: readonly DocumentStructureBlockSummary[];
 }
 
@@ -33,6 +39,7 @@ export interface DocumentStructureSnapshot {
 
 export interface DocumentPatchTarget {
   readonly sectionIndex?: number;
+  readonly sectionHeading?: string;
   readonly blockIndex?: number;
   readonly itemIndex?: number;
   readonly rowIndex?: number;
@@ -44,6 +51,7 @@ export interface DocumentPatch {
   readonly operation: DocumentRevisionOperation;
   readonly target: DocumentPatchTarget;
   readonly value?: string;
+  readonly replacement?: DocumentOutlineSection;
   readonly data?: {
     readonly chartKind: 'bar' | 'pie';
     readonly title?: string;
@@ -91,19 +99,28 @@ export function readStructuredDocument(
       heading: section.heading,
       level: section.level,
       blockCount: section.blocks.length,
+      contentHash: createHash('sha256')
+        .update(JSON.stringify(section))
+        .digest('hex'),
       blocks: section.blocks.map((block, blockIndex) => ({
         blockIndex,
         type: block.type,
         itemCount: blockItemCount(block),
-        characterCount: blockCharacters(block)
+        characterCount: blockCharacters(block),
+        contentHash: hashStructuredValue(block),
+        itemContentHashes: blockAtomicValues(block).map(hashStructuredValue),
+        ...(block.type === 'table' ? { columnCount: block.header.length } : {})
       }))
     }))
   };
 }
 
-export function parseDocumentPatch(value: unknown): DocumentPatch {
+export function parseDocumentPatch(
+  value: unknown,
+  kind?: DocumentWorkspaceKind
+): DocumentPatch {
   if (!isRecord(value)) throw new StructuredDocumentToolError('invalid_patch', 'Patch must be an object');
-  requireExactKeys(value, ['operation', 'target', 'value', 'data']);
+  requireExactKeys(value, ['operation', 'target', 'value', 'replacement', 'data']);
   if (typeof value.operation !== 'string' || !documentRevisionOperations.includes(value.operation as DocumentRevisionOperation)) {
     throw new StructuredDocumentToolError('invalid_patch', 'Patch operation is invalid');
   }
@@ -112,11 +129,17 @@ export function parseDocumentPatch(value: unknown): DocumentPatch {
     operation: value.operation as DocumentRevisionOperation,
     target,
     ...(value.value !== undefined ? { value: requireSafeText(value.value, 'value') } : {}),
+    ...(value.replacement !== undefined
+      ? { replacement: parseReplacementSection(value.replacement, kind) }
+      : {}),
     ...(value.data !== undefined ? { data: parseChartData(value.data) } : {})
   };
   if (patch.value === undefined && patch.data === undefined &&
       ['replace_text', 'insert_text', 'add_section', 'add_column', 'set_style'].includes(patch.operation)) {
     throw new StructuredDocumentToolError('invalid_patch', `${patch.operation} requires a value or data`);
+  }
+  if (patch.operation === 'replace_section' && patch.replacement === undefined) {
+    throw new StructuredDocumentToolError('invalid_patch', 'replace_section requires replacement');
   }
   return patch;
 }
@@ -125,7 +148,7 @@ export function applyStructuredDocumentPatch(
   document: DocumentOutline,
   patchInput: DocumentPatch | unknown
 ): { readonly document: DocumentOutline; readonly change: DocumentPatchChange } {
-  const patch = parseDocumentPatch(patchInput);
+  const patch = parseDocumentPatch(patchInput, document.kind);
   const sections = document.sections.map((section) => ({
     ...section,
     blocks: section.blocks.map((block) => cloneBlock(block))
@@ -143,6 +166,26 @@ export function applyStructuredDocumentPatch(
       sections[sectionIndex] = {
         ...sections[sectionIndex],
         blocks: []
+      };
+      mark(sectionIndex);
+      break;
+    }
+    case 'replace_section': {
+      const sectionIndex = requireSectionIndex(patch.target, sections.length);
+      const replacement = patch.replacement;
+      if (!replacement) {
+        throw new StructuredDocumentToolError(
+          'invalid_patch',
+          'replace_section requires replacement'
+        );
+      }
+      const current = sections[sectionIndex];
+      sections[sectionIndex] = {
+        ...replacement,
+        blocks: replacement.blocks.map((block) => cloneBlock(block)),
+        heading: current.heading,
+        level: current.level,
+        pageKind: current.pageKind
       };
       mark(sectionIndex);
       break;
@@ -254,13 +297,19 @@ export function applyStructuredDocumentPatch(
 
 function parseTarget(value: unknown): DocumentPatchTarget {
   if (!isRecord(value)) throw new StructuredDocumentToolError('invalid_patch', 'Patch target must be an object');
-  requireExactKeys(value, ['sectionIndex', 'blockIndex', 'itemIndex', 'rowIndex', 'columnIndex', 'pageNumber']);
+  requireExactKeys(value, ['sectionIndex', 'sectionHeading', 'blockIndex', 'itemIndex', 'rowIndex', 'columnIndex', 'pageNumber']);
   const target: DocumentPatchTarget = {};
   for (const key of ['sectionIndex', 'blockIndex', 'itemIndex', 'rowIndex', 'columnIndex', 'pageNumber'] as const) {
     if (value[key] !== undefined) {
       if (!Number.isSafeInteger(value[key]) || Number(value[key]) < 0) throw new StructuredDocumentToolError('invalid_patch', `target.${key} must be a non-negative integer`);
       (target as Record<string, number>)[key] = Number(value[key]);
     }
+  }
+  if (value.sectionHeading !== undefined) {
+    (target as { sectionHeading?: string }).sectionHeading = requireSafeText(
+      value.sectionHeading,
+      'target.sectionHeading'
+    );
   }
   return target;
 }
@@ -280,6 +329,43 @@ function parseChartData(value: unknown): NonNullable<DocumentPatch['data']> {
       return { label: requireSafeText(point.label, `data.points[${index}].label`), value: point.value };
     })
   };
+}
+
+function parseReplacementSection(
+  value: unknown,
+  kind?: DocumentWorkspaceKind
+): DocumentOutlineSection {
+  if (kind !== undefined && kind !== 'ppt' && isRecord(value)) {
+    for (const field of ['pageKind', 'takeaway', 'action']) {
+      if (value[field] !== undefined) {
+        throw new StructuredDocumentToolError(
+          'kind_mismatch',
+          `replacement.${field} is only available for PPT sections`
+        );
+      }
+    }
+  }
+  const candidates: readonly DocumentWorkspaceKind[] = kind
+    ? [kind]
+    : ['word', 'excel', 'ppt'];
+  for (const kind of candidates) {
+    try {
+      return parseDocumentOutline(
+        JSON.stringify({
+          kind,
+          title: 'Validated revision',
+          sections: [value]
+        })
+      ).sections[0];
+    } catch {
+      // Try the next document contract. The enclosing document kind is
+      // enforced by applyStructuredDocumentPatch after parsing.
+    }
+  }
+  throw new StructuredDocumentToolError(
+    'invalid_patch',
+    'replacement section is invalid'
+  );
 }
 
 function requireSectionIndex(target: DocumentPatchTarget, count: number): number {
@@ -325,6 +411,17 @@ function blockCharacters(block: DocumentOutlineBlock): number {
   if (block.type === 'bullets' || block.type === 'numbered') return block.items.join('').length;
   if (block.type === 'table') return [...block.header, ...block.rows.flat()].join('').length;
   return (block.title?.length ?? 0) + block.data.map((point) => point.label).join('').length;
+}
+
+function blockAtomicValues(block: DocumentOutlineBlock): readonly unknown[] {
+  if (block.type === 'paragraph' || block.type === 'quote') return [block.text];
+  if (block.type === 'bullets' || block.type === 'numbered') return block.items;
+  if (block.type === 'table') return [...block.header, ...block.rows.flat()];
+  return block.data.map((point) => point);
+}
+
+function hashStructuredValue(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 function cloneBlock(block: DocumentOutlineBlock): DocumentOutlineBlock {

@@ -44,6 +44,16 @@ import {
   isUniCompApiPackage
 } from './unicompapi-model-capabilities';
 import {
+  assembleControlledToolCalls,
+  sanitizeControlledToolResult,
+  parseControlledProviderTools,
+  parseControlledToolCallDeltas,
+  type ControlledProviderToolDefinition,
+  type ControlledProviderToolBridge,
+  type ControlledProviderToolCallDelta,
+  type ControlledProviderToolCall
+} from '../provider-tool-calling';
+import {
   NewApiRuntimeError,
   type NewApiEventStreamSession,
   type NewApiSharedRuntime
@@ -129,8 +139,10 @@ export interface NewApiChatTerminalObserverPort {
 }
 
 export interface NewApiChatMessageV1 {
-  readonly role: 'system' | 'user' | 'assistant';
+  readonly role: 'system' | 'user' | 'assistant' | 'tool';
   readonly content: string;
+  readonly toolCallId?: string;
+  readonly name?: string;
 }
 
 export interface NewApiChatDispatchRequestV1 {
@@ -138,6 +150,7 @@ export interface NewApiChatDispatchRequestV1 {
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly messages: readonly NewApiChatMessageV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
+  readonly tools?: readonly ControlledProviderToolDefinition[];
 }
 
 export type NewApiChatTerminalResult =
@@ -172,8 +185,13 @@ interface ActiveOperation {
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly productFeature: 'text_chat' | 'text_reasoning';
-  readonly session: NewApiEventStreamSession;
+  session: NewApiEventStreamSession;
   readonly removeExternalAbort: () => void;
+  readonly openSession: (messages: readonly NewApiChatMessageV1[]) => Promise<NewApiEventStreamSession>;
+  readonly messages: NewApiChatMessageV1[];
+  readonly toolBridge?: ControlledProviderToolBridge;
+  readonly maxToolRounds: number;
+  readonly signal: AbortSignal;
   cancelReason?: 'user' | 'application_shutdown';
   cancelRequest?: Promise<unknown>;
   completion?: Promise<NewApiChatTerminalResult>;
@@ -270,6 +288,8 @@ export class NewApiChatAdapter {
     readonly request: unknown;
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly signal?: AbortSignal;
+    readonly toolBridge?: ControlledProviderToolBridge;
+    readonly maxToolRounds?: number;
   }): Promise<NewApiChatOperationHandle> {
     if (this.disposed) {
       throw new NewApiRuntimeError('runtime_shutting_down', 'not_retryable');
@@ -311,6 +331,17 @@ export class NewApiChatAdapter {
     const externalController = new AbortController();
     const removeExternalAbort = linkAbort(input.signal, externalController);
     let session: NewApiEventStreamSession | undefined;
+    const openSession = (messages: readonly NewApiChatMessageV1[]) =>
+      this.credentials.useCredential(
+        { connectionId: route.connectionId, credentialVersionId: route.credentialVersionId },
+        (credential) => this.runtime.openChatStream({
+          connection,
+          credentials: credential,
+          body: serializeRequest(route, { ...request, messages }, parameterSchema),
+          signal: externalController.signal,
+          beforeRequestStarted: input.beforeRequestStarted
+        })
+      );
     try {
       session = await this.credentials.useCredential(
         {
@@ -349,6 +380,11 @@ export class NewApiChatAdapter {
         ? 'text_reasoning'
         : 'text_chat',
       session,
+      openSession,
+      messages: [...request.messages],
+      ...(input.toolBridge !== undefined ? { toolBridge: input.toolBridge } : {}),
+      maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4),
+      signal: externalController.signal,
       removeExternalAbort
     };
     this.active.set(providerOperationId, operation);
@@ -393,7 +429,7 @@ export class NewApiChatAdapter {
   ): Promise<NewApiChatTerminalResult> {
     let usagePersisted = false;
     try {
-      const stream = await consumeNewApiStream(
+      let stream = await consumeNewApiStream(
         operation.session.stream,
         expectedModel,
         async (contentDelta) => {
@@ -411,6 +447,26 @@ export class NewApiChatAdapter {
           }
         }
       );
+      let rounds = 0;
+      while (stream.finishReason === 'tool_calls') {
+        if (!operation.toolBridge || !stream.toolCalls || ++rounds > operation.maxToolRounds) {
+          throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
+        }
+        operation.messages.push({ role: 'assistant', content: stream.content ?? '' });
+        for (const call of stream.toolCalls) {
+          const result = await operation.toolBridge.execute({ call, signal: operation.signal });
+          operation.messages.push({ role: 'tool', content: JSON.stringify(sanitizeControlledToolResult(result)), toolCallId: call.id, name: call.name });
+        }
+        operation.session.close();
+        operation.session = await operation.openSession(operation.messages);
+        stream = await consumeNewApiStream(operation.session.stream, expectedModel,
+          async (contentDelta) => { await this.lifecycle.appendContent(operation.responseExecutionId, contentDelta); },
+          async (reasoningDelta) => {
+            if (operation.productFeature === 'text_reasoning') {
+              await this.lifecycle.appendReasoning(operation.responseExecutionId, reasoningDelta);
+            }
+          });
+      }
       const observation = createUsageObservation({
         observationId: this.ids.nextProviderUsageObservationId(),
         invocationAttemptId: operation.invocationAttemptId,
@@ -634,6 +690,8 @@ async function consumeNewApiStream(
   readonly finishReason: NewApiFinishReason;
   readonly contentLength: number;
   readonly usage?: readonly UsageFactV1[];
+  readonly content?: string;
+  readonly toolCalls?: readonly ControlledProviderToolCall[];
 }> {
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let buffer = '';
@@ -643,6 +701,8 @@ async function consumeNewApiStream(
   let responseId: string | undefined;
   let responseModel: string | undefined;
   let contentLength = 0;
+  let content = '';
+  const toolDeltas: ControlledProviderToolCallDelta[] = [];
 
   const processEvent = async (eventText: string) => {
     // Ignore blank events and SSE comment/keep-alive lines. These are transport
@@ -678,12 +738,14 @@ async function consumeNewApiStream(
       await onReasoning(chunk.reasoningDelta);
     }
     if (chunk.contentDelta) {
+      content += chunk.contentDelta;
       contentLength += chunk.contentDelta.length;
       if (contentLength > 1_000_000) {
         throw invalidStream('NewApi stream content exceeded the local limit');
       }
       await onContent(chunk.contentDelta);
     }
+    if (chunk.toolCalls) toolDeltas.push(...chunk.toolCalls);
     if (chunk.finishReason) {
       if (terminalReason) throw invalidStream('NewApi stream reported multiple finish reasons');
       terminalReason = chunk.finishReason;
@@ -717,7 +779,9 @@ async function consumeNewApiStream(
   return {
     finishReason: terminalReason,
     contentLength,
-    ...(usage ? { usage } : {})
+    ...(usage ? { usage } : {}),
+    ...(content ? { content } : {}),
+    ...(toolDeltas.length > 0 ? { toolCalls: assembleControlledToolCalls(toolDeltas) } : {})
   };
 }
 
@@ -739,6 +803,7 @@ function parseStreamChunk(data: string): {
   readonly contentDelta?: string;
   readonly finishReason?: NewApiFinishReason;
   readonly usage?: readonly UsageFactV1[];
+  readonly toolCalls?: readonly ControlledProviderToolCallDelta[];
 } {
   let parsed: unknown;
   try {
@@ -785,7 +850,17 @@ function parseStreamChunk(data: string): {
   ) {
     throw invalidStream('NewApi stream choice is unsupported');
   }
+  const finishReason = choice.finish_reason === undefined || choice.finish_reason === null
+    ? undefined
+    : parseFinishReason(choice.finish_reason);
   const delta = requireRecord(choice.delta, [], 'NewApi stream delta');
+  if (delta.tool_calls !== undefined) {
+    return {
+      id, model, ...(usage ? { usage } : {}),
+      toolCalls: parseControlledToolCallDeltas(delta.tool_calls),
+      ...(finishReason ? { finishReason } : {})
+    };
+  }
   if (delta.role !== undefined && delta.role !== 'assistant') {
     throw invalidStream('NewApi stream role is invalid');
   }
@@ -794,9 +869,6 @@ function parseStreamChunk(data: string): {
     delta.reasoning_content,
     'NewApi reasoning delta'
   );
-  const finishReason = choice.finish_reason === undefined || choice.finish_reason === null
-    ? undefined
-    : parseFinishReason(choice.finish_reason);
   return {
     id,
     model,
@@ -878,20 +950,22 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
   const item = exactRecord(
     value,
     ['responseExecutionId', 'invocationAttemptId', 'messages', 'parameterValues'],
-    [],
+    ['tools'],
     'NewApi chat dispatch request'
   );
   if (!Array.isArray(item.messages) || item.messages.length < 1 || item.messages.length > 200) {
     throw invalidRequest('NewApi messages are invalid');
   }
   const messages = item.messages.map((value) => {
-    const message = exactRecord(value, ['role', 'content'], [], 'NewApi message');
-    if (!['system', 'user', 'assistant'].includes(String(message.role))) {
+    const message = exactRecord(value, ['role', 'content'], ['tool_call_id', 'name'], 'NewApi message');
+    if (!['system', 'user', 'assistant', 'tool'].includes(String(message.role))) {
       throw invalidRequest('NewApi message role is invalid');
     }
     return {
       role: message.role as NewApiChatMessageV1['role'],
-      content: boundedText(message.content, 'NewApi message content', 1_000_000)
+      content: boundedText(message.content, 'NewApi message content', 1_000_000),
+      ...(message.tool_call_id !== undefined ? { toolCallId: boundedText(message.tool_call_id, 'NewApi tool call ID', 256) } : {}),
+      ...(message.name !== undefined ? { name: boundedText(message.name, 'NewApi tool name', 256) } : {})
     };
   });
   if (messages.at(-1)?.role !== 'user') {
@@ -911,7 +985,8 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
     messages,
     parameterValues: plainRecord(item.parameterValues, 'NewApi parameter values') as Readonly<
       Record<string, ParameterValue>
-    >
+    >,
+    ...(item.tools !== undefined ? { tools: parseControlledProviderTools(item.tools) } : {})
   };
 }
 
@@ -924,11 +999,17 @@ function serializeRequest(
   // UniCompAPI / OpenAI-compatible gateways accept temperature and top_p together.
   const body: Record<string, unknown> = {
     model: route.providerModelKey,
-    messages: request.messages,
+    messages: request.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
+      ...(message.name !== undefined ? { name: message.name } : {})
+    })),
     // Product chat path always streams; do not expose stream as a user field.
     stream: true,
     stream_options: { include_usage: true }
   };
+  if (request.tools) body.tools = request.tools;
   if (typeof parameters.max_tokens === 'number') {
     body.max_tokens = parameters.max_tokens;
   }

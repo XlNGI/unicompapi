@@ -865,6 +865,46 @@ describe('NewAPI chat adapter', () => {
     expect(body).not.toHaveProperty('thinking');
   });
 
+  it('serializes only allowlisted native document tools', async () => {
+    const sse = [
+      `data: ${JSON.stringify({ id: 'tool-stream', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v3', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\n`,
+      'data: [DONE]\n\n'
+    ].join('');
+    const fixture = runtimeFixture(async () => streamResponse(sse));
+    const adapter = new NewApiChatAdapter(
+      fixture.runtime,
+      credentialResolver(),
+      connectionResolver(),
+      schemaResolver(),
+      lifecycleFixture().port,
+      usageSink().port
+    );
+    const handle = await adapter.submit({
+      routeSnapshot: routeFor('text_chat'),
+      request: {
+        responseExecutionId: 'response-tool-calling',
+        invocationAttemptId: 'attempt-tool-calling',
+        messages: [{ role: 'user', content: 'apply' }],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'apply_document_patch',
+            parameters: { type: 'object', properties: {} }
+          }
+        }],
+        parameterValues: {}
+      }
+    });
+    await handle.completion;
+    expect(requestJson(fixture.requests[0]).tools).toEqual([{
+      type: 'function',
+      function: {
+        name: 'apply_document_patch',
+        parameters: { type: 'object', properties: {} }
+      }
+    }]);
+  });
+
   it('serializes default UniCompAPI chat fields without forcing stream/user', async () => {
     const sse = [
       'data: {"id":"chat-default-1","object":"chat.completion.chunk","created":1,"model":"' +

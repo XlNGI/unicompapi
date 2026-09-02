@@ -67,6 +67,18 @@ describe('Office request intent', () => {
       targetDocumentKind: 'excel',
       missing: []
     });
+    expect(
+      analyzeOfficeRequest('将第二章的内容删掉', {
+        latestDocumentKind: 'ppt',
+        availableDocumentKinds: ['ppt']
+      })
+    ).toMatchObject({
+      kind: 'document',
+      action: 'revise',
+      documentKind: 'ppt',
+      targetDocumentKind: 'ppt',
+      missing: []
+    });
   });
 
   it('uses the current conversation documents to resolve natural follow-up edits', () => {
@@ -193,6 +205,24 @@ describe('Office request intent', () => {
       action: 'revise',
       documentKind: 'ppt',
       missing: ['可修改的上一版 PPT']
+    });
+  });
+
+  it('keeps explicit new-document requests from being mistaken for revisions', () => {
+    const request = '帮我生成一个 PPT，删除重复内容并保留风险和行动建议';
+    expect(analyzeOfficeRequest(request)).toMatchObject({
+      kind: 'document',
+      action: 'create',
+      documentKind: 'ppt',
+      missing: []
+    });
+    // Existing documents in another conversation/context must not turn a
+    // clearly new request into a revision either.
+    expect(analyzeOfficeRequest(request, { documents })).toMatchObject({
+      kind: 'document',
+      action: 'create',
+      documentKind: 'ppt',
+      missing: []
     });
   });
 

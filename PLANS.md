@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+2026-09-02 PPT 页面类型兼容性补充：文档大纲解析器对 `pageKind` 增加受控的大小写、首尾空白及空格/连字符归一化，仍仅接受既有枚举或已登记语义别名；新增回归覆盖 `Summary` 与 `IMAGE-TEXT`，避免模型轻微格式漂移触发“AI 内容格式异常，文档未生成”。定向解析测试 34/34、完整 `pnpm test`、`typecheck`、`lint`、`build` 和 `git diff --check` 均通过。未执行真实 Provider 调用或 Windows Office 人工验收，下一步按负责人安排在最新 Electron 构建中复测 PPT 生成与 PowerPoint 打开。
+
+2026-09-02 PPT 局部修改反馈：截图中的“将第二章的内容删掉”未命中本地修订代理原有的清空规则（规则只识别“清空第二章”或“删掉本章内容”），导致修订大纲保持不变。已将匹配扩展为受控的前后置“删除/删掉 + 目标内容”表达；章节序号仍必须先通过 `parseRevisionOrdinal` 校验，避免泛化删除请求误触发。新增精确回归测试，验证意图识别、只清空第二章且保留其余章节。
+
+2026-09-02 新对话 PPT 创建分流修复：Office 意图层原先把修订动词与单字版面词（如“行”）直接组合，导致“生成 PPT，删除重复内容并保留风险和行动建议”被误判为 `revise`，在没有当前对话上一版时错误提示“请补充可修改的上一版 PPT”。现改为：明确创建动词优先走创建；只有文件名、上一/前一版、刚才版本或编号章节/页面等受控既有文档引用才升级为修订；无创建动词时仍可凭当前对话 Office 上下文处理自然追改。新增回归覆盖该完整创建请求，定向 Office 意图与修订测试 14/14、完整 `pnpm test` 已通过。尚未执行真实 Provider 调用或 Windows Office 人工验收，需重启并使用最新 Electron 构建复测。
+
+2026-09-02 PPT 修订基底修复：原 `applyLocalPptRevision` 要求父版与新生成目标页的文本 run 数和总页数完全相同；删除章节内容时必然触发回退，最终整份 PPT 看起来像重新生成。现以父版 PPTX 压缩包为修订基底，仅替换命中的目标页文本，删除场景对父页多余文本 run 做清空；父版多出的目标章节续页改为隐藏而不是继续展示旧内容，并保留未命中页及父版结构。新增真实生成 PPT 的回归测试验证非目标页仍保留原内容。Office 生成器定向测试 35/35 通过，完整 `pnpm test` 通过；未执行真实 Provider 调用或 Windows PowerPoint 人工验收。
+
 ## 2026-09-01｜负责人重新制定阶段九智能文档规则
 
 项目负责人明确批准在阶段 9 已收口的 Windows x64 工程基线上新增“智能文档工作流扩展”。原阶段 9 跨平台基线、Windows 必需目标、macOS `required=false/not_run/deferred`、阶段 10 发布边界和历史验收记录继续有效；本条只新增阶段 9 扩展，不把未实施能力写成已完成。
@@ -140,6 +148,14 @@ E7 验收门禁：
 新增 `office-document-tool-executor` 第一版真实文件适配器：仅接受项目内相对路径，执行 DOCX/XLSX/PPTX 格式、大小和 OOXML 包校验；`readOfficeDocumentStructure` 从实际 Office 包生成脱敏结构摘要；`applyOfficeDocumentPatch` 当前支持 `clear_section`，对 Word/PPT 保留段落/文本节点结构，对 Excel 保留首行表头并清空目标工作表数据行，结果只写调用方提供的临时目标，禁止覆盖源文件。
 
 E7.2 当前仍未完成真实 Electron 文件句柄/Work 解析接线，尚未替换现有生成器的正式发布路径，也未完成渲染视觉诊断、取消恢复端到端和 Windows Office GUI 签署。适配器定向测试 2/2 通过；随后完整 `pnpm.cmd test` 为 170 个 Vitest 文件、1031 项及 Node/UI 合同全部通过，`typecheck`、`lint`、`build`、`audit:platform` 和差异检查通过。未调用真实 Provider、未读取凭证、未发起联网或收费请求；E7 整体仍为 `approved/in_progress`。
+
+### E7.3 实施登记（2026-09-02，进行中）
+
+已把 E7.1/E7.2 接入正式文档生成链路：明确清空请求和 Provider 候选大纲中的指定章节改写由 Application 层归一化为 `clear_section` / `replace_section`，模型不能指定工具、路径或内部 ID；Runner 从 `parentWorkId` 解析项目内已验证父文件，Platform 执行器直接读取真实 DOCX/XLSX/PPTX 并写独立临时版本。发布前重新读取父文件与临时文件，要求目标内容 Hash 发生变化、标题/层级/版式保持稳定、全部非目标章节内容 Hash 不变；随后继续经过既有 OOXML、关键内容、SHA-256、原子 rename、FileReference 和 Work 登记门禁。映射失败、目标未变化或越界修改均失败关闭，不回退为整篇重建，也不登记新 Work。父 Work、FileReference 或父文件失效时同样以 `storage_error` 失败关闭，不再退化为整篇重建。
+
+新增 `replace_section` 严格补丁、结构摘要 `contentHash`、真实三格式清空回归、DOCX 改写回归和 Runner 父子 Work 发布回归。完整 `pnpm.cmd test` 为 170 个 Vitest 文件、1041 项及 Node/UI 合同全部通过；`typecheck`、`lint`、`build`、`audit:platform`、`verify:handoff` 与 `git diff --check` 通过。未调用真实 Provider、未读取凭证、未发起联网或收费请求。
+
+E7 仍为 `approved/in_progress`，不得标记 `passed`：Provider 原生 tool calling 已完成受控工具定义发送与调用增量安全校验，但当前响应生命周期尚无工具结果回传与多轮执行合同；自动化 `render_preview` / `inspect_layout` 已新增本地 LibreOffice/Poppler 适配器，但本机未安装渲染器，真实 PDF/PNG 视觉诊断尚未运行。负责人已确认 Windows Office 打开、保存、重新打开及 PDF/图片视觉检查无字体、截断、溢出、重叠或目标范围异常，本轮人工结论尚未附 Office 版本、样例文件名、截图或导出物哈希等独立证据元数据。2026-09-02 修复增量已补齐外层 `kind` 感知的 `replace_section` 校验、PPT 封面/重复标题/续页映射、PPT 重复标题无精确页码失败关闭、Word 段落级和 Excel 单元格级受控修改、目标块/单元格 Hash 门禁、首章节前置段落定位、Excel 非空数据行物理坐标映射、细粒度值失败关闭、Word 展开块回退、失效父 Work/FileReference/父文件失败关闭、最多 8 个去重多目标补丁、显式渲染器配置接入和 `completed_unvalidated` 结构状态；正式 Vitest 目录门禁为 172 个文件、1062 项通过，Office 执行器局部回归 13/13、Runner 15/15。详细记录见 `docs/active/阶段9-E7-生产Agent局部修改闭环验收记录.md` 与 `docs/active/阶段9-E7-修复增量验收记录-2026-09-02.md`。
 
 2026-09-01 Excel 大纲兼容性修复：负责人实际验收发现 DeepSeek 返回的合法 Excel JSON 使用数值单元格（金额、年龄）并以 `footers.label/values` 表达汇总行，旧解析器仅接受字符串行且未归一化 footer，因而在文件生成前错误返回 `invalid_outline`。现仅对 Excel 表格接受有限值类型并统一转为内部字符串契约，同时把受控 footer 归一化为“合计”行；Word/PPT 仍拒绝数值表格单元格。结合本轮 Excel 生成器改进，工资模板的金额字段转为可填写数值、实发工资和合计使用公式，表头/列宽/冻结/筛选补齐。新增解析与生成回归，完整 168 个 Vitest 文件、1014 个测试通过，typecheck、lint、build、平台审计、交接校验和差异检查通过。原始验收文件保持不变，需重新构建并生成新版 XLSX。
 

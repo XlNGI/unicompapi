@@ -30,6 +30,7 @@ export interface DocumentToolRequest {
 
 export const documentAgentStates = [
   'completed',
+  'completed_unvalidated',
   'failed',
   'cancelled',
   'max_steps_exceeded',

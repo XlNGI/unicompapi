@@ -102,6 +102,123 @@ describe('office document generator', () => {
     expect(await resultZip.file('ppt/slides/slide2.xml')!.async('string')).toContain('未修改章节');
   });
 
+  it('keeps the parent package when a revision removes target text runs', async () => {
+    const outputDirectory = await createOutputDirectory();
+    await mkdir(outputDirectory, { recursive: true });
+    const sourcePath = path.join(outputDirectory, 'parent-delete.pptx');
+    const sourceZip = new JSZip();
+    const generatedZip = new JSZip();
+    sourceZip.file(
+      'ppt/slides/slide1.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>封面</a:t><a:t>不应变化</a:t></p:sld>'
+    );
+    sourceZip.file(
+      'ppt/slides/slide2.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>第二章</a:t><a:t>旧标题</a:t><a:t>旧内容</a:t></p:sld>'
+    );
+    sourceZip.file(
+      'ppt/slides/slide3.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>第二章（续 2）</a:t><a:t>旧续页内容</a:t></p:sld>'
+    );
+    generatedZip.file(
+      'ppt/slides/slide1.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>封面</a:t><a:t>模型误改</a:t></p:sld>'
+    );
+    generatedZip.file(
+      'ppt/slides/slide2.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>第二章</a:t></p:sld>'
+    );
+    await writeFixture(
+      sourcePath,
+      await sourceZip.generateAsync({ type: 'nodebuffer' })
+    );
+
+    const patched = await applyLocalPptRevision(
+      {
+        kind: 'ppt',
+        outline: parseDocumentOutline(
+          JSON.stringify({ kind: 'ppt', title: '测试', sections: [] })
+        ),
+        outputDirectory,
+        now: '20260901160000',
+        revisionSourcePath: sourcePath,
+        revisionTargetSectionHeading: '第二章'
+      },
+      await generatedZip.generateAsync({ type: 'nodebuffer' })
+    );
+    const resultZip = await JSZip.loadAsync(patched);
+    const unchanged = await resultZip.file('ppt/slides/slide1.xml')!.async('string');
+    const revised = await resultZip.file('ppt/slides/slide2.xml')!.async('string');
+    const continuation = await resultZip.file('ppt/slides/slide3.xml')!.async('string');
+    expect(unchanged).toContain('不应变化');
+    expect(revised).toContain('第二章');
+    expect(revised).not.toContain('旧标题');
+    expect(revised).not.toContain('旧内容');
+    expect(continuation).toContain('show="0"');
+    expect(continuation).not.toContain('旧续页内容');
+  });
+
+  it('preserves non-target slides in a real generated PPT revision', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const source = await generateDocumentFile({
+      kind: 'ppt',
+      outline: parseDocumentOutline(JSON.stringify({
+        kind: 'ppt',
+        title: '原始汇报',
+        sections: [
+          {
+            heading: '第一章',
+            level: 1,
+            pageKind: 'insight',
+            blocks: [{ type: 'bullets', items: ['第一章原始内容'] }]
+          },
+          {
+            heading: '第二章',
+            level: 1,
+            pageKind: 'insight',
+            blocks: [{ type: 'bullets', items: ['第二章原始内容'] }]
+          }
+        ]
+      })),
+      outputDirectory,
+      now: '20260901160000'
+    });
+    const revised = await generateDocumentFile({
+      kind: 'ppt',
+      outline: parseDocumentOutline(JSON.stringify({
+        kind: 'ppt',
+        title: '新版汇报',
+        sections: [
+          {
+            heading: '第一章',
+            level: 1,
+            pageKind: 'insight',
+            blocks: [{ type: 'bullets', items: ['模型误改第一章'] }]
+          },
+          {
+            heading: '第二章',
+            level: 1,
+            pageKind: 'insight',
+            blocks: []
+          }
+        ]
+      })),
+      outputDirectory,
+      now: '20260901160100',
+      revisionSourcePath: source.absolutePath,
+      revisionTargetSectionHeading: '第二章'
+    });
+    const resultZip = await JSZip.loadAsync(await readFile(revised.absolutePath));
+    const slides = Object.keys(resultZip.files)
+      .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
+      .sort();
+    const firstSlide = await resultZip.file(slides[1])!.async('string');
+    const secondSlide = await resultZip.file(slides[2])!.async('string');
+    expect(firstSlide).toContain('第一章原始内容');
+    expect(firstSlide).not.toContain('模型误改第一章');
+    expect(secondSlide).not.toContain('第二章原始内容');
+  });
+
   it('generates a real Word document', async () => {
     const outputDirectory = await createOutputDirectory();
     const outline = parseDocumentOutline(outlineText);

@@ -598,6 +598,32 @@ describe('content contract helpers', () => {
     ]);
   });
 
+  it('normalizes harmless casing, whitespace and dash drift in PPT page kinds', () => {
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '兼容性',
+      sections: [
+        {
+          heading: '洞察',
+          level: 1,
+          pageKind: ' Summary ',
+          blocks: [{ type: 'paragraph', text: '结论' }]
+        },
+        {
+          heading: '图文',
+          level: 1,
+          pageKind: 'IMAGE-TEXT',
+          blocks: [{ type: 'paragraph', text: '说明' }]
+        }
+      ]
+    }));
+
+    expect(outline.sections.map((section) => section.pageKind)).toEqual([
+      'insight',
+      'image_text'
+    ]);
+  });
+
   it('repairs a missing closing bracket in malformed Excel rows JSON', () => {
     const valid = JSON.stringify({
       kind: 'excel',

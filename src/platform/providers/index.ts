@@ -7,6 +7,7 @@ export * from './credential-vault';
 export * from './provider-credential-controller';
 export * from './provider-capability-services';
 export * from './provider-operation-router';
+export * from './provider-tool-calling';
 export * from './provider-execution-route-dispatcher';
 export * from './conversation-response-streaming';
 export * from './conversation-execution-coordinator';
