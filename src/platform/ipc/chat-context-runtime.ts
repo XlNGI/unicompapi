@@ -300,6 +300,8 @@ export function createChatContextRuntime(
         terminalObserver: createConversationTerminalObserver(
           acceptances,
           authorization as RuntimeAuthorizationOrchestrationPort,
+          invocationRoutes,
+          invocations,
           now
         ),
         now
@@ -585,6 +587,8 @@ export function createChatContextRuntime(
 function createConversationTerminalObserver(
   acceptances: ProjectSubmissionAcceptanceStore,
   authorization: RuntimeAuthorizationOrchestrationPort,
+  routes: JsonProviderExecutionRouteSnapshotRepository,
+  invocations: JsonProviderInvocationRepository,
   now: () => string
 ) {
   const advance = async (
@@ -607,7 +611,7 @@ function createConversationTerminalObserver(
       providerOperationId: input.providerOperationId,
       ...(input.safeCode ? { safeCode: input.safeCode } : {})
     });
-    await acceptances.advance({
+    const updated = await acceptances.advance({
       intent,
       invocationEvent: createProviderInvocationEvent({
         id: `conversation-terminal-${randomUUID()}` as never,
@@ -618,6 +622,7 @@ function createConversationTerminalObserver(
         occurredAt
       })
     });
+    await persistConversationCallRecordFacts({ acceptance: updated, routes, invocations });
     await authorization.recordOutcome(acceptance.intent.authorizationClaimId, occurredAt);
   };
   return {
@@ -699,13 +704,21 @@ async function persistConversationCallRecordFacts(input: {
   readonly invocations: JsonProviderInvocationRepository;
 }): Promise<void> {
   await input.routes.save(input.acceptance.routeSnapshot);
-  const [initial, ...rest] = input.acceptance.invocationEvents;
+  const initial = input.acceptance.invocationEvents[0];
   if (!initial) return;
-  await input.invocations.create({
-    ...input.acceptance.invocationAttempt,
-    state: 'submitting'
-  }, initial);
-  for (const event of rest) {
-    await input.invocations.appendEvent(event);
+  const existing = await input.invocations.get(input.acceptance.invocationAttempt.id);
+  if (!existing) {
+    await input.invocations.create({
+      ...input.acceptance.invocationAttempt,
+      state: 'submitting'
+    }, initial);
+  }
+  const existingEvents = new Set(
+    await input.invocations.listEvents(input.acceptance.invocationAttempt.id)
+  );
+  for (const event of input.acceptance.invocationEvents) {
+    if (![...existingEvents].some((item) => item.id === event.id)) {
+      await input.invocations.appendEvent(event);
+    }
   }
 }

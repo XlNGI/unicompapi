@@ -5,6 +5,7 @@ import {
   parseUsageSchema,
   providerInvocationStates,
   summarizeProviderUsage,
+  toTaskId,
   toIsoTimestamp,
   toProviderInvocationAttemptId,
   type IsoTimestamp,
@@ -39,10 +40,12 @@ import type {
 } from '../providers/newapi/newapi-billing';
 import {
   JsonLocalResultObservationRepository,
+  JsonConversationResponseExecutionRepository,
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
   JsonProviderOperationRepository,
   JsonProviderUsageObservationRepository,
+  JsonTaskRepository,
   JsonWorkRepository
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
@@ -328,10 +331,25 @@ export class ProviderInvocationReadModelController {
       }
       try {
         const facts = await loadProjectFacts(entry);
+        const storage = new NodeProjectStorage(entry.rootDirectory);
+        const tasks = new JsonTaskRepository(storage, entry.projectId);
+        const task = await tasks.get(toTaskId(parsed.taskId));
+        const sourceDraftId = task?.sourceDraftId;
+        const sourceConversationExecutionIds = sourceDraftId
+          ? new Set(
+              (await new JsonConversationResponseExecutionRepository(
+                storage,
+                entry.projectId
+              ).list()).filter((execution) =>
+                sourceDraftId === `message-${execution.snapshot.assistantMessageId}`
+              ).map((execution) => execution.id)
+            )
+          : new Set<string>();
         const attempts = facts.attempts.filter((attempt) =>
           attempt.projectId === parsed.projectId &&
-          attempt.subject.kind === 'media' &&
-          attempt.subject.taskId === parsed.taskId
+          ((attempt.subject.kind === 'media' && attempt.subject.taskId === parsed.taskId) ||
+            (attempt.subject.kind === 'conversation' &&
+              sourceConversationExecutionIds.has(attempt.subject.responseExecutionId)))
         );
         const items = await Promise.all(
           attempts.map(async (attempt) => (await this.buildRecord(entry, facts, attempt)).details)
