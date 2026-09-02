@@ -75,9 +75,9 @@ export function AppLayout({
           onSecondaryNavigate={onSecondaryNavigate}
         />
         <main
+          className={`workspace uc-scrollbar${activeItemId === 'chat' ? ' workspace--chat' : ''}${activeItemId === 'tasks' ? ' workspace--tasks' : ''}`}
           id="main-content"
           tabIndex={-1}
-          className={`workspace uc-scrollbar${activeItemId === 'chat' ? ' workspace--chat' : ''}${activeItemId === 'tasks' ? ' workspace--tasks' : ''}${activeSubItemId === 'video-editing' ? ' workspace--video-editing' : ''}`}
         >
           {children}
         </main>
