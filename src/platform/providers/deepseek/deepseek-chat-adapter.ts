@@ -40,6 +40,16 @@ import {
   isDeepSeekModelKey
 } from './deepseek-contracts';
 import {
+  assembleControlledToolCalls,
+  sanitizeControlledToolResult,
+  parseControlledProviderTools,
+  parseControlledToolCallDeltas,
+  type ControlledProviderToolDefinition,
+  type ControlledProviderToolBridge,
+  type ControlledProviderToolCallDelta,
+  type ControlledProviderToolCall
+} from '../provider-tool-calling';
+import {
   DeepSeekRuntimeError,
   type DeepSeekEventStreamSession,
   type DeepSeekSharedRuntime
@@ -117,8 +127,10 @@ export interface DeepSeekChatTerminalObserverPort {
 }
 
 export interface DeepSeekChatMessageV1 {
-  readonly role: 'system' | 'user' | 'assistant';
+  readonly role: 'system' | 'user' | 'assistant' | 'tool';
   readonly content: string;
+  readonly toolCallId?: string;
+  readonly name?: string;
 }
 
 export interface DeepSeekChatDispatchRequestV1 {
@@ -126,6 +138,7 @@ export interface DeepSeekChatDispatchRequestV1 {
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly messages: readonly DeepSeekChatMessageV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
+  readonly tools?: readonly ControlledProviderToolDefinition[];
 }
 
 export type DeepSeekChatTerminalResult =
@@ -160,8 +173,13 @@ interface ActiveOperation {
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly productFeature: 'text_chat' | 'text_reasoning';
-  readonly session: DeepSeekEventStreamSession;
+  session: DeepSeekEventStreamSession;
   readonly removeExternalAbort: () => void;
+  readonly openSession: (messages: readonly DeepSeekChatMessageV1[]) => Promise<DeepSeekEventStreamSession>;
+  readonly messages: DeepSeekChatMessageV1[];
+  readonly toolBridge?: ControlledProviderToolBridge;
+  readonly maxToolRounds: number;
+  readonly signal: AbortSignal;
   cancelReason?: 'user' | 'application_shutdown';
   cancelRequest?: Promise<unknown>;
   completion?: Promise<DeepSeekChatTerminalResult>;
@@ -250,6 +268,8 @@ export class DeepSeekChatAdapter {
     readonly request: unknown;
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly signal?: AbortSignal;
+    readonly toolBridge?: ControlledProviderToolBridge;
+    readonly maxToolRounds?: number;
   }): Promise<DeepSeekChatOperationHandle> {
     if (this.disposed) {
       throw new DeepSeekRuntimeError('runtime_shutting_down', 'not_retryable');
@@ -270,6 +290,16 @@ export class DeepSeekChatAdapter {
     const externalController = new AbortController();
     const removeExternalAbort = linkAbort(input.signal, externalController);
     let session: DeepSeekEventStreamSession | undefined;
+    const openSession = (messages: readonly DeepSeekChatMessageV1[]) =>
+      this.credentials.useCredential(
+        { connectionId: route.connectionId, credentialVersionId: route.credentialVersionId },
+        (credential) => this.runtime.openChatStream({
+          credentials: credential,
+          body: serializeRequest(route, { ...request, messages }),
+          signal: externalController.signal,
+          beforeRequestStarted: input.beforeRequestStarted
+        })
+      );
     try {
       session = await this.credentials.useCredential(
         {
@@ -307,6 +337,11 @@ export class DeepSeekChatAdapter {
         ? 'text_reasoning'
         : 'text_chat',
       session,
+      openSession,
+      messages: [...request.messages],
+      ...(input.toolBridge !== undefined ? { toolBridge: input.toolBridge } : {}),
+      maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4),
+      signal: externalController.signal,
       removeExternalAbort
     };
     this.active.set(providerOperationId, operation);
@@ -351,7 +386,7 @@ export class DeepSeekChatAdapter {
   ): Promise<DeepSeekChatTerminalResult> {
     let usagePersisted = false;
     try {
-      const stream = await consumeDeepSeekStream(
+      let stream = await consumeDeepSeekStream(
         operation.session.stream,
         expectedModel,
         async (contentDelta) => {
@@ -369,6 +404,26 @@ export class DeepSeekChatAdapter {
           }
         }
       );
+      let rounds = 0;
+      while (stream.finishReason === 'tool_calls') {
+        if (!operation.toolBridge || !stream.toolCalls || ++rounds > operation.maxToolRounds) {
+          throw new DeepSeekChatAdapterError('deepseek.tool_loop_limit', 'Tool calling loop limit exceeded');
+        }
+        operation.messages.push({ role: 'assistant', content: stream.content ?? '' });
+        for (const call of stream.toolCalls) {
+          const result = await operation.toolBridge.execute({ call, signal: operation.signal });
+          operation.messages.push({ role: 'tool', content: JSON.stringify(sanitizeControlledToolResult(result)), toolCallId: call.id, name: call.name });
+        }
+        operation.session.close();
+        operation.session = await operation.openSession(operation.messages);
+        stream = await consumeDeepSeekStream(operation.session.stream, expectedModel,
+          async (contentDelta) => { await this.lifecycle.appendContent(operation.responseExecutionId, contentDelta); },
+          async (reasoningDelta) => {
+            if (operation.productFeature === 'text_reasoning') {
+              await this.lifecycle.appendReasoning(operation.responseExecutionId, reasoningDelta);
+            }
+          });
+      }
       const observation = createUsageObservation({
         observationId: this.ids.nextProviderUsageObservationId(),
         invocationAttemptId: operation.invocationAttemptId,
@@ -594,6 +649,8 @@ async function consumeDeepSeekStream(
   readonly finishReason: DeepSeekFinishReason;
   readonly contentLength: number;
   readonly usage?: readonly UsageFactV1[];
+  readonly content?: string;
+  readonly toolCalls?: readonly ControlledProviderToolCall[];
 }> {
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let buffer = '';
@@ -603,6 +660,8 @@ async function consumeDeepSeekStream(
   let responseId: string | undefined;
   let responseModel: string | undefined;
   let contentLength = 0;
+  let content = '';
+  const toolDeltas: ControlledProviderToolCallDelta[] = [];
 
   const processEvent = async (eventText: string) => {
     // Ignore blank events and SSE comment/keep-alive lines (": ...").
@@ -637,12 +696,14 @@ async function consumeDeepSeekStream(
       await onReasoning(chunk.reasoningDelta);
     }
     if (chunk.contentDelta) {
+      content += chunk.contentDelta;
       contentLength += chunk.contentDelta.length;
       if (contentLength > 1_000_000) {
         throw invalidStream('DeepSeek stream content exceeded the local limit');
       }
       await onContent(chunk.contentDelta);
     }
+    if (chunk.toolCalls) toolDeltas.push(...chunk.toolCalls);
     if (chunk.finishReason) {
       if (terminalReason) throw invalidStream('DeepSeek stream reported multiple finish reasons');
       terminalReason = chunk.finishReason;
@@ -676,7 +737,9 @@ async function consumeDeepSeekStream(
   return {
     finishReason: terminalReason,
     contentLength,
-    ...(usage ? { usage } : {})
+    ...(usage ? { usage } : {}),
+    ...(content ? { content } : {}),
+    ...(toolDeltas.length > 0 ? { toolCalls: assembleControlledToolCalls(toolDeltas) } : {})
   };
 }
 
@@ -698,6 +761,7 @@ function parseStreamChunk(data: string): {
   readonly contentDelta?: string;
   readonly finishReason?: DeepSeekFinishReason;
   readonly usage?: readonly UsageFactV1[];
+  readonly toolCalls?: readonly ControlledProviderToolCallDelta[];
 } {
   let parsed: unknown;
   try {
@@ -743,12 +807,22 @@ function parseStreamChunk(data: string): {
   ) {
     throw invalidStream('DeepSeek stream choice is unsupported');
   }
+  const finishReason = choice.finish_reason === null
+    ? undefined
+    : parseFinishReason(choice.finish_reason);
   const delta = exactRecord(
     choice.delta,
     [],
-    ['role', 'content', 'reasoning_content'],
+    ['role', 'content', 'reasoning_content', 'tool_calls'],
     'DeepSeek stream delta'
   );
+  if (delta.tool_calls !== undefined) {
+    return {
+      id, model, ...(usage ? { usage } : {}),
+      toolCalls: parseControlledToolCallDeltas(delta.tool_calls),
+      ...(finishReason ? { finishReason } : {})
+    };
+  }
   if (delta.role !== undefined && delta.role !== 'assistant') {
     throw invalidStream('DeepSeek stream role is invalid');
   }
@@ -758,9 +832,6 @@ function parseStreamChunk(data: string): {
     delta.reasoning_content,
     'DeepSeek reasoning delta'
   );
-  const finishReason = choice.finish_reason === null
-    ? undefined
-    : parseFinishReason(choice.finish_reason);
   return {
     id,
     model,
@@ -838,20 +909,22 @@ function parseDispatchRequest(value: unknown): DeepSeekChatDispatchRequestV1 {
   const item = exactRecord(
     value,
     ['responseExecutionId', 'invocationAttemptId', 'messages', 'parameterValues'],
-    [],
+    ['tools'],
     'DeepSeek chat dispatch request'
   );
   if (!Array.isArray(item.messages) || item.messages.length < 1 || item.messages.length > 200) {
     throw invalidRequest('DeepSeek messages are invalid');
   }
   const messages = item.messages.map((value) => {
-    const message = exactRecord(value, ['role', 'content'], [], 'DeepSeek message');
-    if (!['system', 'user', 'assistant'].includes(String(message.role))) {
+    const message = exactRecord(value, ['role', 'content'], ['tool_call_id', 'name'], 'DeepSeek message');
+    if (!['system', 'user', 'assistant', 'tool'].includes(String(message.role))) {
       throw invalidRequest('DeepSeek message role is invalid');
     }
     return {
       role: message.role as DeepSeekChatMessageV1['role'],
-      content: boundedText(message.content, 'DeepSeek message content', 1_000_000)
+      content: boundedText(message.content, 'DeepSeek message content', 1_000_000),
+      ...(message.tool_call_id !== undefined ? { toolCallId: boundedText(message.tool_call_id, 'DeepSeek tool call ID', 256) } : {}),
+      ...(message.name !== undefined ? { name: boundedText(message.name, 'DeepSeek tool name', 256) } : {})
     };
   });
   if (messages.at(-1)?.role !== 'user') {
@@ -871,7 +944,8 @@ function parseDispatchRequest(value: unknown): DeepSeekChatDispatchRequestV1 {
     messages,
     parameterValues: plainRecord(item.parameterValues, 'DeepSeek parameter values') as Readonly<
       Record<string, ParameterValue>
-    >
+    >,
+    ...(item.tools !== undefined ? { tools: parseControlledProviderTools(item.tools) } : {})
   };
 }
 
@@ -888,7 +962,12 @@ function serializeRequest(
   }
   const body: Record<string, unknown> = {
     model: route.providerModelKey,
-    messages: request.messages,
+    messages: request.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
+      ...(message.name !== undefined ? { name: message.name } : {})
+    })),
     stream: true,
     stream_options: { include_usage: true },
     thinking: {
@@ -896,6 +975,7 @@ function serializeRequest(
     },
     ...parameters
   };
+  if (request.tools) body.tools = request.tools;
   const encoded = new TextEncoder().encode(JSON.stringify(body));
   if (encoded.byteLength > 2 * 1024 * 1024) {
     throw invalidRequest('DeepSeek request exceeded the local size limit');

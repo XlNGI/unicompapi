@@ -25,6 +25,7 @@ import {
   extractPptxThemeColors,
   RagRetrievalService,
   resolveFileReferencePathSafely,
+  createConfiguredOfficeRenderAdapter,
   type StorageProjectSession,
   type StorageProjectSessionRegistry
 } from '../../src/platform';
@@ -63,7 +64,8 @@ export function registerDocumentGenerationIpcHandlers(options: {
         rootDirectory: session.rootDirectory,
         projectId: session.projectId,
         now,
-        createId: () => randomUUID()
+        createId: () => randomUUID(),
+        renderPreview: createConfiguredOfficeRenderAdapter()
       });
       const application = new DocumentGenerationApplicationService({
         projectId: session.projectId,

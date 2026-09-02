@@ -28,7 +28,13 @@ export interface DocumentQualityDiagnostic {
     | 'capacity_exceeded'
     | 'table_too_wide'
     | 'render_warning'
-    | 'render_failed';
+    | 'render_failed'
+    | 'font_missing'
+    | 'empty_page'
+    | 'invalid_image'
+    | 'page_count_mismatch'
+    | 'text_overflow'
+    | 'overlap';
   readonly severity: DocumentDiagnosticSeverity;
   readonly scope: string;
   readonly message: string;
@@ -37,6 +43,12 @@ export interface DocumentQualityDiagnostic {
 export interface DocumentRenderResult {
   readonly previewCount: number;
   readonly warnings?: readonly string[];
+  readonly diagnostics?: readonly {
+    readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap';
+    readonly severity: DocumentDiagnosticSeverity;
+    readonly scope: string;
+    readonly message: string;
+  }[];
 }
 
 export type DocumentRenderAdapter = (
@@ -157,6 +169,20 @@ export async function prepareTemporaryDocumentVersion(
             scope: 'render',
             message: warning.slice(0, 300)
           });
+        }
+        for (const diagnostic of renderResult.diagnostics ?? []) {
+          diagnostics.push(diagnostic);
+        }
+        if ((renderResult.diagnostics ?? []).some((diagnostic) => diagnostic.severity === 'error')) {
+          await discardTemporaryDocument(temporary);
+          return {
+            status: 'rejected',
+            outline,
+            structure,
+            ...(change !== undefined ? { change } : {}),
+            ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+            diagnostics
+          };
         }
       } catch (error) {
         await discardTemporaryDocument(temporary);

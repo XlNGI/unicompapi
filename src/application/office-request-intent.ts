@@ -59,7 +59,7 @@ const revisionPattern =
 const contextualAddPattern =
   /(?:再|要|需要|想|在|给|帮我)?加(?!油|班|载|速|热|密|群|好友|微信|QQ)[\u4e00-\u9fffA-Za-z0-9]/;
 const revisionTargetPattern =
-  /(?:上一版|前一版|刚才|第\s*[一二三四五六七八九十百\d]+\s*(?:页|张|部分|节)|页面|幻灯片|工作表|单元格|行|列|段落|章节|标题|表格|图表|风格|版式|排版|配色|字体|内容)/;
+  /(?:上一版|前一版|刚才(?:的)?|第\s*[一二三四五六七八九十百\d]+\s*(?:章|页|张(?:幻灯片)?|部分|节))/;
 const directRevisionPattern =
   /(?:把|将|请|麻烦|帮我|给)[\s\S]{0,80}(?:修改|改|调整|优化|重排|替换|换成|更新|补充|增加|新增|加|删除|精简|润色|美化|扩写|丰富)/;
 const questionOrAnalysisPattern =
@@ -81,6 +81,16 @@ export function analyzeOfficeRequest(
   const explicitTarget = findNamedDocument(text, documents);
   const hasRevision =
     revisionPattern.test(text) || contextualAddPattern.test(text);
+  const hasCreateRequest = createPattern.test(text);
+  // A revision target must point at an existing artifact (a named file, a
+  // previous version, or a numbered section/page).  Content instructions
+  // such as “删除重复内容” are not targets: they are valid requirements for
+  // a brand-new document and must not be blocked by the no-previous-version
+  // guard below.
+  const hasExplicitRevisionReference =
+    explicitTarget !== undefined ||
+    revisionTargetPattern.test(text) ||
+    previousResultCorrectionPattern.test(text);
   const directRevision = directRevisionPattern.test(text);
 
   if (explicitNewDocumentPattern.test(text)) {
@@ -90,14 +100,23 @@ export function analyzeOfficeRequest(
     return { kind: 'chat', missing: [] };
   }
 
+  // Creation is the default for an explicit create verb unless the user
+  // also names an existing artifact/version.  This keeps requirements that
+  // contain edit-like words (for example, “删除重复内容”) in the creation
+  // workflow while preserving an explicit revision request such as “修改上
+  // 一版 PPT”.
+  if (hasCreateRequest && !hasExplicitRevisionReference) {
+    if (!explicitKind && !genericDeliverablePattern.test(text)) {
+      return { kind: 'chat', missing: [] };
+    }
+    return createIntent(explicitKind ?? inferDefaultDocumentKind(text));
+  }
+
   const hasDocumentContext =
     documents.length > 0 || context.latestDocumentKind !== undefined;
   const isRevision =
     hasRevision &&
-    (explicitKind !== undefined ||
-      explicitTarget !== undefined ||
-      revisionTargetPattern.test(text) ||
-      hasDocumentContext);
+    (hasExplicitRevisionReference || (!hasCreateRequest && hasDocumentContext));
   if (isRevision) {
     const target = resolveRevisionTarget(text, explicitKind, explicitTarget, documents);
     const documentKind =

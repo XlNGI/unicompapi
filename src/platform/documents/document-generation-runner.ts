@@ -48,6 +48,12 @@ import {
   type GeneratedTemporaryDocumentFile
 } from './office-document-generator';
 import type { DocumentOutline } from './document-outline-parser';
+import type { DocumentRevisionPatch } from '../../application/document-revision-agent';
+import {
+  readOfficeDocumentStructureFromBuffer
+} from './office-document-tool-executor';
+import type { DocumentStructureSnapshot } from './structured-document-tools';
+import type { DocumentRenderResult } from './temporary-document-workflow';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -75,6 +81,8 @@ export interface DocumentGenerationPlanInput {
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
   readonly revisionTargetSectionHeading?: string;
+  readonly revisionPatch?: DocumentRevisionPatch;
+  readonly revisionPatches?: readonly DocumentRevisionPatch[];
   readonly theme?: DocumentThemeId;
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal?: AbortSignal;
@@ -114,6 +122,10 @@ export class DocumentGenerationRunner {
       readonly generateTemporaryFile?: (
         input: GenerateDocumentFileInput
       ) => Promise<GeneratedTemporaryDocumentFile>;
+      readonly renderPreview?: (
+        temporaryPath: string,
+        input: { readonly kind: DocumentWorkspaceKind; readonly signal: AbortSignal }
+      ) => Promise<DocumentRenderResult>;
       publishFile?(
         temporaryPath: string,
         finalPath: string
@@ -171,6 +183,15 @@ export class DocumentGenerationRunner {
       );
       const generateTemporaryFile =
         this.options.generateTemporaryFile ?? generateTemporaryDocumentFile;
+      const revisionSource = await this.resolveRevisionSource(context, input);
+      const sourceStructure =
+        revisionSource.revisionSourcePath && (input.revisionPatch || input.revisionPatches)
+          ? await readOfficeDocumentStructureFromBuffer({
+              buffer: await readFile(revisionSource.revisionSourcePath),
+              kind: input.kind,
+              displayName: path.basename(revisionSource.revisionSourcePath)
+            })
+          : undefined;
       const generated = await generateTemporaryFile({
         kind: input.kind,
         outline: input.outline,
@@ -180,7 +201,7 @@ export class DocumentGenerationRunner {
         ...(input.presentationTemplate !== undefined
           ? { presentationTemplate: input.presentationTemplate }
           : {}),
-        ...(await this.resolveRevisionSource(context, input)),
+        ...revisionSource,
         ...(input.images !== undefined && input.images.length > 0
           ? { images: await this.resolveImages(context, input.images) }
           : {})
@@ -190,6 +211,30 @@ export class DocumentGenerationRunner {
       this.assertNotCancelled(input.signal);
       execution = await this.move(context, execution, 'verifying_file');
       await this.assertTemporaryOutput(generated, input.kind, input.outline);
+      if (this.options.renderPreview) {
+        try {
+          const renderResult = await this.options.renderPreview(generated.temporaryPath, {
+            kind: input.kind,
+            signal: input.signal ?? new AbortController().signal
+          });
+          if ((renderResult.diagnostics ?? []).some((diagnostic) => diagnostic.severity === 'error')) {
+            throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
+          }
+        } catch (error) {
+          throw new DocumentGenerationError(
+            'verification_failed',
+            error instanceof Error ? error.message : 'Document preview rendering failed'
+          );
+        }
+      }
+      if (sourceStructure && (input.revisionPatch || input.revisionPatches)) {
+        await this.assertRevisionScope(
+          sourceStructure,
+          generated,
+          input.kind,
+          input.revisionPatches ?? [input.revisionPatch!]
+        );
+      }
       const temporaryVerification = await this.verifyTemporaryOutput(
         execution,
         generated,
@@ -292,30 +337,54 @@ export class DocumentGenerationRunner {
   ): Promise<{
     readonly revisionSourcePath?: string;
     readonly revisionTargetSectionHeading?: string;
+    readonly revisionPatch?: DocumentRevisionPatch;
+    readonly revisionPatches?: readonly DocumentRevisionPatch[];
   }> {
     if (
-      input.kind !== 'ppt' ||
       input.parentWorkId === undefined ||
-      input.revisionTargetSectionHeading === undefined
+      (input.revisionTargetSectionHeading === undefined &&
+        input.revisionPatch === undefined &&
+        input.revisionPatches === undefined)
     ) {
       return {};
     }
     try {
       const parent = await context.works.get(input.parentWorkId);
-      if (!parent) return {};
+      if (!parent) {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'The parent Work for this scoped revision does not exist'
+        );
+      }
       const file = await context.files.get(parent.fileId);
-      if (!file) return {};
+      if (!file) {
+        throw new DocumentGenerationError(
+          'storage_error',
+          'The parent document file reference does not exist'
+        );
+      }
       const sourcePath = await resolveFileReferencePathSafely(
         this.options.rootDirectory,
         file
       );
       return {
         revisionSourcePath: sourcePath,
-        revisionTargetSectionHeading: input.revisionTargetSectionHeading
+        ...(input.revisionTargetSectionHeading !== undefined
+          ? { revisionTargetSectionHeading: input.revisionTargetSectionHeading }
+          : {}),
+        ...(input.revisionPatch !== undefined
+          ? { revisionPatch: input.revisionPatch }
+          : {}),
+        ...(input.revisionPatches !== undefined
+          ? { revisionPatches: input.revisionPatches }
+          : {})
       };
-    } catch {
-      // A missing or stale parent file must not block a valid regenerated copy.
-      return {};
+    } catch (error) {
+      if (error instanceof DocumentGenerationError) throw error;
+      throw new DocumentGenerationError(
+        'storage_error',
+        'The parent document file could not be resolved for scoped revision'
+      );
     }
   }
 
@@ -394,6 +463,132 @@ export class DocumentGenerationRunner {
       file: provisional,
       signal
     });
+  }
+
+  private async assertRevisionScope(
+    source: DocumentStructureSnapshot,
+    generated: GeneratedTemporaryDocumentFile,
+    kind: DocumentWorkspaceKind,
+    patches: readonly DocumentRevisionPatch[]
+  ): Promise<void> {
+    const candidate = await readOfficeDocumentStructureFromBuffer({
+      buffer: await readFile(generated.temporaryPath),
+      kind,
+      displayName: generated.fileName
+    });
+    if (candidate.sections.length !== source.sections.length) {
+      throw new DocumentGenerationError(
+        'verification_failed',
+        'Scoped document revision changed the document section count'
+      );
+    }
+    const targetIndexes = new Set<number>();
+    for (const patch of patches) {
+      const index = patch.target.sectionIndex;
+      if (!Number.isSafeInteger(index) || index < 0 || index >= source.sections.length) {
+        throw new DocumentGenerationError('verification_failed', 'Scoped document revision target was not found in the source file');
+      }
+      if (
+        kind === 'ppt' &&
+        'pageNumber' in patch.target &&
+        patch.target.pageNumber !== undefined
+      ) {
+        const pageIndex = patch.target.pageNumber - 1;
+        if (pageIndex < 0 || pageIndex >= source.sections.length) {
+          throw new DocumentGenerationError('verification_failed', 'Scoped document revision page target was not found');
+        }
+        targetIndexes.add(pageIndex);
+      } else {
+        targetIndexes.add(index);
+      }
+    }
+    if (targetIndexes.size === 0) {
+      throw new DocumentGenerationError(
+        'verification_failed',
+        'Scoped document revision target was not found in the source file'
+      );
+    }
+    for (let index = 0; index < source.sections.length; index += 1) {
+      if (targetIndexes.has(index)) continue;
+      if (
+        candidate.sections[index]?.heading !== source.sections[index].heading ||
+        candidate.sections[index]?.contentHash !== source.sections[index].contentHash
+      ) {
+        throw new DocumentGenerationError(
+          'verification_failed',
+          'Scoped document revision changed content outside the target'
+        );
+      }
+    }
+    if (
+      [...targetIndexes].every(
+        (index) => candidate.sections[index]?.contentHash === source.sections[index].contentHash
+      )
+    ) {
+      throw new DocumentGenerationError(
+        'verification_failed',
+        'Scoped document revision did not change the requested target'
+      );
+    }
+    for (const patch of patches) {
+      if (patch.operation === 'replace_text' || patch.operation === 'update_cells') {
+        this.assertFineGrainedRevisionScope(source, candidate, patch);
+      }
+    }
+  }
+
+  private assertFineGrainedRevisionScope(
+    source: DocumentStructureSnapshot,
+    candidate: DocumentStructureSnapshot,
+    patch: Extract<DocumentRevisionPatch, { operation: 'replace_text' | 'update_cells' }>
+  ): void {
+    const sourceSection = source.sections[patch.target.sectionIndex];
+    const candidateSection = candidate.sections[patch.target.sectionIndex];
+    if (
+      !sourceSection ||
+      !candidateSection ||
+      sourceSection.heading !== patch.target.sectionHeading ||
+      sourceSection.blocks.length !== candidateSection.blocks.length
+    ) {
+      throw new DocumentGenerationError('verification_failed', 'Fine-grained revision changed the target structure');
+    }
+    const blockIndex = patch.target.blockIndex;
+    for (let index = 0; index < sourceSection.blocks.length; index += 1) {
+      if (index === blockIndex) continue;
+      if (sourceSection.blocks[index].contentHash !== candidateSection.blocks[index]?.contentHash) {
+        throw new DocumentGenerationError('verification_failed', 'Fine-grained revision changed another block');
+      }
+    }
+    const sourceBlock = sourceSection.blocks[blockIndex];
+    const candidateBlock = candidateSection.blocks[blockIndex];
+    if (!sourceBlock || !candidateBlock || sourceBlock.type !== candidateBlock.type) {
+      throw new DocumentGenerationError('verification_failed', 'Fine-grained revision target block is invalid');
+    }
+    if (patch.operation === 'replace_text') {
+      if (
+        sourceBlock.itemContentHashes.length !== 1 ||
+        candidateBlock.itemContentHashes.length !== 1 ||
+        sourceBlock.itemContentHashes[0] === candidateBlock.itemContentHashes[0]
+      ) {
+        throw new DocumentGenerationError('verification_failed', 'Fine-grained text target did not change exactly once');
+      }
+      return;
+    }
+    const columns = sourceBlock.columnCount;
+    if (
+      columns === undefined ||
+      columns !== candidateBlock.columnCount ||
+      sourceBlock.itemContentHashes.length !== candidateBlock.itemContentHashes.length
+    ) {
+      throw new DocumentGenerationError('verification_failed', 'Fine-grained cell target structure changed');
+    }
+    const targetItemIndex = columns + patch.target.rowIndex * columns + patch.target.columnIndex;
+    for (let index = 0; index < sourceBlock.itemContentHashes.length; index += 1) {
+      const changed = sourceBlock.itemContentHashes[index] !== candidateBlock.itemContentHashes[index];
+      if (changed !== (index === targetItemIndex)) {
+        throw new DocumentGenerationError('verification_failed', 'Fine-grained revision changed cells outside the target');
+      }
+    }
   }
 
   private async persistCancelledExecution(

@@ -96,4 +96,40 @@ describe('structured document tools', () => {
       changed: true
     });
   });
+
+  it('replaces one section while retaining heading and page identity', () => {
+    const result = applyStructuredDocumentPatch(outline, {
+      operation: 'replace_section',
+      target: { sectionIndex: 1, sectionHeading: '结论', pageNumber: 2 },
+      replacement: {
+        heading: '模型不得覆盖的标题',
+        level: 3,
+        pageKind: 'process',
+        blocks: [{ type: 'paragraph', text: '新的结论' }]
+      }
+    });
+    expect(result.document.sections[1]).toMatchObject({
+      heading: '结论',
+      level: 1,
+      blocks: [{ type: 'paragraph', text: '新的结论' }]
+    });
+  });
+
+  it('enforces the enclosing document kind for replacement sections', () => {
+    const wordOutline = {
+      kind: 'word' as const,
+      title: '报告',
+      sections: [{ heading: '第一章', level: 1 as const, blocks: [{ type: 'paragraph' as const, text: '内容' }] }]
+    };
+    expect(() => applyStructuredDocumentPatch(wordOutline, {
+      operation: 'replace_section',
+      target: { sectionIndex: 0 },
+      replacement: {
+        heading: '替换',
+        level: 1,
+        pageKind: 'data',
+        blocks: [{ type: 'paragraph', text: '新内容' }]
+      }
+    })).toThrow(/only available for PPT/);
+  });
 });

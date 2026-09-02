@@ -28,6 +28,8 @@ import {
   type DocumentThemeId
 } from './document-theme';
 import type { ExtractedThemeColors } from './pptx-theme-extractor';
+import type { DocumentRevisionPatch } from '../../application/document-revision-agent';
+import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
 import {
   presentationOutlineLimits,
   type DocumentOutline,
@@ -72,6 +74,8 @@ export interface GenerateDocumentFileInput {
   /** Optional parent PPTX used for a safe text-only local revision. */
   readonly revisionSourcePath?: string;
   readonly revisionTargetSectionHeading?: string;
+  readonly revisionPatch?: DocumentRevisionPatch;
+  readonly revisionPatches?: readonly DocumentRevisionPatch[];
 }
 
 export async function generateDocumentFile(
@@ -125,15 +129,26 @@ async function buildDocumentOutput(
             ),
             input.images ?? []
         );
-  const revisedBuffer = await applyLocalPptRevision(input, buffer);
+  const revisedBuffer =
+    input.revisionSourcePath && (input.revisionPatch || input.revisionPatches)
+      ? Buffer.from(
+          await applyOfficeDocumentPatchesToBuffer(
+            await readFile(input.revisionSourcePath),
+            input.kind,
+            input.revisionPatches ?? [input.revisionPatch!]
+          )
+        )
+      : await applyLocalPptRevision(input, buffer);
   return { fileName, buffer: revisedBuffer };
 }
 
 /**
  * Applies a conservative local PPTX revision. The parent package is used as
  * the base and only text runs on slides matching the requested section heading
- * are replaced. If slide structure differs, the freshly generated package is
- * returned unchanged; this fail-open fallback keeps export reliable.
+ * are replaced. Unmodified slides therefore remain byte-for-byte in the
+ * parent package. If the requested edit would require adding shapes or cannot
+ * be mapped safely, the freshly generated package is returned as a safe
+ * fallback.
  */
 export async function applyLocalPptRevision(
   input: GenerateDocumentFileInput,
@@ -152,18 +167,18 @@ export async function applyLocalPptRevision(
     const generatedZip = await JSZip.loadAsync(generated);
     const sourceSlides = slidePartNames(sourceZip);
     const generatedSlides = slidePartNames(generatedZip);
-    if (sourceSlides.length !== generatedSlides.length) return generated;
     const target = input.revisionTargetSectionHeading;
     const sourceTargetIndexes = await matchingSlideIndexes(sourceZip, sourceSlides, target);
     const generatedTargetIndexes = await matchingSlideIndexes(generatedZip, generatedSlides, target);
     if (
       sourceTargetIndexes.length === 0 ||
-      sourceTargetIndexes.length !== generatedTargetIndexes.length
+      generatedTargetIndexes.length === 0 ||
+      sourceTargetIndexes.length < generatedTargetIndexes.length
     ) {
       return generated;
     }
     const patchedZip = sourceZip;
-    for (let index = 0; index < sourceTargetIndexes.length; index += 1) {
+    for (let index = 0; index < generatedTargetIndexes.length; index += 1) {
       const sourceName = sourceSlides[sourceTargetIndexes[index]];
       const generatedName = generatedSlides[generatedTargetIndexes[index]];
       const sourceXml = await sourceZip.file(sourceName)!.async('string');
@@ -171,6 +186,18 @@ export async function applyLocalPptRevision(
       const patchedXml = replaceTextRuns(sourceXml, generatedXml);
       if (!patchedXml) return generated;
       patchedZip.file(sourceName, patchedXml);
+    }
+    // A section may have occupied continuation slides in the parent while
+    // the revised outline no longer needs them (for example, clearing a
+    // chapter). Keep those original slides and clear only their text instead
+    // of dropping the parent package and regenerating every slide.
+    for (let index = generatedTargetIndexes.length; index < sourceTargetIndexes.length; index += 1) {
+      const sourceName = sourceSlides[sourceTargetIndexes[index]];
+      const sourceXml = await sourceZip.file(sourceName)!.async('string');
+      patchedZip.file(
+        sourceName,
+        hideSlide(clearNonHeadingTextRuns(sourceXml, target))
+      );
     }
     return patchedZip.generateAsync({ type: 'nodebuffer' });
   } catch {
@@ -197,7 +224,11 @@ async function matchingSlideIndexes(
   for (let index = 0; index < slides.length; index += 1) {
     const xml = await zip.file(slides[index])!.async('string');
     const texts = extractTextRuns(xml);
-    if (texts.some((text) => text === heading)) indexes.push(index);
+    if (
+      texts.some(
+        (text) => text === heading || text.startsWith(`${heading}（续`)
+      )
+    ) indexes.push(index);
   }
   return indexes;
 }
@@ -207,15 +238,43 @@ function replaceTextRuns(sourceXml: string, generatedXml: string): string | unde
     (match) => match[2]
   );
   const sourceRuns = [...sourceXml.matchAll(/(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu)];
-  if (sourceRuns.length === 0 || sourceRuns.length !== generatedRuns.length) return undefined;
+  // Reuse the parent slide's shapes and formatting. When the revised outline
+  // removes content, the generated slide has fewer text runs; blank the
+  // surplus parent runs instead of falling back to a regenerated package.
+  // Adding runs cannot be represented safely without adding shapes, so that
+  // case still uses the fail-open fallback.
+  if (sourceRuns.length === 0 || sourceRuns.length < generatedRuns.length) return undefined;
   let offset = 0;
   return sourceXml.replace(
     /(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu,
     (_match, open: string, _text: string, close: string) => {
-      const next = generatedRuns[offset++];
+      const next = generatedRuns[offset++] ?? '';
       return `${open}${next}${close}`;
     }
   );
+}
+
+function clearNonHeadingTextRuns(sourceXml: string, heading: string): string {
+  let headingFound = false;
+  return sourceXml.replace(
+    /(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu,
+    (_match, open: string, text: string, close: string) => {
+      if (!headingFound && (text === heading || text.startsWith(`${heading}（续`))) {
+        headingFound = true;
+        return `${open}${text}${close}`;
+      }
+      return `${open}${close}`;
+    }
+  );
+}
+
+function hideSlide(xml: string): string {
+  return xml.replace(/<p:sld(\s[^>]*)?>/u, (match, attributes = '') => {
+    if (/\bshow\s*=/u.test(attributes)) {
+      return match.replace(/\bshow\s*=\s*"[^"]*"/u, 'show="0"');
+    }
+    return `<p:sld${attributes} show="0">`;
+  });
 }
 
 function extractTextRuns(xml: string): string[] {

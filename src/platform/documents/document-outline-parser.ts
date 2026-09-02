@@ -645,10 +645,15 @@ function normalizePresentationPageKind(
   value: unknown
 ): PresentationPageKind | undefined {
   if (typeof value !== 'string') return undefined;
-  if (presentationPageKinds.includes(value as PresentationPageKind)) {
-    return value as PresentationPageKind;
+  // Providers occasionally decorate enum values with display-style casing,
+  // whitespace, or a dash (for example `Image-Text`). Normalize only those
+  // harmless lexical variations; the resulting value still has to be one of
+  // the renderer's canonical enums or an explicitly supported alias.
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/gu, '_');
+  if (presentationPageKinds.includes(normalized as PresentationPageKind)) {
+    return normalized as PresentationPageKind;
   }
-  return presentationPageKindAliases[value];
+  return presentationPageKindAliases[normalized];
 }
 
 function parseOptionalBoundedText(

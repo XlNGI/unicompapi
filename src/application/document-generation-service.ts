@@ -18,7 +18,10 @@ import {
   type WorkId
 } from '../domain';
 import { ConversationApplicationError } from './conversation-service';
-import type { DocumentRevisionAgentResult } from './document-revision-agent';
+import type {
+  DocumentRevisionAgentResult,
+  DocumentRevisionPatch
+} from './document-revision-agent';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
@@ -90,8 +93,10 @@ export interface DocumentGenerationExecutionInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
-  /** Heading of the chapter/page being revised in a PPT parent version. */
+  /** Stable identity and validated patch for a scoped parent revision. */
   readonly revisionTargetSectionHeading?: string;
+  readonly revisionPatch?: DocumentRevisionPatch;
+  readonly revisionPatches?: readonly DocumentRevisionPatch[];
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal: AbortSignal;
@@ -191,6 +196,7 @@ export class DocumentGenerationApplicationService {
           readonly kind: DocumentWorkspaceKind;
           readonly requestText: string;
           readonly outline: DocumentOutline;
+          readonly proposedOutline: DocumentOutline;
           readonly signal: AbortSignal;
         }
       ) => Promise<DocumentRevisionAgentResult>;
@@ -402,6 +408,8 @@ export class DocumentGenerationApplicationService {
       });
       let outline = this.compileDraft(content, input.kind);
       let revisionTargetSectionHeading: string | undefined;
+      let revisionPatch: DocumentRevisionPatch | undefined;
+      let revisionPatches: readonly DocumentRevisionPatch[] | undefined;
       if (input.parentWorkId !== undefined) {
         const previousMessage = [...conversation.messages]
           .reverse()
@@ -431,9 +439,13 @@ export class DocumentGenerationApplicationService {
                 kind: input.kind,
                 requestText,
                 outline: previousOutline,
+                proposedOutline: outline,
                 signal: abortController.signal
               });
-              if (revision.agent.state !== 'completed') {
+              if (
+                revision.agent.state !== 'completed' &&
+                revision.agent.state !== 'completed_unvalidated'
+              ) {
                 throw new DocumentGenerationApplicationError(
                   revision.agent.state === 'cancelled' ? 'cancelled' : 'generation_failed',
                   'Document revision workflow did not complete'
@@ -441,6 +453,8 @@ export class DocumentGenerationApplicationService {
               }
               if (revision.changed) {
                 outline = revision.outline;
+                revisionPatch = revision.patch;
+                revisionPatches = revision.patches;
                 revisionApplied = true;
               }
             }
@@ -481,6 +495,8 @@ export class DocumentGenerationApplicationService {
       ...(revisionTargetSectionHeading !== undefined
         ? { revisionTargetSectionHeading }
         : {}),
+      ...(revisionPatch !== undefined ? { revisionPatch } : {}),
+      ...(revisionPatches !== undefined ? { revisionPatches } : {}),
       ...(input.theme !== undefined ? { theme: input.theme } : {}),
       ...(input.presentationTemplate !== undefined
         ? { presentationTemplate: input.presentationTemplate }

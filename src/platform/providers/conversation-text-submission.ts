@@ -68,6 +68,7 @@ import {
   type ConversationStreamDeltaSegment
 } from './conversation-stream-delta-batcher';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
+import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from './provider-tool-calling';
 
 export interface ConversationTextSubmissionRuntimes {
   readonly deepSeekRuntime: DeepSeekSharedRuntime;
@@ -77,6 +78,11 @@ export interface ConversationTextSubmissionRuntimes {
   readonly providerPackages: ProviderPackageRegistry;
   readonly usage: ProviderUsageObservationRepository;
   readonly terminalObserver?: DeepSeekChatTerminalObserverPort & NewApiChatTerminalObserverPort;
+  readonly toolCalling?: {
+    readonly bridge: ControlledProviderToolBridge;
+    readonly tools: readonly ControlledProviderToolDefinition[];
+    readonly maxRounds?: number;
+  };
 }
 
 export function createConversationTextSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
@@ -140,6 +146,7 @@ export function createConversationTextDispatchBridge(
       protocolId: DEEPSEEK_CHAT_PROTOCOL_ID,
       protocolVersion: DEEPSEEK_CHAT_PROTOCOL_VERSION,
       submit: (input) => deepSeekAdapter.submit(input),
+      toolCalling: options.toolCalling,
       cancel: (providerOperationId) => deepSeekAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
       onCancellationTimeout: async (responseExecutionId) => {
@@ -161,6 +168,7 @@ export function createConversationTextDispatchBridge(
       protocolId: NEWAPI_CHAT_PROTOCOL_ID,
       protocolVersion: NEWAPI_PROTOCOL_VERSION,
       submit: (input) => newApiAdapter.submit(input),
+      toolCalling: options.toolCalling,
       cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
       onCancellationTimeout: async (responseExecutionId) => {
@@ -178,10 +186,13 @@ function wrapChatAdapter(input: {
   readonly adapterVersion: string;
   readonly protocolId: string;
   readonly protocolVersion: string;
+  readonly toolCalling?: ConversationTextSubmissionRuntimes['toolCalling'];
   submit(input: {
     readonly routeSnapshot: unknown;
     readonly request: unknown;
     readonly beforeRequestStarted: () => Promise<void>;
+    readonly toolBridge?: ControlledProviderToolBridge;
+    readonly maxToolRounds?: number;
   }): Promise<{ readonly providerOperationId: string; readonly completion: Promise<unknown> }>;
   cancel(providerOperationId: string): Promise<boolean>;
   readonly coordinator: ConversationExecutionCoordinator;
@@ -197,14 +208,21 @@ function wrapChatAdapter(input: {
     adapterVersion: input.adapterVersion,
     protocolId: input.protocolId,
     protocolVersion: input.protocolVersion,
-    async submit(request): Promise<SubmissionDispatchOutcome> {
+    async submit(dispatchRequest): Promise<SubmissionDispatchOutcome> {
       try {
+        const adapterRequest = input.toolCalling && isRecord(dispatchRequest.request)
+          ? { ...dispatchRequest.request, tools: input.toolCalling.tools }
+          : dispatchRequest.request;
         const handle = await input.submit({
-          routeSnapshot: request.routeSnapshot,
-          request: request.request,
-          beforeRequestStarted: request.beforeRequestStarted
+          routeSnapshot: dispatchRequest.routeSnapshot,
+          request: adapterRequest,
+          beforeRequestStarted: dispatchRequest.beforeRequestStarted,
+          ...(input.toolCalling ? {
+            toolBridge: input.toolCalling.bridge,
+            maxToolRounds: input.toolCalling.maxRounds
+          } : {})
         });
-        const responseExecutionId = responseExecutionIdFromDispatchRequest(request.request);
+        const responseExecutionId = responseExecutionIdFromDispatchRequest(adapterRequest);
         try {
           input.coordinator.register({
             responseExecutionId,
@@ -240,6 +258,10 @@ function responseExecutionIdFromDispatchRequest(value: unknown): ConversationRes
     throw new Error('Conversation dispatch request is missing its response execution ID');
   }
   return responseExecutionId as ConversationResponseExecutionId;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function dispatchFailureSafeCode(adapterKey: string, error: unknown): string {

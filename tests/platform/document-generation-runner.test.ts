@@ -143,6 +143,95 @@ const employeeSalaryOutline = parseDocumentOutline(
 );
 
 describe('document generation runner', () => {
+  it('publishes a real scoped parent revision and preserves non-target sections', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-scoped-revision');
+    const baseOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'word',
+      title: '局部改稿',
+      sections: [
+        { heading: '第一章', level: 1, blocks: [{ type: 'paragraph', text: '保持不变' }] },
+        { heading: '第二章', level: 1, blocks: [{ type: 'paragraph', text: '旧内容' }] }
+      ]
+    }));
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-01T00:00:00.000Z'
+    });
+    const base = await runner.run({
+      kind: 'word',
+      title: baseOutline.title,
+      contentFingerprint: 'c'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'revision-base',
+      outline: baseOutline
+    });
+    const revisedOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'word',
+      title: '局部改稿',
+      sections: [
+        { heading: '第一章', level: 1, blocks: [{ type: 'paragraph', text: '保持不变' }] },
+        { heading: '第二章', level: 1, blocks: [{ type: 'paragraph', text: '新内容' }] }
+      ]
+    }));
+    const revised = await runner.run({
+      kind: 'word',
+      title: revisedOutline.title,
+      contentFingerprint: 'd'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'revision-child',
+      outline: revisedOutline,
+      parentWorkId: base.work.id,
+      revisionTargetSectionHeading: '第二章',
+      revisionPatch: {
+        operation: 'replace_section',
+        target: { sectionIndex: 1, sectionHeading: '第二章' },
+        replacement: revisedOutline.sections[1]
+      }
+    });
+    expect(revised.work.parentWorkId).toBe(base.work.id);
+    expect(revised.execution.state).toBe('completed');
+    const childFile = revised.file.locator.kind === 'project'
+      ? path.join(rootDirectory, revised.file.locator.relativePath)
+      : '';
+    expect(await pathExists(childFile)).toBe(true);
+    expect(await documentFiles(rootDirectory)).toHaveLength(2);
+  });
+
+  it('fails closed instead of rebuilding when a scoped parent Work is missing', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-missing-parent');
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-02T00:00:00.000Z'
+    });
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'word',
+      title: '失效父版本',
+      sections: [{ heading: '第一章', level: 1, blocks: [{ type: 'paragraph', text: '新内容' }] }]
+    }));
+
+    await expect(runner.run({
+      kind: 'word',
+      title: outline.title,
+      contentFingerprint: 'a'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'missing-parent',
+      outline,
+      parentWorkId: 'work-does-not-exist' as never,
+      revisionTargetSectionHeading: '第一章',
+      revisionPatch: {
+        operation: 'replace_section',
+        target: { sectionIndex: 0, sectionHeading: '第一章' },
+        replacement: outline.sections[0]
+      }
+    })).rejects.toMatchObject({ code: 'storage_error' });
+    expect(await documentFiles(rootDirectory)).toEqual([]);
+    expect(await persistedExecutionStates(rootDirectory)).toEqual(['failed']);
+  });
+
   it('accepts a table-based Excel workbook whose title differs from its sheet heading', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-excel-title-sheet');
