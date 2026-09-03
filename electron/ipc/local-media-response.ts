@@ -18,6 +18,7 @@ export async function createLocalMediaResponse(
     headers.set('content-type', mimeType);
   }
   headers.set('accept-ranges', 'bytes');
+  headers.set('access-control-allow-origin', '*');
 
   const range = parseByteRange(rangeHeader, metadata.size);
   if (range === 'unsatisfiable') {
