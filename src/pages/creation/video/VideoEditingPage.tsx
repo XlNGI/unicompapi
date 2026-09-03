@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Checkbox,
   Input,
@@ -147,6 +147,14 @@ export function VideoEditingPage({
   const [exportMedia, setExportMedia] = useState<StorageLocalMediaHandleDto>();
   const [exportBusy, setExportBusy] = useState(false);
   const [exportConfirmed, setExportConfirmed] = useState(false);
+  const [frameUrls, setFrameUrls] = useState<Readonly<Record<string, string>>>({});
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const [inspectorExpanded, setInspectorExpanded] = useState(false);
+  const frameCacheRef = useRef<Map<string, string>>(new Map());
+  const previewRequestRef = useRef(0);
+  const previewHandleRef = useRef<
+    { readonly clipId: string; readonly preview: VideoEditorSourcePreviewDto } | undefined
+  >(undefined);
 
   useEffect(() => {
     let active = true;
@@ -243,6 +251,49 @@ export function VideoEditingPage({
   }, [currentDraft, videoEditors]);
 
   useEffect(() => {
+    if (!videoEditors || !currentDraft || currentDraft.videoTrack.length === 0) {
+      setFrameUrls({});
+      return;
+    }
+    let cancelled = false;
+    const draft = currentDraft;
+    async function extractClipFrames() {
+      const updates: Record<string, string> = {};
+      for (const clip of draft.videoTrack.slice(0, 24)) {
+        if (cancelled) return;
+        const cacheKey = `${clip.clipId}:${clip.sourceRange.inUs}`;
+        const cached = frameCacheRef.current.get(cacheKey);
+        if (cached) {
+          updates[clip.clipId] = cached;
+          continue;
+        }
+        const result = await videoEditors.createSourcePreview(
+          draft.draftId,
+          clip.clipId
+        );
+        if (cancelled) return;
+        if (!result.ok) continue;
+        const dataUrl = await extractVideoFrame(
+          result.value.url,
+          clip.sourceRange.inUs
+        );
+        if (cancelled) return;
+        if (dataUrl) {
+          frameCacheRef.current.set(cacheKey, dataUrl);
+          updates[clip.clipId] = dataUrl;
+        }
+      }
+      if (!cancelled && Object.keys(updates).length > 0) {
+        setFrameUrls((previous) => ({ ...previous, ...updates }));
+      }
+    }
+    void extractClipFrames();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDraft, videoEditors]);
+
+  useEffect(() => {
     let active = true;
     setExportPreflight(undefined);
     setExportConfirmed(false);
@@ -315,6 +366,8 @@ export function VideoEditingPage({
     setTitle(draft?.title ?? '');
     setSaveState('saved');
     setPreview(undefined);
+    setPreviewUnavailable(false);
+    previewHandleRef.current = undefined;
     setExportPreflight(undefined);
     setExportConfirmed(false);
     const nextClipId =
@@ -331,6 +384,9 @@ export function VideoEditingPage({
         (segment) => segment.clipId === nextClipId
       )?.startUs ?? 0
     );
+    if (nextClipId) {
+      void ensurePreview(nextClipId, false, draft);
+    }
     if (!draft) return;
     setDrafts((items) =>
       sortDrafts(
@@ -630,25 +686,48 @@ export function VideoEditingPage({
     }
   }
 
-  async function loadPreview() {
-    if (!videoEditors || !currentDraft || !selectedClipId || busy) return;
-    setBusy(true);
-    setMessage('');
+  async function ensurePreview(
+    clipId: string,
+    force = false,
+    draftOverride?: VideoEditorDraftDto
+  ) {
+    const draft = draftOverride ?? currentDraft;
+    if (!videoEditors || !draft || !clipId) return;
+    const clip = draft.videoTrack.find((item) => item.clipId === clipId);
+    if (!clip) return;
+    const existing = previewHandleRef.current;
+    if (
+      !force &&
+      existing &&
+      existing.clipId === clipId &&
+      videoRef.current &&
+      Number.isFinite(Date.parse(existing.preview.expiresAt)) &&
+      Date.parse(existing.preview.expiresAt) - Date.now() > 30_000
+    ) {
+      videoRef.current.currentTime = clip.sourceRange.inUs / 1_000_000;
+      return;
+    }
+    const token = ++previewRequestRef.current;
     try {
       const result = await videoEditors.createSourcePreview(
-        currentDraft.draftId,
-        selectedClipId
+        draft.draftId,
+        clipId
       );
+      if (token !== previewRequestRef.current) return;
       if (!result.ok) {
-        handleError(result.error);
+        previewHandleRef.current = undefined;
+        setPreview(undefined);
+        setPreviewUnavailable(true);
+        setMessage(errorMessage(result.error.code, '原片预览暂不可用。'));
         return;
       }
+      previewHandleRef.current = { clipId, preview: result.value };
       setPreview(result.value);
-      setMessage('已创建经过重新校验的短期原片预览。');
+      setPreviewUnavailable(false);
     } catch {
-      setMessage('加载原片预览失败，请重试。');
-    } finally {
-      setBusy(false);
+      if (token === previewRequestRef.current) {
+        setMessage('加载原片预览失败，请重试。');
+      }
     }
   }
 
@@ -684,6 +763,8 @@ export function VideoEditingPage({
         handleError(result.error);
         return;
       }
+      frameCacheRef.current.clear();
+      setFrameUrls({});
       setMessage('可重建的预览缓存已清除，草稿和源文件没有改变。');
     } catch {
       setMessage('清除预览缓存失败，请重试。');
@@ -820,14 +901,21 @@ export function VideoEditingPage({
   const hasLocalTitleChange =
     Boolean(currentDraft) && title.trim() !== currentDraft?.title;
   const operationBlocked = busy || hasLocalTitleChange;
+  const clipNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    currentDraft?.videoTrack.forEach((clip, index) => {
+      names[clip.clipId] = resolveClipDisplayName(clip, index, videoWorks);
+    });
+    return names;
+  }, [currentDraft, videoWorks]);
 
   function selectClip(clipId: string) {
     setSelectedClipId(clipId);
-    setPreview(undefined);
     setPlayheadUs(
       segments.find((segment) => segment.clipId === clipId)?.startUs ?? 0
     );
     setInspectorTab('clip');
+    void ensurePreview(clipId);
   }
 
   function seekTimeline(nextUs: number) {
@@ -1009,7 +1097,15 @@ export function VideoEditingPage({
           {mediaTab === 'timeline' ? (
             <MediaList
               draft={currentDraft}
+              frames={frameUrls}
               loading={loading}
+              names={clipNames}
+              onDelete={(clipId) =>
+                void runCommand(
+                  { kind: 'remove_clip', clipId },
+                  '片段已从主轨移除，源文件没有删除。'
+                )
+              }
               onRelink={(clipId) => void relinkSource(clipId)}
               onSelect={selectClip}
               selectedClipId={selectedClipId}
@@ -1083,21 +1179,29 @@ export function VideoEditingPage({
               <EmptyState
                 description={
                   selectedClip
-                    ? '点击“加载原片预览”后，主进程会重新校验源文件并返回短期句柄。'
+                    ? previewUnavailable
+                      ? '源文件不可用，可在左侧素材列表重新定位后重试。'
+                      : '选中片段后会自动校验并加载原片预览；也可点击“刷新原片”强制重新校验。'
                     : '当前没有已选择的视频片段。'
                 }
                 icon="预"
                 readOnly
-                title={selectedClip ? '等待加载受控预览' : '等待视频片段'}
+                title={
+                  selectedClip
+                    ? previewUnavailable
+                      ? '源文件不可用'
+                      : '正在准备受控预览'
+                    : '等待视频片段'
+                }
               />
             )}
             <div className="uc-video-editor__transport">
               <Button
                 disabled={!selectedClip || busy}
-                onClick={() => void loadPreview()}
+                onClick={() => void ensurePreview(selectedClipId, true)}
                 variant="secondary"
               >
-                加载原片预览
+                刷新原片
               </Button>
               <Button
                 disabled={!selectedClip || busy}
@@ -1273,9 +1377,13 @@ export function VideoEditingPage({
             value={Math.min(playheadUs, Math.max(1, totalDurationUs))}
           />
           <VideoTimelineTrack
+            frames={frameUrls}
+            names={clipNames}
             onSelect={selectClip}
+            playheadUs={playheadUs}
             segments={segments}
             selectedClipId={selectedClipId}
+            totalDurationUs={totalDurationUs}
           />
           <TimelineTrack
             items={
@@ -1301,11 +1409,32 @@ export function VideoEditingPage({
           />
         </Card>
 
-        <Card className="uc-video-editor__inspector">
-          <PanelHeading
-            description="表单只提交编辑操作；成功返回的数据是唯一保存依据。"
-            title="属性面板"
-          />
+        <Card
+          className={`uc-video-editor__inspector${inspectorExpanded ? ' uc-video-editor__inspector--expanded' : ''}`}
+        >
+          <div className="uc-video-editor__inspector-head">
+            <PanelHeading
+              description="表单只提交编辑操作；成功返回的数据是唯一保存依据。"
+              title="属性面板"
+            />
+            <button
+              aria-controls="uc-video-editor-inspector-body"
+              aria-expanded={inspectorExpanded}
+              className="uc-video-editor__inspector-toggle"
+              onClick={() => setInspectorExpanded((value) => !value)}
+              type="button"
+            >
+              <span className="uc-video-editor__inspector-toggle-label">
+                {inspectorExpanded ? '收起' : '展开'}
+              </span>
+              <span
+                aria-hidden="true"
+                className="uc-video-editor__inspector-toggle-chev"
+              >
+                ▾
+              </span>
+            </button>
+          </div>
           <div className="uc-video-editor__tabs" role="tablist">
             <button
               aria-selected={inspectorTab === 'clip'}
@@ -1381,12 +1510,16 @@ export function VideoEditingPage({
               <ClipInspector
                 busy={operationBlocked}
                 clip={selectedClip}
+                displayName={clipNames[selectedClip.clipId] ?? `片段 ${selectedIndex + 1}`}
+                frameUrl={frameUrls[selectedClip.clipId]}
+                index={selectedIndex}
                 onCommand={(command, successMessage) =>
                   void runCommand(command, successMessage)
                 }
                 onInvalid={setMessage}
                 onRelink={() => void relinkSource(selectedClip.clipId)}
                 status={sourceStatuses[selectedClip.clipId]}
+                total={currentDraft.videoTrack.length}
               />
             ) : (
               <EmptyState
@@ -1530,7 +1663,10 @@ export function VideoEditingPage({
 
 function MediaList({
   draft,
+  frames,
   loading,
+  names,
+  onDelete,
   onRelink,
   onSelect,
   selectedClipId,
@@ -1538,13 +1674,40 @@ function MediaList({
   statuses
 }: {
   readonly draft?: VideoEditorDraftDto;
+  readonly frames: Readonly<Record<string, string>>;
   readonly loading: boolean;
+  readonly names: Readonly<Record<string, string>>;
+  readonly onDelete: (clipId: string) => void;
   readonly onRelink: (clipId: string) => void;
   readonly onSelect: (clipId: string) => void;
   readonly selectedClipId: string;
   readonly session?: StorageProjectSessionDto;
   readonly statuses: Readonly<Record<string, VideoEditorSourceStatusDto>>;
 }) {
+  const [armedClipId, setArmedClipId] = useState('');
+  const armedTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(armedTimerRef.current);
+    },
+    []
+  );
+
+  function armDelete(clipId: string) {
+    if (armedClipId === clipId) {
+      window.clearTimeout(armedTimerRef.current);
+      setArmedClipId('');
+      onDelete(clipId);
+      return;
+    }
+    window.clearTimeout(armedTimerRef.current);
+    setArmedClipId(clipId);
+    armedTimerRef.current = window.setTimeout(() => {
+      setArmedClipId('');
+    }, 3_000);
+  }
+
   if (loading) {
     return (
       <EmptyState
@@ -1591,12 +1754,13 @@ function MediaList({
       {draft.videoTrack.map((clip, index) => {
         const status = statuses[clip.clipId];
         const display = sourceStatusDisplay(status);
+        const frameUrl = frames[clip.clipId];
         return (
           <li
             className={
               selectedClipId === clip.clipId
-                ? 'uc-video-editor__media-item--selected'
-                : undefined
+                ? 'uc-video-editor__media-item uc-video-editor__media-item--selected'
+                : 'uc-video-editor__media-item'
             }
             key={clip.clipId}
           >
@@ -1605,9 +1769,23 @@ function MediaList({
               onClick={() => onSelect(clip.clipId)}
               type="button"
             >
-              <span aria-hidden="true">视</span>
-              <span>
-                <strong>片段 {index + 1}</strong>
+              <span
+                aria-hidden="true"
+                className="uc-video-editor__media-frame"
+              >
+                {frameUrl ? (
+                  <img alt="" src={frameUrl} />
+                ) : (
+                  <span className="uc-video-editor__frame-fallback">
+                    {index + 1}
+                  </span>
+                )}
+                <span className="uc-video-editor__frame-dur">
+                  {formatTime(effectiveClipDurationUs(clip))}
+                </span>
+              </span>
+              <span className="uc-video-editor__media-meta">
+                <strong>{names[clip.clipId] ?? `片段 ${index + 1}`}</strong>
                 <small>
                   {clip.source.identity.container.toUpperCase()} ·{' '}
                   {clip.source.identity.width}×{clip.source.identity.height} ·{' '}
@@ -1615,12 +1793,23 @@ function MediaList({
                 </small>
               </span>
             </button>
-            <StatusPill tone={display.tone}>{display.label}</StatusPill>
-            {status?.relinkRequired ? (
-              <Button onClick={() => onRelink(clip.clipId)} variant="ghost">
-                重新定位
-              </Button>
-            ) : null}
+            <span className="uc-video-editor__media-side">
+              <StatusPill tone={display.tone}>{display.label}</StatusPill>
+              {status?.relinkRequired ? (
+                <Button onClick={() => onRelink(clip.clipId)} variant="ghost">
+                  重新定位
+                </Button>
+              ) : null}
+              <button
+                aria-label={`删除片段 ${index + 1}（源文件保留）`}
+                className={`uc-video-editor__media-delete${armedClipId === clip.clipId ? ' armed' : ''}`}
+                onClick={() => armDelete(clip.clipId)}
+                title="删除片段（源文件保留）"
+                type="button"
+              >
+                {armedClipId === clip.clipId ? '确认' : '×'}
+              </button>
+            </span>
           </li>
         );
       })}
@@ -1665,35 +1854,74 @@ function ProjectVideoList({
 }
 
 function VideoTimelineTrack({
+  frames,
   onSelect,
+  playheadUs,
   segments,
-  selectedClipId
+  selectedClipId,
+  totalDurationUs
 }: {
+  readonly frames: Readonly<Record<string, string>>;
   readonly onSelect: (clipId: string) => void;
+  readonly playheadUs: number;
   readonly segments: readonly TimelineSegment[];
   readonly selectedClipId: string;
+  readonly totalDurationUs: number;
 }) {
+  const playheadPercent =
+    totalDurationUs > 0
+      ? Math.min(100, Math.max(0, (playheadUs / totalDurationUs) * 100))
+      : 0;
   return (
     <div className="uc-video-editor__track">
       <strong>视频主轨</strong>
-      <div>
-        {segments.length ? (
-          segments.map((segment) => (
-            <button
-              aria-pressed={selectedClipId === segment.clipId}
-              key={segment.clipId}
-              onClick={() => onSelect(segment.clipId)}
-              style={{ flexGrow: Math.max(1, segment.durationUs) }}
-              type="button"
-            >
-              <strong>{segment.index + 1}</strong>
-              <small>{formatTime(segment.durationUs)}</small>
-            </button>
-          ))
-        ) : (
+      {segments.length ? (
+        <div className="uc-video-editor__lane">
+          {segments.map((segment) => {
+            const frameUrl = frames[segment.clipId];
+            return (
+              <button
+                aria-pressed={selectedClipId === segment.clipId}
+                className={`uc-video-editor__seg${
+                  selectedClipId === segment.clipId
+                    ? ' uc-video-editor__seg--selected'
+                    : ''
+                }`}
+                key={segment.clipId}
+                onClick={() => onSelect(segment.clipId)}
+                style={{ flexGrow: Math.max(1, segment.durationUs) }}
+                title={`片段 ${segment.index + 1} · 起点 ${formatTime(segment.startUs)}`}
+                type="button"
+              >
+                {frameUrl ? (
+                  <img alt="" src={frameUrl} />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="uc-video-editor__frame-fallback"
+                  >
+                    {segment.index + 1}
+                  </span>
+                )}
+                <span className="uc-video-editor__seg-label">
+                  {segment.index + 1} · {formatTime(segment.durationUs)}
+                </span>
+              </button>
+            );
+          })}
+          {totalDurationUs > 0 ? (
+            <span
+              aria-hidden="true"
+              className="uc-video-editor__playhead-line"
+              style={{ left: `${playheadPercent}%` }}
+            />
+          ) : null}
+        </div>
+      ) : (
+        <div className="uc-video-editor__lane">
           <small>暂无内容</small>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1712,12 +1940,13 @@ function TimelineTrack({
   return (
     <div className="uc-video-editor__track">
       <strong>{label}</strong>
-      <div>
+      <div className="uc-video-editor__lane uc-video-editor__lane--slim">
         {items.length ? (
           items.map((item) =>
             onSelect ? (
               <button
                 aria-pressed={selectedId === item.id}
+                className="uc-video-editor__chip"
                 key={item.id}
                 onClick={() => onSelect(item.id)}
                 type="button"
@@ -1725,11 +1954,15 @@ function TimelineTrack({
                 {item.label}
               </button>
             ) : (
-              <span key={item.id}>{item.label}</span>
+              <span className="uc-video-editor__chip" key={item.id}>
+                {item.label}
+              </span>
             )
           )
         ) : (
-          <small>暂无内容</small>
+          <span className="uc-video-editor__chip uc-video-editor__chip--ghost">
+            ＋ 暂无内容
+          </span>
         )}
       </div>
     </div>
@@ -1739,17 +1972,25 @@ function TimelineTrack({
 function ClipInspector({
   busy,
   clip,
+  displayName,
+  frameUrl,
+  index,
   onCommand,
   onInvalid,
   onRelink,
-  status
+  status,
+  total
 }: {
   readonly busy: boolean;
   readonly clip: VideoEditorClipDto;
+  readonly displayName: string;
+  readonly frameUrl?: string;
+  readonly index: number;
   readonly onCommand: (command: VideoEditorUpdateDto, message: string) => void;
   readonly onInvalid: (message: string) => void;
   readonly onRelink: () => void;
   readonly status?: VideoEditorSourceStatusDto;
+  readonly total: number;
 }) {
   function submitTrim(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1827,8 +2068,44 @@ function ClipInspector({
   }
 
   const display = sourceStatusDisplay(status);
+  const statusOk = display.tone === 'success';
   return (
     <div className="uc-video-editor__inspector-content">
+      <div className="uc-video-editor__clip-summary">
+        <span
+          aria-hidden="true"
+          className="uc-video-editor__media-frame uc-video-editor__clip-summary-frame"
+        >
+          {frameUrl ? (
+            <img alt="" src={frameUrl} />
+          ) : (
+            <span className="uc-video-editor__frame-fallback">
+              {index + 1}
+            </span>
+          )}
+        </span>
+        <span className="uc-video-editor__clip-summary-meta">
+          <span className="uc-video-editor__clip-summary-name">
+            {displayName}
+          </span>
+          <span className="uc-video-editor__clip-chips">
+            <span className="uc-video-editor__chip2">
+              {index + 1} / {total}
+            </span>
+            <span className="uc-video-editor__chip2">
+              {clip.source.identity.container.toUpperCase()}
+            </span>
+            <span className="uc-video-editor__chip2">
+              {clip.source.identity.width}×{clip.source.identity.height}
+            </span>
+            <span
+              className={`uc-video-editor__chip2${statusOk ? ' uc-video-editor__chip2--ok' : ''}`}
+            >
+              ● {display.label}
+            </span>
+          </span>
+        </span>
+      </div>
       <dl className="uc-video-editor__facts">
         <Fact label="源状态" value={display.label} />
         <Fact
@@ -2822,6 +3099,83 @@ export function buildTimelineSegments(
         : clip.transitionToNext.durationUs);
     return segment;
   });
+}
+
+/**
+ * 通过受控预览句柄在渲染进程内提取一帧（S2 路径 A）。
+ * 隐藏 video 使用 crossOrigin 以避免 canvas taint；任何失败都返回 undefined，
+ * 由调用方降级为黑底序号占位，绝不让取帧失败阻塞编辑。
+ */
+async function extractVideoFrame(
+  previewUrl: string,
+  seekUs: number
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.preload = 'auto';
+    video.src = previewUrl;
+    let settled = false;
+    const finish = (value?: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      video.removeAttribute('src');
+      video.load();
+      resolve(value);
+    };
+    const timer = window.setTimeout(() => finish(undefined), 10_000);
+    const capture = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(2, video.videoWidth);
+        canvas.height = Math.max(2, video.videoHeight);
+        const context = canvas.getContext('2d');
+        if (!context) {
+          finish(undefined);
+          return;
+        }
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        finish(canvas.toDataURL('image/jpeg', 0.72));
+      } catch {
+        finish(undefined);
+      }
+    };
+    video.addEventListener('error', () => finish(undefined));
+    video.addEventListener('loadeddata', () => {
+      if (seekUs <= 0) {
+        capture();
+        return;
+      }
+      try {
+        video.currentTime = seekUs / 1_000_000;
+      } catch {
+        finish(undefined);
+      }
+    });
+    video.addEventListener('seeked', () => capture());
+  });
+}
+
+/**
+ * S4 片段可读命名（纯前端派生，不落库）：
+ * 1) 来源为当前项目视频作品 → 作品名；
+ * 2) 否则有 fileId → “片段 N · 前 6 位短码”；
+ * 3) 兜底 → “片段 N”。
+ */
+export function resolveClipDisplayName(
+  clip: Pick<VideoEditorClipDto, 'source'>,
+  index: number,
+  videoWorks: readonly StorageWorkSummaryDto[]
+): string {
+  const workId = clip.source.workId;
+  if (workId) {
+    const work = videoWorks.find((item) => item.workId === workId);
+    if (work) return work.name;
+  }
+  const shortCode = clip.source.fileId.slice(0, 6);
+  return shortCode ? `片段 ${index + 1} · ${shortCode}` : `片段 ${index + 1}`;
 }
 
 function effectiveClipDurationUs(
