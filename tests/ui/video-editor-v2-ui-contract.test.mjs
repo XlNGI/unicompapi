@@ -35,10 +35,22 @@ test('V2-S3 select automatically loads preview with stale-response protection', 
   assert.match(editorSource, /function ensurePreview\(/);
   assert.match(
     editorSource,
-    /function selectClip\([^)]*\)[^{]*\{[\s\S]{0,400}?void ensurePreview\(clipId\);/
+    /function selectClip\([^)]*\)[^{]*\{[\s\S]{0,500}?void ensurePreview\(clipId, false, undefined, nextPlayheadUs\);/
   );
   // 竞态防护：请求 token 自增，过期响应丢弃
   assert.match(editorSource, /previewRequestRef/);
+  // 分割等草稿更新后，预览必须保留分割前的时间线播放头，
+  // 并由新草稿的当前状态换算到源视频时间，不能再保存第二份待 seek 草稿。
+  assert.match(
+    editorSource,
+    /command\.kind === 'split_clip' \? playheadUs : undefined/
+  );
+  assert.match(editorSource, /preferredSegment\?\.clipId/);
+  assert.match(editorSource, /timelineToSourceUs\(/);
+  assert.match(
+    editorSource,
+    /sourceUs: timelineToSourceUs\(draft, clipId, timelineUs\)/
+  );
   // 手动入口语义降级为“刷新原片”
   assert.match(editorSource, /刷新原片/);
   // 失败空态文案
@@ -107,13 +119,27 @@ test('V2-S6 defines the three-tier responsive system with a collapsed inspector 
   const w3Block = stylesSource.match(/@media \(max-width: 1023px\) \{[\s\S]*?\n\}/);
   assert.ok(w3Block);
   assert.match(w3Block[0], /max-height: 0/);
-  assert.match(stylesSource, /\.uc-video-editor__inspector--expanded \{[^}]*max-height: 80vh/);
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__inspector--expanded \.uc-video-editor__inspector-body \{[^}]*max-height: 80vh/
+  );
   // 抽屉按钮 aria-expanded 联动 + 仅窄屏显示
   assert.match(editorSource, /aria-expanded=\{inspectorExpanded\}/);
   assert.match(
     stylesSource,
     /\.uc-video-editor__inspector-toggle \{[^}]*display: none/
   );
+  assert.match(stylesSource, /\.uc-video-editor \{[^}]*container-type: inline-size/);
+  assert.match(stylesSource, /@container \(max-width: 1023px\)/);
+  assert.match(stylesSource, /\.uc-video-editor__header \{[^}]*position: sticky/);
+  assert.match(stylesSource, /\.uc-video-editor__header \.uc-status-pill--success::before/);
+  assert.match(editorSource, /uc-video-editor__track uc-video-editor__track--video/);
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__timeline > \.uc-video-editor__track--video \.uc-video-editor__lane \{[^}]*gap: 0/
+  );
+  assert.doesNotMatch(stylesSource, /uc-video-editor__track:first-of-type/);
+  assert.doesNotMatch(stylesSource, /uc-video-editor__track:not\(:first-of-type\)/);
   // 旧 1280px 断点已收编：不再对编辑页栅格二次作用
   const legacyBlock = stylesSource.match(
     /@media \(max-width: 1280px\) \{[\s\S]*?\n\}/
@@ -132,4 +158,60 @@ test('V2-S6 defines the three-tier responsive system with a collapsed inspector 
     assert.match(editorSource, new RegExp(className));
     assert.match(stylesSource, new RegExp(`\\.${className.replace(/--.*/, '')}`));
   }
+});
+
+test('V2-S7 aligns the timeline scale and wires drag reorder to move_clip', () => {
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__timeline \{[^}]*--uc-video-editor-track-label-width: 90px;[^}]*grid-template-columns:\s*var\(--uc-video-editor-track-label-width\) minmax\(0, 1fr\)/
+  );
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__ruler,\s*\.uc-video-editor__playhead \{[^}]*grid-column: 2/
+  );
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__track \{[^}]*grid-template-columns:\s*var\(--uc-video-editor-track-label-width, 90px\) minmax\(0, 1fr\)/
+  );
+  assert.match(editorSource, /draggable=\{canReorder\}/);
+  assert.match(editorSource, /onDragStart=/);
+  assert.match(editorSource, /onDragOver=/);
+  assert.match(editorSource, /onDrop=/);
+  assert.match(editorSource, /dataTransfer\.setData\('text\/plain', segment\.clipId\)/);
+  assert.match(editorSource, /kind: 'move_clip',[\s\S]{0,120}?clipId,[\s\S]{0,120}?toIndex/);
+});
+
+test('V2-S8 switches preview ownership when a timeline seek crosses clips', () => {
+  assert.match(
+    editorSource,
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,500}?resolveTimelineSegmentAt\(segments, nextUs\)/
+  );
+  assert.match(
+    editorSource,
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,700}?setSelectedClipId\(targetSegment\.clipId\)/
+  );
+  assert.match(
+    editorSource,
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,900}?ensurePreview\(targetSegment\.clipId, false, undefined, nextUs\)/
+  );
+  assert.match(
+    editorSource,
+    /existing\?\.clipId !== clipId[\s\S]{0,120}?setPreview\(undefined\)/
+  );
+});
+
+test('V2-S9 keeps timeline seeks authoritative until the target frame is rendered', () => {
+  assert.match(editorSource, /pendingPreviewSeekRef/);
+  assert.match(editorSource, /onSeeked=\{completePreviewSeek\}/);
+  assert.match(editorSource, /aria-busy=\{previewSeeking\}/);
+  assert.match(
+    editorSource,
+    /function syncPlayheadFromPreview\(\)[^{]*\{[\s\S]{0,180}?if \(pendingPreviewSeekRef\.current\) return;/
+  );
+  assert.match(
+    editorSource,
+    /videoRef\.current\.currentTime = pending\.sourceUs \/ 1_000_000/
+  );
+  assert.doesNotMatch(editorSource, /uc-video-editor__preview-playhead/);
+  assert.doesNotMatch(stylesSource, /webkit-media-controls-current-time-display/);
 });

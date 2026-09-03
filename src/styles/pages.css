@@ -1857,6 +1857,7 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   color: var(--uc-color-text-primary);
   font-family: var(--uc-font-family-ui);
+  container-type: inline-size;
 }
 
 .uc-video-editor__header,
@@ -1878,6 +1879,11 @@
 
 .uc-video-editor__header {
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-block: var(--uc-space-2);
+  background: var(--uc-color-surface-base);
 }
 
 .uc-video-editor__identity {
@@ -1997,9 +2003,11 @@
 }
 
 .uc-video-editor__timeline {
+  --uc-video-editor-track-label-width: 90px;
   grid-column: 1 / 3;
   grid-row: 2;
   display: grid;
+  grid-template-columns: var(--uc-video-editor-track-label-width) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   max-height: 320px;
@@ -2009,24 +2017,35 @@
   padding: var(--uc-space-3);
 }
 
-.uc-video-editor__timeline > .uc-video-editor__track:first-of-type {
+.uc-video-editor__timeline > .uc-video-editor__timeline-heading,
+.uc-video-editor__timeline > .uc-video-editor__track {
+  grid-column: 1 / -1;
+}
+
+.uc-video-editor__timeline > .uc-video-editor__track--video {
   min-height: 92px;
 }
 
-.uc-video-editor__timeline > .uc-video-editor__track:not(:first-of-type) {
+.uc-video-editor__timeline > .uc-video-editor__track:not(.uc-video-editor__track--video) {
   min-height: 44px;
 }
 
-.uc-video-editor__timeline > .uc-video-editor__track:first-of-type > div {
+.uc-video-editor__timeline > .uc-video-editor__track--video > div {
   min-height: 92px;
 }
 
-.uc-video-editor__timeline > .uc-video-editor__track:not(:first-of-type) > div {
+.uc-video-editor__timeline > .uc-video-editor__track:not(.uc-video-editor__track--video) > div {
   min-height: 44px;
 }
 
 .uc-video-editor__timeline-heading {
   gap: var(--uc-space-2);
+  flex-wrap: wrap;
+}
+
+.uc-video-editor__timeline-actions {
+  flex-wrap: wrap;
+  row-gap: var(--uc-space-1);
 }
 
 .uc-video-editor__panel-heading {
@@ -2277,9 +2296,15 @@
   font-size: var(--uc-font-size-label);
 }
 
+.uc-video-editor__ruler,
+.uc-video-editor__playhead {
+  grid-column: 2;
+  min-width: 0;
+}
+
 .uc-video-editor__track {
   display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
+  grid-template-columns: var(--uc-video-editor-track-label-width, 90px) minmax(0, 1fr);
   align-items: stretch;
   gap: var(--uc-space-3);
 }
@@ -2308,10 +2333,21 @@
   color: var(--uc-color-text-tertiary);
 }
 
-/* S2 主轨 lane：真实帧条 + 播放头 overlay */
-.uc-video-editor__timeline > .uc-video-editor__track:first-of-type .uc-video-editor__lane {
+/* S2 主轨 segment：宽度按 durationUs / totalDurationUs 严格比例分配
+   移除 96px min-width：min-width 在多片段 + 中等窗口下让 lane 内容总和
+   远超父宽，overflow-x:auto 把 playhead-line 的 left:percent% 从相对内容
+   总宽退化为相对父视口，导致主轨竖线与播放头/预览明显脱钩。
+   严格 width:% + overflow:hidden 让 lane 总宽 = 父视口宽，竖线 % 与
+   片段边界完全对齐；tiny clip 用 4px min-width 保留可点击最小面积。 */
+.uc-video-editor__timeline > .uc-video-editor__track--video .uc-video-editor__seg {
+  flex: 0 0 auto;
+  min-width: 4px;
+}
+.uc-video-editor__timeline > .uc-video-editor__track--video .uc-video-editor__lane {
   min-height: 92px;
   align-items: stretch;
+  gap: 0;
+  overflow: hidden;
 }
 
 .uc-video-editor__lane--slim {
@@ -2333,6 +2369,14 @@
   background: #000000;
   cursor: pointer;
   text-align: center;
+}
+
+.uc-video-editor__seg[draggable='true'] {
+  cursor: grab;
+}
+
+.uc-video-editor__seg[draggable='true']:active {
+  cursor: grabbing;
 }
 
 .uc-video-editor__seg:hover {
@@ -2603,12 +2647,16 @@
   border-color: rgb(85 215 167 / 0.4);
 }
 
-/* W3 属性面板折叠抽屉（仅窄屏可见的展开/收起按钮） */
+/* W3 属性面板折叠抽屉：head 始终可见，仅 body 折叠 */
 .uc-video-editor__inspector-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--uc-space-2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--uc-color-surface-panel);
 }
 
 .uc-video-editor__inspector-head .uc-video-editor__panel-heading {
@@ -9613,13 +9661,13 @@ button.uc-project-center__project-card:disabled {
   }
 
   .uc-video-editor__timeline
-    > .uc-video-editor__track:first-of-type
+    > .uc-video-editor__track--video
     .uc-video-editor__lane {
     min-height: 76px;
   }
 }
 
-/* W3 <1024：单列堆叠；属性面板 = 折叠抽屉默认收起（可展开） */
+/* W3 <1024：单列堆叠；属性面板 = 折叠抽屉（head 始终可见，仅 body 折叠） */
 @media (max-width: 1023px) {
   .uc-video-editor__workspace {
     grid-template-columns: minmax(0, 1fr);
@@ -9638,13 +9686,13 @@ button.uc-project-center__project-card:disabled {
     max-height: 40vh;
   }
 
-  .uc-video-editor__inspector {
+  .uc-video-editor__inspector-body {
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.25s ease;
   }
 
-  .uc-video-editor__inspector--expanded {
+  .uc-video-editor__inspector--expanded .uc-video-editor__inspector-body {
     max-height: 80vh;
     overflow-y: auto;
   }
@@ -9654,7 +9702,7 @@ button.uc-project-center__project-card:disabled {
   }
 
   .uc-video-editor__timeline
-    > .uc-video-editor__track:first-of-type
+    > .uc-video-editor__track--video
     .uc-video-editor__lane {
     min-height: 76px;
   }
@@ -9669,5 +9717,69 @@ button.uc-project-center__project-card:disabled {
   .workspace--video-editing .uc-video-editor {
     height: auto;
     min-height: 100%;
+  }
+}
+
+/* The shell sidebar reduces the editor's usable width. Mirror the viewport
+   breakpoints on the page container so the layout follows what the user can
+   actually see, not only the outer browser width. */
+@container (max-width: 1339px) {
+  .uc-video-editor__workspace {
+    grid-template-columns: 250px minmax(0, 1fr) 300px;
+  }
+
+  .uc-video-editor__media-select {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .uc-video-editor__timeline
+    > .uc-video-editor__track--video
+    .uc-video-editor__lane {
+    min-height: 76px;
+  }
+}
+
+@container (max-width: 1023px) {
+  .uc-video-editor__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+
+  .uc-video-editor__media-bin,
+  .uc-video-editor__center,
+  .uc-video-editor__timeline,
+  .uc-video-editor__inspector {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .uc-video-editor__media-bin {
+    max-height: 40vh;
+  }
+
+  .uc-video-editor__inspector-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+  }
+
+  .uc-video-editor__inspector--expanded .uc-video-editor__inspector-body {
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .uc-video-editor__inspector-toggle {
+    display: inline-flex;
+  }
+}
+
+@media (min-width: 1340px) {
+  .uc-video-editor__header .uc-status-pill--success::before {
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--uc-color-status-success-border);
+    border-radius: 50%;
+    background: var(--uc-color-status-success-bg);
+    content: '';
   }
 }

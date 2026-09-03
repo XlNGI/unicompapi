@@ -98,6 +98,13 @@ interface TimelineSegment {
   readonly speedDenominator: number;
 }
 
+interface PendingPreviewSeek {
+  readonly token: number;
+  readonly clipId: string;
+  readonly timelineUs: number;
+  readonly sourceUs: number;
+}
+
 const saveStateLabels: Record<SaveState, string> = {
   saved: '已自动保存',
   editing: '有未保存修改',
@@ -149,9 +156,12 @@ export function VideoEditingPage({
   const [exportConfirmed, setExportConfirmed] = useState(false);
   const [frameUrls, setFrameUrls] = useState<Readonly<Record<string, string>>>({});
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const [previewSeeking, setPreviewSeeking] = useState(false);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const frameCacheRef = useRef<Map<string, string>>(new Map());
   const previewRequestRef = useRef(0);
+  const previewSeekTokenRef = useRef(0);
+  const pendingPreviewSeekRef = useRef<PendingPreviewSeek | undefined>(undefined);
   const previewHandleRef = useRef<
     { readonly clipId: string; readonly preview: VideoEditorSourcePreviewDto } | undefined
   >(undefined);
@@ -255,6 +265,7 @@ export function VideoEditingPage({
       setFrameUrls({});
       return;
     }
+    const editorApi = videoEditors;
     let cancelled = false;
     const draft = currentDraft;
     async function extractClipFrames() {
@@ -267,7 +278,7 @@ export function VideoEditingPage({
           updates[clip.clipId] = cached;
           continue;
         }
-        const result = await videoEditors.createSourcePreview(
+        const result = await editorApi.createSourcePreview(
           draft.draftId,
           clip.clipId
         );
@@ -361,31 +372,48 @@ export function VideoEditingPage({
     };
   }, [exportTask?.state, exportTask?.workId, storage]);
 
-  function acceptDraft(draft?: VideoEditorDraftDto, preferredClipId?: string) {
+  function acceptDraft(
+    draft?: VideoEditorDraftDto,
+    preferredClipId?: string,
+    preferredPlayheadUs?: number
+  ) {
     setCurrentDraft(draft);
     setTitle(draft?.title ?? '');
     setSaveState('saved');
     setPreview(undefined);
     setPreviewUnavailable(false);
     previewHandleRef.current = undefined;
+    pendingPreviewSeekRef.current = undefined;
+    setPreviewSeeking(false);
     setExportPreflight(undefined);
     setExportConfirmed(false);
-    const nextClipId =
+    const segments = buildTimelineSegments(draft?.videoTrack ?? []);
+    const preferredSegment =
+      preferredPlayheadUs === undefined
+        ? undefined
+        : segments.find(
+            (segment) =>
+              preferredPlayheadUs >= segment.startUs &&
+              preferredPlayheadUs < segment.endUs
+          );
+    const nextClipId = preferredSegment?.clipId ?? (
       preferredClipId &&
       draft?.videoTrack.some((clip) => clip.clipId === preferredClipId)
         ? preferredClipId
-        : draft?.videoTrack[0]?.clipId ?? '';
+        : draft?.videoTrack[0]?.clipId ?? ''
+    );
+    const nextSegment = segments.find((segment) => segment.clipId === nextClipId);
+    const nextPlayheadUs =
+      preferredPlayheadUs === undefined || !nextSegment
+        ? nextSegment?.startUs ?? 0
+        : Math.min(nextSegment.endUs, Math.max(nextSegment.startUs, preferredPlayheadUs));
     setSelectedClipId(nextClipId);
     setSelectedTextId((textId) =>
       draft?.textTrack.some((text) => text.textId === textId) ? textId : ''
     );
-    setPlayheadUs(
-      buildTimelineSegments(draft?.videoTrack ?? []).find(
-        (segment) => segment.clipId === nextClipId
-      )?.startUs ?? 0
-    );
+    setPlayheadUs(nextPlayheadUs);
     if (nextClipId) {
-      void ensurePreview(nextClipId, false, draft);
+      void ensurePreview(nextClipId, false, draft, nextPlayheadUs);
     }
     if (!draft) return;
     setDrafts((items) =>
@@ -413,7 +441,8 @@ export function VideoEditingPage({
   async function mutate(
     operation: () => Promise<VideoEditorIpcResult<VideoEditorDraftDto>>,
     successMessage: string,
-    preferredClipId = selectedClipId
+    preferredClipId = selectedClipId,
+    preferredPlayheadUs?: number
   ) {
     if (busy) return;
     setBusy(true);
@@ -425,7 +454,11 @@ export function VideoEditingPage({
         handleError(result.error);
         return;
       }
-      acceptDraft(result.value, preferredClipId);
+      acceptDraft(
+        result.value,
+        preferredClipId,
+        preferredPlayheadUs
+      );
       setMessage(successMessage);
     } catch {
       setSaveState('failed');
@@ -440,7 +473,9 @@ export function VideoEditingPage({
     await mutate(
       () =>
         videoEditors.update(currentDraft.draftId, currentDraft.revision, command),
-      successMessage
+      successMessage,
+      selectedClipId,
+      command.kind === 'split_clip' ? playheadUs : undefined
     );
   }
 
@@ -686,16 +721,84 @@ export function VideoEditingPage({
     }
   }
 
+  function beginPreviewSeek(
+    draft: VideoEditorDraftDto,
+    clipId: string,
+    timelineUs: number
+  ): PendingPreviewSeek {
+    const pending = {
+      token: ++previewSeekTokenRef.current,
+      clipId,
+      timelineUs,
+      sourceUs: timelineToSourceUs(draft, clipId, timelineUs)
+    };
+    pendingPreviewSeekRef.current = pending;
+    setPreviewSeeking(true);
+    return pending;
+  }
+
+  function abandonPreviewSeek(token: number) {
+    if (pendingPreviewSeekRef.current?.token !== token) return;
+    pendingPreviewSeekRef.current = undefined;
+    setPreviewSeeking(false);
+  }
+
+  function completePreviewSeek() {
+    const pending = pendingPreviewSeekRef.current;
+    if (
+      !pending ||
+      !videoRef.current ||
+      videoRef.current.seeking ||
+      previewHandleRef.current?.clipId !== pending.clipId
+    ) {
+      return;
+    }
+    const sourceUs = Math.round(videoRef.current.currentTime * 1_000_000);
+    if (Math.abs(sourceUs - pending.sourceUs) > 1_000) return;
+    pendingPreviewSeekRef.current = undefined;
+    setPreviewSeeking(false);
+    setPlayheadUs(pending.timelineUs);
+  }
+
+  function applyPendingPreviewSeek() {
+    const pending = pendingPreviewSeekRef.current;
+    if (
+      !pending ||
+      !videoRef.current ||
+      previewHandleRef.current?.clipId !== pending.clipId
+    ) {
+      return;
+    }
+    const targetSeconds = pending.sourceUs / 1_000_000;
+    if (
+      videoRef.current.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      !videoRef.current.seeking &&
+      Math.abs(videoRef.current.currentTime - targetSeconds) <= 0.001
+    ) {
+      completePreviewSeek();
+      return;
+    }
+    videoRef.current.currentTime = pending.sourceUs / 1_000_000;
+  }
+
   async function ensurePreview(
     clipId: string,
     force = false,
-    draftOverride?: VideoEditorDraftDto
+    draftOverride?: VideoEditorDraftDto,
+    targetPlayheadUs = playheadUs
   ) {
     const draft = draftOverride ?? currentDraft;
     if (!videoEditors || !draft || !clipId) return;
     const clip = draft.videoTrack.find((item) => item.clipId === clipId);
     if (!clip) return;
+    const pendingSeek = beginPreviewSeek(draft, clipId, targetPlayheadUs);
+    const requestToken = ++previewRequestRef.current;
     const existing = previewHandleRef.current;
+    if (existing?.clipId !== clipId) {
+      previewHandleRef.current = undefined;
+      setPreview(undefined);
+      setPreviewUnavailable(false);
+    }
     if (
       !force &&
       existing &&
@@ -704,17 +807,17 @@ export function VideoEditingPage({
       Number.isFinite(Date.parse(existing.preview.expiresAt)) &&
       Date.parse(existing.preview.expiresAt) - Date.now() > 30_000
     ) {
-      videoRef.current.currentTime = clip.sourceRange.inUs / 1_000_000;
+      applyPendingPreviewSeek();
       return;
     }
-    const token = ++previewRequestRef.current;
     try {
       const result = await videoEditors.createSourcePreview(
         draft.draftId,
         clipId
       );
-      if (token !== previewRequestRef.current) return;
+      if (requestToken !== previewRequestRef.current) return;
       if (!result.ok) {
+        abandonPreviewSeek(pendingSeek.token);
         previewHandleRef.current = undefined;
         setPreview(undefined);
         setPreviewUnavailable(true);
@@ -725,7 +828,8 @@ export function VideoEditingPage({
       setPreview(result.value);
       setPreviewUnavailable(false);
     } catch {
-      if (token === previewRequestRef.current) {
+      if (requestToken === previewRequestRef.current) {
+        abandonPreviewSeek(pendingSeek.token);
         setMessage('加载原片预览失败，请重试。');
       }
     }
@@ -911,27 +1015,28 @@ export function VideoEditingPage({
 
   function selectClip(clipId: string) {
     setSelectedClipId(clipId);
-    setPlayheadUs(
-      segments.find((segment) => segment.clipId === clipId)?.startUs ?? 0
-    );
+    const nextPlayheadUs =
+      segments.find((segment) => segment.clipId === clipId)?.startUs ?? 0;
+    setPlayheadUs(nextPlayheadUs);
     setInspectorTab('clip');
-    void ensurePreview(clipId);
+    void ensurePreview(clipId, false, undefined, nextPlayheadUs);
   }
 
   function seekTimeline(nextUs: number) {
     setPlayheadUs(nextUs);
-    if (!selectedClip || !selectedSegment || !videoRef.current) return;
-    if (nextUs < selectedSegment.startUs || nextUs > selectedSegment.endUs) return;
-    const timelineOffset = nextUs - selectedSegment.startUs;
-    const sourceOffset = Number(
-      (BigInt(timelineOffset) * BigInt(selectedSegment.speedNumerator)) /
-        BigInt(selectedSegment.speedDenominator)
-    );
-    videoRef.current.currentTime =
-      (selectedSegment.sourceInUs + sourceOffset) / 1_000_000;
+    const targetSegment = resolveTimelineSegmentAt(segments, nextUs);
+    if (!targetSegment) return;
+    if (targetSegment.clipId !== selectedClipId) {
+      setSelectedClipId(targetSegment.clipId);
+      void ensurePreview(targetSegment.clipId, false, undefined, nextUs);
+      return;
+    }
+    if (previewHandleRef.current?.clipId !== targetSegment.clipId) return;
+    void ensurePreview(targetSegment.clipId, false, undefined, nextUs);
   }
 
   function syncPlayheadFromPreview() {
+    if (pendingPreviewSeekRef.current) return;
     if (!videoRef.current || !selectedClip || !selectedSegment) return;
     const sourceUs = Math.min(
       selectedClip.sourceRange.outUs,
@@ -1162,15 +1267,13 @@ export function VideoEditingPage({
             />
             {preview ? (
               <video
+                aria-busy={previewSeeking}
                 className="uc-video-editor__video"
                 controls
                 key={preview.url}
-                onLoadedMetadata={() => {
-                  if (videoRef.current && selectedClip) {
-                    videoRef.current.currentTime =
-                      selectedClip.sourceRange.inUs / 1_000_000;
-                  }
-                }}
+                onLoadedData={applyPendingPreviewSeek}
+                onLoadedMetadata={applyPendingPreviewSeek}
+                onSeeked={completePreviewSeek}
                 onTimeUpdate={syncPlayheadFromPreview}
                 ref={videoRef}
                 src={preview.url}
@@ -1377,8 +1480,14 @@ export function VideoEditingPage({
             value={Math.min(playheadUs, Math.max(1, totalDurationUs))}
           />
           <VideoTimelineTrack
+            canReorder={!operationBlocked}
             frames={frameUrls}
-            names={clipNames}
+            onMove={(clipId, toIndex) =>
+              void runCommand(
+                { kind: 'move_clip', clipId, toIndex },
+                '片段已通过拖拽移动。'
+              )
+            }
             onSelect={selectClip}
             playheadUs={playheadUs}
             segments={segments}
@@ -1435,7 +1544,11 @@ export function VideoEditingPage({
               </span>
             </button>
           </div>
-          <div className="uc-video-editor__tabs" role="tablist">
+          <div
+            className="uc-video-editor__inspector-body"
+            id="uc-video-editor-inspector-body"
+          >
+            <div className="uc-video-editor__tabs" role="tablist">
             <button
               aria-selected={inspectorTab === 'clip'}
               onClick={() => setInspectorTab('clip')}
@@ -1519,7 +1632,7 @@ export function VideoEditingPage({
                 onInvalid={setMessage}
                 onRelink={() => void relinkSource(selectedClip.clipId)}
                 status={sourceStatuses[selectedClip.clipId]}
-                total={currentDraft.videoTrack.length}
+                total={currentDraft?.videoTrack.length ?? 0}
               />
             ) : (
               <EmptyState
@@ -1618,6 +1731,7 @@ export function VideoEditingPage({
               title="暂无画布设置"
             />
           )}
+          </div>
         </Card>
       </div>
 
@@ -1854,14 +1968,18 @@ function ProjectVideoList({
 }
 
 function VideoTimelineTrack({
+  canReorder,
   frames,
+  onMove,
   onSelect,
   playheadUs,
   segments,
   selectedClipId,
   totalDurationUs
 }: {
+  readonly canReorder: boolean;
   readonly frames: Readonly<Record<string, string>>;
+  readonly onMove: (clipId: string, toIndex: number) => void;
   readonly onSelect: (clipId: string) => void;
   readonly playheadUs: number;
   readonly segments: readonly TimelineSegment[];
@@ -1873,7 +1991,7 @@ function VideoTimelineTrack({
       ? Math.min(100, Math.max(0, (playheadUs / totalDurationUs) * 100))
       : 0;
   return (
-    <div className="uc-video-editor__track">
+    <div className="uc-video-editor__track uc-video-editor__track--video">
       <strong>视频主轨</strong>
       {segments.length ? (
         <div className="uc-video-editor__lane">
@@ -1887,9 +2005,46 @@ function VideoTimelineTrack({
                     ? ' uc-video-editor__seg--selected'
                     : ''
                 }`}
+                draggable={canReorder}
                 key={segment.clipId}
                 onClick={() => onSelect(segment.clipId)}
-                style={{ flexGrow: Math.max(1, segment.durationUs) }}
+                onDragOver={(event) => {
+                  if (!canReorder) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDragStart={(event) => {
+                  onSelect(segment.clipId);
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', segment.clipId);
+                }}
+                onDrop={(event) => {
+                  if (!canReorder) return;
+                  event.preventDefault();
+                  const clipId = event.dataTransfer.getData('text/plain');
+                  const sourceIndex = segments.findIndex(
+                    (item) => item.clipId === clipId
+                  );
+                  if (sourceIndex < 0) return;
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const placeAfter =
+                    event.clientX >= bounds.left + bounds.width / 2;
+                  const toIndex = resolveTimelineDropIndex(
+                    sourceIndex,
+                    segment.index,
+                    placeAfter
+                  );
+                  if (toIndex !== sourceIndex) onMove(clipId, toIndex);
+                }}
+                style={{
+                  flexBasis:
+                    totalDurationUs > 0
+                      ? `${(segment.durationUs / totalDurationUs) * 100}%`
+                      : 'auto',
+                  flexGrow: 0,
+                  flexShrink: 0,
+                  minWidth: 4
+                }}
                 title={`片段 ${segment.index + 1} · 起点 ${formatTime(segment.startUs)}`}
                 type="button"
               >
@@ -3099,6 +3254,52 @@ export function buildTimelineSegments(
         : clip.transitionToNext.durationUs);
     return segment;
   });
+}
+
+export function resolveTimelineDropIndex(
+  sourceIndex: number,
+  targetIndex: number,
+  placeAfter: boolean
+): number {
+  const insertionIndex = targetIndex + (placeAfter ? 1 : 0);
+  return insertionIndex > sourceIndex ? insertionIndex - 1 : insertionIndex;
+}
+
+export function resolveTimelineSegmentAt(
+  segments: readonly TimelineSegment[],
+  playheadUs: number
+): TimelineSegment | undefined {
+  const segment = segments.find(
+    (candidate) =>
+      playheadUs >= candidate.startUs && playheadUs < candidate.endUs
+  );
+  if (segment) return segment;
+  const lastSegment = segments.at(-1);
+  return lastSegment?.endUs === playheadUs ? lastSegment : undefined;
+}
+
+function timelineToSourceUs(
+  draft: VideoEditorDraftDto,
+  clipId: string,
+  playheadUs: number
+): number {
+  const segment = buildTimelineSegments(draft.videoTrack).find(
+    (candidate) => candidate.clipId === clipId
+  );
+  const clip = draft.videoTrack.find((candidate) => candidate.clipId === clipId);
+  if (!segment || !clip) return 0;
+  const timelineOffset = Math.min(
+    segment.durationUs,
+    Math.max(0, playheadUs - segment.startUs)
+  );
+  const sourceOffset = Number(
+    (BigInt(timelineOffset) * BigInt(segment.speedNumerator)) /
+      BigInt(segment.speedDenominator)
+  );
+  return Math.min(
+    clip.sourceRange.outUs,
+    Math.max(clip.sourceRange.inUs, clip.sourceRange.inUs + sourceOffset)
+  );
 }
 
 /**
