@@ -46,6 +46,10 @@ export type DocumentGenerationApplicationErrorCode =
   | 'cancelled'
   | 'response_failed'
   | 'generation_failed'
+  | 'revision_scope_violation'
+  | 'revision_patch_failed'
+  | 'revision_conflict'
+  | 'unvalidated_output'
   | 'storage_error';
 
 export class DocumentGenerationApplicationError extends Error {
@@ -150,8 +154,18 @@ export async function waitForDocumentResponseCompletion<
   readonly read: () => Promise<T>;
   readonly wait: (milliseconds: number) => Promise<void>;
 }): Promise<T | undefined> {
+  let consecutiveReadFailures = 0;
   for (;;) {
-    const response = await input.read();
+    let response: T;
+    try {
+      response = await input.read();
+      consecutiveReadFailures = 0;
+    } catch (error) {
+      consecutiveReadFailures += 1;
+      if (consecutiveReadFailures >= 5) throw error;
+      await input.wait(1_000);
+      continue;
+    }
     if (response.state === 'completed') return response;
     if (
       response.state === 'failed' ||
@@ -426,14 +440,21 @@ export class DocumentGenerationApplicationService {
           .reverse()
           .find((item) => item.role === 'user')?.displayContent;
         if (previousMessage && requestText) {
-          try {
-            const previousOutline = this.compileDraft(
-              previousMessage.content,
-              input.kind
-            );
-            let revisionApplied = false;
-            if (this.dependencies.revisionAgent !== undefined) {
-              const revision = await this.dependencies.revisionAgent({
+          const previousOutline = this.compileLegacyDraft(
+            previousMessage.content,
+            input.kind
+          );
+          let revisionApplied = false;
+          if (this.dependencies.revisionAgent !== undefined) {
+            if (abortController.signal.aborted) {
+              throw new DocumentGenerationApplicationError(
+                'cancelled',
+                'Document revision was cancelled'
+              );
+            }
+            let revision;
+            try {
+              revision = await this.dependencies.revisionAgent({
                 baseWorkId: input.parentWorkId,
                 expectedRevision: input.expectedRevision,
                 kind: input.kind,
@@ -442,41 +463,76 @@ export class DocumentGenerationApplicationService {
                 proposedOutline: outline,
                 signal: abortController.signal
               });
+            } catch (error) {
+              if (error instanceof DocumentGenerationApplicationError) throw error;
               if (
-                revision.agent.state !== 'completed' &&
-                revision.agent.state !== 'completed_unvalidated'
+                error instanceof ConversationApplicationError &&
+                error.code === 'revision_conflict'
               ) {
+                throw error;
+              }
+              if (error instanceof Error && error.name === 'AbortError') {
                 throw new DocumentGenerationApplicationError(
-                  revision.agent.state === 'cancelled' ? 'cancelled' : 'generation_failed',
-                  'Document revision workflow did not complete'
+                  'cancelled',
+                  'Document revision agent timed out or was cancelled'
                 );
               }
-              if (revision.changed) {
-                outline = revision.outline;
-                revisionPatch = revision.patch;
-                revisionPatches = revision.patches;
-                revisionApplied = true;
-              }
-            }
-            const ordinal = parseRevisionOrdinal(requestText);
-            if (ordinal !== undefined) {
-              revisionTargetSectionHeading =
-                previousOutline.sections[ordinal - 1]?.heading;
-            }
-            if (!revisionApplied) {
-              outline = preserveUntargetedDocumentSections(
-                previousOutline,
-                outline,
-                requestText
+              throw new DocumentGenerationApplicationError(
+                'revision_patch_failed',
+                'Document revision patch workflow failed'
               );
             }
-          } catch (error) {
-            if (error instanceof DocumentGenerationApplicationError) throw error;
-            // An older document may predate the current outline contract. In
-            // that case keep the validated model outline rather than blocking
-            // an otherwise valid revision.
+            if (
+              revision.agent.state !== 'completed' &&
+              revision.agent.state !== 'completed_unvalidated'
+            ) {
+              throw new DocumentGenerationApplicationError(
+                revision.agent.state === 'cancelled' ? 'cancelled' : 'unvalidated_output',
+                'Document revision workflow did not complete structural validation'
+              );
+            }
+            if (!revision.changed) {
+              throw new DocumentGenerationApplicationError(
+                'unvalidated_output',
+                'Document revision workflow did not produce a scoped change'
+              );
+            }
+            validateRevisionScope(previousOutline, revision);
+            outline = revision.outline;
+            revisionPatch = revision.patch;
+            revisionPatches = revision.patches;
+            revisionApplied = true;
           }
+          const ordinal = parseRevisionOrdinal(requestText);
+          if (ordinal !== undefined) {
+            const heading = previousOutline.sections[ordinal - 1]?.heading;
+            if (heading === undefined) {
+              throw new DocumentGenerationApplicationError(
+                'revision_scope_violation',
+                'Revision target does not exist in the previous document'
+              );
+            }
+            revisionTargetSectionHeading = heading;
+          }
+          if (!revisionApplied) {
+            outline = preserveUntargetedDocumentSections(
+              previousOutline,
+              outline,
+              requestText
+            );
+          }
+        } else if (this.dependencies.revisionAgent !== undefined) {
+          throw new DocumentGenerationApplicationError(
+            'invalid_structure',
+            'Revision request or parent document was not found'
+          );
         }
+      }
+      if (abortController.signal.aborted) {
+        throw new DocumentGenerationApplicationError(
+          'cancelled',
+          'Document generation was cancelled before file creation'
+        );
       }
       await this.persistStatus(input, {
         state: 'generating_file',
@@ -531,6 +587,20 @@ export class DocumentGenerationApplicationService {
         error.code === 'invalid_structure' &&
         /not valid JSON/i.test(error.message)
       ) {
+        return this.dependencies.compiler.recover({ content, kind });
+      }
+      throw error;
+    }
+  }
+
+  private compileLegacyDraft(
+    content: string,
+    kind: DocumentWorkspaceKind
+  ): DocumentOutline {
+    try {
+      return this.dependencies.compiler.compile({ content, kind });
+    } catch (error) {
+      if (error instanceof DocumentDraftCompilationError && error.code === 'invalid_structure') {
         return this.dependencies.compiler.recover({ content, kind });
       }
       throw error;
@@ -728,15 +798,85 @@ function documentFailureCode(error: unknown): DocumentGenerationFailureCode {
   if (error instanceof DocumentDraftCompilationError) {
     return error.code === 'resource_limit' ? 'resource_limit' : 'invalid_outline';
   }
-  if (error instanceof DocumentGenerationApplicationError) {
+    if (error instanceof DocumentGenerationApplicationError) {
     if (error.code === 'resource_limit') return 'resource_limit';
     if (error.code === 'layout_overflow') return 'document_layout_overflow';
     if (error.code === 'storage_error') return 'storage_error';
     if (error.code === 'invalid_structure') return 'invalid_outline';
     if (error.code === 'response_failed') return 'response_failed';
+    if (error.code === 'revision_scope_violation') return 'revision_scope_violation';
+    if (error.code === 'revision_patch_failed') return 'revision_patch_failed';
+    if (error.code === 'revision_conflict') return 'revision_conflict';
+    if (error.code === 'unvalidated_output') return 'unvalidated_output';
     return 'generation_failed';
   }
+  if (
+    error instanceof ConversationApplicationError &&
+    error.code === 'revision_conflict'
+  ) {
+    return 'revision_conflict';
+  }
   return 'generation_failed';
+}
+
+function validateRevisionScope(
+  previous: DocumentOutline,
+  revision: DocumentRevisionAgentResult
+): void {
+  const patches = revision.patch
+    ? [revision.patch]
+    : revision.patches && revision.patches.length > 0
+      ? [...revision.patches]
+      : undefined;
+  if (!patches) {
+    throw new DocumentGenerationApplicationError(
+      'revision_patch_failed',
+      'Document revision did not return a validated patch'
+    );
+  }
+  const targetIndexes = new Set<number>();
+  for (const patch of patches) {
+    const target = patch.target;
+    const sectionIndex = target.sectionIndex;
+    const expectedSection = previous.sections[sectionIndex];
+    if (
+      !Number.isSafeInteger(sectionIndex) ||
+      sectionIndex < 0 ||
+      expectedSection === undefined ||
+      target.sectionHeading !== expectedSection.heading ||
+      (previous.kind === 'ppt' &&
+        'pageNumber' in target &&
+        target.pageNumber !== undefined &&
+        target.pageNumber !== sectionIndex + 2)
+    ) {
+      throw new DocumentGenerationApplicationError(
+        'revision_scope_violation',
+        'Revision patch targets an invalid or cross-document range'
+      );
+    }
+    targetIndexes.add(sectionIndex);
+  }
+  if (revision.outline.title !== previous.title) {
+    throw new DocumentGenerationApplicationError(
+      'revision_scope_violation',
+      'Revision changed the document title outside the requested range'
+    );
+  }
+  if (revision.outline.sections.length !== previous.sections.length) {
+    throw new DocumentGenerationApplicationError(
+      'revision_scope_violation',
+      'Revision changed the document section count outside the requested range'
+    );
+  }
+  for (const [sectionIndex, previousSection] of previous.sections.entries()) {
+    if (targetIndexes.has(sectionIndex)) continue;
+    if (JSON.stringify(revision.outline.sections[sectionIndex]) !== JSON.stringify(previousSection)) {
+      throw new DocumentGenerationApplicationError(
+        'revision_scope_violation',
+        'Revision changed a section outside the requested range'
+      );
+    }
+  }
 }
 
 export function toDocumentGenerationApplicationInput(input: {

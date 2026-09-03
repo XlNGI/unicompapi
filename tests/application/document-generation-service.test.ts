@@ -349,4 +349,37 @@ describe('waitForDocumentResponseCompletion', () => {
 
     expect(wait).not.toHaveBeenCalled();
   });
+
+  it('recovers from transient completion-read failures without discarding the response', async () => {
+    let reads = 0;
+
+    const result = await waitForDocumentResponseCompletion({
+      read: async () => {
+        reads += 1;
+        if (reads < 4) throw new Error('transient storage read');
+        return { state: 'completed' as const, content: 'completed outline' };
+      },
+      wait: async () => undefined
+    });
+
+    expect(reads).toBe(4);
+    expect(result).toEqual({
+      state: 'completed',
+      content: 'completed outline'
+    });
+  });
+
+  it('fails closed after five consecutive completion-read failures', async () => {
+    let reads = 0;
+
+    await expect(waitForDocumentResponseCompletion({
+      read: async () => {
+        reads += 1;
+        throw new Error('persistent storage read failure');
+      },
+      wait: async () => undefined
+    })).rejects.toThrow('persistent storage read failure');
+
+    expect(reads).toBe(5);
+  });
 });

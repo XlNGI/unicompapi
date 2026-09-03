@@ -1,6 +1,7 @@
 import {
   mkdtemp,
   mkdir,
+  readFile,
   readdir,
   rename,
   rm,
@@ -11,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readOfficeDocumentStructureFromBuffer } from '../../src/platform/documents/office-document-tool-executor';
 import {
   DocumentGenerationRunner,
   generateDocumentFile,
@@ -196,6 +198,74 @@ describe('document generation runner', () => {
       ? path.join(rootDirectory, revised.file.locator.relativePath)
       : '';
     expect(await pathExists(childFile)).toBe(true);
+    expect(await documentFiles(rootDirectory)).toHaveLength(2);
+  });
+
+  it('authorizes every continuation slide in a scoped PPT section revision', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-ppt-continuation-revision');
+    const section = (marker: string) => ({
+      heading: '第二章',
+      level: 1 as const,
+      blocks: Array.from({ length: 18 }, (_, index) => ({
+        type: 'bullets' as const,
+        items: [`${marker} ${index + 1}`]
+      }))
+    });
+    const baseOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '局部章节修订',
+      sections: [section('旧内容')]
+    }));
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-03T00:00:00.000Z'
+    });
+    const base = await runner.run({
+      kind: 'ppt',
+      title: baseOutline.title,
+      contentFingerprint: 'e'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'ppt-continuation-base',
+      outline: baseOutline
+    });
+    const baseFile = base.file.locator.kind === 'project'
+      ? path.join(rootDirectory, base.file.locator.relativePath)
+      : '';
+    const baseStructure = await readOfficeDocumentStructureFromBuffer({
+      buffer: await readFile(baseFile),
+      kind: 'ppt',
+      displayName: base.work.name
+    });
+    expect(baseStructure.sections.length).toBeGreaterThanOrEqual(5);
+    expect(
+      baseStructure.sections.slice(2, 5).map((slide) => slide.heading)
+    ).toEqual(['第二章', '第二章', '第二章']);
+
+    const revisedOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: baseOutline.title,
+      sections: [section('新内容')]
+    }));
+    const revised = await runner.run({
+      kind: 'ppt',
+      title: revisedOutline.title,
+      contentFingerprint: 'f'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'ppt-continuation-revision',
+      outline: revisedOutline,
+      parentWorkId: base.work.id,
+      revisionTargetSectionHeading: '第二章',
+      revisionPatch: {
+        operation: 'replace_section',
+        target: { sectionIndex: 0, sectionHeading: '第二章', pageNumber: 3 },
+        replacement: revisedOutline.sections[0]
+      }
+    });
+
+    expect(revised.work.parentWorkId).toBe(base.work.id);
+    expect(revised.execution.state).toBe('completed');
     expect(await documentFiles(rootDirectory)).toHaveLength(2);
   });
 

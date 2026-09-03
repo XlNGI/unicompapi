@@ -112,6 +112,10 @@ interface RunnerContext {
 
 const maximumGeneratedDocumentBytes = 64 * 1024 * 1024;
 
+function isPptContinuationHeading(heading: string, sectionHeading: string): boolean {
+  return heading === sectionHeading || heading.startsWith(`${sectionHeading}（续`);
+}
+
 export class DocumentGenerationRunner {
   constructor(
     private readonly options: {
@@ -490,14 +494,32 @@ export class DocumentGenerationRunner {
       }
       if (
         kind === 'ppt' &&
+        (patch.operation === 'clear_section' || patch.operation === 'replace_section') &&
         'pageNumber' in patch.target &&
         patch.target.pageNumber !== undefined
       ) {
         const pageIndex = patch.target.pageNumber - 1;
-        if (pageIndex < 0 || pageIndex >= source.sections.length) {
+        const sectionHeading = patch.target.sectionHeading;
+        if (
+          pageIndex < 0 ||
+          pageIndex >= source.sections.length ||
+          sectionHeading === undefined ||
+          !isPptContinuationHeading(source.sections[pageIndex].heading, sectionHeading)
+        ) {
           throw new DocumentGenerationError('verification_failed', 'Scoped document revision page target was not found');
         }
         targetIndexes.add(pageIndex);
+        for (
+          let continuationIndex = pageIndex + 1;
+          continuationIndex < source.sections.length &&
+          isPptContinuationHeading(
+            source.sections[continuationIndex].heading,
+            sectionHeading
+          );
+          continuationIndex += 1
+        ) {
+          targetIndexes.add(continuationIndex);
+        }
       } else {
         targetIndexes.add(index);
       }

@@ -689,6 +689,9 @@ async function resolvePptTargetNames(
   sectionHeading?: string,
   pageNumber?: number
 ): Promise<readonly string[]> {
+  const isTargetSlideHeading = (text: string): boolean =>
+    sectionHeading !== undefined &&
+    (text === sectionHeading || text.startsWith(`${sectionHeading}（续`));
   if (sectionHeading) {
     const targetIndex = pageNumber === undefined ? sectionIndex : pageNumber - 1;
     const ordinalName = names[targetIndex];
@@ -696,7 +699,7 @@ async function resolvePptTargetNames(
       const ordinalXml = await zip.file(ordinalName)!.async('string');
       const ordinalTexts = [...ordinalXml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
         .map((match) => decodeXml(match[1]));
-      const ordinalIsTarget = ordinalTexts.some((text) => text === sectionHeading);
+      const ordinalIsTarget = ordinalTexts.some(isTargetSlideHeading);
       const duplicateHeading = pageNumber === undefined
         ? await hasMultiplePptHeadings(zip, names, sectionHeading)
         : false;
@@ -706,7 +709,7 @@ async function resolvePptTargetNames(
           const xml = await zip.file(names[index])!.async('string');
           const texts = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
             .map((match) => decodeXml(match[1]));
-          if (!texts.some((text) => text.startsWith(`${sectionHeading}（续`))) break;
+          if (!texts.some(isTargetSlideHeading)) break;
           targets.push(names[index]);
         }
         return targets;
@@ -726,7 +729,7 @@ async function resolvePptTargetNames(
         const xml = await zip.file(names[index])!.async('string');
         const texts = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
           .map((match) => decodeXml(match[1]));
-        if (!texts.some((text) => text.startsWith(`${sectionHeading}（续`))) break;
+        if (!texts.some(isTargetSlideHeading)) break;
         targets.push(names[index]);
       }
       return targets;
