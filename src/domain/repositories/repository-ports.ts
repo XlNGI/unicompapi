@@ -21,6 +21,9 @@ import type {
 } from '../entities/conversation';
 import type { ConversationResponseDraftV1 } from '../entities/conversation-response';
 import type {
+  ConversationWorkflowV1
+} from '../entities/conversation-workflow';
+import type {
   ConversationResponseExecutionV1,
   ConversationResponseStreamEventV1
 } from '../entities/conversation-response-execution';
@@ -47,6 +50,7 @@ import type {
   AssetId,
   CapabilityEvidenceId,
   ConnectionId,
+  ConversationWorkflowId,
   ConversationResponseDraftId,
   ConversationResponseExecutionId,
   ConversationResponseStreamEventId,
@@ -95,6 +99,15 @@ export interface ConversationResponseDraftRepository {
   list(conversationId?: ConversationId): Promise<readonly ConversationResponseDraftV1[]>;
   create(draft: ConversationResponseDraftV1): Promise<void>;
   save(draft: ConversationResponseDraftV1, expectedRevision: number): Promise<void>;
+}
+
+export interface ConversationWorkflowRepository {
+  readonly projectId: ProjectId;
+  get(id: ConversationWorkflowId): Promise<ConversationWorkflowV1 | undefined>;
+  list(conversationId?: ConversationId): Promise<readonly ConversationWorkflowV1[]>;
+  create(workflow: ConversationWorkflowV1): Promise<void>;
+  createSupersedingPending(workflow: ConversationWorkflowV1): Promise<void>;
+  save(workflow: ConversationWorkflowV1, expectedRevision: number): Promise<void>;
 }
 
 export interface ConversationResponseExecutionRepository {

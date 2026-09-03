@@ -39,6 +39,7 @@ export function registerChatContextIpcHandlers(options: {
   });
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;
+  const workflows = runtime.workflows;
   const responseSubscriptionOwners = new Map<string, number>();
 
   ipcMain.handle(chatContextIpcChannels.createConversation, (_event, request: unknown) =>
@@ -97,6 +98,24 @@ export function registerChatContextIpcHandlers(options: {
   );
   ipcMain.handle(chatContextIpcChannels.startResponse, (_event, request: unknown) =>
     runtime.responses.start(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.startWorkflow, (_event, request: unknown) =>
+    workflows.start(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.answerWorkflow, (_event, request: unknown) =>
+    workflows.answer(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.confirmWorkflow, (_event, request: unknown) =>
+    workflows.confirm(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.cancelWorkflow, (_event, request: unknown) =>
+    workflows.cancel(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getWorkflow, (_event, request: unknown) =>
+    workflows.get(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.getPendingWorkflow, (_event, request: unknown) =>
+    workflows.getPending(request)
   );
   ipcMain.handle(chatContextIpcChannels.getResponseExecution, (_event, request: unknown) =>
     runtime.responses.getExecution(request)

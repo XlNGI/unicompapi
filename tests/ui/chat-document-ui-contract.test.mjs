@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 
 const page = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
+const failureNoticeSource = await readFile(
+  'src/ui/chat-response-failure-notice.ts',
+  'utf8'
+);
 
 test('chat page exposes a document generation entry without making chat the only path', () => {
   assert.match(page, /documentMode/);
@@ -42,8 +46,9 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /ragEnabled/);
   assert.match(page, /检索资料/);
   assert.match(page, /retrieveContext/);
-  assert.match(page, /analyzeOfficeRequest/);
-  assert.doesNotMatch(page, /pendingDocumentClarification/);
+  assert.match(page, /chat\.startWorkflow\(/);
+  assert.match(page, /chat\.answerWorkflow\(/);
+  assert.doesNotMatch(page, /analyzeOfficeRequest|analyzeLocalConversationIntent/);
   assert.match(page, /documentKindInstruction/);
   assert.match(page, /documentResult/);
   assert.match(page, /openDocumentWork/);
@@ -117,7 +122,8 @@ test('document outline generation uses one model response and local application 
   assert.doesNotMatch(page, /chat-doc-repair/);
   assert.doesNotMatch(page, /outlineRepairAttempted/);
   assert.doesNotMatch(page, /大纲格式异常/);
-  assert.match(page, /displayContent: requirements/);
+  assert.match(page, /workflow:\s*\{[\s\S]*?workflowId:/);
+  assert.doesNotMatch(page, /displayContent: requirements/);
   assert.doesNotMatch(page, /documentDraftMessageIds/);
   assert.match(page, /documentGenerationStatus/);
   assert.match(page, /文档生成失败/);
@@ -134,10 +140,12 @@ test('document outline payload is never rendered as ordinary chat markdown', () 
   assert.match(page, /documentResponseActive\s*\|\|\s*hideDocumentDraftContent/);
 });
 
-test('document intent passes the resolved kind without waiting for React state', () => {
-  assert.match(page, /analyzeOfficeRequest/);
-  assert.match(page, /sendDocumentMessage\([\s\S]*?documentIntent\.action/);
-  assert.match(page, /resolvedKind \?\?/);
+test('document execution consumes the validated workflow plan without re-parsing in React', () => {
+  assert.match(page, /executeReadyWorkflow/);
+  assert.match(page, /workflow\.plan\.kind === 'document'/);
+  assert.match(page, /workflow\.plan\.action === 'revise'/);
+  assert.match(page, /sendDocumentMessage\(\{[\s\S]*?workflow,[\s\S]*?kind,[\s\S]*?action/);
+  assert.doesNotMatch(page, /analyzeOfficeRequest|analyzeLocalConversationIntent/);
 });
 
 test('composer resolves Office revisions in the background without a persistent action preview', () => {
@@ -147,9 +155,9 @@ test('composer resolves Office revisions in the background without a persistent 
   assert.doesNotMatch(page, /uc-chat-page__office-intent/);
   assert.doesNotMatch(styles, /\.uc-chat-page__office-intent/);
   assert.match(page, /targetMessageId/);
-  assert.match(page, /officeDocuments/);
-  assert.match(page, /unresolvedMissing/);
-  assert.match(page, /请补充：\$\{unresolvedMissing\.join\('、'\)\}/);
+  assert.match(page, /workflow\.plan\.targetHint/);
+  assert.match(page, /workflowQuestion/);
+  assert.match(page, /needs_clarification/);
 });
 
 test('document submission refreshes one stale revision without another click', () => {
@@ -169,11 +177,11 @@ test('document response failures retain the safe provider reason after polling',
   assert.match(page, /failedResponseNotice\(\s*failedMessage,[\s\S]*?failureSafeCode\?\.executionId/);
   assert.match(page, /responseFailureSafeCodeRef\.current = undefined/);
   assert.match(
-    page,
+    failureNoticeSource,
     /safeCode\?\.includes\('timeout'\) \|\| message\?\.failureReason === 'unknown'/
   );
-  assert.match(page, /远端状态和费用可能已经产生/);
-  assert.match(page, /避免立即重复发送/);
+  assert.match(failureNoticeSource, /远端状态和费用可能已经产生/);
+  assert.match(failureNoticeSource, /避免立即重复发送/);
 });
 
 test('document submission guards re-entry before React state updates', () => {

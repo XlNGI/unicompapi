@@ -34,6 +34,7 @@ export interface ConversationResponseDraftV1 {
   readonly conversationRevision: number;
   readonly userMessageId: MessageId;
   readonly userMessageRevision: number;
+  readonly promptContent?: string;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
@@ -48,6 +49,7 @@ export interface CreateConversationResponseDraftInput {
   readonly conversationRevision: number;
   readonly userMessageId: MessageId;
   readonly userMessageRevision: number;
+  readonly promptContent?: string;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections?: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues?: Readonly<Record<string, ParameterValue>>;
@@ -66,6 +68,9 @@ export function createConversationResponseDraft(
     conversationRevision: input.conversationRevision,
     userMessageId: input.userMessageId,
     userMessageRevision: input.userMessageRevision,
+    ...(input.promptContent !== undefined
+      ? { promptContent: input.promptContent }
+      : {}),
     productFeature: input.productFeature,
     contextSelections: input.contextSelections ?? [],
     parameterValues: input.parameterValues ?? {},
@@ -133,9 +138,10 @@ export function parseConversationResponseDraft(
   ]);
   const keys = Object.keys(item);
   const hasParameterValues = Object.prototype.hasOwnProperty.call(item, 'parameterValues');
+  const hasPromptContent = Object.prototype.hasOwnProperty.call(item, 'promptContent');
   if (
-    keys.some((key) => !requiredKeys.has(key) && key !== 'parameterValues') ||
-    requiredKeys.size + (hasParameterValues ? 1 : 0) !== keys.length ||
+    keys.some((key) => !requiredKeys.has(key) && key !== 'parameterValues' && key !== 'promptContent') ||
+    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) !== keys.length ||
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
     Number(item.revision) < 0 ||
@@ -155,6 +161,12 @@ export function parseConversationResponseDraft(
   }
   const createdAt = toIsoTimestamp(String(item.createdAt));
   const updatedAt = toIsoTimestamp(String(item.updatedAt));
+  const promptContent = hasPromptContent
+    ? nonBlank(item.promptContent, 'draft.promptContent')
+    : undefined;
+  if (promptContent !== undefined && promptContent.length > 1_000_000) {
+    throw new InvariantViolationError('conversation response draft promptContent is too long');
+  }
   const contextSelections = item.contextSelections.map(
     parsePinnedProjectContextSelection
   );
@@ -174,6 +186,7 @@ export function parseConversationResponseDraft(
     conversationRevision: Number(item.conversationRevision),
     userMessageId: toMessageId(nonBlank(item.userMessageId, 'draft.userMessageId')),
     userMessageRevision: Number(item.userMessageRevision),
+    ...(promptContent !== undefined ? { promptContent } : {}),
     productFeature,
     contextSelections,
     parameterValues: hasParameterValues

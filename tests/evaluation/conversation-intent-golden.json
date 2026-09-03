@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "conversation-intent-offline-golden",
+  "version": "1.0.0",
+  "updatedAt": "2026-09-03",
+  "cases": [
+  { "input": "你好，介绍一下你能做什么", "expectedKind": "chat" },
+  { "input": "PPT 应该怎么做得更专业？", "expectedKind": "chat" },
+  { "input": "Excel 的 XLOOKUP 怎么用", "expectedKind": "chat" },
+  { "input": "Word 和 PPT 有什么区别？", "expectedKind": "chat" },
+  { "input": "分析一下这份报告的问题", "expectedKind": "chat" },
+  { "input": "帮我总结这段话的三个要点", "expectedKind": "chat" },
+  { "input": "生成 PPT 时需要注意什么", "expectedKind": "chat" },
+  { "input": "这份报告写得怎么样？", "expectedKind": "chat" },
+  { "input": "我不想生成 PPT，只想了解做法", "expectedKind": "chat" },
+  { "input": "今天北京天气如何", "expectedKind": "chat" },
+
+  { "input": "这个报告出了问题", "expectedKind": "unknown", "expectedReadiness": "needs_clarification" },
+  { "input": "不要帮我生成 PPT", "expectedKind": "unknown", "expectedReadiness": "needs_clarification" },
+  { "input": "不要删除第二章", "expectedKind": "unknown", "expectedReadiness": "needs_clarification" },
+  { "input": "改一下", "expectedKind": "unknown", "expectedReadiness": "needs_clarification" },
+  { "input": "做一个", "expectedKind": "unknown", "expectedReadiness": "needs_clarification" },
+  { "input": "报告", "expectedKind": "unknown", "expectedReadiness": "needs_clarification" },
+  { "input": "生成 10 页 PPT 并导出 Excel", "expectedKind": "document", "expectedReadiness": "needs_clarification" },
+  { "input": "同时做一份 Word 方案和 PPT 汇报", "expectedKind": "document", "expectedReadiness": "needs_clarification" },
+
+  { "input": "帮我做一份季度经营汇报 PPT", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt", "expectedReadiness": "ready" },
+  { "input": "能不能帮我生成一份产品介绍 PPT？", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt" },
+  { "input": "来一份季度汇报", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt" },
+  { "input": "重新做一个培训课件", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt" },
+  { "input": "给我一个表格", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "excel" },
+  { "input": "给我整一个销售表", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "excel" },
+  { "input": "我想要一份员工台账", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "excel" },
+  { "input": "把这些数据做成表格", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "excel" },
+  { "input": "生成一份包含表格的 Word 报告", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word" },
+  { "input": "起草一份采购合同", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word" },
+  { "input": "请编写项目复盘报告", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word" },
+  { "input": "整理成会议纪要", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word" },
+  { "input": "帮我做个总结", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "auto", "expectedReadiness": "needs_clarification" },
+
+  {
+    "input": "再加一个例子",
+    "context": { "documents": [{ "messageId": "ppt-1", "kind": "ppt", "fileName": "季度汇报.pptx" }] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "ppt", "expectedResolvedMessageId": "ppt-1"
+  },
+  {
+    "input": "再加一个例子",
+    "context": { "documents": [
+      { "messageId": "ppt-1", "kind": "ppt", "fileName": "季度汇报.pptx" },
+      { "messageId": "word-1", "kind": "word", "fileName": "项目方案.docx" }
+    ] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedReadiness": "needs_clarification"
+  },
+  {
+    "input": "把季度汇报.pptx 的第二页改成时间线",
+    "context": { "documents": [
+      { "messageId": "ppt-1", "kind": "ppt", "fileName": "季度汇报.pptx" },
+      { "messageId": "ppt-2", "kind": "ppt", "fileName": "销售汇报.pptx" }
+    ] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "ppt", "expectedTargetUnit": "page", "expectedTargetOrdinal": 2, "expectedResolvedMessageId": "ppt-1"
+  },
+  {
+    "input": "不是这个，改前一个版本",
+    "context": { "documents": [
+      { "messageId": "ppt-old", "kind": "ppt", "fileName": "经营汇报-v1.pptx" },
+      { "messageId": "ppt-new", "kind": "ppt", "fileName": "经营汇报-v2.pptx" }
+    ] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "ppt", "expectedTargetUnit": "version", "expectedTargetOrdinal": 1, "expectedResolvedMessageId": "ppt-old"
+  },
+  {
+    "input": "把销售表的 B2 改成 100",
+    "context": { "documents": [{ "messageId": "excel-1", "kind": "excel", "fileName": "销售表.xlsx" }] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "excel", "expectedTargetUnit": "cell", "expectedResolvedMessageId": "excel-1"
+  },
+  {
+    "input": "修改上一版 PPT 的第三张",
+    "context": { "documents": [{ "messageId": "ppt-1", "kind": "ppt", "fileName": "路演稿.pptx" }] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "ppt", "expectedTargetUnit": "page", "expectedTargetOrdinal": 3, "expectedResolvedMessageId": "ppt-1"
+  },
+  {
+    "input": "把 PPT 第二页改成时间线",
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "ppt", "expectedReadiness": "needs_clarification", "expectedTargetUnit": "page", "expectedTargetOrdinal": 2
+  },
+  {
+    "input": "删除刚才 PPT 的第二页",
+    "context": { "documents": [{ "messageId": "ppt-1", "kind": "ppt", "fileName": "路演稿.pptx" }] },
+    "expectedKind": "document", "expectedAction": "revise", "expectedDocumentKind": "ppt", "expectedReadiness": "needs_confirmation", "expectedResolvedMessageId": "ppt-1"
+  },
+
+  { "input": "根据项目资料做一份方案", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "internal" },
+  { "input": "根据上传附件整理成会议纪要", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "internal" },
+  { "input": "联网查找最新公开数据并生成 Excel", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "excel", "expectedSourcePolicy": "web" },
+  { "input": "用网上实时信息做一份市场汇报 PPT", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt", "expectedSourcePolicy": "web" },
+  { "input": "结合内部资料和最新公开信息制作报告", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word", "expectedSourcePolicy": "mixed" },
+  { "input": "根据 2025 年销售数据生成报表", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "none" }
+  ]
+}
