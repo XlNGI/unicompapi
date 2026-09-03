@@ -6,6 +6,10 @@ const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
 const buttonSource = await readFile('src/components/Button.tsx', 'utf8');
+const failureNoticeSource = await readFile(
+  'src/ui/chat-response-failure-notice.ts',
+  'utf8'
+);
 const markdownSource = await readFile('src/components/MarkdownMessage.tsx', 'utf8');
 
 test('chat page uses project conversations and composer-first streaming workflow', () => {
@@ -18,6 +22,11 @@ test('chat page uses project conversations and composer-first streaming workflow
     'deleteConversation',
     'listTextCandidates',
     'startResponse',
+    'startWorkflow',
+    'answerWorkflow',
+    'confirmWorkflow',
+    'cancelWorkflow',
+    'getPendingWorkflow',
     'subscribeResponseEvents',
     'cancelResponseExecution',
     'getConversation'
@@ -25,9 +34,13 @@ test('chat page uses project conversations and composer-first streaming workflow
     assert.match(source, new RegExp(`chat\\.${operation}\\(`));
   }
   assert.match(source, /runtime_not_allowed/);
+  assert.doesNotMatch(source, /analyzeLocalConversationIntent|analyzeOfficeRequest/);
+  assert.match(source, /activeWorkflow/);
+  assert.match(source, /needs_clarification/);
+  assert.match(source, /needs_confirmation/);
   assert.match(source, /parameterValues:\s*\{\}/);
   assert.match(source, /已截断/);
-  assert.match(source, /回答达到当前输出长度上限/);
+  assert.match(failureNoticeSource, /回答达到当前输出长度上限/);
   assert.match(source, /searchPlaceholder="搜索模型或服务商"/);
   assert.match(source, /ariaLabel="模型设置"/);
   assert.match(source, /listTextCandidates\('text_chat'\)/);
@@ -113,7 +126,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /uc-chat-page__scroll-to-bottom/);
   assert.match(source, /failedResponseNotice/);
   assert.match(source, /failedResponseNotice\(assistant, event\.safeCode\)/);
-  assert.match(source, /模型请求未正常完成/);
+  assert.match(failureNoticeSource, /模型请求未正常完成/);
   assert.match(source, /chat\.subscribeResponseEvents\(/);
   assert.match(source, /subscribeResponseEvents\(executionId, latestSequence, onEvent\)/);
   assert.match(source, /event\.sequence <= latestSequence/);

@@ -79,6 +79,18 @@ describe('Office request intent', () => {
       targetDocumentKind: 'ppt',
       missing: []
     });
+    expect(
+      analyzeOfficeRequest('将第二章内容清空', {
+        documents: [{ messageId: 'ppt-latest', kind: 'ppt', fileName: '项目演示.pptx' }]
+      })
+    ).toMatchObject({
+      kind: 'document',
+      action: 'revise',
+      documentKind: 'ppt',
+      targetDocumentKind: 'ppt',
+      targetMessageId: 'ppt-latest',
+      missing: []
+    });
   });
 
   it('uses the current conversation documents to resolve natural follow-up edits', () => {

@@ -5,4 +5,7 @@ export * from './office-request-intent';
 export * from './document-intent-planner';
 export * from './document-agent-loop';
 export * from './document-revision-agent';
+export * from './conversation-intent-orchestrator';
+export * from './conversation-workflow-service';
+export * from './conversation-context-builder';
 export * from './latest-snapshot-autosave';

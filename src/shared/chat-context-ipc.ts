@@ -18,6 +18,12 @@ export const chatContextIpcChannels = {
   prepareResponseSubmission: 'chat-context:prepare-response-submission',
   submitResponse: 'chat-context:submit-response',
   startResponse: 'chat-context:start-response',
+  startWorkflow: 'chat-context:start-workflow',
+  answerWorkflow: 'chat-context:answer-workflow',
+  confirmWorkflow: 'chat-context:confirm-workflow',
+  cancelWorkflow: 'chat-context:cancel-workflow',
+  getWorkflow: 'chat-context:get-workflow',
+  getPendingWorkflow: 'chat-context:get-pending-workflow',
   getResponseExecution: 'chat-context:get-response-execution',
   replayResponseEvents: 'chat-context:replay-response-events',
   cancelResponseExecution: 'chat-context:cancel-response-execution',
@@ -70,6 +76,11 @@ export type ChatContextIpcErrorCode =
   | 'selection_out_of_range'
   | 'revision_conflict'
   | 'explicit_confirmation_required'
+  | 'workflow_not_found'
+  | 'workflow_revision_conflict'
+  | 'workflow_not_ready'
+  | 'clarification_required'
+  | 'confirmation_expired'
   | 'adapter_unavailable'
   | 'storage_error';
 
@@ -119,6 +130,10 @@ export interface MessageDto {
       | 'invalid_outline'
       | 'resource_limit'
       | 'document_layout_overflow'
+      | 'revision_scope_violation'
+      | 'revision_patch_failed'
+      | 'revision_conflict'
+      | 'unvalidated_output'
       | 'generation_failed'
       | 'storage_error';
   };
@@ -362,6 +377,62 @@ export interface ConversationResponseStartDto {
   readonly execution: ConversationResponseExecutionDto;
 }
 
+export interface ConversationIntentPlanDto {
+  readonly schemaVersion: 1;
+  readonly kind: 'chat' | 'document' | 'unknown';
+  readonly action?: 'answer' | 'create' | 'revise' | 'analyze';
+  readonly documentKind?: 'word' | 'excel' | 'ppt' | 'auto';
+  readonly targetHint?: {
+    readonly unit: 'document' | 'version' | 'page' | 'section' | 'table' | 'cell' | 'block';
+    readonly ordinal?: number;
+    readonly name?: string;
+  };
+  readonly parameters: Readonly<Record<string, string | number | boolean>>;
+  readonly sourcePolicy: 'none' | 'internal' | 'web' | 'mixed';
+  readonly missing: readonly string[];
+  readonly ambiguities: readonly string[];
+  readonly confidence: 'high' | 'medium' | 'low';
+  readonly needsConfirmation: boolean;
+}
+
+export interface ConversationWorkflowDto {
+  readonly workflowId: string;
+  readonly projectId: string;
+  readonly conversationId: string;
+  readonly sourceMessageId: string;
+  readonly revision: number;
+  readonly status:
+    | 'draft'
+    | 'needs_clarification'
+    | 'needs_confirmation'
+    | 'ready'
+    | 'executing'
+    | 'completed'
+    | 'failed'
+    | 'cancelled';
+  readonly plan: ConversationIntentPlanDto;
+  readonly pendingQuestions: readonly {
+    readonly field: string;
+    readonly question: string;
+    readonly required: boolean;
+  }[];
+  readonly resolvedTarget?: {
+    readonly artifactRef: string;
+    readonly version: number;
+  };
+  readonly confirmationId?: string;
+  readonly planHash?: string;
+  readonly confirmationExpiresAt?: string;
+  readonly executionId?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ConversationWorkflowStartDto {
+  readonly conversation: ConversationDto;
+  readonly workflow: ConversationWorkflowDto;
+}
+
 export interface ConversationResponseStreamEventDto {
   readonly schemaVersion: 1;
   readonly responseExecutionId: string;
@@ -426,6 +497,10 @@ export interface StartResponseRequest {
   readonly title: string;
   readonly content: string;
   readonly displayContent?: string;
+  readonly workflow?: {
+    readonly workflowId: string;
+    readonly expectedRevision: number;
+  };
   readonly productFeature: 'text_chat' | 'text_reasoning';
   readonly candidateId: string;
   readonly contextSelections: readonly {
@@ -437,6 +512,36 @@ export interface StartResponseRequest {
     readonly [key: string]: unknown;
   }>>;
   readonly confirmed: boolean;
+}
+
+export interface StartWorkflowRequest {
+  readonly clientCommandId: string;
+  readonly conversation: {
+    readonly conversationId: string;
+    readonly expectedRevision: number;
+  } | null;
+  readonly title: string;
+  readonly content: string;
+  readonly intentHint?: {
+    readonly kind: 'document';
+    readonly documentKind: 'auto' | 'word' | 'excel' | 'ppt';
+  };
+}
+
+export interface AnswerWorkflowRequest {
+  readonly workflowId: string;
+  readonly expectedWorkflowRevision: number;
+  readonly expectedConversationRevision: number;
+  readonly content: string;
+}
+
+export interface WorkflowRevisionRequest {
+  readonly workflowId: string;
+  readonly expectedRevision: number;
+}
+
+export interface WorkflowIdRequest {
+  readonly workflowId: string;
 }
 
 export interface ResponseExecutionRequest {
@@ -669,12 +774,18 @@ export const chatContextRequestParsers = {
       value !== null &&
       !Array.isArray(value) &&
       Object.prototype.hasOwnProperty.call(value, 'displayContent');
+    const hasWorkflow =
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, 'workflow');
     const record = exactRecord(value, [
       'clientCommandId',
       'conversation',
       'title',
       'content',
       ...(hasDisplayContent ? ['displayContent'] : []),
+      ...(hasWorkflow ? ['workflow'] : []),
       'productFeature',
       'candidateId',
       'contextSelections',
@@ -694,6 +805,9 @@ export const chatContextRequestParsers = {
     const editedMessageId = !conversation || conversation.editedMessageId === null
       ? null
       : controlledId(conversation.editedMessageId, 'editedMessageId');
+    const workflow = !hasWorkflow
+      ? undefined
+      : exactRecord(record.workflow, ['workflowId', 'expectedRevision']);
     if (!Array.isArray(record.contextSelections) || record.contextSelections.length > 100) {
       throw new TypeError('contextSelections are invalid');
     }
@@ -733,12 +847,100 @@ export const chatContextRequestParsers = {
             )
           }
         : {}),
+      ...(workflow !== undefined
+        ? {
+            workflow: {
+              workflowId: controlledId(workflow.workflowId, 'workflowId'),
+              expectedRevision: revision(
+                workflow.expectedRevision,
+                'workflow.expectedRevision'
+              )
+            }
+          }
+        : {}),
       productFeature: record.productFeature,
       candidateId: controlledId(record.candidateId, 'candidateId'),
       contextSelections,
       parameterValues: parameterValuesRecord(record.parameterValues),
       confirmed: booleanValue(record.confirmed, 'confirmed')
     };
+  },
+  startWorkflow(value: unknown): StartWorkflowRequest {
+    const hasIntentHint =
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, 'intentHint');
+    const record = exactRecord(value, [
+      'clientCommandId',
+      'conversation',
+      'title',
+      'content',
+      ...(hasIntentHint ? ['intentHint'] : [])
+    ]);
+    const conversation = record.conversation === null
+      ? null
+      : exactRecord(record.conversation, ['conversationId', 'expectedRevision']);
+    const intentHint = !hasIntentHint
+      ? undefined
+      : exactRecord(record.intentHint, ['kind', 'documentKind']);
+    if (
+      intentHint &&
+      (intentHint.kind !== 'document' ||
+        !['auto', 'word', 'excel', 'ppt'].includes(String(intentHint.documentKind)))
+    ) {
+      throw new TypeError('intentHint is invalid');
+    }
+    return {
+      clientCommandId: controlledId(record.clientCommandId, 'clientCommandId'),
+      conversation: conversation
+        ? {
+            conversationId: controlledId(conversation.conversationId, 'conversationId'),
+            expectedRevision: revision(conversation.expectedRevision, 'expectedRevision')
+          }
+        : null,
+      title: boundedText(record.title, 'title', 200, false),
+      content: boundedText(record.content, 'content', 8_000, false),
+      ...(intentHint
+        ? {
+            intentHint: {
+              kind: 'document' as const,
+              documentKind: intentHint.documentKind as 'auto' | 'word' | 'excel' | 'ppt'
+            }
+          }
+        : {})
+    };
+  },
+  answerWorkflow(value: unknown): AnswerWorkflowRequest {
+    const record = exactRecord(value, [
+      'workflowId',
+      'expectedWorkflowRevision',
+      'expectedConversationRevision',
+      'content'
+    ]);
+    return {
+      workflowId: controlledId(record.workflowId, 'workflowId'),
+      expectedWorkflowRevision: revision(
+        record.expectedWorkflowRevision,
+        'expectedWorkflowRevision'
+      ),
+      expectedConversationRevision: revision(
+        record.expectedConversationRevision,
+        'expectedConversationRevision'
+      ),
+      content: boundedText(record.content, 'content', 8_000, false)
+    };
+  },
+  workflowRevision(value: unknown): WorkflowRevisionRequest {
+    const record = exactRecord(value, ['workflowId', 'expectedRevision']);
+    return {
+      workflowId: controlledId(record.workflowId, 'workflowId'),
+      expectedRevision: revision(record.expectedRevision, 'expectedRevision')
+    };
+  },
+  workflowId(value: unknown): WorkflowIdRequest {
+    const record = exactRecord(value, ['workflowId']);
+    return { workflowId: controlledId(record.workflowId, 'workflowId') };
   },
   responseExecution(value: unknown): ResponseExecutionRequest {
     const record = exactRecord(value, ['responseExecutionId']);
@@ -949,6 +1151,26 @@ export interface ChatContextApi {
   startResponse(
     request: StartResponseRequest
   ): Promise<ChatContextIpcResult<ConversationResponseStartDto>>;
+  startWorkflow(
+    request: StartWorkflowRequest
+  ): Promise<ChatContextIpcResult<ConversationWorkflowStartDto>>;
+  answerWorkflow(
+    request: AnswerWorkflowRequest
+  ): Promise<ChatContextIpcResult<ConversationWorkflowStartDto>>;
+  confirmWorkflow(
+    workflowId: string,
+    expectedRevision: number
+  ): Promise<ChatContextIpcResult<ConversationWorkflowDto>>;
+  cancelWorkflow(
+    workflowId: string,
+    expectedRevision: number
+  ): Promise<ChatContextIpcResult<ConversationWorkflowDto>>;
+  getWorkflow(
+    workflowId: string
+  ): Promise<ChatContextIpcResult<ConversationWorkflowDto>>;
+  getPendingWorkflow(
+    conversationId: string
+  ): Promise<ChatContextIpcResult<ConversationWorkflowDto | null>>;
   getResponseExecution(
     responseExecutionId: string
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;

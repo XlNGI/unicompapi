@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
   ConversationApplicationService,
+  ConversationIntentOrchestrator,
+  ConversationWorkflowService,
   ProjectContextRegistryService,
   type ConversationIdFactory,
   type ProjectContextIdFactory
@@ -30,6 +32,7 @@ import {
   JsonConversationRepository,
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
+  JsonConversationWorkflowRepository,
   JsonProviderUsageObservationRepository,
   JsonProjectConversationRepository,
   JsonProjectContextRepository,
@@ -38,6 +41,10 @@ import {
 import { NodeProjectStorage } from '../storage';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
+import {
+  ConversationWorkflowController,
+  type ConversationWorkflowControllerRuntime
+} from './conversation-workflow-controller';
 import {
   ConversationResponseController,
   type ConversationResponseControllerRuntime
@@ -107,6 +114,7 @@ export interface ChatContextRuntime {
   readonly conversations: ConversationControllerPort;
   readonly responses: ConversationResponseController;
   readonly projectContexts: ProjectContextController;
+  readonly workflows: ConversationWorkflowController;
   interruptActiveResponses(): Promise<number>;
   waitForMutations(): Promise<void>;
 }
@@ -163,6 +171,7 @@ export function createChatContextRuntime(
     readonly conversations: ConversationController;
     readonly conversationRepository: JsonProjectConversationRepository;
     readonly contextService: ProjectContextRegistryService;
+    readonly workflowService: ConversationWorkflowService;
     readonly responses: ConversationResponseControllerRuntime;
   };
   let cached: ProjectRuntime | undefined;
@@ -205,6 +214,11 @@ export function createChatContextRuntime(
       storage,
       session.projectId
     );
+    const workflowService = new ConversationWorkflowService(
+      new JsonConversationWorkflowRepository(storage, session.projectId, now),
+      new ConversationIntentOrchestrator(),
+      now
+    );
     const candidateService = new ProviderFeatureCandidateService(
       new ProjectConversationResponseSubjectResolver(
         projectConversations,
@@ -242,6 +256,7 @@ export function createChatContextRuntime(
     // After a process restart no in-memory adapter exists to resume these streams.
     const responseRecovery = responseLifecycle
       .interruptActiveForApplicationShutdown()
+      .then(() => workflowService.recoverInterruptedExecutions())
       .then(() => undefined);
     const authorization = dependencies.runtimeAuthorization;
     const textSubmission = dependencies.textSubmission;
@@ -262,6 +277,7 @@ export function createChatContextRuntime(
       executions: responseLifecycle,
       executionCoordinator,
       streamChannel,
+      workflowService,
       ready: responseRecovery
     };
     if (canSubmit && textSubmission && authorization) {
@@ -288,6 +304,7 @@ export function createChatContextRuntime(
         terminalObserver: createConversationTerminalObserver(
           acceptances,
           authorization as RuntimeAuthorizationOrchestrationPort,
+          workflowService,
           now
         ),
         now
@@ -374,6 +391,7 @@ export function createChatContextRuntime(
       }),
       conversationRepository: projectConversations,
       contextService,
+      workflowService,
       responses
     };
     runtimes.add(cached);
@@ -497,6 +515,21 @@ export function createChatContextRuntime(
       return getProjectRuntime(session).contextService;
     }
   });
+  const workflows = new ConversationWorkflowController({
+    getSession: dependencies.getSession,
+    onError: dependencies.onError,
+    getRuntime(session): ConversationWorkflowControllerRuntime {
+      const runtime = getProjectRuntime(session);
+      return {
+        conversationService: new ConversationApplicationService(
+          runtime.conversationRepository,
+          conversationIds,
+          now
+        ),
+        workflowService: runtime.workflowService
+      };
+    }
+  });
   const responses = new ConversationResponseController({
     getSession: dependencies.getSession,
     getRuntime: (session) => getProjectRuntime(session).responses,
@@ -508,6 +541,7 @@ export function createChatContextRuntime(
     conversations,
     responses,
     projectContexts,
+    workflows,
     interruptActiveResponses: async () => {
       const interrupted = await Promise.all([...runtimes].map(async (runtime) => {
         // Adapter completion owns the terminal transition. Only persisted handles
@@ -528,7 +562,8 @@ export function createChatContextRuntime(
       await Promise.all([
         conversations.waitForOperations(),
         responses.waitForOperations(),
-        projectContexts.waitForMutations()
+        projectContexts.waitForMutations(),
+        workflows.waitForOperations()
       ]);
     }
   };
@@ -537,6 +572,7 @@ export function createChatContextRuntime(
 function createConversationTerminalObserver(
   acceptances: ProjectSubmissionAcceptanceStore,
   authorization: RuntimeAuthorizationOrchestrationPort,
+  workflows: ConversationWorkflowService,
   now: () => string
 ) {
   const advance = async (
@@ -571,6 +607,16 @@ function createConversationTerminalObserver(
       })
     });
     await authorization.recordOutcome(acceptance.intent.authorizationClaimId, occurredAt);
+    if (acceptance.subjectArtifacts.kind === 'conversation') {
+      await workflows.finishExecution(
+        acceptance.subjectArtifacts.responseExecution.id,
+        status === 'completed'
+          ? 'completed'
+          : status === 'cancelled'
+            ? 'cancelled'
+            : 'failed'
+      );
+    }
   };
   return {
     completed: (input: { providerOperationId: string; invocationAttemptId: string }) =>

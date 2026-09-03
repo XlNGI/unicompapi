@@ -234,6 +234,10 @@ function mapApplicationError<T>(
     case 'response_failed':
       return failure('generation_failed', 'AI content generation did not complete');
     case 'generation_failed':
+    case 'revision_scope_violation':
+    case 'revision_patch_failed':
+    case 'revision_conflict':
+    case 'unvalidated_output':
       return failure('generation_failed', 'Document generation failed');
     case 'storage_error':
       return failure('storage_error', 'Local document storage failed');

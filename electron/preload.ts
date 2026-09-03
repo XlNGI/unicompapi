@@ -788,6 +788,24 @@ const chatContexts: ChatContextApi = {
     }),
   startResponse: (request) =>
     ipcRenderer.invoke(chatContextIpcChannels.startResponse, request),
+  startWorkflow: (request) =>
+    ipcRenderer.invoke(chatContextIpcChannels.startWorkflow, request),
+  answerWorkflow: (request) =>
+    ipcRenderer.invoke(chatContextIpcChannels.answerWorkflow, request),
+  confirmWorkflow: (workflowId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.confirmWorkflow, {
+      workflowId,
+      expectedRevision
+    }),
+  cancelWorkflow: (workflowId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.cancelWorkflow, {
+      workflowId,
+      expectedRevision
+    }),
+  getWorkflow: (workflowId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getWorkflow, { workflowId }),
+  getPendingWorkflow: (conversationId) =>
+    ipcRenderer.invoke(chatContextIpcChannels.getPendingWorkflow, { conversationId }),
   getResponseExecution: (responseExecutionId) =>
     ipcRenderer.invoke(chatContextIpcChannels.getResponseExecution, {
       responseExecutionId

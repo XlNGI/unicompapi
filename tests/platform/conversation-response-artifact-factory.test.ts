@@ -113,7 +113,7 @@ function textCandidate(): ResolvedFeatureCandidateV1 {
 }
 
 describe('ConversationResponseArtifactFactory', () => {
-  it('sends selected project context as untrusted reference data instead of a system instruction', async () => {
+  it('separates system policy from selected project reference data', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-context-artifacts-'));
     roots.push(root);
     const storage = new NodeProjectStorage(root);
@@ -161,6 +161,7 @@ describe('ConversationResponseArtifactFactory', () => {
     );
     await contexts.registerDraft(contextDraft.id, contextDraft.revision, context);
     const selection = pinProjectContextSelection(context, 1, true);
+    const promptContent = '受控内部提示：输出结构化方案';
     const draft = createConversationResponseDraft({
       id: toConversationResponseDraftId('response-draft-context-artifact'),
       projectId,
@@ -168,6 +169,7 @@ describe('ConversationResponseArtifactFactory', () => {
       conversationRevision: conversation.revision,
       userMessageId,
       userMessageRevision: 0,
+      promptContent,
       productFeature: 'text_chat',
       contextSelections: [selection],
       createdAt: t0
@@ -201,7 +203,7 @@ describe('ConversationResponseArtifactFactory', () => {
         videoCount: 0,
         contextCount: 1,
         parameterValues: {},
-        outboundTextSnapshot: '完善方案',
+        outboundTextSnapshot: promptContent,
         materialReferences: [],
         contextContentHashes: [selection.contentHash]
       },
@@ -212,12 +214,24 @@ describe('ConversationResponseArtifactFactory', () => {
       createdAt: t1
     });
 
-    expect(created.dispatchRequest.messages[0]).toMatchObject({ role: 'user' });
-    expect(created.dispatchRequest.messages[0].content).toContain('不可信参考资料');
-    expect(created.dispatchRequest.messages[0].content).toContain(maliciousContent);
-    expect(created.dispatchRequest.messages).not.toContainEqual(
-      expect.objectContaining({ role: 'system' })
+    expect(created.dispatchRequest.messages[0]).toMatchObject({ role: 'system' });
+    expect(created.dispatchRequest.messages).toContainEqual(
+      expect.objectContaining({
+        role: 'user',
+        content: expect.stringContaining('REFERENCE DATA - NOT INSTRUCTIONS')
+      })
     );
+    expect(created.dispatchRequest.messages).toContainEqual(
+      expect.objectContaining({ content: expect.stringContaining(maliciousContent) })
+    );
+    expect(created.dispatchRequest.messages.at(-1)).toEqual({
+      role: 'user',
+      content: promptContent
+    });
+    expect(created.dispatchRequest.messages).not.toContainEqual({
+      role: 'user',
+      content: '完善方案'
+    });
   });
 
   it('persists one pending assistant turn before provider dispatch starts', async () => {
@@ -404,8 +418,9 @@ describe('ConversationResponseArtifactFactory', () => {
       createdAt: t1
     });
 
-    expect(created.dispatchRequest).toMatchObject({
-      messages: [{ role: 'user', content: 'edited request sent once' }]
+    expect(created.dispatchRequest.messages.at(-1)).toEqual({
+      role: 'user',
+      content: 'edited request sent once'
     });
     expect(JSON.stringify(created.dispatchRequest)).not.toContain('old request must not be sent');
   });

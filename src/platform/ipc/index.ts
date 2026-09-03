@@ -16,6 +16,7 @@ export * from './video-export-controller';
 export * from './video-reference-media-controller';
 export * from './settings-controller';
 export * from './conversation-controller';
+export * from './conversation-workflow-controller';
 export * from './conversation-response-controller';
 export * from './image-feature-controller';
 export * from './image-feature-runtime';

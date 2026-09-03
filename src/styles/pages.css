@@ -6775,6 +6775,33 @@ button.uc-project-center__project-card:disabled {
   pointer-events: auto;
 }
 
+.uc-chat-page__workflow-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--uc-space-3);
+  width: 100%;
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: 8px;
+  padding: var(--uc-space-2) var(--uc-space-3);
+  background: var(--uc-color-surface-raised);
+  box-shadow: var(--uc-shadow-sm);
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-chat-page__workflow-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.uc-chat-page__workflow-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--uc-space-1);
+}
+
 .uc-chat-page__composer {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(40px, auto) auto;
@@ -7293,6 +7320,16 @@ button.uc-project-center__project-card:disabled {
 }
 
 @media (max-width: 520px) {
+  .uc-chat-page__workflow-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .uc-chat-page__workflow-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
   .uc-chat-page__composer {
     min-height: 92px;
   }

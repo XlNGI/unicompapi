@@ -25,6 +25,7 @@ export type TextOverlayId = DomainId<'TextOverlayId'>;
 export type ConversationId = DomainId<'ConversationId'>;
 export type MessageId = DomainId<'MessageId'>;
 export type ConversationResponseDraftId = DomainId<'ConversationResponseDraftId'>;
+export type ConversationWorkflowId = DomainId<'ConversationWorkflowId'>;
 export type ConversationResponseExecutionId = DomainId<'ConversationResponseExecutionId'>;
 export type ConversationResponseStreamEventId = DomainId<'ConversationResponseStreamEventId'>;
 export type ProjectContextId = DomainId<'ProjectContextId'>;
@@ -83,6 +84,8 @@ export const toMessageId = (value: string) =>
   toDomainId(value, 'MessageId');
 export const toConversationResponseDraftId = (value: string) =>
   toDomainId(value, 'ConversationResponseDraftId');
+export const toConversationWorkflowId = (value: string) =>
+  toDomainId(value, 'ConversationWorkflowId');
 export const toConversationResponseExecutionId = (value: string) =>
   toDomainId(value, 'ConversationResponseExecutionId');
 export const toConversationResponseStreamEventId = (value: string) =>

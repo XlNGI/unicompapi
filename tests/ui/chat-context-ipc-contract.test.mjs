@@ -27,6 +27,12 @@ const operations = [
   'prepareResponseSubmission',
   'submitResponse',
   'startResponse',
+  'startWorkflow',
+  'answerWorkflow',
+  'confirmWorkflow',
+  'cancelWorkflow',
+  'getWorkflow',
+  'getPendingWorkflow',
   'getResponseExecution',
   'replayResponseEvents',
   'cancelResponseExecution',
@@ -73,6 +79,7 @@ test('keeps renderer chat contracts free of protected platform facts', () => {
     'contentHash',
     'routeSnapshot',
     'outboundTextSnapshot',
+    'promptContent',
     'stack'
   ]) {
     assert.doesNotMatch(sharedSource, new RegExp(forbidden, 'i'));

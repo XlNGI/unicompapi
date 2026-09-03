@@ -1,5 +1,6 @@
 import {
   ConversationApplicationError,
+  ConversationWorkflowApplicationError,
   ProjectContextApplicationError
 } from '../../application';
 import {
@@ -15,6 +16,8 @@ import {
   ConversationResponseDraftRepositoryDataError,
   ConversationResponseDraftRevisionConflictError,
   ConversationResponseExecutionRepositoryDataError,
+  ConversationWorkflowRepositoryDataError,
+  ConversationWorkflowRevisionConflictError,
   ProjectContextRepositoryDataError,
   ProjectContextRevisionConflictError,
   ProjectContextSnapshotError
@@ -44,6 +47,9 @@ export function chatContextFailure<T>(
   if (error instanceof ProjectContextApplicationError) {
     return failure(error.code, error.message);
   }
+  if (error instanceof ConversationWorkflowApplicationError) {
+    return failure(error.code, error.message, error.currentRevision);
+  }
   if (error instanceof ConversationRevisionConflictError) {
     return failure(
       'revision_conflict',
@@ -62,6 +68,13 @@ export function chatContextFailure<T>(
     return failure(
       'revision_conflict',
       'Conversation response draft revision has changed',
+      error.actualRevision ?? undefined
+    );
+  }
+  if (error instanceof ConversationWorkflowRevisionConflictError) {
+    return failure(
+      'workflow_revision_conflict',
+      'Conversation workflow revision has changed',
       error.actualRevision ?? undefined
     );
   }
@@ -108,7 +121,8 @@ export function chatContextFailure<T>(
     error instanceof ConversationRepositoryDataError ||
     error instanceof ProjectContextRepositoryDataError ||
     error instanceof ConversationResponseDraftRepositoryDataError ||
-    error instanceof ConversationResponseExecutionRepositoryDataError
+    error instanceof ConversationResponseExecutionRepositoryDataError ||
+    error instanceof ConversationWorkflowRepositoryDataError
   ) {
     return failure('storage_error', 'Local data could not be read or saved');
   }

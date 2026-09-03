@@ -5,6 +5,7 @@ import {
   toConversationId,
   toConversationResponseDraftId,
   toConversationResponseExecutionId,
+  toConversationWorkflowId,
   toIsoTimestamp,
   toMessageId,
   toProjectContextId,
@@ -17,7 +18,11 @@ import {
   type ProjectConversationRepository,
   type SubmissionUserConfirmationV1
 } from '../../domain';
-import type { ConversationApplicationService } from '../../application';
+import {
+  ConversationWorkflowApplicationError,
+  type ConversationApplicationService,
+  type ConversationWorkflowService
+} from '../../application';
 import type {
   ChatContextIpcResult,
   ConversationResponseCandidateDto,
@@ -51,6 +56,7 @@ export interface ConversationResponseControllerRuntime {
   readonly executions: ConversationResponseExecutionLifecycle;
   readonly executionCoordinator: ConversationExecutionCoordinator;
   readonly streamChannel: ControlledConversationResponseStreamChannel;
+  readonly workflowService?: ConversationWorkflowService;
   /** Completes startup recovery before this project accepts response operations. */
   readonly ready: Promise<void>;
   submit?(input: {
@@ -444,6 +450,9 @@ export class ConversationResponseController {
         'Conversation provider runtime access is not approved'
       );
     }
+    const workflow = input.workflow
+      ? await this.requireReadyWorkflow(runtime, input)
+      : undefined;
     if (input.conversation) {
       const active = await runtime.executions.listActive(input.conversation.conversationId);
       if (active.length > 0) {
@@ -461,7 +470,18 @@ export class ConversationResponseController {
           title: input.title,
           projectId: runtime.conversations.projectId
         });
-    if (input.conversation) {
+    if (workflow) {
+      if (
+        !input.conversation ||
+        conversation.revision !== input.conversation.expectedRevision
+      ) {
+        return failure(
+          'revision_conflict',
+          'Conversation revision has changed',
+          conversation.revision
+        );
+      }
+    } else if (input.conversation) {
       conversation = input.conversation.editedMessageId
         ? await runtime.conversationService.editCancelledUserMessage({
             conversationId: conversation.id,
@@ -490,7 +510,9 @@ export class ConversationResponseController {
           : {})
       });
     }
-    const userMessage = input.conversation?.editedMessageId
+    const userMessage = workflow
+      ? conversation.messages.find((message) => message.id === workflow.sourceMessageId)
+      : input.conversation?.editedMessageId
       ? conversation.messages.find(
           (message) => message.id === toMessageId(input.conversation!.editedMessageId!)
         )
@@ -505,6 +527,7 @@ export class ConversationResponseController {
       conversationRevision: conversation.revision,
       userMessageId: userMessage.id,
       userMessageRevision: userMessage.revision,
+      ...(workflow ? { promptContent: input.content } : {}),
       productFeature: input.productFeature,
       createdAt: toIsoTimestamp(this.now())
     });
@@ -543,15 +566,44 @@ export class ConversationResponseController {
       subject: subject(draft),
       candidateId: input.candidateId
     });
-    const execution = await runtime.start({
-      subject: subject(draft),
-      routeSelectionToken: prepared.routeSelectionToken,
-      confirmation: {
-        schemaVersion: 1,
-        confirmationId: prepared.confirmation.confirmationId,
-        confirmed: true
+    const pendingExecutionId = workflow
+      ? `pending:${input.clientCommandId}`
+      : undefined;
+    const executingWorkflow = workflow && pendingExecutionId
+      ? await runtime.workflowService!.beginExecution({
+          workflowId: workflow.id,
+          expectedRevision: workflow.revision,
+          executionId: pendingExecutionId
+        })
+      : undefined;
+    let execution: ConversationResponseExecutionReadModelV1;
+    try {
+      execution = await runtime.start({
+        subject: subject(draft),
+        routeSelectionToken: prepared.routeSelectionToken,
+        confirmation: {
+          schemaVersion: 1,
+          confirmationId: prepared.confirmation.confirmationId,
+          confirmed: true
+        }
+      });
+    } catch (error) {
+      if (pendingExecutionId) {
+        await runtime.workflowService?.finishExecution(pendingExecutionId, 'failed');
       }
-    });
+      throw error;
+    }
+    if (executingWorkflow) {
+      try {
+        await runtime.workflowService!.bindExecution({
+          workflowId: executingWorkflow.id,
+          expectedRevision: executingWorkflow.revision,
+          executionId: execution.responseExecutionId
+        });
+      } catch (error) {
+        this.dependencies.onError?.(error);
+      }
+    }
     const latest = await runtime.conversationService.get(conversation.id);
     return {
       ok: true,
@@ -560,6 +612,49 @@ export class ConversationResponseController {
         execution: toResponseExecutionDto(execution)
       }
     };
+  }
+
+  private async requireReadyWorkflow(
+    runtime: ConversationResponseControllerRuntime,
+    input: StartResponseRequest
+  ) {
+    if (!input.workflow || !runtime.workflowService || !input.conversation) {
+      throw new TypeError('Conversation workflow response binding is invalid');
+    }
+    if (input.conversation.editedMessageId !== null) {
+      throw new TypeError('Conversation workflow cannot edit a cancelled message');
+    }
+    const workflow = await runtime.workflowService.get(
+      toConversationWorkflowId(input.workflow.workflowId)
+    );
+    if (!workflow) {
+      throw new ConversationWorkflowApplicationError(
+        'workflow_not_found',
+        'Conversation workflow does not exist'
+      );
+    }
+    if (workflow.revision !== input.workflow.expectedRevision) {
+      throw new ConversationWorkflowApplicationError(
+        'workflow_revision_conflict',
+        'Conversation workflow revision changed',
+        workflow.revision
+      );
+    }
+    if (workflow.projectId !== runtime.conversations.projectId || workflow.conversationId !== input.conversation.conversationId) {
+      throw new TypeError('Conversation workflow does not belong to this response');
+    }
+    if (workflow.status !== 'ready') {
+      throw new ConversationWorkflowApplicationError(
+        workflow.status === 'needs_clarification'
+          ? 'clarification_required'
+          : workflow.status === 'needs_confirmation'
+            ? 'confirmation_required'
+            : 'workflow_not_ready',
+        'Conversation workflow is not ready for this response',
+        workflow.revision
+      );
+    }
+    return workflow;
   }
 
   private async requireRuntime(): Promise<ConversationResponseControllerRuntime> {

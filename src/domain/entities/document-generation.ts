@@ -93,6 +93,10 @@ export const documentGenerationFailureCodes = [
   'invalid_outline',
   'resource_limit',
   'document_layout_overflow',
+  'revision_scope_violation',
+  'revision_patch_failed',
+  'revision_conflict',
+  'unvalidated_output',
   'generation_failed',
   'storage_error'
 ] as const;

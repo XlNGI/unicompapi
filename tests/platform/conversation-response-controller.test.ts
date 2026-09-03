@@ -3,9 +3,14 @@ import {
   addUserMessage,
   beginAssistantMessage,
   createConversation,
+  createConversationResponseDraft,
+  createConversationWorkflow,
+  parseConversationIntentPlan,
   toConnectionId,
   toConversationId,
+  toConversationResponseDraftId,
   toConversationResponseExecutionId,
+  toConversationWorkflowId,
   toIsoTimestamp,
   toMessageId,
   toModelId,
@@ -16,6 +21,7 @@ import {
 } from '../../src/domain';
 import {
   ConversationResponseController,
+  toResponseDraftDto,
   type ConversationResponseControllerRuntime
 } from '../../src/platform';
 
@@ -84,6 +90,39 @@ function fixture() {
     }))
   };
   const startedExecution = execution();
+  const readyWorkflow = createConversationWorkflow({
+    id: toConversationWorkflowId('workflow-response-controller'),
+    projectId,
+    conversationId: withUser.id,
+    sourceMessageId: withUser.messages[0].id,
+    plan: parseConversationIntentPlan({
+      schemaVersion: 1,
+      kind: 'chat',
+      parameters: {},
+      sourcePolicy: 'none',
+      missing: [],
+      ambiguities: [],
+      confidence: 'high',
+      needsConfirmation: false
+    }),
+    createdAt
+  });
+  const executingWorkflow = {
+    ...readyWorkflow,
+    revision: 1,
+    status: 'executing' as const,
+    executionId: 'pending:workflow-response-controller'
+  };
+  const workflowService = {
+    get: vi.fn(async () => readyWorkflow),
+    beginExecution: vi.fn(async () => executingWorkflow),
+    bindExecution: vi.fn(async () => ({
+      ...executingWorkflow,
+      revision: 2,
+      executionId: startedExecution.responseExecutionId
+    })),
+    finishExecution: vi.fn(async () => undefined)
+  };
   const runtime = {
     conversationService: service,
     conversations: {
@@ -103,6 +142,7 @@ function fixture() {
       cancel: vi.fn(async () => true)
     },
     streamChannel: {},
+    workflowService,
     ready: Promise.resolve(),
     start: vi.fn(async () => startedExecution)
   } as unknown as ConversationResponseControllerRuntime;
@@ -118,7 +158,16 @@ function fixture() {
     now: () => createdAt,
     onError: (error) => errors.push(error)
   });
-  return { controller, runtime, service, candidateService, errors };
+  return {
+    controller,
+    runtime,
+    service,
+    candidateService,
+    draftRepository,
+    readyWorkflow,
+    workflowService,
+    errors
+  };
 }
 
 function startRequest(clientCommandId = 'client-command-controller') {
@@ -136,6 +185,24 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('does not expose an internal workflow prompt through the response draft DTO', () => {
+    const promptContent = '受控内部提示：不要进入 Renderer';
+    const draft = createConversationResponseDraft({
+      id: toConversationResponseDraftId('response-draft-projection'),
+      projectId,
+      conversationId: toConversationId('conversation-controller'),
+      conversationRevision: 1,
+      userMessageId: toMessageId('message-user-controller'),
+      userMessageRevision: 0,
+      promptContent,
+      productFeature: 'text_chat',
+      createdAt
+    });
+
+    expect(JSON.stringify(toResponseDraftDto(draft))).not.toContain(promptContent);
+    expect(toResponseDraftDto(draft)).not.toHaveProperty('promptContent');
+  });
+
   it('deduplicates concurrent start commands by client command ID', async () => {
     const value = fixture();
     const [first, second] = await Promise.all([
@@ -207,6 +274,42 @@ describe('ConversationResponseController', () => {
     if (result.ok) {
       expect(JSON.stringify(result.value.conversation)).not.toContain(internalPrompt);
     }
+  });
+
+  it('starts a ready workflow from its persisted source message without appending a duplicate user turn', async () => {
+    const value = fixture();
+    const promptContent = '受控内部提示：输出结构化文档大纲';
+    const result = await value.controller.start({
+      ...startRequest('workflow-response-controller'),
+      conversation: {
+        conversationId: 'conversation-controller',
+        expectedRevision: 2,
+        editedMessageId: null
+      },
+      content: promptContent,
+      workflow: {
+        workflowId: value.readyWorkflow.id,
+        expectedRevision: value.readyWorkflow.revision
+      }
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(value.service.addUserMessage).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userMessageId: 'message-user-controller',
+        promptContent
+      })
+    );
+    expect(value.workflowService.beginExecution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: value.readyWorkflow.id,
+        expectedRevision: value.readyWorkflow.revision
+      })
+    );
+    expect(value.workflowService.bindExecution).toHaveBeenCalledWith(
+      expect.objectContaining({ executionId: 'response-execution-controller' })
+    );
   });
 
   it('passes a transport interruption callback for a cancellation that outlives the request', async () => {

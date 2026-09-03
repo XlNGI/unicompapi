@@ -32,6 +32,7 @@ import type {
   ConversationResponseCandidateDto,
   ConversationResponseExecutionDto,
   ConversationResponseStreamEventDto,
+  ConversationWorkflowDto,
   MessageDto,
   ProjectContextCandidateDto,
   ProjectContextDetailDto,
@@ -50,8 +51,8 @@ import {
   type DocumentKindOption
 } from './documentDrafting';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
+import { failedResponseNotice } from '../../ui/chat-response-failure-notice';
 import {
-  analyzeOfficeRequest,
   waitForDocumentResponseCompletion,
   type OfficeRequestAction
 } from '../../application';
@@ -87,6 +88,11 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   selection_out_of_range: '所选消息范围已经失效。',
   revision_conflict: '内容已在其他位置更新，请刷新后重试。',
   explicit_confirmation_required: '请先明确确认预览。',
+  workflow_not_found: '这项会话任务已不存在，请重新发送需求。',
+  workflow_revision_conflict: '会话任务刚刚更新，请同步后重试。',
+  workflow_not_ready: '会话任务尚未准备好，请先完成追问或确认。',
+  clarification_required: '请先补充会话任务所需的信息。',
+  confirmation_expired: '任务确认已过期，请重新发送需求。',
   adapter_unavailable: '文本适配器当前不可用。',
   storage_error: '本地保存失败，请检查存储状态后重试。'
 };
@@ -174,37 +180,6 @@ function messageStatusLabel(message: MessageDto): string {
     return '已中断';
   }
   return messageStateLabels[message.state];
-}
-
-function failedResponseNotice(message?: MessageDto, safeCode?: string): string {
-  const partial = Boolean(message?.content.trim());
-  const preserved = partial ? '，已保留接收到的内容' : '';
-  const diagnostic = safeCode ? `（${safeCode}）` : '';
-  if (safeCode?.includes('finish.content_filter')) {
-    return `回答被模型安全策略提前结束${diagnostic}${preserved}。请调整问题后重试。`;
-  }
-  if (safeCode?.includes('finish.tool_calls')) {
-    return `模型请求调用工具，但当前会话未配置该工具${diagnostic}${preserved}。请调整问题后重试。`;
-  }
-  if (safeCode?.includes('finish.insufficient_system_resource')) {
-    return `模型服务资源不足${diagnostic}${preserved}。请稍后重试或切换模型。`;
-  }
-  if (safeCode?.includes('timeout') || message?.failureReason === 'unknown') {
-    return `本地等待模型响应超时${preserved}。远端状态和费用可能已经产生，请先核对服务商后台，避免立即重复发送。`;
-  }
-  if (message?.failureReason === 'truncated') {
-    return `回答达到当前输出长度上限${preserved}。可以继续追问，或调整输出长度后重试。`;
-  }
-  if (message?.failureReason === 'interrupted') {
-    return `模型连接中断${preserved}，请检查网络后重试。`;
-  }
-  if (message?.failureReason === 'invalid_response') {
-    return `模型返回的数据格式异常${preserved}，请重试或切换模型。`;
-  }
-  if (message?.failureReason === 'unavailable') {
-    return `模型连接超时或服务暂时不可用${preserved}，请稍后重试或切换模型。`;
-  }
-  return `模型请求未正常完成${diagnostic}${preserved}，请重试。`;
 }
 
 function messageStatusTone(
@@ -405,12 +380,45 @@ function isMachineReadableDocumentOutline(content: string): boolean {
   return /["'](?:kind|sections|title)\s*:/u.test(text);
 }
 
+function workflowQuestion(workflow: ConversationWorkflowDto): string {
+  return workflow.pendingQuestions[0]?.question ??
+    workflow.plan.ambiguities[0] ??
+    '请补充具体目标后再继续。';
+}
+
+function workflowRequirements(
+  workflow: ConversationWorkflowDto,
+  sourceContent: string
+): string {
+  const labels: Readonly<Record<string, string>> = {
+    pageCount: '页数',
+    audience: '受众',
+    style: '风格'
+  };
+  const parameters = Object.entries(workflow.plan.parameters)
+    .filter(([key]) => key !== 'topic')
+    .map(([key, value]) => `${labels[key] ?? key}：${String(value)}`);
+  return parameters.length > 0
+    ? `${sourceContent}\n\n已确认参数：\n${parameters.join('\n')}`
+    : sourceContent;
+}
+
 interface AttachmentDraft {
   readonly fileId: string;
   readonly fileName: string;
   readonly sizeBytes: number;
   readonly status: DocumentExtractionStatus;
   readonly preview: string;
+}
+
+interface ReadyDocumentWorkflowExecution {
+  readonly workflow: ConversationWorkflowDto;
+  readonly conversation: ConversationDto;
+  readonly requirements: string;
+  readonly kind: 'word' | 'excel' | 'ppt';
+  readonly action: OfficeRequestAction;
+  readonly targetMessageId?: string;
+  readonly useInternalSources: boolean;
 }
 
 export function ChatPage({
@@ -461,6 +469,7 @@ export function ChatPage({
   const [activityExpanded, setActivityExpanded] = useState(false);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [responseStarting, setResponseStarting] = useState(false);
+  const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [copiedMessageId, setCopiedMessageId] = useState<string>();
@@ -572,32 +581,12 @@ export function ChatPage({
   const canCompose = Boolean(
     session && (!selected || (!selected.readOnly && selected.status === 'active'))
   );
-  const completedDocumentMessages = selected
-    ? selected.messages.filter(
-        (message) =>
-          message.role === 'assistant' &&
-          message.state === 'completed' &&
-          message.documentResult
-      )
-    : [];
-  const officeDocuments = completedDocumentMessages.flatMap((message) =>
-    message.documentResult
-      ? [{
-          messageId: message.messageId,
-          kind: message.documentResult.kind,
-          fileName: message.documentResult.fileName
-        }]
-      : []
-  );
-  const officeIntent = analyzeOfficeRequest(input, { documents: officeDocuments });
   const composerDocumentKind =
     documentKind !== 'auto'
       ? documentKind
-      : officeIntent.kind === 'document' && officeIntent.documentKind
-        ? officeIntent.documentKind
-        : input.trim()
-          ? inferDocumentKind(input)
-          : documentKind;
+      : input.trim()
+        ? inferDocumentKind(input)
+        : documentKind;
 
   useEffect(() => {
     let active = true;
@@ -686,6 +675,25 @@ export function ChatPage({
   useEffect(() => {
     onCandidateChange?.(selectedCandidateId);
   }, [onCandidateChange, selectedCandidateId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!chat || !selected?.conversationId) {
+      setActiveWorkflow(undefined);
+      return () => {
+        active = false;
+      };
+    }
+    void chat.getPendingWorkflow(selected.conversationId).then((result) => {
+      if (!active) return;
+      setActiveWorkflow(result.ok ? result.value ?? undefined : undefined);
+    }).catch(() => {
+      if (active) setActiveWorkflow(undefined);
+    });
+    return () => {
+      active = false;
+    };
+  }, [chat, selected?.conversationId]);
 
   useEffect(() => {
     let active = true;
@@ -932,6 +940,7 @@ export function ChatPage({
     }
     if (!confirmLeaveUnsentInput()) return;
     setSelectedId(undefined);
+    setActiveWorkflow(undefined);
     updateInput('');
     setEditingMessageId(undefined);
     setHistoryOpen(false);
@@ -1037,6 +1046,7 @@ export function ChatPage({
     updateInput('');
     setEditingMessageId(undefined);
     setSelectedId(conversationId);
+    setActiveWorkflow(undefined);
     setHistoryOpen(false);
   }
 
@@ -1119,32 +1129,210 @@ export function ChatPage({
       !session ||
       (selected && (selected.readOnly || selected.status !== 'active')) ||
       !input.trim() ||
-      !selectedCandidateId ||
-      !selectedCandidate?.available ||
       cancelRequested ||
       responseInProgress ||
       busy
     ) {
       return;
     }
-    const documentIntent = analyzeOfficeRequest(input.trim(), {
-      documents: officeDocuments
-    });
-    if (documentIntent.kind === 'document') {
-      const kind = documentIntent.documentKind ?? 'auto';
-      setDocumentKind(kind);
-      setDocumentMode(true);
-      if (documentIntent.missing.length > 0) {
-        setNotice(`请补充：${documentIntent.missing.join('、')}。`);
+    if (editingMessageId) {
+      if (!selectedCandidateId || !selectedCandidate?.available) {
+        setNotice('请先选择一个可用模型。');
         return;
       }
-      await sendDocumentMessage(
-        documentIntent.documentKind,
-        documentIntent.action,
-        documentIntent.targetMessageId
+      await startChatResponse(input.trim(), selected);
+      return;
+    }
+    await submitWorkflowInput();
+  }
+
+  async function submitWorkflowInput(forceDocument = false) {
+    if (!chat || !session || !input.trim() || busy || responseInProgress) return;
+    if (activeWorkflow && activeWorkflow.status !== 'needs_clarification') {
+      setNotice(
+        activeWorkflow.status === 'needs_confirmation'
+          ? '请先确认或取消当前任务。'
+          : '当前任务已经准备好，请继续执行或取消后再发送新需求。'
       );
       return;
     }
+    const content = input.trim();
+    setBusy(true);
+    setNotice(activeWorkflow ? '正在合并补充信息…' : '正在理解需求…');
+    let ready:
+      | { readonly workflow: ConversationWorkflowDto; readonly conversation: ConversationDto }
+      | undefined;
+    try {
+      const result = activeWorkflow && selected
+        ? await chat.answerWorkflow({
+            workflowId: activeWorkflow.workflowId,
+            expectedWorkflowRevision: activeWorkflow.revision,
+            expectedConversationRevision: selected.revision,
+            content
+          })
+        : await chat.startWorkflow({
+            clientCommandId: `chat-workflow-${crypto.randomUUID()}`,
+            conversation: selected
+              ? {
+                  conversationId: selected.conversationId,
+                  expectedRevision: selected.revision
+                }
+              : null,
+            title: conversationTitleFromMessage(content),
+            content,
+            ...(forceDocument
+              ? {
+                  intentHint: {
+                    kind: 'document' as const,
+                    documentKind
+                  }
+                }
+              : {})
+          });
+      if (!result.ok) {
+        setNotice(errorMessages[result.error.code]);
+        return;
+      }
+      replaceConversation(result.value.conversation);
+      setSelectedId(result.value.conversation.conversationId);
+      setActiveWorkflow(result.value.workflow);
+      updateInput('');
+      if (result.value.workflow.status === 'needs_clarification') {
+        setNotice(workflowQuestion(result.value.workflow));
+        return;
+      }
+      if (result.value.workflow.status === 'needs_confirmation') {
+        setNotice('请确认当前任务计划后再执行。');
+        return;
+      }
+      if (result.value.workflow.status !== 'ready') {
+        setNotice('会话任务当前不可执行，请重新发送需求。');
+        return;
+      }
+      ready = result.value;
+    } catch {
+      setNotice(errorMessages.storage_error);
+    } finally {
+      setBusy(false);
+    }
+    if (ready) await executeReadyWorkflow(ready.workflow, ready.conversation);
+  }
+
+  async function executeReadyWorkflow(
+    workflow: ConversationWorkflowDto,
+    conversation: ConversationDto
+  ) {
+    if (!selectedCandidateId || !selectedCandidate?.available) {
+      setActiveWorkflow(workflow);
+      setNotice('需求已准备好，请选择一个可用模型后继续。');
+      return;
+    }
+    if (workflow.plan.sourcePolicy === 'web' || workflow.plan.sourcePolicy === 'mixed') {
+      setActiveWorkflow(workflow);
+      setNotice('当前版本尚未接入经授权的联网检索，此任务未执行。');
+      return;
+    }
+    const source = conversation.messages.find(
+      (message) => message.messageId === workflow.sourceMessageId
+    );
+    const sourceContent = source?.content ?? '';
+    if (workflow.plan.kind === 'document') {
+      const kind = workflow.plan.documentKind && workflow.plan.documentKind !== 'auto'
+        ? workflow.plan.documentKind
+        : inferDocumentKind(sourceContent);
+      setDocumentKind(kind);
+      setDocumentMode(true);
+      const targetMessageId = workflow.resolvedTarget?.artifactRef ??
+        (workflow.plan.targetHint?.unit === 'document'
+          ? conversation.messages.find(
+              (message) => message.documentResult?.fileName === workflow.plan.targetHint?.name
+            )?.messageId
+          : undefined);
+      await sendDocumentMessage({
+        workflow,
+        conversation,
+        requirements: workflowRequirements(workflow, sourceContent),
+        kind,
+        action: workflow.plan.action === 'revise' ? 'revise' : 'create',
+        targetMessageId,
+        useInternalSources: workflow.plan.sourcePolicy === 'internal' || ragEnabled
+      });
+      return;
+    }
+    if (workflow.plan.kind !== 'chat') {
+      setNotice(workflowQuestion(workflow));
+      return;
+    }
+    await startChatResponse(sourceContent, conversation, workflow);
+  }
+
+  async function confirmActiveWorkflow() {
+    if (!chat || !activeWorkflow || !selected || busy) return;
+    setBusy(true);
+    setNotice('正在确认任务…');
+    let confirmed: ConversationWorkflowDto | undefined;
+    let conversation: ConversationDto | undefined;
+    try {
+      const result = await chat.confirmWorkflow(
+        activeWorkflow.workflowId,
+        activeWorkflow.revision
+      );
+      if (!result.ok) {
+        if (result.error.code === 'confirmation_expired') setActiveWorkflow(undefined);
+        setNotice(errorMessages[result.error.code]);
+        return;
+      }
+      const refreshed = await chat.getConversation(selected.conversationId);
+      if (!refreshed.ok) {
+        setNotice(errorMessages[refreshed.error.code]);
+        return;
+      }
+      confirmed = result.value;
+      conversation = refreshed.value;
+      setActiveWorkflow(confirmed);
+      replaceConversation(conversation);
+    } catch {
+      setNotice(errorMessages.storage_error);
+    } finally {
+      setBusy(false);
+    }
+    if (confirmed && conversation) {
+      await executeReadyWorkflow(confirmed, conversation);
+    }
+  }
+
+  async function continueActiveWorkflow() {
+    if (!activeWorkflow || activeWorkflow.status !== 'ready' || !selected || busy) return;
+    await executeReadyWorkflow(activeWorkflow, selected);
+  }
+
+  async function cancelActiveWorkflow() {
+    if (!chat || !activeWorkflow || busy) return;
+    setBusy(true);
+    try {
+      const result = await chat.cancelWorkflow(
+        activeWorkflow.workflowId,
+        activeWorkflow.revision
+      );
+      if (!result.ok) {
+        setNotice(errorMessages[result.error.code]);
+        return;
+      }
+      setActiveWorkflow(undefined);
+      setNotice('当前任务已取消。');
+    } catch {
+      setNotice(errorMessages.storage_error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startChatResponse(
+    commandContent: string,
+    conversation?: ConversationDto,
+    workflow?: ConversationWorkflowDto
+  ) {
+    if (!chat || !selectedCandidateId || !selectedCandidate?.available) return;
     rendererTrace('sendMessage:start', {
       selectedId,
       editingMessageId,
@@ -1154,20 +1342,27 @@ export function ChatPage({
     setResponseStarting(true);
     setNotice('正在准备回复…');
     clearResponseDraftState();
-    const commandContent = input.trim();
-    const commandEditingMessageId = editingMessageId;
+    const commandEditingMessageId = workflow ? undefined : editingMessageId;
     try {
       const started = await chat.startResponse({
         clientCommandId: `chat-start-${crypto.randomUUID()}`,
-        conversation: selected
+        conversation: conversation
           ? {
-              conversationId: selected.conversationId,
-              expectedRevision: selected.revision,
+              conversationId: conversation.conversationId,
+              expectedRevision: conversation.revision,
               editedMessageId: commandEditingMessageId ?? null
             }
           : null,
         title: conversationTitleFromMessage(commandContent),
         content: commandContent,
+        ...(workflow
+          ? {
+              workflow: {
+                workflowId: workflow.workflowId,
+                expectedRevision: workflow.revision
+              }
+            }
+          : {}),
         productFeature: responseFeature,
         candidateId: selectedCandidateId,
         contextSelections: includedContextIds.flatMap((contextId) => {
@@ -1192,8 +1387,8 @@ export function ChatPage({
         cancelRequestedRef.current = false;
         setCancelRequested(false);
         setNotice(describeChatError(started.error));
-        if (selected) {
-          const refreshed = await chat.getConversation(selected.conversationId);
+        if (conversation) {
+          const refreshed = await chat.getConversation(conversation.conversationId);
           if (refreshed.ok) replaceConversation(refreshed.value);
         }
         return;
@@ -1207,6 +1402,7 @@ export function ChatPage({
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
+      setActiveWorkflow(undefined);
       setActivityExpanded(responseFeature === 'text_reasoning');
       updateInput('');
       setEditingMessageId(undefined);
@@ -1229,7 +1425,6 @@ export function ChatPage({
     } finally {
       setResponseStarting(false);
     }
-
   }
 
   async function importDroppedFile(file: File) {
@@ -1310,18 +1505,19 @@ export function ChatPage({
     );
   }
 
-  async function sendDocumentMessage(
-    resolvedKind?: 'word' | 'excel' | 'ppt',
-    requestedAction?: OfficeRequestAction,
-    requestedTargetMessageId?: string
-  ) {
+  async function sendDocumentMessage(execution?: ReadyDocumentWorkflowExecution) {
+    if (!execution) {
+      await submitWorkflowInput(true);
+      return;
+    }
     if (documentGenerationInFlightRef.current) return;
+    const executionConversation = execution.conversation;
     if (
       !chat ||
       !documentGeneration ||
       !session ||
-      (selected && (selected.readOnly || selected.status !== 'active')) ||
-      !input.trim() ||
+      executionConversation.readOnly ||
+      executionConversation.status !== 'active' ||
       !selectedCandidateId ||
       !selectedCandidate?.available ||
       busy ||
@@ -1329,46 +1525,23 @@ export function ChatPage({
     ) {
       return;
     }
-    const requirements = input.trim();
-    const currentIntent = analyzeOfficeRequest(requirements, {
-      documents: officeDocuments
-    });
-    const unresolvedMissing =
-      currentIntent.kind === 'document'
-        ? currentIntent.missing.filter(
-            (item) =>
-              !(
-                documentKind !== 'auto' &&
-                item === '文档类型（Word、Excel 或 PPT）'
-              )
-          )
-        : [];
-    if (unresolvedMissing.length > 0) {
-      setNotice(`请补充：${unresolvedMissing.join('、')}。`);
-      return;
-    }
-    const action =
-      requestedAction ??
-      (currentIntent.kind === 'document' ? currentIntent.action : 'create');
-    const kind =
-      resolvedKind ??
-      (documentKind === 'auto'
-        ? currentIntent.kind === 'document' && currentIntent.documentKind
-          ? currentIntent.documentKind
-          : inferDocumentKind(requirements)
-        : documentKind);
-    const targetMessageId =
-      requestedTargetMessageId ??
-      (currentIntent.kind === 'document'
-        ? currentIntent.targetMessageId
-        : undefined);
+    const requirements = execution.requirements;
+    const action = execution.action;
+    const kind = execution.kind;
+    const targetMessageId = execution.targetMessageId;
+    const conversationDocumentMessages = executionConversation.messages.filter(
+      (message) =>
+        message.role === 'assistant' &&
+        message.state === 'completed' &&
+        message.documentResult
+    );
     const previousDocument =
       action === 'revise'
         ? targetMessageId
-          ? completedDocumentMessages.find(
+          ? conversationDocumentMessages.find(
               (item) => item.messageId === targetMessageId
             )
-          : [...completedDocumentMessages]
+          : [...conversationDocumentMessages]
               .reverse()
               .find((item) => item.documentResult?.kind === kind)
         : undefined;
@@ -1381,7 +1554,7 @@ export function ChatPage({
     setBusy(true);
     setNotice('AI 正在撰写文档内容…');
     rendererTrace('sendDocumentMessage:start', JSON.stringify({
-      selectedId,
+      selectedId: executionConversation.conversationId,
       documentKind,
       action,
       candidateId: selectedCandidateId,
@@ -1409,7 +1582,7 @@ export function ChatPage({
     const kindInstruction = documentKindInstruction(kind);
     const combinedWithKind = `${combined}\n\n${kindInstruction}`;
     let modelContent = combinedWithKind;
-    if (ragEnabled && documentAttachments) {
+    if (execution.useInternalSources && documentAttachments) {
       try {
         const ragResult = await documentAttachments.retrieveContext({
           query: requirements,
@@ -1446,7 +1619,10 @@ export function ChatPage({
             : null,
           title: conversationTitleFromMessage(requirements),
           content: modelContent,
-          displayContent: requirements,
+          workflow: {
+            workflowId: execution.workflow.workflowId,
+            expectedRevision: execution.workflow.revision
+          },
           productFeature: responseFeature,
           candidateId: selectedCandidateId,
           contextSelections: includedContextIds.flatMap((contextId) => {
@@ -1462,10 +1638,10 @@ export function ChatPage({
           parameterValues: responseParameterValues,
           confirmed: true
         });
-      let started = await startDocumentResponse(selected);
-      if (!started.ok && started.error.code === 'revision_conflict' && selected) {
+      let started = await startDocumentResponse(executionConversation);
+      if (!started.ok && started.error.code === 'revision_conflict') {
         setNotice('会话刚刚更新，正在同步后继续生成…');
-        const refreshed = await chat.getConversation(selected.conversationId);
+        const refreshed = await chat.getConversation(executionConversation.conversationId);
         if (refreshed.ok) {
           replaceConversation(refreshed.value);
           setSelectedId(refreshed.value.conversationId);
@@ -1491,6 +1667,7 @@ export function ChatPage({
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
+      setActiveWorkflow(undefined);
       const prepared = await documentGeneration.prepareGeneration({
         conversationId: started.value.conversation.conversationId,
         expectedRevision: started.value.conversation.revision,
@@ -2356,6 +2533,42 @@ export function ChatPage({
         </div>
 
         <div className="uc-chat-page__composer-region">
+          {activeWorkflow ? (
+            <div className="uc-chat-page__workflow-status" role="status">
+              <span>
+                {activeWorkflow.status === 'needs_clarification'
+                  ? workflowQuestion(activeWorkflow)
+                  : activeWorkflow.status === 'needs_confirmation'
+                    ? '这项任务需要确认后才能执行。'
+                    : '这项任务已准备好。'}
+              </span>
+              <div className="uc-chat-page__workflow-actions">
+                {activeWorkflow.status === 'needs_confirmation' ? (
+                  <Button
+                    disabled={busy || responseInProgress}
+                    onClick={() => void confirmActiveWorkflow()}
+                  >
+                    确认并继续
+                  </Button>
+                ) : null}
+                {activeWorkflow.status === 'ready' ? (
+                  <Button
+                    disabled={busy || responseInProgress || !selectedCandidate?.available}
+                    onClick={() => void continueActiveWorkflow()}
+                  >
+                    继续执行
+                  </Button>
+                ) : null}
+                <Button
+                  disabled={busy || responseInProgress}
+                  onClick={() => void cancelActiveWorkflow()}
+                  variant="ghost"
+                >
+                  取消任务
+                </Button>
+              </div>
+            </div>
+          ) : null}
           {notice ? (
             <p className="uc-chat-page__message" aria-live="polite" role="status">
               {notice}
@@ -2643,7 +2856,6 @@ export function ChatPage({
                       : !chat ||
                         !canCompose ||
                         !input.trim() ||
-                        !selectedCandidate?.available ||
                         busy ||
                         cancelRequested}
                   onClick={() =>
