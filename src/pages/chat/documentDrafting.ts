@@ -1,4 +1,9 @@
 import type { PresentationTemplateId } from '../../shared/document-generation-ipc';
+import {
+  isSupportedPresentationTotalPages,
+  parseRequestedPresentationTotalPages,
+  presentationBodySectionCount
+} from '../../application/presentation-page-count';
 
 export type DocumentKindOption = 'auto' | 'word' | 'excel' | 'ppt';
 export type PresentationTemplateSelection = 'auto' | PresentationTemplateId;
@@ -107,13 +112,29 @@ export async function sha256Hex(value: string): Promise<string> {
 
 export function composeDocumentRevisionInput(
   previousContent: string | undefined,
-  requirements: string
+  requirements: string,
+  kind?: 'word' | 'excel' | 'ppt'
 ): string {
+  const requestedTotalPages =
+    kind === 'ppt'
+      ? parseRequestedPresentationTotalPages(requirements)
+      : undefined;
+  const pageCountConstraint =
+    requestedTotalPages !== undefined &&
+    isSupportedPresentationTotalPages(requestedTotalPages)
+      ? `\n\nPPT 总页数硬性约束：\n- 用户要求总页数恰好为 ${requestedTotalPages} 页，包含系统另行生成的 1 页封面和 1 页结束页。\n- sections 必须恰好包含 ${presentationBodySectionCount(requestedTotalPages)} 个正文分节，不得输出封面、结束页或致谢 section。\n- 每个 section 必须控制为 1 页：正文最多 4 个内容组，takeaway 和 action 各不超过 90 字；表格最多 5 列、7 行。不要用重复页或碎片页凑页数。`
+      : '';
+  const isFullPresentationRevision =
+    previousContent !== undefined &&
+    requestedTotalPages !== undefined &&
+    isSupportedPresentationTotalPages(requestedTotalPages);
   const body =
     previousContent && previousContent.trim().length > 0
-      ? `上一版文档内容：\n${previousContent}\n\n这是一次局部修改：只修改用户明确指出的页面、分节、表格、图表或单元格，其他内容、顺序、标题和样式保持不变。输出时仍需返回完整文档大纲，以便生成新版文件。\n\n局部修改的语义验收规则：\n- 如果用户指定了受众（例如“面向非技术管理者”），必须对目标范围做实质性语义改写，而不是只改标题、同义替换或重新排版。\n- 面向非技术管理者时，优先使用业务目标、经营影响、决策依据、风险和下一步行动来表达；首次出现的技术术语要用一句白话解释，删除不影响决策的 API、模型、协议和实现细节。\n- 保留上一版中有依据的事实、数字和结论；不得为了改写而编造数据。目标范围至少应有一处完整句式、解释或行动建议发生变化，且要能看出受众变化。\n- 非目标范围必须逐字保持原内容、顺序、标题、页面类型和数据不变。\n\n修改要求：\n${requirements}`
+      ? isFullPresentationRevision
+        ? `上一版文档内容：\n${previousContent}\n\n这是一次用户明确授权的 PPT 整体页数调整：可以重组正文分节以达到总页数要求，但必须保留上一版中有依据的事实、数字和结论，不得编造数据；标题保持不变。输出完整文档大纲，以便生成新版文件。\n\n修改要求：\n${requirements}`
+        : `上一版文档内容：\n${previousContent}\n\n这是一次局部修改：只修改用户明确指出的页面、分节、表格、图表或单元格，其他内容、顺序、标题和样式保持不变。输出时仍需返回完整文档大纲，以便生成新版文件。\n\n局部修改的语义验收规则：\n- 如果用户指定了受众（例如“面向非技术管理者”），必须对目标范围做实质性语义改写，而不是只改标题、同义替换或重新排版。\n- 面向非技术管理者时，优先使用业务目标、经营影响、决策依据、风险和下一步行动来表达；首次出现的技术术语要用一句白话解释，删除不影响决策的 API、模型、协议和实现细节。\n- 保留上一版中有依据的事实、数字和结论；不得为了改写而编造数据。目标范围至少应有一处完整句式、解释或行动建议发生变化，且要能看出受众变化。\n- 非目标范围必须逐字保持原内容、顺序、标题、页面类型和数据不变。\n\n修改要求：\n${requirements}`
       : requirements;
-  return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}`;
+  return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}${pageCountConstraint}`;
 }
 
 export function extractSectionHeadings(
@@ -143,7 +164,7 @@ export function documentKindInstruction(
 ): string {
   if (kind === 'ppt') {
     return [
-      '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。',
+      '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。用户明确要求总页数时，必须服从前文的精确页数与单页容量约束。',
       'pageKind 只能使用以下值：cover（封面）、section（章节页）、insight（结论/总结/详情/风险）、comparison（对比）、process（路线图/行动建议）、data（数据）、image_text（图文）、closing（结束页）。不要输出 summary、detail、roadmap、risk、action 等其他值。',
       '封面和结束页由系统统一生成；sections 只填写正文内容。不要把“封面”“谢谢”“谢谢观看”“感谢观看”作为正文 section，也不要把表格或图表挂在致谢页下。用户明确要求页数时，按总页数预算组织内容，避免通过重复页或碎片页凑页数。',
       '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',

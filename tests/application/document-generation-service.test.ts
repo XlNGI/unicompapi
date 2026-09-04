@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ConversationApplicationError,
+  collectRevisionRequestText,
   DocumentDraftCompilationError,
   DocumentGenerationApplicationService,
+  parseRequestedPresentationTotalPages,
   preserveUntargetedDocumentSections,
   waitForDocumentResponseCompletion
 } from '../../src/application';
 import {
   appendAssistantMessageChunk,
+  addUserMessage,
+  attachDocumentResultToMessage,
   beginAssistantMessage,
   completeAssistantMessage,
   createConversation,
@@ -89,6 +93,17 @@ function completedConversation(content: string) {
   return completeAssistantMessage(chunked, messageId, now);
 }
 
+function appendCompletedAssistantMessage(
+  conversation: ReturnType<typeof createConversation>,
+  id: ReturnType<typeof toMessageId>,
+  content: string
+) {
+  const pending = beginAssistantMessage(conversation, { id, createdAt: now });
+  const streaming = startAssistantMessageStreaming(pending, id, now);
+  const chunked = appendAssistantMessageChunk(streaming, id, content, now);
+  return completeAssistantMessage(chunked, id, now);
+}
+
 function recoveredOutline() {
   return {
     kind: 'ppt' as const,
@@ -160,6 +175,202 @@ function environment(content = '{"kind":"ppt" "title":"缺少逗号"}') {
 }
 
 describe('document generation application service', () => {
+  it('aggregates the consecutive revision messages and applies an exact total-page rewrite', async () => {
+    const previousMessageId = toMessageId('document-application-previous-message');
+    const currentMessageId = toMessageId('document-application-page-count-message');
+    const parentWorkId = toWorkId('document-application-parent-work');
+    const previousOutline = {
+      kind: 'ppt' as const,
+      title: '关于龙的PPT',
+      sections: [
+        {
+          heading: '资料说明',
+          level: 1 as const,
+          pageKind: 'insight' as const,
+          blocks: [{ type: 'bullets' as const, items: ['原内容'] }]
+        }
+      ]
+    };
+    const proposedOutline = {
+      ...previousOutline,
+      title: '模型不应擅自改标题',
+      sections: Array.from({ length: 3 }, (_, index) => ({
+        heading: `正文 ${index + 1}`,
+        level: 1 as const,
+        pageKind: 'insight' as const,
+        blocks: [{ type: 'bullets' as const, items: [`扩展内容 ${index + 1}`] }]
+      }))
+    };
+    let conversation = createConversation({
+      id: conversationId,
+      title: 'PPT 修订',
+      projectId,
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      previousMessageId,
+      JSON.stringify(previousOutline)
+    );
+    conversation = attachDocumentResultToMessage(
+      conversation,
+      previousMessageId,
+      {
+        workId: parentWorkId,
+        fileName: '关于龙的PPT.pptx',
+        kind: 'ppt',
+        sizeBytes: 4096
+      },
+      now
+    );
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('document-application-page-count-request'),
+      content: '内容太少了加到5页',
+      createdAt: now
+    });
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('document-application-revision-confirmation'),
+      content: '修改文档',
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      currentMessageId,
+      JSON.stringify(proposedOutline)
+    );
+
+    expect(collectRevisionRequestText(conversation, currentMessageId)).toBe(
+      '内容太少了加到5页\n修改文档'
+    );
+    const revisionAgent = vi.fn();
+    const run = vi.fn(async () => ({
+      taskId: toTaskId('task-document-page-count'),
+      executionId: toExecutionId('execution-document-page-count'),
+      workId: toWorkId('work-document-page-count'),
+      fileName: '关于龙的PPT-5页.pptx',
+      sizeBytes: 8192
+    }));
+    const service = new DocumentGenerationApplicationService({
+      projectId,
+      conversations: {
+        load: async () => conversation,
+        attachDocumentResult: async () => undefined,
+        updateDocumentGenerationStatus: async () => undefined
+      },
+      compiler: {
+        compile: ({ content }) => JSON.parse(content),
+        recover: ({ content }) => JSON.parse(content)
+      },
+      generator: { run },
+      revisionAgent,
+      fingerprint: () => 'page-count-content-sha256',
+      wait: async () => undefined
+    });
+
+    await service.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId: currentMessageId,
+      kind: 'ppt',
+      parentWorkId,
+      presentationTemplate: 'work_report',
+      images: []
+    });
+
+    expect(revisionAgent).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentWorkId,
+        requestedTotalPages: 5,
+        outline: expect.objectContaining({
+          title: previousOutline.title,
+          sections: proposedOutline.sections
+        })
+      })
+    );
+  });
+
+  it('rejects a total-page rewrite whose body section count is not exact', async () => {
+    const previousMessageId = toMessageId('document-application-mismatch-parent');
+    const currentMessageId = toMessageId('document-application-mismatch-current');
+    const parentWorkId = toWorkId('document-application-mismatch-work');
+    const previousOutline = recoveredOutline();
+    const proposedOutline = {
+      ...previousOutline,
+      sections: Array.from({ length: 5 }, (_, index) => ({
+        ...previousOutline.sections[0],
+        heading: `模型正文 ${index + 1}`
+      }))
+    };
+    let conversation = createConversation({
+      id: conversationId,
+      title: 'PPT 页数不匹配',
+      projectId,
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      previousMessageId,
+      JSON.stringify(previousOutline)
+    );
+    conversation = attachDocumentResultToMessage(
+      conversation,
+      previousMessageId,
+      {
+        workId: parentWorkId,
+        fileName: '上一版.pptx',
+        kind: 'ppt',
+        sizeBytes: 4096
+      },
+      now
+    );
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('document-application-mismatch-request'),
+      content: '扩展至 5 页',
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      currentMessageId,
+      JSON.stringify(proposedOutline)
+    );
+    const run = vi.fn();
+    const statuses: unknown[] = [];
+    const service = new DocumentGenerationApplicationService({
+      projectId,
+      conversations: {
+        load: async () => conversation,
+        attachDocumentResult: async () => undefined,
+        updateDocumentGenerationStatus: async (input) => {
+          statuses.push(input.status);
+        }
+      },
+      compiler: {
+        compile: ({ content }) => JSON.parse(content),
+        recover: ({ content }) => JSON.parse(content)
+      },
+      generator: { run },
+      revisionAgent: vi.fn(),
+      fingerprint: () => 'page-count-content-sha256',
+      wait: async () => undefined
+    });
+
+    await expect(service.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId: currentMessageId,
+      kind: 'ppt',
+      parentWorkId,
+      images: []
+    })).rejects.toMatchObject({ code: 'page_count_mismatch' });
+    expect(run).not.toHaveBeenCalled();
+    expect(statuses.at(-1)).toEqual({
+      state: 'failed',
+      kind: 'ppt',
+      errorCode: 'page_count_mismatch'
+    });
+  });
+
   it('recovers a non-empty PPT draft locally and completes the same generation run', async () => {
     const { attachDocumentResult, compile, recover, run, service, conversation } =
       environment();
@@ -318,6 +529,22 @@ describe('document generation application service', () => {
       expect(recover).toHaveBeenCalledWith({ content: 'not structured', kind });
     }
   );
+});
+
+describe('presentation total-page request parsing', () => {
+  it.each([
+    ['内容太少了加到5页', 5],
+    ['扩展至 8 页', 8],
+    ['页数：十二页', 12],
+    ['生成一份 6 页 PPT', 6]
+  ])('parses %s as an exact total', (request, expected) => {
+    expect(parseRequestedPresentationTotalPages(request)).toBe(expected);
+  });
+
+  it('does not confuse a local page target with a total-page request', () => {
+    expect(parseRequestedPresentationTotalPages('修改第5页')).toBeUndefined();
+    expect(parseRequestedPresentationTotalPages('增加5页内容')).toBeUndefined();
+  });
 });
 
 describe('waitForDocumentResponseCompletion', () => {

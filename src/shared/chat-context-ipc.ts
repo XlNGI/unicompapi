@@ -134,6 +134,7 @@ export interface MessageDto {
       | 'revision_patch_failed'
       | 'revision_conflict'
       | 'unvalidated_output'
+      | 'page_count_mismatch'
       | 'generation_failed'
       | 'storage_error';
   };

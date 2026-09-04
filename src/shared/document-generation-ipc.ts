@@ -23,6 +23,7 @@ export type DocumentGenerationIpcErrorCode =
   | 'conversation_not_active'
   | 'revision_conflict'
   | 'invalid_outline'
+  | 'page_count_mismatch'
   | 'document_layout_overflow'
   | 'generation_cancelled'
   | 'generation_failed'

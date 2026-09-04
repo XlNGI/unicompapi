@@ -229,6 +229,8 @@ function mapApplicationError<T>(
     case 'resource_limit':
     case 'layout_overflow':
       return failure('document_layout_overflow', error.message);
+    case 'page_count_mismatch':
+      return failure('page_count_mismatch', error.message);
     case 'cancelled':
       return failure('generation_cancelled', 'Document generation was cancelled');
     case 'response_failed':

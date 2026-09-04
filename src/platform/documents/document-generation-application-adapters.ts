@@ -62,6 +62,8 @@ export class PlatformDocumentGenerationExecutor
         throw new DocumentGenerationApplicationError(
           error.code === 'cancelled'
             ? 'cancelled'
+            : error.code === 'page_count_mismatch'
+              ? 'page_count_mismatch'
             : error.code === 'generation_failed' ||
                 error.code === 'verification_failed'
               ? 'generation_failed'

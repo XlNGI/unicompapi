@@ -63,6 +63,7 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /generateFromMessage/);
   assert.match(page, /cancelGeneration/);
   assert.match(page, /document_layout_overflow/);
+  assert.match(page, /page_count_mismatch/);
   assert.match(page, /generation_cancelled/);
   assert.match(page, /文档生成或写入失败，未登记作品/);
   assert.match(page, /awaitDocumentCompletion/);

@@ -10,3 +10,4 @@ export * from './conversation-workflow-service';
 export * from './conversation-context-builder';
 export * from './conversation-web-research-service';
 export * from './latest-snapshot-autosave';
+export * from './presentation-page-count';

@@ -60,6 +60,7 @@ export type DocumentGenerationErrorCode =
   | 'cancelled'
   | 'generation_failed'
   | 'verification_failed'
+  | 'page_count_mismatch'
   | 'storage_error';
 
 export class DocumentGenerationError extends Error {
@@ -83,6 +84,7 @@ export interface DocumentGenerationPlanInput {
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
+  readonly requestedTotalPages?: number;
   readonly theme?: DocumentThemeId;
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal?: AbortSignal;
@@ -214,7 +216,12 @@ export class DocumentGenerationRunner {
       finalPath = generated.finalPath;
       this.assertNotCancelled(input.signal);
       execution = await this.move(context, execution, 'verifying_file');
-      await this.assertTemporaryOutput(generated, input.kind, input.outline);
+      await this.assertTemporaryOutput(
+        generated,
+        input.kind,
+        input.outline,
+        input.requestedTotalPages
+      );
       if (this.options.renderPreview) {
         try {
           const renderResult = await this.options.renderPreview(generated.temporaryPath, {
@@ -404,7 +411,8 @@ export class DocumentGenerationRunner {
   private async assertTemporaryOutput(
     generated: GeneratedTemporaryDocumentFile,
     kind: DocumentWorkspaceKind,
-    outline: DocumentOutline
+    outline: DocumentOutline,
+    requestedTotalPages?: number
   ): Promise<void> {
     const metadata = await lstat(generated.temporaryPath);
     if (
@@ -446,6 +454,17 @@ export class DocumentGenerationRunner {
         'verification_failed',
         'Generated document is not a valid Office package'
       );
+    }
+    if (kind === 'ppt' && requestedTotalPages !== undefined) {
+      const actualPages = Object.keys(zip.files).filter((name) =>
+        /^ppt\/slides\/slide\d+\.xml$/u.test(name)
+      ).length;
+      if (actualPages !== requestedTotalPages) {
+        throw new DocumentGenerationError(
+          'page_count_mismatch',
+          `生成的 PPT 共 ${actualPages} 页，与明确要求的 ${requestedTotalPages} 页不一致。`
+        );
+      }
     }
     await assertExpectedDocumentContent(zip, kind, outline, generated.fileName);
   }

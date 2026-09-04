@@ -108,6 +108,7 @@ const documentErrorMessages: Record<string, string> = {
   conversation_not_active: '请先恢复已归档对话。',
   revision_conflict: '内容已变化，请重试。',
   invalid_outline: '文档大纲无效，请调整需求后重试。',
+  page_count_mismatch: 'PPT 页数未达到明确要求，请减少单页内容后重试。',
   document_layout_overflow:
     '单个内容组过长，无法在可读字号下排版，请拆分内容后重试。',
   generation_cancelled: '文档生成已取消，未保存文件。',
@@ -366,6 +367,8 @@ function documentGenerationMessage(
       return 'AI 内容生成未完成，文档未生成。';
     case 'invalid_outline':
       return 'AI 内容格式异常，文档未生成，请重试或切换模型。';
+    case 'page_count_mismatch':
+      return 'PPT 页数未达到明确要求，文档未生成，请减少单页内容后重试。';
     case 'resource_limit':
     case 'document_layout_overflow':
       return '内容超出当前文档生成限制，请精简或拆分后重试。';
@@ -1714,7 +1717,8 @@ export function ChatPage({
       .join('\n\n');
     const revisionInput = composeDocumentRevisionInput(
       previousDocument?.content,
-      requirements
+      requirements,
+      kind
     );
     const resolvedPresentationTemplate = resolvePresentationTemplate(
       presentationTemplate,
