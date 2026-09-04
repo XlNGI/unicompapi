@@ -1,5 +1,7 @@
 # UniComp 开发计划
 
+2026-09-04 联网不可用状态回归修复：截图复核确认，`feature/web-research-foundation` 引入授权预览后，只在 preload API 缺失时复用旧的 workflow 取消逻辑；当预览返回 `unavailable/failed`、IPC 失败或授权后检索失败时仍保留 `ready` workflow，导致页面同时显示“继续执行”和“任务未执行”。现统一在这些终止路径取消联网 session 并持久化取消 workflow，成功后同步清除 `activeWorkflow` 与 UI 联网 session；只有 `authorization_required` 保留继续入口。定向 UI 合同 21/21、`typecheck`、`lint`、`build`、完整 `pnpm.cmd test`、`audit:platform`、`verify:handoff` 与 `git diff --check` 通过。真实搜索服务商、搜索凭证、HTTP 与收费调用仍为 0，W0/W2/W5/W6 状态不变。
+
 2026-09-04 会话自然语言 PPT 创建修复：截图复核发现“帮我只做一个关于龙的ppt”虽包含明确类型与创建意图，却因 `hasStrongCreateCommand` 未允许“只”等副词而落入 unknown；后续“制作ppt”又只能补类型，无法恢复上一轮主题。现将受控创建副词纳入 Application 意图识别，并让 unknown 追问态基于当前 workflow 源消息后的最多 8 条用户消息重建完整计划，保持否定句、多文档歧义和确认门禁不变。黄金集升级为 `conversation-intent-offline-golden@1.0.1`，截图原句纳入第 46 条样本；自然语言创建、多轮恢复和黄金集定向回归 27/27，Node/UI 353/353、Vitest 183 文件 1128/1128、`typecheck`、`lint`、`build` 与 `git diff --check` 通过。真实 LLM、联网、Provider、Office 人工验收仍未执行。
 
 2026-09-04 受控联网基础接入执行记录：从同步后的 `develop` 创建 `feature/web-research-foundation`，完成 W1/W3/W4 的 provider-neutral 与会话接线。新增共享 `conversation.web.preview/authorize/cancel/getStatus` DTO、严格字段解析、Application 本地 BM25 优先编排、workflow/revision/planHash 授权绑定、取消与过期 fail-closed、主进程默认 `UnconfiguredWebSearchTransport`、凭证回调端口和 UI 外发预览/明确授权。新增 Application 3/3、联网合同 5/5、受控 transport 4/4 和 IPC 合同 2/2 测试；`typecheck`、`lint`、`git diff --check` 通过。当前未配置真实服务商、未读取凭证、未发起 HTTP 或收费调用；W0/W2/W5/W6 仍未完成，真实联网仍不可用。

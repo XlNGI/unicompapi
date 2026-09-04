@@ -47,6 +47,9 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /检索资料/);
   assert.match(page, /retrieveContext/);
   assert.match(page, /cancelUnsupportedWebWorkflow/);
+  assert.match(page, /preview\.value\.status === 'unavailable'[\s\S]*cancelUnsupportedWebWorkflow/);
+  assert.match(page, /cancelUnsupportedWebWorkflow[\s\S]*webResearch\.cancel/);
+  assert.match(page, /setWebResearchSession\(undefined\)/);
   assert.match(page, /任务已取消，未执行/);
   assert.match(page, /chat\.startWorkflow\(/);
   assert.match(page, /chat\.answerWorkflow\(/);
