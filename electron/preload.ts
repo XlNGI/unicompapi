@@ -47,6 +47,10 @@ import {
   type ConversationResponseStreamEventDto
 } from '../src/shared/chat-context-ipc';
 import {
+  webResearchIpcChannels,
+  type WebResearchApi
+} from '../src/shared/web-research-ipc';
+import {
   autosaveDiagnosticsIpcChannel,
   type AutosaveDiagnosticsApi
 } from '../src/shared/autosave-diagnostics-ipc';
@@ -87,6 +91,13 @@ const documentAttachments: DocumentAttachmentApi = {
     ipcRenderer.invoke(documentAttachmentIpcChannels.extractTheme, request),
   retrieveContext: (request) =>
     ipcRenderer.invoke(documentAttachmentIpcChannels.retrieveContext, request)
+};
+
+const webResearch: WebResearchApi = {
+  preview: (request) => ipcRenderer.invoke(webResearchIpcChannels.preview, request),
+  authorize: (request) => ipcRenderer.invoke(webResearchIpcChannels.authorize, request),
+  cancel: (request) => ipcRenderer.invoke(webResearchIpcChannels.cancel, request),
+  getStatus: (request) => ipcRenderer.invoke(webResearchIpcChannels.getStatus, request)
 };
 
 const storage: StorageApi = {
@@ -951,6 +962,7 @@ contextBridge.exposeInMainWorld('unicomp', {
   autosaveDiagnostics,
   chatContexts,
   documentAttachments,
+  webResearch,
   documentGeneration,
   getPathForFile,
   imageSubmissions,

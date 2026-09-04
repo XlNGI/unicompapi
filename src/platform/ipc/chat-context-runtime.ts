@@ -4,6 +4,7 @@ import {
   ConversationApplicationService,
   ConversationIntentOrchestrator,
   ConversationWorkflowService,
+  ConversationWebResearchService,
   ProjectContextRegistryService,
   type ConversationIdFactory,
   type ProjectContextIdFactory
@@ -45,6 +46,10 @@ import {
   ConversationWorkflowController,
   type ConversationWorkflowControllerRuntime
 } from './conversation-workflow-controller';
+import {
+  ConversationWebResearchController,
+  type ConversationWebResearchControllerRuntime
+} from './conversation-web-research-controller';
 import {
   ConversationResponseController,
   type ConversationResponseControllerRuntime
@@ -92,6 +97,12 @@ import type {
 } from '../../shared/chat-context-ipc';
 import { chatContextRequestParsers } from '../../shared/chat-context-ipc';
 import { chatContextFailure, failure } from './chat-context-errors';
+import {
+  ControlledWebResearchService,
+  RagRetrievalService,
+  UnconfiguredWebSearchTransport,
+  type WebSearchTransport
+} from '../search';
 
 export interface ChatContextRuntimeDependencies {
   readonly userDataDirectory: string;
@@ -104,6 +115,10 @@ export interface ChatContextRuntimeDependencies {
     ConversationTextSubmissionRuntimes,
     'providerRegistry' | 'providerPackages' | 'usage'
   >;
+  readonly webResearch?: {
+    readonly transport?: WebSearchTransport;
+    readonly configuration?: ConstructorParameters<typeof ConversationWebResearchService>[1];
+  };
   now?: () => string;
   conversationIds?: ConversationIdFactory;
   projectContextIds?: ProjectContextIdFactory;
@@ -115,6 +130,7 @@ export interface ChatContextRuntime {
   readonly responses: ConversationResponseController;
   readonly projectContexts: ProjectContextController;
   readonly workflows: ConversationWorkflowController;
+  readonly webResearch: ConversationWebResearchController;
   interruptActiveResponses(): Promise<number>;
   waitForMutations(): Promise<void>;
 }
@@ -172,6 +188,7 @@ export function createChatContextRuntime(
     readonly conversationRepository: JsonProjectConversationRepository;
     readonly contextService: ProjectContextRegistryService;
     readonly workflowService: ConversationWorkflowService;
+    readonly webResearch: ConversationWebResearchControllerRuntime;
     readonly responses: ConversationResponseControllerRuntime;
   };
   let cached: ProjectRuntime | undefined;
@@ -217,6 +234,21 @@ export function createChatContextRuntime(
     const workflowService = new ConversationWorkflowService(
       new JsonConversationWorkflowRepository(storage, session.projectId, now),
       new ConversationIntentOrchestrator(),
+      now
+    );
+    const retrieval = new RagRetrievalService({
+      rootDirectory: session.rootDirectory,
+      projectId: session.projectId
+    });
+    const webTransport = dependencies.webResearch?.transport ?? new UnconfiguredWebSearchTransport();
+    const webResearchService = new ConversationWebResearchService(
+      new ControlledWebResearchService({ transport: webTransport }),
+      dependencies.webResearch?.configuration ?? {
+        enabled: false,
+        allowedDomains: [],
+        outboundSummary: '联网服务尚未配置，不会外发内容',
+        allowMixedQueries: false
+      },
       now
     );
     const candidateService = new ProviderFeatureCandidateService(
@@ -392,6 +424,16 @@ export function createChatContextRuntime(
       conversationRepository: projectConversations,
       contextService,
       workflowService,
+      webResearch: {
+        conversationService: new ConversationApplicationService(
+          projectConversations,
+          conversationIds,
+          now
+        ),
+        workflowService,
+        research: webResearchService,
+        local: retrieval
+      },
       responses
     };
     runtimes.add(cached);
@@ -530,6 +572,13 @@ export function createChatContextRuntime(
       };
     }
   });
+  const webResearch = new ConversationWebResearchController({
+    getSession: dependencies.getSession,
+    onError: dependencies.onError,
+    getRuntime(session): ConversationWebResearchControllerRuntime {
+      return getProjectRuntime(session).webResearch;
+    }
+  });
   const responses = new ConversationResponseController({
     getSession: dependencies.getSession,
     getRuntime: (session) => getProjectRuntime(session).responses,
@@ -542,6 +591,7 @@ export function createChatContextRuntime(
     responses,
     projectContexts,
     workflows,
+    webResearch,
     interruptActiveResponses: async () => {
       const interrupted = await Promise.all([...runtimes].map(async (runtime) => {
         // Adapter completion owns the terminal transition. Only persisted handles
@@ -563,7 +613,8 @@ export function createChatContextRuntime(
         conversations.waitForOperations(),
         responses.waitForOperations(),
         projectContexts.waitForMutations(),
-        workflows.waitForOperations()
+        workflows.waitForOperations(),
+        webResearch.waitForOperations()
       ]);
     }
   };

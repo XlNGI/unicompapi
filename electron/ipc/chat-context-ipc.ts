@@ -11,6 +11,7 @@ import {
   type StorageProjectSession
 } from '../../src/platform';
 import { chatContextIpcChannels } from '../../src/shared/chat-context-ipc';
+import { webResearchIpcChannels } from '../../src/shared/web-research-ipc';
 
 export interface ChatContextIpcLifecycle {
   interruptActiveResponses(): Promise<number>;
@@ -40,6 +41,7 @@ export function registerChatContextIpcHandlers(options: {
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;
   const workflows = runtime.workflows;
+  const webResearch = runtime.webResearch;
   const responseSubscriptionOwners = new Map<string, number>();
 
   ipcMain.handle(chatContextIpcChannels.createConversation, (_event, request: unknown) =>
@@ -116,6 +118,18 @@ export function registerChatContextIpcHandlers(options: {
   );
   ipcMain.handle(chatContextIpcChannels.getPendingWorkflow, (_event, request: unknown) =>
     workflows.getPending(request)
+  );
+  ipcMain.handle(webResearchIpcChannels.preview, (_event, request: unknown) =>
+    webResearch.preview(request)
+  );
+  ipcMain.handle(webResearchIpcChannels.authorize, (_event, request: unknown) =>
+    webResearch.authorize(request)
+  );
+  ipcMain.handle(webResearchIpcChannels.cancel, (_event, request: unknown) =>
+    webResearch.cancel(request)
+  );
+  ipcMain.handle(webResearchIpcChannels.getStatus, (_event, request: unknown) =>
+    webResearch.getStatus(request)
   );
   ipcMain.handle(chatContextIpcChannels.getResponseExecution, (_event, request: unknown) =>
     runtime.responses.getExecution(request)

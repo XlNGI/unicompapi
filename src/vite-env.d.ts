@@ -14,6 +14,7 @@ import type { ChatContextApi } from './shared/chat-context-ipc';
 import type { AutosaveDiagnosticsApi } from './shared/autosave-diagnostics-ipc';
 import type { DocumentAttachmentApi } from './shared/document-attachment-ipc';
 import type { DocumentGenerationApi } from './shared/document-generation-ipc';
+import type { WebResearchApi } from './shared/web-research-ipc';
 
 declare global {
   interface Window {
@@ -22,6 +23,7 @@ declare global {
       chatContexts: ChatContextApi;
       documentAttachments: DocumentAttachmentApi;
       documentGeneration: DocumentGenerationApi;
+      webResearch: WebResearchApi;
       getPathForFile: (file: File) => string;
       imageFeatures: ImageFeatureApi;
       promptEnhance: PromptEnhanceApi;
