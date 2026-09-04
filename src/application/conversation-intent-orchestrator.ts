@@ -251,9 +251,11 @@ function mergeWorkflowClarification(
   if (!answer) return undefined;
   if (plan.kind === 'unknown') {
     const recent = context.recentUserMessages ?? [];
-    const previous = recent.length > 1 ? recent.at(-2) : undefined;
+    const turns = recent.at(-1)?.trim() === answer.trim()
+      ? recent
+      : [...recent, answer];
     const recovered = analyzeLocalConversationIntent({
-      rawText: previous ? `${previous}\n${answer}` : answer,
+      rawText: turns.slice(-8).join('\n'),
       context: {
         ...context,
         recentUserMessages: undefined

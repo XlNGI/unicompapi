@@ -81,7 +81,7 @@ export class ConversationWorkflowController {
         workflowId,
         expectedRevision: input.expectedWorkflowRevision,
         rawText: input.content,
-        context: semanticContext(conversation)
+        context: semanticContext(conversation, workflow.sourceMessageId)
       });
       return {
         ok: true,
@@ -246,7 +246,16 @@ export function toWorkflowDto(workflow: ConversationWorkflowV1): ConversationWor
   };
 }
 
-function semanticContext(conversation: Awaited<ReturnType<ConversationApplicationService['get']>>) {
+function semanticContext(
+  conversation: Awaited<ReturnType<ConversationApplicationService['get']>>,
+  workflowSourceMessageId?: string
+) {
+  const sourceIndex = workflowSourceMessageId === undefined
+    ? 0
+    : conversation.messages.findIndex((message) => message.id === workflowSourceMessageId);
+  const workflowMessages = sourceIndex >= 0
+    ? conversation.messages.slice(sourceIndex)
+    : conversation.messages;
   return {
     documents: conversation.messages.flatMap((message) =>
       message.role === 'assistant' && message.state === 'completed' && message.documentResult
@@ -257,7 +266,7 @@ function semanticContext(conversation: Awaited<ReturnType<ConversationApplicatio
           }]
         : []
     ),
-    recentUserMessages: conversation.messages
+    recentUserMessages: workflowMessages
       .filter((message) => message.role === 'user' && message.state === 'completed')
       .slice(-8)
       .map((message) => message.displayContent ?? message.content)
