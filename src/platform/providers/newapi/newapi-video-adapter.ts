@@ -141,6 +141,7 @@ interface NewApiOperationContext {
   readonly route: ValidatedNewApiRoute;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly connection: ProviderConnection;
+  providerRequestId?: string;
   usagePersisted: boolean;
 }
 
@@ -213,6 +214,9 @@ export class NewApiVideoAdapter
           beforeRequestStarted: async () => {
             await input.beforeRequestStarted?.();
             requestStarted = true;
+          },
+          onResponseRequestId: (requestId) => {
+            if (submissionContext) submissionContext.providerRequestId = requestId;
           }
         })
       );
@@ -273,6 +277,9 @@ export class NewApiVideoAdapter
       route,
       invocationAttemptId,
       connection,
+      ...(existing?.providerRequestId
+        ? { providerRequestId: existing.providerRequestId }
+        : {}),
       usagePersisted: Boolean(input.usageAlreadyPersisted)
     });
   }
@@ -524,8 +531,11 @@ export class NewApiVideoAdapter
         sequence: 1,
         status,
         sourceStage: 'poll',
-        facts,
-        observedAt: this.nowTimestamp()
+      facts,
+      ...(context.providerRequestId
+        ? { providerRequestId: context.providerRequestId }
+        : {}),
+      observedAt: this.nowTimestamp()
       }, newApiVideoUsageSchema),
       newApiVideoUsageSchema
     );

@@ -90,6 +90,8 @@ export interface ProviderUsageObservationV1 {
   readonly status: UsageObservationStatus;
   readonly sourceStage: UsageStage;
   readonly facts: readonly UsageFactV1[];
+  /** Provider/gateway request identifier used for later billing reconciliation. */
+  readonly providerRequestId?: string;
   readonly observedAt: IsoTimestamp;
 }
 
@@ -98,6 +100,7 @@ export interface ProviderUsageSummaryV1 {
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly availability: UsageAvailability;
   readonly facts: readonly UsageFactV1[];
+  readonly providerRequestId?: string;
   readonly calculatedAt: IsoTimestamp;
 }
 
@@ -175,7 +178,7 @@ export function parseUsageSchema(value: unknown): UsageSchemaV1 {
 export function parseProviderUsageObservation(
   value: unknown
 ): ProviderUsageObservationV1 {
-  const item = exactRecord(value, [
+  const item = flexibleExactRecord(value, [
     'schemaVersion',
     'id',
     'invocationAttemptId',
@@ -187,7 +190,13 @@ export function parseProviderUsageObservation(
     'sourceStage',
     'facts',
     'observedAt'
-  ], 'provider usage observation');
+  ], ['providerRequestId'], 'provider usage observation');
+  if (
+    item.providerRequestId !== undefined &&
+    !isValidProviderRequestId(item.providerRequestId)
+  ) {
+    throw new InvariantViolationError('provider request ID is invalid');
+  }
   if (
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.usageSchemaRevision) ||
@@ -225,18 +234,26 @@ export function parseProviderUsageObservation(
     status: item.status as UsageObservationStatus,
     sourceStage: item.sourceStage as UsageStage,
     facts,
+    ...(item.providerRequestId === undefined
+      ? {}
+      : { providerRequestId: item.providerRequestId }),
     observedAt: toIsoTimestamp(String(item.observedAt))
   };
 }
 
 export function parseProviderUsageSummary(value: unknown): ProviderUsageSummaryV1 {
-  const item = exactRecord(value, [
-    'schemaVersion',
-    'invocationAttemptId',
-    'availability',
-    'facts',
-    'calculatedAt'
-  ], 'provider usage summary');
+  const item = flexibleExactRecord(
+    value,
+    ['schemaVersion', 'invocationAttemptId', 'availability', 'facts', 'calculatedAt'],
+    ['providerRequestId'],
+    'provider usage summary'
+  );
+  if (
+    item.providerRequestId !== undefined &&
+    !isValidProviderRequestId(item.providerRequestId)
+  ) {
+    throw new InvariantViolationError('provider request ID is invalid');
+  }
   if (
     item.schemaVersion !== 1 ||
     !usageAvailabilities.includes(item.availability as UsageAvailability) ||
@@ -261,6 +278,9 @@ export function parseProviderUsageSummary(value: unknown): ProviderUsageSummaryV
     ),
     availability: item.availability as UsageAvailability,
     facts,
+    ...(item.providerRequestId === undefined
+      ? {}
+      : { providerRequestId: item.providerRequestId }),
     calculatedAt: toIsoTimestamp(String(item.calculatedAt))
   };
 }
@@ -375,24 +395,25 @@ export function summarizeProviderUsage(input: {
     throw new InvariantViolationError('usage observations belong to another attempt');
   }
   observations.forEach((item) => validateUsageObservationAgainstSchema(item, schema));
+  const providerRequestId = latestProviderRequestId(observations).providerRequestId;
   if (input.availabilityOverride !== undefined) {
     if (observations.length > 0) {
       throw new InvariantViolationError('usage availability override cannot hide observations');
     }
-    return summary(input.invocationAttemptId, input.availabilityOverride, [], input.calculatedAt);
+    return summary(input.invocationAttemptId, input.availabilityOverride, [], input.calculatedAt, providerRequestId);
   }
   if (
     input.attemptState === 'unknown_outcome' ||
     observations.some((item) => item.status === 'unknown_outcome')
   ) {
-    return summary(input.invocationAttemptId, 'unknown_outcome', [], input.calculatedAt);
+    return summary(input.invocationAttemptId, 'unknown_outcome', [], input.calculatedAt, providerRequestId);
   }
   if (observations.some((item) => item.status === 'invalid_response')) {
-    return summary(input.invocationAttemptId, 'invalid_response', [], input.calculatedAt);
+    return summary(input.invocationAttemptId, 'invalid_response', [], input.calculatedAt, providerRequestId);
   }
   const reported = observations.filter((item) => item.status === 'reported');
   if (reported.length === 0) {
-    return summary(input.invocationAttemptId, 'not_reported', [], input.calculatedAt);
+    return summary(input.invocationAttemptId, 'not_reported', [], input.calculatedAt, providerRequestId);
   }
   const aggregated: UsageFactV1[] = [];
   for (const definition of schema.metrics) {
@@ -404,7 +425,7 @@ export function summarizeProviderUsage(input: {
     if (values.length === 0) continue;
     const fact = aggregateMetric(definition, values);
     if (!fact) {
-      return summary(input.invocationAttemptId, 'invalid_response', [], input.calculatedAt);
+      return summary(input.invocationAttemptId, 'invalid_response', [], input.calculatedAt, providerRequestId);
     }
     aggregated.push(fact);
   }
@@ -415,7 +436,7 @@ export function summarizeProviderUsage(input: {
         .every((metric) => aggregated.some((fact) => fact.metricId === metric.metricId))
       ? 'reported_complete'
       : 'reported_partial';
-  return summary(input.invocationAttemptId, availability, aggregated, input.calculatedAt);
+  return summary(input.invocationAttemptId, availability, aggregated, input.calculatedAt, providerRequestId);
 }
 
 export function sameUsageSourceEvent(
@@ -548,15 +569,27 @@ function summary(
   invocationAttemptId: ProviderInvocationAttemptId,
   availability: UsageAvailability,
   facts: readonly UsageFactV1[],
-  calculatedAt: IsoTimestamp
+  calculatedAt: IsoTimestamp,
+  providerRequestId?: string
 ): ProviderUsageSummaryV1 {
   return parseProviderUsageSummary({
     schemaVersion: 1,
     invocationAttemptId,
     availability,
     facts,
+    ...(providerRequestId ? { providerRequestId } : {}),
     calculatedAt
   });
+}
+
+function latestProviderRequestId(
+  observations: readonly ProviderUsageObservationV1[]
+): { readonly providerRequestId?: string } {
+  for (let index = observations.length - 1; index >= 0; index -= 1) {
+    const providerRequestId = observations[index]?.providerRequestId;
+    if (providerRequestId) return { providerRequestId };
+  }
+  return {};
 }
 
 function parseQuantity(value: string, numericKind: 'integer' | 'decimal'): string {
@@ -625,6 +658,13 @@ function parseSourceEventKey(value: unknown): string {
     throw new InvariantViolationError('usage source event key is invalid');
   }
   return key;
+}
+
+function isValidProviderRequestId(value: unknown): value is string {
+  return typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value);
 }
 
 function positiveInteger(value: unknown, label: string): number {

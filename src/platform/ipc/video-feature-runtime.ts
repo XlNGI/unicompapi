@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import {
+  createProviderInvocationEvent,
   createLocalResultObservation,
   recoverRemoteCompletedExecution,
   toTaskId,
   toIsoTimestamp,
   toLocalResultObservationId,
+  toProviderInvocationEventId,
   toProviderOperationRecordId,
   transitionExecution,
+  type ProviderInvocationAttemptId,
   type ProviderProtocolBinding
 } from '../../domain';
 import type { VideoFeatureSubmissionDto } from '../../shared/video-feature-ipc';
@@ -463,6 +466,16 @@ export function createVideoFeatureControllerRuntime(
     }
 
     const feedbackSafeCode = latestSafeCode(acceptance.invocationEvents);
+    if (finalStatus === 'completed' || finalStatus === 'failed' || finalStatus === 'cancelled') {
+      await finalizeVideoInvocation({
+        invocations,
+        attemptId: acceptance.invocationAttempt.id,
+        status: finalStatus,
+        safeCode: feedbackSafeCode,
+        now
+      });
+    }
+
     const feedback =
       localResultError ??
       (workId
@@ -645,4 +658,39 @@ async function persistCallRecordFacts(input: {
   for (const event of rest) {
     await input.invocations.appendEvent(event);
   }
+}
+
+async function finalizeVideoInvocation(input: {
+  readonly invocations: JsonProviderInvocationRepository;
+  readonly attemptId: ProviderInvocationAttemptId;
+  readonly status: 'completed' | 'failed' | 'cancelled';
+  readonly safeCode?: string;
+  readonly now: () => string;
+}): Promise<void> {
+  let events = await input.invocations.listEvents(input.attemptId);
+  if (events.some((event) =>
+    event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled'
+  )) return;
+
+  if (input.status === 'completed' && !events.some((event) => event.type === 'result_received')) {
+    const resultReceived = createProviderInvocationEvent({
+      id: toProviderInvocationEventId(`invocation-event-${randomUUID()}`),
+      invocationAttemptId: input.attemptId,
+      sequence: events.length + 1,
+      type: 'result_received',
+      occurredAt: toIsoTimestamp(input.now())
+    });
+    await input.invocations.appendEvent(resultReceived);
+    events = [...events, resultReceived];
+  }
+
+  const terminal = createProviderInvocationEvent({
+    id: toProviderInvocationEventId(`invocation-event-${randomUUID()}`),
+    invocationAttemptId: input.attemptId,
+    sequence: events.length + 1,
+    type: input.status,
+    ...(input.safeCode ? { safeCode: input.safeCode } : {}),
+    occurredAt: toIsoTimestamp(input.now())
+  });
+  await input.invocations.appendEvent(terminal);
 }

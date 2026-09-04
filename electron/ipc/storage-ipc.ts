@@ -52,6 +52,7 @@ import {
   WorkspacePromptEnhanceSubjectAdapter,
   type DeepSeekSharedRuntime,
   type NewApiSharedRuntime,
+  NewApiBillingReconciler,
   type NewApiImageDownloadPort,
   type SecureCredentialVault,
   deepSeekProviderPackageDescriptor,
@@ -132,6 +133,13 @@ export function registerStorageIpcHandlers(options: {
     newApiRuntime: options.textSubmission?.newApiRuntime,
     imageResultDownloads: options.textSubmission?.newApiImageDownloads
   });
+  const billingReconciliation = options.textSubmission
+    ? new NewApiBillingReconciler(
+        providerRegistry,
+        options.textSubmission.credentialVault,
+        options.textSubmission.newApiRuntime
+      )
+    : undefined;
   const imageWorkspaces = new ImageWorkspaceController({
     getSession: () => sessionRegistry.get(),
     mutations: imageMutations
@@ -409,7 +417,9 @@ export function registerStorageIpcHandlers(options: {
   const callReadModels = new ProviderInvocationReadModelController(
     catalog,
     options.providerUsageSchemas,
-    options.currencyConversions
+    options.currencyConversions,
+    undefined,
+    billingReconciliation
   );
   const projectStorageMonitor = new ProjectStorageChangeMonitor(
     catalog,

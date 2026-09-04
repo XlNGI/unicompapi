@@ -471,6 +471,7 @@ export class NewApiChatAdapter {
         observationId: this.ids.nextProviderUsageObservationId(),
         invocationAttemptId: operation.invocationAttemptId,
         providerOperationId: operation.providerOperationId,
+        providerRequestId: operation.session.requestId,
         status: stream.usage ? 'reported' : 'not_reported',
         facts: stream.usage ?? [],
         observedAt: this.now()
@@ -602,6 +603,7 @@ export class NewApiChatAdapter {
       observationId: this.ids.nextProviderUsageObservationId(),
       invocationAttemptId: operation.invocationAttemptId,
       providerOperationId: operation.providerOperationId,
+      providerRequestId: operation.session.requestId,
       status,
       facts: [],
       observedAt: this.now()
@@ -1102,6 +1104,7 @@ function createUsageObservation(input: {
   readonly observationId: ProviderUsageObservationId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly providerOperationId: string;
+  readonly providerRequestId?: string;
   readonly status: 'reported' | 'not_reported' | 'invalid_response' | 'unknown_outcome';
   readonly facts: readonly UsageFactV1[];
   readonly observedAt: IsoTimestamp;
@@ -1116,6 +1119,7 @@ function createUsageObservation(input: {
     status: input.status,
     sourceStage: 'result',
     facts: input.facts,
+    ...(input.providerRequestId ? { providerRequestId: input.providerRequestId } : {}),
     observedAt: input.observedAt
   }, newApiChatUsageSchema);
 }

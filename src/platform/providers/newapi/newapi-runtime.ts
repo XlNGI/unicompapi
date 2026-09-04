@@ -134,7 +134,10 @@ export interface NewApiSafeLogEvent {
     | 'image_submit'
     | 'video_submit'
     | 'video_query'
-    | 'video_result';
+    | 'video_result'
+    | 'billing_logs'
+    | 'site_status'
+    | 'model_pricing';
   readonly method?: 'GET' | 'POST';
   readonly status?: number;
   readonly errorCode?: NewApiRuntimeErrorCode;
@@ -151,6 +154,7 @@ export interface NewApiSafeLogEvent {
 
 export interface NewApiEventStreamSession {
   readonly stream: AsyncIterable<Uint8Array>;
+  readonly requestId?: string;
   readonly cancel: () => void;
   readonly close: () => void;
 }
@@ -161,6 +165,8 @@ export interface NewApiSharedRuntimeOptions extends ProviderStreamTimeoutOptions
   readonly logger?: (event: NewApiSafeLogEvent) => void;
   readonly now?: () => number;
 }
+
+export type NewApiResponseRequestIdObserver = (requestId: string) => void;
 
 type RuntimeOperation = NonNullable<NewApiSafeLogEvent['operation']>;
 
@@ -200,6 +206,7 @@ export class NewApiSharedRuntime {
     readonly body: Uint8Array;
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
   }): Promise<NewApiEventStreamSession> {
     const response = await this.request({
       connection: input.connection,
@@ -212,6 +219,7 @@ export class NewApiSharedRuntime {
       body: input.body,
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
+      onResponseRequestId: input.onResponseRequestId,
       accept: 'text/event-stream',
       contentType: 'application/json',
       maximumRequestBytes: 2 * 1024 * 1024,
@@ -226,6 +234,7 @@ export class NewApiSharedRuntime {
     }
     return {
       stream: response.stream,
+      ...(response.requestId ? { requestId: response.requestId } : {}),
       cancel: response.cancel!,
       close: response.close!
     };
@@ -237,6 +246,7 @@ export class NewApiSharedRuntime {
     readonly body: Uint8Array;
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
   }): Promise<Uint8Array> {
     return requireBody(await this.request({
       connection: input.connection,
@@ -249,11 +259,84 @@ export class NewApiSharedRuntime {
       body: input.body,
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
+      onResponseRequestId: input.onResponseRequestId,
       accept: 'application/json',
       contentType: 'application/json',
       maximumRequestBytes: 2 * 1024 * 1024,
       maximumResponseBytes: 2 * 1024 * 1024,
       requireReadyConnection: true,
+      expectedResponse: 'json',
+      notFoundKind: 'model'
+    }));
+  }
+
+  async requestTokenLogs(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly signal?: AbortSignal;
+  }): Promise<Uint8Array> {
+    return requireBody(await this.request({
+      connection: input.connection,
+      credentials: input.credentials,
+      adapterId: NEWAPI_CHAT_ADAPTER_ID,
+      protocolId: NEWAPI_CHAT_PROTOCOL_ID,
+      operation: 'billing_logs',
+      method: 'GET',
+      pathSegments: ['api', 'log', 'token'],
+      pathRoot: 'origin',
+      signal: input.signal,
+      accept: 'application/json',
+      maximumRequestBytes: 1,
+      maximumResponseBytes: 8 * 1024 * 1024,
+      requireReadyConnection: false,
+      expectedResponse: 'json',
+      notFoundKind: 'model'
+    }));
+  }
+
+  async requestSiteStatus(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly signal?: AbortSignal;
+  }): Promise<Uint8Array> {
+    return requireBody(await this.request({
+      connection: input.connection,
+      credentials: input.credentials,
+      adapterId: NEWAPI_CHAT_ADAPTER_ID,
+      protocolId: NEWAPI_CHAT_PROTOCOL_ID,
+      operation: 'site_status',
+      method: 'GET',
+      pathSegments: ['api', 'status'],
+      pathRoot: 'origin',
+      signal: input.signal,
+      accept: 'application/json',
+      maximumRequestBytes: 1,
+      maximumResponseBytes: 1024 * 1024,
+      requireReadyConnection: false,
+      expectedResponse: 'json',
+      notFoundKind: 'model'
+    }));
+  }
+
+  async requestModelPricing(input: {
+    readonly connection: ProviderConnection;
+    readonly credentials: StructuredCredentialRecord;
+    readonly signal?: AbortSignal;
+  }): Promise<Uint8Array> {
+    return requireBody(await this.request({
+      connection: input.connection,
+      credentials: input.credentials,
+      adapterId: NEWAPI_CHAT_ADAPTER_ID,
+      protocolId: NEWAPI_CHAT_PROTOCOL_ID,
+      operation: 'model_pricing',
+      method: 'GET',
+      pathSegments: ['api', 'pricing'],
+      pathRoot: 'origin',
+      signal: input.signal,
+      accept: 'application/json',
+      maximumRequestBytes: 1,
+      maximumResponseBytes: 8 * 1024 * 1024,
+      requireReadyConnection: false,
       expectedResponse: 'json',
       notFoundKind: 'model'
     }));
@@ -266,6 +349,7 @@ export class NewApiSharedRuntime {
     readonly path?: 'generations' | 'edits';
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
   }): Promise<Uint8Array> {
     return requireBody(await this.request({
       connection: input.connection,
@@ -278,6 +362,7 @@ export class NewApiSharedRuntime {
       body: input.body,
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
+      onResponseRequestId: input.onResponseRequestId,
       accept: 'application/json',
       contentType: 'application/json',
       maximumRequestBytes: NEWAPI_MAXIMUM_IMAGE_REQUEST_BYTES,
@@ -295,6 +380,7 @@ export class NewApiSharedRuntime {
     readonly contentType: string;
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
   }): Promise<Uint8Array> {
     return requireBody(await this.request({
       connection: input.connection,
@@ -307,6 +393,7 @@ export class NewApiSharedRuntime {
       body: input.body,
       signal: input.signal,
       beforeRequestStarted: input.beforeRequestStarted,
+      onResponseRequestId: input.onResponseRequestId,
       accept: 'application/json',
       contentType: requireVideoCreateContentType(input.contentType),
       maximumRequestBytes: 64 * 1024 * 1024,
@@ -389,9 +476,11 @@ export class NewApiSharedRuntime {
     readonly operation: RuntimeOperation;
     readonly method: 'GET' | 'POST';
     readonly pathSegments: readonly string[];
+    readonly pathRoot?: 'v1' | 'origin';
     readonly body?: Uint8Array;
     readonly signal?: AbortSignal;
     readonly beforeRequestStarted?: () => Promise<void>;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
     readonly accept: string;
     readonly contentType?: string;
     readonly maximumRequestBytes: number;
@@ -400,6 +489,7 @@ export class NewApiSharedRuntime {
     readonly expectedResponse: 'json' | 'stream' | 'binary';
     readonly notFoundKind: 'model' | 'operation';
   }): Promise<NewApiHttpTransportResponse & {
+    readonly requestId?: string;
     readonly cancel?: () => void;
     readonly close?: () => void;
   }> {
@@ -413,7 +503,9 @@ export class NewApiSharedRuntime {
       input.requireReadyConnection
     );
     const credential = parseCredential(input.credentials);
-    const url = resolvePath(baseUrl, input.pathSegments);
+    const url = input.pathRoot === 'origin'
+      ? resolveOriginPath(baseUrl, input.pathSegments)
+      : resolvePath(baseUrl, input.pathSegments);
     validateBounds(input.body, input.maximumRequestBytes, input.maximumResponseBytes);
     const requestTimeoutMs = this.options.defaultTimeoutMs ?? 120_000;
     const streamTimeoutPolicy = input.expectedResponse === 'stream'
@@ -502,6 +594,7 @@ export class NewApiSharedRuntime {
       });
       responseStatus = response.status;
       responseRequestId = safeRequestId(response.headers);
+      if (responseRequestId) input.onResponseRequestId?.(responseRequestId);
       streamTimeout?.connected();
       validateDeclaredResponseSize(response.headers, input.maximumResponseBytes);
       if (response.status >= 300 && response.status < 400) {
@@ -537,6 +630,7 @@ export class NewApiSharedRuntime {
         return {
           status: response.status,
           headers,
+          ...(responseRequestId ? { requestId: responseRequestId } : {}),
           stream: boundProviderByteStream({
             stream: response.stream,
             maximumBytes: input.maximumResponseBytes,
@@ -572,7 +666,12 @@ export class NewApiSharedRuntime {
         elapsedMs: Math.max(0, this.now() - startedAt)
       });
       close();
-      return { status: response.status, headers, body: Uint8Array.from(response.body) };
+      return {
+        status: response.status,
+        headers,
+        ...(responseRequestId ? { requestId: responseRequestId } : {}),
+        body: Uint8Array.from(response.body)
+      };
     } catch (error) {
       close();
       if (!requestStarted && !(error instanceof NewApiRuntimeError)) throw error;
@@ -680,6 +779,17 @@ function resolvePath(baseUrl: URL, segments: readonly string[]): URL {
   }
   const url = new URL(`${baseUrl.pathname}${segments.map(encodeURIComponent).join('/')}`, baseUrl);
   if (url.origin !== baseUrl.origin || !url.pathname.startsWith('/v1/')) {
+    throw new NewApiRuntimeError('endpoint_not_allowed', 'not_retryable');
+  }
+  return url;
+}
+
+function resolveOriginPath(baseUrl: URL, segments: readonly string[]): URL {
+  if (segments.length < 1 || segments.some((segment) => !isPathSegment(segment))) {
+    throw new NewApiRuntimeError('invalid_request', 'not_retryable');
+  }
+  const url = new URL(`/${segments.map(encodeURIComponent).join('/')}`, baseUrl.origin);
+  if (url.origin !== baseUrl.origin || !url.pathname.startsWith('/api/')) {
     throw new NewApiRuntimeError('endpoint_not_allowed', 'not_retryable');
   }
   return url;

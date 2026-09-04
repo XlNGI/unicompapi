@@ -1,5 +1,6 @@
 import type {
   StorageCallDetailsDto,
+  StorageCallBillingDto,
   StorageCallOfficialPricingRuleDto,
   StorageCallPricingRateDto,
   StorageCallUsageFactDto
@@ -60,6 +61,19 @@ export function formatCallFee(calculation: CallFeeCalculation): string {
 export function formatCallFeeFormula(calculation: CallFeeCalculation): string {
   if (calculation.state !== 'calculated') return calculation.reason;
   return calculation.formula;
+}
+
+export function formatCallBilling(billing: StorageCallBillingDto | undefined): string | undefined {
+  if (!billing) return undefined;
+  if (billing.amount !== undefined) return `¥${billing.amount}`;
+  if (billing.state === 'actual_bill') return '实际账单金额待显示';
+  if (billing.state === 'pending_reconciliation') return '等待中转站账单确认';
+  if (billing.state === 'unknown_need_check') return '调用结果未知，请核对中转站日志';
+  if (billing.state === 'failed_no_charge') return '调用失败，不计费';
+  if (billing.state === 'refunded') return '已退款';
+  if (billing.state === 'unestimated') return '无法估算';
+  if (billing.state === 'estimated_station_price') return '中转站价格预估';
+  return '上游价格预估';
 }
 
 export function formatFeeAmount(value: number): string {

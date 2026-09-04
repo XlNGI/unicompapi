@@ -24,6 +24,7 @@ import {
   toProjectContextDraftId,
   toProjectContextFragmentId,
   toProjectContextId,
+  toSubmissionIntentId,
   transitionSubmissionIntent,
   type Conversation,
   type ProjectId
@@ -33,6 +34,8 @@ import {
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
   JsonConversationWorkflowRepository,
+  JsonProviderExecutionRouteSnapshotRepository,
+  JsonProviderInvocationRepository,
   JsonProviderUsageObservationRepository,
   JsonProjectConversationRepository,
   JsonProjectContextRepository,
@@ -85,6 +88,7 @@ import {
   ProjectSubmissionAcceptanceStore,
   SubmissionIntentJournal
 } from '../storage';
+import type { ProjectSubmissionAcceptanceV1 } from '../storage';
 import type {
   ChatContextIpcResult,
   ConversationCandidateDto,
@@ -219,6 +223,14 @@ export function createChatContextRuntime(
       new ConversationIntentOrchestrator(),
       now
     );
+    const invocationRoutes = new JsonProviderExecutionRouteSnapshotRepository(
+      storage,
+      session.projectId
+    );
+    const invocations = new JsonProviderInvocationRepository(
+      storage,
+      session.projectId
+    );
     const candidateService = new ProviderFeatureCandidateService(
       new ProjectConversationResponseSubjectResolver(
         projectConversations,
@@ -305,6 +317,8 @@ export function createChatContextRuntime(
           acceptances,
           authorization as RuntimeAuthorizationOrchestrationPort,
           workflowService,
+          invocationRoutes,
+          invocations,
           now
         ),
         now
@@ -330,6 +344,11 @@ export function createChatContextRuntime(
         ) {
           throw new Error('Conversation response acceptance artifacts are missing');
         }
+        await persistConversationCallRecordFacts({
+          acceptance,
+          routes: invocationRoutes,
+          invocations
+        });
         return responseLifecycle.readModel(
           acceptance.subjectArtifacts.responseExecution.id
         );
@@ -339,8 +358,31 @@ export function createChatContextRuntime(
         if (started.subjectArtifacts.kind !== 'conversation') {
           throw new Error('Conversation response acceptance artifacts are missing');
         }
+        const submissionIntentId = toSubmissionIntentId(started.accepted.submissionIntentId);
+        const accepted = await acceptances.get(submissionIntentId);
+        if (!accepted || accepted.subjectArtifacts.kind !== 'conversation') {
+          throw new Error('Conversation response acceptance artifacts are missing');
+        }
+        await persistConversationCallRecordFacts({
+          acceptance: accepted,
+          routes: invocationRoutes,
+          invocations
+        });
         const executionId = started.subjectArtifacts.responseExecution.id;
-        void started.completion.catch(async (error: unknown) => {
+        void started.completion.then(async () => {
+          try {
+            const completed = await acceptances.get(submissionIntentId);
+            if (completed) {
+              await persistConversationCallRecordFacts({
+                acceptance: completed,
+                routes: invocationRoutes,
+                invocations
+              });
+            }
+          } catch (error) {
+            dependencies.onError?.(error);
+          }
+        }, async (error: unknown) => {
           dependencies.onError?.(error);
           try {
             const current = await responseLifecycle.readModel(executionId);
@@ -372,6 +414,14 @@ export function createChatContextRuntime(
               }
             }
             await responseLifecycle.publish(event);
+            const failed = await acceptances.get(submissionIntentId);
+            if (failed) {
+              await persistConversationCallRecordFacts({
+                acceptance: failed,
+                routes: invocationRoutes,
+                invocations
+              });
+            }
           } catch (terminalError) {
             dependencies.onError?.(terminalError);
           }
@@ -573,6 +623,8 @@ function createConversationTerminalObserver(
   acceptances: ProjectSubmissionAcceptanceStore,
   authorization: RuntimeAuthorizationOrchestrationPort,
   workflows: ConversationWorkflowService,
+  routes: JsonProviderExecutionRouteSnapshotRepository,
+  invocations: JsonProviderInvocationRepository,
   now: () => string
 ) {
   const advance = async (
@@ -595,7 +647,7 @@ function createConversationTerminalObserver(
       providerOperationId: input.providerOperationId,
       ...(input.safeCode ? { safeCode: input.safeCode } : {})
     });
-    await acceptances.advance({
+    const updated = await acceptances.advance({
       intent,
       invocationEvent: createProviderInvocationEvent({
         id: `conversation-terminal-${randomUUID()}` as never,
@@ -606,6 +658,7 @@ function createConversationTerminalObserver(
         occurredAt
       })
     });
+    await persistConversationCallRecordFacts({ acceptance: updated, routes, invocations });
     await authorization.recordOutcome(acceptance.intent.authorizationClaimId, occurredAt);
     if (acceptance.subjectArtifacts.kind === 'conversation') {
       await workflows.finishExecution(
@@ -689,4 +742,29 @@ function createProjectContextIds(): ProjectContextIdFactory {
       toProjectContextFragmentId(`context-fragment-${randomUUID()}`),
     nextContextId: () => toProjectContextId(`context-${randomUUID()}`)
   };
+}
+
+async function persistConversationCallRecordFacts(input: {
+  readonly acceptance: ProjectSubmissionAcceptanceV1;
+  readonly routes: JsonProviderExecutionRouteSnapshotRepository;
+  readonly invocations: JsonProviderInvocationRepository;
+}): Promise<void> {
+  await input.routes.save(input.acceptance.routeSnapshot);
+  const initial = input.acceptance.invocationEvents[0];
+  if (!initial) return;
+  const existing = await input.invocations.get(input.acceptance.invocationAttempt.id);
+  if (!existing) {
+    await input.invocations.create({
+      ...input.acceptance.invocationAttempt,
+      state: 'submitting'
+    }, initial);
+  }
+  const existingEvents = new Set(
+    await input.invocations.listEvents(input.acceptance.invocationAttempt.id)
+  );
+  for (const event of input.acceptance.invocationEvents) {
+    if (![...existingEvents].some((item) => item.id === event.id)) {
+      await input.invocations.appendEvent(event);
+    }
+  }
 }
