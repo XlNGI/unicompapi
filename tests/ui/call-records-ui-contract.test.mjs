@@ -54,7 +54,7 @@ test('task center consumption charts stay compact and theme driven', () => {
   assert.match(styles, /\.uc-task-center__charts\s*\{[^}]*grid-template-columns: minmax\(0, 1\.24fr\) minmax\(300px, 0\.76fr\);/);
   assert.match(styles, /\.uc-task-center__bar-chart--empty/);
   assert.match(styles, /\.uc-task-center__donut--empty/);
-  assert.match(styles, /\.uc-task-center__bar-row\s*\{[^}]*grid-template-columns: minmax\(100px, 0\.7fr\) minmax\(120px, 1fr\) auto;/);
+  assert.match(styles, /\.uc-task-center__bar-row\s*\{[^}]*grid-template-columns: max-content minmax\(0, 1fr\) auto;/);
   assert.match(styles, /\.uc-task-center__donut\s*\{[\s\S]*var\(--uc-task-donut/);
   assert.match(styles, /\.uc-task-center__donut-legend div\s*\{[^}]*grid-template-columns: 10px minmax\(0, 1fr\) auto;/);
   assert.doesNotMatch(page, /<canvas|<svg|chartjs|recharts/i);

@@ -4455,7 +4455,7 @@ button.uc-project-center__project-card:disabled {
 
 .uc-task-center__bar-row {
   display: grid;
-  grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 1fr) auto;
+  grid-template-columns: max-content minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--uc-space-2);
   min-width: 0;
