@@ -197,6 +197,12 @@ export interface OutputPreference {
   readonly conflictPolicy: 'fail' | 'create_unique_name';
 }
 
+interface TimelineDependentState {
+  readonly textTrack: readonly TextOverlay[];
+  readonly backgroundMusic: BackgroundMusic | null;
+  readonly cover: CoverSelection | null;
+}
+
 interface VideoEditCommandBase {
   readonly schemaVersion: 1;
 }
@@ -236,6 +242,10 @@ export type VideoEditCommand = VideoEditCommandBase &
         readonly kind: 'remove_clip';
         readonly clip: VideoClip;
         readonly previousIndex: number;
+        readonly timelineDependents?: {
+          readonly before: TimelineDependentState;
+          readonly after: TimelineDependentState;
+        };
       }
     | {
         readonly kind: 'restore_clip';
@@ -640,9 +650,17 @@ export function isVideoEditCommand(value: unknown): value is VideoEditCommand {
         isVideoClip(value.afterLeft) &&
         isVideoClip(value.createdRight);
     case 'remove_clip':
-      return exact(value, ['schemaVersion', 'kind', 'clip', 'previousIndex']) &&
+      return exact(value, [
+        'schemaVersion',
+        'kind',
+        'clip',
+        'previousIndex',
+        'timelineDependents'
+      ]) &&
         isVideoClip(value.clip) &&
-        isNonNegativeInteger(value.previousIndex);
+        isNonNegativeInteger(value.previousIndex) &&
+        (value.timelineDependents === undefined ||
+          isTimelineDependentChange(value.timelineDependents));
     case 'restore_clip':
       return exact(value, ['schemaVersion', 'kind', 'clip', 'targetIndex']) &&
         isVideoClip(value.clip) &&
@@ -752,9 +770,13 @@ function executeCommand(
         ? splitClip(draft, command)
         : unsplitClip(draft, command);
     case 'remove_clip':
-      return apply
+      return applyTimelineDependentChange(
+        apply
         ? removeActiveClip(draft, command.clip, command.previousIndex, true)
-        : restoreRemovedClip(draft, command.clip, command.previousIndex);
+        : restoreRemovedClip(draft, command.clip, command.previousIndex),
+        command.timelineDependents,
+        apply
+      );
     case 'restore_clip':
       return apply
         ? restoreRemovedClip(draft, command.clip, command.targetIndex)
@@ -1017,6 +1039,34 @@ function upsertText(
     textTrack: draft.textTrack.map((text, currentIndex) =>
       currentIndex === index ? structuredClone(after) : text
     )
+  };
+}
+
+function applyTimelineDependentChange(
+  draft: VideoEditDraft,
+  change: Extract<
+    VideoEditCommand,
+    { readonly kind: 'remove_clip' }
+  >['timelineDependents'],
+  apply: boolean
+): VideoEditDraft {
+  if (!change) return draft;
+  const before = apply ? change.before : change.after;
+  const after = apply ? change.after : change.before;
+  assertEqual(
+    {
+      textTrack: draft.textTrack,
+      backgroundMusic: draft.backgroundMusic,
+      cover: draft.cover
+    },
+    before,
+    'timeline dependents'
+  );
+  return {
+    ...draft,
+    textTrack: structuredClone(after.textTrack),
+    backgroundMusic: structuredClone(after.backgroundMusic),
+    cover: structuredClone(after.cover)
   };
 }
 
@@ -1310,6 +1360,22 @@ function isBackgroundMusic(value: unknown): value is BackgroundMusic {
     isNonNegativeInteger(value.fadeOutUs) &&
     value.fadeInUs + value.fadeOutUs <=
       value.timelineRange.endUs - value.timelineRange.startUs;
+}
+
+function isTimelineDependentState(value: unknown): value is TimelineDependentState {
+  return isRecord(value) &&
+    exact(value, ['textTrack', 'backgroundMusic', 'cover']) &&
+    Array.isArray(value.textTrack) &&
+    value.textTrack.every(isTextOverlay) &&
+    (value.backgroundMusic === null || isBackgroundMusic(value.backgroundMusic)) &&
+    (value.cover === null || isCoverSelection(value.cover));
+}
+
+function isTimelineDependentChange(value: unknown): boolean {
+  return isRecord(value) &&
+    exact(value, ['before', 'after']) &&
+    isTimelineDependentState(value.before) &&
+    isTimelineDependentState(value.after);
 }
 
 function isCoverSelection(value: unknown): value is CoverSelection {

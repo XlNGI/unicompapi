@@ -58,6 +58,23 @@ test('A4 gates success, playback and file actions on a registered Work', () => {
   assert.match(appSource, /preferredDraftId=\{openedVideoDraftId\}/);
 });
 
+test('A4 export result uses the controlled fullscreen fallback', () => {
+  assert.match(editorSource, /const \[resultPreviewExpanded, setResultPreviewExpanded\]/);
+  assert.match(editorSource, /controlsList="nofullscreen"/);
+  assert.match(editorSource, /className="uc-video-editor__export-preview-video"/);
+  assert.match(editorSource, /uc-video-editor__export-preview--expanded/);
+  assert.match(editorSource, /aria-label=\{resultPreviewExpanded \? '退出导出视频全屏预览' : '全屏预览导出视频'\}/);
+  assert.match(editorSource, /event\.key === 'Escape'\) setResultPreviewExpanded\(false\)/);
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__export-preview-video::\-webkit-media-controls-fullscreen-button \{[^}]*display: none !important;/
+  );
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__export-preview--expanded \{[^}]*position: fixed;[^}]*z-index: 1000;[^}]*inset: 0;/
+  );
+});
+
 test('A4 keeps its dense export controls scoped and responsive', () => {
   for (const className of [
     'uc-video-editor__export-confirmation',

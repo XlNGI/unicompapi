@@ -15,6 +15,7 @@ export const videoEditorIpcChannels = {
   selectCoverImage: 'video-editor:select-cover-image',
   attachCoverWork: 'video-editor:attach-cover-work',
   createSourcePreview: 'video-editor:create-source-preview',
+  createBackgroundMusicPreview: 'video-editor:create-background-music-preview',
   requestPreviewArtifact: 'video-editor:request-preview-artifact',
   clearPreviewCache: 'video-editor:clear-preview-cache',
   preflightExport: 'video-editor:preflight-export',
@@ -348,8 +349,18 @@ export interface VideoEditorSourcePreviewDto {
   readonly kind: 'original';
 }
 
+export interface VideoEditorBackgroundMusicPreviewDto {
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mimeType: 'audio/wav';
+  readonly kind: 'original';
+}
+
 export type VideoEditorPreviewArtifactKindDto =
   | 'proxy_video'
+  | 'proxy_video_clear'
+  | 'proxy_video_smooth'
+  | 'proxy_video_fast'
   | 'thumbnail_strip'
   | 'audio_waveform';
 
@@ -515,6 +526,9 @@ export interface VideoEditorApi {
     draftId: string,
     clipId: string
   ): Promise<VideoEditorIpcResult<VideoEditorSourcePreviewDto>>;
+  createBackgroundMusicPreview(
+    draftId: string
+  ): Promise<VideoEditorIpcResult<VideoEditorBackgroundMusicPreviewDto>>;
   requestPreviewArtifact(
     draftId: string,
     clipId: string,

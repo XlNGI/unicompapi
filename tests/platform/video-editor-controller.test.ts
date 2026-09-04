@@ -10,6 +10,7 @@ import {
   toFileReferenceId,
   toIsoTimestamp,
   toProjectId,
+  toTextOverlayId,
   toVideoClipId,
   toVideoEditDraftId,
   toDraftId,
@@ -269,6 +270,158 @@ describe('VideoEditorController', () => {
     expect(serialized).not.toContain('modifiedAtMs');
     expect(serialized).not.toContain('undoStack');
     expect(serialized).not.toContain('internalCommand');
+  });
+
+  it('removes a clip while keeping dependent timeline content valid and undoable', async () => {
+    const fixture = await createFixture();
+    const repository = new JsonVideoEditDraftRepository(
+      fixture.storage,
+      fixture.projectId
+    );
+    const firstClip = clip();
+    const secondClip: VideoClip = {
+      ...clip(),
+      id: toVideoClipId('editor-controller-clip-2')
+    };
+    const base = createEmptyVideoEditDraft({
+      id: toVideoEditDraftId('remove-dependent-editor-draft'),
+      projectId: fixture.projectId,
+      createdAt: toIsoTimestamp('2026-07-24T13:50:00.000Z')
+    });
+    const withFirstClip = applyVideoEditCommand(
+      base,
+      { schemaVersion: 1, kind: 'insert_clip', clip: firstClip, targetIndex: 0 },
+      toIsoTimestamp('2026-07-24T13:51:00.000Z')
+    );
+    const withClips = applyVideoEditCommand(
+      withFirstClip,
+      { schemaVersion: 1, kind: 'insert_clip', clip: secondClip, targetIndex: 1 },
+      toIsoTimestamp('2026-07-24T13:52:00.000Z')
+    );
+    const textStyle = {
+      requestedFontFamily: 'system-ui',
+      fontSizeMilliPx: 32_000,
+      alignment: 'center' as const,
+      opacityPermille: 1000,
+      color: '#ffffff'
+    };
+    const textPosition = { xPermille: 500, yPermille: 800 };
+    const withFirstText = applyVideoEditCommand(
+      withClips,
+      {
+        schemaVersion: 1,
+        kind: 'upsert_text',
+        before: null,
+        after: {
+          kind: 'text_overlay',
+          id: toTextOverlayId('editor-controller-text-1'),
+          content: 'keep and trim',
+          range: { startUs: 0, endUs: 20_000_000 },
+          style: textStyle,
+          position: textPosition,
+          entrance: 'none',
+          exit: 'none'
+        }
+      },
+      toIsoTimestamp('2026-07-24T13:53:00.000Z')
+    );
+    const withTexts = applyVideoEditCommand(
+      withFirstText,
+      {
+        schemaVersion: 1,
+        kind: 'upsert_text',
+        before: null,
+        after: {
+          kind: 'text_overlay',
+          id: toTextOverlayId('editor-controller-text-2'),
+          content: 'remove after timeline end',
+          range: { startUs: 15_000_000, endUs: 19_000_000 },
+          style: textStyle,
+          position: textPosition,
+          entrance: 'none',
+          exit: 'none'
+        }
+      },
+      toIsoTimestamp('2026-07-24T13:54:00.000Z')
+    );
+    const withMusic = applyVideoEditCommand(
+      withTexts,
+      {
+        schemaVersion: 1,
+        kind: 'set_background_music',
+        before: null,
+        after: {
+          kind: 'background_music',
+          fileId: toFileReferenceId('editor-controller-music'),
+          identity: {
+            sizeBytes: 2048,
+            modifiedAtMs: 1_721_822_400_000,
+            durationUs: 20_000_000,
+            container: 'wav',
+            width: 0,
+            height: 0,
+            checksumSha256: 'c'.repeat(64)
+          },
+          sourceRange: { inUs: 0, outUs: 20_000_000 },
+          timelineRange: { startUs: 0, endUs: 20_000_000 },
+          volumePermille: 700,
+          fadeInUs: 6_000_000,
+          fadeOutUs: 6_000_000
+        }
+      },
+      toIsoTimestamp('2026-07-24T13:55:00.000Z')
+    );
+    const seeded = applyVideoEditCommand(
+      withMusic,
+      {
+        schemaVersion: 1,
+        kind: 'set_cover',
+        before: null,
+        after: {
+          kind: 'video_frame',
+          clipId: firstClip.id,
+          sourceTimeUs: 1_000_000,
+          prependToVideo: false
+        }
+      },
+      toIsoTimestamp('2026-07-24T13:56:00.000Z')
+    );
+    await repository.save(seeded);
+
+    const removed = await fixture.controller.update({
+      draftId: seeded.id,
+      expectedRevision: seeded.revision,
+      command: { kind: 'remove_clip', clipId: firstClip.id }
+    });
+    if (!removed.ok) throw fixture.getLastError();
+
+    expect(removed.value.videoTrack).toHaveLength(1);
+    expect(removed.value.textTrack).toEqual([
+      expect.objectContaining({ range: { startUs: 0, endUs: 10_000_000 } })
+    ]);
+    expect(removed.value.backgroundMusic).toMatchObject({
+      timelineRange: { startUs: 0, endUs: 10_000_000 },
+      fadeInUs: 6_000_000,
+      fadeOutUs: 4_000_000
+    });
+    expect(removed.value.cover).toBeNull();
+
+    const undone = await fixture.controller.undo({
+      draftId: removed.value.draftId,
+      expectedRevision: removed.value.revision
+    });
+    if (!undone.ok) throw fixture.getLastError();
+    expect(undone.value.videoTrack).toHaveLength(2);
+    expect(undone.value.textTrack.map((text) => text.range)).toEqual([
+      { startUs: 0, endUs: 20_000_000 },
+      { startUs: 15_000_000, endUs: 19_000_000 }
+    ]);
+    expect(undone.value.backgroundMusic).toMatchObject({
+      timelineRange: { startUs: 0, endUs: 20_000_000 },
+      fadeInUs: 6_000_000,
+      fadeOutUs: 6_000_000
+    });
+    expect(undone.value.cover).toMatchObject({ clipId: firstClip.id });
   });
 
   it('accepts an existing video generation draft as explicit source intent', async () => {
