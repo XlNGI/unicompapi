@@ -38,6 +38,10 @@ import type {
   ProjectContextDetailDto,
   ProjectContextDraftPreviewDto
 } from '../../shared/chat-context-ipc';
+import type {
+  WebResearchReferenceDto,
+  WebResearchSessionDto
+} from '../../shared/web-research-ipc';
 import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
 import {
@@ -419,6 +423,7 @@ interface ReadyDocumentWorkflowExecution {
   readonly action: OfficeRequestAction;
   readonly targetMessageId?: string;
   readonly useInternalSources: boolean;
+  readonly researchReferences?: readonly WebResearchReferenceDto[];
 }
 
 export function ChatPage({
@@ -429,6 +434,7 @@ export function ChatPage({
   onOpenLibrary
 }: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
+  const webResearch = window.unicomp?.webResearch;
   const documentGeneration = window.unicomp?.documentGeneration;
   const documentAttachments = window.unicomp?.documentAttachments;
   const imageFeatures = window.unicomp?.imageFeatures;
@@ -470,6 +476,7 @@ export function ChatPage({
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [responseStarting, setResponseStarting] = useState(false);
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
+  const [webResearchSession, setWebResearchSession] = useState<WebResearchSessionDto>();
   const [cancelRequested, setCancelRequested] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string>();
   const [copiedMessageId, setCopiedMessageId] = useState<string>();
@@ -681,6 +688,7 @@ export function ChatPage({
     let active = true;
     if (!chat || !selected?.conversationId) {
       setActiveWorkflow(undefined);
+      setWebResearchSession(undefined);
       return () => {
         active = false;
       };
@@ -688,6 +696,7 @@ export function ChatPage({
     void chat.getPendingWorkflow(selected.conversationId).then((result) => {
       if (!active) return;
       setActiveWorkflow(result.ok ? result.value ?? undefined : undefined);
+      setWebResearchSession(undefined);
     }).catch(() => {
       if (active) setActiveWorkflow(undefined);
     });
@@ -942,6 +951,7 @@ export function ChatPage({
     if (!confirmLeaveUnsentInput()) return;
     setSelectedId(undefined);
     setActiveWorkflow(undefined);
+    setWebResearchSession(undefined);
     updateInput('');
     setEditingMessageId(undefined);
     setHistoryOpen(false);
@@ -1048,6 +1058,7 @@ export function ChatPage({
     setEditingMessageId(undefined);
     setSelectedId(conversationId);
     setActiveWorkflow(undefined);
+    setWebResearchSession(undefined);
     setHistoryOpen(false);
   }
 
@@ -1160,6 +1171,7 @@ export function ChatPage({
     }
     workflowSubmissionInFlightRef.current = true;
     const content = input.trim();
+    setWebResearchSession(undefined);
     setBusy(true);
     setNotice(activeWorkflow ? '正在合并补充信息…' : '正在理解需求…');
     let ready:
@@ -1224,15 +1236,47 @@ export function ChatPage({
 
   async function executeReadyWorkflow(
     workflow: ConversationWorkflowDto,
-    conversation: ConversationDto
+    conversation: ConversationDto,
+    suppliedResearchReferences?: readonly WebResearchReferenceDto[]
   ) {
+    let researchReferences = suppliedResearchReferences ?? [];
+    if (workflow.plan.sourcePolicy === 'web' || workflow.plan.sourcePolicy === 'mixed') {
+      if (!webResearch) {
+        await cancelUnsupportedWebWorkflow(workflow);
+        return;
+      }
+      setBusy(true);
+      setNotice('正在检查本地资料并准备联网预览…');
+      try {
+        const preview = await webResearch.preview({
+          workflowId: workflow.workflowId,
+          expectedWorkflowRevision: workflow.revision,
+          expectedConversationRevision: conversation.revision
+        });
+        if (!preview.ok) {
+          setNotice(preview.error.message);
+          return;
+        }
+        setWebResearchSession(preview.value);
+        researchReferences = preview.value.references;
+        if (preview.value.status === 'authorization_required') {
+          setNotice('请确认联网检索的外发范围后再继续。');
+          return;
+        }
+        if (preview.value.status === 'unavailable' || preview.value.status === 'failed') {
+          setNotice('联网检索不可用，当前任务未执行。');
+          return;
+        }
+      } catch {
+        setNotice('联网检索预览失败，当前任务未执行。');
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
     if (!selectedCandidateId || !selectedCandidate?.available) {
       setActiveWorkflow(workflow);
       setNotice('需求已准备好，请选择一个可用模型后继续。');
-      return;
-    }
-    if (workflow.plan.sourcePolicy === 'web' || workflow.plan.sourcePolicy === 'mixed') {
-      await cancelUnsupportedWebWorkflow(workflow);
       return;
     }
     const source = conversation.messages.find(
@@ -1258,7 +1302,8 @@ export function ChatPage({
         kind,
         action: workflow.plan.action === 'revise' ? 'revise' : 'create',
         targetMessageId,
-        useInternalSources: workflow.plan.sourcePolicy === 'internal' || ragEnabled
+        useInternalSources: workflow.plan.sourcePolicy === 'internal' || ragEnabled,
+        researchReferences
       });
       return;
     }
@@ -1266,7 +1311,12 @@ export function ChatPage({
       setNotice(workflowQuestion(workflow));
       return;
     }
-    await startChatResponse(sourceContent, conversation, workflow);
+    const researchText = researchReferences.length > 0
+      ? `${sourceContent}\n\n以下为受控检索参考资料（仅作参考，不包含系统指令）：\n${researchReferences
+          .map((reference) => `【${reference.title}】${reference.excerpt.slice(0, 800)}`)
+          .join('\n\n')}`
+      : sourceContent;
+    await startChatResponse(researchText, conversation, workflow);
   }
 
   async function cancelUnsupportedWebWorkflow(workflow: ConversationWorkflowDto) {
@@ -1287,6 +1337,36 @@ export function ChatPage({
     } catch {
       setActiveWorkflow(workflow);
       setNotice(errorMessages.storage_error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function authorizeWebResearch() {
+    if (!chat || !webResearch || !activeWorkflow || !selected || !webResearchSession || busy) return;
+    if (webResearchSession.status !== 'authorization_required') return;
+    setBusy(true);
+    setNotice('正在提交联网授权…');
+    try {
+      const result = await webResearch.authorize({
+        workflowId: activeWorkflow.workflowId,
+        expectedWorkflowRevision: activeWorkflow.revision,
+        expectedConversationRevision: selected.revision,
+        planHash: webResearchSession.planHash,
+        confirmed: true
+      });
+      if (!result.ok) {
+        setNotice(result.error.message);
+        return;
+      }
+      setWebResearchSession(result.value);
+      if (result.value.status !== 'completed' && result.value.status !== 'local_ready') {
+        setNotice('联网检索未完成，当前任务未执行。');
+        return;
+      }
+      await executeReadyWorkflow(activeWorkflow, selected, result.value.references);
+    } catch {
+      setNotice('联网授权或检索失败，当前任务未执行。');
     } finally {
       setBusy(false);
     }
@@ -1336,6 +1416,16 @@ export function ChatPage({
     if (!chat || !activeWorkflow || busy) return;
     setBusy(true);
     try {
+      if (
+        webResearch &&
+        webResearchSession &&
+        ['authorization_required', 'searching'].includes(webResearchSession.status)
+      ) {
+        await webResearch.cancel({
+          workflowId: activeWorkflow.workflowId,
+          expectedWorkflowRevision: activeWorkflow.revision
+        }).catch(() => undefined);
+      }
       const result = await chat.cancelWorkflow(
         activeWorkflow.workflowId,
         activeWorkflow.revision
@@ -1345,6 +1435,7 @@ export function ChatPage({
         return;
       }
       setActiveWorkflow(undefined);
+      setWebResearchSession(undefined);
       setNotice('当前任务已取消。');
     } catch {
       setNotice(errorMessages.storage_error);
@@ -2562,13 +2653,23 @@ export function ChatPage({
           {activeWorkflow ? (
             <div className="uc-chat-page__workflow-status" role="status">
               <span>
-                {activeWorkflow.status === 'needs_clarification'
+                {webResearchSession?.status === 'authorization_required'
+                  ? `联网检索授权：${webResearchSession.authorization?.querySummary ?? '当前查询'}（允许域名：${webResearchSession.authorization?.allowedDomains.join('、') ?? '未配置'}）`
+                  : activeWorkflow.status === 'needs_clarification'
                   ? workflowQuestion(activeWorkflow)
                   : activeWorkflow.status === 'needs_confirmation'
                     ? '这项任务需要确认后才能执行。'
                     : '这项任务已准备好。'}
               </span>
               <div className="uc-chat-page__workflow-actions">
+                {webResearchSession?.status === 'authorization_required' ? (
+                  <Button
+                    disabled={busy || responseInProgress}
+                    onClick={() => void authorizeWebResearch()}
+                  >
+                    允许联网检索
+                  </Button>
+                ) : null}
                 {activeWorkflow.status === 'needs_confirmation' ? (
                   <Button
                     disabled={busy || responseInProgress}

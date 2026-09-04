@@ -1,5 +1,7 @@
 # UniComp 开发计划
 
+2026-09-04 受控联网基础接入执行记录：从同步后的 `develop` 创建 `feature/web-research-foundation`，完成 W1/W3/W4 的 provider-neutral 与会话接线。新增共享 `conversation.web.preview/authorize/cancel/getStatus` DTO、严格字段解析、Application 本地 BM25 优先编排、workflow/revision/planHash 授权绑定、取消与过期 fail-closed、主进程默认 `UnconfiguredWebSearchTransport`、凭证回调端口和 UI 外发预览/明确授权。新增 Application 3/3、联网合同 5/5、受控 transport 4/4 和 IPC 合同 2/2 测试；`typecheck`、`lint`、`git diff --check` 通过。当前未配置真实服务商、未读取凭证、未发起 HTTP 或收费调用；W0/W2/W5/W6 仍未完成，真实联网仍不可用。
+
 2026-09-04 建立《阶段9-受控联网搜索真实接入计划》：当前只冻结 provider-neutral transport、主进程凭证端口、RAG 优先、联网授权预览、IPC/UI、来源证据、失败码、缓存治理和 Windows 真实请求准入；真实搜索服务商、真实 transport、凭证读取、联网 IPC/UI 和收费调用均未启动。后续按 PR-W0 至 PR-W6 从最新 `develop` 分支实施，未完成前继续保留 `web/mixed` 阻断和本地 RAG 回退，不把计划或 E3 合同验收描述为联网已支持。
 
 2026-09-04 会话联网任务状态与重复提交修复：截图复核确认，同一输入可在 React `busy` 状态完成重渲染前被连续提交，产生不同 `clientCommandId` 和重复用户消息；同时 `web/mixed` 计划在真实联网能力未接入时只显示阻断提示但继续保留为 `ready`，导致页面同时出现“继续执行”和“任务未执行”。现为 workflow 提交增加同步 in-flight 门禁，并在当前不支持联网时通过现有 workflow 端口持久化取消任务、清除活动任务卡且明确提示未执行；历史重复消息不做破坏性删除。UI 定向合同 19/19、workflow 应用测试 10/10、`typecheck`、`lint`、完整 `pnpm.cmd test`、`build` 与 `git diff --check` 均通过；本地页面对话页渲染正常且控制台 0 错误。真实联网 transport、授权 UI、搜索服务商及收费调用仍未接入，本次真实 HTTP/凭证读取/费用均为 0。
