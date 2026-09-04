@@ -32,6 +32,26 @@ export interface WebSearchTransport {
   }): Promise<readonly WebSearchTransportResult[]>;
 }
 
+export type WebSearchTransportErrorCode =
+  | 'invalid_request'
+  | 'provider_unconfigured'
+  | 'credential_unavailable'
+  | 'authentication_failed'
+  | 'rate_limited'
+  | 'dns_unavailable'
+  | 'timeout'
+  | 'cancelled'
+  | 'network_error'
+  | 'response_invalid'
+  | 'response_too_large';
+
+export class WebSearchTransportError extends Error {
+  constructor(readonly code: WebSearchTransportErrorCode) {
+    super(`Web search transport failed: ${code}`);
+    this.name = 'WebSearchTransportError';
+  }
+}
+
 export interface ExternalEvidence {
   readonly citationId: string;
   readonly title: string;
@@ -49,8 +69,17 @@ export interface WebResearchResult {
   readonly reason?:
     | 'authorization_required'
     | 'no_allowed_domains'
+    | 'invalid_request'
+    | 'provider_unconfigured'
+    | 'credential_unavailable'
+    | 'authentication_failed'
+    | 'rate_limited'
+    | 'dns_unavailable'
     | 'timeout'
+    | 'cancelled'
     | 'network_error'
+    | 'response_invalid'
+    | 'response_too_large'
     | 'no_results';
   readonly fromCache: boolean;
 }
@@ -173,9 +202,20 @@ export class ControlledWebResearchService {
         evidence
       });
       return { status: 'completed', evidence, fromCache: false };
-    } catch {
+    } catch (error) {
       if (input.signal?.aborted) {
         return { status: 'cancelled', evidence: [], fromCache: false };
+      }
+      if (error instanceof WebSearchTransportError) {
+        if (error.code === 'cancelled') {
+          return { status: 'cancelled', evidence: [], reason: 'cancelled', fromCache: false };
+        }
+        return {
+          status: 'offline_fallback',
+          evidence: [],
+          reason: error.code,
+          fromCache: false
+        };
       }
       return {
         status: 'offline_fallback',
