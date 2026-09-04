@@ -36,6 +36,8 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /runtime_not_allowed/);
   assert.doesNotMatch(source, /analyzeLocalConversationIntent|analyzeOfficeRequest/);
   assert.match(source, /activeWorkflow/);
+  assert.match(source, /workflowSubmissionInFlightRef/);
+  assert.match(source, /if \(workflowSubmissionInFlightRef\.current\) return;/);
   assert.match(source, /needs_clarification/);
   assert.match(source, /needs_confirmation/);
   assert.match(source, /parameterValues:\s*\{\}/);
