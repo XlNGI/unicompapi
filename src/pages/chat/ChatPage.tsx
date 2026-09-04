@@ -1254,7 +1254,10 @@ export function ChatPage({
           expectedConversationRevision: conversation.revision
         });
         if (!preview.ok) {
-          setNotice(preview.error.message);
+          await cancelUnsupportedWebWorkflow(
+            workflow,
+            `${preview.error.message}，任务已取消，未执行。`
+          );
           return;
         }
         setWebResearchSession(preview.value);
@@ -1264,11 +1267,17 @@ export function ChatPage({
           return;
         }
         if (preview.value.status === 'unavailable' || preview.value.status === 'failed') {
-          setNotice('联网检索不可用，当前任务未执行。');
+          await cancelUnsupportedWebWorkflow(
+            workflow,
+            '联网检索不可用，任务已取消，未执行。'
+          );
           return;
         }
       } catch {
-        setNotice('联网检索预览失败，当前任务未执行。');
+        await cancelUnsupportedWebWorkflow(
+          workflow,
+          '联网检索预览失败，任务已取消，未执行。'
+        );
         return;
       } finally {
         setBusy(false);
@@ -1319,10 +1328,19 @@ export function ChatPage({
     await startChatResponse(researchText, conversation, workflow);
   }
 
-  async function cancelUnsupportedWebWorkflow(workflow: ConversationWorkflowDto) {
+  async function cancelUnsupportedWebWorkflow(
+    workflow: ConversationWorkflowDto,
+    successNotice = '当前版本尚未接入经授权的联网检索，任务已取消，未执行。'
+  ) {
     if (!chat) return;
     setBusy(true);
     try {
+      if (webResearch) {
+        await webResearch.cancel({
+          workflowId: workflow.workflowId,
+          expectedWorkflowRevision: workflow.revision
+        }).catch(() => undefined);
+      }
       const result = await chat.cancelWorkflow(
         workflow.workflowId,
         workflow.revision
@@ -1333,7 +1351,8 @@ export function ChatPage({
         return;
       }
       setActiveWorkflow(undefined);
-      setNotice('当前版本尚未接入经授权的联网检索，任务已取消，未执行。');
+      setWebResearchSession(undefined);
+      setNotice(successNotice);
     } catch {
       setActiveWorkflow(workflow);
       setNotice(errorMessages.storage_error);
@@ -1356,17 +1375,26 @@ export function ChatPage({
         confirmed: true
       });
       if (!result.ok) {
-        setNotice(result.error.message);
+        await cancelUnsupportedWebWorkflow(
+          activeWorkflow,
+          `${result.error.message}，任务已取消，未执行。`
+        );
         return;
       }
       setWebResearchSession(result.value);
       if (result.value.status !== 'completed' && result.value.status !== 'local_ready') {
-        setNotice('联网检索未完成，当前任务未执行。');
+        await cancelUnsupportedWebWorkflow(
+          activeWorkflow,
+          '联网检索未完成，任务已取消，未执行。'
+        );
         return;
       }
       await executeReadyWorkflow(activeWorkflow, selected, result.value.references);
     } catch {
-      setNotice('联网授权或检索失败，当前任务未执行。');
+      await cancelUnsupportedWebWorkflow(
+        activeWorkflow,
+        '联网授权或检索失败，任务已取消，未执行。'
+      );
     } finally {
       setBusy(false);
     }
