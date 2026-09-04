@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "suiteId": "conversation-intent-offline-golden",
-  "version": "1.0.0",
-  "updatedAt": "2026-09-03",
+  "version": "1.0.1",
+  "updatedAt": "2026-09-04",
   "cases": [
   { "input": "你好，介绍一下你能做什么", "expectedKind": "chat" },
   { "input": "PPT 应该怎么做得更专业？", "expectedKind": "chat" },
@@ -25,6 +25,7 @@
   { "input": "同时做一份 Word 方案和 PPT 汇报", "expectedKind": "document", "expectedReadiness": "needs_clarification" },
 
   { "input": "帮我做一份季度经营汇报 PPT", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt", "expectedReadiness": "ready" },
+  { "input": "帮我只做一个关于龙的ppt", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt", "expectedReadiness": "ready" },
   { "input": "能不能帮我生成一份产品介绍 PPT？", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt" },
   { "input": "来一份季度汇报", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt" },
   { "input": "重新做一个培训课件", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt" },

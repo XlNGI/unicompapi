@@ -31,6 +31,22 @@ describe('Conversation intent orchestrator', () => {
     expect(summary.assessment.readiness).toBe('needs_clarification');
   });
 
+  it('recognizes focused natural-language PPT creation requests', () => {
+    const decision = analyzeLocalConversationIntent({
+      rawText: '帮我只做一个关于龙的ppt'
+    });
+    expect(decision).toMatchObject({
+      plan: {
+        kind: 'document',
+        action: 'create',
+        documentKind: 'ppt',
+        confidence: 'high',
+        parameters: { topic: '帮我只做一个关于龙的ppt' }
+      },
+      assessment: { readiness: 'ready' }
+    });
+  });
+
   it('does not guess among multiple document targets for an underspecified edit', () => {
     const decision = analyzeLocalConversationIntent({
       rawText: '再加一个例子',
