@@ -69,6 +69,49 @@ describe('Conversation workflow', () => {
     expect((await repository.get(created.id))?.revision).toBe(1);
   });
 
+  it('recovers an unknown workflow from the previous topic plus a terse PPT answer', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-natural-language-'));
+    roots.push(root);
+    let clock = 0;
+    const now = () => `2026-09-03T00:00:0${clock++}.000Z`;
+    const repository = new JsonConversationWorkflowRepository(
+      new NodeProjectStorage(root),
+      projectId,
+      now
+    );
+    const service = new ConversationWorkflowService(
+      repository,
+      new ConversationIntentOrchestrator(),
+      now,
+      () => toConversationWorkflowId('workflow-natural-language')
+    );
+    const created = await service.create({
+      projectId,
+      conversationId,
+      sourceMessageId: toMessageId('message-natural-language'),
+      rawText: '帮我做一个关于龙的'
+    });
+    expect(created.status).toBe('needs_clarification');
+
+    const answered = await service.answer({
+      workflowId: created.id,
+      expectedRevision: created.revision,
+      rawText: '制作ppt',
+      context: {
+        recentUserMessages: ['帮我做一个关于龙的', '制作ppt']
+      }
+    });
+    expect(answered).toMatchObject({
+      status: 'ready',
+      plan: {
+        kind: 'document',
+        action: 'create',
+        documentKind: 'ppt',
+        parameters: { topic: expect.stringContaining('关于龙') }
+      }
+    });
+  });
+
   it('rejects stale workflow saves atomically', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-conflict-'));
     roots.push(root);

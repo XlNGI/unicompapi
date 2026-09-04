@@ -249,6 +249,23 @@ function mergeWorkflowClarification(
   context: ConversationSemanticContext
 ): { readonly plan: ConversationIntentPlan; readonly resolvedTarget?: OfficeDocumentContext } | undefined {
   if (!answer) return undefined;
+  if (plan.kind === 'unknown') {
+    const recent = context.recentUserMessages ?? [];
+    const previous = recent.length > 1 ? recent.at(-2) : undefined;
+    const recovered = analyzeLocalConversationIntent({
+      rawText: previous ? `${previous}\n${answer}` : answer,
+      context: {
+        ...context,
+        recentUserMessages: undefined
+      }
+    });
+    if (recovered.plan.kind !== 'unknown') {
+      return {
+        plan: recovered.plan,
+        ...(recovered.resolvedTarget ? { resolvedTarget: recovered.resolvedTarget } : {})
+      };
+    }
+  }
   const parameters = { ...plan.parameters };
   const remaining = new Set(plan.missing);
   const kind = inferExplicitKind(answer);
@@ -397,8 +414,8 @@ function inferExplicitKinds(text: string): readonly DocumentWorkspaceKind[] {
 
 function hasStrongCreateCommand(text: string): boolean {
   return (
-    /(?:帮我|给我|麻烦(?:你)?|请(?:你)?)\s*(?:做|生成|制作|创建|写|编写|起草|拟定|整理|输出|导出)(?:成|个|一份|一个)?/.test(text) ||
-    /^(?:做|生成|制作|创建|写|编写|起草|拟定|整理|输出|导出|出)(?:成|个|一份|一个)?/.test(text) ||
+    /(?:帮我|给我|麻烦(?:你)?|请(?:你)?)\s*(?:(?:只|就|先|再|直接|简单(?:地)?|尽量|最好)\s*)*(?:做|生成|制作|创建|写|编写|起草|拟定|整理|输出|导出)(?:成|个|一份|一个)?/.test(text) ||
+    /^(?:(?:只|就|先|再|直接|简单(?:地)?|尽量|最好)\s*)*(?:做|生成|制作|创建|写|编写|起草|拟定|整理|输出|导出|出)(?:成|个|一份|一个)?/.test(text) ||
     /^(?:把|将)[\s\S]{1,100}(?:做成|整理成|输出为|导出为)/.test(text) ||
     /(?:根据|结合|使用|用|拿)[\s\S]{1,100}(?:做|生成|制作|创建|写|编写|起草|整理|输出|导出)/.test(text) ||
     /(?:并|然后|再)\s*(?:做|生成|制作|创建|写|编写|起草|整理|输出|导出)/.test(text) ||
