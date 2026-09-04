@@ -104,6 +104,7 @@ describe('ConversationWorkflowController', () => {
         }
       }
     });
+    if (!answered.ok) throw new Error('Workflow clarification fixture failed');
 
     const pending = await runtime.workflows.getPending({
       conversationId: started.value.conversation.conversationId
@@ -123,5 +124,56 @@ describe('ConversationWorkflowController', () => {
       conversationId: started.value.conversation.conversationId
     });
     expect(resumed).toEqual(pending);
+
+    const restarted = await runtime.workflows.start({
+      clientCommandId: 'workflow-natural-language-controller',
+      conversation: {
+        conversationId: started.value.conversation.conversationId,
+        expectedRevision: answered.value.conversation.revision
+      },
+      title: '关于龙的 PPT',
+      content: '帮我做一个关于龙的'
+    });
+    expect(restarted).toMatchObject({
+      ok: true,
+      value: { workflow: { status: 'needs_clarification', revision: 0 } }
+    });
+    if (!restarted.ok) throw new Error('Natural-language workflow fixture did not start');
+
+    const partial = await runtime.workflows.answer({
+      workflowId: restarted.value.workflow.workflowId,
+      expectedWorkflowRevision: restarted.value.workflow.revision,
+      expectedConversationRevision: restarted.value.conversation.revision,
+      content: '制作'
+    });
+    expect(partial).toMatchObject({
+      ok: true,
+      value: { workflow: { status: 'needs_clarification', revision: 1 } }
+    });
+    if (!partial.ok) throw new Error('Natural-language partial answer failed');
+
+    const recovered = await runtime.workflows.answer({
+      workflowId: partial.value.workflow.workflowId,
+      expectedWorkflowRevision: partial.value.workflow.revision,
+      expectedConversationRevision: partial.value.conversation.revision,
+      content: 'ppt'
+    });
+    expect(recovered).toMatchObject({
+      ok: true,
+      value: {
+        workflow: {
+          status: 'ready',
+          revision: 2,
+          plan: {
+            kind: 'document',
+            action: 'create',
+            documentKind: 'ppt',
+            parameters: { topic: expect.stringContaining('关于龙') }
+          }
+        }
+      }
+    });
+    if (!recovered.ok) throw new Error('Natural-language workflow did not recover');
+    expect(recovered.value.workflow.plan.parameters.topic).not.toContain('帮我做个总结');
   });
 });

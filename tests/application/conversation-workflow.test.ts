@@ -69,7 +69,7 @@ describe('Conversation workflow', () => {
     expect((await repository.get(created.id))?.revision).toBe(1);
   });
 
-  it('recovers an unknown workflow from the previous topic plus a terse PPT answer', async () => {
+  it('recovers an unknown workflow across multiple terse clarification turns', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-natural-language-'));
     roots.push(root);
     let clock = 0;
@@ -93,12 +93,22 @@ describe('Conversation workflow', () => {
     });
     expect(created.status).toBe('needs_clarification');
 
-    const answered = await service.answer({
+    const stillUnknown = await service.answer({
       workflowId: created.id,
       expectedRevision: created.revision,
-      rawText: '制作ppt',
+      rawText: '制作',
       context: {
-        recentUserMessages: ['帮我做一个关于龙的', '制作ppt']
+        recentUserMessages: ['帮我做一个关于龙的', '制作']
+      }
+    });
+    expect(stillUnknown.status).toBe('needs_clarification');
+
+    const answered = await service.answer({
+      workflowId: stillUnknown.id,
+      expectedRevision: stillUnknown.revision,
+      rawText: 'ppt',
+      context: {
+        recentUserMessages: ['帮我做一个关于龙的', '制作', 'ppt']
       }
     });
     expect(answered).toMatchObject({
