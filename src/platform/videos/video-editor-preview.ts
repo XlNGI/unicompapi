@@ -13,6 +13,9 @@ import type {
 
 export const videoEditorPreviewArtifactKinds = [
   'proxy_video',
+  'proxy_video_clear',
+  'proxy_video_smooth',
+  'proxy_video_fast',
   'thumbnail_strip',
   'audio_waveform'
 ] as const;

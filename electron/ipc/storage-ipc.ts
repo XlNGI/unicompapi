@@ -705,6 +705,11 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => videoEditorMedia.createSourcePreview(request)
   );
   ipcMain.handle(
+    videoEditorIpcChannels.createBackgroundMusicPreview,
+    (_event, request: unknown) =>
+      videoEditorMedia.createBackgroundMusicPreview(request)
+  );
+  ipcMain.handle(
     videoEditorIpcChannels.requestPreviewArtifact,
     (_event, request: unknown) => videoEditorMedia.requestPreviewArtifact(request)
   );

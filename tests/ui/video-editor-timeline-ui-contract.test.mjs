@@ -16,7 +16,7 @@ test('A2 consumes every controlled B2 source and preview operation', () => {
     'prepareRelink',
     'confirmRelink',
     'createSourcePreview',
-    'requestPreviewArtifact',
+    'createBackgroundMusicPreview',
     'clearPreviewCache'
   ]) {
     assert.match(editorSource, new RegExp(`videoEditors\\.${operation}\\(`));
@@ -41,19 +41,19 @@ test('A2 sends domain commands for timeline and canvas edits', () => {
   assert.doesNotMatch(editorSource, /setVideoTrack|setRemovedClips|timelineStart/);
 });
 
-test('A2 keeps source recovery and unavailable proxy states visible', () => {
+test('A2 keeps source recovery visible without exposing proxy as a player control', () => {
   for (const text of [
     '重新定位源文件',
     '候选视频与原文件不同',
     '文件丢失',
     '内容已变化',
     '存储已断开',
-    '检查预览代理',
     '清除预览缓存',
     'adapter_unavailable'
   ]) {
     assert.match(editorSource, new RegExp(text));
   }
+  assert.doesNotMatch(editorSource, /检查预览代理|>\s*代理\s*</);
 });
 
 test('A2 has responsive selected, preview, playhead and inspector styling', () => {

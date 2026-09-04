@@ -548,6 +548,10 @@ const videoEditors: VideoEditorApi = {
       draftId,
       clipId
     }),
+  createBackgroundMusicPreview: (draftId) =>
+    ipcRenderer.invoke(videoEditorIpcChannels.createBackgroundMusicPreview, {
+      draftId
+    }),
   requestPreviewArtifact: (draftId, clipId, kind) =>
     ipcRenderer.invoke(videoEditorIpcChannels.requestPreviewArtifact, {
       draftId,

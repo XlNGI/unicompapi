@@ -150,6 +150,54 @@ describe('video editor preview cache boundary', () => {
     expect(calls[0].args.join(' ')).not.toContain('shell=true');
   });
 
+  it('builds distinct bounded FFmpeg proxies for each viewing quality', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-ffmpeg-quality-'));
+    roots.push(root);
+    const cache = new NodeVideoEditorPreviewCache(root);
+    const calls: readonly string[][] = [];
+    const mutableCalls = calls as string[][];
+    const adapter = new FfmpegVideoEditorPreviewAdapter({
+      ffmpegPath: 'ffmpeg-development-placeholder',
+      runCommand: async (_command, args) => {
+        mutableCalls.push([...args]);
+        const target = args.at(-1);
+        if (!target) throw new Error('missing output target');
+        await writeFile(target, 'fake-webm-artifact');
+      }
+    });
+
+    for (const kind of [
+      'proxy_video_clear',
+      'proxy_video_smooth',
+      'proxy_video_fast'
+    ] as const) {
+      await adapter.requestArtifact({
+        plan: plan(),
+        kind,
+        cache,
+        sourcePath: path.join(root, 'source.mp4')
+      });
+    }
+
+    expect(calls).toHaveLength(3);
+    expect(calls.map((args) => args[args.indexOf('-crf') + 1])).toEqual([
+      '28',
+      '34',
+      '40'
+    ]);
+    expect(calls.map((args) => args[args.indexOf('-b:a') + 1])).toEqual([
+      '128k',
+      '96k',
+      '64k'
+    ]);
+    expect(calls.map((args) => args[args.indexOf('-vf') + 1])).toEqual([
+      'scale=-2:trunc(min(1080\\,ih)/2)*2',
+      'scale=-2:trunc(min(720\\,ih)/2)*2',
+      'scale=-2:trunc(min(480\\,ih)/2)*2'
+    ]);
+    expect(new Set(calls.map((args) => args.at(-1))).size).toBe(3);
+  });
+
   it('builds a waveform request without accepting a shell command', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-ffmpeg-waveform-'));
     roots.push(root);

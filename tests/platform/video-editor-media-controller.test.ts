@@ -154,7 +154,7 @@ describe('VideoEditorMediaController', () => {
       fixture.controller.requestPreviewArtifact({
         draftId: fixture.created.draftId,
         clipId: selected.value.source.clipId,
-        kind: 'thumbnail_strip'
+        kind: 'proxy_video_clear'
       })
     ).resolves.toMatchObject({
       ok: false,
@@ -188,6 +188,19 @@ describe('VideoEditorMediaController', () => {
       }
     });
 
+    const musicPreview = await fixture.controller.createBackgroundMusicPreview({
+      draftId: fixture.created.draftId
+    });
+    if (!musicPreview.ok) throw new Error(JSON.stringify(musicPreview));
+    const musicUrl = new URL(musicPreview.value.url);
+    expect(fixture.handles.resolve(musicUrl.pathname.slice(1))).toBe(
+      fixture.backgroundMusic
+    );
+    expect(musicPreview.value).toMatchObject({
+      kind: 'original',
+      mimeType: 'audio/wav'
+    });
+
     const replacement = await fixture.controller.selectBackgroundMusic({
       draftId: fixture.created.draftId,
       expectedRevision: 2
@@ -211,7 +224,7 @@ describe('VideoEditorMediaController', () => {
         }
       }
     });
-    const serialized = JSON.stringify({ music, cover });
+    const serialized = JSON.stringify({ music, musicPreview, cover });
     expect(serialized).not.toContain(fixture.backgroundMusic);
     expect(serialized).not.toContain(fixture.coverImage);
     expect(serialized).not.toContain('checksumSha256');

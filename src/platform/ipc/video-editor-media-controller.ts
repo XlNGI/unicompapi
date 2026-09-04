@@ -35,6 +35,7 @@ import type {
   VideoEditorIpcErrorCode,
   VideoEditorIpcResult,
   VideoEditorAssetSelectionResultDto,
+  VideoEditorBackgroundMusicPreviewDto,
   VideoEditorDraftDto,
   VideoEditorMediaIdentityDto,
   VideoEditorPreviewArtifactDto,
@@ -500,6 +501,49 @@ export class VideoEditorMediaController {
       return {
         ...this.dependencies.handles.create(target, mimeType),
         mimeType,
+        kind: 'original'
+      };
+    });
+  }
+
+  createBackgroundMusicPreview(
+    request: unknown
+  ): Promise<VideoEditorIpcResult<VideoEditorBackgroundMusicPreviewDto>> {
+    return this.execute(async () => {
+      const parsed = parseDraftRequest(request);
+      const context = this.createContext();
+      const draft = await this.requireDraft(parsed.draftId);
+      if (draft.projectId !== context.session.projectId || !draft.backgroundMusic) {
+        throw mediaError(
+          'source_not_found',
+          'The requested background music does not exist'
+        );
+      }
+      const file = await context.fileRepository.get(draft.backgroundMusic.fileId);
+      if (!file) {
+        throw mediaError('preview_unavailable', 'The background music record is unavailable');
+      }
+      const verified = await this.verifyFile(
+        context,
+        file,
+        draft.backgroundMusic.identity.checksumSha256
+      );
+      if (
+        verified.file.state !== 'available' ||
+        verified.matchesIdentity === false
+      ) {
+        throw mediaError(
+          'preview_unavailable',
+          'The background music is not locally available and verified'
+        );
+      }
+      const target = await resolveFileReferencePathSafely(
+        context.session.rootDirectory,
+        verified.file
+      );
+      return {
+        ...this.dependencies.handles.create(target, 'audio/wav'),
+        mimeType: 'audio/wav',
         kind: 'original'
       };
     });
@@ -1295,6 +1339,19 @@ function parseClipRequest(request: unknown): {
   } catch {
     throw mediaError('invalid_request', 'The video clip identifiers are invalid');
   }
+}
+
+function parseDraftRequest(request: unknown): {
+  readonly draftId: VideoEditDraft['id'];
+} {
+  if (
+    !isRecord(request) ||
+    !exact(request, ['draftId']) ||
+    typeof request.draftId !== 'string'
+  ) {
+    throw mediaError('invalid_request', 'A valid video edit draft request is required');
+  }
+  return { draftId: parseDraftId(request.draftId) };
 }
 
 function parseConfirmRelinkRequest(request: unknown): {

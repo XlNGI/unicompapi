@@ -146,6 +146,31 @@ describe('video editor draft contracts', () => {
     expect(redone.revision).toBe(4);
   });
 
+  it('persists a canvas ratio command and keeps it undoable', () => {
+    const draft = emptyDraft();
+    const changed = applyVideoEditCommand(
+      draft,
+      {
+        schemaVersion: 1,
+        kind: 'set_canvas',
+        before: draft.canvas,
+        after: {
+          ...draft.canvas,
+          aspectRatio: { kind: 'ratio', numerator: 9, denominator: 16 }
+        }
+      },
+      t1
+    );
+
+    expect(changed.canvas.aspectRatio).toEqual({
+      kind: 'ratio',
+      numerator: 9,
+      denominator: 16
+    });
+    expect(changed.history.undoStack.at(-1)?.kind).toBe('set_canvas');
+    expect(undoVideoEditCommand(changed, t2).canvas).toEqual(draft.canvas);
+  });
+
   it('relinks a clip source through reversible domain history', () => {
     const inserted = insert(emptyDraft());
     const original = inserted.videoTrack[0]!;

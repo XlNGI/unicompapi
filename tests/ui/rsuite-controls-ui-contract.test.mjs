@@ -56,7 +56,7 @@ test('the shared RSuite theme and mature control set stay installed', () => {
   assert.match(settings, /<Slider/);
   assert.match(editor, /<RadioGroup/);
   assert.match(editor, /<Checkbox/);
-  assert.match(editor, /<Slider/);
+  assert.match(editor, /role="slider"/);
 });
 
 test('shared model picker closes its portal when the workspace scrolls', () => {

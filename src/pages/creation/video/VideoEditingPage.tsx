@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
+  LuCheck,
+  LuChevronDown,
+  LuChevronUp,
+  LuMaximize2,
+  LuMinimize2,
+  LuPause,
+  LuPlay,
+  LuZoomIn
+} from 'react-icons/lu';
+import {
   Checkbox,
+  Dropdown,
   Input,
   InputNumber,
   Radio,
   RadioGroup,
-  SelectPicker,
-  Slider
+  SelectPicker
 } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
@@ -20,6 +30,7 @@ import type {
 } from '../../../shared/storage-ipc';
 import type {
   VideoEditorApi,
+  VideoEditorBackgroundMusicPreviewDto,
   VideoEditorCanvasDto,
   VideoEditorBackgroundMusicDto,
   VideoEditorClipDto,
@@ -30,7 +41,6 @@ import type {
   VideoEditorIpcErrorCode,
   VideoEditorIpcResult,
   VideoEditorOutputPreferenceDto,
-  VideoEditorSourcePreviewDto,
   VideoEditorSourceRegistrationStrategyDto,
   VideoEditorSourceStatusDto,
   VideoEditorTextOverlayDto,
@@ -74,6 +84,19 @@ const errorMessages: Partial<Record<VideoEditorIpcErrorCode, string>> = {
 
 const defaultTextFontFamily = 'Arial';
 
+const canvasRatioPresets = [
+  { key: '16:9', label: '16:9（西瓜视频）', numerator: 16, denominator: 9 },
+  { key: '4:3', label: '4:3', numerator: 4, denominator: 3 },
+  { key: '2.35:1', label: '2.35:1', numerator: 47, denominator: 20 },
+  { key: '2:1', label: '2:1', numerator: 2, denominator: 1 },
+  { key: '1.85:1', label: '1.85:1', numerator: 37, denominator: 20 },
+  { key: '9:16', label: '9:16（抖音）', numerator: 9, denominator: 16 },
+  { key: '3:4', label: '3:4', numerator: 3, denominator: 4 },
+  { key: '9:19.5', label: '5.8寸', numerator: 6, denominator: 13 },
+  { key: '1:1', label: '1:1', numerator: 1, denominator: 1 },
+  { key: '1:2', label: '1:2', numerator: 1, denominator: 2 }
+] as const;
+
 type EditorError = Extract<
   VideoEditorIpcResult<unknown>,
   { readonly ok: false }
@@ -81,6 +104,26 @@ type EditorError = Extract<
 type SaveState = 'saved' | 'editing' | 'saving' | 'failed' | 'conflict';
 type MediaTab = 'timeline' | 'project';
 type InspectorTab = 'clip' | 'canvas' | 'audio' | 'text' | 'cover' | 'export';
+type PreviewZoom = 'fit' | 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2;
+
+interface PreviewMediaHandle {
+  readonly url: string;
+  readonly expiresAt: string;
+  readonly mimeType: string;
+}
+
+const previewZoomOptions: readonly {
+  readonly key: PreviewZoom;
+  readonly label: string;
+}[] = [
+  { key: 'fit', label: '适应' },
+  { key: 0.5, label: '50%' },
+  { key: 0.75, label: '75%' },
+  { key: 1, label: '100%' },
+  { key: 1.25, label: '125%' },
+  { key: 1.5, label: '150%' },
+  { key: 2, label: '200%' }
+] as const;
 
 interface VideoEditingPageProps {
   readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
@@ -103,6 +146,7 @@ interface PendingPreviewSeek {
   readonly clipId: string;
   readonly timelineUs: number;
   readonly sourceUs: number;
+  readonly resumePlayback: boolean;
 }
 
 const saveStateLabels: Record<SaveState, string> = {
@@ -128,6 +172,7 @@ export function VideoEditingPage({
   const storage = window.unicomp?.storage;
   const videoEditors = window.unicomp?.videoEditors;
   const videoRef = useRef<HTMLVideoElement>(null);
+  const musicRef = useRef<HTMLAudioElement>(null);
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [drafts, setDrafts] = useState<readonly VideoEditorDraftDto[]>([]);
   const [currentDraft, setCurrentDraft] = useState<VideoEditorDraftDto>();
@@ -139,8 +184,11 @@ export function VideoEditingPage({
   const [sourceStatuses, setSourceStatuses] = useState<
     Readonly<Record<string, VideoEditorSourceStatusDto>>
   >({});
-  const [preview, setPreview] = useState<VideoEditorSourcePreviewDto>();
+  const [preview, setPreview] = useState<PreviewMediaHandle>();
+  const [musicPreview, setMusicPreview] =
+    useState<VideoEditorBackgroundMusicPreviewDto>();
   const [playheadUs, setPlayheadUs] = useState(0);
+  const [timelinePlaying, setTimelinePlaying] = useState(false);
   const [title, setTitle] = useState('');
   const [mediaTab, setMediaTab] = useState<MediaTab>('timeline');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('clip');
@@ -157,14 +205,34 @@ export function VideoEditingPage({
   const [frameUrls, setFrameUrls] = useState<Readonly<Record<string, string>>>({});
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const [previewSeeking, setPreviewSeeking] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>('fit');
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const frameCacheRef = useRef<Map<string, string>>(new Map());
+  const previewCacheRef = useRef<Map<string, PreviewMediaHandle>>(new Map());
   const previewRequestRef = useRef(0);
   const previewSeekTokenRef = useRef(0);
   const pendingPreviewSeekRef = useRef<PendingPreviewSeek | undefined>(undefined);
   const previewHandleRef = useRef<
-    { readonly clipId: string; readonly preview: VideoEditorSourcePreviewDto } | undefined
+    { readonly clipId: string; readonly preview: PreviewMediaHandle } | undefined
   >(undefined);
+  const timelinePlayingRef = useRef(false);
+  const playbackSwitchingRef = useRef(false);
+
+  useEffect(() => {
+    if (!previewExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewExpanded(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [previewExpanded]);
 
   useEffect(() => {
     let active = true;
@@ -284,6 +352,11 @@ export function VideoEditingPage({
         );
         if (cancelled) return;
         if (!result.ok) continue;
+        previewCacheRef.current.set(clip.clipId, {
+          url: result.value.url,
+          expiresAt: result.value.expiresAt,
+          mimeType: result.value.mimeType
+        });
         const dataUrl = await extractVideoFrame(
           result.value.url,
           clip.sourceRange.inUs
@@ -303,6 +376,29 @@ export function VideoEditingPage({
       cancelled = true;
     };
   }, [currentDraft, videoEditors]);
+
+  useEffect(() => {
+    let active = true;
+    setMusicPreview(undefined);
+    if (
+      !videoEditors ||
+      typeof videoEditors.createBackgroundMusicPreview !== 'function' ||
+      !currentDraft?.backgroundMusic
+    ) {
+      return () => {
+        active = false;
+      };
+    }
+    void videoEditors.createBackgroundMusicPreview(currentDraft.draftId)
+      .then((result) => {
+        if (!active) return;
+        if (result.ok) setMusicPreview(result.value);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [currentDraft?.backgroundMusic?.fileId, currentDraft?.draftId, videoEditors]);
 
   useEffect(() => {
     let active = true;
@@ -377,13 +473,19 @@ export function VideoEditingPage({
     preferredClipId?: string,
     preferredPlayheadUs?: number
   ) {
+    timelinePlayingRef.current = false;
+    setTimelinePlaying(false);
+    videoRef.current?.pause();
+    musicRef.current?.pause();
     setCurrentDraft(draft);
     setTitle(draft?.title ?? '');
     setSaveState('saved');
     setPreview(undefined);
     setPreviewUnavailable(false);
     previewHandleRef.current = undefined;
+    previewCacheRef.current.clear();
     pendingPreviewSeekRef.current = undefined;
+    playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
     setExportPreflight(undefined);
     setExportConfirmed(false);
@@ -724,13 +826,15 @@ export function VideoEditingPage({
   function beginPreviewSeek(
     draft: VideoEditorDraftDto,
     clipId: string,
-    timelineUs: number
+    timelineUs: number,
+    resumePlayback = false
   ): PendingPreviewSeek {
     const pending = {
       token: ++previewSeekTokenRef.current,
       clipId,
       timelineUs,
-      sourceUs: timelineToSourceUs(draft, clipId, timelineUs)
+      sourceUs: timelineToSourceUs(draft, clipId, timelineUs),
+      resumePlayback
     };
     pendingPreviewSeekRef.current = pending;
     setPreviewSeeking(true);
@@ -740,6 +844,7 @@ export function VideoEditingPage({
   function abandonPreviewSeek(token: number) {
     if (pendingPreviewSeekRef.current?.token !== token) return;
     pendingPreviewSeekRef.current = undefined;
+    playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
   }
 
@@ -749,15 +854,24 @@ export function VideoEditingPage({
       !pending ||
       !videoRef.current ||
       videoRef.current.seeking ||
-      previewHandleRef.current?.clipId !== pending.clipId
+      videoRef.current.dataset.previewClipId !== pending.clipId
     ) {
       return;
     }
     const sourceUs = Math.round(videoRef.current.currentTime * 1_000_000);
-    if (Math.abs(sourceUs - pending.sourceUs) > 1_000) return;
+    if (Math.abs(sourceUs - pending.sourceUs) > 50_000) {
+      applyPendingPreviewSeek();
+      return;
+    }
     pendingPreviewSeekRef.current = undefined;
+    playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
     setPlayheadUs(pending.timelineUs);
+    if (pending.resumePlayback && timelinePlayingRef.current) {
+      startCurrentPreviewPlayback(pending.clipId, pending.timelineUs);
+    } else {
+      syncBackgroundMusic(pending.timelineUs, false);
+    }
   }
 
   function applyPendingPreviewSeek() {
@@ -765,7 +879,9 @@ export function VideoEditingPage({
     if (
       !pending ||
       !videoRef.current ||
-      previewHandleRef.current?.clipId !== pending.clipId
+      videoRef.current.dataset.previewClipId !== pending.clipId ||
+      videoRef.current.readyState < HTMLMediaElement.HAVE_METADATA ||
+      videoRef.current.seeking
     ) {
       return;
     }
@@ -785,75 +901,66 @@ export function VideoEditingPage({
     clipId: string,
     force = false,
     draftOverride?: VideoEditorDraftDto,
-    targetPlayheadUs = playheadUs
-  ) {
+    targetPlayheadUs = playheadUs,
+    resumePlayback = false
+  ): Promise<boolean> {
     const draft = draftOverride ?? currentDraft;
-    if (!videoEditors || !draft || !clipId) return;
+    if (!videoEditors || !draft || !clipId) return false;
     const clip = draft.videoTrack.find((item) => item.clipId === clipId);
-    if (!clip) return;
-    const pendingSeek = beginPreviewSeek(draft, clipId, targetPlayheadUs);
+    if (!clip) return false;
+    const pendingSeek = beginPreviewSeek(
+      draft,
+      clipId,
+      targetPlayheadUs,
+      resumePlayback
+    );
     const requestToken = ++previewRequestRef.current;
     const existing = previewHandleRef.current;
-    if (existing?.clipId !== clipId) {
-      previewHandleRef.current = undefined;
-      setPreview(undefined);
-      setPreviewUnavailable(false);
-    }
+    const cacheKey = clipId;
+    const cached = previewCacheRef.current.get(cacheKey);
+    const reusable =
+      existing?.clipId === clipId ? existing.preview : cached;
     if (
       !force &&
-      existing &&
-      existing.clipId === clipId &&
-      videoRef.current &&
-      Number.isFinite(Date.parse(existing.preview.expiresAt)) &&
-      Date.parse(existing.preview.expiresAt) - Date.now() > 30_000
+      reusable &&
+      Number.isFinite(Date.parse(reusable.expiresAt)) &&
+      Date.parse(reusable.expiresAt) - Date.now() > 30_000
     ) {
-      applyPendingPreviewSeek();
-      return;
+      previewHandleRef.current = { clipId, preview: reusable };
+      setPreview(reusable);
+      setPreviewUnavailable(false);
+      if (existing?.clipId === clipId && videoRef.current) {
+        applyPendingPreviewSeek();
+      }
+      return true;
     }
     try {
-      const result = await videoEditors.createSourcePreview(
-        draft.draftId,
-        clipId
-      );
-      if (requestToken !== previewRequestRef.current) return;
+      const result = await videoEditors.createSourcePreview(draft.draftId, clipId);
+      if (requestToken !== previewRequestRef.current) return false;
       if (!result.ok) {
         abandonPreviewSeek(pendingSeek.token);
-        previewHandleRef.current = undefined;
-        setPreview(undefined);
-        setPreviewUnavailable(true);
-        setMessage(errorMessage(result.error.code, '原片预览暂不可用。'));
-        return;
+        setPreviewUnavailable(!existing);
+        if (resumePlayback) stopTimelinePlayback();
+        setMessage(errorMessage(result.error.code, '当前片段预览暂不可用。'));
+        return false;
       }
-      previewHandleRef.current = { clipId, preview: result.value };
-      setPreview(result.value);
+      const nextPreview: PreviewMediaHandle = {
+        url: result.value.url,
+        expiresAt: result.value.expiresAt,
+        mimeType: result.value.mimeType
+      };
+      previewHandleRef.current = { clipId, preview: nextPreview };
+      previewCacheRef.current.set(cacheKey, nextPreview);
+      setPreview(nextPreview);
       setPreviewUnavailable(false);
+      return true;
     } catch {
       if (requestToken === previewRequestRef.current) {
         abandonPreviewSeek(pendingSeek.token);
-        setMessage('加载原片预览失败，请重试。');
+        if (resumePlayback) stopTimelinePlayback();
+        setMessage('加载片段预览失败，请重试。');
       }
-    }
-  }
-
-  async function requestProxy() {
-    if (!videoEditors || !currentDraft || !selectedClipId || busy) return;
-    setBusy(true);
-    setMessage('正在检查预览代理缓存…');
-    try {
-      const result = await videoEditors.requestPreviewArtifact(
-        currentDraft.draftId,
-        selectedClipId,
-        'proxy_video'
-      );
-      if (!result.ok) {
-        handleError(result.error);
-        return;
-      }
-      setMessage('预览代理缓存已就绪。');
-    } catch {
-      setMessage('检查预览代理失败，请重试。');
-    } finally {
-      setBusy(false);
+      return false;
     }
   }
 
@@ -868,6 +975,7 @@ export function VideoEditingPage({
         return;
       }
       frameCacheRef.current.clear();
+      previewCacheRef.current.clear();
       setFrameUrls({});
       setMessage('可重建的预览缓存已清除，草稿和源文件没有改变。');
     } catch {
@@ -1012,50 +1120,216 @@ export function VideoEditingPage({
     });
     return names;
   }, [currentDraft, videoWorks]);
+  const activeTexts =
+    currentDraft?.textTrack.filter(
+      (text) => playheadUs >= text.range.startUs && playheadUs < text.range.endUs
+    ) ?? [];
 
   function selectClip(clipId: string) {
+    const resumePlayback = timelinePlayingRef.current;
+    playbackSwitchingRef.current = false;
+    videoRef.current?.pause();
+    musicRef.current?.pause();
     setSelectedClipId(clipId);
     const nextPlayheadUs =
       segments.find((segment) => segment.clipId === clipId)?.startUs ?? 0;
     setPlayheadUs(nextPlayheadUs);
     setInspectorTab('clip');
-    void ensurePreview(clipId, false, undefined, nextPlayheadUs);
+    void ensurePreview(
+      clipId,
+      false,
+      undefined,
+      nextPlayheadUs,
+      resumePlayback
+    );
   }
 
   function seekTimeline(nextUs: number) {
-    setPlayheadUs(nextUs);
-    const targetSegment = resolveTimelineSegmentAt(segments, nextUs);
-    if (!targetSegment) return;
-    if (targetSegment.clipId !== selectedClipId) {
-      setSelectedClipId(targetSegment.clipId);
-      void ensurePreview(targetSegment.clipId, false, undefined, nextUs);
+    const boundedUs = Math.min(totalDurationUs, Math.max(0, nextUs));
+    setPlayheadUs(boundedUs);
+    if (boundedUs >= totalDurationUs) {
+      stopTimelinePlayback();
       return;
     }
-    if (previewHandleRef.current?.clipId !== targetSegment.clipId) return;
-    void ensurePreview(targetSegment.clipId, false, undefined, nextUs);
+    const targetSegment = resolveTimelineSegmentAt(segments, boundedUs);
+    if (!targetSegment) return;
+    const resumePlayback = timelinePlayingRef.current;
+    playbackSwitchingRef.current = false;
+    videoRef.current?.pause();
+    musicRef.current?.pause();
+    if (targetSegment.clipId !== selectedClipId) {
+      setSelectedClipId(targetSegment.clipId);
+    }
+    void ensurePreview(
+      targetSegment.clipId,
+      false,
+      undefined,
+      boundedUs,
+      resumePlayback
+    );
   }
 
   function syncPlayheadFromPreview() {
     if (pendingPreviewSeekRef.current) return;
-    if (!videoRef.current || !selectedClip || !selectedSegment) return;
+    if (!videoRef.current || !currentDraft) return;
+    const previewClipId = previewHandleRef.current?.clipId;
+    const playbackClip = currentDraft.videoTrack.find(
+      (clip) => clip.clipId === previewClipId
+    );
+    const playbackSegment = segments.find(
+      (segment) => segment.clipId === previewClipId
+    );
+    if (!playbackClip || !playbackSegment) return;
+    const rawPreviewUs = Math.round(videoRef.current.currentTime * 1_000_000);
     const sourceUs = Math.min(
-      selectedClip.sourceRange.outUs,
-      Math.max(
-        selectedClip.sourceRange.inUs,
-        Math.round(videoRef.current.currentTime * 1_000_000)
-      )
+      playbackClip.sourceRange.outUs,
+      Math.max(playbackClip.sourceRange.inUs, rawPreviewUs)
     );
-    if (sourceUs === selectedClip.sourceRange.outUs) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = sourceUs / 1_000_000;
-    }
-    const sourceOffset = sourceUs - selectedSegment.sourceInUs;
+    const sourceOffset = sourceUs - playbackSegment.sourceInUs;
     const timelineOffset = Number(
-      (BigInt(sourceOffset) * BigInt(selectedSegment.speedDenominator)) /
-        BigInt(selectedSegment.speedNumerator)
+      (BigInt(sourceOffset) * BigInt(playbackSegment.speedDenominator)) /
+        BigInt(playbackSegment.speedNumerator)
     );
-    setPlayheadUs(
-      Math.min(selectedSegment.endUs, selectedSegment.startUs + timelineOffset)
+    const nextPlayheadUs = Math.min(
+      playbackSegment.endUs,
+      playbackSegment.startUs + timelineOffset
+    );
+    setPlayheadUs(nextPlayheadUs);
+    syncBackgroundMusic(nextPlayheadUs, timelinePlayingRef.current);
+    const previewEndUs = playbackClip.sourceRange.outUs;
+    if (rawPreviewUs >= previewEndUs - 1_000) {
+      if (timelinePlayingRef.current) advanceTimelinePlayback();
+      else videoRef.current.pause();
+    }
+  }
+
+  function toggleTimelinePlayback() {
+    if (timelinePlayingRef.current) {
+      stopTimelinePlayback();
+      return;
+    }
+    const startUs = playheadUs >= totalDurationUs ? 0 : playheadUs;
+    const targetSegment = resolveTimelineSegmentAt(segments, startUs);
+    if (!targetSegment) return;
+    timelinePlayingRef.current = true;
+    playbackSwitchingRef.current = false;
+    setTimelinePlaying(true);
+    setPlayheadUs(startUs);
+    setSelectedClipId(targetSegment.clipId);
+    void ensurePreview(targetSegment.clipId, false, undefined, startUs, true);
+  }
+
+  function stopTimelinePlayback() {
+    timelinePlayingRef.current = false;
+    playbackSwitchingRef.current = false;
+    setTimelinePlaying(false);
+    videoRef.current?.pause();
+    musicRef.current?.pause();
+  }
+
+  function startCurrentPreviewPlayback(clipId: string, timelineUs: number) {
+    if (!timelinePlayingRef.current || !videoRef.current || !currentDraft) return;
+    const clip = currentDraft.videoTrack.find((candidate) => candidate.clipId === clipId);
+    if (!clip) return;
+    videoRef.current.playbackRate = clip.speed.numerator / clip.speed.denominator;
+    videoRef.current.muted = clip.sourceAudio.muted;
+    videoRef.current.volume = clip.sourceAudio.volumePermille / 1_000;
+    syncBackgroundMusic(timelineUs, true);
+    void videoRef.current.play().catch(() => {
+      stopTimelinePlayback();
+      setMessage('无法开始时间线预览，请再次点击播放。');
+    });
+  }
+
+  function advanceTimelinePlayback() {
+    const previewClipId = previewHandleRef.current?.clipId;
+    const playbackSegment = segments.find(
+      (segment) => segment.clipId === previewClipId
+    );
+    if (
+      !timelinePlayingRef.current ||
+      !playbackSegment ||
+      playbackSwitchingRef.current
+    ) {
+      return;
+    }
+    playbackSwitchingRef.current = true;
+    videoRef.current?.pause();
+    const nextSegment = segments[playbackSegment.index + 1];
+    if (!nextSegment) {
+      setPlayheadUs(totalDurationUs);
+      stopTimelinePlayback();
+      return;
+    }
+    const nextPlayheadUs = Math.max(playbackSegment.endUs, nextSegment.startUs);
+    setPlayheadUs(nextPlayheadUs);
+    setSelectedClipId(nextSegment.clipId);
+    void ensurePreview(
+      nextSegment.clipId,
+      false,
+      undefined,
+      nextPlayheadUs,
+      true
+    );
+  }
+
+  function syncBackgroundMusic(timelineUs: number, shouldPlay: boolean) {
+    if (!musicRef.current || !currentDraft?.backgroundMusic || !musicPreview) return;
+    const playback = resolveBackgroundMusicPlayback(
+      currentDraft.backgroundMusic,
+      timelineUs
+    );
+    if (!playback) {
+      musicRef.current.pause();
+      return;
+    }
+    const targetSeconds = playback.sourceUs / 1_000_000;
+    if (Math.abs(musicRef.current.currentTime - targetSeconds) > 0.2) {
+      musicRef.current.currentTime = targetSeconds;
+    }
+    musicRef.current.volume = playback.volumePermille / 1_000;
+    if (shouldPlay && musicRef.current.paused) {
+      void musicRef.current.play().catch(() => undefined);
+    } else if (!shouldPlay) {
+      musicRef.current.pause();
+    }
+  }
+
+  function togglePreviewFullscreen() {
+    setPreviewExpanded((value) => !value);
+  }
+
+  function selectCanvasRatio(eventKey: string | number | undefined) {
+    if (!currentDraft || operationBlocked || typeof eventKey !== 'string') return;
+    if (eventKey === 'custom') {
+      setInspectorTab('canvas');
+      setInspectorExpanded(true);
+      return;
+    }
+    const aspectRatio: VideoEditorCanvasDto['aspectRatio'] =
+      eventKey === 'source'
+        ? { kind: 'source' }
+        : (() => {
+            const preset = canvasRatioPresets.find((item) => item.key === eventKey);
+            return preset
+              ? {
+                  kind: 'ratio' as const,
+                  numerator: preset.numerator,
+                  denominator: preset.denominator
+                }
+              : currentDraft.canvas.aspectRatio;
+          })();
+    const label =
+      eventKey === 'source'
+        ? '适应（原始）'
+        : canvasRatioPresets.find((item) => item.key === eventKey)?.label;
+    if (!label) return;
+    void runCommand(
+      {
+        kind: 'set_canvas',
+        canvas: { ...currentDraft.canvas, aspectRatio }
+      },
+      `画布比例已切换为${label}。`
     );
   }
 
@@ -1067,25 +1341,35 @@ export function VideoEditingPage({
             <h1 className="uc-page-skeleton__title" id={`${mode.id}-title`}>
               {mode.label}
             </h1>
-            <StatusPill
-              tone={
+            <span
+              aria-live="polite"
+              className={`uc-video-editor__save-state uc-video-editor__save-state--${
                 loading
                   ? 'info'
                   : session
                     ? saveStateTones[saveState]
                     : 'warning'
-              }
+              }`}
             >
+              <span aria-hidden="true" className="uc-video-editor__save-state-dot" />
               {loading
                 ? '读取中'
                 : session
                   ? saveStateLabels[saveState]
                   : '未打开项目'}
-            </StatusPill>
+            </span>
+            {saveState === 'conflict' ? (
+              <Button
+                disabled={busy}
+                onClick={() => currentDraft && void openDraft(currentDraft.draftId)}
+                variant="secondary"
+              >
+                重新载入
+              </Button>
+            ) : null}
           </div>
           <div className="uc-video-editor__draft-picker">
             <div className="uc-rsuite-field">
-              <span>编辑草稿</span>
               <SelectPicker
                 aria-label="编辑草稿"
                 cleanable={false}
@@ -1174,7 +1458,9 @@ export function VideoEditingPage({
         </div>
       </header>
 
-      <div className="uc-video-editor__workspace">
+      <div
+        className={`uc-video-editor__workspace${timelineCollapsed ? ' uc-video-editor__workspace--timeline-collapsed' : ''}`}
+      >
         <Card className="uc-video-editor__media-bin">
           <PanelHeading
             description="素材只通过受控接口登记，界面不会读取本地绝对路径。"
@@ -1221,6 +1507,7 @@ export function VideoEditingPage({
             <ProjectVideoList
               onSelect={setSelectedWorkId}
               selectedWorkId={selectedWorkId}
+              storage={storage}
               works={videoWorks}
             />
           )}
@@ -1250,12 +1537,16 @@ export function VideoEditingPage({
               添加所选作品
             </Button>
           )}
-          <p className="uc-video-editor__hint">
+          {mediaTab === 'timeline' ? (
+            <p className="uc-video-editor__hint">
               导入只登记或复制视频并追加片段，不上传、不调用在线智能服务、不创建任务。
-          </p>
+            </p>
+          ) : null}
         </Card>
 
-        <div className="uc-video-editor__center">
+        <div
+          className={`uc-video-editor__center${previewExpanded ? ' uc-video-editor__center--expanded' : ''}`}
+        >
           <Card className="uc-video-editor__preview">
             <PanelHeading
               description={
@@ -1265,62 +1556,211 @@ export function VideoEditingPage({
               }
               title="预览舞台"
             />
-            {preview ? (
-              <video
-                aria-busy={previewSeeking}
-                className="uc-video-editor__video"
-                controls
-                key={preview.url}
-                onLoadedData={applyPendingPreviewSeek}
-                onLoadedMetadata={applyPendingPreviewSeek}
-                onSeeked={completePreviewSeek}
-                onTimeUpdate={syncPlayheadFromPreview}
-                ref={videoRef}
-                src={preview.url}
-              />
-            ) : (
-              <EmptyState
-                description={
-                  selectedClip
-                    ? previewUnavailable
-                      ? '源文件不可用，可在左侧素材列表重新定位后重试。'
-                      : '选中片段后会自动校验并加载原片预览；也可点击“刷新原片”强制重新校验。'
-                    : '当前没有已选择的视频片段。'
+            <div className="uc-video-editor__preview-stage">
+              <div
+                className="uc-video-editor__preview-canvas"
+                style={{
+                  aspectRatio: currentDraft ? canvasPreviewAspectRatio(currentDraft) : '16 / 9',
+                  backgroundColor:
+                    currentDraft?.canvas.background.kind === 'solid'
+                      ? currentDraft.canvas.background.color
+                      : '#000000',
+                  transform: previewZoom === 'fit' ? undefined : `scale(${previewZoom})`
+                }}
+              >
+                {preview ? (
+                  <video
+                    aria-busy={previewSeeking}
+                    aria-label="时间线预览"
+                    className="uc-video-editor__video"
+                    data-preview-clip-id={previewHandleRef.current?.clipId}
+                    key={`${previewHandleRef.current?.clipId ?? ''}:${preview.url}`}
+                    onEnded={advanceTimelinePlayback}
+                    onLoadedData={applyPendingPreviewSeek}
+                    onLoadedMetadata={applyPendingPreviewSeek}
+                    onSeeked={completePreviewSeek}
+                    onTimeUpdate={syncPlayheadFromPreview}
+                    playsInline
+                    ref={videoRef}
+                    src={preview.url}
+                  />
+                ) : (
+                  <EmptyState
+                    description={
+                      selectedClip
+                        ? previewUnavailable
+                          ? '源文件不可用，可在左侧素材列表重新定位后重试。'
+                          : '正在校验并加载第一个片段，加载完成后即可预览整条时间线。'
+                        : '当前没有已选择的视频片段。'
+                    }
+                    icon="预"
+                    readOnly
+                    title={
+                      selectedClip
+                        ? previewUnavailable
+                          ? '源文件不可用'
+                          : '正在准备时间线预览'
+                        : '等待视频片段'
+                    }
+                  />
+                )}
+                {activeTexts.map((text) => (
+                  <span
+                    className="uc-video-editor__preview-text"
+                    key={text.textId}
+                    style={{
+                      color: text.style.color,
+                      fontFamily: text.style.requestedFontFamily,
+                      fontSize: `${text.style.fontSizeMilliPx / 1_000}px`,
+                      left: `${text.position.xPermille / 10}%`,
+                      opacity: text.style.opacityPermille / 1_000,
+                      textAlign: text.style.alignment,
+                      top: `${text.position.yPermille / 10}%`,
+                      transform: `translate(${text.style.alignment === 'left' ? '0' : text.style.alignment === 'center' ? '-50%' : '-100%'}, -50%)`
+                    }}
+                  >
+                    {text.content}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {musicPreview ? (
+              <audio
+                aria-hidden="true"
+                key={musicPreview.url}
+                onLoadedMetadata={() =>
+                  syncBackgroundMusic(playheadUs, timelinePlayingRef.current)
                 }
-                icon="预"
-                readOnly
-                title={
-                  selectedClip
-                    ? previewUnavailable
-                      ? '源文件不可用'
-                      : '正在准备受控预览'
-                    : '等待视频片段'
-                }
+                ref={musicRef}
+                src={musicPreview.url}
               />
-            )}
+            ) : null}
             <div className="uc-video-editor__transport">
-              <Button
-                disabled={!selectedClip || busy}
-                onClick={() => void ensurePreview(selectedClipId, true)}
-                variant="secondary"
-              >
-                刷新原片
-              </Button>
-              <Button
-                disabled={!selectedClip || busy}
-                onClick={() => void requestProxy()}
-                variant="ghost"
-              >
-                检查预览代理
-              </Button>
-              <span>
-                {formatTime(playheadUs)} / {formatTime(totalDurationUs)}
+              <span className="uc-video-editor__transport-time">
+                <strong>{formatTime(playheadUs)}</strong> / {formatTime(totalDurationUs)}
               </span>
+              <button
+                aria-label={timelinePlaying ? '暂停时间线' : '播放时间线'}
+                className="uc-video-editor__transport-play"
+                disabled={totalDurationUs <= 0 || busy}
+                onClick={toggleTimelinePlayback}
+                title={timelinePlaying ? '暂停' : '播放'}
+                type="button"
+              >
+                {timelinePlaying ? <LuPause aria-hidden="true" /> : <LuPlay aria-hidden="true" />}
+              </button>
+              <div className="uc-video-editor__transport-tools">
+                <Dropdown
+                  className="uc-video-editor__zoom-menu"
+                  menuStyle={{ minWidth: 132, maxHeight: 320, overflowY: 'auto' }}
+                  onSelect={(eventKey) => {
+                    if (eventKey === 'clear-preview-cache') {
+                      void clearPreviewCache();
+                      return;
+                    }
+                    const zoom = previewZoomOptions.find(
+                      (option) => option.key === eventKey
+                    )?.key;
+                    if (zoom !== undefined) setPreviewZoom(zoom);
+                  }}
+                  placement="bottomEnd"
+                  renderToggle={(props, ref) => (
+                    <button
+                      {...props}
+                      aria-label="预览缩放"
+                      className={`uc-video-editor__transport-icon${props.className ? ` ${props.className}` : ''}`}
+                      ref={ref}
+                      title={`预览缩放：${previewZoom === 'fit' ? '适应' : `${previewZoom * 100}%`}`}
+                      type="button"
+                    >
+                      <LuZoomIn aria-hidden="true" />
+                    </button>
+                  )}
+                >
+                  {previewZoomOptions.map((option) => (
+                    <Dropdown.Item
+                      className="uc-video-editor__zoom-item"
+                      eventKey={option.key}
+                      icon={previewZoom === option.key ? <LuCheck /> : undefined}
+                      key={option.key}
+                    >
+                      {option.label}
+                    </Dropdown.Item>
+                  ))}
+                  <Dropdown.Separator />
+                  <Dropdown.Item eventKey="clear-preview-cache">
+                    清除预览缓存
+                  </Dropdown.Item>
+                </Dropdown>
+                <Dropdown
+                  className="uc-video-editor__ratio-menu"
+                  disabled={!currentDraft || operationBlocked}
+                  menuStyle={{ minWidth: 184, maxHeight: 356, overflowY: 'auto' }}
+                  onSelect={selectCanvasRatio}
+                  placement="bottomEnd"
+                  renderToggle={(props, ref) => (
+                    <button
+                      {...props}
+                      aria-label="画布比例"
+                      className={`uc-video-editor__transport-ratio${props.className ? ` ${props.className}` : ''}`}
+                      ref={ref}
+                      title="选择画布比例"
+                      type="button"
+                    >
+                      {currentDraft ? selectedCanvasRatioLabel(currentDraft) : '比例'}
+                      <LuChevronDown aria-hidden="true" />
+                    </button>
+                  )}
+                >
+                  <Dropdown.Item
+                    className="uc-video-editor__ratio-item"
+                    eventKey="source"
+                    icon={currentDraft?.canvas.aspectRatio.kind === 'source' ? <LuCheck /> : undefined}
+                  >
+                    <span className="uc-video-editor__ratio-option">
+                      <span>适应（原始）</span>
+                    </span>
+                  </Dropdown.Item>
+                  <Dropdown.Item className="uc-video-editor__ratio-item" eventKey="custom">
+                    自定义
+                  </Dropdown.Item>
+                  <Dropdown.Separator />
+                  {canvasRatioPresets.map((preset) => (
+                    <Dropdown.Item
+                      className="uc-video-editor__ratio-item"
+                      eventKey={preset.key}
+                      icon={currentDraft && canvasRatioMatches(currentDraft.canvas, preset.numerator, preset.denominator) ? <LuCheck /> : undefined}
+                      key={preset.key}
+                    >
+                      <span className="uc-video-editor__ratio-option">
+                        <span>{preset.label}</span>
+                        <span
+                          aria-hidden="true"
+                          className="uc-video-editor__ratio-shape"
+                          style={{ aspectRatio: `${preset.numerator} / ${preset.denominator}` }}
+                        />
+                      </span>
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown>
+                <button
+                  aria-label={previewExpanded ? '退出全屏预览' : '全屏预览'}
+                  aria-pressed={previewExpanded}
+                  className="uc-video-editor__transport-icon"
+                  onClick={togglePreviewFullscreen}
+                  title={previewExpanded ? '退出全屏预览' : '全屏预览'}
+                  type="button"
+                >
+                  {previewExpanded ? <LuMinimize2 aria-hidden="true" /> : <LuMaximize2 aria-hidden="true" />}
+                </button>
+              </div>
             </div>
           </Card>
         </div>
 
-        <Card className="uc-video-editor__timeline">
+        <Card
+          className={`uc-video-editor__timeline${timelineCollapsed ? ' uc-video-editor__timeline--collapsed' : ''}`}
+        >
           <div className="uc-video-editor__timeline-heading">
             <PanelHeading
               description="片段起点由顺序、裁剪、速度和转场实时计算，不另存第二份事实。"
@@ -1462,60 +1902,84 @@ export function VideoEditingPage({
               >
                 封面
               </Button>
+              <button
+                aria-controls="uc-video-editor-timeline-content"
+                aria-expanded={!timelineCollapsed}
+                className="uc-video-editor__timeline-toggle"
+                onClick={() => setTimelineCollapsed((value) => !value)}
+                title={timelineCollapsed ? '展开时间线' : '收起时间线'}
+                type="button"
+              >
+                {timelineCollapsed ? <LuChevronUp aria-hidden="true" /> : <LuChevronDown aria-hidden="true" />}
+                {timelineCollapsed ? '展开' : '收起'}
+              </button>
             </div>
           </div>
-          <div className="uc-video-editor__ruler" aria-hidden="true">
-            <span>00:00.000</span>
-            <span>{segments.length} 个片段</span>
-            <span>{formatTime(totalDurationUs)}</span>
+          {timelineCollapsed ? (
+            <div
+              className="uc-video-editor__timeline-summary"
+              id="uc-video-editor-timeline-content"
+            >
+              <strong>视频主轨</strong>
+              <span>{segments.length} 个片段</span>
+              <span>{formatTime(totalDurationUs)}</span>
+            </div>
+          ) : (
+          <div
+            className="uc-video-editor__timeline-grid"
+            id="uc-video-editor-timeline-content"
+          >
+            <div className="uc-video-editor__timeline-primary">
+              <div className="uc-video-editor__ruler" aria-hidden="true">
+                <span>00:00.000</span>
+                <span>{segments.length} 个片段</span>
+                <span>{formatTime(totalDurationUs)}</span>
+              </div>
+              <VideoTimelineTrack
+                canReorder={!operationBlocked}
+                frames={frameUrls}
+                onMove={(clipId, toIndex) =>
+                  void runCommand(
+                    { kind: 'move_clip', clipId, toIndex },
+                    '片段已通过拖拽移动。'
+                  )
+                }
+                onSeek={(nextUs) => seekTimeline(nextUs)}
+                onSelect={selectClip}
+                segments={segments}
+                selectedClipId={selectedClipId}
+                totalDurationUs={totalDurationUs}
+              />
+              <TimelinePlayhead
+                onSeek={seekTimeline}
+                playheadUs={playheadUs}
+                totalDurationUs={totalDurationUs}
+              />
+            </div>
+            <TimelineTrack
+              items={
+                currentDraft?.textTrack.map((text) => ({
+                  id: text.textId,
+                  label: text.content || '空文字层'
+                })) ?? []
+              }
+              label="文字轨"
+              onSelect={(textId) => {
+                setSelectedTextId(textId);
+                setInspectorTab('text');
+              }}
+              selectedId={selectedTextId}
+            />
+            <TimelineTrack
+              items={
+                currentDraft?.backgroundMusic
+                  ? [{ id: currentDraft.backgroundMusic.fileId, label: '背景音乐' }]
+                  : []
+              }
+              label="背景音乐"
+            />
           </div>
-          <Slider
-            aria-label="时间线播放头"
-            className="uc-video-editor__playhead"
-            disabled={totalDurationUs === 0}
-            max={Math.max(1, totalDurationUs)}
-            min={0}
-            onChange={seekTimeline}
-            step={1000}
-            value={Math.min(playheadUs, Math.max(1, totalDurationUs))}
-          />
-          <VideoTimelineTrack
-            canReorder={!operationBlocked}
-            frames={frameUrls}
-            onMove={(clipId, toIndex) =>
-              void runCommand(
-                { kind: 'move_clip', clipId, toIndex },
-                '片段已通过拖拽移动。'
-              )
-            }
-            onSelect={selectClip}
-            playheadUs={playheadUs}
-            segments={segments}
-            selectedClipId={selectedClipId}
-            totalDurationUs={totalDurationUs}
-          />
-          <TimelineTrack
-            items={
-              currentDraft?.textTrack.map((text) => ({
-                id: text.textId,
-                label: text.content || '空文字层'
-              })) ?? []
-            }
-            label="文字轨"
-            onSelect={(textId) => {
-              setSelectedTextId(textId);
-              setInspectorTab('text');
-            }}
-            selectedId={selectedTextId}
-          />
-          <TimelineTrack
-            items={
-              currentDraft?.backgroundMusic
-                ? [{ id: currentDraft.backgroundMusic.fileId, label: '背景音乐' }]
-                : []
-            }
-            label="背景音乐"
-          />
+          )}
         </Card>
 
         <Card
@@ -1735,42 +2199,11 @@ export function VideoEditingPage({
         </Card>
       </div>
 
-      <Card className="uc-video-editor__status" role="status">
-        <StatusPill tone={saveStateTones[saveState]}>
-          {saveStateLabels[saveState]}
-        </StatusPill>
-        <span>草稿：{currentDraft ? `版本 ${currentDraft.revision}` : '无'}</span>
-        <span>
-          源文件：
-          {currentDraft
-            ? sourceSummary(currentDraft, sourceStatuses)
-            : '无'}
-        </span>
-        <span>预览：{preview ? '原片就绪' : '未加载'}</span>
-        <span>时间线：{formatTime(totalDurationUs)}</span>
-        <Button
-          disabled={!currentDraft || busy}
-          onClick={() => void clearPreviewCache()}
-          variant="ghost"
-        >
-          清除预览缓存
-        </Button>
-        {saveState === 'conflict' ? (
-          <Button
-            disabled={busy}
-            onClick={() =>
-              currentDraft && void openDraft(currentDraft.draftId)
-            }
-            variant="secondary"
-          >
-            重新载入
-          </Button>
-        ) : null}
-      </Card>
-
-      <p className="uc-video-editor__message" aria-live="polite">
-        {message}
-      </p>
+      {message ? (
+        <p className="uc-video-editor__message" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -1934,10 +2367,12 @@ function MediaList({
 function ProjectVideoList({
   onSelect,
   selectedWorkId,
+  storage,
   works
 }: {
   readonly onSelect: (workId: string) => void;
   readonly selectedWorkId: string;
+  readonly storage?: StorageApi;
   readonly works: readonly StorageWorkSummaryDto[];
 }) {
   if (works.length === 0) {
@@ -1951,7 +2386,7 @@ function ProjectVideoList({
     );
   }
   return (
-    <div className="uc-video-editor__project-works">
+    <div className="uc-video-editor__project-works uc-scrollbar">
       {works.map((work) => (
         <button
           aria-pressed={selectedWorkId === work.workId}
@@ -1959,11 +2394,72 @@ function ProjectVideoList({
           onClick={() => onSelect(work.workId)}
           type="button"
         >
-          <strong>{work.name}</strong>
-          <small>{fileStateLabel(work.fileState)}</small>
+          <ProjectVideoThumbnail storage={storage} work={work} />
+          <span className="uc-video-editor__project-work-meta">
+            <strong title={work.name}>{work.name}</strong>
+            <small>{fileStateLabel(work.fileState)}</small>
+          </span>
         </button>
       ))}
     </div>
+  );
+}
+
+function ProjectVideoThumbnail({
+  storage,
+  work
+}: {
+  readonly storage?: StorageApi;
+  readonly work: StorageWorkSummaryDto;
+}) {
+  const previewRef = useRef<HTMLSpanElement>(null);
+  const [media, setMedia] = useState<StorageLocalMediaHandleDto>();
+
+  useEffect(() => {
+    const preview = previewRef.current;
+    let active = true;
+    setMedia(undefined);
+    if (!preview || !storage || work.fileState !== 'available') {
+      return () => {
+        active = false;
+      };
+    }
+
+    const load = () => {
+      void storage.createWorkMediaHandle(work.workId, work.projectId)
+        .then((result) => {
+          if (active && result.ok) setMedia(result.value);
+        })
+        .catch(() => undefined);
+    };
+    const observer = typeof IntersectionObserver === 'undefined'
+      ? undefined
+      : new IntersectionObserver(([entry]) => {
+          if (!entry?.isIntersecting) return;
+          load();
+          observer?.disconnect();
+        }, { rootMargin: '180px' });
+    if (observer) observer.observe(preview);
+    else load();
+
+    return () => {
+      active = false;
+      observer?.disconnect();
+    };
+  }, [storage, work.fileState, work.projectId, work.workId]);
+
+  return (
+    <span
+      aria-hidden="true"
+      className="uc-video-editor__project-work-preview"
+      ref={previewRef}
+    >
+      {media ? (
+        <video muted playsInline preload="metadata" src={media.url} />
+      ) : (
+        <span className="uc-video-editor__project-work-fallback">视频</span>
+      )}
+    </span>
   );
 }
 
@@ -1971,8 +2467,8 @@ function VideoTimelineTrack({
   canReorder,
   frames,
   onMove,
+  onSeek,
   onSelect,
-  playheadUs,
   segments,
   selectedClipId,
   totalDurationUs
@@ -1980,21 +2476,36 @@ function VideoTimelineTrack({
   readonly canReorder: boolean;
   readonly frames: Readonly<Record<string, string>>;
   readonly onMove: (clipId: string, toIndex: number) => void;
+  readonly onSeek: (timelineUs: number) => void;
   readonly onSelect: (clipId: string) => void;
-  readonly playheadUs: number;
   readonly segments: readonly TimelineSegment[];
   readonly selectedClipId: string;
   readonly totalDurationUs: number;
 }) {
-  const playheadPercent =
-    totalDurationUs > 0
-      ? Math.min(100, Math.max(0, (playheadUs / totalDurationUs) * 100))
-      : 0;
+  const laneRef = useRef<HTMLDivElement | null>(null);
   return (
     <div className="uc-video-editor__track uc-video-editor__track--video">
       <strong>视频主轨</strong>
       {segments.length ? (
-        <div className="uc-video-editor__lane">
+        <div
+          className="uc-video-editor__lane"
+          onClick={(event) => {
+            if (!laneRef.current) return;
+            const target = event.target as HTMLElement;
+            if (target.closest('button.uc-video-editor__seg')) return;
+            const rect = laneRef.current.getBoundingClientRect();
+            if (rect.width <= 0) return;
+            onSeek(
+              resolveTimelinePositionUs(
+                event.clientX,
+                rect.left,
+                rect.width,
+                totalDurationUs
+              )
+            );
+          }}
+          ref={laneRef}
+        >
           {segments.map((segment) => {
             const frameUrl = frames[segment.clipId];
             return (
@@ -2064,19 +2575,99 @@ function VideoTimelineTrack({
               </button>
             );
           })}
-          {totalDurationUs > 0 ? (
-            <span
-              aria-hidden="true"
-              className="uc-video-editor__playhead-line"
-              style={{ left: `${playheadPercent}%` }}
-            />
-          ) : null}
         </div>
       ) : (
         <div className="uc-video-editor__lane">
           <small>暂无内容</small>
         </div>
       )}
+    </div>
+  );
+}
+
+function TimelinePlayhead({
+  onSeek,
+  playheadUs,
+  totalDurationUs
+}: {
+  readonly onSeek: (timelineUs: number) => void;
+  readonly playheadUs: number;
+  readonly totalDurationUs: number;
+}) {
+  const scaleRef = useRef<HTMLDivElement | null>(null);
+  if (totalDurationUs <= 0) return null;
+  const playheadPercent = Math.min(
+    100,
+    Math.max(0, (playheadUs / totalDurationUs) * 100)
+  );
+  return (
+    <div className="uc-video-editor__playhead-layer">
+      <div className="uc-video-editor__playhead-scale" ref={scaleRef}>
+        <button
+          aria-label="主轨播放头"
+          aria-valuemin={0}
+          aria-valuemax={totalDurationUs}
+          aria-valuenow={playheadUs}
+          aria-valuetext={formatTime(playheadUs)}
+          className="uc-video-editor__playhead-line"
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              onSeek(Math.max(0, playheadUs - 500_000));
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              onSeek(Math.min(totalDurationUs, playheadUs + 500_000));
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              onSeek(0);
+            } else if (event.key === 'End') {
+              event.preventDefault();
+              onSeek(totalDurationUs);
+            }
+          }}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!scaleRef.current) return;
+            const rect = scaleRef.current.getBoundingClientRect();
+            let pendingClientX = event.clientX;
+            let animationFrameId: number | undefined;
+            const flushMove = () => {
+              animationFrameId = undefined;
+              onSeek(
+                resolveTimelinePositionUs(
+                  pendingClientX,
+                  rect.left,
+                  rect.width,
+                  totalDurationUs
+                )
+              );
+            };
+            const scheduleMove = (clientX: number) => {
+              pendingClientX = clientX;
+              if (animationFrameId === undefined) {
+                animationFrameId = window.requestAnimationFrame(flushMove);
+              }
+            };
+            scheduleMove(event.clientX);
+            const onMove = (e: MouseEvent) => scheduleMove(e.clientX);
+            const onUp = (e: MouseEvent) => {
+              pendingClientX = e.clientX;
+              if (animationFrameId !== undefined) {
+                window.cancelAnimationFrame(animationFrameId);
+              }
+              flushMove();
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          }}
+          role="slider"
+          style={{ left: `${playheadPercent}%` }}
+          type="button"
+        />
+      </div>
     </div>
   );
 }
@@ -3004,6 +3595,7 @@ function ExportInspector({
   const [conflictPolicy, setConflictPolicy] = useState(
     draft.outputPreference.conflictPolicy
   );
+  const [resultPreviewExpanded, setResultPreviewExpanded] = useState(false);
   const state = exportStateDisplay(task?.state);
   const completed = task?.state === 'completed' && Boolean(task.workId);
   const active = Boolean(task && isExportPollingState(task.state));
@@ -3011,6 +3603,20 @@ function ExportInspector({
     fileName.trim() !== (draft.outputPreference.fileName ?? draft.title) ||
     conflictPolicy !== draft.outputPreference.conflictPolicy;
   const currentPreflight = preferencesDirty ? undefined : preflight;
+
+  useEffect(() => {
+    if (!resultPreviewExpanded || !completed) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setResultPreviewExpanded(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [completed, resultPreviewExpanded]);
 
   function savePreferences(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3188,7 +3794,33 @@ function ExportInspector({
           </div>
           <p>文件已经过独立探测、校验、发布并登记为新作品。</p>
           {media?.mediaKind === 'video' ? (
-            <video aria-label="已登记导出作品预览" controls src={media.url} />
+            <div
+              className={`uc-video-editor__export-preview${resultPreviewExpanded ? ' uc-video-editor__export-preview--expanded' : ''}`}
+            >
+              <video
+                aria-label="已登记导出作品预览"
+                className="uc-video-editor__export-preview-video"
+                controls
+                controlsList="nofullscreen"
+                playsInline
+                preload="metadata"
+                src={media.url}
+              />
+              <button
+                aria-label={resultPreviewExpanded ? '退出导出视频全屏预览' : '全屏预览导出视频'}
+                aria-pressed={resultPreviewExpanded}
+                className="uc-video-editor__export-preview-fullscreen"
+                onClick={() => setResultPreviewExpanded((value) => !value)}
+                title={resultPreviewExpanded ? '退出全屏' : '全屏预览'}
+                type="button"
+              >
+                {resultPreviewExpanded ? (
+                  <LuMinimize2 aria-hidden="true" />
+                ) : (
+                  <LuMaximize2 aria-hidden="true" />
+                )}
+              </button>
+            </div>
           ) : null}
           <div className="uc-video-editor__export-actions">
             <Button disabled={busy} onClick={onReveal} variant="secondary">
@@ -3276,6 +3908,44 @@ export function resolveTimelineSegmentAt(
   if (segment) return segment;
   const lastSegment = segments.at(-1);
   return lastSegment?.endUs === playheadUs ? lastSegment : undefined;
+}
+
+export function resolveTimelinePositionUs(
+  clientX: number,
+  laneLeft: number,
+  laneWidth: number,
+  totalDurationUs: number
+): number {
+  if (laneWidth <= 0 || totalDurationUs <= 0) return 0;
+  const offset = Math.min(laneWidth, Math.max(0, clientX - laneLeft));
+  return Math.round((offset / laneWidth) * totalDurationUs);
+}
+
+export function resolveBackgroundMusicPlayback(
+  music: VideoEditorBackgroundMusicDto,
+  timelineUs: number
+): { readonly sourceUs: number; readonly volumePermille: number } | undefined {
+  if (
+    timelineUs < music.timelineRange.startUs ||
+    timelineUs >= music.timelineRange.endUs
+  ) {
+    return undefined;
+  }
+  const timelineOffset = timelineUs - music.timelineRange.startUs;
+  const remainingUs = music.timelineRange.endUs - timelineUs;
+  const fadeInScale =
+    music.fadeInUs > 0 ? Math.min(1, timelineOffset / music.fadeInUs) : 1;
+  const fadeOutScale =
+    music.fadeOutUs > 0 ? Math.min(1, remainingUs / music.fadeOutUs) : 1;
+  return {
+    sourceUs: Math.min(
+      music.sourceRange.outUs,
+      music.sourceRange.inUs + timelineOffset
+    ),
+    volumePermille: Math.round(
+      music.volumePermille * Math.min(fadeInScale, fadeOutScale)
+    )
+  };
 }
 
 function timelineToSourceUs(
@@ -3405,6 +4075,54 @@ function canvasLabel(draft: VideoEditorDraftDto): string {
   return `${aspectRatio} · ${draft.canvas.transformPolicy === 'fit' ? '适应画布' : '填满画布'}`;
 }
 
+export function selectedCanvasRatioLabel(draft: VideoEditorDraftDto): string {
+  if (draft.canvas.aspectRatio.kind === 'ratio') {
+    const preset = canvasRatioPresets.find((item) =>
+      canvasRatioMatches(draft.canvas, item.numerator, item.denominator)
+    );
+    return preset?.key ?? `${draft.canvas.aspectRatio.numerator}:${draft.canvas.aspectRatio.denominator}`;
+  }
+  const identity = draft.videoTrack[0]?.source.identity;
+  if (!identity || identity.width <= 0 || identity.height <= 0) return '原始比例';
+  const divisor = greatestCommonDivisor(identity.width, identity.height);
+  return `${identity.width / divisor}:${identity.height / divisor}`;
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b > 0) {
+    [a, b] = [b, a % b];
+  }
+  return a || 1;
+}
+
+export function canvasPreviewAspectRatio(draft: {
+  readonly canvas: Pick<VideoEditorCanvasDto, 'aspectRatio'>;
+  readonly videoTrack: readonly {
+    readonly source: {
+      readonly identity: { readonly width: number; readonly height: number };
+    };
+  }[];
+}): string {
+  if (draft.canvas.aspectRatio.kind === 'ratio') {
+    return `${draft.canvas.aspectRatio.numerator} / ${draft.canvas.aspectRatio.denominator}`;
+  }
+  const sourceIdentity = draft.videoTrack[0]?.source.identity;
+  return sourceIdentity && sourceIdentity.width > 0 && sourceIdentity.height > 0
+    ? `${sourceIdentity.width} / ${sourceIdentity.height}`
+    : '16 / 9';
+}
+
+function canvasRatioMatches(
+  canvas: VideoEditorCanvasDto,
+  numerator: number,
+  denominator: number
+): boolean {
+  return canvas.aspectRatio.kind === 'ratio' &&
+    canvas.aspectRatio.numerator * denominator === numerator * canvas.aspectRatio.denominator;
+}
+
 function coverLabel(cover: VideoEditorCoverDto | null): string {
   if (!cover) return '未设置';
   if (cover.kind === 'video_frame') return '视频选帧';
@@ -3458,20 +4176,6 @@ function sourceStatusDisplay(
     default:
       return { label: '未知文件状态', tone: status.relinkRequired ? 'warning' : 'neutral' };
   }
-}
-
-function sourceSummary(
-  draft: VideoEditorDraftDto,
-  statuses: Readonly<Record<string, VideoEditorSourceStatusDto>>
-): string {
-  if (draft.videoTrack.length === 0) return '无';
-  const abnormal = draft.videoTrack.filter(
-    (clip) => statuses[clip.clipId]?.relinkRequired
-  ).length;
-  const pending = draft.videoTrack.filter((clip) => !statuses[clip.clipId]).length;
-  if (abnormal) return `${abnormal} 个需恢复`;
-  if (pending) return '检查中';
-  return '全部可用';
 }
 
 async function findLatestExportForDraft(

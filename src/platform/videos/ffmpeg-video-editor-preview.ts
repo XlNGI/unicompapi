@@ -167,6 +167,9 @@ const artifactSpecifications: Record<
   { readonly extension: string; readonly mimeType: string }
 > = {
   proxy_video: { extension: 'webm', mimeType: 'video/webm' },
+  proxy_video_clear: { extension: 'webm', mimeType: 'video/webm' },
+  proxy_video_smooth: { extension: 'webm', mimeType: 'video/webm' },
+  proxy_video_fast: { extension: 'webm', mimeType: 'video/webm' },
   thumbnail_strip: { extension: 'jpg', mimeType: 'image/jpeg' },
   audio_waveform: { extension: 'png', mimeType: 'image/png' }
 };
@@ -237,7 +240,13 @@ function buildFfmpegArguments(input: {
     ];
   }
 
-  const filters = buildVideoFilters(input.plan);
+  const proxyProfile = videoProxyProfile(input.kind);
+  const filters = [
+    ...buildVideoFilters(input.plan),
+    ...(proxyProfile.maxHeight
+      ? [`scale=-2:trunc(min(${proxyProfile.maxHeight}\\,ih)/2)*2`]
+      : [])
+  ];
   const args = [
     ...common,
     '-map',
@@ -249,7 +258,7 @@ function buildFfmpegArguments(input: {
     '-cpu-used',
     '8',
     '-crf',
-    '35',
+    String(proxyProfile.crf),
     '-b:v',
     '0'
   ];
@@ -259,16 +268,56 @@ function buildFfmpegArguments(input: {
   if (input.plan.sourceAudio.muted) {
     args.push('-an');
   } else {
-    args.push('-map', '0:a:0?', '-c:a', 'libopus', '-b:a', '96k');
+    args.push('-map', '0:a:0?', '-c:a', 'libopus', '-b:a', proxyProfile.audioBitrate);
+    const audioFilters: string[] = [];
+    if (input.plan.speed.numerator !== input.plan.speed.denominator) {
+      audioFilters.push(
+        audioTempoFilter(input.plan.speed.numerator / input.plan.speed.denominator)
+      );
+    }
     if (input.plan.sourceAudio.volumePermille !== 1000) {
-      args.push(
-        '-af',
+      audioFilters.push(
         `volume=${formatFilterNumber(input.plan.sourceAudio.volumePermille / 1000)}`
       );
+    }
+    if (audioFilters.length > 0) {
+      args.push('-af', audioFilters.join(','));
     }
   }
   args.push('-shortest', input.target);
   return args;
+}
+
+function audioTempoFilter(speed: number): string {
+  const values: number[] = [];
+  let remaining = speed;
+  while (remaining > 2) {
+    values.push(2);
+    remaining /= 2;
+  }
+  while (remaining < 0.5) {
+    values.push(0.5);
+    remaining /= 0.5;
+  }
+  values.push(remaining);
+  return values.map((value) => `atempo=${value.toFixed(6)}`).join(',');
+}
+
+function videoProxyProfile(kind: VideoEditorPreviewArtifactKind): {
+  readonly maxHeight?: number;
+  readonly crf: number;
+  readonly audioBitrate: string;
+} {
+  switch (kind) {
+    case 'proxy_video_clear':
+      return { maxHeight: 1080, crf: 28, audioBitrate: '128k' };
+    case 'proxy_video_smooth':
+      return { maxHeight: 720, crf: 34, audioBitrate: '96k' };
+    case 'proxy_video_fast':
+      return { maxHeight: 480, crf: 40, audioBitrate: '64k' };
+    default:
+      return { crf: 35, audioBitrate: '96k' };
+  }
 }
 
 function buildVideoFilters(plan: VideoEditorPreviewPlan): string[] {

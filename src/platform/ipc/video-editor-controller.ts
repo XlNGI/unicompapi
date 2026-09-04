@@ -4,6 +4,7 @@ import {
   applyVideoEditCommand,
   copyVideoEditDraft,
   createEmptyVideoEditDraft,
+  getVideoTimelineDurationUs,
   isVideoEditCommand,
   redoVideoEditCommand,
   toAssetId,
@@ -784,7 +785,8 @@ function buildDomainCommand(
         clip,
         previousIndex: draft.videoTrack.findIndex(
           (candidate) => candidate.id === clip.id
-        )
+        ),
+        timelineDependents: buildTimelineDependentChange(draft, clip.id)
       };
     }
     case 'restore_clip': {
@@ -944,6 +946,74 @@ function buildDomainCommand(
         after: value.outputPreference as OutputPreference
       };
   }
+}
+
+function buildTimelineDependentChange(
+  draft: VideoEditDraft,
+  removedClipId: VideoClip['id']
+): NonNullable<
+  Extract<VideoEditCommand, { readonly kind: 'remove_clip' }>['timelineDependents']
+> {
+  const remainingTrack = draft.videoTrack.filter(
+    (clip) => clip.id !== removedClipId
+  );
+  const durationUs = getVideoTimelineDurationUs({
+    ...draft,
+    videoTrack: remainingTrack
+  });
+  const textTrack = draft.textTrack
+    .filter((text) => text.range.startUs < durationUs)
+    .map((text) => ({
+      ...text,
+      range: {
+        startUs: text.range.startUs,
+        endUs: Math.min(text.range.endUs, durationUs)
+      }
+    }));
+  const backgroundMusic = clampBackgroundMusic(
+    draft.backgroundMusic,
+    durationUs
+  );
+  const cover =
+    draft.cover?.kind === 'video_frame' &&
+    draft.cover.clipId === removedClipId
+      ? null
+      : draft.cover;
+  return {
+    before: {
+      textTrack: structuredClone(draft.textTrack),
+      backgroundMusic: structuredClone(draft.backgroundMusic),
+      cover: structuredClone(draft.cover)
+    },
+    after: {
+      textTrack,
+      backgroundMusic,
+      cover: structuredClone(cover)
+    }
+  };
+}
+
+function clampBackgroundMusic(
+  music: BackgroundMusic | null,
+  durationUs: number
+): BackgroundMusic | null {
+  if (!music || music.timelineRange.startUs >= durationUs) return null;
+  const endUs = Math.min(music.timelineRange.endUs, durationUs);
+  const availableDurationUs = endUs - music.timelineRange.startUs;
+  const fadeInUs = Math.min(music.fadeInUs, availableDurationUs);
+  const fadeOutUs = Math.min(
+    music.fadeOutUs,
+    availableDurationUs - fadeInUs
+  );
+  return {
+    ...music,
+    timelineRange: {
+      startUs: music.timelineRange.startUs,
+      endUs
+    },
+    fadeInUs,
+    fadeOutUs
+  };
 }
 
 function requireClip(draft: VideoEditDraft, clipId: string) {

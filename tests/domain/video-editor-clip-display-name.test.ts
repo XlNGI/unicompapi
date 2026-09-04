@@ -29,6 +29,7 @@ function makeSource(fileId: string, workId?: string) {
         container: 'mp4',
         durationUs: 1_000_000,
         height: 1080,
+        sizeBytes: 1_024,
         width: 1920
       }
     }
