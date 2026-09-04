@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent
+} from 'react';
 import {
   LuCheck,
   LuChevronDown,
@@ -137,9 +144,73 @@ interface TimelineSegment {
   readonly endUs: number;
   readonly durationUs: number;
   readonly sourceInUs: number;
+  readonly sourceOutUs: number;
   readonly speedNumerator: number;
   readonly speedDenominator: number;
 }
+
+interface TimelineRulerTick {
+  readonly timeUs: number;
+  readonly leftPx: number;
+  readonly label: string;
+}
+
+interface TimelineThumbnailSlot {
+  readonly key: string;
+  readonly clipId: string;
+  readonly slotIndex: number;
+  readonly sourceUs: number;
+  readonly leftPx: number;
+  readonly widthPx: number;
+}
+
+interface TimelineFrameRequest {
+  readonly kind: 'poster' | 'timeline';
+  readonly key: string;
+  readonly clipId: string;
+  readonly sourceUs: number;
+}
+
+interface ExtractedTimelineFrame {
+  readonly request: TimelineFrameRequest;
+  readonly frameUrl: string;
+}
+
+interface TimelineWheelZoomInput {
+  readonly currentPixelsPerSecond: number;
+  readonly deltaY: number;
+  readonly pointerOffsetPx: number;
+  readonly scrollLeft: number;
+  readonly totalDurationUs: number;
+  readonly viewportWidth: number;
+}
+
+interface TimelineHorizontalWheelInput {
+  readonly deltaX: number;
+  readonly deltaY: number;
+  readonly deltaMode: number;
+  readonly shiftKey: boolean;
+  readonly viewportHeight: number;
+}
+
+interface TimelineEdgeAutoScrollInput {
+  readonly clientX: number;
+  readonly viewportLeft: number;
+  readonly viewportWidth: number;
+  readonly scrollLeft: number;
+  readonly scrollWidth: number;
+}
+
+const timelineThumbnailWidthPx = 56;
+const timelineThumbnailRenderWidthPx = 112;
+const timelineThumbnailRenderHeightPx = 72;
+const timelineFrameCacheLimit = 256;
+const timelineFrameConcurrency = 2;
+const timelineFrameDebounceMs = 60;
+const timelineFramePresentationTimeoutMs = 48;
+const timelineMaximumPixelsPerSecond = 1_000;
+const timelineWheelSensitivity = 0.002;
+const timelineRulerTargetGapPx = 96;
 
 interface PendingPreviewSeek {
   readonly token: number;
@@ -173,6 +244,11 @@ export function VideoEditingPage({
   const videoEditors = window.unicomp?.videoEditors;
   const videoRef = useRef<HTMLVideoElement>(null);
   const musicRef = useRef<HTMLAudioElement>(null);
+  const timelineViewportRef = useRef<HTMLDivElement>(null);
+  const timelineFitPixelsPerSecondRef = useRef(0);
+  const timelineScrollFrameRef = useRef<number>();
+  const timelinePendingScrollLeftRef = useRef(0);
+  const timelineZoomScrollLeftRef = useRef<number>();
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [drafts, setDrafts] = useState<readonly VideoEditorDraftDto[]>([]);
   const [currentDraft, setCurrentDraft] = useState<VideoEditorDraftDto>();
@@ -203,13 +279,22 @@ export function VideoEditingPage({
   const [exportBusy, setExportBusy] = useState(false);
   const [exportConfirmed, setExportConfirmed] = useState(false);
   const [frameUrls, setFrameUrls] = useState<Readonly<Record<string, string>>>({});
+  const [timelineFrameUrls, setTimelineFrameUrls] = useState<
+    Readonly<Record<string, string>>
+  >({});
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const [previewSeeking, setPreviewSeeking] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<PreviewZoom>('fit');
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
+  const [timelinePixelsPerSecond, setTimelinePixelsPerSecond] = useState(0);
+  const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
+  const [timelineFrameRefresh, setTimelineFrameRefresh] = useState(0);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const frameCacheRef = useRef<Map<string, string>>(new Map());
+  const timelineFrameCacheRef = useRef<Map<string, string>>(new Map());
+  const timelineFrameRequestRef = useRef(0);
   const previewCacheRef = useRef<Map<string, PreviewMediaHandle>>(new Map());
   const previewRequestRef = useRef(0);
   const previewSeekTokenRef = useRef(0);
@@ -233,6 +318,19 @@ export function VideoEditingPage({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [previewExpanded]);
+
+  useEffect(() => {
+    timelineFrameRequestRef.current += 1;
+    revokeFrameUrlMap(frameCacheRef.current);
+    revokeFrameUrlMap(timelineFrameCacheRef.current);
+    setFrameUrls({});
+    setTimelineFrameUrls({});
+    return () => {
+      timelineFrameRequestRef.current += 1;
+      revokeFrameUrlMap(frameCacheRef.current);
+      revokeFrameUrlMap(timelineFrameCacheRef.current);
+    };
+  }, [currentDraft?.draftId]);
 
   useEffect(() => {
     let active = true;
@@ -325,55 +423,6 @@ export function VideoEditingPage({
     });
     return () => {
       active = false;
-    };
-  }, [currentDraft, videoEditors]);
-
-  useEffect(() => {
-    if (!videoEditors || !currentDraft || currentDraft.videoTrack.length === 0) {
-      setFrameUrls({});
-      return;
-    }
-    const editorApi = videoEditors;
-    let cancelled = false;
-    const draft = currentDraft;
-    async function extractClipFrames() {
-      const updates: Record<string, string> = {};
-      for (const clip of draft.videoTrack.slice(0, 24)) {
-        if (cancelled) return;
-        const cacheKey = `${clip.clipId}:${clip.sourceRange.inUs}`;
-        const cached = frameCacheRef.current.get(cacheKey);
-        if (cached) {
-          updates[clip.clipId] = cached;
-          continue;
-        }
-        const result = await editorApi.createSourcePreview(
-          draft.draftId,
-          clip.clipId
-        );
-        if (cancelled) return;
-        if (!result.ok) continue;
-        previewCacheRef.current.set(clip.clipId, {
-          url: result.value.url,
-          expiresAt: result.value.expiresAt,
-          mimeType: result.value.mimeType
-        });
-        const dataUrl = await extractVideoFrame(
-          result.value.url,
-          clip.sourceRange.inUs
-        );
-        if (cancelled) return;
-        if (dataUrl) {
-          frameCacheRef.current.set(cacheKey, dataUrl);
-          updates[clip.clipId] = dataUrl;
-        }
-      }
-      if (!cancelled && Object.keys(updates).length > 0) {
-        setFrameUrls((previous) => ({ ...previous, ...updates }));
-      }
-    }
-    void extractClipFrames();
-    return () => {
-      cancelled = true;
     };
   }, [currentDraft, videoEditors]);
 
@@ -487,6 +536,11 @@ export function VideoEditingPage({
     pendingPreviewSeekRef.current = undefined;
     playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
+    setTimelinePixelsPerSecond(0);
+    setTimelineScrollLeft(0);
+    timelineFitPixelsPerSecondRef.current = 0;
+    timelineZoomScrollLeftRef.current = undefined;
+    if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0;
     setExportPreflight(undefined);
     setExportConfirmed(false);
     const segments = buildTimelineSegments(draft?.videoTrack ?? []);
@@ -974,9 +1028,13 @@ export function VideoEditingPage({
         handleError(result.error);
         return;
       }
-      frameCacheRef.current.clear();
+      timelineFrameRequestRef.current += 1;
+      revokeFrameUrlMap(frameCacheRef.current);
+      revokeFrameUrlMap(timelineFrameCacheRef.current);
       previewCacheRef.current.clear();
       setFrameUrls({});
+      setTimelineFrameUrls({});
+      setTimelineFrameRefresh((value) => value + 1);
       setMessage('可重建的预览缓存已清除，草稿和源文件没有改变。');
     } catch {
       setMessage('清除预览缓存失败，请重试。');
@@ -1101,7 +1159,10 @@ export function VideoEditingPage({
     }
   }
 
-  const segments = buildTimelineSegments(currentDraft?.videoTrack ?? []);
+  const segments = useMemo(
+    () => buildTimelineSegments(currentDraft?.videoTrack ?? []),
+    [currentDraft?.videoTrack]
+  );
   const totalDurationUs = segments.at(-1)?.endUs ?? 0;
   const selectedClip = currentDraft?.videoTrack.find(
     (clip) => clip.clipId === selectedClipId
@@ -1120,6 +1181,328 @@ export function VideoEditingPage({
     });
     return names;
   }, [currentDraft, videoWorks]);
+  const timelineFitPixelsPerSecond =
+    totalDurationUs > 0 && timelineViewportWidth > 0
+      ? timelineViewportWidth / (totalDurationUs / 1_000_000)
+      : 0;
+  const effectiveTimelinePixelsPerSecond =
+    timelineFitPixelsPerSecond > 0
+      ? Math.max(
+          timelineFitPixelsPerSecond,
+          timelinePixelsPerSecond || timelineFitPixelsPerSecond
+        )
+      : 0;
+  const timelineCanvasWidth = Math.max(
+    timelineViewportWidth,
+    (totalDurationUs / 1_000_000) * effectiveTimelinePixelsPerSecond
+  );
+  const timelineRulerTicks = useMemo(
+    () =>
+      buildTimelineRulerTicks(
+        totalDurationUs,
+        effectiveTimelinePixelsPerSecond,
+        timelineScrollLeft,
+        timelineScrollLeft + timelineViewportWidth,
+        timelineViewportWidth
+      ),
+    [
+      effectiveTimelinePixelsPerSecond,
+      timelineScrollLeft,
+      timelineViewportWidth,
+      totalDurationUs
+    ]
+  );
+  const timelineThumbnailSlots = useMemo(
+    () =>
+      timelineCollapsed ||
+      timelineViewportWidth <= 0 ||
+      effectiveTimelinePixelsPerSecond <= 0
+        ? []
+        : buildTimelineThumbnailSlots(
+            segments,
+            effectiveTimelinePixelsPerSecond,
+            timelineScrollLeft,
+            timelineScrollLeft + timelineViewportWidth,
+            timelineViewportWidth
+          ),
+    [
+      effectiveTimelinePixelsPerSecond,
+      segments,
+      timelineCollapsed,
+      timelineScrollLeft,
+      timelineViewportWidth
+    ]
+  );
+
+  useEffect(() => {
+    const viewport = timelineViewportRef.current;
+    if (!viewport) return;
+    const updateWidth = () => setTimelineViewportWidth(viewport.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [timelineCollapsed]);
+
+  useEffect(() => {
+    if (timelineFitPixelsPerSecond <= 0) return;
+    const previousFit = timelineFitPixelsPerSecondRef.current;
+    setTimelinePixelsPerSecond((current) => {
+      const wasFitted =
+        current <= 0 ||
+        previousFit <= 0 ||
+        Math.abs(current - previousFit) < 0.5;
+      const next = wasFitted
+        ? timelineFitPixelsPerSecond
+        : Math.max(timelineFitPixelsPerSecond, current);
+      return Math.min(
+        Math.max(timelineFitPixelsPerSecond, timelineMaximumPixelsPerSecond),
+        next
+      );
+    });
+    timelineFitPixelsPerSecondRef.current = timelineFitPixelsPerSecond;
+  }, [timelineFitPixelsPerSecond]);
+
+  useEffect(() => {
+    const viewport = timelineViewportRef.current;
+    if (
+      !viewport ||
+      timelineCollapsed ||
+      effectiveTimelinePixelsPerSecond <= 0 ||
+      totalDurationUs <= 0
+    ) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+        const rect = viewport.getBoundingClientRect();
+        const deltaY =
+          event.deltaMode === WheelEvent.DOM_DELTA_LINE
+            ? event.deltaY * 16
+            : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+              ? event.deltaY * viewport.clientHeight
+              : event.deltaY;
+        const next = resolveTimelineWheelZoom({
+          currentPixelsPerSecond: effectiveTimelinePixelsPerSecond,
+          deltaY,
+          pointerOffsetPx: event.clientX - rect.left,
+          scrollLeft: viewport.scrollLeft,
+          totalDurationUs,
+          viewportWidth: viewport.clientWidth
+        });
+        timelineZoomScrollLeftRef.current = next.scrollLeft;
+        setTimelinePixelsPerSecond(next.pixelsPerSecond);
+        return;
+      }
+      const horizontalDelta = resolveTimelineHorizontalWheelDelta({
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        shiftKey: event.shiftKey,
+        viewportHeight: viewport.clientHeight
+      });
+      if (horizontalDelta === 0) return;
+      const maximumScrollLeft = Math.max(
+        0,
+        viewport.scrollWidth - viewport.clientWidth
+      );
+      const nextScrollLeft = Math.min(
+        maximumScrollLeft,
+        Math.max(0, viewport.scrollLeft + horizontalDelta)
+      );
+      if (nextScrollLeft === viewport.scrollLeft) return;
+      event.preventDefault();
+      viewport.scrollLeft = nextScrollLeft;
+    };
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', onWheel);
+  }, [
+    effectiveTimelinePixelsPerSecond,
+    timelineCollapsed,
+    totalDurationUs
+  ]);
+
+  useLayoutEffect(() => {
+    const viewport = timelineViewportRef.current;
+    const nextScrollLeft = timelineZoomScrollLeftRef.current;
+    if (!viewport || nextScrollLeft === undefined) return;
+    timelineZoomScrollLeftRef.current = undefined;
+    viewport.scrollLeft = nextScrollLeft;
+    timelinePendingScrollLeftRef.current = viewport.scrollLeft;
+    setTimelineScrollLeft(viewport.scrollLeft);
+  }, [timelineCanvasWidth]);
+
+  useEffect(
+    () => () => {
+      if (timelineScrollFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(timelineScrollFrameRef.current);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const requestToken = ++timelineFrameRequestRef.current;
+    if (!videoEditors || !currentDraft || currentDraft.videoTrack.length === 0) {
+      setFrameUrls({});
+      setTimelineFrameUrls({});
+      return;
+    }
+    const editorApi = videoEditors;
+    const draft = currentDraft;
+    const groups = new Map<string, TimelineFrameRequest[]>();
+    const addRequest = (request: TimelineFrameRequest) => {
+      const requests = groups.get(request.clipId) ?? [];
+      if (!requests.some((item) => item.key === request.key)) {
+        requests.push(request);
+        groups.set(request.clipId, requests);
+      }
+    };
+    const cachedTimelineFrames: Record<string, string> = {};
+    const viewportCenterPx = timelineScrollLeft + timelineViewportWidth / 2;
+    const prioritizedSlots = [...timelineThumbnailSlots].sort(
+      (left, right) =>
+        Math.abs(left.leftPx + left.widthPx / 2 - viewportCenterPx) -
+        Math.abs(right.leftPx + right.widthPx / 2 - viewportCenterPx)
+    );
+    for (const slot of prioritizedSlots) {
+      const cached = timelineFrameCacheRef.current.get(slot.key);
+      if (cached) {
+        timelineFrameCacheRef.current.delete(slot.key);
+        timelineFrameCacheRef.current.set(slot.key, cached);
+        cachedTimelineFrames[slot.key] = cached;
+      } else {
+        addRequest({
+          kind: 'timeline',
+          key: slot.key,
+          clipId: slot.clipId,
+          sourceUs: slot.sourceUs
+        });
+      }
+    }
+    if (Object.keys(cachedTimelineFrames).length > 0) {
+      setTimelineFrameUrls((previous) => ({
+        ...previous,
+        ...cachedTimelineFrames
+      }));
+    }
+
+    const cachedPosterFrames: Record<string, string> = {};
+    for (const clip of draft.videoTrack.slice(0, 24)) {
+      const cached = frameCacheRef.current.get(clip.clipId);
+      if (cached) {
+        cachedPosterFrames[clip.clipId] = cached;
+      } else {
+        addRequest({
+          kind: 'poster',
+          key: `poster:${clip.clipId}:${clip.sourceRange.inUs}`,
+          clipId: clip.clipId,
+          sourceUs: clip.sourceRange.inUs
+        });
+      }
+    }
+    if (Object.keys(cachedPosterFrames).length > 0) {
+      setFrameUrls((previous) => ({ ...previous, ...cachedPosterFrames }));
+    }
+    const groupedRequests = [...groups.entries()];
+    if (groupedRequests.length === 0) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void runWithConcurrency(
+        groupedRequests,
+        timelineFrameConcurrency,
+        async ([clipId, requests]) => {
+          const isCancelled = () =>
+            requestToken !== timelineFrameRequestRef.current ||
+            controller.signal.aborted;
+          if (isCancelled()) return;
+          let handle = previewCacheRef.current.get(clipId);
+          if (
+            !handle ||
+            !Number.isFinite(Date.parse(handle.expiresAt)) ||
+            Date.parse(handle.expiresAt) - Date.now() <= 30_000
+          ) {
+            const result = await editorApi.createSourcePreview(
+              draft.draftId,
+              clipId
+            );
+            if (isCancelled() || !result.ok) return;
+            handle = {
+              url: result.value.url,
+              expiresAt: result.value.expiresAt,
+              mimeType: result.value.mimeType
+            };
+            previewCacheRef.current.set(clipId, handle);
+          }
+          await extractTimelineFrameBatch(
+            handle.url,
+            requests,
+            controller.signal,
+            isCancelled,
+            (frames) => {
+              if (isCancelled()) {
+                for (const frame of frames) {
+                  URL.revokeObjectURL(frame.frameUrl);
+                }
+                return;
+              }
+              const nextPosterFrames: Record<string, string> = {};
+              const nextTimelineFrames: Record<string, string> = {};
+              const evictedTimelineKeys = new Set<string>();
+              for (const { request, frameUrl } of frames) {
+                if (request.kind === 'poster') {
+                  const previous = frameCacheRef.current.get(request.clipId);
+                  if (previous && previous !== frameUrl) {
+                    URL.revokeObjectURL(previous);
+                  }
+                  frameCacheRef.current.set(request.clipId, frameUrl);
+                  nextPosterFrames[request.clipId] = frameUrl;
+                  continue;
+                }
+                for (const key of cacheTimelineFrame(
+                  timelineFrameCacheRef.current,
+                  request.key,
+                  frameUrl
+                )) {
+                  evictedTimelineKeys.add(key);
+                }
+                nextTimelineFrames[request.key] = frameUrl;
+              }
+              if (Object.keys(nextPosterFrames).length > 0) {
+                setFrameUrls((current) => ({
+                  ...current,
+                  ...nextPosterFrames
+                }));
+              }
+              if (
+                Object.keys(nextTimelineFrames).length > 0 ||
+                evictedTimelineKeys.size > 0
+              ) {
+                setTimelineFrameUrls((current) => {
+                  const next = { ...current, ...nextTimelineFrames };
+                  for (const key of evictedTimelineKeys) delete next[key];
+                  return next;
+                });
+              }
+            }
+          );
+        }
+      ).catch(() => undefined);
+    }, timelineFrameDebounceMs);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    currentDraft,
+    timelineFrameRefresh,
+    timelineThumbnailSlots,
+    timelineScrollLeft,
+    timelineViewportWidth,
+    videoEditors
+  ]);
   const activeTexts =
     currentDraft?.textTrack.filter(
       (text) => playheadUs >= text.range.startUs && playheadUs < text.range.endUs
@@ -1929,55 +2312,98 @@ export function VideoEditingPage({
             className="uc-video-editor__timeline-grid"
             id="uc-video-editor-timeline-content"
           >
-            <div className="uc-video-editor__timeline-primary">
-              <div className="uc-video-editor__ruler" aria-hidden="true">
-                <span>00:00.000</span>
-                <span>{segments.length} 个片段</span>
-                <span>{formatTime(totalDurationUs)}</span>
-              </div>
-              <VideoTimelineTrack
-                canReorder={!operationBlocked}
-                frames={frameUrls}
-                onMove={(clipId, toIndex) =>
-                  void runCommand(
-                    { kind: 'move_clip', clipId, toIndex },
-                    '片段已通过拖拽移动。'
-                  )
-                }
-                onSeek={(nextUs) => seekTimeline(nextUs)}
-                onSelect={selectClip}
-                segments={segments}
-                selectedClipId={selectedClipId}
-                totalDurationUs={totalDurationUs}
-              />
-              <TimelinePlayhead
-                onSeek={seekTimeline}
-                playheadUs={playheadUs}
-                totalDurationUs={totalDurationUs}
-              />
+            <div className="uc-video-editor__timeline-labels" aria-hidden="true">
+              <span />
+              <strong>视频主轨</strong>
+              <strong>文字轨</strong>
+              <strong>背景音乐</strong>
             </div>
-            <TimelineTrack
-              items={
-                currentDraft?.textTrack.map((text) => ({
-                  id: text.textId,
-                  label: text.content || '空文字层'
-                })) ?? []
-              }
-              label="文字轨"
-              onSelect={(textId) => {
-                setSelectedTextId(textId);
-                setInspectorTab('text');
+            <div
+              aria-label="时间线，按住 Ctrl 滚动鼠标滚轮可缩放"
+              className="uc-video-editor__timeline-viewport"
+              onScroll={(event) => {
+                timelinePendingScrollLeftRef.current =
+                  event.currentTarget.scrollLeft;
+                if (timelineScrollFrameRef.current !== undefined) return;
+                timelineScrollFrameRef.current = window.requestAnimationFrame(() => {
+                  timelineScrollFrameRef.current = undefined;
+                  setTimelineScrollLeft(timelinePendingScrollLeftRef.current);
+                });
               }}
-              selectedId={selectedTextId}
-            />
-            <TimelineTrack
-              items={
-                currentDraft?.backgroundMusic
-                  ? [{ id: currentDraft.backgroundMusic.fileId, label: '背景音乐' }]
-                  : []
-              }
-              label="背景音乐"
-            />
+              ref={timelineViewportRef}
+              role="region"
+              title="按住 Ctrl 滚动鼠标滚轮可缩放时间线"
+            >
+              <div
+                className="uc-video-editor__timeline-canvas"
+                style={{ width: `${timelineCanvasWidth}px` }}
+              >
+                <div className="uc-video-editor__ruler" aria-hidden="true">
+                  {timelineRulerTicks.map((tick) => (
+                    <span
+                      className="uc-video-editor__ruler-tick"
+                      key={tick.timeUs}
+                      style={{ left: `${tick.leftPx}px` }}
+                    >
+                      {tick.label}
+                    </span>
+                  ))}
+                </div>
+                <VideoTimelineTrack
+                  canReorder={!operationBlocked}
+                  frames={frameUrls}
+                  onMove={(clipId, toIndex) =>
+                    void runCommand(
+                      { kind: 'move_clip', clipId, toIndex },
+                      '片段已通过拖拽移动。'
+                    )
+                  }
+                  onSeek={(nextUs) => seekTimeline(nextUs)}
+                  onSelect={selectClip}
+                  pixelsPerSecond={effectiveTimelinePixelsPerSecond}
+                  segments={segments}
+                  selectedClipId={selectedClipId}
+                  thumbnailFrames={timelineFrameUrls}
+                  thumbnailSlots={timelineThumbnailSlots}
+                  totalDurationUs={totalDurationUs}
+                />
+                <TimelineTrack
+                  items={
+                    currentDraft?.textTrack.map((text) => ({
+                      id: text.textId,
+                      label: text.content || '空文字层',
+                      startUs: text.range.startUs,
+                      endUs: text.range.endUs
+                    })) ?? []
+                  }
+                  onSelect={(textId) => {
+                    setSelectedTextId(textId);
+                    setInspectorTab('text');
+                  }}
+                  selectedId={selectedTextId}
+                  totalDurationUs={totalDurationUs}
+                />
+                <TimelineTrack
+                  items={
+                    currentDraft?.backgroundMusic
+                      ? [{
+                          id: currentDraft.backgroundMusic.fileId,
+                          label: '背景音乐',
+                          startUs: currentDraft.backgroundMusic.timelineRange.startUs,
+                          endUs: currentDraft.backgroundMusic.timelineRange.endUs
+                        }]
+                      : []
+                  }
+                  totalDurationUs={totalDurationUs}
+                />
+                <TimelinePlayhead
+                  onSeek={seekTimeline}
+                  playheadUs={playheadUs}
+                  totalDurationUs={totalDurationUs}
+                  viewportRef={timelineViewportRef}
+                />
+              </div>
+            </div>
           </div>
           )}
         </Card>
@@ -2469,8 +2895,11 @@ function VideoTimelineTrack({
   onMove,
   onSeek,
   onSelect,
+  pixelsPerSecond,
   segments,
   selectedClipId,
+  thumbnailFrames,
+  thumbnailSlots,
   totalDurationUs
 }: {
   readonly canReorder: boolean;
@@ -2478,17 +2907,26 @@ function VideoTimelineTrack({
   readonly onMove: (clipId: string, toIndex: number) => void;
   readonly onSeek: (timelineUs: number) => void;
   readonly onSelect: (clipId: string) => void;
+  readonly pixelsPerSecond: number;
   readonly segments: readonly TimelineSegment[];
   readonly selectedClipId: string;
+  readonly thumbnailFrames: Readonly<Record<string, string>>;
+  readonly thumbnailSlots: readonly TimelineThumbnailSlot[];
   readonly totalDurationUs: number;
 }) {
   const laneRef = useRef<HTMLDivElement | null>(null);
-  return (
-    <div className="uc-video-editor__track uc-video-editor__track--video">
-      <strong>视频主轨</strong>
-      {segments.length ? (
+  const slotsByClip = useMemo(() => {
+    const grouped = new Map<string, TimelineThumbnailSlot[]>();
+    for (const slot of thumbnailSlots) {
+      const slots = grouped.get(slot.clipId) ?? [];
+      slots.push(slot);
+      grouped.set(slot.clipId, slots);
+    }
+    return grouped;
+  }, [thumbnailSlots]);
+  return segments.length ? (
         <div
-          className="uc-video-editor__lane"
+          className="uc-video-editor__lane uc-video-editor__lane--video"
           onClick={(event) => {
             if (!laneRef.current) return;
             const target = event.target as HTMLElement;
@@ -2508,6 +2946,8 @@ function VideoTimelineTrack({
         >
           {segments.map((segment) => {
             const frameUrl = frames[segment.clipId];
+            const segmentLeftPx =
+              (segment.startUs / 1_000_000) * pixelsPerSecond;
             return (
               <button
                 aria-pressed={selectedClipId === segment.clipId}
@@ -2548,19 +2988,20 @@ function VideoTimelineTrack({
                   if (toIndex !== sourceIndex) onMove(clipId, toIndex);
                 }}
                 style={{
-                  flexBasis:
-                    totalDurationUs > 0
-                      ? `${(segment.durationUs / totalDurationUs) * 100}%`
-                      : 'auto',
-                  flexGrow: 0,
-                  flexShrink: 0,
+                  left: `${(segment.startUs / 1_000_000) * pixelsPerSecond}px`,
+                  width: `${Math.max(4, (segment.durationUs / 1_000_000) * pixelsPerSecond)}px`,
                   minWidth: 4
                 }}
                 title={`片段 ${segment.index + 1} · 起点 ${formatTime(segment.startUs)}`}
                 type="button"
               >
                 {frameUrl ? (
-                  <img alt="" src={frameUrl} />
+                  <img
+                    alt=""
+                    className="uc-video-editor__seg-poster"
+                    draggable={false}
+                    src={frameUrl}
+                  />
                 ) : (
                   <span
                     aria-hidden="true"
@@ -2569,6 +3010,28 @@ function VideoTimelineTrack({
                     {segment.index + 1}
                   </span>
                 )}
+                <span
+                  aria-hidden="true"
+                  className="uc-video-editor__thumbnail-strip"
+                >
+                  {(slotsByClip.get(segment.clipId) ?? []).map((slot) => {
+                    const thumbnailUrl = thumbnailFrames[slot.key] ?? frameUrl;
+                    return (
+                      <span
+                        className="uc-video-editor__thumbnail"
+                        key={slot.key}
+                        style={{
+                          left: `${slot.leftPx - segmentLeftPx}px`,
+                          width: `${slot.widthPx}px`
+                        }}
+                      >
+                        {thumbnailUrl ? (
+                          <img alt="" draggable={false} src={thumbnailUrl} />
+                        ) : null}
+                      </span>
+                    );
+                  })}
+                </span>
                 <span className="uc-video-editor__seg-label">
                   {segment.index + 1} · {formatTime(segment.durationUs)}
                 </span>
@@ -2577,22 +3040,22 @@ function VideoTimelineTrack({
           })}
         </div>
       ) : (
-        <div className="uc-video-editor__lane">
+        <div className="uc-video-editor__lane uc-video-editor__lane--video">
           <small>暂无内容</small>
         </div>
-      )}
-    </div>
   );
 }
 
 function TimelinePlayhead({
   onSeek,
   playheadUs,
-  totalDurationUs
+  totalDurationUs,
+  viewportRef
 }: {
   readonly onSeek: (timelineUs: number) => void;
   readonly playheadUs: number;
   readonly totalDurationUs: number;
+  readonly viewportRef: { readonly current: HTMLDivElement | null };
 }) {
   const scaleRef = useRef<HTMLDivElement | null>(null);
   if (totalDurationUs <= 0) return null;
@@ -2629,19 +3092,39 @@ function TimelinePlayhead({
             event.preventDefault();
             event.stopPropagation();
             if (!scaleRef.current) return;
-            const rect = scaleRef.current.getBoundingClientRect();
             let pendingClientX = event.clientX;
+            let active = true;
+            let lastPositionUs = -1;
             let animationFrameId: number | undefined;
             const flushMove = () => {
               animationFrameId = undefined;
-              onSeek(
-                resolveTimelinePositionUs(
-                  pendingClientX,
-                  rect.left,
-                  rect.width,
-                  totalDurationUs
-                )
+              if (!active || !scaleRef.current) return;
+              const viewport = viewportRef.current;
+              if (viewport) {
+                const viewportRect = viewport.getBoundingClientRect();
+                const nextScrollLeft = resolveTimelineEdgeAutoScroll({
+                  clientX: pendingClientX,
+                  viewportLeft: viewportRect.left,
+                  viewportWidth: viewportRect.width,
+                  scrollLeft: viewport.scrollLeft,
+                  scrollWidth: viewport.scrollWidth
+                });
+                if (nextScrollLeft !== viewport.scrollLeft) {
+                  viewport.scrollLeft = nextScrollLeft;
+                }
+              }
+              const scaleRect = scaleRef.current.getBoundingClientRect();
+              const nextPositionUs = resolveTimelinePositionUs(
+                pendingClientX,
+                scaleRect.left,
+                scaleRect.width,
+                totalDurationUs
               );
+              if (nextPositionUs !== lastPositionUs) {
+                lastPositionUs = nextPositionUs;
+                onSeek(nextPositionUs);
+              }
+              animationFrameId = window.requestAnimationFrame(flushMove);
             };
             const scheduleMove = (clientX: number) => {
               pendingClientX = clientX;
@@ -2653,10 +3136,21 @@ function TimelinePlayhead({
             const onMove = (e: MouseEvent) => scheduleMove(e.clientX);
             const onUp = (e: MouseEvent) => {
               pendingClientX = e.clientX;
+              active = false;
               if (animationFrameId !== undefined) {
                 window.cancelAnimationFrame(animationFrameId);
               }
-              flushMove();
+              if (scaleRef.current) {
+                const scaleRect = scaleRef.current.getBoundingClientRect();
+                onSeek(
+                  resolveTimelinePositionUs(
+                    pendingClientX,
+                    scaleRect.left,
+                    scaleRect.width,
+                    totalDurationUs
+                  )
+                );
+              }
               window.removeEventListener('mousemove', onMove);
               window.removeEventListener('mouseup', onUp);
             };
@@ -2674,18 +3168,21 @@ function TimelinePlayhead({
 
 function TimelineTrack({
   items,
-  label,
   onSelect,
-  selectedId
+  selectedId,
+  totalDurationUs
 }: {
-  readonly items: readonly { readonly id: string; readonly label: string }[];
-  readonly label: string;
+  readonly items: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly startUs: number;
+    readonly endUs: number;
+  }[];
   readonly onSelect?: (id: string) => void;
   readonly selectedId?: string;
+  readonly totalDurationUs: number;
 }) {
   return (
-    <div className="uc-video-editor__track">
-      <strong>{label}</strong>
       <div className="uc-video-editor__lane uc-video-editor__lane--slim">
         {items.length ? (
           items.map((item) =>
@@ -2695,12 +3192,17 @@ function TimelineTrack({
                 className="uc-video-editor__chip"
                 key={item.id}
                 onClick={() => onSelect(item.id)}
+                style={timelineRangeStyle(item, totalDurationUs)}
                 type="button"
               >
                 {item.label}
               </button>
             ) : (
-              <span className="uc-video-editor__chip" key={item.id}>
+              <span
+                className="uc-video-editor__chip"
+                key={item.id}
+                style={timelineRangeStyle(item, totalDurationUs)}
+              >
                 {item.label}
               </span>
             )
@@ -2711,8 +3213,20 @@ function TimelineTrack({
           </span>
         )}
       </div>
-    </div>
   );
+}
+
+function timelineRangeStyle(
+  range: { readonly startUs: number; readonly endUs: number },
+  totalDurationUs: number
+): { readonly left: string; readonly width: string } {
+  if (totalDurationUs <= 0) return { left: '0%', width: '0%' };
+  const startUs = Math.min(totalDurationUs, Math.max(0, range.startUs));
+  const endUs = Math.min(totalDurationUs, Math.max(startUs, range.endUs));
+  return {
+    left: `${(startUs / totalDurationUs) * 100}%`,
+    width: `${((endUs - startUs) / totalDurationUs) * 100}%`
+  };
 }
 
 function ClipInspector({
@@ -3876,6 +4390,7 @@ export function buildTimelineSegments(
       endUs: cursorUs + durationUs,
       durationUs,
       sourceInUs: clip.sourceRange.inUs,
+      sourceOutUs: clip.sourceRange.outUs,
       speedNumerator: clip.speed.numerator,
       speedDenominator: clip.speed.denominator
     };
@@ -3886,6 +4401,188 @@ export function buildTimelineSegments(
         : clip.transitionToNext.durationUs);
     return segment;
   });
+}
+
+export function resolveTimelineWheelZoom({
+  currentPixelsPerSecond,
+  deltaY,
+  pointerOffsetPx,
+  scrollLeft,
+  totalDurationUs,
+  viewportWidth
+}: TimelineWheelZoomInput): {
+  readonly pixelsPerSecond: number;
+  readonly scrollLeft: number;
+} {
+  if (
+    currentPixelsPerSecond <= 0 ||
+    totalDurationUs <= 0 ||
+    viewportWidth <= 0
+  ) {
+    return {
+      pixelsPerSecond: Math.max(0, currentPixelsPerSecond),
+      scrollLeft: Math.max(0, scrollLeft)
+    };
+  }
+  const totalDurationSeconds = totalDurationUs / 1_000_000;
+  const fitPixelsPerSecond = viewportWidth / totalDurationSeconds;
+  const maximumPixelsPerSecond = Math.max(
+    fitPixelsPerSecond,
+    timelineMaximumPixelsPerSecond
+  );
+  const pixelsPerSecond = Math.min(
+    maximumPixelsPerSecond,
+    Math.max(
+      fitPixelsPerSecond,
+      currentPixelsPerSecond * Math.exp(-deltaY * timelineWheelSensitivity)
+    )
+  );
+  const pointer = Math.min(viewportWidth, Math.max(0, pointerOffsetPx));
+  const anchorSeconds = (Math.max(0, scrollLeft) + pointer) /
+    currentPixelsPerSecond;
+  const maximumScrollLeft = Math.max(
+    0,
+    totalDurationSeconds * pixelsPerSecond - viewportWidth
+  );
+  const nextScrollLeft = Math.min(
+    maximumScrollLeft,
+    Math.max(0, anchorSeconds * pixelsPerSecond - pointer)
+  );
+  return { pixelsPerSecond, scrollLeft: nextScrollLeft };
+}
+
+export function resolveTimelineHorizontalWheelDelta({
+  deltaX,
+  deltaY,
+  deltaMode,
+  shiftKey,
+  viewportHeight
+}: TimelineHorizontalWheelInput): number {
+  const rawDelta = deltaX !== 0 ? deltaX : shiftKey ? deltaY : 0;
+  if (rawDelta === 0) return 0;
+  const multiplier = deltaMode === 1
+    ? 16
+    : deltaMode === 2
+      ? Math.max(1, viewportHeight)
+      : 1;
+  return rawDelta * multiplier;
+}
+
+export function resolveTimelineEdgeAutoScroll({
+  clientX,
+  viewportLeft,
+  viewportWidth,
+  scrollLeft,
+  scrollWidth
+}: TimelineEdgeAutoScrollInput): number {
+  const maximumScrollLeft = Math.max(0, scrollWidth - viewportWidth);
+  const boundedScrollLeft = Math.min(
+    maximumScrollLeft,
+    Math.max(0, scrollLeft)
+  );
+  if (viewportWidth <= 0 || maximumScrollLeft <= 0) return boundedScrollLeft;
+  const edgeWidth = Math.min(64, Math.max(24, viewportWidth * 0.12));
+  const leftEdge = viewportLeft + edgeWidth;
+  const rightEdge = viewportLeft + viewportWidth - edgeWidth;
+  let strength = 0;
+  if (clientX < leftEdge) {
+    strength = -Math.min(1, (leftEdge - clientX) / edgeWidth);
+  } else if (clientX > rightEdge) {
+    strength = Math.min(1, (clientX - rightEdge) / edgeWidth);
+  }
+  if (strength === 0) return boundedScrollLeft;
+  const delta = Math.sign(strength) * Math.ceil(4 + 24 * Math.abs(strength));
+  return Math.min(
+    maximumScrollLeft,
+    Math.max(0, boundedScrollLeft + delta)
+  );
+}
+
+export function buildTimelineRulerTicks(
+  totalDurationUs: number,
+  pixelsPerSecond: number,
+  viewportStartPx = 0,
+  viewportEndPx = (totalDurationUs / 1_000_000) * pixelsPerSecond,
+  overscanPx = 0
+): readonly TimelineRulerTick[] {
+  if (totalDurationUs <= 0 || pixelsPerSecond <= 0) return [];
+  const rawStepSeconds = timelineRulerTargetGapPx / pixelsPerSecond;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStepSeconds));
+  const normalized = rawStepSeconds / magnitude;
+  const niceMultiplier =
+    normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const stepUs = Math.max(
+    1,
+    Math.round(niceMultiplier * magnitude * 1_000_000)
+  );
+  const visibleStartPx = Math.max(0, viewportStartPx - Math.max(0, overscanPx));
+  const visibleEndPx = viewportEndPx + Math.max(0, overscanPx);
+  const visibleStartUs = (visibleStartPx / pixelsPerSecond) * 1_000_000;
+  const visibleEndUs = Math.min(
+    totalDurationUs,
+    (visibleEndPx / pixelsPerSecond) * 1_000_000
+  );
+  const firstTickUs = Math.ceil(visibleStartUs / stepUs) * stepUs;
+  const ticks: TimelineRulerTick[] = [];
+  for (
+    let timeUs = firstTickUs;
+    timeUs <= visibleEndUs;
+    timeUs += stepUs
+  ) {
+    ticks.push({
+      timeUs,
+      leftPx: (timeUs / 1_000_000) * pixelsPerSecond,
+      label: formatTime(timeUs)
+    });
+  }
+  return ticks;
+}
+
+export function buildTimelineThumbnailSlots(
+  segments: readonly TimelineSegment[],
+  pixelsPerSecond: number,
+  viewportStartPx: number,
+  viewportEndPx: number,
+  overscanPx: number
+): readonly TimelineThumbnailSlot[] {
+  if (pixelsPerSecond <= 0 || viewportEndPx < viewportStartPx) return [];
+  const visibleStartPx = Math.max(0, viewportStartPx - Math.max(0, overscanPx));
+  const visibleEndPx = viewportEndPx + Math.max(0, overscanPx);
+  const slots: TimelineThumbnailSlot[] = [];
+  for (const segment of segments) {
+    const segmentLeftPx = (segment.startUs / 1_000_000) * pixelsPerSecond;
+    const segmentWidthPx = (segment.durationUs / 1_000_000) * pixelsPerSecond;
+    if (segmentWidthPx <= 0) continue;
+    const slotCount = Math.max(
+      1,
+      Math.ceil(segmentWidthPx / timelineThumbnailWidthPx)
+    );
+    const widthPx = segmentWidthPx / slotCount;
+    for (let slotIndex = 0; slotIndex < slotCount; slotIndex += 1) {
+      const leftPx = segmentLeftPx + slotIndex * widthPx;
+      if (leftPx > visibleEndPx || leftPx + widthPx < visibleStartPx) continue;
+      const timelineOffsetUs = Math.round(
+        (segment.durationUs * (slotIndex + 0.5)) / slotCount
+      );
+      const sourceOffsetUs = Number(
+        (BigInt(timelineOffsetUs) * BigInt(segment.speedNumerator)) /
+          BigInt(segment.speedDenominator)
+      );
+      const sourceUs = Math.min(
+        segment.sourceOutUs,
+        Math.max(segment.sourceInUs, segment.sourceInUs + sourceOffsetUs)
+      );
+      slots.push({
+        key: `${segment.clipId}:${sourceUs}`,
+        clipId: segment.clipId,
+        slotIndex,
+        sourceUs,
+        leftPx,
+        widthPx
+      });
+    }
+  }
+  return slots;
 }
 
 export function resolveTimelineDropIndex(
@@ -3972,60 +4669,256 @@ function timelineToSourceUs(
   );
 }
 
+function revokeFrameUrlMap(cache: Map<string, string>): void {
+  for (const frameUrl of cache.values()) URL.revokeObjectURL(frameUrl);
+  cache.clear();
+}
+
+function cacheTimelineFrame(
+  cache: Map<string, string>,
+  key: string,
+  frameUrl: string
+): readonly string[] {
+  const previous = cache.get(key);
+  if (previous && previous !== frameUrl) URL.revokeObjectURL(previous);
+  cache.delete(key);
+  cache.set(key, frameUrl);
+  const evictedKeys: string[] = [];
+  while (cache.size > timelineFrameCacheLimit) {
+    const oldest = cache.entries().next().value as
+      | [string, string]
+      | undefined;
+    if (!oldest) break;
+    cache.delete(oldest[0]);
+    URL.revokeObjectURL(oldest[1]);
+    evictedKeys.push(oldest[0]);
+  }
+  return evictedKeys;
+}
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  maximumConcurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(
+    items.length,
+    Math.max(1, Math.floor(maximumConcurrency))
+  );
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const item = items[nextIndex];
+        nextIndex += 1;
+        await worker(item);
+      }
+    })
+  );
+}
+
 /**
- * 通过受控预览句柄在渲染进程内提取一帧（S2 路径 A）。
- * 隐藏 video 使用 crossOrigin 以避免 canvas taint；任何失败都返回 undefined，
- * 由调用方降级为黑底序号占位，绝不让取帧失败阻塞编辑。
+ * 每个素材批次只创建一个 video，并在同一解码器上顺序定位可见帧。
+ * 任一帧失败只保留占位，不阻塞编辑，也不触发草稿写入。
  */
-async function extractVideoFrame(
+async function extractTimelineFrameBatch(
   previewUrl: string,
-  seekUs: number
-): Promise<string | undefined> {
+  requests: readonly TimelineFrameRequest[],
+  signal: AbortSignal,
+  isCancelled: () => boolean,
+  onFrames: (frames: readonly ExtractedTimelineFrame[]) => void
+): Promise<void> {
+  const video = document.createElement('video');
+  video.crossOrigin = 'anonymous';
+  video.muted = true;
+  video.preload = 'auto';
+  video.src = previewUrl;
+  const extractedFrames: ExtractedTimelineFrame[] = [];
+  try {
+    if (!(await waitForVideoReady(video, signal))) return;
+    const orderedRequests = [...requests].sort(
+      (left, right) => left.sourceUs - right.sourceUs
+    );
+    for (const request of orderedRequests) {
+      if (isCancelled()) break;
+      if (!(await seekVideoFrame(video, request.sourceUs, signal))) continue;
+      if (isCancelled()) break;
+      const frameUrl = await captureTimelineFrame(video);
+      if (!frameUrl) continue;
+      if (isCancelled()) {
+        URL.revokeObjectURL(frameUrl);
+        break;
+      }
+      extractedFrames.push({ request, frameUrl });
+    }
+    if (isCancelled()) {
+      for (const frame of extractedFrames) URL.revokeObjectURL(frame.frameUrl);
+      return;
+    }
+    if (extractedFrames.length > 0) onFrames(extractedFrames);
+  } finally {
+    video.removeAttribute('src');
+    video.load();
+  }
+}
+
+function waitForVideoReady(
+  video: HTMLVideoElement,
+  signal: AbortSignal
+): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return Promise.resolve(true);
+  }
   return new Promise((resolve) => {
-    const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
-    video.muted = true;
-    video.preload = 'auto';
-    video.src = previewUrl;
     let settled = false;
-    const finish = (value?: string) => {
+    const finish = (ready: boolean) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
-      video.removeAttribute('src');
-      video.load();
-      resolve(value);
+      video.removeEventListener('loadeddata', onLoaded);
+      video.removeEventListener('error', onError);
+      signal.removeEventListener('abort', onAbort);
+      resolve(ready);
     };
-    const timer = window.setTimeout(() => finish(undefined), 10_000);
-    const capture = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(2, video.videoWidth);
-        canvas.height = Math.max(2, video.videoHeight);
-        const context = canvas.getContext('2d');
-        if (!context) {
-          finish(undefined);
-          return;
-        }
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        finish(canvas.toDataURL('image/jpeg', 0.72));
-      } catch {
-        finish(undefined);
+    const onLoaded = () => finish(true);
+    const onError = () => finish(false);
+    const onAbort = () => finish(false);
+    const timer = window.setTimeout(() => finish(false), 10_000);
+    video.addEventListener('loadeddata', onLoaded, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+    video.load();
+  });
+}
+
+async function seekVideoFrame(
+  video: HTMLVideoElement,
+  sourceUs: number,
+  signal: AbortSignal
+): Promise<boolean> {
+  if (signal.aborted) return false;
+  const maximumSeconds = Number.isFinite(video.duration)
+    ? Math.max(0, video.duration - 0.001)
+    : Number.POSITIVE_INFINITY;
+  const targetSeconds = Math.min(
+    maximumSeconds,
+    Math.max(0, sourceUs / 1_000_000)
+  );
+  if (
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+    !video.seeking &&
+    Math.abs(video.currentTime - targetSeconds) <= 0.001
+  ) {
+    await waitForPresentedVideoFrame(video, signal);
+    return !signal.aborted;
+  }
+  const sought = await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('error', onError);
+      signal.removeEventListener('abort', onAbort);
+      resolve(ready);
+    };
+    const onSeeked = () => finish(true);
+    const onError = () => finish(false);
+    const onAbort = () => finish(false);
+    const timer = window.setTimeout(() => finish(false), 5_000);
+    video.addEventListener('seeked', onSeeked, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      video.currentTime = targetSeconds;
+    } catch {
+      finish(false);
+    }
+  });
+  if (!sought || signal.aborted) return false;
+  await waitForPresentedVideoFrame(video, signal);
+  return !signal.aborted;
+}
+
+function waitForPresentedVideoFrame(
+  video: HTMLVideoElement,
+  signal: AbortSignal
+): Promise<void> {
+  if (
+    signal.aborted ||
+    typeof video.requestVideoFrameCallback !== 'function'
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let callbackId: number | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      if (callbackId !== undefined) {
+        video.cancelVideoFrameCallback(callbackId);
       }
+      resolve();
     };
-    video.addEventListener('error', () => finish(undefined));
-    video.addEventListener('loadeddata', () => {
-      if (seekUs <= 0) {
-        capture();
+    const timer = window.setTimeout(finish, timelineFramePresentationTimeoutMs);
+    signal.addEventListener('abort', finish, { once: true });
+    callbackId = video.requestVideoFrameCallback(finish);
+  });
+}
+
+function captureTimelineFrame(
+  video: HTMLVideoElement
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    try {
+      const sourceWidth = Math.max(2, video.videoWidth);
+      const sourceHeight = Math.max(2, video.videoHeight);
+      const sourceRatio = sourceWidth / sourceHeight;
+      const targetRatio =
+        timelineThumbnailRenderWidthPx / timelineThumbnailRenderHeightPx;
+      let sourceX = 0;
+      let sourceY = 0;
+      let cropWidth = sourceWidth;
+      let cropHeight = sourceHeight;
+      if (sourceRatio > targetRatio) {
+        cropWidth = sourceHeight * targetRatio;
+        sourceX = (sourceWidth - cropWidth) / 2;
+      } else if (sourceRatio < targetRatio) {
+        cropHeight = sourceWidth / targetRatio;
+        sourceY = (sourceHeight - cropHeight) / 2;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = timelineThumbnailRenderWidthPx;
+      canvas.height = timelineThumbnailRenderHeightPx;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        resolve(undefined);
         return;
       }
-      try {
-        video.currentTime = seekUs / 1_000_000;
-      } catch {
-        finish(undefined);
-      }
-    });
-    video.addEventListener('seeked', () => capture());
+      context.drawImage(
+        video,
+        sourceX,
+        sourceY,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+      canvas.toBlob(
+        (blob) => resolve(blob ? URL.createObjectURL(blob) : undefined),
+        'image/jpeg',
+        0.72
+      );
+    } catch {
+      resolve(undefined);
+    }
   });
 }
 
