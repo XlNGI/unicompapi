@@ -1,6 +1,7 @@
 import {
   documentWorkspaceKinds,
   presentationPageKinds,
+  presentationDocumentPageLimits,
   type DocumentOutline,
   type DocumentOutlineBlock,
   type DocumentOutlineSection,
@@ -41,7 +42,7 @@ const MAX_CHART_LABEL_LENGTH = 100;
 export const presentationOutlineLimits = {
   maxTotalCharacters: 48_000,
   maxContentGroups: 80,
-  maxEstimatedPages: 40
+  maxEstimatedPages: presentationDocumentPageLimits.maximumPages
 } as const;
 
 export function parseDocumentOutline(jsonText: string): DocumentOutline {

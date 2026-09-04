@@ -157,6 +157,26 @@ describe('document outline parser', () => {
     });
   });
 
+  it('recovers repeated missing item-array closings from one PPT response', () => {
+    const malformed = `{"kind":"ppt","title":"关于龙的PPT","sections":[
+      {"heading":"起源","level":1,"blocks":[{"type":"bullets","items":["神话起源"]}]},
+      {"heading":"形象","level":1,"blocks":[{"type":"bullets","items":["东西方形象"}]},
+      {"heading":"文化","level":1,"blocks":[{"type":"bullets","items":["文化象征"}]},
+      {"heading":"文学","level":1,"blocks":[{"type":"bullets","items":["文学演变"}]},
+      {"heading":"科学","level":1,"blocks":[{"type":"bullets","items":["原型假说"]}]}
+    ]}`.replace(/"(东西方形象|文化象征|文学演变|原型假说)"\]\}/gu, '"$1"}');
+
+    expect(() => JSON.parse(malformed)).toThrow();
+    const recovered = recoverPresentationContent(malformed);
+    expect(recovered.sections.map((section) => section.heading)).toEqual([
+      '起源',
+      '形象',
+      '文化',
+      '文学',
+      '科学'
+    ]);
+  });
+
   it('rejects an unsupported PPT page kind', () => {
     const value = JSON.parse(validOutline());
     value.sections[0].pageKind = 'graphic';

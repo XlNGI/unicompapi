@@ -22,6 +22,11 @@ import type {
   DocumentRevisionAgentResult,
   DocumentRevisionPatch
 } from './document-revision-agent';
+import {
+  isSupportedPresentationTotalPages,
+  parseRequestedPresentationTotalPages,
+  presentationBodySectionCount
+} from './presentation-page-count';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
@@ -50,6 +55,7 @@ export type DocumentGenerationApplicationErrorCode =
   | 'revision_patch_failed'
   | 'revision_conflict'
   | 'unvalidated_output'
+  | 'page_count_mismatch'
   | 'storage_error';
 
 export class DocumentGenerationApplicationError extends Error {
@@ -101,6 +107,7 @@ export interface DocumentGenerationExecutionInput {
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
+  readonly requestedTotalPages?: number;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal: AbortSignal;
@@ -424,6 +431,23 @@ export class DocumentGenerationApplicationService {
       let revisionTargetSectionHeading: string | undefined;
       let revisionPatch: DocumentRevisionPatch | undefined;
       let revisionPatches: readonly DocumentRevisionPatch[] | undefined;
+      const requestText = collectRevisionRequestText(
+        conversation,
+        input.messageId
+      );
+      const requestedTotalPages =
+        input.kind === 'ppt' && requestText !== undefined
+          ? parseRequestedPresentationTotalPages(requestText)
+          : undefined;
+      if (
+        requestedTotalPages !== undefined &&
+        !isSupportedPresentationTotalPages(requestedTotalPages)
+      ) {
+        throw new DocumentGenerationApplicationError(
+          'page_count_mismatch',
+          'PPT 总页数必须在 3 至 40 页之间。'
+        );
+      }
       if (input.parentWorkId !== undefined) {
         const previousMessage = [...conversation.messages]
           .reverse()
@@ -435,17 +459,20 @@ export class DocumentGenerationApplicationService {
               result?.kind === input.kind
             );
           });
-        const requestText = [...conversation.messages]
-          .slice(0, conversation.messages.indexOf(message))
-          .reverse()
-          .find((item) => item.role === 'user')?.displayContent;
         if (previousMessage && requestText) {
           const previousOutline = this.compileLegacyDraft(
             previousMessage.content,
             input.kind
           );
           let revisionApplied = false;
-          if (this.dependencies.revisionAgent !== undefined) {
+          if (requestedTotalPages !== undefined) {
+            outline = validateFullPresentationPageCountRevision(
+              previousOutline,
+              outline,
+              requestedTotalPages
+            );
+            revisionApplied = true;
+          } else if (this.dependencies.revisionAgent !== undefined) {
             if (abortController.signal.aborted) {
               throw new DocumentGenerationApplicationError(
                 'cancelled',
@@ -553,6 +580,7 @@ export class DocumentGenerationApplicationService {
         : {}),
       ...(revisionPatch !== undefined ? { revisionPatch } : {}),
       ...(revisionPatches !== undefined ? { revisionPatches } : {}),
+      ...(requestedTotalPages !== undefined ? { requestedTotalPages } : {}),
       ...(input.theme !== undefined ? { theme: input.theme } : {}),
       ...(input.presentationTemplate !== undefined
         ? { presentationTemplate: input.presentationTemplate }
@@ -808,6 +836,7 @@ function documentFailureCode(error: unknown): DocumentGenerationFailureCode {
     if (error.code === 'revision_patch_failed') return 'revision_patch_failed';
     if (error.code === 'revision_conflict') return 'revision_conflict';
     if (error.code === 'unvalidated_output') return 'unvalidated_output';
+    if (error.code === 'page_count_mismatch') return 'page_count_mismatch';
     return 'generation_failed';
   }
   if (
@@ -817,6 +846,54 @@ function documentFailureCode(error: unknown): DocumentGenerationFailureCode {
     return 'revision_conflict';
   }
   return 'generation_failed';
+}
+
+export function collectRevisionRequestText(
+  conversation: Conversation,
+  currentAssistantMessageId: MessageId
+): string | undefined {
+  const currentIndex = conversation.messages.findIndex(
+    (message) => message.id === currentAssistantMessageId
+  );
+  if (currentIndex < 1) return undefined;
+  const parts: string[] = [];
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const message = conversation.messages[index];
+    if (message.role !== 'user') break;
+    const content = (message.displayContent ?? message.content).trim();
+    if (content.length > 0) parts.unshift(content);
+  }
+  if (parts.length > 0) return parts.join('\n');
+  const legacyRequest = [...conversation.messages]
+    .slice(0, currentIndex)
+    .reverse()
+    .find((message) => message.role === 'user');
+  const legacyContent = (
+    legacyRequest?.displayContent ?? legacyRequest?.content ?? ''
+  ).trim();
+  return legacyContent.length > 0 ? legacyContent : undefined;
+}
+
+function validateFullPresentationPageCountRevision(
+  previous: DocumentOutline,
+  proposed: DocumentOutline,
+  requestedTotalPages: number
+): DocumentOutline {
+  const requiredSections = presentationBodySectionCount(requestedTotalPages);
+  if (
+    previous.kind !== 'ppt' ||
+    proposed.kind !== 'ppt' ||
+    proposed.sections.length !== requiredSections ||
+    proposed.sections.some(
+      (section) => section.pageKind === 'cover' || section.pageKind === 'closing'
+    )
+  ) {
+    throw new DocumentGenerationApplicationError(
+      'page_count_mismatch',
+      `PPT 总页数要求为 ${requestedTotalPages} 页，模型必须返回 ${requiredSections} 个正文分节。`
+    );
+  }
+  return { ...proposed, title: previous.title };
 }
 
 function validateRevisionScope(

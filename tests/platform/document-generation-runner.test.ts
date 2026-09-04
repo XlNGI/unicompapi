@@ -145,6 +145,74 @@ const employeeSalaryOutline = parseDocumentOutline(
 );
 
 describe('document generation runner', () => {
+  it('publishes exactly five PPT slides for three bounded body sections', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-exact-page-count');
+    const exactOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '五页演示',
+      sections: Array.from({ length: 3 }, (_, index) => ({
+        heading: `正文 ${index + 1}`,
+        level: 1,
+        pageKind: 'insight',
+        blocks: [{ type: 'bullets', items: [`结论：正文内容 ${index + 1}`] }]
+      }))
+    }));
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-04T00:00:00.000Z'
+    });
+
+    const result = await runner.run({
+      kind: 'ppt',
+      title: exactOutline.title,
+      contentFingerprint: '8'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'ppt-exact-page-count',
+      outline: exactOutline,
+      requestedTotalPages: 5,
+      presentationTemplate: 'work_report'
+    });
+
+    const finalPath = result.file.locator.kind === 'project'
+      ? path.join(rootDirectory, result.file.locator.relativePath)
+      : '';
+    const zip = await JSZip.loadAsync(await readFile(finalPath));
+    expect(Object.keys(zip.files).filter((name) =>
+      /^ppt\/slides\/slide\d+\.xml$/u.test(name)
+    )).toHaveLength(5);
+    expect(result.work.id).toBeDefined();
+  });
+
+  it('rejects an exact PPT page-count mismatch before publishing a work', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-page-count-mismatch');
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-04T00:00:00.000Z'
+    });
+
+    await expect(runner.run({
+      kind: 'ppt',
+      title: presentationOutline.title,
+      contentFingerprint: '9'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'ppt-page-count-mismatch',
+      outline: presentationOutline,
+      requestedTotalPages: 5,
+      presentationTemplate: 'work_report'
+    })).rejects.toMatchObject({ code: 'page_count_mismatch' });
+
+    const works = new JsonWorkRepository(
+      new NodeProjectStorage(rootDirectory),
+      projectId
+    );
+    expect(await works.list(projectId)).toEqual([]);
+    expect(await documentFiles(rootDirectory)).toEqual([]);
+  });
+
   it('publishes a real scoped parent revision and preserves non-target sections', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-scoped-revision');

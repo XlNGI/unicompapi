@@ -62,6 +62,12 @@ export interface DocumentOutline {
   readonly sections: readonly DocumentOutlineSection[];
 }
 
+export const presentationDocumentPageLimits = {
+  systemGeneratedPages: 2,
+  minimumRequestedPages: 3,
+  maximumPages: 40
+} as const;
+
 export const documentWorkspaceKindExtensions: Readonly<
   Record<DocumentWorkspaceKind, string>
 > = {
@@ -97,6 +103,7 @@ export const documentGenerationFailureCodes = [
   'revision_patch_failed',
   'revision_conflict',
   'unvalidated_output',
+  'page_count_mismatch',
   'generation_failed',
   'storage_error'
 ] as const;

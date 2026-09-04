@@ -61,6 +61,20 @@ describe('document drafting helpers', () => {
     );
   });
 
+  it('turns an exact five-page PPT revision into three body sections', () => {
+    const input = composeDocumentRevisionInput(
+      '{"kind":"ppt","title":"关于龙的PPT","sections":[]}',
+      '内容太少了加到5页',
+      'ppt'
+    );
+
+    expect(input).toContain('PPT 整体页数调整');
+    expect(input).toContain('总页数恰好为 5 页');
+    expect(input).toContain('sections 必须恰好包含 3 个正文分节');
+    expect(input).toContain('1 页封面和 1 页结束页');
+    expect(input).not.toContain('这是一次局部修改');
+  });
+
   it('extracts section headings from assistant markdown', () => {
     expect(
       extractSectionHeadings('# 封面\n\n## 本周进展\n\n正文\n\n## 下周计划')
