@@ -496,6 +496,7 @@ export function ChatPage({
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
+  const workflowSubmissionInFlightRef = useRef(false);
   const documentGenerationInFlightRef = useRef(false);
   const activeDocumentGenerationRef = useRef<{
     readonly conversationId: string;
@@ -1147,6 +1148,7 @@ export function ChatPage({
   }
 
   async function submitWorkflowInput(forceDocument = false) {
+    if (workflowSubmissionInFlightRef.current) return;
     if (!chat || !session || !input.trim() || busy || responseInProgress) return;
     if (activeWorkflow && activeWorkflow.status !== 'needs_clarification') {
       setNotice(
@@ -1156,6 +1158,7 @@ export function ChatPage({
       );
       return;
     }
+    workflowSubmissionInFlightRef.current = true;
     const content = input.trim();
     setBusy(true);
     setNotice(activeWorkflow ? '正在合并补充信息…' : '正在理解需求…');
@@ -1214,6 +1217,7 @@ export function ChatPage({
       setNotice(errorMessages.storage_error);
     } finally {
       setBusy(false);
+      workflowSubmissionInFlightRef.current = false;
     }
     if (ready) await executeReadyWorkflow(ready.workflow, ready.conversation);
   }
@@ -1228,8 +1232,7 @@ export function ChatPage({
       return;
     }
     if (workflow.plan.sourcePolicy === 'web' || workflow.plan.sourcePolicy === 'mixed') {
-      setActiveWorkflow(workflow);
-      setNotice('当前版本尚未接入经授权的联网检索，此任务未执行。');
+      await cancelUnsupportedWebWorkflow(workflow);
       return;
     }
     const source = conversation.messages.find(
@@ -1264,6 +1267,29 @@ export function ChatPage({
       return;
     }
     await startChatResponse(sourceContent, conversation, workflow);
+  }
+
+  async function cancelUnsupportedWebWorkflow(workflow: ConversationWorkflowDto) {
+    if (!chat) return;
+    setBusy(true);
+    try {
+      const result = await chat.cancelWorkflow(
+        workflow.workflowId,
+        workflow.revision
+      );
+      if (!result.ok) {
+        setActiveWorkflow(workflow);
+        setNotice(errorMessages[result.error.code]);
+        return;
+      }
+      setActiveWorkflow(undefined);
+      setNotice('当前版本尚未接入经授权的联网检索，任务已取消，未执行。');
+    } catch {
+      setActiveWorkflow(workflow);
+      setNotice(errorMessages.storage_error);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmActiveWorkflow() {
