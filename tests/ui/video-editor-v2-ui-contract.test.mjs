@@ -9,10 +9,12 @@ const editorSource = await readFile(
 const stylesSource = await readFile('src/styles/pages.css', 'utf8');
 
 test('V2-S2 renders real video frames with degraded placeholders', () => {
-  // 渲染进程内提帧（隐藏 video + canvas），且任何失败都降级不阻塞
-  assert.match(editorSource, /function extractVideoFrame\(/);
+  // 渲染进程内按批次复用隐藏 video + canvas，失败只保留占位。
+  assert.match(editorSource, /function extractTimelineFrameBatch\(/);
   assert.match(editorSource, /crossOrigin = 'anonymous'/);
-  assert.match(editorSource, /toDataURL\('image\/jpeg', 0\.72\)/);
+  assert.match(editorSource, /canvas\.toBlob\(/);
+  assert.match(editorSource, /URL\.createObjectURL\(blob\)/);
+  assert.match(editorSource, /URL\.revokeObjectURL\(/);
   assert.match(editorSource, /frameCacheRef/);
   // 真实帧/黑底序号占位/时长角标在 JSX 与 CSS 中成对出现
   for (const className of [
@@ -28,6 +30,29 @@ test('V2-S2 renders real video frames with degraded placeholders', () => {
     stylesSource,
     /\.uc-video-editor__frame-fallback \{[^}]*linear-gradient/
   );
+});
+
+test('V2-S15 bounds dynamic timeline extraction and drops stale zoom work', () => {
+  assert.match(editorSource, /const timelineFrameCacheLimit = 256/);
+  assert.match(editorSource, /const timelineFrameConcurrency = 2/);
+  assert.match(editorSource, /const timelineFrameDebounceMs = 60/);
+  assert.match(editorSource, /const timelineFramePresentationTimeoutMs = 48/);
+  assert.match(editorSource, /new AbortController\(\)/);
+  assert.match(editorSource, /controller\.abort\(\)/);
+  assert.match(editorSource, /requestToken !== timelineFrameRequestRef\.current/);
+  assert.match(editorSource, /buildTimelineThumbnailSlots\(/);
+  assert.match(editorSource, /timelineViewportWidth\s*\)/);
+  assert.match(editorSource, /waitForPresentedVideoFrame\(/);
+  assert.match(editorSource, /requestVideoFrameCallback/);
+  assert.match(editorSource, /const orderedRequests = \[\.\.\.requests\]\.sort\(/);
+  assert.match(editorSource, /onFrames: \(frames: readonly ExtractedTimelineFrame\[\]\) => void/);
+  assert.match(editorSource, /onFrames\(extractedFrames\)/);
+  assert.match(
+    editorSource,
+    /const thumbnailUrl = thumbnailFrames\[slot\.key\] \?\? frameUrl/
+  );
+  assert.match(editorSource, /uc-video-editor__thumbnail-strip/);
+  assert.match(stylesSource, /\.uc-video-editor__thumbnail \{/);
 });
 
 test('V2-S3 select automatically loads preview with stale-response protection', () => {
@@ -90,12 +115,14 @@ test('V2-S5 uses one draggable main-track playhead without a duplicate slider ro
   assert.match(editorSource, /onMouseDown=/);
   assert.match(editorSource, /window\.requestAnimationFrame\(/);
   assert.match(editorSource, /window\.cancelAnimationFrame\(/);
+  assert.match(editorSource, /resolveTimelineEdgeAutoScroll\(\{/);
+  assert.match(editorSource, /viewportRef=\{timelineViewportRef\}/);
   assert.equal(
     editorSource.match(/className="uc-video-editor__playhead-line"/g)?.length,
     1
   );
   assert.match(editorSource, /className="uc-video-editor__timeline-grid"/);
-  assert.match(editorSource, /className="uc-video-editor__timeline-primary"/);
+  assert.match(editorSource, /className="uc-video-editor__timeline-canvas"/);
   assert.match(editorSource, /className="uc-video-editor__playhead-layer"/);
   // ruler 时间戳等宽字体
   assert.match(
@@ -111,15 +138,15 @@ test('V2-S5 uses one draggable main-track playhead without a duplicate slider ro
   assert.match(stylesSource, /\.uc-video-editor__playhead-line::after/);
   assert.match(
     stylesSource,
-    /\.uc-video-editor__playhead-layer \{[^}]*position: absolute;[^}]*inset: 0;[^}]*pointer-events: none/
+    /\.uc-video-editor__playhead-layer \{[^}]*position: absolute;[^}]*top: 0;[^}]*height: calc\([^}]*pointer-events: none/
   );
   assert.match(
     stylesSource,
-    /\.uc-video-editor__timeline-primary \{[^}]*position: relative;/
+    /\.uc-video-editor__timeline-canvas \{[^}]*position: relative;/
   );
   assert.match(
     stylesSource,
-    /\.uc-video-editor__timeline-primary \{[^}]*isolation: isolate;/
+    /\.uc-video-editor__timeline-canvas \{[^}]*isolation: isolate;/
   );
   assert.match(
     stylesSource,
@@ -149,7 +176,7 @@ test('V2-S6 defines the three-tier responsive system with a collapsed inspector 
   assert.match(stylesSource, /@media \(max-width: 1412px\)/);
   assert.match(
     stylesSource,
-    /\.uc-video-editor__timeline-primary\s*> \.uc-video-editor__track--video,\s*\.uc-video-editor__timeline-primary\s*> \.uc-video-editor__track--video\s*\.uc-video-editor__lane \{\s*min-height: 76px/
+    /\.uc-video-editor__timeline-grid \{\s*--uc-video-editor-video-track-height: 76px/
   );
   const w2Block = stylesSource.match(/@media \(max-width: 1412px\) \{[\s\S]*?\n\}/);
   assert.ok(w2Block);
@@ -194,10 +221,10 @@ test('V2-S6 defines the three-tier responsive system with a collapsed inspector 
     stylesSource,
     /\.uc-video-editor__inspector-body > \.uc-video-editor__tabs \{[^}]*position: sticky;[^}]*top: 0;[^}]*z-index: 3;[^}]*margin: 0 -14px;[^}]*padding: 10px 14px;[^}]*background: var\(--uc-color-surface-panel\)/
   );
-  assert.match(editorSource, /uc-video-editor__track uc-video-editor__track--video/);
+  assert.match(editorSource, /uc-video-editor__lane uc-video-editor__lane--video/);
   assert.match(
     stylesSource,
-    /\.uc-video-editor__timeline-primary > \.uc-video-editor__track--video \.uc-video-editor__lane \{[^}]*gap: 0/
+    /\.uc-video-editor__timeline-canvas > \.uc-video-editor__lane \{[^}]*overflow: hidden/
   );
   assert.doesNotMatch(stylesSource, /uc-video-editor__track:first-of-type/);
   assert.doesNotMatch(stylesSource, /uc-video-editor__track:not\(:first-of-type\)/);
@@ -228,11 +255,11 @@ test('V2-S7 aligns the timeline scale and wires drag reorder to move_clip', () =
   );
   assert.match(
     stylesSource,
-    /\.uc-video-editor__ruler \{[^}]*grid-column: 2/
+    /\.uc-video-editor__timeline-viewport \{[^}]*grid-column: 2;[^}]*overflow-x: auto/
   );
   assert.match(
     stylesSource,
-    /\.uc-video-editor__track \{[^}]*grid-template-columns:\s*var\(--uc-video-editor-track-label-width, 90px\) minmax\(0, 1fr\)/
+    /\.uc-video-editor__timeline-labels,\s*\.uc-video-editor__timeline-canvas \{[^}]*grid-template-rows:/
   );
   assert.match(editorSource, /draggable=\{canReorder\}/);
   assert.match(editorSource, /onDragStart=/);
@@ -240,6 +267,26 @@ test('V2-S7 aligns the timeline scale and wires drag reorder to move_clip', () =
   assert.match(editorSource, /onDrop=/);
   assert.match(editorSource, /dataTransfer\.setData\('text\/plain', segment\.clipId\)/);
   assert.match(editorSource, /kind: 'move_clip',[\s\S]{0,120}?clipId,[\s\S]{0,120}?toIndex/);
+});
+
+test('V2-S14 zooms one shared timeline canvas and pans it with horizontal wheel input', () => {
+  assert.match(editorSource, /viewport\.addEventListener\('wheel', onWheel, \{ passive: false \}\)/);
+  assert.match(editorSource, /if \(event\.ctrlKey\)/);
+  assert.match(editorSource, /event\.preventDefault\(\)/);
+  assert.match(editorSource, /resolveTimelineWheelZoom\(\{/);
+  assert.match(editorSource, /resolveTimelineHorizontalWheelDelta\(\{/);
+  assert.match(editorSource, /viewport\.scrollLeft = nextScrollLeft/);
+  assert.match(editorSource, /buildTimelineRulerTicks\(/);
+  assert.match(editorSource, /style=\{\{ width: `\$\{timelineCanvasWidth\}px` \}\}/);
+  assert.match(editorSource, /按住 Ctrl 滚动鼠标滚轮可缩放时间线/);
+  assert.match(stylesSource, /\.uc-video-editor__timeline-viewport \{[^}]*overscroll-behavior-inline: contain/);
+});
+
+test('V2-S16 keeps the media-bin empty state compact', () => {
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__media-bin > \.uc-empty-state \{[^}]*min-height: 0;[^}]*align-content: start/
+  );
 });
 
 test('V2-S8 switches preview ownership when a timeline seek crosses clips', () => {
