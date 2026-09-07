@@ -5291,7 +5291,11 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-work-library {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   gap: var(--uc-space-5);
   color: var(--uc-color-text-primary);
   font-family: var(--uc-font-family-ui);
@@ -5366,7 +5370,9 @@ button.uc-project-center__project-card:disabled {
 .uc-work-library__workspace {
   display: grid;
   grid-template-columns: minmax(420px, 1.15fr) minmax(360px, 0.85fr);
-  min-height: 560px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
   border: 1px solid var(--uc-color-border-subtle);
   border-radius: var(--uc-radius-12);
   overflow: hidden;
@@ -5380,6 +5386,48 @@ button.uc-project-center__project-card:disabled {
   align-content: start;
   gap: var(--uc-space-3);
   padding: var(--uc-space-5);
+  min-height: 0;
+}
+
+.uc-work-library__list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.uc-work-library__details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.uc-work-library__details > h2 {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* 宽屏：详情完整显示——预览区弹性伸缩，标题/事实/按钮永远可见 */
+.uc-work-library__details .uc-work-library__details-content {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.uc-work-library__details .uc-work-library__details-content > * {
+  flex: 0 0 auto;
+}
+
+.uc-work-library__details .uc-work-library__details-content > .uc-work-library__preview {
+  flex: 1 1 auto;
+  min-height: 140px;
+  max-height: 480px;
+}
+
+/* 极矮窗口兜底：面板高度不足时才允许右侧滚动，保证内容不丢失 */
+@media (min-width: 1081px) and (max-height: 700px) {
+  .uc-work-library__details {
+    overflow-y: auto;
+  }
 }
 
 .uc-work-library__list {
@@ -5565,8 +5613,10 @@ button.uc-project-center__project-card:disabled {
 
 .uc-work-library__preview img,
 .uc-work-library__preview video {
-  width: 100%;
-  max-height: 360px;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 
@@ -5671,13 +5721,39 @@ button.uc-project-center__project-card:disabled {
 }
 
 @media (max-width: 1080px) {
-  .uc-work-library__filters,
-  .uc-work-library__workspace {
+  .uc-work-library {
+    height: auto;
+    overflow: visible;
+  }
+
+  .uc-work-library__filters {
     grid-template-columns: 1fr 1fr;
   }
 
   .uc-work-library__workspace {
+    flex: 0 0 auto;
+    min-height: 560px;
+    max-height: none;
     grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .uc-work-library__list,
+  .uc-work-library__details {
+    overflow: visible;
+    min-height: auto;
+  }
+
+  /* 单列布局下还原预览自然高度 */
+  .uc-work-library__details .uc-work-library__details-content > .uc-work-library__preview {
+    flex: 0 0 auto;
+    min-height: 220px;
+  }
+
+  .uc-work-library__preview img,
+  .uc-work-library__preview video {
+    height: auto;
+    max-height: 360px;
   }
 
   .uc-work-library__list {
