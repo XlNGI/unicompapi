@@ -372,4 +372,68 @@ describe('Office document file executor', () => {
       target: { sectionIndex: 0, sectionHeading: '重复章节' }
     })).rejects.toMatchObject({ code: 'target_not_found' });
   });
+
+  it('preserves the PPT footer page number when clearing slide content', async () => {
+    const slide = (heading: string, body: string, pageNumber: number) =>
+      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${body}</a:t><a:t>${pageNumber}</a:t></p:sld>`;
+    const zip = new JSZip();
+    zip.file('ppt/slides/slide1.xml', slide('封面', '封面内容', 1));
+    zip.file('ppt/slides/slide2.xml', slide('正文', '需要清空', 2));
+    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const revised = await applyOfficeDocumentPatchToBuffer(source, 'ppt', {
+      operation: 'clear_section',
+      target: { sectionIndex: 0, sectionHeading: '正文', pageNumber: 2, targetUnit: 'page' }
+    });
+    const result = await JSZip.loadAsync(revised);
+    const xml = await result.file('ppt/slides/slide2.xml')!.async('string');
+    expect(xml).toContain('<a:t>正文</a:t>');
+    expect(xml).toContain('<a:t>2</a:t>');
+    expect(xml).not.toContain('<a:t>需要清空</a:t>');
+  });
+
+  it('limits a physical PPT page revision to the named slide', async () => {
+    const slide = (heading: string, body: string, pageNumber: number) =>
+      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${body}</a:t><a:t>${pageNumber}</a:t></p:sld>`;
+    const zip = new JSZip();
+    zip.file('ppt/slides/slide1.xml', slide('封面', '封面内容', 1));
+    zip.file('ppt/slides/slide2.xml', slide('第二章', '目标页内容', 2));
+    zip.file('ppt/slides/slide3.xml', slide('第二章（续 2）', '续页内容', 3));
+    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const revised = await applyOfficeDocumentPatchToBuffer(source, 'ppt', {
+      operation: 'clear_section',
+      target: { sectionIndex: 0, sectionHeading: '第二章', pageNumber: 2, targetUnit: 'page' }
+    });
+    const result = await JSZip.loadAsync(revised);
+    expect(await result.file('ppt/slides/slide2.xml')!.async('string')).not.toContain('目标页内容');
+    expect(await result.file('ppt/slides/slide3.xml')!.async('string')).toContain('续页内容');
+  });
+
+  it('rejects a physical PPT page when its heading does not match the revision target', async () => {
+    const zip = new JSZip();
+    zip.file('ppt/slides/slide1.xml', '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>实际章节</a:t><a:t>正文</a:t></p:sld>');
+    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    await expect(applyOfficeDocumentPatchToBuffer(source, 'ppt', {
+      operation: 'clear_section',
+      target: { sectionIndex: 0, sectionHeading: '错误章节', pageNumber: 1, targetUnit: 'page' }
+    })).rejects.toMatchObject({ code: 'target_not_found' });
+  });
+
+  it('keeps numeric PPT body text when it is not a registered page-number shape', async () => {
+    const zip = new JSZip();
+    zip.file(
+      'ppt/slides/slide2.xml',
+      '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><p:sp><p:nvSpPr><p:cNvPr id="1" name="Title"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>年度目标</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>2026</a:t></a:r></a:p></p:txBody></p:sp></p:sld>'
+    );
+    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const structure = await readOfficeDocumentStructureFromBuffer({
+      buffer: source,
+      kind: 'ppt',
+      displayName: 'numeric-body.pptx'
+    });
+
+    expect(structure.sections[0]).toMatchObject({
+      heading: '年度目标',
+      blockCount: 1
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConversationStreamingService } from '../../src/application';
 import {
   archiveConversation,
   createConversation,
@@ -9,6 +10,7 @@ import {
   renameConversation,
   toConversationId,
   toIsoTimestamp,
+  toMessageId,
   toProjectId
 } from '../../src/domain';
 import {
@@ -88,6 +90,39 @@ describe('JsonConversationRepository', () => {
     expect(persistedText).not.toMatch(
       /absolutePath|sha256|apiKey|endpoint|https?:\/\//i
     );
+  });
+
+  it('persists a locally completed assistant message with exactly one revision', async () => {
+    const { repositoryPath, repository, now } = await fixture();
+    const created = create('conversation-local-completed-message');
+    await repository.create(created);
+    const messageId = toMessageId('message-local-completed');
+    const streaming = new ConversationStreamingService(repository, {
+      nextConversationId: () => toConversationId('unused-conversation-id'),
+      nextMessageId: () => messageId
+    }, now);
+
+    const result = await streaming.createCompletedLocalAssistantMessage({
+      conversationId: created.id,
+      expectedRevision: created.revision,
+      content: 'Local document revision is ready.'
+    });
+
+    expect(result).toMatchObject({
+      messageId,
+      conversation: {
+        revision: created.revision + 1,
+        messages: [{
+          id: messageId,
+          role: 'assistant',
+          state: 'completed',
+          content: 'Local document revision is ready.'
+        }]
+      }
+    });
+    const reloaded = await new JsonConversationRepository(repositoryPath, now)
+      .get(created.id);
+    expect(reloaded).toEqual(result.conversation);
   });
 
   it('keeps deleted conversations as tombstones while ordinary lists hide them', async () => {

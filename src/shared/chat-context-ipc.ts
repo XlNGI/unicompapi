@@ -143,6 +143,7 @@ export interface MessageDto {
     readonly fileName: string;
     readonly kind: 'word' | 'excel' | 'ppt';
     readonly sizeBytes: number;
+    readonly validatedContent?: string;
   };
   readonly attachments: readonly ConversationAttachmentDto[];
   readonly streamSequence?: number;

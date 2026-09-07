@@ -10,6 +10,8 @@ import {
 } from '../../domain';
 import { parseDocumentOutline, presentationPageKinds } from './document-outline-parser';
 
+export type DocumentPatchTargetUnit = 'section' | 'page';
+
 export interface DocumentStructureBlockSummary {
   readonly blockIndex: number;
   readonly type: DocumentOutlineBlock['type'];
@@ -38,6 +40,7 @@ export interface DocumentStructureSnapshot {
 }
 
 export interface DocumentPatchTarget {
+  readonly targetUnit?: DocumentPatchTargetUnit;
   readonly sectionIndex?: number;
   readonly sectionHeading?: string;
   readonly blockIndex?: number;
@@ -134,6 +137,20 @@ export function parseDocumentPatch(
       : {}),
     ...(value.data !== undefined ? { data: parseChartData(value.data) } : {})
   };
+  if (patch.target.targetUnit === 'page') {
+    if (kind !== undefined && kind !== 'ppt') {
+      throw new StructuredDocumentToolError(
+        'kind_mismatch',
+        'Page targets are only available for PPT revisions'
+      );
+    }
+    if (patch.target.pageNumber === undefined || patch.target.pageNumber < 1) {
+      throw new StructuredDocumentToolError(
+        'invalid_patch',
+        'Page targets require a positive pageNumber'
+      );
+    }
+  }
   if (patch.value === undefined && patch.data === undefined &&
       ['replace_text', 'insert_text', 'add_section', 'add_column', 'set_style'].includes(patch.operation)) {
     throw new StructuredDocumentToolError('invalid_patch', `${patch.operation} requires a value or data`);
@@ -297,8 +314,14 @@ export function applyStructuredDocumentPatch(
 
 function parseTarget(value: unknown): DocumentPatchTarget {
   if (!isRecord(value)) throw new StructuredDocumentToolError('invalid_patch', 'Patch target must be an object');
-  requireExactKeys(value, ['sectionIndex', 'sectionHeading', 'blockIndex', 'itemIndex', 'rowIndex', 'columnIndex', 'pageNumber']);
+  requireExactKeys(value, ['targetUnit', 'sectionIndex', 'sectionHeading', 'blockIndex', 'itemIndex', 'rowIndex', 'columnIndex', 'pageNumber']);
   const target: DocumentPatchTarget = {};
+  if (value.targetUnit !== undefined) {
+    if (value.targetUnit !== 'section' && value.targetUnit !== 'page') {
+      throw new StructuredDocumentToolError('invalid_patch', 'target.targetUnit is invalid');
+    }
+    (target as { targetUnit?: DocumentPatchTargetUnit }).targetUnit = value.targetUnit;
+  }
   for (const key of ['sectionIndex', 'blockIndex', 'itemIndex', 'rowIndex', 'columnIndex', 'pageNumber'] as const) {
     if (value[key] !== undefined) {
       if (!Number.isSafeInteger(value[key]) || Number(value[key]) < 0) throw new StructuredDocumentToolError('invalid_patch', `target.${key} must be a non-negative integer`);

@@ -28,6 +28,10 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /kind !== 'ppt'[\s\S]*?theme: documentTheme/);
   assert.match(page, /composeDocumentRevisionInput/);
   assert.match(page, /previousDocument/);
+  assert.match(
+    page,
+    /previousDocument\?\.documentResult\?\.validatedContent\s*\?\?\s*previousDocument\?\.content/
+  );
   assert.doesNotMatch(page, /toggleTemplate/);
   assert.doesNotMatch(page, /extractTheme/);
   assert.doesNotMatch(page, /customTheme/);
@@ -64,6 +68,14 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /cancelGeneration/);
   assert.match(page, /document_layout_overflow/);
   assert.match(page, /page_count_mismatch/);
+  assert.match(page, /revision_scope_violation/);
+  assert.match(page, /revision_patch_failed/);
+  assert.match(page, /unvalidated_output/);
+  assert.match(page, /\u539f\u6587\u4ef6\u672a\u6539\u53d8/);
+  assert.match(
+    page,
+    /case 'revision_scope_violation':[\s\S]*?case 'revision_patch_failed':[\s\S]*?case 'unvalidated_output'/
+  );
   assert.match(page, /generation_cancelled/);
   assert.match(page, /文档生成或写入失败，未登记作品/);
   assert.match(page, /awaitDocumentCompletion/);
@@ -123,7 +135,7 @@ test('PPT template picker defaults to automatic matching and opens above the com
 });
 
 test('document outline generation uses one model response and local application recovery', () => {
-  assert.match(page, /documentResponseParameterValues\(selectedCandidate\)/);
+  assert.match(page, /documentResponseParameterValues\(modelCandidate\)/);
   assert.doesNotMatch(page, /buildDocumentOutlineRepairInput/);
   assert.doesNotMatch(page, /chat-doc-repair/);
   assert.doesNotMatch(page, /outlineRepairAttempted/);
@@ -152,6 +164,19 @@ test('document execution consumes the validated workflow plan without re-parsing
   assert.match(page, /workflow\.plan\.action === 'revise'/);
   assert.match(page, /sendDocumentMessage\(\{[\s\S]*?workflow,[\s\S]*?kind,[\s\S]*?action/);
   assert.doesNotMatch(page, /analyzeOfficeRequest|analyzeLocalConversationIntent/);
+});
+
+test('a single confirmed clear revision bypasses provider response generation safely', () => {
+  assert.match(page, /parseDeterministicClearRevisionTarget/);
+  assert.match(page, /prepareDeterministicRevision\(\{/);
+  assert.match(
+    page,
+    /useDeterministicLocalRevision[\s\S]*?prepareDeterministicRevision[\s\S]*?generateFromMessage/
+  );
+  assert.match(page, /workflowTarget\.ordinal === deterministicTarget\.ordinal/);
+  assert.match(page, /execution\.workflow\.plan\.sourcePolicy === 'none'/);
+  assert.match(page, /attachments\.length === 0/);
+  assert.match(page, /这项修改需要模型生成内容，请选择一个可用模型后继续/);
 });
 
 test('composer resolves Office revisions in the background without a persistent action preview', () => {

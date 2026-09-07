@@ -1,5 +1,7 @@
 export const documentGenerationIpcChannels = {
   prepareGeneration: 'document-generation:prepare-generation',
+  prepareDeterministicRevision:
+    'document-generation:prepare-deterministic-revision',
   reconcileGeneration: 'document-generation:reconcile-generation',
   generateFromMessage: 'document-generation:generate-from-message',
   cancelGeneration: 'document-generation:cancel-generation',
@@ -22,6 +24,10 @@ export type DocumentGenerationIpcErrorCode =
   | 'conversation_not_found'
   | 'conversation_not_active'
   | 'revision_conflict'
+  | 'local_revision_not_supported'
+  | 'revision_scope_violation'
+  | 'revision_patch_failed'
+  | 'unvalidated_output'
   | 'invalid_outline'
   | 'page_count_mismatch'
   | 'document_layout_overflow'
@@ -65,6 +71,7 @@ export interface DocumentGenerationFromMessageRequest {
   readonly expectedRevision: number;
   readonly messageId: string;
   readonly kind: 'word' | 'excel' | 'ppt';
+  readonly parentWorkId?: string;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   readonly images?: readonly {
@@ -85,6 +92,21 @@ export interface DocumentGenerationPrepareRequest {
 
 export interface DocumentGenerationPrepareResultDto {
   readonly prepared: true;
+}
+
+export interface DocumentDeterministicRevisionPrepareRequest {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly workflowId: string;
+  readonly expectedWorkflowRevision: number;
+  readonly kind: 'word' | 'excel' | 'ppt';
+  readonly parentWorkId: string;
+}
+
+export interface DocumentDeterministicRevisionPrepareResultDto {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly messageId: string;
 }
 
 export interface DocumentGenerationReconcileRequest {
@@ -119,6 +141,39 @@ function requireString(value: unknown, label: string): string {
 }
 
 export const documentGenerationRequestParsers = {
+  prepareDeterministicRevision(
+    value: unknown
+  ): DocumentDeterministicRevisionPrepareRequest {
+    if (!isRecord(value)) {
+      throw new TypeError('Invalid deterministic document revision request');
+    }
+    requireExactKeys(
+      value,
+      [
+        'conversationId',
+        'expectedRevision',
+        'workflowId',
+        'expectedWorkflowRevision',
+        'kind',
+        'parentWorkId'
+      ],
+      'prepareDeterministicRevision'
+    );
+    return {
+      conversationId: requireString(value.conversationId, 'conversationId'),
+      expectedRevision: requireNonNegativeInteger(
+        value.expectedRevision,
+        'expectedRevision'
+      ),
+      workflowId: requireString(value.workflowId, 'workflowId'),
+      expectedWorkflowRevision: requireNonNegativeInteger(
+        value.expectedWorkflowRevision,
+        'expectedWorkflowRevision'
+      ),
+      kind: requireKind(value.kind),
+      parentWorkId: requireString(value.parentWorkId, 'parentWorkId')
+    };
+  },
   prepareGeneration(value: unknown): DocumentGenerationPrepareRequest {
     if (!isRecord(value)) {
       throw new TypeError('Invalid document generation preparation request');
@@ -331,6 +386,11 @@ function parseImages(
 }
 
 export interface DocumentGenerationApi {
+  prepareDeterministicRevision(
+    request: DocumentDeterministicRevisionPrepareRequest
+  ): Promise<
+    DocumentGenerationIpcResult<DocumentDeterministicRevisionPrepareResultDto>
+  >;
   prepareGeneration(
     request: DocumentGenerationPrepareRequest
   ): Promise<DocumentGenerationIpcResult<DocumentGenerationPrepareResultDto>>;
