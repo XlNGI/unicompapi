@@ -3,6 +3,7 @@ import {
   DocumentDraftCompilationError,
   DocumentGenerationApplicationError,
   toDocumentGenerationApplicationInput,
+  toPrepareDeterministicDocumentRevisionInput,
   type DocumentGenerationApplicationService
 } from '../../application';
 import {
@@ -13,6 +14,7 @@ import {
 } from '../../domain';
 import type {
   DocumentGenerationCancelResultDto,
+  DocumentDeterministicRevisionPrepareResultDto,
   DocumentGenerationFromConversationDto,
   DocumentGenerationIpcErrorCode,
   DocumentGenerationIpcResult,
@@ -44,6 +46,31 @@ export class DocumentGenerationController {
   constructor(
     private readonly dependencies: DocumentGenerationControllerDependencies
   ) {}
+
+  prepareDeterministicRevision(
+    request: unknown
+  ): Promise<
+    DocumentGenerationIpcResult<DocumentDeterministicRevisionPrepareResultDto>
+  > {
+    return this.execute(async () => {
+      const input = documentGenerationRequestParsers
+        .prepareDeterministicRevision(request);
+      const session = this.requireSession();
+      const result = await this.dependencies
+        .getApplication(session)
+        .prepareDeterministicRevision(
+          toPrepareDeterministicDocumentRevisionInput(input)
+        );
+      return {
+        ok: true,
+        value: {
+          conversationId: result.conversationId,
+          expectedRevision: result.expectedRevision,
+          messageId: result.messageId
+        }
+      };
+    });
+  }
 
   prepareGeneration(
     request: unknown
@@ -236,11 +263,17 @@ function mapApplicationError<T>(
     case 'response_failed':
       return failure('generation_failed', 'AI content generation did not complete');
     case 'generation_failed':
-    case 'revision_scope_violation':
-    case 'revision_patch_failed':
-    case 'revision_conflict':
-    case 'unvalidated_output':
       return failure('generation_failed', 'Document generation failed');
+    case 'local_revision_not_supported':
+      return failure('local_revision_not_supported', error.message);
+    case 'revision_scope_violation':
+      return failure('revision_scope_violation', error.message);
+    case 'revision_patch_failed':
+      return failure('revision_patch_failed', error.message);
+    case 'revision_conflict':
+      return failure('revision_conflict', error.message);
+    case 'unvalidated_output':
+      return failure('unvalidated_output', error.message);
     case 'storage_error':
       return failure('storage_error', 'Local document storage failed');
   }

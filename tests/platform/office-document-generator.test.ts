@@ -443,6 +443,7 @@ describe('office document generator', () => {
     expect(firstSlide).toContain('季度销售复盘');
     const secondSlide = zip.readAsText('ppt/slides/slide2.xml');
     expect(secondSlide).toContain('业绩概览');
+    expect(secondSlide).toContain('UniComp Page Number');
     const closingSlide = zip.readAsText('ppt/slides/slide4.xml');
     expect(closingSlide).toContain('谢谢观看');
   });

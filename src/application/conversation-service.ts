@@ -1,5 +1,6 @@
 import {
   addUserMessage,
+  addCompletedAssistantMessage,
   appendAssistantMessageChunk,
   archiveConversation,
   beginAssistantMessage,
@@ -221,6 +222,11 @@ export interface ConversationStreamApplicationPort {
     readonly messageId: MessageId;
     readonly expectedRevision: number;
   }): Promise<Conversation>;
+  createCompletedLocalAssistantMessage(input: {
+    readonly conversationId: ConversationId;
+    readonly expectedRevision: number;
+    readonly content: string;
+  }): Promise<ConversationStreamStartResult>;
 }
 
 export class ConversationStreamingService
@@ -244,6 +250,24 @@ export class ConversationStreamingService
     });
     await this.repository.save(updated, input.expectedRevision);
     return { conversation: updated, messageId };
+  }
+
+  async createCompletedLocalAssistantMessage(input: {
+    readonly conversationId: ConversationId;
+    readonly expectedRevision: number;
+    readonly content: string;
+  }): Promise<ConversationStreamStartResult> {
+    const conversation = await this.requireConversation(input.conversationId);
+    assertRevision(conversation, input.expectedRevision);
+    const timestamp = toIsoTimestamp(this.now());
+    const messageId = this.ids.nextMessageId();
+    const completed = addCompletedAssistantMessage(conversation, {
+      id: messageId,
+      content: input.content,
+      createdAt: timestamp
+    });
+    await this.repository.save(completed, input.expectedRevision);
+    return { conversation: completed, messageId };
   }
 
   async append(input: {

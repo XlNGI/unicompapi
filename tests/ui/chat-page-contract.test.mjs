@@ -40,6 +40,8 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /if \(workflowSubmissionInFlightRef\.current\) return;/);
   assert.match(source, /needs_clarification/);
   assert.match(source, /needs_confirmation/);
+  assert.match(source, /PPT 物理第/);
+  assert.match(source, /保留：其他页面与原文件不变/);
   assert.match(source, /parameterValues:\s*\{\}/);
   assert.match(source, /已截断/);
   assert.match(failureNoticeSource, /回答达到当前输出长度上限/);

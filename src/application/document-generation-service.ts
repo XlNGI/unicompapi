@@ -1,10 +1,13 @@
 import {
   toConversationId,
+  toConversationWorkflowId,
   toMessageId,
   toWorkId,
   type Conversation,
   type ConversationId,
   type ConversationResponseExecutionState,
+  type ConversationWorkflowId,
+  type ConversationWorkflowV1,
   type DocumentMessageResult,
   type DocumentGenerationFailureCode,
   type DocumentGenerationStatus,
@@ -21,6 +24,12 @@ import { ConversationApplicationError } from './conversation-service';
 import type {
   DocumentRevisionAgentResult,
   DocumentRevisionPatch
+} from './document-revision-agent';
+import {
+  isExplicitClearRevisionRequest,
+  parseDeterministicClearRevisionTarget,
+  parseRevisionTarget,
+  revisionSectionIndex
 } from './document-revision-agent';
 import {
   isSupportedPresentationTotalPages,
@@ -51,6 +60,7 @@ export type DocumentGenerationApplicationErrorCode =
   | 'cancelled'
   | 'response_failed'
   | 'generation_failed'
+  | 'local_revision_not_supported'
   | 'revision_scope_violation'
   | 'revision_patch_failed'
   | 'revision_conflict'
@@ -81,6 +91,14 @@ export interface DocumentDraftCompilerPort {
 
 export interface DocumentGenerationConversationPort {
   load(conversationId: ConversationId): Promise<Conversation | undefined>;
+  createCompletedLocalAssistantMessage?(input: {
+    readonly conversationId: ConversationId;
+    readonly expectedRevision: number;
+    readonly content: string;
+  }): Promise<{
+    readonly conversation: Conversation;
+    readonly messageId: MessageId;
+  }>;
   attachDocumentResult(input: {
     readonly conversationId: ConversationId;
     readonly messageId: MessageId;
@@ -93,6 +111,19 @@ export interface DocumentGenerationConversationPort {
     readonly expectedRevision: number;
     readonly status: DocumentGenerationStatus;
   }): Promise<void>;
+}
+
+export interface DocumentGenerationWorkflowPort {
+  load(workflowId: ConversationWorkflowId): Promise<ConversationWorkflowV1 | undefined>;
+  beginExecution(input: {
+    readonly workflowId: ConversationWorkflowId;
+    readonly expectedRevision: number;
+    readonly executionId: string;
+  }): Promise<void>;
+  finishExecution(
+    executionId: string,
+    status: 'completed' | 'failed' | 'cancelled'
+  ): Promise<void>;
 }
 
 export interface DocumentGenerationExecutionInput {
@@ -155,6 +186,21 @@ export interface GenerateDocumentFromMessageResult
   readonly messageId: MessageId;
 }
 
+export interface PrepareDeterministicDocumentRevisionInput {
+  readonly conversationId: ConversationId;
+  readonly expectedRevision: number;
+  readonly workflowId: ConversationWorkflowId;
+  readonly expectedWorkflowRevision: number;
+  readonly kind: DocumentWorkspaceKind;
+  readonly parentWorkId: WorkId;
+}
+
+export interface PrepareDeterministicDocumentRevisionResult {
+  readonly conversationId: ConversationId;
+  readonly expectedRevision: number;
+  readonly messageId: MessageId;
+}
+
 export async function waitForDocumentResponseCompletion<
   T extends { readonly state: ConversationResponseExecutionState }
 >(input: {
@@ -194,6 +240,7 @@ export class DocumentGenerationApplicationService {
   >();
   private readonly messageTails = new Map<string, Promise<void>>();
   private readonly preparedMessages = new Set<string>();
+  private readonly localRevisionWorkflows = new Map<string, string>();
   private readonly activeOperations = new Map<
     string,
     {
@@ -207,6 +254,7 @@ export class DocumentGenerationApplicationService {
     private readonly dependencies: {
       readonly projectId: ProjectId;
       readonly conversations: DocumentGenerationConversationPort;
+      readonly workflows?: DocumentGenerationWorkflowPort;
       readonly compiler: DocumentDraftCompilerPort;
       readonly generator: DocumentGenerationExecutorPort;
       /** Optional bounded local/provider-backed revision workflow. */
@@ -217,14 +265,162 @@ export class DocumentGenerationApplicationService {
           readonly kind: DocumentWorkspaceKind;
           readonly requestText: string;
           readonly outline: DocumentOutline;
-          readonly proposedOutline: DocumentOutline;
+          readonly proposedOutline?: DocumentOutline;
           readonly signal: AbortSignal;
         }
       ) => Promise<DocumentRevisionAgentResult>;
       readonly fingerprint: (content: string) => string;
+      readonly nextLocalExecutionId?: () => string;
       readonly wait?: (milliseconds: number) => Promise<void>;
     }
   ) {}
+
+  async prepareDeterministicRevision(
+    input: PrepareDeterministicDocumentRevisionInput
+  ): Promise<PrepareDeterministicDocumentRevisionResult> {
+    const workflows = this.dependencies.workflows;
+    const createLocalMessage =
+      this.dependencies.conversations.createCompletedLocalAssistantMessage;
+    if (!workflows || !createLocalMessage) {
+      throw new DocumentGenerationApplicationError(
+        'local_revision_not_supported',
+        'Local document revision workflow is unavailable'
+      );
+    }
+    const conversation = await this.dependencies.conversations.load(
+      input.conversationId
+    );
+    if (!conversation || conversation.projectId !== this.dependencies.projectId) {
+      throw new ConversationApplicationError(
+        'conversation_not_found',
+        'Conversation does not exist'
+      );
+    }
+    if (conversation.revision !== input.expectedRevision) {
+      throw new ConversationApplicationError(
+        'revision_conflict',
+        'Conversation revision has changed',
+        conversation.revision
+      );
+    }
+    const workflow = await workflows.load(input.workflowId);
+    if (
+      !workflow ||
+      workflow.projectId !== this.dependencies.projectId ||
+      workflow.conversationId !== input.conversationId ||
+      workflow.revision !== input.expectedWorkflowRevision ||
+      workflow.status !== 'ready' ||
+      workflow.plan.kind !== 'document' ||
+      workflow.plan.action !== 'revise' ||
+      (workflow.plan.documentKind !== 'auto' &&
+        workflow.plan.documentKind !== input.kind) ||
+      workflow.plan.sourcePolicy !== 'none'
+    ) {
+      throw new DocumentGenerationApplicationError(
+        'local_revision_not_supported',
+        'The confirmed workflow is not eligible for local document revision'
+      );
+    }
+    const sourceIndex = conversation.messages.findIndex(
+      (message) => message.id === workflow.sourceMessageId
+    );
+    const source = conversation.messages[sourceIndex];
+    const parentIndex = conversation.messages.findIndex(
+      (message) =>
+        message.role === 'assistant' &&
+        message.state === 'completed' &&
+        message.documentResult?.workId === input.parentWorkId &&
+        message.documentResult.kind === input.kind
+    );
+    const parent = conversation.messages[parentIndex];
+    if (
+      !source ||
+      source.role !== 'user' ||
+      source.state !== 'completed' ||
+      sourceIndex !== conversation.messages.length - 1 ||
+      !parent ||
+      parent.role !== 'assistant' ||
+      parent.state !== 'completed' ||
+      !parent.documentResult?.validatedContent ||
+      parentIndex >= sourceIndex ||
+      workflow.resolvedTarget?.artifactRef !== parent.id
+    ) {
+      throw new DocumentGenerationApplicationError(
+        'local_revision_not_supported',
+        'The local revision source or parent document is unavailable'
+      );
+    }
+    const requestText = (source.displayContent ?? source.content).trim();
+    const target = parseDeterministicClearRevisionTarget(requestText);
+    if (!target || !workflowTargetMatches(workflow, target)) {
+      throw new DocumentGenerationApplicationError(
+        'local_revision_not_supported',
+        'The request is not a single explicit clear operation'
+      );
+    }
+    const previousOutline = this.compileLegacyDraft(
+      parent.documentResult.validatedContent,
+      input.kind
+    );
+    const targetIndex = revisionSectionIndex(input.kind, target);
+    if (targetIndex < 0 || targetIndex >= previousOutline.sections.length) {
+      throw new DocumentGenerationApplicationError(
+        'revision_scope_violation',
+        'Revision target does not exist in the previous document'
+      );
+    }
+
+    const executionId = this.dependencies.nextLocalExecutionId?.() ??
+      `local-document-revision-${workflow.id}-${workflow.revision}`;
+    await workflows.beginExecution({
+      workflowId: workflow.id,
+      expectedRevision: workflow.revision,
+      executionId
+    });
+    try {
+      const created = await createLocalMessage({
+          conversationId: conversation.id,
+          expectedRevision: conversation.revision,
+          content: '已按确认范围执行本地文档修改。'
+        });
+      const key = messageQueueKey(this.dependencies.projectId, {
+        conversationId: conversation.id,
+        messageId: created.messageId
+      });
+      this.localRevisionWorkflows.set(key, executionId);
+      await this.persistStatus(
+        {
+          conversationId: conversation.id,
+          expectedRevision: created.conversation.revision,
+          messageId: created.messageId,
+          kind: input.kind,
+          parentWorkId: input.parentWorkId,
+          images: []
+        },
+        { state: 'validating_outline', kind: input.kind }
+      );
+      const preparedConversation = await this.dependencies.conversations.load(
+        conversation.id
+      );
+      if (!preparedConversation) {
+        throw new ConversationApplicationError(
+          'conversation_not_found',
+          'Conversation disappeared during local revision preparation'
+        );
+      }
+      return {
+        conversationId: conversation.id,
+        expectedRevision: preparedConversation.revision,
+        messageId: created.messageId
+      };
+    } catch (error) {
+      for (const [key, value] of this.localRevisionWorkflows) {
+        if (value === executionId) this.localRevisionWorkflows.delete(key);
+      }
+      await workflows.finishExecution(executionId, 'failed');
+      throw error;
+    }
+  }
 
   async prepare(input: GenerateDocumentFromMessageInput): Promise<void> {
     const conversation = await this.requireAssistantMessage(input);
@@ -278,6 +474,14 @@ export class DocumentGenerationApplicationService {
       },
       { state: 'interrupted', kind: status.kind }
     );
+    const localWorkflowExecutionId = this.localRevisionWorkflows.get(key);
+    if (localWorkflowExecutionId && this.dependencies.workflows) {
+      await this.dependencies.workflows.finishExecution(
+        localWorkflowExecutionId,
+        'failed'
+      );
+      this.localRevisionWorkflows.delete(key);
+    }
     return true;
   }
 
@@ -291,11 +495,12 @@ export class DocumentGenerationApplicationService {
     const abortController = new AbortController();
     const queueKey = messageQueueKey(this.dependencies.projectId, input);
     const previous = this.messageTails.get(queueKey) ?? Promise.resolve();
-    const operation = this.track(
+    const operation = this.track(this.settleLocalRevisionWorkflow(
+      queueKey,
       previous
         .catch(() => undefined)
         .then(() => this.runGeneration(key, input, abortController))
-    );
+    ));
     const tail = operation.then(
       () => undefined,
       () => undefined
@@ -383,6 +588,30 @@ export class DocumentGenerationApplicationService {
     await Promise.all([...this.operations]);
   }
 
+  private async settleLocalRevisionWorkflow<T>(
+    queueKey: string,
+    operation: Promise<T>
+  ): Promise<T> {
+    const executionId = this.localRevisionWorkflows.get(queueKey);
+    if (!executionId || !this.dependencies.workflows) return operation;
+    try {
+      const result = await operation;
+      await this.dependencies.workflows.finishExecution(executionId, 'completed');
+      return result;
+    } catch (error) {
+      await this.dependencies.workflows.finishExecution(
+        executionId,
+        error instanceof DocumentGenerationApplicationError &&
+          error.code === 'cancelled'
+          ? 'cancelled'
+          : 'failed'
+      );
+      throw error;
+    } finally {
+      this.localRevisionWorkflows.delete(queueKey);
+    }
+  }
+
   private async runGeneration(
     key: string,
     input: GenerateDocumentFromMessageInput,
@@ -427,14 +656,44 @@ export class DocumentGenerationApplicationService {
         state: 'validating_outline',
         kind: input.kind
       });
-      let outline = this.compileDraft(content, input.kind);
-      let revisionTargetSectionHeading: string | undefined;
-      let revisionPatch: DocumentRevisionPatch | undefined;
-      let revisionPatches: readonly DocumentRevisionPatch[] | undefined;
       const requestText = collectRevisionRequestText(
         conversation,
         input.messageId
       );
+      const previousMessage = input.parentWorkId === undefined
+        ? undefined
+        : [...conversation.messages]
+            .reverse()
+            .find((item) => {
+              const result = item.documentResult;
+              return (
+                item.role === 'assistant' &&
+                result?.workId === input.parentWorkId &&
+                result?.kind === input.kind
+              );
+            });
+      const previousOutline = previousMessage
+        ? this.compileLegacyDraft(
+            previousMessage.documentResult?.validatedContent ?? previousMessage.content,
+            input.kind
+          )
+        : undefined;
+      const revisionTarget = requestText === undefined
+        ? undefined
+        : parseRevisionTarget(requestText);
+      const useDeterministicClearRevision =
+        input.parentWorkId !== undefined &&
+        requestText !== undefined &&
+        revisionTarget !== undefined &&
+        previousOutline !== undefined &&
+        this.dependencies.revisionAgent !== undefined &&
+        isExplicitClearRevisionRequest(requestText);
+      let outline = useDeterministicClearRevision
+        ? previousOutline
+        : this.compileDraft(content, input.kind);
+      let revisionTargetSectionHeading: string | undefined;
+      let revisionPatch: DocumentRevisionPatch | undefined;
+      let revisionPatches: readonly DocumentRevisionPatch[] | undefined;
       const requestedTotalPages =
         input.kind === 'ppt' && requestText !== undefined
           ? parseRequestedPresentationTotalPages(requestText)
@@ -449,21 +708,7 @@ export class DocumentGenerationApplicationService {
         );
       }
       if (input.parentWorkId !== undefined) {
-        const previousMessage = [...conversation.messages]
-          .reverse()
-          .find((item) => {
-            const result = item.documentResult;
-            return (
-              item.role === 'assistant' &&
-              result?.workId === input.parentWorkId &&
-              result?.kind === input.kind
-            );
-          });
-        if (previousMessage && requestText) {
-          const previousOutline = this.compileLegacyDraft(
-            previousMessage.content,
-            input.kind
-          );
+        if (previousOutline && requestText) {
           let revisionApplied = false;
           if (requestedTotalPages !== undefined) {
             outline = validateFullPresentationPageCountRevision(
@@ -487,7 +732,9 @@ export class DocumentGenerationApplicationService {
                 kind: input.kind,
                 requestText,
                 outline: previousOutline,
-                proposedOutline: outline,
+                ...(useDeterministicClearRevision
+                  ? {}
+                  : { proposedOutline: outline }),
                 signal: abortController.signal
               });
             } catch (error) {
@@ -530,9 +777,10 @@ export class DocumentGenerationApplicationService {
             revisionPatches = revision.patches;
             revisionApplied = true;
           }
-          const ordinal = parseRevisionOrdinal(requestText);
-          if (ordinal !== undefined) {
-            const heading = previousOutline.sections[ordinal - 1]?.heading;
+          if (revisionTarget !== undefined) {
+            const heading = previousOutline.sections[
+              revisionSectionIndex(previousOutline.kind, revisionTarget)
+            ]?.heading;
             if (heading === undefined) {
               throw new DocumentGenerationApplicationError(
                 'revision_scope_violation',
@@ -568,7 +816,9 @@ export class DocumentGenerationApplicationService {
       const generated = await this.dependencies.generator.run({
       kind: input.kind,
       title: outline.title,
-      contentFingerprint: this.dependencies.fingerprint(content),
+      contentFingerprint: this.dependencies.fingerprint(
+        useDeterministicClearRevision ? requestText : content
+      ),
       draftRevision: 1,
       sourceDraftId: `message-${input.messageId}`,
       outline,
@@ -591,7 +841,7 @@ export class DocumentGenerationApplicationService {
       images: input.images
       });
 
-      await this.attachResult(input, generated);
+      await this.attachResult(input, generated, outline);
       return {
         conversationId: input.conversationId,
         messageId: input.messageId,
@@ -708,7 +958,8 @@ export class DocumentGenerationApplicationService {
 
   private async attachResult(
     input: GenerateDocumentFromMessageInput,
-    generated: DocumentGenerationExecutionResult
+    generated: DocumentGenerationExecutionResult,
+    validatedOutline: DocumentOutline
   ): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = await this.dependencies.conversations.load(
@@ -729,7 +980,8 @@ export class DocumentGenerationApplicationService {
             workId: generated.workId,
             fileName: generated.fileName,
             kind: input.kind,
-            sizeBytes: generated.sizeBytes
+            sizeBytes: generated.sizeBytes,
+            validatedContent: JSON.stringify(validatedOutline)
           }
         });
         return;
@@ -813,7 +1065,7 @@ function operationKey(
 
 function messageQueueKey(
   projectId: ProjectId,
-  input: GenerateDocumentFromMessageInput
+  input: Pick<GenerateDocumentFromMessageInput, 'conversationId' | 'messageId'>
 ): string {
   return `${projectId}:${input.conversationId}:${input.messageId}`;
 }
@@ -846,6 +1098,18 @@ function documentFailureCode(error: unknown): DocumentGenerationFailureCode {
     return 'revision_conflict';
   }
   return 'generation_failed';
+}
+
+function workflowTargetMatches(
+  workflow: ConversationWorkflowV1,
+  target: { readonly unit: 'page' | 'section'; readonly ordinal: number }
+): boolean {
+  const hint = workflow.plan.targetHint;
+  return (
+    hint?.unit === target.unit &&
+    hint.ordinal === target.ordinal &&
+    hint.name === undefined
+  );
 }
 
 export function collectRevisionRequestText(
@@ -977,6 +1241,22 @@ export function toDocumentGenerationApplicationInput(input: {
   };
 }
 
+export function toPrepareDeterministicDocumentRevisionInput(input: {
+  readonly conversationId: string;
+  readonly expectedRevision: number;
+  readonly workflowId: string;
+  readonly expectedWorkflowRevision: number;
+  readonly kind: DocumentWorkspaceKind;
+  readonly parentWorkId: string;
+}): PrepareDeterministicDocumentRevisionInput {
+  return {
+    ...input,
+    conversationId: toConversationId(input.conversationId),
+    workflowId: toConversationWorkflowId(input.workflowId),
+    parentWorkId: toWorkId(input.parentWorkId)
+  };
+}
+
 /**
  * Keeps a revision scoped to the chapter/page the user named. The model still
  * returns a complete outline for validation, but sections outside the ordinal
@@ -989,9 +1269,10 @@ export function preserveUntargetedDocumentSections(
   requestText: string
 ): DocumentOutline {
   if (previous.kind !== next.kind) return next;
-  const ordinal = parseRevisionOrdinal(requestText);
-  if (ordinal === undefined || ordinal > previous.sections.length) return next;
-  const targetIndex = ordinal - 1;
+  const revisionTarget = parseRevisionTarget(requestText);
+  if (revisionTarget === undefined) return next;
+  const targetIndex = revisionSectionIndex(previous.kind, revisionTarget);
+  if (targetIndex < 0 || targetIndex >= previous.sections.length) return next;
   const target = next.sections[targetIndex];
   const base = previous.sections[targetIndex];
   if (!target || !base) return next;
@@ -1057,6 +1338,8 @@ function rewriteSectionForNonTechnicalManagers(
 }
 
 export function parseRevisionOrdinal(value: string): number | undefined {
+  const target = parseRevisionTarget(value);
+  if (target !== undefined) return target.ordinal;
   const match = /第\s*([一二三四五六七八九十百千万\d]+)\s*(?:章|节|页|部分)/u.exec(
     value
   );

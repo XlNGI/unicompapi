@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConversationApplicationService,
   ConversationStreamingService,
+  DocumentGenerationApplicationError,
   DocumentGenerationApplicationService
 } from '../../src/application';
 import {
@@ -159,9 +160,92 @@ describe('document generation controller', () => {
     const { controller } = await createEnvironment();
     expect(controller).not.toHaveProperty('generateFromConversation');
     expect(controller).toHaveProperty('generateFromMessage');
+    expect(controller).toHaveProperty('prepareDeterministicRevision');
     expect(controller).toHaveProperty('prepareGeneration');
     expect(controller).toHaveProperty('reconcileGeneration');
     expect(controller).toHaveProperty('cancelGeneration');
+  });
+
+  it('exposes a strict deterministic revision preparation contract', async () => {
+    const application = {
+      prepareDeterministicRevision: async () => ({
+        conversationId: toConversationId('document-local-conversation'),
+        expectedRevision: 8,
+        messageId: toMessageId('document-local-message')
+      })
+    } as unknown as DocumentGenerationApplicationService;
+    const controller = new DocumentGenerationController({
+      getSession: () => ({
+        projectId: toProjectId('document-local-project'),
+        projectName: 'Document local project',
+        rootDirectory: process.cwd()
+      }),
+      getApplication: () => application,
+      openPath: async () => ''
+    });
+
+    await expect(controller.prepareDeterministicRevision({
+      conversationId: 'document-local-conversation',
+      expectedRevision: 7,
+      workflowId: 'document-local-workflow',
+      expectedWorkflowRevision: 2,
+      kind: 'ppt',
+      parentWorkId: 'document-local-parent'
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        conversationId: 'document-local-conversation',
+        expectedRevision: 8,
+        messageId: 'document-local-message'
+      }
+    });
+    await expect(controller.prepareDeterministicRevision({
+      conversationId: 'document-local-conversation',
+      expectedRevision: 7,
+      workflowId: 'document-local-workflow',
+      expectedWorkflowRevision: 2,
+      kind: 'ppt',
+      parentWorkId: 'document-local-parent',
+      outputPath: 'D:\\unsafe\\result.pptx'
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_request',
+        message:
+          'prepareDeterministicRevision contains unsupported field outputPath'
+      }
+    });
+  });
+
+  it.each([
+    ['revision_scope_violation', 'Revision target is outside the document'],
+    ['revision_patch_failed', 'Revision patch could not be applied'],
+    ['unvalidated_output', 'Revision produced no validated change']
+  ] as const)('preserves the actionable %s error code', async (code, message) => {
+    const application = {
+      generateFromMessage: async () => {
+        throw new DocumentGenerationApplicationError(code, message);
+      }
+    } as unknown as DocumentGenerationApplicationService;
+    const controller = new DocumentGenerationController({
+      getSession: () => ({
+        projectId: toProjectId('document-error-project'),
+        projectName: 'Document error project',
+        rootDirectory: process.cwd()
+      }),
+      getApplication: () => application,
+      openPath: async () => ''
+    });
+
+    await expect(controller.generateFromMessage({
+      conversationId: 'document-error-conversation',
+      expectedRevision: 0,
+      messageId: 'document-error-message',
+      kind: 'ppt'
+    })).resolves.toEqual({
+      ok: false,
+      error: { code, message }
+    });
   });
 
   it('opens the registered document file', async () => {
@@ -242,6 +326,13 @@ describe('document generation controller', () => {
     expect(message?.state).toBe('completed');
     if (message?.state !== 'completed') throw new Error('message not completed');
     expect(message.documentResult?.workId).toBe(result.value.workId);
+    const validatedOutline = JSON.parse(
+      message.documentResult?.validatedContent ?? ''
+    );
+    expect(validatedOutline).toMatchObject({
+      kind: 'word',
+      title: '项目周报'
+    });
     const works = new JsonWorkRepository(
       new NodeProjectStorage(rootDirectory),
       toProjectId('doc-ipc-project')

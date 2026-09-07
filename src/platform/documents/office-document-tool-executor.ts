@@ -11,6 +11,7 @@ import type {
 import {
   readStructuredDocument,
   type DocumentPatch,
+  type DocumentPatchTargetUnit,
   type DocumentStructureSnapshot
 } from './structured-document-tools';
 
@@ -159,6 +160,17 @@ export async function applyOfficeDocumentPatchToBuffer(
   ) {
     throw new OfficeDocumentToolError('target_not_found', 'Fine-grained operation does not match the Office format');
   }
+  if (
+    patch.target.targetUnit === 'page' &&
+    (kind !== 'ppt' ||
+      !Number.isSafeInteger(patch.target.pageNumber) ||
+      Number(patch.target.pageNumber) < 1)
+  ) {
+    throw new OfficeDocumentToolError(
+      'target_not_found',
+      'Physical page targets require a positive PPT page number'
+    );
+  }
   const sectionIndex = patch.target.sectionIndex;
   if (
     typeof sectionIndex !== 'number' ||
@@ -215,13 +227,15 @@ export async function applyOfficeDocumentPatchToBuffer(
         zip,
         sectionIndex,
         patch.target.sectionHeading,
-        patch.target.pageNumber
+        patch.target.pageNumber,
+        patch.target.targetUnit
       )
     : replacePptSection(
         zip,
         sectionIndex,
         patch.target.sectionHeading,
         patch.target.pageNumber,
+        patch.target.targetUnit,
         requireReplacement(patch)
       );
 }
@@ -235,7 +249,7 @@ export async function applyOfficeDocumentPatchesToBuffer(
     throw new OfficeDocumentToolError('target_not_found', 'The Office patch batch must contain one to eight patches');
   }
   const targets = new Set(patches.map((patch) =>
-    `${patch.operation}:${patch.target.sectionIndex}:${patch.target.blockIndex ?? ''}:${patch.target.rowIndex ?? ''}:${patch.target.columnIndex ?? ''}`
+    `${patch.operation}:${patch.target.targetUnit ?? ''}:${patch.target.sectionIndex ?? ''}:${patch.target.pageNumber ?? ''}:${patch.target.blockIndex ?? ''}:${patch.target.rowIndex ?? ''}:${patch.target.columnIndex ?? ''}`
   ));
   if (targets.size !== patches.length) {
     throw new OfficeDocumentToolError('target_not_found', 'The Office patch batch contains duplicate targets');
@@ -492,14 +506,27 @@ async function parsePptOutline(zip: JSZip, relativePath: string): Promise<Docume
   for (const name of names) {
     const xml = await zip.file(name)!.async('string');
     const texts = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
-      .map((match) => decodeXml(match[1]))
-      .filter((text) => text.trim().length > 0);
-    if (texts.length === 0) continue;
+      .map((match) => decodeXml(match[1]));
+    const pageNumberIndex = pptPageNumberTextIndex(
+      xml,
+      texts,
+      pptSlideNumber(name)
+    );
+    const headingIndex = texts.findIndex(
+      (text, index) => index !== pageNumberIndex && text.trim().length > 0
+    );
+    if (headingIndex < 0) continue;
     sections.push({
-      heading: texts[0],
+      heading: texts[headingIndex],
       level: 1,
       pageKind: 'insight',
-      blocks: texts.slice(1).map((text): DocumentOutlineBlock => ({ type: 'paragraph', text }))
+      blocks: texts
+        .filter((_text, index) =>
+          index !== headingIndex &&
+          index !== pageNumberIndex &&
+          texts[index].trim().length > 0
+        )
+        .map((text): DocumentOutlineBlock => ({ type: 'paragraph', text }))
     });
   }
   return {
@@ -579,7 +606,8 @@ async function clearPptSection(
   zip: JSZip,
   sectionIndex: number,
   sectionHeading?: string,
-  pageNumber?: number
+  pageNumber?: number,
+  targetUnit?: DocumentPatchTargetUnit
 ): Promise<Uint8Array> {
   const names = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
@@ -589,15 +617,37 @@ async function clearPptSection(
     names,
     sectionIndex,
     sectionHeading,
-    pageNumber
+    pageNumber,
+    targetUnit,
+    targetUnit === 'page' && sectionHeading !== undefined
   );
   for (const name of targets) {
     const xml = await zip.file(name)!.async('string');
+    const originalTexts = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
+      .map((match) => decodeXml(match[1]));
+    const pageNumberIndex = pptPageNumberTextIndex(
+      xml,
+      originalTexts,
+      pptSlideNumber(name),
+      targetUnit === 'page'
+    );
+    const physicalPageHeadingIndex = targetUnit === 'page'
+      ? originalTexts.findIndex(
+          (text, index) => index !== pageNumberIndex && text.trim().length > 0
+        )
+      : -1;
     let headingPreserved = false;
+    let textIndex = 0;
     const patched = xml.replace(
       /(<a:t(?:\s[^>]*)?>)([\s\S]*?)(<\/a:t>)/gu,
       (match, open: string, text: string, close: string) => {
+        const currentIndex = textIndex++;
         const decoded = decodeXml(text);
+        if (currentIndex === pageNumberIndex) return match;
+        if (currentIndex === physicalPageHeadingIndex) {
+          headingPreserved = true;
+          return match;
+        }
         if (
           !headingPreserved &&
           (sectionHeading === undefined ||
@@ -620,6 +670,7 @@ async function replacePptSection(
   sectionIndex: number,
   sectionHeading: string | undefined,
   pageNumber: number | undefined,
+  targetUnit: DocumentPatchTargetUnit | undefined,
   replacement: DocumentOutlineSection
 ): Promise<Uint8Array> {
   const names = Object.keys(zip.files)
@@ -630,7 +681,9 @@ async function replacePptSection(
     names,
     sectionIndex,
     sectionHeading,
-    pageNumber
+    pageNumber,
+    targetUnit,
+    true
   );
   const xmlByName = await Promise.all(
     targets.map(async (name) => ({ name, xml: await zip.file(name)!.async('string') }))
@@ -643,9 +696,12 @@ async function replacePptSection(
       text === sectionHeading ||
       text.startsWith(`${sectionHeading}（续`)
     );
-    const pageNumberIndex = texts.length > 1 && /^\d+$/u.test(texts.at(-1) ?? '')
-      ? texts.length - 1
-      : -1;
+    const pageNumberIndex = pptPageNumberTextIndex(
+      item.xml,
+      texts,
+      pptSlideNumber(item.name),
+      targetUnit === 'page'
+    );
     return total + texts.filter((_text, index) => index !== headingIndex && index !== pageNumberIndex).length;
   }, 0);
   const values = replacementTextValues(replacement);
@@ -664,9 +720,12 @@ async function replacePptSection(
       text === sectionHeading ||
       text.startsWith(`${sectionHeading}（续`)
     );
-    const pageNumberIndex = originalTexts.length > 1 && /^\d+$/u.test(originalTexts.at(-1) ?? '')
-      ? originalTexts.length - 1
-      : -1;
+    const pageNumberIndex = pptPageNumberTextIndex(
+      item.xml,
+      originalTexts,
+      pptSlideNumber(item.name),
+      targetUnit === 'page'
+    );
     let runIndex = 0;
     const patched = item.xml.replace(
       /(<a:t(?:\s[^>]*)?>)[\s\S]*?(<\/a:t>)/gu,
@@ -687,11 +746,40 @@ async function resolvePptTargetNames(
   names: readonly string[],
   sectionIndex: number,
   sectionHeading?: string,
-  pageNumber?: number
+  pageNumber?: number,
+  targetUnit?: DocumentPatchTargetUnit,
+  requireHeadingMatch = false
 ): Promise<readonly string[]> {
   const isTargetSlideHeading = (text: string): boolean =>
     sectionHeading !== undefined &&
     (text === sectionHeading || text.startsWith(`${sectionHeading}（续`));
+  if (targetUnit === 'page') {
+    const pageIndex = pageNumber === undefined ? -1 : pageNumber - 1;
+    const pageName = names[pageIndex];
+    if (!pageName) {
+      throw new OfficeDocumentToolError('target_not_found', 'PPT page does not exist');
+    }
+    if (requireHeadingMatch && sectionHeading !== undefined) {
+      const xml = await zip.file(pageName)!.async('string');
+      const texts = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
+        .map((match) => decodeXml(match[1]));
+      const pageNumberIndex = pptPageNumberTextIndex(
+        xml,
+        texts,
+        pptSlideNumber(pageName)
+      );
+      const heading = texts.find(
+        (text, index) => index !== pageNumberIndex && text.trim().length > 0
+      );
+      if (heading === undefined || !isTargetSlideHeading(heading)) {
+        throw new OfficeDocumentToolError(
+          'target_not_found',
+          'PPT page cannot be mapped safely to the proposed replacement section'
+        );
+      }
+    }
+    return [pageName];
+  }
   if (sectionHeading) {
     const targetIndex = pageNumber === undefined ? sectionIndex : pageNumber - 1;
     const ordinalName = names[targetIndex];
@@ -762,6 +850,42 @@ async function hasMultiplePptHeadings(
     }
   }
   return false;
+}
+
+function pptSlideNumber(name: string): number | undefined {
+  const value = Number(/slide(\d+)\.xml$/u.exec(name)?.[1]);
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function pptPageNumberTextIndex(
+  xml: string,
+  texts: readonly string[],
+  expectedPageNumber: number | undefined,
+  allowLegacyFallback = false
+): number {
+  if (expectedPageNumber === undefined) return -1;
+  const expected = String(expectedPageNumber);
+  const shapes = [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/gu)];
+  const pageNumberShape = shapes.find((match) => {
+    const shape = match[0];
+    const isKnownPageNumberShape =
+      /<p:cNvPr\b[^>]*\bname=["']UniComp Page Number["']/u.test(shape) ||
+      /<a:off\b[^>]*\bx=["']11247120["'][^>]*\by=["']6446520["'][^>]*\/>/u.test(shape);
+    if (!isKnownPageNumberShape) return false;
+    const values = [...shape.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gu)]
+      .map((item) => decodeXml(item[1]).trim());
+    return values.length === 1 && values[0] === expected;
+  });
+  if (!pageNumberShape || pageNumberShape.index === undefined) {
+    return allowLegacyFallback && texts.length > 1 && texts.at(-1)?.trim() === expected
+      ? texts.length - 1
+      : -1;
+  }
+  const shapeText = /<a:t(?:\s[^>]*)?>[\s\S]*?<\/a:t>/u.exec(pageNumberShape[0]);
+  if (!shapeText || shapeText.index === undefined) return -1;
+  const absoluteTextOffset = pageNumberShape.index + shapeText.index;
+  const textIndex = [...xml.slice(0, absoluteTextOffset).matchAll(/<a:t(?:\s[^>]*)?>/gu)].length;
+  return texts[textIndex]?.trim() === expected ? textIndex : -1;
 }
 
 async function clearExcelSection(buffer: Uint8Array, sectionIndex: number): Promise<Uint8Array> {

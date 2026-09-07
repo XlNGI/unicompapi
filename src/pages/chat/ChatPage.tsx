@@ -57,6 +57,7 @@ import {
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
 import { failedResponseNotice } from '../../ui/chat-response-failure-notice';
 import {
+  parseDeterministicClearRevisionTarget,
   waitForDocumentResponseCompletion,
   type OfficeRequestAction
 } from '../../application';
@@ -106,7 +107,15 @@ const documentErrorMessages: Record<string, string> = {
   project_not_open: '请先打开项目。',
   conversation_not_found: '该对话已不存在。',
   conversation_not_active: '请先恢复已归档对话。',
-  revision_conflict: '内容已变化，请重试。',
+  revision_conflict: '文档刚刚更新，请基于最新版本重试。',
+  local_revision_not_supported:
+    '这项修改不能安全地在本地直接执行，请检查目标是否唯一且已确认。',
+  revision_scope_violation:
+    '没有安全定位到要修改的范围，原文件未改变。请写明具体页、章节或表格。',
+  revision_patch_failed:
+    '这项修改无法套用到当前文档结构，原文件未改变。请缩小范围或明确目标。',
+  unvalidated_output:
+    '没有产生可验证的内容变化，原文件未改变。请补充希望改成什么内容。',
   invalid_outline: '文档大纲无效，请调整需求后重试。',
   page_count_mismatch: 'PPT 页数未达到明确要求，请减少单页内容后重试。',
   document_layout_overflow:
@@ -367,6 +376,12 @@ function documentGenerationMessage(
       return 'AI 内容生成未完成，文档未生成。';
     case 'invalid_outline':
       return 'AI 内容格式异常，文档未生成，请重试或切换模型。';
+    case 'revision_scope_violation':
+      return '没有安全定位到要修改的范围，原文件未改变。请写明具体页、章节或表格。';
+    case 'revision_patch_failed':
+      return '这项修改无法套用到当前文档结构，原文件未改变。请缩小范围或明确目标。';
+    case 'unvalidated_output':
+      return '没有产生可验证的内容变化，原文件未改变。请补充希望改成什么内容。';
     case 'page_count_mismatch':
       return 'PPT 页数未达到明确要求，文档未生成，请减少单页内容后重试。';
     case 'resource_limit':
@@ -391,6 +406,50 @@ function workflowQuestion(workflow: ConversationWorkflowDto): string {
   return workflow.pendingQuestions[0]?.question ??
     workflow.plan.ambiguities[0] ??
     '请补充具体目标后再继续。';
+}
+
+function workflowConfirmationDetails(
+  workflow: ConversationWorkflowDto,
+  conversation?: ConversationDto
+): readonly string[] {
+  if (workflow.status !== 'needs_confirmation' || workflow.plan.action !== 'revise') {
+    return [];
+  }
+  const targetMessage = workflow.resolvedTarget?.artifactRef
+    ? conversation?.messages.find(
+        (message) => message.messageId === workflow.resolvedTarget?.artifactRef
+      )
+    : undefined;
+  const document = targetMessage?.documentResult;
+  const kind = document?.kind ?? (
+    workflow.plan.documentKind && workflow.plan.documentKind !== 'auto'
+      ? workflow.plan.documentKind
+      : undefined
+  );
+  const details: string[] = [];
+  if (document?.fileName) details.push(`文件：${document.fileName}`);
+  const target = workflow.plan.targetHint;
+  if (target?.unit === 'page' && target.ordinal !== undefined) {
+    details.push(
+      kind === 'ppt'
+        ? `目标：PPT 物理第 ${target.ordinal} 张（含封面）`
+        : `目标：第 ${target.ordinal} 页`
+    );
+  } else if (target?.unit === 'section' && target.ordinal !== undefined) {
+    details.push(`目标：正文第 ${target.ordinal} 个 section`);
+  } else if (target?.name) {
+    details.push(`目标：${target.name}`);
+  }
+  const source = conversation?.messages.find(
+    (message) => message.messageId === workflow.sourceMessageId
+  )?.content ?? '';
+  details.push(
+    /(?:清空|清除|删除|删掉)/u.test(source)
+      ? '操作：清空目标范围的正文内容'
+      : '操作：按当前请求修改目标范围'
+  );
+  details.push('保留：其他页面与原文件不变，成功后生成新版文件');
+  return details;
 }
 
 function workflowRequirements(
@@ -1286,11 +1345,6 @@ export function ChatPage({
         setBusy(false);
       }
     }
-    if (!selectedCandidateId || !selectedCandidate?.available) {
-      setActiveWorkflow(workflow);
-      setNotice('需求已准备好，请选择一个可用模型后继续。');
-      return;
-    }
     const source = conversation.messages.find(
       (message) => message.messageId === workflow.sourceMessageId
     );
@@ -1317,6 +1371,11 @@ export function ChatPage({
         useInternalSources: workflow.plan.sourcePolicy === 'internal' || ragEnabled,
         researchReferences
       });
+      return;
+    }
+    if (!selectedCandidateId || !selectedCandidate?.available) {
+      setActiveWorkflow(workflow);
+      setNotice('需求已准备好，请选择一个可用模型后继续。');
       return;
     }
     if (workflow.plan.kind !== 'chat') {
@@ -1666,8 +1725,6 @@ export function ChatPage({
       !session ||
       executionConversation.readOnly ||
       executionConversation.status !== 'active' ||
-      !selectedCandidateId ||
-      !selectedCandidate?.available ||
       busy ||
       responseInProgress
     ) {
@@ -1697,10 +1754,40 @@ export function ChatPage({
       setNotice(`请先生成或选择一份可修改的上一版 ${documentKindLabel(kind)}。`);
       return;
     }
+    const sourceMessage = executionConversation.messages.find(
+      (message) => message.messageId === execution.workflow.sourceMessageId
+    );
+    const deterministicTarget = parseDeterministicClearRevisionTarget(
+      sourceMessage?.content ?? ''
+    );
+    const workflowTarget = execution.workflow.plan.targetHint;
+    const useDeterministicLocalRevision = Boolean(
+      action === 'revise' &&
+      previousDocument?.documentResult?.validatedContent &&
+      deterministicTarget &&
+      workflowTarget?.unit === deterministicTarget.unit &&
+      workflowTarget.ordinal === deterministicTarget.ordinal &&
+      workflowTarget.name === undefined &&
+      execution.workflow.plan.sourcePolicy === 'none' &&
+      attachments.length === 0 &&
+      (execution.researchReferences?.length ?? 0) === 0
+    );
+    if (
+      !useDeterministicLocalRevision &&
+      (!selectedCandidateId || !selectedCandidate?.available)
+    ) {
+      setActiveWorkflow(execution.workflow);
+      setNotice('这项修改需要模型生成内容，请选择一个可用模型后继续。');
+      return;
+    }
     documentGenerationInFlightRef.current = true;
     responseFailureSafeCodeRef.current = undefined;
     setBusy(true);
-    setNotice('AI 正在撰写文档内容…');
+    setNotice(
+      useDeterministicLocalRevision
+        ? '正在本地校验并修改文档…'
+        : 'AI 正在撰写文档内容…'
+    );
     rendererTrace('sendDocumentMessage:start', JSON.stringify({
       selectedId: executionConversation.conversationId,
       documentKind,
@@ -1708,6 +1795,80 @@ export function ChatPage({
       candidateId: selectedCandidateId,
       productFeature: responseFeature
     }));
+    if (useDeterministicLocalRevision && previousDocument?.documentResult) {
+      try {
+        const prepared = await documentGeneration.prepareDeterministicRevision({
+          conversationId: executionConversation.conversationId,
+          expectedRevision: executionConversation.revision,
+          workflowId: execution.workflow.workflowId,
+          expectedWorkflowRevision: execution.workflow.revision,
+          kind,
+          parentWorkId: previousDocument.documentResult.workId
+        });
+        if (!prepared.ok) {
+          setNotice(describeDocumentError(prepared.error));
+          setActiveWorkflow(execution.workflow);
+          return;
+        }
+        setActiveWorkflow(undefined);
+        const preparedConversation = await chat.getConversation(
+          prepared.value.conversationId
+        );
+        if (preparedConversation.ok) {
+          replaceConversation(preparedConversation.value);
+          setSelectedId(preparedConversation.value.conversationId);
+        }
+        const generationContext = {
+          conversationId: prepared.value.conversationId,
+          expectedRevision: prepared.value.expectedRevision,
+          messageId: prepared.value.messageId
+        };
+        activeDocumentGenerationRef.current = generationContext;
+        setDocumentGenerationActive(true);
+        setDocumentCancelRequested(false);
+        const generated = await documentGeneration.generateFromMessage({
+          ...generationContext,
+          kind,
+          parentWorkId: previousDocument.documentResult.workId,
+          ...(kind === 'ppt'
+            ? {
+                presentationTemplate: resolvePresentationTemplate(
+                  presentationTemplate,
+                  requirements
+                )
+              }
+            : { theme: documentTheme }),
+          images: []
+        });
+        if (!generated.ok) {
+          setNotice(describeDocumentError(generated.error));
+        } else {
+          setNotice(
+            `新版文档已生成，基于 ${previousDocument.documentResult.fileName} 修改，原文件已保留。`
+          );
+          setDocumentMode(false);
+        }
+        const refreshed = await chat.getConversation(
+          prepared.value.conversationId
+        );
+        if (refreshed.ok) {
+          replaceConversation(refreshed.value);
+          setSelectedId(refreshed.value.conversationId);
+        }
+      } catch {
+        setNotice('本地文档修改失败，原文件未改变，请重试。');
+      } finally {
+        activeDocumentGenerationRef.current = undefined;
+        setDocumentGenerationActive(false);
+        setDocumentCancelRequested(false);
+        documentGenerationInFlightRef.current = false;
+        setBusy(false);
+      }
+      return;
+    }
+    if (!selectedCandidateId || !selectedCandidate) return;
+    const modelCandidateId = selectedCandidateId;
+    const modelCandidate = selectedCandidate;
     const attachmentText = attachments
       .filter((attachment) => attachment.status === 'extracted')
       .map(
@@ -1716,7 +1877,7 @@ export function ChatPage({
       )
       .join('\n\n');
     const revisionInput = composeDocumentRevisionInput(
-      previousDocument?.content,
+      previousDocument?.documentResult?.validatedContent ?? previousDocument?.content,
       requirements,
       kind
     );
@@ -1724,7 +1885,7 @@ export function ChatPage({
       presentationTemplate,
       requirements
     );
-    const responseParameterValues = documentResponseParameterValues(selectedCandidate);
+    const responseParameterValues = documentResponseParameterValues(modelCandidate);
     const combined = attachmentText
       ? `${revisionInput}\n\n${attachmentText}`
       : revisionInput;
@@ -1773,7 +1934,7 @@ export function ChatPage({
             expectedRevision: execution.workflow.revision
           },
           productFeature: responseFeature,
-          candidateId: selectedCandidateId,
+          candidateId: modelCandidateId,
           contextSelections: includedContextIds.flatMap((contextId) => {
             const context = viewedContexts[contextId];
             return context
@@ -2684,15 +2845,24 @@ export function ChatPage({
         <div className="uc-chat-page__composer-region">
           {activeWorkflow ? (
             <div className="uc-chat-page__workflow-status" role="status">
-              <span>
-                {webResearchSession?.status === 'authorization_required'
-                  ? `联网检索授权：${webResearchSession.authorization?.querySummary ?? '当前查询'}（允许域名：${webResearchSession.authorization?.allowedDomains.join('、') ?? '未配置'}）`
-                  : activeWorkflow.status === 'needs_clarification'
-                  ? workflowQuestion(activeWorkflow)
-                  : activeWorkflow.status === 'needs_confirmation'
-                    ? '这项任务需要确认后才能执行。'
-                    : '这项任务已准备好。'}
-              </span>
+              <div className="uc-chat-page__workflow-copy">
+                <span>
+                  {webResearchSession?.status === 'authorization_required'
+                    ? `联网检索授权：${webResearchSession.authorization?.querySummary ?? '当前查询'}（允许域名：${webResearchSession.authorization?.allowedDomains.join('、') ?? '未配置'}）`
+                    : activeWorkflow.status === 'needs_clarification'
+                    ? workflowQuestion(activeWorkflow)
+                    : activeWorkflow.status === 'needs_confirmation'
+                      ? '这项任务需要确认后才能执行。'
+                      : '这项任务已准备好。'}
+                </span>
+                {activeWorkflow.status === 'needs_confirmation' ? (
+                  <div className="uc-chat-page__workflow-details" role="note">
+                    {workflowConfirmationDetails(activeWorkflow, selected).map((detail) => (
+                      <span key={detail}>{detail}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <div className="uc-chat-page__workflow-actions">
                 {webResearchSession?.status === 'authorization_required' ? (
                   <Button

@@ -3,7 +3,9 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { app, ipcMain, shell } from 'electron';
 import {
+  ConversationIntentOrchestrator,
   ConversationStreamingService,
+  ConversationWorkflowService,
   DocumentGenerationApplicationService
 } from '../../src/application';
 import { runLocalDocumentRevisionAgent } from '../../src/application';
@@ -17,6 +19,7 @@ import {
   FileExtractionService,
   JsonFileReferenceRepository,
   JsonProjectConversationRepository,
+  JsonConversationWorkflowRepository,
   NodeProjectStorage,
   PlatformDocumentDraftCompiler,
   PlatformDocumentGenerationExecutor,
@@ -60,6 +63,15 @@ export function registerDocumentGenerationIpcHandlers(options: {
         now
       );
       const streaming = new ConversationStreamingService(repository, ids, now);
+      const workflowService = new ConversationWorkflowService(
+        new JsonConversationWorkflowRepository(
+          storage,
+          session.projectId,
+          now
+        ),
+        new ConversationIntentOrchestrator(),
+        now
+      );
       const runner = new DocumentGenerationRunner({
         rootDirectory: session.rootDirectory,
         projectId: session.projectId,
@@ -71,11 +83,22 @@ export function registerDocumentGenerationIpcHandlers(options: {
         projectId: session.projectId,
         conversations: {
           load: (conversationId) => repository.get(conversationId),
+          createCompletedLocalAssistantMessage: (input) =>
+            streaming.createCompletedLocalAssistantMessage(input),
           attachDocumentResult: async (input) => {
             await streaming.attachDocumentResult(input);
           },
           updateDocumentGenerationStatus: async (input) => {
             await streaming.updateDocumentGenerationStatus(input);
+          }
+        },
+        workflows: {
+          load: (workflowId) => workflowService.get(workflowId),
+          beginExecution: async (input) => {
+            await workflowService.beginExecution(input);
+          },
+          finishExecution: async (executionId, status) => {
+            await workflowService.finishExecution(executionId, status);
           }
         },
         compiler: new PlatformDocumentDraftCompiler(),
@@ -93,7 +116,9 @@ export function registerDocumentGenerationIpcHandlers(options: {
             }
           }),
         fingerprint: (content) =>
-          createHash('sha256').update(content).digest('hex')
+          createHash('sha256').update(content).digest('hex'),
+        nextLocalExecutionId: () =>
+          `local-document-revision-${randomUUID()}`
       });
       applications.set(key, application);
       return application;
@@ -117,6 +142,11 @@ export function registerDocumentGenerationIpcHandlers(options: {
     }
   });
 
+  ipcMain.handle(
+    documentGenerationIpcChannels.prepareDeterministicRevision,
+    (_event, request: unknown) =>
+      controller.prepareDeterministicRevision(request)
+  );
   ipcMain.handle(
     documentGenerationIpcChannels.prepareGeneration,
     (_event, request: unknown) => controller.prepareGeneration(request)
