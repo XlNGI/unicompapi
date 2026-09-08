@@ -31,7 +31,7 @@ test('workspace feedback uses one reusable floating status bar', () => {
   assert.match(appStyles, /\.uc-project-status-dock \{[\s\S]*grid-column: 2;/);
   assert.doesNotMatch(appStyles, /\.uc-project-status-bar \{[^}]*position: fixed;/);
   assert.match(appStyles, /\.uc-project-status-bar \{[\s\S]*min-height: 44px;/);
-  assert.match(appStyles, /\.uc-project-status-bar \{[\s\S]*padding: var\(--uc-space-2\) var\(--uc-space-3\);/);
+  assert.match(appStyles, /\.uc-project-status-bar \{[\s\S]*box-shadow: var\(--uc-shadow-sm\);/);
   assert.match(taskStatusDockSource, /uc-project-status-bar/);
   assert.match(statusContext, /ProjectStatusProvider/);
   assert.match(statusContext, /priority\?: number/);
@@ -45,8 +45,8 @@ test('global status dock aggregates concurrent production tasks without fake per
   assert.match(taskStatusDockSource, /tasksForProject\(tasks, currentProjectId\)/);
   assert.doesNotMatch(taskStatusDockSource, /summarizeTasks\(tasks, now\)/);
   assert.match(taskStatusDockSource, /maximumVisibleTasks = 4/);
-  assert.match(taskStatusDockSource, /正在处理 \{summary\.inProgress\} 个任务/);
-  assert.match(taskStatusDockSource, /\{summary\.attention\} 个需要处理/);
+  assert.match(taskStatusDockSource, /处理中 \$\{summary\.inProgress\}/);
+  assert.match(taskStatusDockSource, /需处理 \{summary\.attention\}/);
   assert.match(taskStatusDockSource, /接收并校验/);
   assert.match(taskStatusDockSource, /已下载、校验并保存到本地作品库/);
   assert.match(taskStatusDockSource, /onNavigate\('tasks'\)/);

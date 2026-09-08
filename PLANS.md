@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+2026-09-08 底栏交付决策更新：负责人明确要求上传 `feature/status-dock-refinement` 并合并 develop，覆盖此前仅本地验收的交付限制；功能分支保留。详细结果以 `docs/active/底部任务状态栏优化实施记录.md` 的最新交付记录为准。
+
+本次底栏验收环境问题：Vite 监视隔离 Electron 配置目录产生 EBUSY，已由独立验收启动器排除 .cache 后恢复；产品配置无变更，详见本次实施记录。
+
+2026-09-08 底部任务状态栏优化：负责人批准 V1 方案后在隔离分支 `feature/status-dock-refinement` 实施。三阶段自动验证完成，默认收起、页面反馈与任务摘要共存、真实读取/异常状态、刷新与键盘焦点、导航后收起均已落地。Node 356/356、Vitest 1149 通过/5 跳过（隔离区缺少 FFmpeg 的真实媒体测试）；最终构建、全仓 lint 与定向任务测试通过。15 组页面/窗口布局无底栏重叠及页面横向溢出，独立生产 Electron 已启动。尚待负责人最终人工验收；macOS 未实测，未提交、推送或合并。逐阶段证据与入口见 `docs/active/底部任务状态栏优化实施记录.md`。
+
 2026-09-04 联网不可用状态回归修复：截图复核确认，`feature/web-research-foundation` 引入授权预览后，只在 preload API 缺失时复用旧的 workflow 取消逻辑；当预览返回 `unavailable/failed`、IPC 失败或授权后检索失败时仍保留 `ready` workflow，导致页面同时显示“继续执行”和“任务未执行”。现统一在这些终止路径取消联网 session 并持久化取消 workflow，成功后同步清除 `activeWorkflow` 与 UI 联网 session；只有 `authorization_required` 保留继续入口。定向 UI 合同 21/21、`typecheck`、`lint`、`build`、完整 `pnpm.cmd test`、`audit:platform`、`verify:handoff` 与 `git diff --check` 通过。真实搜索服务商、搜索凭证、HTTP 与收费调用仍为 0，W0/W2/W5/W6 状态不变。
 
 2026-09-04 会话自然语言 PPT 创建修复：截图复核发现“帮我只做一个关于龙的ppt”虽包含明确类型与创建意图，却因 `hasStrongCreateCommand` 未允许“只”等副词而落入 unknown；后续“制作ppt”又只能补类型，无法恢复上一轮主题。现将受控创建副词纳入 Application 意图识别，并让 unknown 追问态基于当前 workflow 源消息后的最多 8 条用户消息重建完整计划，保持否定句、多文档歧义和确认门禁不变。黄金集升级为 `conversation-intent-offline-golden@1.0.1`，截图原句纳入第 46 条样本；自然语言创建、多轮恢复和黄金集定向回归 27/27，Node/UI 353/353、Vitest 183 文件 1128/1128、`typecheck`、`lint`、`build` 与 `git diff --check` 通过。真实 LLM、联网、Provider、Office 人工验收仍未执行。

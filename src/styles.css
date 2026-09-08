@@ -340,12 +340,33 @@ button {
   align-items: center;
   gap: var(--uc-space-2);
   border: 1px solid var(--uc-color-border-default);
-  border-radius: var(--uc-radius-8);
-  padding: var(--uc-space-2) var(--uc-space-3);
+  border-radius: var(--uc-radius-6);
+  padding: var(--uc-space-1) var(--uc-space-2) var(--uc-space-1) var(--uc-space-3);
   color: var(--uc-color-text-primary);
   background: var(--uc-color-surface-raised);
-  box-shadow: var(--uc-shadow-md);
+  box-shadow: var(--uc-shadow-sm);
 }
+
+.uc-project-status-bar__scene {
+  display: flex;
+  flex: 1 1 180px;
+  min-width: 0;
+  align-items: center;
+  gap: var(--uc-space-2);
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-project-status-bar__scene > svg,
+.uc-task-status-summary > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.uc-project-status-bar__scene--warning { color: var(--uc-color-status-warning); }
+.uc-project-status-bar__scene--danger { color: var(--uc-color-status-danger); }
+.uc-project-status-bar__scene--success { color: var(--uc-color-status-success); }
 
 .uc-project-status-bar__content {
   display: flex;
@@ -354,25 +375,15 @@ button {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--uc-space-2);
+  overflow-wrap: anywhere;
 }
 
 .uc-project-status-bar__content > p {
   min-width: 0;
   margin: 0;
-  color: var(--uc-color-text-secondary);
+  color: inherit;
   font-size: var(--uc-font-size-caption);
   line-height: var(--uc-line-height-caption);
-}
-
-.uc-project-status-bar--tasks {
-  gap: var(--uc-space-3);
-}
-
-.uc-project-status-bar--tasks > svg {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  color: var(--uc-color-text-accent);
 }
 
 .uc-task-status-spinner {
@@ -382,38 +393,17 @@ button {
 .uc-task-status-summary {
   display: flex;
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: var(--uc-space-2);
   font-size: var(--uc-font-size-caption);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .uc-task-status-summary__attention {
-  color: var(--uc-color-status-danger);
+  color: var(--uc-color-status-warning);
   font-weight: 600;
-}
-
-.uc-task-status-progress,
-.uc-task-status-row__progress {
-  position: relative;
-  height: 3px;
-  min-width: 100px;
-  flex: 1 1 240px;
-  overflow: hidden;
-  border-radius: var(--uc-radius-full);
-  background: var(--uc-color-surface-subtle);
-}
-
-.uc-task-status-progress > span,
-.uc-task-status-row__progress > span {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 30%;
-  border-radius: inherit;
-  background: var(--uc-color-accent-fill);
-  animation: uc-task-status-progress 1.8s ease-in-out infinite;
 }
 
 .uc-task-status-link,
@@ -430,20 +420,64 @@ button {
 
 .uc-task-status-link,
 .uc-task-status-toggle {
-  min-height: 28px;
-  padding: 4px var(--uc-space-2);
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--uc-space-1);
+  flex: 0 0 auto;
+  padding: var(--uc-space-1) var(--uc-space-2);
+  font-size: var(--uc-font-size-caption);
   white-space: nowrap;
 }
 
 .uc-task-status-link {
   margin-left: auto;
+  border-left: 1px solid var(--uc-color-border-subtle);
 }
 
 .uc-task-status-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  width: 32px;
+  height: 32px;
   color: var(--uc-color-text-primary);
+}
+
+.uc-task-status-summary--warning { color: var(--uc-color-status-warning); }
+.uc-task-status-summary--info > svg { color: var(--uc-color-status-info); }
+.uc-task-status-summary--success { color: var(--uc-color-status-success); }
+.uc-task-status-summary--neutral { color: var(--uc-color-text-secondary); }
+
+.uc-task-status-panel__tools {
+  flex: 0 0 auto;
+}
+
+.uc-task-status-panel__message {
+  margin: 0;
+  padding: var(--uc-space-4) var(--uc-space-3);
+  font-size: var(--uc-font-size-label);
+  color: var(--uc-color-text-secondary);
+  background: var(--uc-color-surface-raised);
+  overflow-wrap: anywhere;
+}
+
+.uc-task-status-toggle[aria-disabled="true"] {
+  color: var(--uc-color-text-disabled);
+  cursor: default;
+}
+
+.uc-task-status-tooltip {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.uc-task-status-link svg,
+.uc-task-status-toggle svg,
+.uc-task-status-row svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .uc-task-status-link:hover,
@@ -468,18 +502,19 @@ button {
   bottom: calc(100% + var(--uc-space-2));
   left: 0;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   max-height: min(360px, calc(100vh - 150px));
   overflow: hidden;
   border: 1px solid var(--uc-color-border-default);
   border-radius: var(--uc-radius-8);
   color: var(--uc-color-text-primary);
   background: var(--uc-color-surface-raised);
-  box-shadow: var(--uc-shadow-lg);
+  box-shadow: var(--uc-shadow-sm);
 }
 
 .uc-task-status-panel__header {
   display: flex;
-  min-height: 46px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: var(--uc-space-3);
@@ -493,20 +528,17 @@ button {
   min-width: 0;
   align-items: center;
   gap: var(--uc-space-3);
+  flex-wrap: wrap;
+  font-size: var(--uc-font-size-caption);
 }
 
-.uc-task-status-panel__header > div > span:last-child {
-  overflow: hidden;
+.uc-task-status-panel__header > div > span {
   color: var(--uc-color-text-secondary);
   font-size: var(--uc-font-size-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.uc-task-status-panel__header > button {
-  min-height: 30px;
-  flex: 0 0 auto;
-  padding: 4px var(--uc-space-2);
+.uc-task-status-panel__header strong {
+  font-size: var(--uc-font-size-body);
 }
 
 .uc-task-status-panel__list {
@@ -519,22 +551,20 @@ button {
 
 .uc-task-status-row {
   display: grid;
-  grid-template-columns: 32px minmax(180px, 1fr) auto minmax(90px, auto) minmax(100px, 220px) auto;
-  min-height: 56px;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  min-height: 68px;
   align-items: center;
   gap: var(--uc-space-3);
-  padding: var(--uc-space-2) var(--uc-space-3);
+  padding: var(--uc-space-3);
   background: var(--uc-color-surface-raised);
 }
 
 .uc-task-status-row__icon {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   place-items: center;
-  border-radius: var(--uc-radius-6);
-  color: var(--uc-color-text-accent);
-  background: var(--uc-color-surface-selected);
+  color: var(--uc-color-text-secondary);
 }
 
 .uc-task-status-row__icon svg {
@@ -544,17 +574,14 @@ button {
 
 .uc-task-status-row--completed .uc-task-status-row__icon {
   color: var(--uc-color-status-success);
-  background: color-mix(in srgb, var(--uc-color-status-success) 14%, transparent);
 }
 
 .uc-task-status-row--attention .uc-task-status-row__icon {
   color: var(--uc-color-status-warning);
-  background: color-mix(in srgb, var(--uc-color-status-warning) 14%, transparent);
 }
 
 .uc-task-status-row--failed .uc-task-status-row__icon {
   color: var(--uc-color-status-danger);
-  background: color-mix(in srgb, var(--uc-color-status-danger) 14%, transparent);
 }
 
 .uc-task-status-row__identity {
@@ -563,26 +590,36 @@ button {
   gap: 2px;
 }
 
-.uc-task-status-row__identity strong,
-.uc-task-status-row__identity small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.uc-task-status-row__heading,
+.uc-task-status-row__metadata {
+  display: flex;
+  align-items: center;
+  gap: var(--uc-space-2);
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.uc-task-status-row__heading .uc-status-pill {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  min-height: 0;
+  background: transparent;
 }
 
 .uc-task-status-row__identity strong {
   font-size: var(--uc-font-size-label);
 }
 
-.uc-task-status-row__identity small,
+.uc-task-status-row__metadata,
 .uc-task-status-row__time {
   color: var(--uc-color-text-secondary);
   font-size: var(--uc-font-size-caption);
 }
 
 .uc-task-status-row__time {
-  text-align: right;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .uc-task-status-row__actions {
@@ -592,33 +629,19 @@ button {
 }
 
 .uc-task-status-row__actions button {
-  min-height: 30px;
-  border: 1px solid var(--uc-color-border-default);
-  padding: 4px var(--uc-space-3);
-  color: var(--uc-color-text-primary);
-  background: var(--uc-color-surface-subtle);
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: var(--uc-space-1);
+  padding: var(--uc-space-1) var(--uc-space-2);
+  color: var(--uc-color-text-accent);
+  font-size: var(--uc-font-size-caption);
   white-space: nowrap;
-}
-
-.uc-task-status-row--failed .uc-task-status-row__actions button:first-child,
-.uc-task-status-row--attention .uc-task-status-row__actions button:first-child {
-  border-color: color-mix(in srgb, var(--uc-color-status-danger) 48%, var(--uc-color-border-default));
-  color: var(--uc-color-status-danger);
 }
 
 @keyframes uc-task-status-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes uc-task-status-progress {
-  from {
-    transform: translateX(-120%);
-  }
-
-  to {
-    transform: translateX(430%);
   }
 }
 
@@ -1330,25 +1353,12 @@ button {
     padding-left: 6px;
   }
 
-  .uc-task-status-progress,
-  .uc-task-status-panel__header > div > span:last-child,
-  .uc-task-status-row__time,
-  .uc-task-status-row__progress {
-    display: none;
+  .uc-project-status-bar {
+    flex-wrap: wrap;
   }
 
-  .uc-task-status-row {
-    grid-template-columns: 32px minmax(140px, 1fr) auto auto;
-  }
-}
-
-@media (min-width: 901px) and (max-width: 1280px) {
-  .uc-task-status-row {
-    grid-template-columns: 32px minmax(160px, 1fr) auto minmax(90px, auto) auto;
-  }
-
-  .uc-task-status-row__progress {
-    display: none;
+  .uc-project-status-bar__scene {
+    flex-basis: 100%;
   }
 }
 
@@ -1364,9 +1374,7 @@ button {
     animation: none;
   }
 
-  .uc-task-status-spinner,
-  .uc-task-status-progress > span,
-  .uc-task-status-row__progress > span {
+  .uc-task-status-spinner {
     animation: none;
   }
 
