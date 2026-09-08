@@ -1,5 +1,12 @@
 # UniComp 开发计划
 
+2026-09-08 底栏合并验证完成：功能提交 `31ace2b` 已同步 origin/develop `ceaab5e`，仅 PLANS.md 新增记录冲突并完整保留双方。Node/UI 357/357、Vitest 1168 通过/5 项 FFmpeg 集成跳过，typecheck、lint、build 及差异检查通过。共享依赖入口失效/安装文件锁已通过隔离目录离线安装恢复，依赖清单与锁文件未改。按负责人指令执行上传和 develop 合并，保留功能分支；此记录不宣称安装包发布或 macOS 实机通过。
+
+2026-09-08 底栏交付决策更新：负责人明确要求上传 `feature/status-dock-refinement` 并合并 develop，覆盖此前仅本地验收的交付限制；功能分支保留。详细结果以 `docs/active/底部任务状态栏优化实施记录.md` 的最新交付记录为准。
+
+本次底栏验收环境问题：Vite 监视隔离 Electron 配置目录产生 EBUSY，已由独立验收启动器排除 .cache 后恢复；产品配置无变更，详见本次实施记录。
+
+2026-09-08 底部任务状态栏优化：负责人批准 V1 方案后在隔离分支 `feature/status-dock-refinement` 实施。三阶段自动验证完成，默认收起、页面反馈与任务摘要共存、真实读取/异常状态、刷新与键盘焦点、导航后收起均已落地。Node 356/356、Vitest 1149 通过/5 跳过（隔离区缺少 FFmpeg 的真实媒体测试）；最终构建、全仓 lint 与定向任务测试通过。15 组页面/窗口布局无底栏重叠及页面横向溢出，独立生产 Electron 已启动。尚待负责人最终人工验收；macOS 未实测，未提交、推送或合并。逐阶段证据与入口见 `docs/active/底部任务状态栏优化实施记录.md`。
 2026-09-07 明确清空操作与 Provider 解耦：截图中的“将第二章的内容清空”在任何本地文档修订开始前被 `newapi.authentication_failed` 中断，根因是 Renderer 把所有文档修改都强制绑定一次模型响应。现新增受控的本地确定性修订准备 IPC；仅当已有父 Work 带 Application 验证大纲、已确认 workflow、单一页/章目标、计划目标与原始用户消息一致、无资料外发且整句只表达清空/删除内容时，Application 才创建本地完成消息并沿用现有 Revision Agent、Office 结构读取、范围校验、渲染、布局、Hash、原子发布、Work 登记和父版本链。否定句、多目标、清空并改写、附件/检索、越界、旧版无验证状态及普通改写仍 fail-closed 或进入原模型链路。真实 JSON 仓储回归确认本地完成消息只推进一个 conversation revision 并可在重开仓储后读回。完整测试为 Node/UI 354/354、Vitest 183 文件 1158/1158，共 1512 项；`typecheck`、`lint`、`build`、平台审计、交接校验、恢复审计、阶段 9 关闭门禁和 `git diff --check` 通过。未调用真实 Provider、未读取或修改凭证、未产生费用；NewAPI 鉴权配置本身仍需单独检查，Windows Electron/PowerPoint 人工复验未执行。
 
 2026-09-04 联网不可用状态回归修复：截图复核确认，`feature/web-research-foundation` 引入授权预览后，只在 preload API 缺失时复用旧的 workflow 取消逻辑；当预览返回 `unavailable/failed`、IPC 失败或授权后检索失败时仍保留 `ready` workflow，导致页面同时显示“继续执行”和“任务未执行”。现统一在这些终止路径取消联网 session 并持久化取消 workflow，成功后同步清除 `activeWorkflow` 与 UI 联网 session；只有 `authorization_required` 保留继续入口。定向 UI 合同 21/21、`typecheck`、`lint`、`build`、完整 `pnpm.cmd test`、`audit:platform`、`verify:handoff` 与 `git diff --check` 通过。真实搜索服务商、搜索凭证、HTTP 与收费调用仍为 0，W0/W2/W5/W6 状态不变。

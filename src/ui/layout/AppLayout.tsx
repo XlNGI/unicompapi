@@ -55,7 +55,7 @@ export function AppLayout({
     register(sceneStatusId, {
       label: '项目状态',
       tone: 'neutral',
-      content: `当前场景：${sceneLabel}。页面状态会在这里更新。`,
+      content: `当前场景：${sceneLabel}`,
       priority: 0,
       role: 'status'
     });

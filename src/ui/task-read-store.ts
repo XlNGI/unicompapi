@@ -51,8 +51,7 @@ export function refreshTaskReadStore(): Promise<TaskReadSnapshot> {
   const requestedProjectScopeRevision = projectScopeRevision;
   updateSnapshot({
     ...snapshot,
-    loading: snapshot.loading || snapshot.tasks.length === 0,
-    error: false
+    loading: snapshot.loading || snapshot.tasks.length === 0
   });
   const pending = Promise.all([
     storage.listTasks(),
