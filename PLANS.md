@@ -1,5 +1,7 @@
 # UniComp 开发计划
 
+2026-09-08 底栏合并验证完成：功能提交 `31ace2b` 已同步 origin/develop `ceaab5e`，仅 PLANS.md 新增记录冲突并完整保留双方。Node/UI 357/357、Vitest 1168 通过/5 项 FFmpeg 集成跳过，typecheck、lint、build 及差异检查通过。共享依赖入口失效/安装文件锁已通过隔离目录离线安装恢复，依赖清单与锁文件未改。按负责人指令执行上传和 develop 合并，保留功能分支；此记录不宣称安装包发布或 macOS 实机通过。
+
 2026-09-08 底栏交付决策更新：负责人明确要求上传 `feature/status-dock-refinement` 并合并 develop，覆盖此前仅本地验收的交付限制；功能分支保留。详细结果以 `docs/active/底部任务状态栏优化实施记录.md` 的最新交付记录为准。
 
 本次底栏验收环境问题：Vite 监视隔离 Electron 配置目录产生 EBUSY，已由独立验收启动器排除 .cache 后恢复；产品配置无变更，详见本次实施记录。
