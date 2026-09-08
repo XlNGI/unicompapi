@@ -7736,9 +7736,18 @@ button.uc-project-center__project-card:disabled {
   font-size: var(--uc-font-size-caption);
 }
 
-.uc-chat-page__workflow-status > span {
+.uc-chat-page__workflow-copy {
   min-width: 0;
+  display: grid;
+  gap: 2px;
   overflow-wrap: anywhere;
+}
+
+.uc-chat-page__workflow-details {
+  display: grid;
+  gap: 1px;
+  color: var(--uc-color-text-tertiary);
+  font-size: var(--uc-font-size-caption);
 }
 
 .uc-chat-page__workflow-actions {

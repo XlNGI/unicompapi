@@ -528,16 +528,18 @@ export class DocumentGenerationRunner {
           throw new DocumentGenerationError('verification_failed', 'Scoped document revision page target was not found');
         }
         targetIndexes.add(pageIndex);
-        for (
-          let continuationIndex = pageIndex + 1;
-          continuationIndex < source.sections.length &&
-          isPptContinuationHeading(
-            source.sections[continuationIndex].heading,
-            sectionHeading
-          );
-          continuationIndex += 1
-        ) {
-          targetIndexes.add(continuationIndex);
+        if (patch.target.targetUnit !== 'page') {
+          for (
+            let continuationIndex = pageIndex + 1;
+            continuationIndex < source.sections.length &&
+            isPptContinuationHeading(
+              source.sections[continuationIndex].heading,
+              sectionHeading
+            );
+            continuationIndex += 1
+          ) {
+            targetIndexes.add(continuationIndex);
+          }
         }
       } else {
         targetIndexes.add(index);

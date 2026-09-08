@@ -337,6 +337,73 @@ describe('document generation runner', () => {
     expect(await documentFiles(rootDirectory)).toHaveLength(2);
   });
 
+  it('keeps continuation slides outside a physical page revision scope', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-ppt-physical-page-revision');
+    const section = (marker: string) => ({
+      heading: '第二章',
+      level: 1 as const,
+      blocks: Array.from({ length: 18 }, (_, index) => ({
+        type: 'bullets' as const,
+        items: [`${marker} ${index + 1}`]
+      }))
+    });
+    const baseOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '物理页修订',
+      sections: [section('旧内容')]
+    }));
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-03T00:00:00.000Z'
+    });
+    const base = await runner.run({
+      kind: 'ppt',
+      title: baseOutline.title,
+      contentFingerprint: 'a'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'ppt-physical-page-base',
+      outline: baseOutline
+    });
+    const revisedOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: baseOutline.title,
+      sections: [{ ...section('旧内容'), blocks: [] }]
+    }));
+    const revised = await runner.run({
+      kind: 'ppt',
+      title: revisedOutline.title,
+      contentFingerprint: 'b'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'ppt-physical-page-revision',
+      outline: revisedOutline,
+      parentWorkId: base.work.id,
+      revisionTargetSectionHeading: '第二章',
+      revisionPatch: {
+        operation: 'clear_section',
+        target: {
+          sectionIndex: 0,
+          sectionHeading: '第二章',
+          pageNumber: 3,
+          targetUnit: 'page'
+        }
+      }
+    });
+
+    expect(revised.execution.state).toBe('completed');
+    const filePath = revised.file.locator.kind === 'project'
+      ? path.join(rootDirectory, revised.file.locator.relativePath)
+      : '';
+    const zip = await JSZip.loadAsync(await readFile(filePath));
+    const slide2 = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    const slide3 = await zip.file('ppt/slides/slide3.xml')!.async('string');
+    const slide4 = await zip.file('ppt/slides/slide4.xml')!.async('string');
+    expect(slide2).toContain('旧内容 1');
+    expect(slide3).not.toContain('旧内容');
+    expect(slide4).toContain('旧内容');
+  });
+
   it('fails closed instead of rebuilding when a scoped parent Work is missing', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-missing-parent');

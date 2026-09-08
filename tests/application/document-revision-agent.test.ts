@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { runLocalDocumentRevisionAgent } from '../../src/application';
+import {
+  parseDeterministicClearRevisionTarget,
+  runLocalDocumentRevisionAgent
+} from '../../src/application';
 import {
   applyStructuredDocumentPatch,
   readStructuredDocument
@@ -46,6 +49,31 @@ const ports = {
 };
 
 describe('local document revision agent', () => {
+  it('only accepts one explicit clear target for provider-free execution', () => {
+    expect(parseDeterministicClearRevisionTarget('将第二章的内容清空')).toEqual({
+      unit: 'section',
+      ordinal: 2
+    });
+    expect(
+      parseDeterministicClearRevisionTarget('清空第二章和第三章')
+    ).toBeUndefined();
+    expect(
+      parseDeterministicClearRevisionTarget('清空第二章并改写第三章')
+    ).toBeUndefined();
+    expect(
+      parseDeterministicClearRevisionTarget('把第二章改写得更清楚')
+    ).toBeUndefined();
+    expect(
+      parseDeterministicClearRevisionTarget('不要清空第二章')
+    ).toBeUndefined();
+    expect(
+      parseDeterministicClearRevisionTarget('清空第二章以及标题')
+    ).toBeUndefined();
+    expect(
+      parseDeterministicClearRevisionTarget('将第二页的内容清空，其他地方不动')
+    ).toEqual({ unit: 'page', ordinal: 2 });
+  });
+
   it('runs read → patch → render → inspect and clears only the requested section', async () => {
     const result = await runLocalDocumentRevisionAgent(
       {
@@ -92,6 +120,59 @@ describe('local document revision agent', () => {
     expect(result.outline.sections[1].blocks).toEqual([]);
     expect(result.outline.sections[0]).toEqual(outline.sections[0]);
     expect(result.outline.sections[2]).toEqual(outline.sections[2]);
+  });
+
+  it('maps a physical PPT page without applying the cover offset twice', async () => {
+    const result = await runLocalDocumentRevisionAgent(
+      {
+        baseWorkId: 'work-parent' as never,
+        expectedRevision: 3,
+        kind: 'ppt',
+        requestText: '将第二页的内容清空，其他地方不动',
+        outline
+      },
+      ports
+    );
+
+    expect(result.agent.state).toBe('completed_unvalidated');
+    expect(result.changed).toBe(true);
+    expect(result.targetSectionIndex).toBe(0);
+    expect(result.patch).toMatchObject({
+      operation: 'clear_section',
+      target: {
+        sectionIndex: 0,
+        sectionHeading: '第一章',
+        pageNumber: 2,
+        targetUnit: 'page'
+      }
+    });
+    expect(result.outline.sections[0].blocks).toEqual([]);
+    expect(result.outline.sections[1]).toEqual(outline.sections[1]);
+  });
+
+  it('does not reinterpret a Word page number as a section number', async () => {
+    const wordOutline = {
+      kind: 'word' as const,
+      title: '分页报告',
+      sections: [
+        { heading: '第一章', level: 1 as const, blocks: [{ type: 'paragraph' as const, text: '保留' }] },
+        { heading: '第二章', level: 1 as const, blocks: [{ type: 'paragraph' as const, text: '也保留' }] }
+      ]
+    };
+    const result = await runLocalDocumentRevisionAgent(
+      {
+        baseWorkId: 'work-parent' as never,
+        expectedRevision: 3,
+        kind: 'word',
+        requestText: '清空第二页',
+        outline: wordOutline
+      },
+      ports
+    );
+
+    expect(result.changed).toBe(false);
+    expect(result.patches).toBeUndefined();
+    expect(result.outline).toEqual(wordOutline);
   });
 
   it('applies a bounded batch when two addressed chapters are requested', async () => {

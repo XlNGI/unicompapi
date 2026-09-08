@@ -37,10 +37,24 @@ const validDocumentResult = {
 
 describe('document message result', () => {
   it('parses a valid document result', () => {
-    const result = parseDocumentMessageResult(validDocumentResult);
+    const validatedContent = JSON.stringify({
+      kind: 'word',
+      title: 'Validated title',
+      sections: []
+    });
+    const result = parseDocumentMessageResult({
+      ...validDocumentResult,
+      validatedContent
+    });
     expect(result.workId).toBe('work-document-1');
     expect(result.kind).toBe('word');
     expect(result.sizeBytes).toBe(1024);
+    expect(result.validatedContent).toBe(validatedContent);
+  });
+
+  it('keeps legacy document results without validated content compatible', () => {
+    const result = parseDocumentMessageResult(validDocumentResult);
+    expect(result.validatedContent).toBeUndefined();
   });
 
   it('rejects invalid document results', () => {
@@ -53,6 +67,15 @@ describe('document message result', () => {
     expect(() =>
       parseDocumentMessageResult({ ...validDocumentResult, sizeBytes: -1 })
     ).toThrow(TypeError);
+    expect(() =>
+      parseDocumentMessageResult({ ...validDocumentResult, validatedContent: ' ' })
+    ).toThrow(TypeError);
+    expect(() =>
+      parseDocumentMessageResult({
+        ...validDocumentResult,
+        validatedContent: 'x'.repeat(1_000_001)
+      })
+    ).toThrow(TypeError);
     expect(() => parseDocumentMessageResult(null)).toThrow(TypeError);
   });
 
@@ -63,10 +86,18 @@ describe('document message result', () => {
   });
 
   it('persists documentResult on completed assistant messages', () => {
+    const validatedContent = JSON.stringify({
+      kind: 'word',
+      title: 'Validated title',
+      sections: []
+    });
     const message = parseMessage(
-      completedAssistantMessage({ documentResult: validDocumentResult })
+      completedAssistantMessage({
+        documentResult: { ...validDocumentResult, validatedContent }
+      })
     );
     expect(message.documentResult?.workId).toBe('work-document-1');
+    expect(message.documentResult?.validatedContent).toBe(validatedContent);
   });
 
   it('rejects documentResult on user messages', () => {

@@ -1320,6 +1320,7 @@ function renderPresentationPage(
     }
   }
   slide.addText(String(pageNumber), {
+    objectName: 'UniComp Page Number',
     x: 12.25,
     y: 7.04,
     w: 0.45,

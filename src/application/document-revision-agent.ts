@@ -23,6 +23,13 @@ export interface DocumentRevisionAgentInput {
   readonly signal?: AbortSignal;
 }
 
+export type RevisionTargetUnit = 'section' | 'page';
+
+export interface RevisionOrdinalTarget {
+  readonly ordinal: number;
+  readonly unit: RevisionTargetUnit;
+}
+
 export interface DocumentRevisionAgentResult {
   readonly outline: DocumentOutline;
   readonly agent: DocumentAgentResult;
@@ -49,6 +56,7 @@ export type DocumentRevisionPatch =
         readonly sectionIndex: number;
         readonly sectionHeading: string;
         readonly pageNumber?: number;
+        readonly targetUnit?: RevisionTargetUnit;
       };
     }
   | {
@@ -57,6 +65,7 @@ export type DocumentRevisionPatch =
         readonly sectionIndex: number;
         readonly sectionHeading: string;
         readonly pageNumber?: number;
+        readonly targetUnit?: RevisionTargetUnit;
       };
       readonly replacement: DocumentOutlineSection;
     }
@@ -66,6 +75,7 @@ export type DocumentRevisionPatch =
         readonly sectionIndex: number;
         readonly sectionHeading: string;
         readonly blockIndex: number;
+        readonly targetUnit?: RevisionTargetUnit;
       };
       readonly value: string;
     }
@@ -77,6 +87,7 @@ export type DocumentRevisionPatch =
         readonly blockIndex: number;
         readonly rowIndex: number;
         readonly columnIndex: number;
+        readonly targetUnit?: RevisionTargetUnit;
       };
       readonly value: string;
     };
@@ -243,13 +254,19 @@ function nextLocalDecision(
 function resolveRevisionPatches(
   input: DocumentRevisionAgentInput
 ): readonly DocumentRevisionPatch[] {
-  const ordinals = parseRevisionOrdinals(input.requestText)
-    .filter((ordinal) => ordinal <= input.outline.sections.length);
-  if (ordinals.length === 0) return [];
-  if (isExplicitClearRequest(input.requestText)) {
-    return ordinals.map((ordinal) => ({
+  const targets = parseRevisionTargets(input.requestText)
+    .map((target) => ({
+      target,
+      sectionIndex: revisionSectionIndex(input.kind, target)
+    }))
+    .filter(({ sectionIndex }) =>
+      sectionIndex >= 0 && sectionIndex < input.outline.sections.length
+    );
+  if (targets.length === 0) return [];
+  if (isExplicitClearRevisionRequest(input.requestText)) {
+    return targets.map(({ target }) => ({
       operation: 'clear_section' as const,
-      target: revisionTarget(input, ordinal)
+      target: revisionTarget(input, target)
     }));
   }
   if (
@@ -262,32 +279,41 @@ function resolveRevisionPatches(
   if (
     !input.proposedOutline ||
     input.proposedOutline.kind !== input.outline.kind ||
-    ordinals.some((ordinal) => !input.proposedOutline?.sections[ordinal - 1])
+    targets.some(({ sectionIndex }) => !input.proposedOutline?.sections[sectionIndex])
   ) {
     return [];
   }
-  return ordinals.map((ordinal) => {
-    const sectionIndex = ordinal - 1;
+  return targets.map(({ target }) => {
+    const sectionIndex = revisionSectionIndex(input.kind, target);
     const replacementSection = input.proposedOutline!.sections[sectionIndex];
-    const target = revisionTarget(input, ordinal);
+    const revisionTargetValue = revisionTarget(input, target);
     return resolveFineGrainedPatches(
       input.kind,
       input.outline.sections[sectionIndex],
       replacementSection,
-      target
+      revisionTargetValue
     ) ?? [{
       operation: 'replace_section' as const,
-      target,
+      target: revisionTargetValue,
       replacement: replacementSection
     }];
   }).flat();
 }
 
-function parseRevisionOrdinals(requestText: string): readonly number[] {
-  const matches = [...requestText.matchAll(/第\s*([0-9一二两三四五六七八九十百零〇]+)\s*(?:章|节|页|部分)/gu)]
-    .map((match) => parseOrdinalToken(match[1]))
-    .filter((value) => Number.isSafeInteger(value) && value > 0);
-  return [...new Set(matches)].slice(0, 8);
+export function parseRevisionTargets(requestText: string): readonly RevisionOrdinalTarget[] {
+  const matches = [...requestText.matchAll(/第\s*([0-9一二两三四五六七八九十百零〇]+)\s*(章|节|页|张|部分)/gu)]
+    .map((match) => ({
+      ordinal: parseOrdinalToken(match[1]),
+      unit: /^(?:页|张)$/u.test(match[2]) ? 'page' as const : 'section' as const
+    }))
+    .filter((target) => Number.isSafeInteger(target.ordinal) && target.ordinal > 0);
+  const seen = new Set<string>();
+  return matches.filter((target) => {
+    const key = `${target.unit}:${target.ordinal}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 8);
 }
 
 function parseOrdinalToken(token: string): number {
@@ -305,12 +331,49 @@ function parseOrdinalToken(token: string): number {
   return Number(token.split('').map((character) => digits[character] ?? '').join(''));
 }
 
-function revisionTarget(input: DocumentRevisionAgentInput, ordinal: number) {
-  const sectionIndex = ordinal - 1;
+export function revisionSectionIndex(
+  kind: DocumentWorkspaceKind,
+  target: RevisionOrdinalTarget
+): number {
+  // PPT page numbers are physical slide numbers; slide 1 is the cover.
+  // Section ordinals continue to address logical content sections.
+  if (target.unit === 'page') {
+    return kind === 'ppt' ? target.ordinal - 2 : -1;
+  }
+  return target.ordinal - 1;
+}
+
+export function parseRevisionTarget(
+  requestText: string
+): RevisionOrdinalTarget | undefined {
+  const match = /第\s*([0-9一二两三四五六七八九十百零〇]+)\s*(章|节|页|张|部分)/u.exec(
+    requestText
+  );
+  if (!match) return undefined;
+  const ordinal = parseOrdinalToken(match[1]);
+  if (!Number.isSafeInteger(ordinal) || ordinal <= 0) return undefined;
+  return {
+    ordinal,
+    unit: /^(?:页|张)$/u.test(match[2]) ? 'page' : 'section'
+  };
+}
+
+function revisionTarget(
+  input: DocumentRevisionAgentInput,
+  target: RevisionOrdinalTarget
+) {
+  const sectionIndex = revisionSectionIndex(input.kind, target);
   return {
     sectionIndex,
     sectionHeading: input.outline.sections[sectionIndex].heading,
-    ...(input.kind === 'ppt' ? { pageNumber: ordinal + 1 } : {})
+    ...(input.kind === 'ppt'
+      ? {
+          pageNumber: target.unit === 'page' ? target.ordinal : sectionIndex + 2,
+          ...(target.unit === 'page' ? { targetUnit: target.unit } : {})
+        }
+      : target.unit === 'page'
+        ? { targetUnit: target.unit }
+        : {})
   };
 }
 
@@ -318,7 +381,12 @@ function resolveFineGrainedPatches(
   kind: DocumentWorkspaceKind,
   current: DocumentOutlineSection,
   replacement: DocumentOutlineSection,
-  target: { readonly sectionIndex: number; readonly sectionHeading: string; readonly pageNumber?: number }
+  target: {
+    readonly sectionIndex: number;
+    readonly sectionHeading: string;
+    readonly pageNumber?: number;
+    readonly targetUnit?: RevisionTargetUnit;
+  }
 ): readonly DocumentRevisionPatch[] | undefined {
   if (kind === 'word' && current.blocks.length === replacement.blocks.length) {
     const changed = current.blocks
@@ -334,6 +402,8 @@ function resolveFineGrainedPatches(
           target: {
             sectionIndex: target.sectionIndex,
             sectionHeading: target.sectionHeading,
+            ...(target.pageNumber !== undefined ? { pageNumber: target.pageNumber } : {}),
+            ...(target.targetUnit !== undefined ? { targetUnit: target.targetUnit } : {}),
             blockIndex: item.blockIndex
           },
           value: (item.next as Extract<DocumentOutlineSection['blocks'][number], { type: 'paragraph' | 'quote' }>).text
@@ -373,6 +443,8 @@ function resolveFineGrainedPatches(
         target: {
           sectionIndex: target.sectionIndex,
           sectionHeading: target.sectionHeading,
+          ...(target.pageNumber !== undefined ? { pageNumber: target.pageNumber } : {}),
+          ...(target.targetUnit !== undefined ? { targetUnit: target.targetUnit } : {}),
           blockIndex: change.blockIndex,
           rowIndex: change.rowIndex,
           columnIndex: change.columnIndex
@@ -384,7 +456,7 @@ function resolveFineGrainedPatches(
   return undefined;
 }
 
-function isExplicitClearRequest(requestText: string): boolean {
+export function isExplicitClearRevisionRequest(requestText: string): boolean {
   // The target ordinal is validated above, so only accept clear/delete
   // wording that is explicitly tied to the section's content. Users commonly
   // place the action before the target ("删除第二章的内容") or after it
@@ -393,6 +465,31 @@ function isExplicitClearRequest(requestText: string): boolean {
   const clearsContent =
     /(?:清空|清除)[\s\S]{0,24}|(?:删除|删掉)[\s\S]{0,24}(?:内容|本章|这一章|该章节)|(?:内容|本章|这一章|该章节)[\s\S]{0,24}(?:删除|删掉)/u.test(requestText);
   return clearsContent;
+}
+
+export function parseDeterministicClearRevisionTarget(
+  requestText: string
+): RevisionOrdinalTarget | undefined {
+  const targets = parseRevisionTargets(requestText);
+  if (targets.length !== 1 || !isExplicitClearRevisionRequest(requestText)) {
+    return undefined;
+  }
+  const ordinal = '[0-9一二两三四五六七八九十百零〇]+';
+  const target = `第\\s*${ordinal}\\s*(?:章|节|页|张|部分)`;
+  const document = '(?:(?:当前|这个|这份)?(?:PPT|演示文稿|文档)(?:的)?)?';
+  const content = '(?:\\s*(?:的\\s*)?(?:(?:全部|所有)\\s*)?(?:正文(?:内容)?|内容|本章内容|这一章(?:的)?内容|该章节(?:的)?内容))?';
+  const clear = '(?:清空|清除|删除|删掉)';
+  const polite = '(?:请(?:帮我|帮忙)?|麻烦(?:帮我|帮忙)?|帮我)?\\s*';
+  const preserve = '(?:\\s*[,，]\\s*(?:(?:其他|其余)(?:页面|页|章节|地方|内容)?(?:都)?(?:保持不变|不变|不动)|保留(?:其他|其余)(?:页面|页|章节|内容)?))?';
+  const terminal = '\\s*[。！!]?\\s*';
+  const grammar = new RegExp(
+    `^${polite}(?:(?:将|把)\\s*${document}${target}${content}\\s*${clear}|${clear}\\s*${document}${target}${content})${preserve}${terminal}$`,
+    'u'
+  );
+  if (!grammar.test(requestText.trim())) {
+    return undefined;
+  }
+  return targets[0];
 }
 
 function parsePatchJson(value: unknown): readonly DocumentRevisionPatch[] {

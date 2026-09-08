@@ -70,6 +70,11 @@ const autosaveDiagnostics: AutosaveDiagnosticsApi = {
 const getPathForFile = (file: File) => webUtils.getPathForFile(file);
 
 const documentGeneration: DocumentGenerationApi = {
+  prepareDeterministicRevision: (request) =>
+    ipcRenderer.invoke(
+      documentGenerationIpcChannels.prepareDeterministicRevision,
+      request
+    ),
   prepareGeneration: (request) =>
     ipcRenderer.invoke(documentGenerationIpcChannels.prepareGeneration, request),
   reconcileGeneration: (request) =>

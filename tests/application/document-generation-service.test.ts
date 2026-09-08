@@ -4,6 +4,7 @@ import {
   collectRevisionRequestText,
   DocumentDraftCompilationError,
   DocumentGenerationApplicationService,
+  type DocumentGenerationExecutionInput,
   parseRequestedPresentationTotalPages,
   preserveUntargetedDocumentSections,
   waitForDocumentResponseCompletion
@@ -18,6 +19,7 @@ import {
   startAssistantMessageStreaming,
   setDocumentGenerationStatusOnMessage,
   toConversationId,
+  toConversationWorkflowId,
   toExecutionId,
   toIsoTimestamp,
   toMessageId,
@@ -77,6 +79,30 @@ describe('semantic document revisions', () => {
     expect(revised.sections[1].blocks).not.toEqual(previous.sections[1].blocks);
     expect(JSON.stringify(revised.sections[1])).toContain('系统能力');
     expect(revised.sections[1].action).toContain('试点');
+  });
+
+  it('preserves all other sections when a PPT physical page is revised', () => {
+    const previous = {
+      kind: 'ppt' as const,
+      title: '运营方案',
+      sections: [
+        { heading: '第一页', level: 1 as const, pageKind: 'insight' as const, blocks: [{ type: 'paragraph' as const, text: '第一页旧内容' }] },
+        { heading: '第二页', level: 1 as const, pageKind: 'insight' as const, blocks: [{ type: 'paragraph' as const, text: '第二页旧内容' }] }
+      ]
+    };
+    const next = {
+      ...previous,
+      title: '被模型改写的标题',
+      sections: [
+        { ...previous.sections[0], blocks: [{ type: 'paragraph' as const, text: '第二页的新内容' }] },
+        { ...previous.sections[1], blocks: [{ type: 'paragraph' as const, text: '不应被修改' }] }
+      ]
+    };
+
+    const revised = preserveUntargetedDocumentSections(previous, next, '把第二页改成新的表达');
+    expect(revised.title).toBe(previous.title);
+    expect(revised.sections[0].blocks).toEqual(next.sections[0].blocks);
+    expect(revised.sections[1]).toEqual(previous.sections[1]);
   });
 });
 
@@ -175,6 +201,660 @@ function environment(content = '{"kind":"ppt" "title":"缺少逗号"}') {
 }
 
 describe('document generation application service', () => {
+  it('prepares and completes an explicit clear revision without provider output', async () => {
+    const parentMessageId = toMessageId('document-local-clear-parent');
+    const sourceMessageId = toMessageId('document-local-clear-source');
+    const parentWorkId = toWorkId('document-local-clear-work');
+    const workflowId = toConversationWorkflowId('document-local-clear-workflow');
+    const previousOutline = {
+      kind: 'ppt' as const,
+      title: '龙文化',
+      sections: [
+        {
+          heading: '第一章',
+          level: 1 as const,
+          blocks: [{ type: 'paragraph' as const, text: '保留' }]
+        },
+        {
+          heading: '第二章',
+          level: 1 as const,
+          blocks: [{ type: 'paragraph' as const, text: '清空' }]
+        }
+      ]
+    };
+    let conversation = createConversation({
+      id: conversationId,
+      title: '本地清空',
+      projectId,
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      parentMessageId,
+      JSON.stringify(previousOutline)
+    );
+    conversation = attachDocumentResultToMessage(
+      conversation,
+      parentMessageId,
+      {
+        workId: parentWorkId,
+        fileName: '龙文化.pptx',
+        kind: 'ppt',
+        sizeBytes: 4096,
+        validatedContent: JSON.stringify(previousOutline)
+      },
+      now
+    );
+    conversation = addUserMessage(conversation, {
+      id: sourceMessageId,
+      content: '将第二章的内容清空',
+      createdAt: now
+    });
+    const workflow = {
+      schemaVersion: 1 as const,
+      id: workflowId,
+      projectId,
+      conversationId,
+      sourceMessageId,
+      revision: 1,
+      status: 'ready' as const,
+      plan: {
+        schemaVersion: 1 as const,
+        kind: 'document' as const,
+        action: 'revise' as const,
+        documentKind: 'ppt' as const,
+        targetHint: { unit: 'section' as const, ordinal: 2 },
+        parameters: { topic: '将第二章的内容清空' },
+        sourcePolicy: 'none' as const,
+        missing: [],
+        ambiguities: [],
+        confidence: 'high' as const,
+        needsConfirmation: false
+      },
+      pendingQuestions: [],
+      resolvedTarget: { artifactRef: parentMessageId, version: 1 },
+      createdAt: now,
+      updatedAt: now
+    };
+    const beginExecution = vi.fn(async () => undefined);
+    const finishExecution = vi.fn(async () => undefined);
+    const createCompletedLocalAssistantMessage = vi.fn(async (input: {
+      readonly expectedRevision: number;
+      readonly content: string;
+    }) => {
+      expect(input.expectedRevision).toBe(conversation.revision);
+      const localMessageId = toMessageId('document-local-clear-result');
+      conversation = appendCompletedAssistantMessage(
+        conversation,
+        localMessageId,
+        input.content
+      );
+      return { conversation, messageId: localMessageId };
+    });
+    const updateDocumentGenerationStatus = vi.fn(async (input: {
+      readonly messageId: ReturnType<typeof toMessageId>;
+      readonly status: Parameters<typeof setDocumentGenerationStatusOnMessage>[2];
+    }) => {
+      conversation = setDocumentGenerationStatusOnMessage(
+        conversation,
+        input.messageId,
+        input.status,
+        now
+      );
+    });
+    const attachDocumentResult = vi.fn(async (input: {
+      readonly messageId: ReturnType<typeof toMessageId>;
+      readonly documentResult: Parameters<typeof attachDocumentResultToMessage>[2];
+    }) => {
+      conversation = attachDocumentResultToMessage(
+        conversation,
+        input.messageId,
+        input.documentResult,
+        now
+      );
+    });
+    const run = vi.fn(async (input: DocumentGenerationExecutionInput) => ({
+      taskId: toTaskId('task-local-clear'),
+      executionId: toExecutionId('execution-local-clear'),
+      workId: toWorkId('work-local-clear-result'),
+      fileName: '龙文化-新版.pptx',
+      sizeBytes: 4096,
+      outline: input.outline
+    }));
+    const service = new DocumentGenerationApplicationService({
+      projectId,
+      conversations: {
+        load: async () => conversation,
+        createCompletedLocalAssistantMessage,
+        updateDocumentGenerationStatus,
+        attachDocumentResult
+      },
+      workflows: {
+        load: async () => workflow,
+        beginExecution,
+        finishExecution
+      },
+      compiler: {
+        compile: ({ content }) => JSON.parse(content),
+        recover: ({ content }) => JSON.parse(content)
+      },
+      generator: { run },
+      revisionAgent: async (input) => ({
+        outline: {
+          ...input.outline,
+          sections: [
+            input.outline.sections[0],
+            { ...input.outline.sections[1], blocks: [] }
+          ]
+        },
+        agent: {
+          state: 'completed_unvalidated',
+          steps: 4,
+          costUnits: 0,
+          observations: [],
+          summary: 'Local clear complete'
+        },
+        changed: true,
+        targetSectionIndex: 1,
+        patch: {
+          operation: 'clear_section',
+          target: {
+            sectionIndex: 1,
+            sectionHeading: '第二章',
+            pageNumber: 3
+          }
+        }
+      }),
+      fingerprint: () => 'local-clear-fingerprint',
+      nextLocalExecutionId: () => 'local-clear-execution',
+      wait: async () => undefined
+    });
+
+    const prepared = await service.prepareDeterministicRevision({
+      conversationId,
+      expectedRevision: conversation.revision,
+      workflowId,
+      expectedWorkflowRevision: workflow.revision,
+      kind: 'ppt',
+      parentWorkId
+    });
+    const result = await service.generateFromMessage({
+      ...prepared,
+      kind: 'ppt',
+      parentWorkId,
+      images: []
+    });
+
+    expect(result.workId).toBe(toWorkId('work-local-clear-result'));
+    expect(createCompletedLocalAssistantMessage).toHaveBeenCalledOnce();
+    expect(beginExecution).toHaveBeenCalledOnce();
+    expect(finishExecution).toHaveBeenLastCalledWith(
+      'local-clear-execution',
+      'completed'
+    );
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      parentWorkId,
+      revisionPatch: expect.objectContaining({ operation: 'clear_section' }),
+      outline: expect.objectContaining({
+        sections: [
+          previousOutline.sections[0],
+          expect.objectContaining({ blocks: [] })
+        ]
+      })
+    }));
+    expect(
+      conversation.messages.find((message) => message.id === parentMessageId)
+        ?.documentResult?.workId
+    ).toBe(parentWorkId);
+  });
+
+  it('rejects mixed clear and rewrite instructions before creating a local result message', async () => {
+    const parentMessageId = toMessageId('document-local-mixed-parent');
+    const sourceMessageId = toMessageId('document-local-mixed-source');
+    const parentWorkId = toWorkId('document-local-mixed-work');
+    const workflowId = toConversationWorkflowId('document-local-mixed-workflow');
+    const outline = {
+      kind: 'ppt' as const,
+      title: '安全边界',
+      sections: [
+        { heading: '第一章', level: 1 as const, blocks: [{ type: 'paragraph' as const, text: '甲' }] },
+        { heading: '第二章', level: 1 as const, blocks: [{ type: 'paragraph' as const, text: '乙' }] }
+      ]
+    };
+    let conversation = createConversation({ id: conversationId, title: '安全边界', projectId, createdAt: now });
+    conversation = appendCompletedAssistantMessage(conversation, parentMessageId, JSON.stringify(outline));
+    conversation = attachDocumentResultToMessage(conversation, parentMessageId, {
+      workId: parentWorkId,
+      fileName: '安全边界.pptx',
+      kind: 'ppt',
+      sizeBytes: 100,
+      validatedContent: JSON.stringify(outline)
+    }, now);
+    conversation = addUserMessage(conversation, {
+      id: sourceMessageId,
+      content: '清空第二章并改写第一章',
+      createdAt: now
+    });
+    const createCompletedLocalAssistantMessage = vi.fn();
+    const service = new DocumentGenerationApplicationService({
+      projectId,
+      conversations: {
+        load: async () => conversation,
+        createCompletedLocalAssistantMessage,
+        attachDocumentResult: async () => undefined,
+        updateDocumentGenerationStatus: async () => undefined
+      },
+      workflows: {
+        load: async () => ({
+          schemaVersion: 1,
+          id: workflowId,
+          projectId,
+          conversationId,
+          sourceMessageId,
+          revision: 0,
+          status: 'ready',
+          plan: {
+            schemaVersion: 1,
+            kind: 'document',
+            action: 'revise',
+            documentKind: 'ppt',
+            targetHint: { unit: 'section', ordinal: 2 },
+            parameters: {},
+            sourcePolicy: 'none',
+            missing: [],
+            ambiguities: [],
+            confidence: 'high',
+            needsConfirmation: false
+          },
+          pendingQuestions: [],
+          resolvedTarget: { artifactRef: parentMessageId, version: 1 },
+          createdAt: now,
+          updatedAt: now
+        }),
+        beginExecution: async () => undefined,
+        finishExecution: async () => undefined
+      },
+      compiler: {
+        compile: ({ content }) => JSON.parse(content),
+        recover: ({ content }) => JSON.parse(content)
+      },
+      generator: { run: vi.fn() },
+      fingerprint: () => 'unused'
+    });
+
+    await expect(service.prepareDeterministicRevision({
+      conversationId,
+      expectedRevision: conversation.revision,
+      workflowId,
+      expectedWorkflowRevision: 0,
+      kind: 'ppt',
+      parentWorkId
+    })).rejects.toMatchObject({ code: 'local_revision_not_supported' });
+    expect(createCompletedLocalAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it('applies a deterministic PPT page clear without compiling the provider draft', async () => {
+    const previousMessageId = toMessageId('document-application-clear-parent');
+    const currentMessageId = toMessageId('document-application-clear-current');
+    const parentWorkId = toWorkId('document-application-clear-work');
+    const previousOutline = {
+      kind: 'ppt' as const,
+      title: '关于龙的PPT',
+      sections: [
+        {
+          heading: '神话起源',
+          level: 1 as const,
+          pageKind: 'insight' as const,
+          blocks: [{ type: 'paragraph' as const, text: '需要清空的正文' }]
+        },
+        {
+          heading: '现代诠释',
+          level: 1 as const,
+          pageKind: 'insight' as const,
+          blocks: [{ type: 'paragraph' as const, text: '必须保留的正文' }]
+        }
+      ]
+    };
+    let conversation = createConversation({
+      id: conversationId,
+      title: 'PPT 局部清空',
+      projectId,
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      previousMessageId,
+      JSON.stringify(previousOutline)
+    );
+    conversation = attachDocumentResultToMessage(
+      conversation,
+      previousMessageId,
+      {
+        workId: parentWorkId,
+        fileName: '关于龙的PPT.pptx',
+        kind: 'ppt',
+        sizeBytes: 4096
+      },
+      now
+    );
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('document-application-clear-request'),
+      content: '将第二页的内容清空',
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      currentMessageId,
+      '这不是有效的文档大纲'
+    );
+
+    const compile = vi.fn(({ content }: { readonly content: string }) =>
+      JSON.parse(content)
+    );
+    const recover = vi.fn(({ content }: { readonly content: string }) =>
+      JSON.parse(content)
+    );
+    const revisionAgent = vi.fn(async (input: Parameters<NonNullable<
+      ConstructorParameters<typeof DocumentGenerationApplicationService>[0]['revisionAgent']
+    >>[0]) => ({
+      outline: {
+        ...input.outline,
+        sections: [
+          { ...input.outline.sections[0], blocks: [] },
+          input.outline.sections[1]
+        ]
+      },
+      agent: {
+        state: 'completed_unvalidated' as const,
+        steps: 4,
+        costUnits: 0,
+        observations: [],
+        summary: 'Scoped clear completed'
+      },
+      changed: true,
+      targetSectionIndex: 0,
+      patch: {
+        operation: 'clear_section' as const,
+        target: {
+          sectionIndex: 0,
+          sectionHeading: '神话起源',
+          pageNumber: 2,
+          targetUnit: 'page' as const
+        }
+      }
+    }));
+    const run = vi.fn(async () => ({
+      taskId: toTaskId('task-document-clear-page'),
+      executionId: toExecutionId('execution-document-clear-page'),
+      workId: toWorkId('work-document-clear-page'),
+      fileName: '关于龙的PPT-新版.pptx',
+      sizeBytes: 4096
+    }));
+    const fingerprint = vi.fn(() => 'clear-page-content-sha256');
+    const service = new DocumentGenerationApplicationService({
+      projectId,
+      conversations: {
+        load: async () => conversation,
+        attachDocumentResult: async () => undefined,
+        updateDocumentGenerationStatus: async () => undefined
+      },
+      compiler: {
+        compile,
+        recover
+      },
+      generator: { run },
+      revisionAgent,
+      fingerprint,
+      wait: async () => undefined
+    });
+
+    await service.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId: currentMessageId,
+      kind: 'ppt',
+      parentWorkId,
+      images: []
+    });
+
+    expect(revisionAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestText: '将第二页的内容清空',
+        outline: previousOutline
+      })
+    );
+    expect(revisionAgent.mock.calls[0]?.[0]).not.toHaveProperty('proposedOutline');
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(compile).toHaveBeenCalledWith({
+      content: JSON.stringify(previousOutline),
+      kind: 'ppt'
+    });
+    expect(recover).not.toHaveBeenCalled();
+    expect(fingerprint).toHaveBeenCalledWith('将第二页的内容清空');
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentWorkId,
+        outline: expect.objectContaining({
+          sections: [
+            expect.objectContaining({ blocks: [] }),
+            previousOutline.sections[1]
+          ]
+        }),
+        revisionPatch: expect.objectContaining({
+          operation: 'clear_section',
+          target: expect.objectContaining({ pageNumber: 2, targetUnit: 'page' })
+        })
+      })
+    );
+  });
+
+  it('chains every revision from the latest application-validated outline', async () => {
+    const initialMessageId = toMessageId('document-canonical-initial');
+    const firstRevisionMessageId = toMessageId('document-canonical-revision-1');
+    const secondRevisionMessageId = toMessageId('document-canonical-revision-2');
+    const initialWorkId = toWorkId('document-canonical-work-0');
+    const firstWorkId = toWorkId('document-canonical-work-1');
+    const secondWorkId = toWorkId('document-canonical-work-2');
+    const initialOutline = {
+      kind: 'ppt' as const,
+      title: 'Canonical revision chain',
+      sections: [
+        {
+          heading: 'Page two',
+          level: 1 as const,
+          pageKind: 'insight' as const,
+          blocks: [{ type: 'paragraph' as const, text: 'Keep until round one' }]
+        },
+        {
+          heading: 'Page three',
+          level: 1 as const,
+          pageKind: 'insight' as const,
+          blocks: [{ type: 'paragraph' as const, text: 'Keep until round two' }]
+        }
+      ]
+    };
+    const staleProviderOutline = {
+      ...initialOutline,
+      sections: [
+        initialOutline.sections[0],
+        { ...initialOutline.sections[1], blocks: [] }
+      ]
+    };
+    let conversation = createConversation({
+      id: conversationId,
+      title: 'Canonical revisions',
+      projectId,
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      initialMessageId,
+      JSON.stringify(initialOutline)
+    );
+    conversation = attachDocumentResultToMessage(
+      conversation,
+      initialMessageId,
+      {
+        workId: initialWorkId,
+        fileName: 'canonical.pptx',
+        kind: 'ppt',
+        sizeBytes: 4096
+      },
+      now
+    );
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('document-canonical-request-1'),
+      content: '\u5c06\u7b2c\u4e8c\u9875\u7684\u5185\u5bb9\u6e05\u7a7a',
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      firstRevisionMessageId,
+      JSON.stringify(staleProviderOutline)
+    );
+
+    const revisionAgent = vi.fn(async (input: Parameters<NonNullable<
+      ConstructorParameters<typeof DocumentGenerationApplicationService>[0]['revisionAgent']
+    >>[0]) => {
+      const targetSectionIndex = input.requestText.includes('\u7b2c\u4e09\u9875') ? 1 : 0;
+      const targetSection = input.outline.sections[targetSectionIndex];
+      if (!targetSection) throw new Error('revision target missing');
+      const outline = {
+        ...input.outline,
+        sections: input.outline.sections.map((section, index) =>
+          index === targetSectionIndex ? { ...section, blocks: [] } : section
+        )
+      };
+      return {
+        outline,
+        agent: {
+          state: 'completed_unvalidated' as const,
+          steps: 4,
+          costUnits: 0,
+          observations: [],
+          summary: 'Scoped clear completed'
+        },
+        changed: true,
+        targetSectionIndex,
+        patch: {
+          operation: 'clear_section' as const,
+          target: {
+            sectionIndex: targetSectionIndex,
+            sectionHeading: targetSection.heading,
+            pageNumber: targetSectionIndex + 2,
+            targetUnit: 'page' as const
+          }
+        }
+      };
+    });
+    let runCount = 0;
+    const run = vi.fn(async () => {
+      runCount += 1;
+      return {
+        taskId: toTaskId(`document-canonical-task-${runCount}`),
+        executionId: toExecutionId(`document-canonical-execution-${runCount}`),
+        workId: runCount === 1 ? firstWorkId : secondWorkId,
+        fileName: `canonical-${runCount}.pptx`,
+        sizeBytes: 4096
+      };
+    });
+    const attachDocumentResult = vi.fn(async (input: {
+      readonly messageId: ReturnType<typeof toMessageId>;
+      readonly expectedRevision: number;
+      readonly documentResult: Parameters<typeof attachDocumentResultToMessage>[2];
+    }) => {
+      expect(input.expectedRevision).toBe(conversation.revision);
+      conversation = attachDocumentResultToMessage(
+        conversation,
+        input.messageId,
+        input.documentResult,
+        now
+      );
+    });
+    const service = new DocumentGenerationApplicationService({
+      projectId,
+      conversations: {
+        load: async () => conversation,
+        attachDocumentResult,
+        updateDocumentGenerationStatus: async (input) => {
+          expect(input.expectedRevision).toBe(conversation.revision);
+          conversation = setDocumentGenerationStatusOnMessage(
+            conversation,
+            input.messageId,
+            input.status,
+            now
+          );
+        }
+      },
+      compiler: {
+        compile: ({ content }) => JSON.parse(content),
+        recover: ({ content }) => JSON.parse(content)
+      },
+      generator: { run },
+      revisionAgent,
+      fingerprint: (content) => content,
+      wait: async () => undefined
+    });
+
+    await service.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId: firstRevisionMessageId,
+      kind: 'ppt',
+      parentWorkId: initialWorkId,
+      images: []
+    });
+
+    const firstRevisionMessage = conversation.messages.find(
+      (message) => message.id === firstRevisionMessageId
+    );
+    expect(firstRevisionMessage?.content).toBe(JSON.stringify(staleProviderOutline));
+    const firstValidatedOutline = JSON.parse(
+      firstRevisionMessage?.documentResult?.validatedContent ?? ''
+    );
+    expect(firstValidatedOutline.sections[0].blocks).toEqual([]);
+    expect(firstValidatedOutline.sections[1].blocks).toEqual(
+      initialOutline.sections[1].blocks
+    );
+
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('document-canonical-request-2'),
+      content: '\u5c06\u7b2c\u4e09\u9875\u7684\u5185\u5bb9\u6e05\u7a7a',
+      createdAt: now
+    });
+    conversation = appendCompletedAssistantMessage(
+      conversation,
+      secondRevisionMessageId,
+      JSON.stringify(staleProviderOutline)
+    );
+
+    await service.generateFromMessage({
+      conversationId,
+      expectedRevision: conversation.revision,
+      messageId: secondRevisionMessageId,
+      kind: 'ppt',
+      parentWorkId: firstWorkId,
+      images: []
+    });
+
+    expect(revisionAgent).toHaveBeenCalledTimes(2);
+    expect(revisionAgent.mock.calls[1]?.[0].outline.sections[0].blocks).toEqual([]);
+    expect(revisionAgent.mock.calls[1]?.[0].outline.sections[1].blocks).toEqual(
+      initialOutline.sections[1].blocks
+    );
+    const secondRevisionMessage = conversation.messages.find(
+      (message) => message.id === secondRevisionMessageId
+    );
+    const secondValidatedOutline = JSON.parse(
+      secondRevisionMessage?.documentResult?.validatedContent ?? ''
+    );
+    expect(secondValidatedOutline.sections.map(
+      (section: { blocks: unknown[] }) => section.blocks
+    ))
+      .toEqual([[], []]);
+    expect(attachDocumentResult).toHaveBeenCalledTimes(2);
+  });
+
   it('aggregates the consecutive revision messages and applies an exact total-page rewrite', async () => {
     const previousMessageId = toMessageId('document-application-previous-message');
     const currentMessageId = toMessageId('document-application-page-count-message');

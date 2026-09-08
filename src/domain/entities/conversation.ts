@@ -173,6 +173,12 @@ export interface BeginAssistantMessageInput {
   readonly createdAt: IsoTimestamp;
 }
 
+export interface AddCompletedAssistantMessageInput {
+  readonly id: MessageId;
+  readonly content: string;
+  readonly createdAt: IsoTimestamp;
+}
+
 const conversationBaseKeys = [
   'schemaVersion',
   'id',
@@ -382,6 +388,29 @@ export function beginAssistantMessage(
     attachments: [],
     createdAt: input.createdAt,
     updatedAt: input.createdAt
+  });
+  return appendMessage(conversation, message, input.createdAt);
+}
+
+export function addCompletedAssistantMessage(
+  conversation: Conversation,
+  input: AddCompletedAssistantMessageInput
+): ActiveConversation {
+  assertConversationActive(conversation, 'append messages');
+  assertUniqueMessageId(conversation, input.id);
+  const message = parseMessage({
+    schemaVersion: 1,
+    id: input.id,
+    conversationId: conversation.id,
+    revision: 0,
+    role: 'assistant',
+    state: 'completed',
+    content: input.content,
+    attachments: [],
+    streamSequence: 0,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    completedAt: input.createdAt
   });
   return appendMessage(conversation, message, input.createdAt);
 }

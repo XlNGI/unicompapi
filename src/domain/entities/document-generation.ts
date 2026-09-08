@@ -81,6 +81,12 @@ export interface DocumentMessageResult {
   readonly fileName: string;
   readonly kind: DocumentWorkspaceKind;
   readonly sizeBytes: number;
+  /**
+   * Application-validated content that produced this Work. Provider output is
+   * retained on the message for audit, but must not become the next revision's
+   * source of truth after a local patch has been applied.
+   */
+  readonly validatedContent?: string;
 }
 
 export const documentGenerationStates = [
@@ -189,7 +195,24 @@ export function parseDocumentMessageResult(
     value.sizeBytes,
     'message.documentResult.sizeBytes'
   );
-  return { workId, fileName, kind, sizeBytes };
+  const validatedContent = value.validatedContent === undefined
+    ? undefined
+    : requireNonBlankString(
+        value.validatedContent,
+        'message.documentResult.validatedContent'
+      );
+  if (validatedContent !== undefined && validatedContent.length > 1_000_000) {
+    throw new TypeError(
+      'message.documentResult.validatedContent exceeds the maximum length'
+    );
+  }
+  return {
+    workId,
+    fileName,
+    kind,
+    sizeBytes,
+    ...(validatedContent !== undefined ? { validatedContent } : {})
+  };
 }
 
 export function isDocumentMessageResult(
