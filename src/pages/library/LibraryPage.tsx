@@ -1,6 +1,7 @@
+import { SelectPicker } from '../../components/Pickers';
 import { useEffect, useRef, useState } from 'react';
 import { LuMaximize2, LuMinimize2 } from 'react-icons/lu';
-import { Input, SelectPicker } from 'rsuite';
+import { Input } from 'rsuite';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';

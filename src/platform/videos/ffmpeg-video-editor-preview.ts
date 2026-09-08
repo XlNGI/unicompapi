@@ -13,8 +13,14 @@ import {
   type VideoEditorPreviewPlan
 } from './video-editor-preview';
 import { ManagedProcessSupervisor } from '../runtime';
+import {
+  videoEditorThumbnailStripVersion,
+  videoEditorThumbnailStripFrameCount,
+  videoEditorThumbnailStripFrameWidth,
+  videoEditorThumbnailStripFrameHeight
+} from '../../shared/video-editor-thumbnail-spec';
 
-export const developmentFfmpegVersion = '8.1.2';
+export const developmentFfmpegVersion = `8.1.2-${videoEditorThumbnailStripVersion}`;
 
 export interface FfmpegDevelopmentEnvironment {
   readonly VITE_DEV_SERVER_URL?: string;
@@ -209,16 +215,21 @@ function buildFfmpegArguments(input: {
   ];
 
   if (input.kind === 'thumbnail_strip') {
+    const durationSeconds = (range.outUs - range.inUs) / 1_000_000;
+    const fps = videoEditorThumbnailStripFrameCount / durationSeconds;
     return [
       ...common,
       '-map',
       '0:v:0',
+      '-vf',
+      `fps=${fps.toFixed(6)},` +
+        `scale=${videoEditorThumbnailStripFrameWidth}:${videoEditorThumbnailStripFrameHeight}:force_original_aspect_ratio=increase,` +
+        `crop=${videoEditorThumbnailStripFrameWidth}:${videoEditorThumbnailStripFrameHeight},` +
+        `tile=${videoEditorThumbnailStripFrameCount}x1`,
       '-frames:v',
       '1',
-      '-vf',
-      'scale=320:-2',
       '-q:v',
-      '4',
+      '2',
       '-an',
       input.target
     ];

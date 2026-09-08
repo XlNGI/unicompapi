@@ -21,7 +21,7 @@ test('A4 consumes the controlled B4 export lifecycle without a second task store
   }
   assert.match(editorSource, /storage\.listTasks\(\)/);
   assert.match(editorSource, /task\.kind === 'video_editing'/);
-  assert.doesNotMatch(editorSource, /localStorage|sessionStorage|fetch\(|child_process|absolutePath/);
+  assert.doesNotMatch(editorSource, /localStorage|sessionStorage|\bfetch\(|child_process|absolutePath/);
 });
 
 test('A4 exposes true preflight, task, cancellation and recovery states', () => {

@@ -1,3 +1,4 @@
+import { SelectPicker } from '../../../components/Pickers';
 import {
   useEffect,
   useLayoutEffect,
@@ -14,17 +15,10 @@ import {
   LuMinimize2,
   LuPause,
   LuPlay,
-  LuZoomIn
+  LuZoomIn,
+  LuZoomOut
 } from 'react-icons/lu';
-import {
-  Checkbox,
-  Dropdown,
-  Input,
-  InputNumber,
-  Radio,
-  RadioGroup,
-  SelectPicker
-} from 'rsuite';
+import { Checkbox, Dropdown, Input, InputNumber, Radio, RadioGroup } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';
@@ -54,7 +48,13 @@ import type {
   VideoEditorUpdateDto
 } from '../../../shared/video-editor-ipc';
 import '../../../styles/pages.css';
+import {
+  videoEditorThumbnailStripFrameCount as contactSheetFrameCount,
+  videoEditorThumbnailStripFrameWidth as contactSheetFrameWidthPx,
+  videoEditorThumbnailStripFrameHeight as contactSheetFrameHeightPx
+} from '../../../shared/video-editor-thumbnail-spec';
 import { videoCreationModes } from '../creationModes';
+import { VideoScrubCache } from './video-scrub-cache';
 
 const mode = videoCreationModes[3];
 
@@ -133,6 +133,7 @@ const previewZoomOptions: readonly {
 ] as const;
 
 interface VideoEditingPageProps {
+  readonly active?: boolean;
   readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
   readonly preferredDraftId?: string;
 }
@@ -162,6 +163,8 @@ interface TimelineThumbnailSlot {
   readonly sourceUs: number;
   readonly leftPx: number;
   readonly widthPx: number;
+  readonly stripFrameIndex: number;
+  readonly requiresExactFrame: boolean;
 }
 
 interface TimelineFrameRequest {
@@ -202,15 +205,21 @@ interface TimelineEdgeAutoScrollInput {
 }
 
 const timelineThumbnailWidthPx = 56;
-const timelineThumbnailRenderWidthPx = 112;
-const timelineThumbnailRenderHeightPx = 72;
+const timelineThumbnailRenderWidthPx = 320;
+const timelineThumbnailRenderHeightPx = 180;
 const timelineFrameCacheLimit = 256;
 const timelineFrameConcurrency = 2;
 const timelineFrameDebounceMs = 60;
 const timelineFramePresentationTimeoutMs = 48;
 const timelineMaximumPixelsPerSecond = 1_000;
+const timelineDefaultPixelsPerSecond = 80;
 const timelineWheelSensitivity = 0.002;
 const timelineRulerTargetGapPx = 96;
+
+export function contactSheetTranslateX(frameIndex: number): string {
+  const bounded = Math.min(contactSheetFrameCount - 1, Math.max(0, Math.floor(frameIndex)));
+  return `${-(bounded / contactSheetFrameCount) * 100}%`;
+}
 
 interface PendingPreviewSeek {
   readonly token: number;
@@ -237,6 +246,7 @@ const saveStateTones: Record<SaveState, StatusTone> = {
 };
 
 export function VideoEditingPage({
+  active = true,
   onNavigate,
   preferredDraftId
 }: VideoEditingPageProps) {
@@ -245,7 +255,6 @@ export function VideoEditingPage({
   const videoRef = useRef<HTMLVideoElement>(null);
   const musicRef = useRef<HTMLAudioElement>(null);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
-  const timelineFitPixelsPerSecondRef = useRef(0);
   const timelineScrollFrameRef = useRef<number>();
   const timelinePendingScrollLeftRef = useRef(0);
   const timelineZoomScrollLeftRef = useRef<number>();
@@ -261,9 +270,25 @@ export function VideoEditingPage({
     Readonly<Record<string, VideoEditorSourceStatusDto>>
   >({});
   const [preview, setPreview] = useState<PreviewMediaHandle>();
+  const stageCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [showStageFrame, setShowStageFrame] = useState(false);
+  const stageHeldRef = useRef(false);
+  const scrubbingRef = useRef(false);
+  const scrubTargetRef = useRef(0);
+  const scrubCache = useMemo(() => videoEditors ? new VideoScrubCache(async (draftId, clipId) => {
+    const cached = previewCacheRef.current.get(clipId);
+    if (cached && Date.parse(cached.expiresAt) - Date.now() > 30_000) return cached.url;
+    const result = await videoEditors.createSourcePreview(draftId, clipId);
+    if (!result.ok) return undefined;
+    previewCacheRef.current.set(clipId, result.value);
+    return result.value.url;
+  }, () => setMessage('部分片段预览准备失败，请检查素材状态后重试。')) : undefined, [videoEditors]);
+  useEffect(() => () => scrubCache?.clear(), [scrubCache]);
   const [musicPreview, setMusicPreview] =
     useState<VideoEditorBackgroundMusicPreviewDto>();
   const [playheadUs, setPlayheadUs] = useState(0);
+  const playheadLabelRef = useRef<HTMLElement>(null);
+  const scrubContextRef = useRef('');
   const [timelinePlaying, setTimelinePlaying] = useState(false);
   const [title, setTitle] = useState('');
   const [mediaTab, setMediaTab] = useState<MediaTab>('timeline');
@@ -282,6 +307,9 @@ export function VideoEditingPage({
   const [timelineFrameUrls, setTimelineFrameUrls] = useState<
     Readonly<Record<string, string>>
   >({});
+  const [contactSheetUrls, setContactSheetUrls] = useState<
+    Readonly<Record<string, string>>
+  >({});
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const [previewSeeking, setPreviewSeeking] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<PreviewZoom>('fit');
@@ -294,6 +322,7 @@ export function VideoEditingPage({
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const frameCacheRef = useRef<Map<string, string>>(new Map());
   const timelineFrameCacheRef = useRef<Map<string, string>>(new Map());
+  const contactSheetCacheRef = useRef<Map<string, string>>(new Map());
   const timelineFrameRequestRef = useRef(0);
   const previewCacheRef = useRef<Map<string, PreviewMediaHandle>>(new Map());
   const previewRequestRef = useRef(0);
@@ -304,6 +333,13 @@ export function VideoEditingPage({
   >(undefined);
   const timelinePlayingRef = useRef(false);
   const playbackSwitchingRef = useRef(false);
+
+  useEffect(() => {
+    if (!active) {
+      scrubbingRef.current = false;
+      stopTimelinePlayback();
+    }
+  }, [active]);
 
   useEffect(() => {
     if (!previewExpanded) return;
@@ -325,10 +361,13 @@ export function VideoEditingPage({
     revokeFrameUrlMap(timelineFrameCacheRef.current);
     setFrameUrls({});
     setTimelineFrameUrls({});
+    contactSheetCacheRef.current.clear();
+    setContactSheetUrls({});
     return () => {
       timelineFrameRequestRef.current += 1;
       revokeFrameUrlMap(frameCacheRef.current);
       revokeFrameUrlMap(timelineFrameCacheRef.current);
+      contactSheetCacheRef.current.clear();
     };
   }, [currentDraft?.draftId]);
 
@@ -336,6 +375,7 @@ export function VideoEditingPage({
     let active = true;
 
     async function load() {
+      if (!active) return;
       if (!storage || !videoEditors) {
         if (active) {
           setLoading(false);
@@ -353,6 +393,7 @@ export function VideoEditingPage({
       }
       setSession(sessionResult.value);
       if (!sessionResult.value) {
+        acceptDraft(undefined);
         setLoading(false);
         return;
       }
@@ -381,7 +422,8 @@ export function VideoEditingPage({
       const preferred = preferredDraftId
         ? sorted.find((draft) => draft.draftId === preferredDraftId)
         : undefined;
-      acceptDraft(preferred ?? sorted[0]);
+      const next = preferred ?? sorted.find((item) => item.draftId === currentDraft?.draftId) ?? sorted[0];
+      if (next?.draftId !== currentDraft?.draftId || next?.revision !== currentDraft?.revision) acceptDraft(next);
     }
 
     void load().catch(() => {
@@ -393,7 +435,7 @@ export function VideoEditingPage({
     return () => {
       active = false;
     };
-  }, [preferredDraftId, storage, videoEditors]);
+  }, [active, preferredDraftId, storage, videoEditors]);
 
   useEffect(() => {
     let active = true;
@@ -529,18 +571,53 @@ export function VideoEditingPage({
     setCurrentDraft(draft);
     setTitle(draft?.title ?? '');
     setSaveState('saved');
-    setPreview(undefined);
+    holdStageFrame();
+    if (!draft || draft.draftId !== currentDraft?.draftId) {
+      setPreview(undefined);
+      scrubCache?.clear();
+      const canvas = stageCanvasRef.current;
+      if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+      stageHeldRef.current = false;
+      setShowStageFrame(false);
+      previewHandleRef.current = undefined;
+      previewCacheRef.current.clear();
+      setTimelinePixelsPerSecond(0);
+      setTimelineScrollLeft(0);
+      timelineZoomScrollLeftRef.current = undefined;
+      if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0;
+    } else {
+      // Appending a clip must not invalidate already prepared source images.
+      for (const previous of currentDraft.videoTrack) {
+      const next = draft.videoTrack.find((clip) => clip.clipId === previous.clipId);
+        if (next && JSON.stringify([next.source, next.sourceRange]) ===
+          JSON.stringify([previous.source, previous.sourceRange])) continue;
+        const id = previous.clipId;
+        previewCacheRef.current.delete(id);
+        if (previewHandleRef.current?.clipId === id) previewHandleRef.current = undefined;
+        contactSheetCacheRef.current.delete(id);
+        const poster = frameCacheRef.current.get(id);
+        if (poster) URL.revokeObjectURL(poster);
+        frameCacheRef.current.delete(id);
+        const removedKeys: string[] = [];
+        for (const [key, url] of timelineFrameCacheRef.current) {
+          if (!key.startsWith(`${id}:`)) continue;
+          URL.revokeObjectURL(url);
+          timelineFrameCacheRef.current.delete(key);
+          removedKeys.push(key);
+        }
+        setTimelineFrameUrls((current) => {
+          const next = { ...current };
+          for (const key of removedKeys) delete next[key];
+          return next;
+        });
+        setFrameUrls((current) => { const next = { ...current }; delete next[id]; return next; });
+        setContactSheetUrls((current) => { const next = { ...current }; delete next[id]; return next; });
+      }
+    }
     setPreviewUnavailable(false);
-    previewHandleRef.current = undefined;
-    previewCacheRef.current.clear();
     pendingPreviewSeekRef.current = undefined;
     playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
-    setTimelinePixelsPerSecond(0);
-    setTimelineScrollLeft(0);
-    timelineFitPixelsPerSecondRef.current = 0;
-    timelineZoomScrollLeftRef.current = undefined;
-    if (timelineViewportRef.current) timelineViewportRef.current.scrollLeft = 0;
     setExportPreflight(undefined);
     setExportConfirmed(false);
     const segments = buildTimelineSegments(draft?.videoTrack ?? []);
@@ -903,10 +980,12 @@ export function VideoEditingPage({
   }
 
   function completePreviewSeek() {
+    if (scrubbingRef.current) return;
     const pending = pendingPreviewSeekRef.current;
     if (
       !pending ||
       !videoRef.current ||
+      videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
       videoRef.current.seeking ||
       videoRef.current.dataset.previewClipId !== pending.clipId
     ) {
@@ -917,6 +996,15 @@ export function VideoEditingPage({
       applyPendingPreviewSeek();
       return;
     }
+    const video = videoRef.current;
+    const reveal = () => {
+      if (scrubbingRef.current || previewSeekTokenRef.current !== pending.token || videoRef.current !== video) return;
+      stageHeldRef.current = false;
+      setShowStageFrame(false);
+    };
+    // seeked/loadeddata already establishes a decoded paused frame. Waiting for
+    // a subsequent video-frame callback can wait forever at time zero.
+    window.requestAnimationFrame(reveal);
     pendingPreviewSeekRef.current = undefined;
     playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
@@ -951,6 +1039,10 @@ export function VideoEditingPage({
     videoRef.current.currentTime = pending.sourceUs / 1_000_000;
   }
 
+  useLayoutEffect(() => {
+    if (!scrubbingRef.current) applyPendingPreviewSeek();
+  }, [preview, previewSeeking]);
+
   async function ensurePreview(
     clipId: string,
     force = false,
@@ -962,6 +1054,7 @@ export function VideoEditingPage({
     if (!videoEditors || !draft || !clipId) return false;
     const clip = draft.videoTrack.find((item) => item.clipId === clipId);
     if (!clip) return false;
+    holdStageFrame();
     const pendingSeek = beginPreviewSeek(
       draft,
       clipId,
@@ -980,12 +1073,12 @@ export function VideoEditingPage({
       Number.isFinite(Date.parse(reusable.expiresAt)) &&
       Date.parse(reusable.expiresAt) - Date.now() > 30_000
     ) {
-      previewHandleRef.current = { clipId, preview: reusable };
-      setPreview(reusable);
       setPreviewUnavailable(false);
-      if (existing?.clipId === clipId && videoRef.current) {
-        applyPendingPreviewSeek();
-      }
+        previewHandleRef.current = { clipId, preview: reusable };
+        setPreview(reusable);
+        if (existing?.clipId === clipId && videoRef.current) {
+          applyPendingPreviewSeek();
+        }
       return true;
     }
     try {
@@ -1003,10 +1096,10 @@ export function VideoEditingPage({
         expiresAt: result.value.expiresAt,
         mimeType: result.value.mimeType
       };
-      previewHandleRef.current = { clipId, preview: nextPreview };
       previewCacheRef.current.set(cacheKey, nextPreview);
-      setPreview(nextPreview);
       setPreviewUnavailable(false);
+        previewHandleRef.current = { clipId, preview: nextPreview };
+        setPreview(nextPreview);
       return true;
     } catch {
       if (requestToken === previewRequestRef.current) {
@@ -1034,6 +1127,8 @@ export function VideoEditingPage({
       previewCacheRef.current.clear();
       setFrameUrls({});
       setTimelineFrameUrls({});
+      contactSheetCacheRef.current.clear();
+      setContactSheetUrls({});
       setTimelineFrameRefresh((value) => value + 1);
       setMessage('可重建的预览缓存已清除，草稿和源文件没有改变。');
     } catch {
@@ -1171,6 +1266,12 @@ export function VideoEditingPage({
     (segment) => segment.clipId === selectedClipId
   );
   const selectedIndex = selectedSegment?.index ?? -1;
+  useEffect(() => {
+    if (!active || !currentDraft || !scrubCache) return;
+    for (const clip of currentDraft.videoTrack.slice(Math.max(0, selectedIndex - 3), Math.max(0, selectedIndex - 3) + 8)) {
+      scrubCache.prefetch(currentDraft.draftId, clip);
+    }
+  }, [active, currentDraft, scrubCache, selectedIndex]);
   const hasLocalTitleChange =
     Boolean(currentDraft) && title.trim() !== currentDraft?.title;
   const operationBlocked = busy || hasLocalTitleChange;
@@ -1183,23 +1284,41 @@ export function VideoEditingPage({
   }, [currentDraft, videoWorks]);
   const timelineFitPixelsPerSecond =
     totalDurationUs > 0 && timelineViewportWidth > 0
-      ? timelineViewportWidth / (totalDurationUs / 1_000_000)
+      ? timelineViewportWidth * 0.9 / (totalDurationUs / 1_000_000)
       : 0;
   const effectiveTimelinePixelsPerSecond =
     timelineFitPixelsPerSecond > 0
-      ? Math.max(
-          timelineFitPixelsPerSecond,
-          timelinePixelsPerSecond || timelineFitPixelsPerSecond
-        )
+      ? timelinePixelsPerSecond || timelineDefaultPixelsPerSecond
       : 0;
   const timelineCanvasWidth = Math.max(
     timelineViewportWidth,
     (totalDurationUs / 1_000_000) * effectiveTimelinePixelsPerSecond
   );
+  const timelineViewDurationUs = effectiveTimelinePixelsPerSecond > 0
+    ? Math.max(totalDurationUs, timelineCanvasWidth / effectiveTimelinePixelsPerSecond * 1_000_000)
+    : totalDurationUs;
+  const timelineMinimumPixelsPerSecond = Math.min(
+    timelineDefaultPixelsPerSecond,
+    timelineFitPixelsPerSecond || timelineDefaultPixelsPerSecond
+  );
+  const changeTimelineZoom = (pixelsPerSecond: number) => {
+    const viewport = timelineViewportRef.current;
+    if (!viewport || effectiveTimelinePixelsPerSecond <= 0) return;
+    const next = resolveTimelineWheelZoom({
+      currentPixelsPerSecond: effectiveTimelinePixelsPerSecond,
+      deltaY: -Math.log(pixelsPerSecond / effectiveTimelinePixelsPerSecond) / timelineWheelSensitivity,
+      pointerOffsetPx: viewport.clientWidth / 2,
+      scrollLeft: viewport.scrollLeft,
+      totalDurationUs,
+      viewportWidth: viewport.clientWidth
+    });
+    timelineZoomScrollLeftRef.current = next.scrollLeft;
+    setTimelinePixelsPerSecond(next.pixelsPerSecond);
+  };
   const timelineRulerTicks = useMemo(
     () =>
       buildTimelineRulerTicks(
-        totalDurationUs,
+        timelineViewDurationUs,
         effectiveTimelinePixelsPerSecond,
         timelineScrollLeft,
         timelineScrollLeft + timelineViewportWidth,
@@ -1209,7 +1328,7 @@ export function VideoEditingPage({
       effectiveTimelinePixelsPerSecond,
       timelineScrollLeft,
       timelineViewportWidth,
-      totalDurationUs
+      timelineViewDurationUs
     ]
   );
   const timelineThumbnailSlots = useMemo(
@@ -1243,25 +1362,6 @@ export function VideoEditingPage({
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [timelineCollapsed]);
-
-  useEffect(() => {
-    if (timelineFitPixelsPerSecond <= 0) return;
-    const previousFit = timelineFitPixelsPerSecondRef.current;
-    setTimelinePixelsPerSecond((current) => {
-      const wasFitted =
-        current <= 0 ||
-        previousFit <= 0 ||
-        Math.abs(current - previousFit) < 0.5;
-      const next = wasFitted
-        ? timelineFitPixelsPerSecond
-        : Math.max(timelineFitPixelsPerSecond, current);
-      return Math.min(
-        Math.max(timelineFitPixelsPerSecond, timelineMaximumPixelsPerSecond),
-        next
-      );
-    });
-    timelineFitPixelsPerSecondRef.current = timelineFitPixelsPerSecond;
-  }, [timelineFitPixelsPerSecond]);
 
   useEffect(() => {
     const viewport = timelineViewportRef.current;
@@ -1331,7 +1431,7 @@ export function VideoEditingPage({
     viewport.scrollLeft = nextScrollLeft;
     timelinePendingScrollLeftRef.current = viewport.scrollLeft;
     setTimelineScrollLeft(viewport.scrollLeft);
-  }, [timelineCanvasWidth]);
+  }, [timelineCanvasWidth, effectiveTimelinePixelsPerSecond]);
 
   useEffect(
     () => () => {
@@ -1360,6 +1460,9 @@ export function VideoEditingPage({
       }
     };
     const cachedTimelineFrames: Record<string, string> = {};
+    const exactFrameKeys = new Set(
+      timelineThumbnailSlots.filter((slot) => slot.requiresExactFrame).map((slot) => slot.key)
+    );
     const viewportCenterPx = timelineScrollLeft + timelineViewportWidth / 2;
     const prioritizedSlots = [...timelineThumbnailSlots].sort(
       (left, right) =>
@@ -1367,6 +1470,7 @@ export function VideoEditingPage({
         Math.abs(right.leftPx + right.widthPx / 2 - viewportCenterPx)
     );
     for (const slot of prioritizedSlots) {
+      if (contactSheetCacheRef.current.has(slot.clipId) && !slot.requiresExactFrame) continue;
       const cached = timelineFrameCacheRef.current.get(slot.key);
       if (cached) {
         timelineFrameCacheRef.current.delete(slot.key);
@@ -1436,58 +1540,86 @@ export function VideoEditingPage({
             };
             previewCacheRef.current.set(clipId, handle);
           }
-          await extractTimelineFrameBatch(
-            handle.url,
-            requests,
-            controller.signal,
-            isCancelled,
-            (frames) => {
-              if (isCancelled()) {
-                for (const frame of frames) {
-                  URL.revokeObjectURL(frame.frameUrl);
+          let contactSheetReady = contactSheetCacheRef.current.has(clipId);
+          if (!contactSheetReady && requests.some((request) => request.kind === 'timeline')) {
+            try {
+              const artifact = await editorApi.requestPreviewArtifact(
+                draft.draftId,
+                clipId,
+                'thumbnail_strip'
+              );
+              if (!isCancelled() && artifact.ok) {
+                const usable = await loadUsableContactSheet(artifact.value.url);
+                if (!isCancelled() && usable) {
+                  contactSheetCacheRef.current.set(clipId, artifact.value.url);
+                  setContactSheetUrls((current) => ({
+                    ...current,
+                    [clipId]: artifact.value.url
+                  }));
+                  contactSheetReady = true;
                 }
-                return;
               }
-              const nextPosterFrames: Record<string, string> = {};
-              const nextTimelineFrames: Record<string, string> = {};
-              const evictedTimelineKeys = new Set<string>();
-              for (const { request, frameUrl } of frames) {
-                if (request.kind === 'poster') {
-                  const previous = frameCacheRef.current.get(request.clipId);
-                  if (previous && previous !== frameUrl) {
-                    URL.revokeObjectURL(previous);
-                  }
-                  frameCacheRef.current.set(request.clipId, frameUrl);
-                  nextPosterFrames[request.clipId] = frameUrl;
-                  continue;
-                }
-                for (const key of cacheTimelineFrame(
-                  timelineFrameCacheRef.current,
-                  request.key,
-                  frameUrl
-                )) {
-                  evictedTimelineKeys.add(key);
-                }
-                nextTimelineFrames[request.key] = frameUrl;
-              }
-              if (Object.keys(nextPosterFrames).length > 0) {
-                setFrameUrls((current) => ({
-                  ...current,
-                  ...nextPosterFrames
-                }));
-              }
-              if (
-                Object.keys(nextTimelineFrames).length > 0 ||
-                evictedTimelineKeys.size > 0
-              ) {
-                setTimelineFrameUrls((current) => {
-                  const next = { ...current, ...nextTimelineFrames };
-                  for (const key of evictedTimelineKeys) delete next[key];
-                  return next;
-                });
-              }
+            } catch {
+              // 未提供联系表时，继续使用现有 Canvas 提帧路径。
             }
-          );
+          }
+          const canvasRequests = contactSheetReady
+            ? requests.filter((request) => request.kind === 'poster' || exactFrameKeys.has(request.key))
+            : requests;
+          if (!isCancelled() && canvasRequests.length > 0) {
+            await extractTimelineFrameBatch(
+              handle.url,
+              canvasRequests,
+              controller.signal,
+              isCancelled,
+              (frames) => {
+                if (isCancelled()) {
+                  for (const frame of frames) {
+                    URL.revokeObjectURL(frame.frameUrl);
+                  }
+                  return;
+                }
+                const nextPosterFrames: Record<string, string> = {};
+                const nextTimelineFrames: Record<string, string> = {};
+                const evictedTimelineKeys = new Set<string>();
+                for (const { request, frameUrl } of frames) {
+                  if (request.kind === 'poster') {
+                    const previous = frameCacheRef.current.get(request.clipId);
+                    if (previous && previous !== frameUrl) {
+                      URL.revokeObjectURL(previous);
+                    }
+                    frameCacheRef.current.set(request.clipId, frameUrl);
+                    nextPosterFrames[request.clipId] = frameUrl;
+                    continue;
+                  }
+                  for (const key of cacheTimelineFrame(
+                    timelineFrameCacheRef.current,
+                    request.key,
+                    frameUrl
+                  )) {
+                    evictedTimelineKeys.add(key);
+                  }
+                  nextTimelineFrames[request.key] = frameUrl;
+                }
+                if (Object.keys(nextPosterFrames).length > 0) {
+                  setFrameUrls((current) => ({
+                    ...current,
+                    ...nextPosterFrames
+                  }));
+                }
+                if (
+                  Object.keys(nextTimelineFrames).length > 0 ||
+                  evictedTimelineKeys.size > 0
+                ) {
+                  setTimelineFrameUrls((current) => {
+                    const next = { ...current, ...nextTimelineFrames };
+                    for (const key of evictedTimelineKeys) delete next[key];
+                    return next;
+                  });
+                }
+              }
+            );
+          }
         }
       ).catch(() => undefined);
     }, timelineFrameDebounceMs);
@@ -1509,6 +1641,7 @@ export function VideoEditingPage({
     ) ?? [];
 
   function selectClip(clipId: string) {
+    scrubbingRef.current = false;
     const resumePlayback = timelinePlayingRef.current;
     playbackSwitchingRef.current = false;
     videoRef.current?.pause();
@@ -1527,7 +1660,60 @@ export function VideoEditingPage({
     );
   }
 
+  function holdStageFrame() {
+    const canvas = stageCanvasRef.current;
+    const video = videoRef.current;
+    if (!stageHeldRef.current && canvas && video && video.readyState >= 2) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')?.drawImage(video, 0, 0);
+      stageHeldRef.current = true;
+      setShowStageFrame(true);
+    }
+  }
+
+  function scrubTimeline(nextUs: number) {
+    if (!currentDraft || !scrubCache) return;
+    if (!scrubbingRef.current) {
+      holdStageFrame();
+      stopTimelinePlayback();
+      scrubContextRef.current = '';
+    }
+    scrubbingRef.current = true;
+    previewRequestRef.current++;
+    if (playheadLabelRef.current) playheadLabelRef.current.textContent = formatTime(nextUs);
+    const segment = resolveTimelineSegmentAt(segments, Math.min(nextUs, totalDurationUs - 1));
+    const clip = currentDraft.videoTrack.find((item) => item.clipId === segment?.clipId);
+    if (!clip) return;
+    const context = JSON.stringify([clip.clipId, currentDraft.textTrack
+      .filter(text => nextUs >= text.range.startUs && nextUs < text.range.endUs)
+      .map(text => text.textId)]);
+    if (context !== scrubContextRef.current) {
+      scrubContextRef.current = context;
+      setSelectedClipId(clip.clipId);
+      setPlayheadUs(nextUs);
+    }
+    const token = ++scrubTargetRef.current;
+    scrubCache.request({
+      draftId: currentDraft.draftId, clip,
+      sourceUs: timelineToSourceUs(currentDraft, clip.clipId, nextUs),
+      present: (video) => {
+        if (!scrubbingRef.current || token !== scrubTargetRef.current) return;
+        const canvas = stageCanvasRef.current;
+        if (!canvas) return;
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+        canvas.getContext('2d')?.drawImage(video, 0, 0, width, height);
+        stageHeldRef.current = true;
+        setShowStageFrame(true);
+      }
+    });
+  }
+
   function seekTimeline(nextUs: number) {
+    scrubbingRef.current = false;
     const boundedUs = Math.min(totalDurationUs, Math.max(0, nextUs));
     setPlayheadUs(boundedUs);
     if (boundedUs >= totalDurationUs) {
@@ -1543,6 +1729,23 @@ export function VideoEditingPage({
     if (targetSegment.clipId !== selectedClipId) {
       setSelectedClipId(targetSegment.clipId);
     }
+    const activePreview = previewHandleRef.current;
+    if (
+      currentDraft &&
+      activePreview?.clipId === targetSegment.clipId &&
+      videoRef.current
+    ) {
+      previewRequestRef.current += 1;
+      holdStageFrame();
+      beginPreviewSeek(
+        currentDraft,
+        targetSegment.clipId,
+        boundedUs,
+        resumePlayback
+      );
+      applyPendingPreviewSeek();
+      return;
+    }
     void ensurePreview(
       targetSegment.clipId,
       false,
@@ -1553,6 +1756,7 @@ export function VideoEditingPage({
   }
 
   function syncPlayheadFromPreview() {
+    if (scrubbingRef.current) return;
     if (pendingPreviewSeekRef.current) return;
     if (!videoRef.current || !currentDraft) return;
     const previewClipId = previewHandleRef.current?.clipId;
@@ -1717,7 +1921,7 @@ export function VideoEditingPage({
   }
 
   return (
-    <section className="uc-video-editor" aria-labelledby={`${mode.id}-title`}>
+    <section hidden={!active} className="uc-video-editor" aria-labelledby={`${mode.id}-title`}>
       <header className="uc-video-editor__header">
         <div className="uc-video-editor__identity">
           <div className="uc-page-skeleton__heading-row">
@@ -1947,7 +2151,7 @@ export function VideoEditingPage({
                   backgroundColor:
                     currentDraft?.canvas.background.kind === 'solid'
                       ? currentDraft.canvas.background.color
-                      : '#000000',
+                      : 'var(--uc-color-surface-subtle)',
                   transform: previewZoom === 'fit' ? undefined : `scale(${previewZoom})`
                 }}
               >
@@ -1968,25 +2172,39 @@ export function VideoEditingPage({
                     src={preview.url}
                   />
                 ) : (
-                  <EmptyState
-                    description={
-                      selectedClip
-                        ? previewUnavailable
-                          ? '源文件不可用，可在左侧素材列表重新定位后重试。'
-                          : '正在校验并加载第一个片段，加载完成后即可预览整条时间线。'
-                        : '当前没有已选择的视频片段。'
-                    }
-                    icon="预"
-                    readOnly
-                    title={
-                      selectedClip
-                        ? previewUnavailable
-                          ? '源文件不可用'
-                          : '正在准备时间线预览'
-                        : '等待视频片段'
-                    }
-                  />
+                  selectedClip && frameUrls[selectedClip.clipId] ? (
+                    <img
+                      alt="当前片段预览占位"
+                      className="uc-video-editor__video uc-video-editor__video-placeholder"
+                      src={frameUrls[selectedClip.clipId]}
+                    />
+                  ) : (
+                    <EmptyState
+                      description={
+                        selectedClip
+                          ? previewUnavailable
+                            ? '源文件不可用，可在左侧素材列表重新定位后重试。'
+                            : '正在准备预览画面…'
+                          : '当前没有已选择的视频片段。'
+                      }
+                      icon="预"
+                      readOnly
+                      title={
+                        selectedClip
+                          ? previewUnavailable
+                            ? '源文件不可用'
+                            : '正在准备预览画面'
+                          : '等待视频片段'
+                      }
+                    />
+                  )
                 )}
+                <canvas
+                  ref={stageCanvasRef}
+                  className="uc-video-editor__stage-frame"
+                  aria-label="拖动预览画面"
+                  style={{ visibility: showStageFrame ? 'visible' : 'hidden' }}
+                />
                 {activeTexts.map((text) => (
                   <span
                     className="uc-video-editor__preview-text"
@@ -2020,7 +2238,7 @@ export function VideoEditingPage({
             ) : null}
             <div className="uc-video-editor__transport">
               <span className="uc-video-editor__transport-time">
-                <strong>{formatTime(playheadUs)}</strong> / {formatTime(totalDurationUs)}
+                <strong ref={playheadLabelRef}>{formatTime(playheadUs)}</strong> / {formatTime(totalDurationUs)}
               </span>
               <button
                 aria-label={timelinePlaying ? '暂停时间线' : '播放时间线'}
@@ -2145,10 +2363,7 @@ export function VideoEditingPage({
           className={`uc-video-editor__timeline${timelineCollapsed ? ' uc-video-editor__timeline--collapsed' : ''}`}
         >
           <div className="uc-video-editor__timeline-heading">
-            <PanelHeading
-              description="片段起点由顺序、裁剪、速度和转场实时计算，不另存第二份事实。"
-              title="轻量单轨时间线"
-            />
+            <div className="uc-video-editor__panel-heading"><h2>时间线</h2></div>
             <div className="uc-video-editor__timeline-actions">
               <Button
                 disabled={
@@ -2285,6 +2500,23 @@ export function VideoEditingPage({
               >
                 封面
               </Button>
+              <div className="uc-video-editor__timeline-zoom">
+                <Button aria-label="缩小时间线" title="缩小时间线" variant="ghost"
+                  disabled={totalDurationUs <= 0 || effectiveTimelinePixelsPerSecond <= timelineMinimumPixelsPerSecond}
+                  onClick={() => changeTimelineZoom(effectiveTimelinePixelsPerSecond / 1.5)}>
+                  <LuZoomOut aria-hidden="true" />
+                </Button>
+                <input type="range" aria-label="时间线缩放" min={Math.log(timelineMinimumPixelsPerSecond)}
+                  max={Math.log(timelineMaximumPixelsPerSecond)} step="any"
+                  value={Math.log(effectiveTimelinePixelsPerSecond || timelineDefaultPixelsPerSecond)}
+                  disabled={totalDurationUs <= 0}
+                  onChange={(event) => changeTimelineZoom(Math.exp(Number(event.target.value)))} />
+                <Button aria-label="放大时间线" title="放大时间线" variant="ghost"
+                  disabled={totalDurationUs <= 0 || effectiveTimelinePixelsPerSecond >= timelineMaximumPixelsPerSecond}
+                  onClick={() => changeTimelineZoom(effectiveTimelinePixelsPerSecond * 1.5)}>
+                  <LuZoomIn aria-hidden="true" />
+                </Button>
+              </div>
               <button
                 aria-controls="uc-video-editor-timeline-content"
                 aria-expanded={!timelineCollapsed}
@@ -2338,7 +2570,11 @@ export function VideoEditingPage({
                 className="uc-video-editor__timeline-canvas"
                 style={{ width: `${timelineCanvasWidth}px` }}
               >
-                <div className="uc-video-editor__ruler" aria-hidden="true">
+                <div className="uc-video-editor__ruler" aria-hidden="true"
+                  onClick={(event) => seekTimeline(resolveTimelinePositionUs(
+                    event.clientX, event.currentTarget.getBoundingClientRect().left,
+                    totalDurationUs / 1_000_000 * effectiveTimelinePixelsPerSecond, totalDurationUs
+                  ))}>
                   {timelineRulerTicks.map((tick) => (
                     <span
                       className="uc-video-editor__ruler-tick"
@@ -2351,6 +2587,8 @@ export function VideoEditingPage({
                 </div>
                 <VideoTimelineTrack
                   canReorder={!operationBlocked}
+                  clipNames={clipNames}
+                  contactSheets={contactSheetUrls}
                   frames={frameUrls}
                   onMove={(clipId, toIndex) =>
                     void runCommand(
@@ -2381,7 +2619,7 @@ export function VideoEditingPage({
                     setInspectorTab('text');
                   }}
                   selectedId={selectedTextId}
-                  totalDurationUs={totalDurationUs}
+                  totalDurationUs={timelineViewDurationUs}
                 />
                 <TimelineTrack
                   items={
@@ -2394,10 +2632,12 @@ export function VideoEditingPage({
                         }]
                       : []
                   }
-                  totalDurationUs={totalDurationUs}
+                  totalDurationUs={timelineViewDurationUs}
                 />
                 <TimelinePlayhead
+                  pixelsPerSecond={effectiveTimelinePixelsPerSecond}
                   onSeek={seekTimeline}
+                  onScrub={scrubTimeline}
                   playheadUs={playheadUs}
                   totalDurationUs={totalDurationUs}
                   viewportRef={timelineViewportRef}
@@ -2750,7 +2990,10 @@ function MediaList({
                   <img alt="" src={frameUrl} />
                 ) : (
                   <span className="uc-video-editor__frame-fallback">
-                    {index + 1}
+                    <span className="uc-video-editor__frame-fallback-icon" aria-hidden="true">▶</span>
+                    <span className="uc-video-editor__frame-fallback-label">
+                      {(names[clip.clipId] ?? `片段 ${index + 1}`).slice(0, 12)}
+                    </span>
                   </span>
                 )}
                 <span className="uc-video-editor__frame-dur">
@@ -2891,6 +3134,8 @@ function ProjectVideoThumbnail({
 
 function VideoTimelineTrack({
   canReorder,
+  clipNames,
+  contactSheets,
   frames,
   onMove,
   onSeek,
@@ -2903,6 +3148,8 @@ function VideoTimelineTrack({
   totalDurationUs
 }: {
   readonly canReorder: boolean;
+  readonly clipNames: Readonly<Record<string, string>>;
+  readonly contactSheets: Readonly<Record<string, string>>;
   readonly frames: Readonly<Record<string, string>>;
   readonly onMove: (clipId: string, toIndex: number) => void;
   readonly onSeek: (timelineUs: number) => void;
@@ -2915,6 +3162,29 @@ function VideoTimelineTrack({
   readonly totalDurationUs: number;
 }) {
   const laneRef = useRef<HTMLDivElement | null>(null);
+  const dragPreviewRef = useRef<HTMLElement | null>(null);
+  function clearDragPreview() {
+    dragPreviewRef.current?.remove();
+    dragPreviewRef.current = null;
+  }
+  function updateDragPreviewPosition(clientX: number, clientY: number) {
+    const dragPreview = dragPreviewRef.current;
+    if (!dragPreview || (clientX === 0 && clientY === 0)) return;
+    dragPreview.style.top = `${clientY + 12}px`;
+    dragPreview.style.left = `${clientX + 12}px`;
+  }
+  useEffect(() => {
+    const move = (event: DragEvent) => updateDragPreviewPosition(event.clientX, event.clientY);
+    document.addEventListener('dragover', move);
+    document.addEventListener('drop', clearDragPreview);
+    document.addEventListener('dragend', clearDragPreview);
+    return () => {
+      document.removeEventListener('dragover', move);
+      document.removeEventListener('drop', clearDragPreview);
+      document.removeEventListener('dragend', clearDragPreview);
+      clearDragPreview();
+    };
+  }, []);
   const slotsByClip = useMemo(() => {
     const grouped = new Map<string, TimelineThumbnailSlot[]>();
     for (const slot of thumbnailSlots) {
@@ -2937,7 +3207,7 @@ function VideoTimelineTrack({
               resolveTimelinePositionUs(
                 event.clientX,
                 rect.left,
-                rect.width,
+                totalDurationUs / 1_000_000 * pixelsPerSecond,
                 totalDurationUs
               )
             );
@@ -2965,11 +3235,29 @@ function VideoTimelineTrack({
                   event.dataTransfer.dropEffect = 'move';
                 }}
                 onDragStart={(event) => {
+                  clearDragPreview();
                   onSelect(segment.clipId);
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('text/plain', segment.clipId);
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const dragPreview = event.currentTarget.cloneNode(true) as HTMLElement;
+                  dragPreview.classList.add('uc-video-editor__drag-preview');
+                  dragPreview.setAttribute('aria-hidden', 'true');
+                  dragPreview.removeAttribute('draggable');
+                  dragPreview.style.width = `${Math.min(bounds.width, 320)}px`;
+                  dragPreview.style.height = `${bounds.height}px`;
+                  document.body.append(dragPreview);
+                  dragPreviewRef.current = dragPreview;
+                  updateDragPreviewPosition(event.clientX, event.clientY);
+                  // The visible preview is a DOM overlay; suppress the native snapshot.
+                  const emptyDragImage = document.createElement('canvas');
+                  emptyDragImage.width = emptyDragImage.height = 1;
+                  event.dataTransfer.setDragImage(emptyDragImage, 0, 0);
                 }}
+                onDrag={(event) => updateDragPreviewPosition(event.clientX, event.clientY)}
+                onDragEnd={clearDragPreview}
                 onDrop={(event) => {
+                  clearDragPreview();
                   if (!canReorder) return;
                   event.preventDefault();
                   const clipId = event.dataTransfer.getData('text/plain');
@@ -3007,7 +3295,7 @@ function VideoTimelineTrack({
                     aria-hidden="true"
                     className="uc-video-editor__frame-fallback"
                   >
-                    {segment.index + 1}
+                    <span className="uc-video-editor__frame-fallback-icon">▶</span>
                   </span>
                 )}
                 <span
@@ -3015,7 +3303,8 @@ function VideoTimelineTrack({
                   className="uc-video-editor__thumbnail-strip"
                 >
                   {(slotsByClip.get(segment.clipId) ?? []).map((slot) => {
-                    const thumbnailUrl = thumbnailFrames[slot.key] ?? frameUrl;
+                    const contactSheetUrl = contactSheets[segment.clipId];
+                    const fallbackUrl = thumbnailFrames[slot.key];
                     return (
                       <span
                         className="uc-video-editor__thumbnail"
@@ -3025,15 +3314,29 @@ function VideoTimelineTrack({
                           width: `${slot.widthPx}px`
                         }}
                       >
-                        {thumbnailUrl ? (
-                          <img alt="" draggable={false} src={thumbnailUrl} />
+                        {contactSheetUrl && !slot.requiresExactFrame ? (
+                          <span className="uc-video-editor__contact-sheet-cell"
+                            style={{ minHeight: `${slot.widthPx * contactSheetFrameHeightPx / contactSheetFrameWidthPx}px` }}>
+                          <img
+                            alt=""
+                            className="uc-video-editor__contact-sheet"
+                            draggable={false}
+                            src={contactSheetUrl}
+                            style={{
+                              transform: `translateX(${contactSheetTranslateX(slot.stripFrameIndex)})`
+                            }}
+                          />
+                          </span>
+                        ) : fallbackUrl ? (
+                          <img alt="" draggable={false} src={fallbackUrl} />
                         ) : null}
                       </span>
                     );
                   })}
                 </span>
                 <span className="uc-video-editor__seg-label">
-                  {segment.index + 1} · {formatTime(segment.durationUs)}
+                  <span>{clipNames[segment.clipId] ?? `片段 ${segment.index + 1}`}</span>
+                  <span>{formatTime(segment.durationUs)}</span>
                 </span>
               </button>
             );
@@ -3048,16 +3351,21 @@ function VideoTimelineTrack({
 
 function TimelinePlayhead({
   onSeek,
+  onScrub,
+  pixelsPerSecond,
   playheadUs,
   totalDurationUs,
   viewportRef
 }: {
   readonly onSeek: (timelineUs: number) => void;
+  readonly onScrub: (timelineUs: number) => void;
+  readonly pixelsPerSecond: number;
   readonly playheadUs: number;
   readonly totalDurationUs: number;
   readonly viewportRef: { readonly current: HTMLDivElement | null };
 }) {
   const scaleRef = useRef<HTMLDivElement | null>(null);
+  const handleRef = useRef<HTMLButtonElement | null>(null);
   if (totalDurationUs <= 0) return null;
   const playheadPercent = Math.min(
     100,
@@ -3065,7 +3373,8 @@ function TimelinePlayhead({
   );
   return (
     <div className="uc-video-editor__playhead-layer">
-      <div className="uc-video-editor__playhead-scale" ref={scaleRef}>
+      <div className="uc-video-editor__playhead-scale" ref={scaleRef}
+        style={{ width: `${totalDurationUs / 1_000_000 * pixelsPerSecond}px` }}>
         <button
           aria-label="主轨播放头"
           aria-valuemin={0}
@@ -3073,6 +3382,7 @@ function TimelinePlayhead({
           aria-valuenow={playheadUs}
           aria-valuetext={formatTime(playheadUs)}
           className="uc-video-editor__playhead-line"
+          ref={handleRef}
           onKeyDown={(event) => {
             if (event.key === 'ArrowLeft') {
               event.preventDefault();
@@ -3122,7 +3432,12 @@ function TimelinePlayhead({
               );
               if (nextPositionUs !== lastPositionUs) {
                 lastPositionUs = nextPositionUs;
-                onSeek(nextPositionUs);
+                if (handleRef.current) {
+                  handleRef.current.style.left = `${nextPositionUs / totalDurationUs * 100}%`;
+                  handleRef.current.setAttribute('aria-valuenow', String(nextPositionUs));
+                  handleRef.current.setAttribute('aria-valuetext', formatTime(nextPositionUs));
+                }
+                onScrub(nextPositionUs);
               }
               animationFrameId = window.requestAnimationFrame(flushMove);
             };
@@ -3340,7 +3655,10 @@ function ClipInspector({
             <img alt="" src={frameUrl} />
           ) : (
             <span className="uc-video-editor__frame-fallback">
-              {index + 1}
+              <span className="uc-video-editor__frame-fallback-icon" aria-hidden="true">▶</span>
+              <span className="uc-video-editor__frame-fallback-label">
+                {displayName.slice(0, 12)}
+              </span>
             </span>
           )}
         </span>
@@ -4425,15 +4743,13 @@ export function resolveTimelineWheelZoom({
     };
   }
   const totalDurationSeconds = totalDurationUs / 1_000_000;
-  const fitPixelsPerSecond = viewportWidth / totalDurationSeconds;
-  const maximumPixelsPerSecond = Math.max(
-    fitPixelsPerSecond,
-    timelineMaximumPixelsPerSecond
+  const minimumPixelsPerSecond = Math.min(
+    timelineDefaultPixelsPerSecond, viewportWidth * 0.9 / totalDurationSeconds
   );
   const pixelsPerSecond = Math.min(
-    maximumPixelsPerSecond,
+    timelineMaximumPixelsPerSecond,
     Math.max(
-      fitPixelsPerSecond,
+      minimumPixelsPerSecond,
       currentPixelsPerSecond * Math.exp(-deltaY * timelineWheelSensitivity)
     )
   );
@@ -4572,13 +4888,28 @@ export function buildTimelineThumbnailSlots(
         segment.sourceOutUs,
         Math.max(segment.sourceInUs, segment.sourceInUs + sourceOffsetUs)
       );
+      const sourceRangeUs = segment.sourceOutUs - segment.sourceInUs;
+      const stripFrameIndex = sourceRangeUs > 0
+        ? Math.min(
+            contactSheetFrameCount - 1,
+            Math.max(
+              0,
+              Math.floor(
+                ((sourceUs - segment.sourceInUs) / sourceRangeUs) *
+                  contactSheetFrameCount
+              )
+            )
+          )
+        : 0;
       slots.push({
         key: `${segment.clipId}:${sourceUs}`,
         clipId: segment.clipId,
         slotIndex,
         sourceUs,
         leftPx,
-        widthPx
+        widthPx,
+        stripFrameIndex,
+        requiresExactFrame: slotCount > contactSheetFrameCount
       });
     }
   }
@@ -4667,6 +4998,35 @@ function timelineToSourceUs(
     clip.sourceRange.outUs,
     Math.max(clip.sourceRange.inUs, clip.sourceRange.inUs + sourceOffset)
   );
+}
+
+export function isUsableContactSheetSize(width: number, height: number): boolean {
+  return (
+    width === contactSheetFrameCount * contactSheetFrameWidthPx &&
+    height === contactSheetFrameHeightPx
+  );
+}
+
+function loadUsableContactSheet(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    const timer = window.setTimeout(() => {
+      image.onload = null;
+      image.onerror = null;
+      resolve(false);
+    }, 2_000);
+    image.onload = () => {
+      window.clearTimeout(timer);
+      resolve(
+        isUsableContactSheetSize(image.naturalWidth, image.naturalHeight)
+      );
+    };
+    image.onerror = () => {
+      window.clearTimeout(timer);
+      resolve(false);
+    };
+    image.src = url;
+  });
 }
 
 function revokeFrameUrlMap(cache: Map<string, string>): void {
@@ -4777,15 +5137,18 @@ function waitForVideoReady(
       settled = true;
       window.clearTimeout(timer);
       video.removeEventListener('loadeddata', onLoaded);
+      video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('error', onError);
       signal.removeEventListener('abort', onAbort);
       resolve(ready);
     };
     const onLoaded = () => finish(true);
+    const onCanPlay = () => finish(true);
     const onError = () => finish(false);
     const onAbort = () => finish(false);
     const timer = window.setTimeout(() => finish(false), 10_000);
     video.addEventListener('loadeddata', onLoaded, { once: true });
+    video.addEventListener('canplay', onCanPlay, { once: true });
     video.addEventListener('error', onError, { once: true });
     signal.addEventListener('abort', onAbort, { once: true });
     video.load();
@@ -4878,23 +5241,11 @@ function captureTimelineFrame(
     try {
       const sourceWidth = Math.max(2, video.videoWidth);
       const sourceHeight = Math.max(2, video.videoHeight);
-      const sourceRatio = sourceWidth / sourceHeight;
-      const targetRatio =
-        timelineThumbnailRenderWidthPx / timelineThumbnailRenderHeightPx;
-      let sourceX = 0;
-      let sourceY = 0;
-      let cropWidth = sourceWidth;
-      let cropHeight = sourceHeight;
-      if (sourceRatio > targetRatio) {
-        cropWidth = sourceHeight * targetRatio;
-        sourceX = (sourceWidth - cropWidth) / 2;
-      } else if (sourceRatio < targetRatio) {
-        cropHeight = sourceWidth / targetRatio;
-        sourceY = (sourceHeight - cropHeight) / 2;
-      }
+      const scale = Math.min(timelineThumbnailRenderWidthPx / sourceWidth,
+        timelineThumbnailRenderHeightPx / sourceHeight);
       const canvas = document.createElement('canvas');
-      canvas.width = timelineThumbnailRenderWidthPx;
-      canvas.height = timelineThumbnailRenderHeightPx;
+      canvas.width = Math.max(2, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(2, Math.round(sourceHeight * scale));
       const context = canvas.getContext('2d');
       if (!context) {
         resolve(undefined);
@@ -4902,10 +5253,10 @@ function captureTimelineFrame(
       }
       context.drawImage(
         video,
-        sourceX,
-        sourceY,
-        cropWidth,
-        cropHeight,
+        0,
+        0,
+        sourceWidth,
+        sourceHeight,
         0,
         0,
         canvas.width,
@@ -4914,7 +5265,7 @@ function captureTimelineFrame(
       canvas.toBlob(
         (blob) => resolve(blob ? URL.createObjectURL(blob) : undefined),
         'image/jpeg',
-        0.72
+        0.9
       );
     } catch {
       resolve(undefined);

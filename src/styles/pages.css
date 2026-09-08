@@ -1861,6 +1861,10 @@
   container-type: inline-size;
 }
 
+.uc-video-editor[hidden] {
+  display: none;
+}
+
 .uc-video-editor__header,
 .uc-video-editor__header-actions,
 .uc-video-editor__draft-picker,
@@ -2095,7 +2099,7 @@
   min-width: 0;
   column-gap: var(--uc-video-editor-track-gap);
   --uc-video-editor-ruler-height: 28px;
-  --uc-video-editor-video-track-height: 92px;
+  --uc-video-editor-video-track-height: 76px;
   --uc-video-editor-slim-track-height: 44px;
 }
 
@@ -2467,6 +2471,27 @@
   color: var(--uc-color-text-secondary);
   font-size: var(--uc-font-size-title-2);
   font-weight: 600;
+  gap: 2px;
+  position: relative;
+  overflow: hidden;
+  background: oklch(0.96 0.005 250);
+}
+
+.uc-video-editor__frame-fallback-icon {
+  font-size: 1.2em;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.uc-video-editor__frame-fallback-label {
+  font-size: 0.45em;
+  font-weight: 400;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  opacity: 0.85;
 }
 
 .uc-video-editor__frame-dur {
@@ -2668,6 +2693,16 @@
   cursor: grabbing;
 }
 
+.uc-video-editor__drag-preview {
+  position: fixed;
+  z-index: 1000;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.9;
+  border-color: var(--uc-color-accent-fill);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+}
+
 .uc-video-editor__seg:hover {
   border-color: var(--uc-color-border-strong);
 }
@@ -2688,7 +2723,7 @@
 
 .uc-video-editor__thumbnail-strip {
   position: absolute;
-  inset: 0;
+  inset: 20px 0 0;
   z-index: 1;
   overflow: hidden;
   pointer-events: none;
@@ -2696,11 +2731,14 @@
 
 .uc-video-editor__thumbnail {
   position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   top: 0;
   bottom: 0;
   overflow: hidden;
   border-right: 1px solid rgb(255 255 255 / 0.14);
-  background: rgb(255 255 255 / 0.06);
+  background: var(--uc-color-surface-panel);
 }
 
 .uc-video-editor__thumbnail img {
@@ -2710,20 +2748,62 @@
   object-fit: cover;
 }
 
+.uc-video-editor__contact-sheet-cell {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  flex: none;
+}
+
+.uc-video-editor__thumbnail .uc-video-editor__contact-sheet {
+  width: auto;
+  max-width: none;
+  height: 100%;
+  object-fit: initial;
+}
+
 .uc-video-editor__seg-label {
-  position: relative;
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
   z-index: 2;
-  align-self: end;
-  justify-self: center;
-  min-width: max-content;
-  margin: 4px;
-  border-radius: 4px;
-  padding: 1px 4px;
+  min-width: 0;
+  padding: 0 6px;
   color: #ffffff;
-  background: rgb(0 0 0 / 0.6);
+  background: var(--uc-color-accent-fill);
   font-family: var(--uc-font-family-mono, Consolas, monospace);
   font-size: 10px;
   line-height: 1.5;
+}
+
+.uc-video-editor__seg-label > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.uc-video-editor__seg-label > span:last-child {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.uc-video-editor__timeline-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.uc-video-editor__timeline-zoom input {
+  width: 100px;
+  min-width: 48px;
+  accent-color: var(--uc-color-accent-fill);
 }
 
 .uc-video-editor__playhead-line {
@@ -2772,15 +2852,15 @@
 }
 
 .uc-video-editor__playhead-line::before {
-  top: 0;
+  top: 2px;
   width: 10px;
-  height: 8px;
-  border-radius: 0 0 5px 5px;
+  height: 10px;
+  border-radius: 50%;
   box-shadow: 0 0 0 1px var(--uc-color-surface-panel);
 }
 
 .uc-video-editor__playhead-line::after {
-  top: 7px;
+  top: 11px;
   bottom: 0;
   width: 2px;
   box-shadow: 0 0 4px rgb(109 93 251 / 0.65);
@@ -4441,6 +4521,33 @@ button.uc-project-center__project-card:disabled {
   padding: var(--uc-space-3);
 }
 
+.uc-task-center__task-filters {
+  grid-template-columns: minmax(180px, 1fr) 152px 152px 280px;
+  align-items: end;
+  gap: 10px;
+}
+
+.uc-task-center__task-filters .rs-picker,
+.uc-task-center__task-filters .rs-picker-toggle {
+  width: 100%;
+  min-width: 0;
+}
+
+.uc-task-center__task-filters .rs-picker-daterange input {
+  border: 0;
+}
+
+@media (max-width: 1180px) {
+  .uc-task-center__filters.uc-task-center__task-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .uc-task-center__task-filters > label,
+  .uc-task-center__task-date-range {
+    grid-column: 1 / -1;
+  }
+}
+
 .uc-task-center__charts {
   display: grid;
   grid-template-columns: minmax(0, 1.24fr) minmax(300px, 0.76fr);
@@ -5325,6 +5432,25 @@ button.uc-project-center__project-card:disabled {
   font-size: var(--uc-font-size-caption);
 }
 
+.uc-video-editor__video-placeholder {
+  object-fit: contain;
+}
+
+.uc-video-editor__stage-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000000;
+}
+
+.uc-work-library__filters .rs-picker,
+.uc-work-library__filters .rs-picker-toggle {
+  width: 100%;
+  min-width: 0;
+}
+
 .uc-work-library__filters input,
 .uc-work-library__filters select {
   min-height: 36px;
@@ -5370,6 +5496,7 @@ button.uc-project-center__project-card:disabled {
 .uc-work-library__workspace {
   display: grid;
   grid-template-columns: minmax(420px, 1.15fr) minmax(360px, 0.85fr);
+  grid-template-rows: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   max-height: 100%;
@@ -5394,6 +5521,8 @@ button.uc-project-center__project-card:disabled {
   overscroll-behavior: contain;
 }
 
+/* 详情列 = 固定标题 + 内容区独立滚动。
+   内容放得下时无滚动条（视觉等同固定）；放不下时仅内容区滚动，信息不裁切。 */
 .uc-work-library__details {
   display: flex;
   flex-direction: column;
@@ -5405,29 +5534,27 @@ button.uc-project-center__project-card:disabled {
   margin: 0;
 }
 
-/* 宽屏：详情完整显示——预览区弹性伸缩，标题/事实/按钮永远可见 */
+/* 预览区是固定高度的"舞台"，超高时随内容区滚动查看；
+   媒体一律 contain 完整显示，不拉伸、不裁切。 */
 .uc-work-library__details .uc-work-library__details-content {
   flex: 1 1 auto;
-  display: flex;
   min-height: 0;
+  display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
+/* 内容块保持自然高度，不因容器挤压而变形；超高时由外层滚动承载 */
 .uc-work-library__details .uc-work-library__details-content > * {
   flex: 0 0 auto;
 }
 
 .uc-work-library__details .uc-work-library__details-content > .uc-work-library__preview {
-  flex: 1 1 auto;
-  min-height: 140px;
+  flex: 0 0 auto;
+  height: clamp(220px, 44vh, 480px);
+  min-height: 220px;
   max-height: 480px;
-}
-
-/* 极矮窗口兜底：面板高度不足时才允许右侧滚动，保证内容不丢失 */
-@media (min-width: 1081px) and (max-height: 700px) {
-  .uc-work-library__details {
-    overflow-y: auto;
-  }
 }
 
 .uc-work-library__list {
@@ -5602,20 +5729,31 @@ button.uc-project-center__project-card:disabled {
 
 .uc-work-library__preview {
   position: relative;
-  display: grid;
-  min-height: 220px;
-  place-items: center;
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
   border: 1px solid var(--uc-color-border-subtle);
   border-radius: var(--uc-radius-10);
-  background: var(--uc-color-bg-app);
+  background: #0b0b0f;
 }
 
-.uc-work-library__preview img,
-.uc-work-library__preview video {
+/* 图片：铺满预览舞台并按原始比例 contain，保证任何比例都完整显示、不裁切 */
+.uc-work-library__preview img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+/* 视频：铺满预览舞台并按原始比例 contain，播放器控件保持可用 */
+.uc-work-library__preview video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000000;
 }
 
 .uc-work-library__preview-video::-webkit-media-controls-fullscreen-button {
@@ -5657,12 +5795,14 @@ button.uc-project-center__project-card:disabled {
   height: 18px;
 }
 
-/* 全屏预览：提升优先级覆盖 flex 布局的 min/max-height 限制 */
-.uc-work-library__preview.uc-work-library__preview--expanded {
+/* 全屏预览：4 类选择器(0,4,0)压过 .uc-work-library__details ... .uc-work-library__preview(0,3,0)，
+   确保展开后真正铺满视口，不被父级 flex 的 min/max-height 限制 */
+.uc-work-library__details .uc-work-library__details-content > .uc-work-library__preview.uc-work-library__preview--expanded {
   position: fixed;
   z-index: 1000;
   inset: 0;
   width: 100%;
+  height: 100%;
   min-height: 0;
   max-height: none;
   padding: var(--uc-space-8);
@@ -5675,6 +5815,7 @@ button.uc-project-center__project-card:disabled {
 .uc-work-library__preview--expanded video {
   width: 100%;
   height: 100%;
+  max-width: none;
   max-height: none;
   object-fit: contain;
 }
@@ -5722,9 +5863,11 @@ button.uc-project-center__project-card:disabled {
 }
 
 @media (max-width: 1080px) {
+  /* 窄屏：单列上下分栏，左右两块各自拥有独立滚动条。
+     缩屏时右侧详情超高必然出现滚动条，内容可完整到达。 */
   .uc-work-library {
-    height: auto;
-    overflow: visible;
+    height: 100%;
+    overflow: hidden;
   }
 
   .uc-work-library__filters {
@@ -5732,35 +5875,35 @@ button.uc-project-center__project-card:disabled {
   }
 
   .uc-work-library__workspace {
-    flex: 0 0 auto;
-    min-height: 560px;
-    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
     grid-template-columns: 1fr;
-    overflow: visible;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1.05fr);
+    overflow: hidden;
   }
 
   .uc-work-library__list {
-    overflow: visible;
-    min-height: auto;
-  }
-
-  /* 缩屏时右侧详情保留滚动条，避免大图被截断 */
-  .uc-work-library__details {
     overflow-y: auto;
-    max-height: 70vh;
-    min-height: auto;
-  }
-
-  /* 单列布局下还原预览自然高度 */
-  .uc-work-library__details .uc-work-library__details-content > .uc-work-library__preview {
-    flex: 0 0 auto;
-    min-height: 220px;
-    max-height: 360px;
-  }
-
-  .uc-work-library__list {
     border-right: 0;
     border-bottom: 1px solid var(--uc-color-border-subtle);
+  }
+
+  .uc-work-library__details {
+    overflow: hidden;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .uc-work-library__details .uc-work-library__details-content {
+    overflow-y: auto;
+  }
+
+  /* 窄屏舞台适度收窄，避免详情区长时间只看到预览而看不到下方信息 */
+  .uc-work-library__details .uc-work-library__details-content > .uc-work-library__preview {
+    height: clamp(150px, 30vh, 320px);
+    min-height: 150px;
+    max-height: 320px;
   }
 }
 

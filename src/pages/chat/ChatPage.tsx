@@ -1,3 +1,4 @@
+import { SelectPicker } from '../../components/Pickers';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   LuArchive,
@@ -18,7 +19,7 @@ import {
   LuTrash2,
   LuX
 } from 'react-icons/lu';
-import { Checkbox, Drawer, Input, Modal, SelectPicker, Tooltip, Whisper } from 'rsuite';
+import { Checkbox, Drawer, Input, Modal, Tooltip, Whisper } from 'rsuite';
 import { ActionMenu } from '../../components/ActionMenu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';

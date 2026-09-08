@@ -78,7 +78,12 @@ test('work detail status stays horizontal beside long work names', () => {
 });
 
 test('work detail video preview has a controlled fullscreen fallback', () => {
-  assert.match(styles, /\.uc-work-library__preview--expanded \{[\s\S]*?position: fixed;/);
+  assert.match(source, /onClick=\{\(\) => setPreviewExpanded\(\(value\) => !value\)\}/);
+  assert.doesNotMatch(source, /requestFullscreen|document\.fullscreenElement/);
+  assert.match(
+    styles,
+    /\.uc-work-library__details \.uc-work-library__details-content > \.uc-work-library__preview\.uc-work-library__preview--expanded \{[\s\S]*?position: fixed;[\s\S]*?height: 100%;[\s\S]*?max-height: none;/
+  );
   assert.match(styles, /\.uc-work-library__preview-fullscreen \{[\s\S]*?position: absolute;/);
   assert.match(styles, /\.uc-work-library__preview-video::\-webkit-media-controls-fullscreen-button \{[\s\S]*?display: none !important;/);
 });

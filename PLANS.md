@@ -1,5 +1,15 @@
 # UniComp 开发计划
 
+2026-09-08 负责人要求精简时间线工具栏：移除“适配全部”按钮及其点击处理，保留缩放滑杆、放大/缩小图标与 Ctrl 滚轮。此决策覆盖此前方案中的适配全部入口，默认 5 秒约 8 帧规则不变。
+
+2026-09-08 时间线验收白条修复：负责人截图确认抽帧格之间出现规律白条，原因是约 50 px 格宽中居中放置约 32 px 的固定竖向裁片，上一轮浏览器验证仅核对数量与拼图比例，漏检单格覆盖范围。现裁片宽度填满格子，并按拼图单帧比例推导最小高度后居中裁切；独立帧改为 cover。默认约 8 帧和 Ctrl 滚轮密度规则不变。新增浏览器覆盖检查在修改前失败、修改后通过，默认和放大均无格内露白；领域 17/17、UI 20/20 通过。用户原视频 Electron 效果仍待复验。“适配全部”仅调整显示比例以完整展示所有片段，不恢复默认抽帧密度，不改变素材和导出。
+
+2026-09-08 视频时间线布局：负责人确认静态方案并补充“5 秒约 8 帧，Ctrl 加滚轮增加图片”。在当前 `fix/video-thumbnail-preview` 分支调整默认时间比例为 80 px/s，5.042 秒宽约 403 px、8 个抽帧槽，右侧留空；增加显式缩放和适配全部，主轨 76 px、标题带与胶片分离，同步播放头/标尺/文字/音乐坐标。超过 40 帧缓存密度时复用按源时间提帧与取消/缓存边界。领域 17/17、相关 UI 合同 29/29、构建、定向 ESLint、diff 检查通过。浏览器实际组件配合编号测试拼图验证默认 8 帧、Ctrl 放大后 15 帧、适配约 90%、1024 宽无页面横向溢出。真实 Electron 原视频、长片连续滚动及导出未人工验收；未提交推送。方案与证据：`docs/discussions/video-timeline-layout/prototype.md`。
+
+2026-09-08 选择器弹层错位修复：实测菜单滚轮经 React Portal 传回任务中心导致统计区折叠，触发框上移约 199px 而菜单不动。任务中心现隔离 Portal 滚轮并在弹层打开时暂停图表折叠。全部现有 SelectPicker/DateRangePicker 使用公共 Pickers 包装显式传递定位参数（RSuite 6.2.2 部分 overlay 参数绕过 Provider defaults），统一挂载在避开标题栏与状态栏的弹层容器，自动上下定位、限制高度并允许内部滚动。任务状态菜单滚动后保持对齐；日期面板底边与输入框顶边实测均为 339px，快捷项可滚动到达。UI 合同 322 项与新增回归 2 项通过，构建通过；未逐页执行 Electron 人工验收，未提交推送。
+
+2026-09-08 任务中心时间范围筛选：负责人审核布局预览后批准在当前分支实施。复用 RSuite DateRangePicker，按任务 createdAt 的本地自然日筛选；默认全部时间，支持今天、近 7 天、近 30 天、自选区间及清空。筛选栏采用搜索、项目、状态、时间范围排列，窄屏换行；消费图表保持原统计口径。日期边界单测 3/3、任务中心合同测试 10/10、构建通过。浏览器已验证快捷选择、清空和宽屏布局；真实 Electron 任务数据筛选及完整窄屏交互仍待人工验收。未提交、未推送。
+
 2026-09-04 联网不可用状态回归修复：截图复核确认，`feature/web-research-foundation` 引入授权预览后，只在 preload API 缺失时复用旧的 workflow 取消逻辑；当预览返回 `unavailable/failed`、IPC 失败或授权后检索失败时仍保留 `ready` workflow，导致页面同时显示“继续执行”和“任务未执行”。现统一在这些终止路径取消联网 session 并持久化取消 workflow，成功后同步清除 `activeWorkflow` 与 UI 联网 session；只有 `authorization_required` 保留继续入口。定向 UI 合同 21/21、`typecheck`、`lint`、`build`、完整 `pnpm.cmd test`、`audit:platform`、`verify:handoff` 与 `git diff --check` 通过。真实搜索服务商、搜索凭证、HTTP 与收费调用仍为 0，W0/W2/W5/W6 状态不变。
 
 2026-09-04 会话自然语言 PPT 创建修复：截图复核发现“帮我只做一个关于龙的ppt”虽包含明确类型与创建意图，却因 `hasStrongCreateCommand` 未允许“只”等副词而落入 unknown；后续“制作ppt”又只能补类型，无法恢复上一轮主题。现将受控创建副词纳入 Application 意图识别，并让 unknown 追问态基于当前 workflow 源消息后的最多 8 条用户消息重建完整计划，保持否定句、多文档歧义和确认门禁不变。黄金集升级为 `conversation-intent-offline-golden@1.0.1`，截图原句纳入第 46 条样本；自然语言创建、多轮恢复和黄金集定向回归 27/27，Node/UI 353/353、Vitest 183 文件 1128/1128、`typecheck`、`lint`、`build` 与 `git diff --check` 通过。真实 LLM、联网、Provider、Office 人工验收仍未执行。
@@ -1510,3 +1520,48 @@ M6 已通过 `a0c75d8` 非快进合并并推送 `develop`，`feature/provider-ro
 2026-09-03 工程记录：负责人总验收发现两类回归，已在同分支提交 77fbc07(批次 D) 修复：(1) 主轨竖线与播放头/预览脱钩——根因 .uc-video-editor__seg 既有 CSS min-width:96px 与 flex-grow:durationUs 让 lane 内容宽度在中/窄窗口超过父宽，触发 overflow-x:auto，竖线 left:percent% 相对父视口而非内容总宽落点偏移。修复改为 JSX flexBasis:百分比 + CSS min-width:4px + lane overflow:hidden，保证 lane 总宽恒等于父视口，竖线百分比与片段边界严格对齐；(2) 窄屏属性面板折叠抽屉不可见——根因 @media(max-width:1023px) 把整个 .uc-video-editor__inspector 设 max-height:0;overflow:hidden，把含展开按钮的 head 一并裁掉，用户无法触发抽屉。修复为：JSX 把 head 与 body 拆分（uc-video-editor__inspector-body 包裹 tabs/title/表单），CSS W3 规则只折叠 body，head 始终可见且 position:sticky 锚定；(3) 中屏时间线标题与操作区按钮溢出——.uc-video-editor__timeline-heading 与 .uc-video-editor__timeline-actions 加 flex-wrap:wrap，中屏自动下行而非溢出卡片。同步更新 tests/ui/video-editor-v2-ui-contract.test.mjs 匹配新 .inspector--expanded .inspector-body 展开选择器；tests/domain/video-editor-timeline-view.test.ts 补 resolveTimelineDropIndex 与 resolveTimelineSegmentAt 单元（拖拽边缘映射 + 跨片段 seek 定位）。门禁：tsc 0、eslint 0、Node 合同 346/346、Vitest 串行 1036/1037（+2 新域用例，仍余 office 抖动 1 项为既有环境性失败，未触动）。本批提交链 77fbc07 ← ff114ae ← 1eb8e84 ← e946284 ← 69a2af1；未推送；未调用真实服务商；仍待负责人在重启 Electron 后再次窗口化核对（重点：拖动播放头/点击片段看主轨竖线、窄屏抽屉触发按钮可见、1280 边界两侧停留 3 秒）。
 
 2026-09-04 工程记录：`feature/ppt-revision-page-count-fix` 完成 PPT 总页数修订失败修复。实际会话“内容太少了加到5页”后再输入“修改文档”时，两条 user message 均无 `displayContent`，旧 Application 因此丢失修订请求并误报 `invalid_outline`；真实模型的五 section 缺括号响应可由既有有限恢复器完整恢复，不是最终根因。修复后聚合当前 assistant 前连续 user 消息并回退 `content`，历史链路保留最近 user 兼容路径；新增明确总页数语义解析，5 页固定换算为 3 个正文 section，走独立全篇结构替换门禁并跳过局部 patch Agent；提示词写明封面/结束页预算与单页容量；Runner 在临时 PPTX 发布前核对真实 slide 数，不符返回 `page_count_mismatch` 且零 Work。依赖用户绝对路径的诊断测试已替换为自包含五 section 坏 JSON 回归。最终 Node/UI 353/353、Vitest 183 文件 1139/1139，合计 1492 项通过；typecheck、lint、build、415 文件平台审计、50 项/27 资产交接校验、恢复审计、阶段 9 关闭门禁和差异检查全部通过。未调用真实 Provider、未读取凭证、未产生费用；仍需完整重启 Windows Electron 后人工复验 5 页新版、旧版保留及父 Work 关系，记录见 `docs/active/对话内Office文档生成-PPT质量优化验收记录.md` 第 15 节。
+
+
+2026-09-07 工程记录：视频基础编辑缩略图修复继续阶段 1（用户已批准实施）。在 fix/video-thumbnail-preview 现有未提交补丁上修正：FFmpeg 联系表固定 40 格，每格 112px；派生缓存版本升级；时间线联系表与单帧封面缓存分离，已有联系表不因滚动/缩放重复请求；裁切位置按 frameIndex/39 正向计算；预加载失败/超时保留当前画面并停止播放，新请求清除旧 pending，旧 token 不得提交；撤下无限 shimmer，Canvas 等待上限恢复 10 秒。保留作品库及其他现有修改，未提交/推送/合并。验证：typecheck、lint、定向 Vitest 32/32、UI 合同 19/19、build、git diff --check 通过；本机 FFmpeg 从真实视频截取 5 秒生成 4480x64 联系表（临时目录），宽度符合 40x112。未验证：Windows Electron 第 5 片段最终画面、快速切换/滚动/缩放真实体验、冷启动耗时与无 FFmpeg 回退体验；仅图片尺寸与自动测试不能证明无黑格和流畅度。下一阶段须重启主进程加载新缓存版本并完成上述视觉/性能验收，不能据此声明整体优化完成。未修改 D:\测试 草稿或清理其缓存。
+
+
+2026-09-07 视觉验收前修复：确认运行缓存中存在 320px 单帧 JPG，被旧代码误当作联系表，导致截图中的横向条纹；并确认固定低分辨率/强制拉伸会造成抽帧越来越模糊。修复为 thumbnail-strip-v3：每格 320x180、40 格、JPEG q=2、保持比例中心裁切；前端只接受恰好 12800x180 的联系表，旧 poster/旧联系表走 Canvas 单帧兜底；联系表使用真实 img 横向位移而非 background 拉伸。新增尺寸拒绝测试。验证：typecheck、lint、build、UI 合同 19/19、定向 Vitest 33/33、真实 FFmpeg 生成 12800x180 联系表并抽取首尾格成功。Windows Computer Use 可读取 UniComp 无障碍树，但截图捕获返回系统错误 SetIsBorderRequired 不支持此接口，因此真实 Electron 视觉/滚动手感尚未通过；不得把自动化结果当人工验收。未提交、未推送、未修改 D:\测试草稿。
+
+2026-09-08 工程记录：视频基础编辑优化方案的自动化实施与验收已全部收口。基于截图进一步发现 v3 的横向 320x180 联系表虽已隔离旧缓存，却与时间线约 56px 宽、92px 高的槽位比例不匹配，仍会在竖屏素材中显得裁切或发虚；已升级为 `thumbnail-strip-v4`：固定 40 格、每格 160x264、JPEG q=2、`force_original_aspect_ratio=increase` 后中心裁切，前端只接受恰好 6400x264 的联系表，并用等比 `<img>` 平移显示，旧单帧、v2/v3 联系表一律回退 Canvas 单帧抽取。缓存版本同步升级，旧缓存不会命中。新增真实 FFmpeg 竖屏 720x1280、5 秒素材回归，实际输出 6400x264 且非空；更新旧缓存尺寸负向测试与 UI 合同。完整验收：`npm run verify:media-engine` 通过；typecheck、lint、build、`git diff --check` 通过；定向视频编辑/媒体引擎套件 40/40；全部 `npm test` 183 文件、1151 测试通过，0 失败。最终开发 Electron 已完整重启，日志确认本地 FFmpeg 与 renderer 连接正常。Windows 自动化窗口截图仍因宿主 `SetIsBorderRequired (0x80004002)` 无法取证，故这不是自动视觉判定；负责人可现在打开项目进行最终人工视觉与手感验收。未提交、未推送、未合并；未清除或改写 D:\测试 的草稿、缓存或素材。
+
+2026-09-08 旧补丁剥离与冗余审计：截图中的 `contactSheetClips`、联系表混入普通帧缓存、CSS `background-image/background-position` 切片及 112px 旧规格均已不存在；保留 FFmpeg 联系表主路径、预览双缓冲和 Canvas 受控回退，后者仍负责联系表不可用时的时间线帧与素材封面，不是重复 owner。本次将联系表版本、格数和尺寸收口到 `src/shared/video-editor-thumbnail-spec.ts`，供 renderer、FFmpeg preview 与 media-engine 共同消费，并删除时间线缩略图相同的 JSX 条件分支及失效的 `background-repeat`。验证：typecheck、lint、build、UI 合同 19/19、定向视频/媒体引擎 40/40（包含真实 FFmpeg 6400x264 联系表）和 `git diff --check` 通过。未修改作品库实现，未提交、未推送、未合并。
+2026-09-08 黑屏与拖动修复：复现确认 `acceptDraft` 清空舞台预览后等待异步句柄会暴露黑色画布；时间线拖动在同片段内重复走 `ensurePreview`，反复创建 seek 状态并暂停/等待。修改为加载时使用已有封面或明确占位、用非黑加载层覆盖未就绪帧、同片段拖动直接复用当前 video 元素 seek，并固定跨片段预加载 video 的 key，避免每个指针事件重建解码器。新增 UI 合同 V2-S17。验证：typecheck、lint、build、定向 24 项平台/领域测试和 20 项 UI 合同通过，git diff --check 通过。开发 Electron 重启尝试被宿主审批策略拒绝，真实窗口黑屏消失与拖动手感仍待人工验收。
+本次清理后另行完成全量 npm test：Node/UI 356/356、Vitest 183 文件 1151/1151，0 失败、0 跳过。最终视觉清晰度、黑屏与滚动手感仍须在实际 Electron 中验收，本次代码去重与自动测试不代替该结论。
+本轮全量 npm test：Node/UI 357/357；Vitest 1150/1151，图片登记测试清理临时 logs 时 ENOTEMPTY，单独复跑该文件 10/10 通过。不能把此次全量首跑记录为全通过。尚未在真实 Electron 复现/测量导入、重新进入页面及拖动延迟；静态合同测试不证明视觉或性能验收。
+
+2026-09-08 连续拖动预览重做（负责人批准，实施中，未验收）：前述黑/浅色整块加载遮罩方案被负责人否决，不能沿用其完成结论。当前已移除 pendingPreview 隐藏视频及 readyPreviewUrl 遮罩；新增受控 scrub_frames 类型及 chunkIndex 参数，由主进程校验片段范围后生成一秒/20帧、640px 方格、5x4的 JPEG 块，复用现有派生磁盘缓存。前端 VideoScrubCache 单任务执行、最新请求覆盖、最多6块解码缓存、最多12个预取目标；舞台 Canvas 保留最后有效画面，拖动时绘制专用帧，松手回到原视频定位。基础编辑实例跨页面保留，隐藏时暂停，返回时检查草稿修订。未触碰作品库、任务日期等其他并行修改。
+
+本轮证据：类型检查、lint、build通过；拖动时间映射与请求合并/旧帧抑制测试通过；媒体控制器拒绝负数/小数/超范围 chunk；真实 FFmpeg 输出3200x2560图片块通过；视频/IPC合同21项通过。所有证据仅覆盖已跑路径。尚缺：真实 Electron 冷/暖缓存及跨片段性能与像素验收、首次导入首帧时序、松手精确帧交接、项目切换及返回布局验证、磁盘缓存容量淘汰策略和最终全量回归。现有Electron与5173均未运行；此前重启命令被策略拒绝，不绕过，已请求用户正常运行npm run dev以继续真实验收。不得将本条标为全部完成或交由负责人作为最终人工验收版本。
+
+续验收记录：用户已启动真实Electron；截图捕获再次报SetIsBorderRequired (0x80004002)，无障碍仅空文档树，未获取视觉证据。一次完整npm test已通过（Vitest186文件1156项，包含其他任务当时新增测试），随后增加实际视频帧回调交接保护。工作区并行下拉框/主题改动随后导致最新typecheck出现12项错误，涉及ModelSelect、ImageGenerationControls、VideoEditingPage表单、LibraryPage、CallRecordsView、TasksPage；不覆盖这些外部修改，已请求协调同文件写入。当前全量构建和真实验收均未通过，前述绿灯不代表当前工作区。独立拖动缓存模块可继续验证；稳定版本后须重新构建、运行真实交互并补齐磁盘限额、首帧与交接验收后再交付。
+
+独立缓存补验：scrub-v1磁盘缓存隔离到既有video-editor-preview目录下的子目录，512MiB上限，仅淘汰hash命名的旧JPEG，不删除当前输出、part文件或原素材。稀疏文件配额测试通过；媒体预览文件9/9通过（含真实FFmpeg）。仍不代表真实首帧、拖动流畅或最终验收通过。
+
+11:45最新门禁：并行修改后的typecheck已恢复通过，lint、build、git diff --check通过，全量npm test退出0，Vitest186文件1157项通过。真实窗口截图仍受SetIsBorderRequired阻断，无障碍无法取得编辑内容；因此整体未验收，不能宣称达到参考视频效果。仍需实测首次导入、往返页面、冷缓存连续拖动、松手交接；当前一秒分块按需生成与有限预取是否满足目标延迟尚未证实。
+
+2026-09-08 负责人录屏反馈后的布局恢复：最新录屏抽帧显示预览停留后跳变，参考录屏显示更连续的画面变化；不从手机录屏推定精确延迟或剪映内部实现。恢复本轮新增页面保留包装层造成的高度回归：App移除外层div，VideoEditingPage根section直接承接工作区高度并使用hidden，CSS明确隐藏规则，保留切页实例状态。仅修改此布局边界，不覆盖并行表单和主题修改。使用真实pages.css的标准模式Edge浏览器隔离布局复现：1710、1280、900宽度，920px容器内旧结构高度694px、新结构920px；隐藏及重新显示通过。该证据是布局夹具，不是完整Electron实机验收。新鲜typecheck、build、29项视频UI合同和git diff --check通过。
+
+拖动问题仍未修复验收：当前未解码块请求串行经过原文件校验/校验结果持久化、派生图片获取和图片加载，正在运行的预取无法让位；最后画面保留只能避免空屏，不能消除等待。各环节真实耗时、首次导入首帧、返回页面及松手交接仍需实测，不能宣称达到参考效果。本次只恢复已确认的布局回归；不继续叠加未经验证的性能补丁。未提交、未推送、未改用户草稿或原素材。
+
+2026-09-08 再次接管后的根因纠正与实施：负责人继续授权修复导入黑屏、主轨刷新及拖动卡顿。主线为已有预览owner内修正状态失效与解码调度，不变更框架/媒体权限。实测用户5秒H264素材：JPEG一秒块冷生成133–146ms，校验结果持久化23.6–34.8ms，独立Edge首次图片decode约26ms；六块平方JPEG只覆盖六秒并占约187.5MiB解码内存。相同原片使用常驻video合并最新seek，seeked p95 7.5–8.6ms、rVFC间隔p95约16.8ms；全帧内VP9代理没有明显优势，生成约1.394秒且体积更大。因此拒绝继续调大JPEG缓存或默认转码，删除本轮scrub_frames/chunkIndex/spec/磁盘配额/对应旧测试；保留thumbnail v4。
+
+实际修复：VideoScrubCache改为各源文件独立常驻video，最多8个解码器，源句柄预取，目标合并，不在每次拖动调用IPC。seek按已提交目标去重，避免浏览器帧时间量化触发重复seek；当前目标变化时允许显示该素材刚解码的进度帧，禁止非当前素材回写。加载错误和15秒加载超时反馈到页面，清理取消事件与迟到句柄。主轨光标和读数在拖动RAF内更新，页面只在片段/文字有效范围改变及松手时同步。acceptDraft同草稿只失效删除/源或裁剪变化的片段缓存，保留原主轨图片、缩放与滚动。暂停首帧已就绪后用RAF交接，不等不存在的下一视频帧；空Canvas不再默认覆盖舞台，新视频未就绪保持已有画面。React提交后重新应用待定位目标，覆盖同URL跨片段重挂载时序。
+
+验证证据与边界：修复前真实页面组件+Edge媒体解码夹具复现0秒video已有数据但空Canvas仍可见；修复后首帧、导入、松手、隐藏返回均正常。真实素材、两片段、121次自动化鼠标事件约118次Canvas绘制，事件至绘制p95约20–22ms；自动化事件发送间隔p95约51–68ms，不能把此测量称为稳定60fps。导入仅新增片段请求预览和主轨图片，拖动/返回没有新增IPC；最终0.161290秒目标与video精确一致。夹具接口为替身，素材与React页面/解码器真实；不替代Electron原生导入对话框、真实8片段主轨或全平台验收。临时复现脚本为用户Temp/unicomp-editor-runtime.cjs，截图unicomp-editor-runtime-after.png。独立耗时脚本unicomp-video-seek-audit.cjs与unicomp-scrub-audit-*在同一Temp。
+
+最新门禁：typecheck、lint、build、git diff --check通过；32项定向测试通过（含真实FFmpeg40帧与新增decoder合并/跨源/上限/迟到响应回归）；全量Node/UI359/359，Vitest1155/1156，图片登记测试stored-immediate-image-result-port.test.ts临时目录清理ENOTEMPTY失败，未将首跑改记全绿。当前没有可见UniComp窗口，只有后台Electron进程；原生窗口最终验收、长GOP/高分辨率/超过8源的首次跨片段性能及全量失败项仍未关闭。总体不得宣称全部验收通过。未提交、未推送、未改用户草稿及源素材。
+
+补充夹具证据：同源片段20–22ms结果之外，改为两个不同fileId与不同真实视频URL，121次鼠标事件115次绘制，事件至绘制p95约35.7ms；松手0.161290秒精确一致，Canvas正常隐藏，隐藏返回不发新预览请求。导入新增源有两次并发句柄申请（舞台及后台准备），拖动热路径0次；没有将此结果夸大成全轨60fps或完全无卡顿。
+
+2026-09-08 时间线两处 UI 修复：按负责人截图在当前 fix/video-thumbnail-preview 分支追加局部修改，保留既有未提交工作。片段拖动显式使用仅含当前片段的独立 DOM 快照，下一事件轮清理；播放头顶部由半圆改为内缩 2px 的完整 10px 圆点，竖线时间位置不变。验证：视频编辑 UI 合同 39/39、时间线领域测试 17/17、typecheck、lint、build、git diff --check 通过。静态合同不能证明原生拖拽浮影，实际 Electron 拖拽图、圆点视觉与边界显示尚未实机验收；下一步在真实窗口拖动不同片段并检查圆点。未提交、未推送。
+
+2026-09-08 拖拽浮影回归修正：负责人反馈上次修复后浮影不显示。上次将独立片段副本放到视口外 -10000px，Chromium 捕获存在不可见问题；本次副本改在原片段视口位置渲染并提高层级，捕获后沿用定时清理，仅克隆当前片段。新增位置回归合同先失败后通过。视频 UI 39/39、typecheck、定向 eslint、build、差异检查通过。未取得原生 Electron 浮影视觉证据，不宣称实机验收通过；未提交或推送。
+
+2026-09-08 拖动浮影再次回归后改正：此前两次 setDragImage 副本方案均未通过负责人实际反馈，不沿用完成结论。移除立即删除副本逻辑，使用拖动期间常驻、跟随 drag/dragover 坐标的页面 DOM 浮层，只克隆当前片段并限制宽度320px，保留名称；原生快照设透明Canvas，drop/dragend/卸载清理浮层。新鲜验证：真实VideoTimelineTrack源码与pages.css在Edge夹具中，合成拖动事件后浮层仅有片段A、尺寸240x92、位置432/312，结束清理通过；不等价于Electron原生鼠标拖动。UI39/39、typecheck、定向eslint、build通过。最终Electron鼠标视觉仍待验证。未提交、未推送。
+
+2026-09-08 播放舞台闪色定位：负责人视频2按4fps抽帧，约0.25秒及8秒处人物仍在但左右黑边变浅灰，再恢复黑色。不是已证实的整页布局抖动。代码对应：seek期间舞台背景切浅灰、旧帧Canvas背景浅灰、video隐藏。本次取消seek隐藏视频与背景切色，Canvas背景与现有video黑底一致；保留既有帧交接，不声称与剪映等效连续播放。UI17项通过，typecheck与定向eslint通过；最终背景修正后重跑build。未进行新版本Electron真实像素验收，未提交推送。

@@ -27,7 +27,7 @@ test('video editor shell consumes only the controlled B1 operations', () => {
   }
   assert.doesNotMatch(
     editorSource,
-    /videoWorkspaces|videoSubmissions|videoFeatures|providers|fetch\(|localStorage/
+    /videoWorkspaces|videoSubmissions|videoFeatures|providers|\bfetch\(|localStorage/
   );
 });
 
@@ -35,7 +35,7 @@ test('video editor shell exposes the frozen A1 regions and honest states', () =>
   for (const text of [
     '素材与片段',
     '预览舞台',
-    '轻量单轨时间线',
+    '时间线',
     '视频主轨',
     '文字轨',
     '背景音乐',

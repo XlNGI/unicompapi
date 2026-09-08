@@ -1,4 +1,5 @@
-import { Checkbox, Input, InputNumber, SelectPicker } from 'rsuite';
+import { SelectPicker } from '../../../components/Pickers';
+import { Checkbox, Input, InputNumber } from 'rsuite';
 import {
   displayParameterKey,
   displayParameterOption,

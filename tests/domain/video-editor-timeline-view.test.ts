@@ -4,6 +4,8 @@ import {
   buildTimelineSegments,
   buildTimelineThumbnailSlots,
   canvasPreviewAspectRatio,
+  contactSheetTranslateX,
+  isUsableContactSheetSize,
   resolveTimelineDropIndex,
   resolveBackgroundMusicPlayback,
   resolveTimelineEdgeAutoScroll,
@@ -14,6 +16,21 @@ import {
 } from '../../src/pages/creation/video/VideoEditingPage';
 
 describe('video editor timeline view', () => {
+  it('rejects old posters and incompatible contact sheets before sprite rendering', () => {
+    expect(isUsableContactSheetSize(320, 180)).toBe(false);
+    expect(isUsableContactSheetSize(320, 640)).toBe(false);
+    expect(isUsableContactSheetSize(4480, 64)).toBe(false);
+    expect(isUsableContactSheetSize(12800, 180)).toBe(false);
+    expect(isUsableContactSheetSize(6400, 264)).toBe(true);
+  });
+  it('crops the first and last contact sheet frames without escaping the image', () => {
+    expect(contactSheetTranslateX(0)).toBe('0%');
+    expect(contactSheetTranslateX(39)).toBe('-97.5%');
+    expect(parseFloat(contactSheetTranslateX(20))).toBeLessThan(0);
+    expect(parseFloat(contactSheetTranslateX(20))).toBeGreaterThan(-100);
+    expect(contactSheetTranslateX(-1)).toBe('0%');
+    expect(contactSheetTranslateX(40)).toBe('-97.5%');
+  });
   it('derives the visible preview canvas ratio from the persisted canvas setting', () => {
     const draft = {
       canvas: {
@@ -144,7 +161,7 @@ describe('video editor timeline view', () => {
     })).toBe(1_400);
   });
 
-  it('zooms around the pointer while clamping to fit and maximum density', () => {
+  it('zooms around the pointer while allowing short clips to leave empty space', () => {
     const totalDurationUs = 13_077_000;
     const viewportWidth = 1_128;
     const pointerOffsetPx = 420;
@@ -177,7 +194,7 @@ describe('video editor timeline view', () => {
       viewportWidth
     });
     expect(fitted.pixelsPerSecond).toBeCloseTo(
-      viewportWidth / (totalDurationUs / 1_000_000),
+      Math.min(80, viewportWidth * 0.9 / (totalDurationUs / 1_000_000)),
       9
     );
     expect(fitted.scrollLeft).toBe(0);
@@ -191,6 +208,44 @@ describe('video editor timeline view', () => {
       viewportWidth
     });
     expect(maximum.pixelsPerSecond).toBe(1_000);
+  });
+
+  it('shows about eight frames for five seconds and adds distinct samples on Ctrl wheel zoom', () => {
+    const [segment] = buildTimelineSegments([{
+      clipId: 'five-second-clip',
+      sourceRange: { inUs: 0, outUs: 5_042_000 },
+      speed: { numerator: 1, denominator: 1 },
+      transitionToNext: { kind: 'none' }
+    }]);
+    const initial = resolveTimelineWheelZoom({
+      currentPixelsPerSecond: 80,
+      deltaY: 0,
+      pointerOffsetPx: 160,
+      scrollLeft: 0,
+      totalDurationUs: segment.durationUs,
+      viewportWidth: 1_540
+    });
+    expect(initial.pixelsPerSecond).toBe(80);
+    const initialFrames = buildTimelineThumbnailSlots([segment], initial.pixelsPerSecond, 0, 1_540, 0);
+    expect(initialFrames).toHaveLength(8);
+    expect(initialFrames.at(-1)!.leftPx + initialFrames.at(-1)!.widthPx).toBeCloseTo(403.36);
+    const enlarged = resolveTimelineWheelZoom({
+      currentPixelsPerSecond: initial.pixelsPerSecond,
+      deltaY: -360,
+      pointerOffsetPx: 160,
+      scrollLeft: 0,
+      totalDurationUs: segment.durationUs,
+      viewportWidth: 1_540
+    });
+    const enlargedFrames = buildTimelineThumbnailSlots([segment], enlarged.pixelsPerSecond, 0, 1_540, 0);
+    expect(enlargedFrames.length).toBeGreaterThan(initialFrames.length);
+    expect(new Set(enlargedFrames.map((frame) => frame.stripFrameIndex)).size).toBe(enlargedFrames.length);
+    expect(resolveTimelinePositionUs(400, 0, 403.36, segment.durationUs)).toBe(5_000_000);
+    expect(resolveTimelinePositionUs(1_200, 0, 403.36, segment.durationUs)).toBe(segment.durationUs);
+    const denseFrames = buildTimelineThumbnailSlots([segment], 1_000, 0, 6_000, 0);
+    expect(denseFrames.length).toBeGreaterThan(40);
+    expect(denseFrames.every((frame) => frame.requiresExactFrame)).toBe(true);
+    expect(initialFrames.every((frame) => !frame.requiresExactFrame)).toBe(true);
   });
 
   it('uses finer ruler steps as the timeline is enlarged', () => {
