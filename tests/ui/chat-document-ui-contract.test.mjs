@@ -114,7 +114,8 @@ test('document outline generation uses one model response and local application 
   assert.doesNotMatch(page, /documentDraftMessageIds/);
   assert.match(page, /documentGenerationStatus/);
   assert.match(page, /文档生成失败/);
-  assert.match(page, /Office 文档已生成/);
+  assert.match(page, /文档已生成并保存/);
+  assert.match(page, /<DocumentProgress/);
 });
 
 test('document outline payload is never rendered as ordinary chat markdown', () => {
