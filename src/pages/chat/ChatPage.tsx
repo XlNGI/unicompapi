@@ -24,6 +24,9 @@ import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
+import { StreamingMarkdown } from './StreamingMarkdown';
+import { ChatAttachment } from './ChatAttachment';
+import { DocumentProgress } from './DocumentProgress';
 import { ModelSelect } from '../../components/ModelSelect';
 import { StatusPill } from '../../components/StatusPill';
 import type {
@@ -352,7 +355,10 @@ function documentGenerationMessage(
   if (status.state === 'interrupted') {
     return '文档任务已中断，请恢复任务以核对保存结果。';
   }
-  if (status.state !== 'failed') return '正在生成 Office 文档…';
+  if (status.state === 'generating_content') return '正在生成文档内容，完成后会自动检查结构并排版。';
+  if (status.state === 'validating_outline') return '正在检查内容结构和格式…';
+  if (status.state === 'generating_file') return '正在排版、校验并保存本地文件…';
+  if (status.state === 'completed') return '文档已生成并保存。';
   switch (status.errorCode) {
     case 'response_failed':
       return 'AI 内容生成未完成，文档未生成。';
@@ -721,6 +727,34 @@ export function ChatPage({
   useEffect(() => {
     onConversationChange?.(selectedId);
   }, [onConversationChange, selectedId]);
+
+  useEffect(() => {
+    if (!documentGenerationActive || !chat || !selectedId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let reads = 0;
+    const refresh = async () => {
+      try {
+        const result = await chat.getConversation(selectedId);
+        if (active && result.ok) replaceConversation(result.value);
+      } finally {
+        if (active && ++reads < 600) timer = setTimeout(() => { void refresh().catch(() => undefined); }, 750);
+      }
+    };
+    void refresh().catch(() => undefined);
+    return () => { active = false; clearTimeout(timer); };
+  }, [chat, documentGenerationActive, selectedId]);
+
+  useEffect(() => {
+    const content = messagesRef.current?.firstElementChild;
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const messages = messagesRef.current;
+      if (messages && followOutputRef.current) messages.scrollTop = messages.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     onCandidateChange?.(selectedCandidateId);
@@ -2969,7 +3003,7 @@ export function ChatPage({
                   const isDocumentDraftMessage =
                     item.role === 'assistant' &&
                     (Boolean(item.documentResult) ||
-                      Boolean(item.documentGenerationStatus));
+                      Boolean(item.documentGenerationStatus) || (isCurrentAssistant && documentResponseActive));
                   const hideDocumentDraftContent =
                     item.role === 'assistant' &&
                     (isCurrentAssistant || documentResponseActive ||
@@ -3046,22 +3080,28 @@ export function ChatPage({
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">
                           {isDocumentDraftMessage || hideDocumentDraftContent ? (
-                            <p>
-                              {item.documentResult
-                                ? 'Office 文档已生成。'
-                                : documentGenerationMessage(
-                                    item.documentGenerationStatus
-                                  )}
-                            </p>
+                            <DocumentProgress
+                              state={item.documentResult ? 'completed' : item.documentGenerationStatus?.state}
+                              detail={item.documentResult ? '文档已生成并保存。' : documentGenerationMessage(item.documentGenerationStatus)}
+                            />
                           ) : (
-                            <MarkdownMessage
+                            <StreamingMarkdown
+                              streaming={item.state === 'streaming' && Boolean(item.content)}
                               content={item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
                             />
                           )}
                           {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
                         </div>
                       ) : (
-                        <div className="uc-chat-page__message-bubble">{item.attachments.length ? <ul aria-label="本条消息的附件">{item.attachments.map(attachment => <li key={attachment.kind === 'file_reference' ? attachment.fileReferenceId : attachment.assetId}>{attachment.kind === 'file_reference' ? attachment.fileName ?? '附件' : '图片素材'}</li>)}</ul> : null}<p>{item.content}</p></div>
+                        <div className="uc-chat-page__message-bubble">
+                          {item.attachments.length ? <ul className="uc-chat-page__message-attachments" aria-label="本条消息的附件">
+                            {item.attachments.map(attachment => <li key={attachment.kind === 'file_reference' ? attachment.fileReferenceId : attachment.assetId}>
+                              {attachment.kind === 'file_reference' ? <ChatAttachment fileId={attachment.fileReferenceId}
+                                projectId={attachment.projectId} fileName={attachment.fileName ?? '附件'} /> : <span>图片素材</span>}
+                            </li>)}
+                          </ul> : null}
+                          <p>{item.content}</p>
+                        </div>
                       )}
                       {item.role === 'assistant' && item.documentResult ? (
                         <section className="uc-chat-page__document-card" aria-label="生成的 Office 文档">
@@ -3266,18 +3306,9 @@ export function ChatPage({
               <ul className="uc-chat-page__attachments">
                 {attachments.map((attachment) => (
                   <li key={attachment.fileId}>
-                    <>{attachment.previewUrl ? <img src={attachment.previewUrl} alt={attachment.fileName} style={{ width: 48, height: 48, objectFit: 'contain' }} /> : <LuPaperclip aria-hidden="true" />}</>
-                    <span title={[attachment.fileName, ...attachment.warnings].join('；')}>
-                      {attachment.fileName}{isImageFileName(attachment.fileName) ? '（图片）' : attachment.status !== 'extracted' ? '（正文未读取）' : ''}
-                    </span>
-                    <button
-                      aria-label={`移除附件 ${attachment.fileName}`}
-                      disabled={busy}
-                      onClick={() => removeAttachment(attachment.fileId)}
-                      type="button"
-                    >
-                      <LuX aria-hidden="true" />
-                    </button>
+                    <ChatAttachment fileId={attachment.fileId} projectId={session!.projectId}
+                      fileName={attachment.fileName} previewUrl={attachment.previewUrl}
+                      disabled={busy} onRemove={() => removeAttachment(attachment.fileId)} />
                   </li>
                 ))}
               </ul>

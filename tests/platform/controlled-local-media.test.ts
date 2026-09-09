@@ -13,6 +13,7 @@ import {
   type Work
 } from '../../src/domain';
 import {
+  AttachmentImportService,
   ControlledLocalMediaController,
   InMemoryProjectCatalogStore,
   JsonFileReferenceRepository,
@@ -74,6 +75,33 @@ async function createFixture() {
 }
 
 describe('ControlledLocalMediaController', () => {
+  it('previews imported images with an opaque current-project handle and rejects other files/scopes', async () => {
+    const fixture = await createFixture();
+    const handles = new LocalMediaHandleRegistry();
+    const session = { projectId: toProjectId('project-media'), rootDirectory: fixture.root, projectName: 'Media project' };
+    const sourcePath = path.join(fixture.root, 'source.png');
+    await writeFile(sourcePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'));
+    const imported = await new AttachmentImportService({ rootDirectory: fixture.root, projectId: session.projectId }).importAttachment({ sourcePath });
+    const controller = new ControlledLocalMediaController({ catalog: fixture.catalog, handles, getSession: () => session, revealFile: () => undefined });
+    const result = await controller.createAttachmentHandle({ fileId: imported.fileId, projectId: session.projectId });
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(result)).not.toContain(fixture.root);
+    if (result.ok) {
+      expect(result.value.mediaKind).toBe('image');
+      expect(handles.resolveEntry(new URL(result.value.url).pathname.slice(1))?.mimeType).toBe('image/png');
+    }
+    for (const request of [
+      { fileId: imported.fileId, projectId: 'other-project' },
+      { fileId: 'file-media', projectId: session.projectId },
+      { fileId: imported.fileId, projectId: session.projectId, sourcePath },
+      { fileId: '../../source.png', projectId: session.projectId }
+    ]) expect((await controller.createAttachmentHandle(request)).ok).toBe(false);
+    const registered = await new JsonFileReferenceRepository(new NodeProjectStorage(fixture.root), session.projectId).get(toFileReferenceId(imported.fileId));
+    if (registered?.locator.kind !== 'project') throw new Error('Expected an imported local file');
+    await writeFile(path.join(fixture.root, registered.locator.relativePath), 'not an image');
+    expect((await controller.createAttachmentHandle({ fileId: imported.fileId, projectId: session.projectId })).ok).toBe(false);
+  });
+
   it('revokes every opaque media handle during application cleanup', () => {
     const handles = new LocalMediaHandleRegistry(() => 1_000, 5_000);
     const created = handles.create('C:\\private\\preview.png', 'image/png');

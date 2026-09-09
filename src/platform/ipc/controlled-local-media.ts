@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { toWorkId } from '../../domain';
+import { toFileReferenceId, toWorkId } from '../../domain';
 import type {
   StorageIpcResult,
   StorageLocalMediaHandleDto
 } from '../../shared/storage-ipc';
-import { resolveFileReferencePathSafely } from '../files';
+import { NodeImageInspector, NodeSha256FileVerifier, resolveFileReferencePathSafely } from '../files';
+import type { StorageProjectSession } from './storage-ipc-controller';
 import {
   JsonFileReferenceRepository,
   JsonWorkRepository
@@ -84,6 +85,7 @@ export class LocalMediaHandleRegistry {
 }
 
 export interface ControlledLocalMediaDependencies {
+  getSession?(): StorageProjectSession | undefined;
   readonly catalog: ProjectCatalogService;
   readonly handles: LocalMediaHandleRegistry;
   revealFile(target: string): void;
@@ -91,6 +93,38 @@ export interface ControlledLocalMediaDependencies {
 
 export class ControlledLocalMediaController {
   constructor(private readonly dependencies: ControlledLocalMediaDependencies) {}
+
+  async createAttachmentHandle(request: unknown): Promise<StorageIpcResult<StorageLocalMediaHandleDto>> {
+    try {
+      const session = this.dependencies.getSession?.();
+      if (!session || !request || typeof request !== 'object' ||
+          Object.keys(request).length !== 2 || !('projectId' in request) ||
+          request.projectId !== session.projectId || !('fileId' in request) ||
+          typeof request.fileId !== 'string') throw new LocalMediaError('media_unavailable');
+      const files = new JsonFileReferenceRepository(new NodeProjectStorage(session.rootDirectory), session.projectId);
+      const file = await files.get(toFileReferenceId(request.fileId));
+      if (!file || file.projectId !== session.projectId || file.state !== 'available' ||
+          file.locator.kind !== 'project' || !file.locator.relativePath.startsWith('files/attachments/')) {
+        throw new LocalMediaError('media_unavailable');
+      }
+      const target = await resolveFileReferencePathSafely(session.rootDirectory, file);
+      const inspection = await new NodeImageInspector().inspect(target);
+      if (inspection.sizeBytes > 8 * 1024 * 1024 || inspection.width * inspection.height > 40_000_000) {
+        throw new LocalMediaError('media_unavailable');
+      }
+      if (file.checksumSha256) {
+        const verification = await new NodeSha256FileVerifier(session.rootDirectory).verify({ file, expectedChecksum: file.checksumSha256 });
+        if (!verification.matchesExpected) throw new LocalMediaError('media_unavailable');
+      }
+      if (this.dependencies.getSession?.()?.projectId !== session.projectId) throw new LocalMediaError('media_unavailable');
+      return { ok: true, value: {
+        ...this.dependencies.handles.create(target, inspection.mimeType, `attachment:${session.projectId}:${file.id}`),
+        mediaKind: 'image'
+      } };
+    } catch (error) {
+      return mapError(error);
+    }
+  }
 
   async createHandle(
     request: unknown

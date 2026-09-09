@@ -20,6 +20,7 @@ export const storageIpcChannels = {
   listWorks: 'storage:list-works',
   getWorkDetails: 'storage:get-work-details',
   createWorkMediaHandle: 'storage:create-work-media-handle',
+  createAttachmentMediaHandle: 'storage:create-attachment-media-handle',
   revealWorkFile: 'storage:reveal-work-file',
   closeProject: 'storage:close-project',
   getProjectSession: 'storage:get-project-session'
@@ -483,6 +484,10 @@ export interface StorageApi {
   createWorkMediaHandle(
     workId: string,
     projectId?: string
+  ): Promise<StorageIpcResult<StorageLocalMediaHandleDto>>;
+  createAttachmentMediaHandle(
+    fileId: string,
+    projectId: string
   ): Promise<StorageIpcResult<StorageLocalMediaHandleDto>>;
   revealWorkFile(
     workId: string
