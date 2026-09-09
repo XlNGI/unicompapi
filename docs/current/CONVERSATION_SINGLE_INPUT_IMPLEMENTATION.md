@@ -1,5 +1,9 @@
 # 对话单输入框实施记录
 
+2026-09-10 集成更新：实现已提交为 `6f7c1c4`，通过 `dbe7054` 合入主工作区本地 `develop`。下文隔离状态为 9 月 9 日历史事实，已由本次集成覆盖。主工作区构建成功，36 项针对真实 PPT 页问答、修改保存与 JSX 输入事件的回归，以及六项 Electron preload/IPC 检查通过；合并源码与先前完整 1765 项通过的版本一致。原有 62 项 handoff 删除原样保留，未提交远程，功能分支保留。
+
+运行交付：已从主工作区的 `node_modules/electron/dist/electron.exe .` 启动最新生产构建，Windows 窗口标题为 UniComp，窗口句柄有效且 Responding=true，启动标准错误日志为空。该验证证明本地构建已启动，不代表真实模型生成或用户原 PPT 人工验收。桌面“UniComp (Internal Test)”仍指向旧安装包，本次未改安装包或快捷方式；之后可在主工作区运行 `pnpm start` 打开本次版本。集成日志位于主工作区 `.cache/conversation-integration-*.log`。
+
 日期：2026-09-09；性质：独立维护优化。
 
 ## 决策与范围
