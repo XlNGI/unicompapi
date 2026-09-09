@@ -17,6 +17,50 @@ import {
 } from '../../src/platform';
 
 describe('createConversationLinkedLifecycle', () => {
+  it.each([false, true])('publishes completion only after the conversation is saved (save failure: %s)', async (failSave) => {
+    const createdAt = toIsoTimestamp('2026-09-10T00:00:00.000Z');
+    const assistantMessageId = toMessageId('assistant-completion');
+    const executionId = toConversationResponseExecutionId('execution-completion');
+    let conversation: Conversation = beginAssistantMessage(addUserMessage(createConversation({
+      id: toConversationId('conversation-completion'), title: '分析图片',
+      projectId: toProjectId('project-completion'), createdAt
+    }), { id: toMessageId('user-completion'), content: '分析图片', createdAt }), {
+      id: assistantMessageId, createdAt
+    });
+    let rendererSnapshot: Conversation | undefined;
+    const lifecycle = {
+      start: async () => undefined,
+      appendDeltas: async () => [],
+      complete: async () => { rendererSnapshot = conversation; },
+      readModel: async () => ({ conversationId: conversation.id, assistantMessageId, reasoningContent: '' })
+    } as unknown as ConversationResponseExecutionLifecycle;
+    const repository = {
+      get: async () => conversation,
+      save: async (updated: Conversation, expectedRevision: number) => {
+        expect(expectedRevision).toBe(conversation.revision);
+        if (failSave && updated.messages.at(-1)?.state === 'completed') throw new Error('disk unavailable');
+        await Promise.resolve();
+        conversation = updated;
+      }
+    } as unknown as ProjectConversationRepository;
+    const linked = createConversationLinkedLifecycle(lifecycle, repository, () => createdAt);
+    await linked.start(executionId);
+    await linked.appendContent(executionId, '这是一张大熊猫图片。');
+    if (failSave) {
+      await expect(linked.complete(executionId)).rejects.toThrow('disk unavailable');
+      expect(rendererSnapshot).toBeUndefined();
+    } else {
+      await linked.complete(executionId);
+      expect(rendererSnapshot?.messages.at(-1)?.state).toBe('completed');
+      // The next user turn uses exactly the revision observed by the renderer.
+      const next = addUserMessage(rendererSnapshot!, {
+        id: toMessageId('user-followup'), content: '生成提示词', createdAt
+      });
+      await repository.save(next, rendererSnapshot!.revision);
+      expect(conversation.messages.at(-1)?.content).toBe('生成提示词');
+    }
+  });
+
   it('projects a confirmed cancellation onto the linked assistant message', async () => {
     const conversationId = toConversationId('conversation-linked-cancel');
     const assistantMessageId = toMessageId('assistant-linked-cancel');

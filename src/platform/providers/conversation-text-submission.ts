@@ -504,13 +504,14 @@ export function createConversationLinkedLifecycle(
       await sealAndDrainDeltas(executionId);
       await enqueue(executionId, async () => {
         await flushPending(executionId);
-        await lifecycle.complete(executionId);
         await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => completeAssistantMessage(
           conversation,
           assistantMessageId,
           toIsoTimestamp(now()),
           reasoningContent || undefined
         ));
+        // Completion (including replay) must expose the saved conversation revision.
+        await lifecycle.complete(executionId);
         releaseProjection(executionId);
       });
     },

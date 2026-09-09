@@ -682,7 +682,11 @@ export function ChatPage({
               if (refreshed.ok) loadedConversations = refreshed.value;
             }
           }
-          setConversations(loadedConversations);
+          setConversations((current) => loadedConversations.map((incoming) => {
+            const existing = current.find((item) => item.conversationId === incoming.conversationId &&
+              item.projectId === incoming.projectId);
+            return existing && existing.revision > incoming.revision ? existing : incoming;
+          }));
           setSelectedId((current) =>
             current && loadedConversations.some((item) => item.conversationId === current)
               ? current
@@ -1099,7 +1103,7 @@ export function ChatPage({
       (item) => item.conversationId === conversation.conversationId
     )
       ? items.map((item) =>
-          item.conversationId === conversation.conversationId ? conversation : item
+          item.conversationId === conversation.conversationId && item.revision <= conversation.revision ? conversation : item
         )
       : [conversation, ...items]);
   }
@@ -1215,22 +1219,44 @@ export function ChatPage({
       | { readonly workflow: ConversationWorkflowDto; readonly conversation: ConversationDto }
       | undefined;
     try {
+      // Streaming updates can advance storage after the renderer's last snapshot.
+      // Refresh before creating a command, without replaying a potentially accepted write.
+      let currentConversation = selected;
+      if (selected) {
+        const refreshed = await chat.getConversation(selected.conversationId);
+        if (inputScope !== composerScopeRef.current) return;
+        if (!refreshed.ok) {
+          setNotice(describeChatError(refreshed.error));
+          return;
+        }
+        currentConversation = refreshed.value;
+        replaceConversation(currentConversation);
+        if (currentConversation.readOnly || currentConversation.status !== 'active') {
+          setNotice(currentConversation.readOnly
+            ? errorMessages.legacy_conversation_read_only : errorMessages.conversation_not_active);
+          return;
+        }
+      }
+      if (planningCommand.cancelled) {
+        setNotice('需求理解已停止，未开始后续执行。');
+        return;
+      }
       const result = answerCurrentWorkflow
         ? await chat.answerWorkflow({
             clientCommandId: planningCommand.clientCommandId,
             workflowId: activeWorkflow.workflowId,
             expectedWorkflowRevision: activeWorkflow.revision,
-            expectedConversationRevision: selected.revision,
+            expectedConversationRevision: currentConversation!.revision,
             content,
             ...attachmentSelection,
             ...semanticSelection
           })
         : await chat.startWorkflow({
             clientCommandId: planningCommand.clientCommandId,
-            conversation: selected
+            conversation: currentConversation
               ? {
-                  conversationId: selected.conversationId,
-                  expectedRevision: selected.revision
+                  conversationId: currentConversation.conversationId,
+                  expectedRevision: currentConversation.revision
                 }
               : null,
             title: conversationTitleFromMessage(content),
