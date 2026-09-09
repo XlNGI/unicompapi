@@ -47,6 +47,8 @@ import type { StorageProjectSession } from './storage-ipc-controller';
 import { chatContextFailure, failure } from './chat-context-errors';
 import { toConversationDto } from './conversation-controller';
 import { ConversationAttachmentError, conversationAttachmentBatch, type ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
+import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export interface ConversationResponseControllerRuntime {
   readonly conversationService: ConversationApplicationService;
@@ -59,6 +61,7 @@ export interface ConversationResponseControllerRuntime {
   readonly streamChannel: ControlledConversationResponseStreamChannel;
   readonly workflowService?: ConversationWorkflowService;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
+  readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   /** Completes startup recovery before this project accepts response operations. */
   readonly ready: Promise<void>;
   submit?(input: {
@@ -119,6 +122,14 @@ export class ConversationResponseController {
       if (message.state !== 'completed') {
         return failure('message_not_completed', 'The selected user message is not complete');
       }
+      const attachmentQuery = conversationAttachmentQuery(undefined, message);
+      const isPlainUserMessage = message.displayContent === undefined || message.displayContent === message.content;
+      const pageReferences = isPlainUserMessage ? await runtime.documentPages?.resolve({
+        conversation, currentUserMessageId: message.id, query: attachmentQuery
+      }) ?? [] : [];
+      if (!pageReferences.length) await runtime.attachments?.resolve({
+        conversation, currentUserMessageId: message.id, query: attachmentQuery
+      });
       const draft = createConversationResponseDraft({
         id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
         projectId: runtime.conversations.projectId,
@@ -126,6 +137,8 @@ export class ConversationResponseController {
         conversationRevision: conversation.revision,
         userMessageId: message.id,
         userMessageRevision: message.revision,
+        attachmentQuery,
+        ...(pageReferences.length ? { documentPageQuery: attachmentQuery } : {}),
         productFeature: input.productFeature,
         createdAt: toIsoTimestamp(this.now())
       });
@@ -539,10 +552,17 @@ export class ConversationResponseController {
     }
     // Fail locally before candidate authorization or provider dispatch. Factory
     // revalidates the pinned hashes immediately before forming provider messages.
-    await runtime.attachments?.resolve({
+    const attachmentQuery = conversationAttachmentQuery(workflow?.plan, userMessage);
+    const isPageQuestion = workflow ? workflow.plan.kind === 'chat'
+      : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
+    const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
+    const pageReferences = documentPageQuery ? await runtime.documentPages?.resolve({
+      conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
+    }) ?? [] : [];
+    if (!pageReferences.length) await runtime.attachments?.resolve({
       conversation,
       currentUserMessageId: userMessage.id,
-      query: userMessage.displayContent ?? userMessage.content
+      query: attachmentQuery
     });
     let draft = createConversationResponseDraft({
       id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
@@ -552,6 +572,8 @@ export class ConversationResponseController {
       userMessageId: userMessage.id,
       userMessageRevision: userMessage.revision,
       ...(workflow ? { promptContent: input.content } : {}),
+      attachmentQuery,
+      ...(pageReferences.length ? { documentPageQuery } : {}),
       productFeature: input.productFeature,
       createdAt: toIsoTimestamp(this.now())
     });

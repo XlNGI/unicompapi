@@ -25,6 +25,7 @@ import {
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export interface ConversationResponseArtifactFactoryDependencies {
   readonly conversations: ProjectConversationRepository;
@@ -33,6 +34,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly executions: ConversationResponseExecutionRepository;
   readonly contextBuilder?: ConversationContextBuilder;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'>;
+  readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   nextMessageId?: () => MessageId;
   nextExecutionId?: () => string;
   nextStreamEventId?: () => string;
@@ -73,8 +75,15 @@ export class ConversationResponseArtifactFactory
     if (!conversation || conversation.revision !== subject.conversationRevision) {
       throw new TypeError('Conversation revision changed before artifact creation');
     }
+    const userMessage = conversation.messages.find((message) => message.id === draft.userMessageId);
+    if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
+      throw new TypeError('Conversation response user message is unavailable for artifact creation');
+    }
+    const pageReferences = await resolveConversationResponseDocumentPages({
+      conversation, draft, service: this.dependencies.documentPages
+    });
     const selectedContexts = [];
-    for (const selection of draft.contextSelections) {
+    for (const selection of pageReferences.length ? [] : draft.contextSelections) {
       const context = await this.dependencies.contexts.get(selection.contextId);
       if (context) selectedContexts.push(context);
     }
@@ -82,14 +91,17 @@ export class ConversationResponseArtifactFactory
       projectId: this.dependencies.conversations.projectId,
       surface: 'conversation',
       contexts: selectedContexts,
-      selections: draft.contextSelections
+      selections: pageReferences.length ? [] : draft.contextSelections
     });
-    const attachmentReferences = await this.dependencies.attachments?.resolve({
+    if (pageReferences.some((reference) => !input.subject.contextContentHashes?.includes(reference.contentHash))) {
+      throw new ConversationDocumentPageError('document_page_unavailable', '作品页面在请求准备后发生变化，请重新核对后再提问。');
+    }
+    const attachmentReferences = pageReferences.length ? [] : await this.dependencies.attachments?.resolve({
       conversation,
       currentUserMessageId: draft.userMessageId,
-      query: conversation.messages.find((message) => message.id === draft.userMessageId)?.content ?? input.subject.outboundTextSnapshot
+      query: draft.attachmentQuery ?? userMessage.displayContent ?? userMessage.content
     }) ?? [];
-    const references: readonly ConversationContextReference[] = [...attachmentReferences, ...contextSnapshots.map(
+    const references: readonly ConversationContextReference[] = [...pageReferences, ...attachmentReferences, ...contextSnapshots.map(
       (snapshot) => ({
         sourceId: snapshot.contextId,
         sourceType: 'project' as const,
@@ -102,8 +114,13 @@ export class ConversationResponseArtifactFactory
       conversation,
       currentUserMessageId: draft.userMessageId,
       currentUserContent: input.subject.outboundTextSnapshot,
+      omitHistory: pageReferences.length > 0,
       references
     });
+    if (pageReferences.some((page) => !contextEnvelope.references.some((reference) =>
+      reference.sourceId === page.sourceId && reference.contentHash === page.contentHash && reference.excerpt === page.excerpt))) {
+      throw new ConversationDocumentPageError('document_page_scope_exceeded', '目标页面超过本次完整读取预算，请缩小问题范围后继续。');
+    }
     const messages = contextEnvelope.messages;
     const createdAt = toIsoTimestamp(input.createdAt);
     const assistantMessageId = this.nextMessageId();

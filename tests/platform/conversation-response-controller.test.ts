@@ -24,6 +24,7 @@ import {
   toResponseDraftDto,
   type ConversationResponseControllerRuntime
 } from '../../src/platform';
+import { ConversationDocumentPageError } from '../../src/platform/documents/conversation-document-page-context';
 
 const projectId = toProjectId('project-response-controller');
 const createdAt = toIsoTimestamp('2026-08-18T00:00:00.000Z');
@@ -52,7 +53,7 @@ function execution(
   };
 }
 
-function fixture() {
+function fixture(documentPages?: ConversationResponseControllerRuntime['documentPages'], userContent = 'hello', userDisplayContent?: string) {
   const base = createConversation({
     id: toConversationId('conversation-controller'),
     title: 'Controller test',
@@ -61,7 +62,8 @@ function fixture() {
   });
   const withUser = addUserMessage(base, {
     id: toMessageId('message-user-controller'),
-    content: 'hello',
+    content: userContent,
+    ...(userDisplayContent !== undefined ? { displayContent: userDisplayContent } : {}),
     createdAt
   });
   const withAssistant = beginAssistantMessage(withUser, {
@@ -143,6 +145,7 @@ function fixture() {
     },
     streamChannel: {},
     workflowService,
+    documentPages,
     ready: Promise.resolve(),
     start: vi.fn(async () => startedExecution)
   } as unknown as ConversationResponseControllerRuntime;
@@ -185,6 +188,89 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it.each(['content', 'matching displayContent'] as const)('preflights and pins the stored %s page query through the legacy createDraft entry', async (source) => {
+    const query = '第 5 页讲了什么？';
+    const documentPages = { resolve: vi.fn(async () => [{ sourceId: 'delivered-work', sourceType: 'project' as const,
+      contentHash: 'a'.repeat(64), excerpt: '实际第 5 页：现金流风险' }]) };
+    const value = source === 'content' ? fixture(documentPages, query)
+      : fixture(documentPages, query, query);
+    const result = await value.controller.createDraft({
+      conversationId: 'conversation-controller', expectedRevision: 1,
+      userMessageId: 'message-user-controller', productFeature: 'text_chat'
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(documentPages.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      currentUserMessageId: 'message-user-controller', query
+    }));
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentQuery: query, documentPageQuery: query
+    }));
+    expect(documentPages.resolve.mock.invocationCallOrder[0]).toBeLessThan(value.draftRepository.create.mock.invocationCallOrder[0]);
+    expect(result.ok && result.value).not.toHaveProperty('documentPageQuery');
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy generation prompts out of page preflight when createDraft uses a separate display request', async () => {
+    const documentPages = { resolve: vi.fn(async () => []) };
+    const displayContent = '修改第 5 页的内容';
+    const value = fixture(documentPages, '内部生成提示：输出修改第 5 页后的完整 PPT 结构', displayContent);
+    expect(await value.controller.createDraft({
+      conversationId: 'conversation-controller', expectedRevision: 1,
+      userMessageId: 'message-user-controller', productFeature: 'text_chat'
+    })).toMatchObject({ ok: true });
+    expect(documentPages.resolve).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ attachmentQuery: displayContent }));
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.not.objectContaining({ documentPageQuery: expect.anything() }));
+  });
+
+  it('keeps an unbound legacy generation start on the document history path', async () => {
+    const documentPages = { resolve: vi.fn(async () => []) };
+    const content = '内部生成提示：修改第 5 页并返回完整 PPT 大纲';
+    const displayContent = '修改第 5 页的内容';
+    const value = fixture(documentPages, content, displayContent);
+    expect(await value.controller.start({ ...startRequest(), content, displayContent })).toMatchObject({ ok: true });
+    expect(documentPages.resolve).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ attachmentQuery: displayContent }));
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.not.objectContaining({ documentPageQuery: expect.anything() }));
+    expect(value.runtime.start).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an unavailable page before legacy createDraft can persist a draft', async () => {
+    const documentPages = { resolve: vi.fn(async () => {
+      throw new ConversationDocumentPageError('document_page_out_of_range', '该 PPT 没有第 5 页。');
+    }) };
+    const value = fixture(documentPages, '第 5 页讲了什么？');
+    expect(await value.controller.createDraft({
+      conversationId: 'conversation-controller', expectedRevision: 1,
+      userMessageId: 'message-user-controller', productFeature: 'text_chat'
+    })).toMatchObject({ ok: false, error: { code: 'document_page_out_of_range' } });
+    expect(documentPages.resolve).toHaveBeenCalledOnce();
+    expect(value.draftRepository.create).not.toHaveBeenCalled();
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('stops a missing generated PPT page before draft creation, candidate authorization or dispatch', async () => {
+    const documentPages = { resolve: vi.fn(async () => {
+      throw new ConversationDocumentPageError('document_page_out_of_range', '该 PPT 没有第 5 页。');
+    }) };
+    const value = fixture(documentPages);
+    const result = await value.controller.start({ ...startRequest(), content: '第 5 页讲了什么？' });
+    expect(result).toMatchObject({ ok: false, error: { code: 'document_page_out_of_range', message: '该 PPT 没有第 5 页。' } });
+    expect(documentPages.resolve).toHaveBeenCalledOnce();
+    expect(value.draftRepository.create).not.toHaveBeenCalled();
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('persists the trusted page query after successful local page preflight', async () => {
+    const documentPages = { resolve: vi.fn(async () => [{ sourceId: 'delivered-work', sourceType: 'project' as const,
+      contentHash: 'a'.repeat(64), excerpt: '实际第 5 页：现金流风险' }]) };
+    const value = fixture(documentPages, '第 5 页讲了什么？');
+    expect(await value.controller.start({ ...startRequest(), content: '第 5 页讲了什么？' })).toMatchObject({ ok: true });
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ documentPageQuery: '第 5 页讲了什么？' }));
+  });
   it('projects a provider completion that raced ahead of workflow execution binding', async () => {
     const value = fixture();
     vi.mocked(value.runtime.executions.readModel).mockResolvedValue(execution('completed'));
@@ -224,12 +310,31 @@ describe('ConversationResponseController', () => {
       userMessageId: toMessageId('message-user-controller'),
       userMessageRevision: 0,
       promptContent,
+      attachmentQuery: '内部持久化的累计资料需求',
+      documentPageQuery: '第 5 页讲了什么？',
       productFeature: 'text_chat',
       createdAt
     });
 
     expect(JSON.stringify(toResponseDraftDto(draft))).not.toContain(promptContent);
     expect(toResponseDraftDto(draft)).not.toHaveProperty('promptContent');
+    expect(toResponseDraftDto(draft)).not.toHaveProperty('attachmentQuery');
+    expect(toResponseDraftDto(draft)).not.toHaveProperty('documentPageQuery');
+  });
+
+  it('rejects an attachment query supplied through renderer IPC', async () => {
+    const value = fixture();
+    const result = await value.controller.start({ ...startRequest(), attachmentQuery: '绕过全表资料范围校验' });
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('rejects a generated document page query supplied through renderer IPC', async () => {
+    const value = fixture();
+    const result = await value.controller.start({ ...startRequest(), documentPageQuery: '第 7 页' });
+    expect(result).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
   });
 
   it('deduplicates concurrent start commands by client command ID', async () => {
@@ -308,6 +413,9 @@ describe('ConversationResponseController', () => {
   it('starts a ready workflow from its persisted source message without appending a duplicate user turn', async () => {
     const value = fixture();
     const promptContent = '受控内部提示：输出结构化文档大纲';
+    const attachmentQuery = '原始需求\n后续要求：总结附件全文';
+    value.workflowService.get.mockResolvedValue({ ...value.readyWorkflow,
+      plan: parseConversationIntentPlan({ ...value.readyWorkflow.plan, parameters: { requirements: attachmentQuery } }) });
     const result = await value.controller.start({
       ...startRequest('workflow-response-controller'),
       conversation: {
@@ -327,7 +435,8 @@ describe('ConversationResponseController', () => {
     expect(value.draftRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         userMessageId: 'message-user-controller',
-        promptContent
+        promptContent,
+        attachmentQuery
       })
     );
     expect(value.workflowService.beginExecution).toHaveBeenCalledWith(

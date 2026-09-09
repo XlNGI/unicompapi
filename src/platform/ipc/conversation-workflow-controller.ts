@@ -18,6 +18,7 @@ import { toConversationDto } from './conversation-controller';
 import { chatContextFailure, failure } from './chat-context-errors';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
 
 export interface ConversationWorkflowControllerRuntime {
   readonly ready?: Promise<void>;
@@ -112,7 +113,8 @@ export class ConversationWorkflowController {
       this.preparedPlanningWorkflows.set(signal, updated);
       if (updated.status === 'ready') await runtime.attachments?.prepareSummary?.({
         conversation,
-        query: conversation.messages.find((message) => message.id === updated.sourceMessageId)?.content ?? input.content,
+        query: conversationAttachmentQuery(updated.plan,
+          conversation.messages.find((message) => message.id === updated.sourceMessageId) ?? { content: input.content }),
         selection: input.semanticCandidate,
         signal
       });
@@ -315,7 +317,7 @@ export class ConversationWorkflowController {
     });
     this.preparedPlanningWorkflows.set(signal, workflow);
     if (workflow.status === 'ready') await runtime.attachments?.prepareSummary?.({
-      conversation, query: input.content, selection: input.semanticCandidate, signal
+      conversation, query: conversationAttachmentQuery(workflow.plan, source), selection: input.semanticCandidate, signal
     });
     return {
       ok: true,
@@ -362,7 +364,16 @@ export function toWorkflowDto(workflow: ConversationWorkflowV1): ConversationWor
     plan: workflow.plan,
     ...(workflow.deliveries ? { deliveries: workflow.deliveries } : {}),
     pendingQuestions: workflow.pendingQuestions,
-    ...(workflow.resolvedTarget ? { resolvedTarget: workflow.resolvedTarget } : {}),
+    ...(workflow.resolvedTarget ? { resolvedTarget: {
+      artifactRef: workflow.resolvedTarget.artifactRef, version: workflow.resolvedTarget.version,
+      ...(workflow.resolvedTarget.presentation ? { presentation: {
+        workId: workflow.resolvedTarget.presentation.workId,
+        unit: workflow.resolvedTarget.presentation.unit,
+        ordinal: workflow.resolvedTarget.presentation.ordinal,
+        heading: workflow.resolvedTarget.presentation.heading,
+        pages: workflow.resolvedTarget.presentation.pages
+      } } : {})
+    } } : {}),
     ...(workflow.confirmationId ? { confirmationId: workflow.confirmationId } : {}),
     ...(workflow.planHash ? { planHash: workflow.planHash } : {}),
     ...(workflow.confirmationExpiresAt

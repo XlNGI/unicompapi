@@ -103,6 +103,8 @@ function environment() {
   const updateDocumentGenerationStatus = vi.fn(async () => undefined);
   const run = vi.fn(async () => generatedResult('revision'));
   const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
     projectId,
     conversations: {
       load: async () => conversation,
@@ -132,6 +134,8 @@ function serviceWithCompilerError(
   const recover = vi.fn(() => JSON.parse(outlineJson('兼容章节')));
   const run = vi.fn(async () => generatedResult('legacy'));
   const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
     projectId,
     conversations: {
       load: async () => conversation,
@@ -159,6 +163,8 @@ describe('document generation revision fail-closed boundary', () => {
       )
     };
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -238,6 +244,8 @@ describe('document generation revision fail-closed boundary', () => {
   it('stops before file creation when the revision agent throws', async () => {
     const { conversation, run, updateDocumentGenerationStatus } = environment();
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -286,6 +294,8 @@ describe('document generation revision fail-closed boundary', () => {
       )
     };
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -335,6 +345,8 @@ describe('document generation revision fail-closed boundary', () => {
   it('fails closed without a new work when the revision chain conflicts', async () => {
     const { conversation, run, updateDocumentGenerationStatus } = environment();
     const serviceWithAgent = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,

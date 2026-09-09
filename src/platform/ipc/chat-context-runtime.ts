@@ -17,6 +17,7 @@ import {
   createConversation,
   createProviderInvocationEvent,
   failAssistantMessage,
+  setDocumentGenerationStatusOnMessage,
   startAssistantMessageStreaming,
   toConversationId,
   toConversationResponseStreamEventId,
@@ -44,6 +45,9 @@ import {
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
+import { createPresentationWorkflowScope } from '../documents/registered-presentation-reader';
+import { documentDeliveryFailureReason } from '../documents/conversation-document-workflow';
 import { ConversationSemanticClassifier, conversationSemanticLimits } from '../providers/conversation-semantic-classifier';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
@@ -271,10 +275,13 @@ export function createChatContextRuntime(
       projectId: session.projectId,
       summarizer: classifier
     });
+    const documentPages = new ConversationDocumentPageContextService({
+      rootDirectory: session.rootDirectory, projectId: session.projectId
+    });
     const workflowService = new ConversationWorkflowService(
       new JsonConversationWorkflowRepository(storage, session.projectId, now),
       new ConversationIntentOrchestrator({ classifier, classifierTimeoutMs: conversationSemanticLimits.timeoutMs }),
-      now
+      now, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId })
     );
     const retrieval = new RagRetrievalService({
       rootDirectory: session.rootDirectory,
@@ -295,7 +302,8 @@ export function createChatContextRuntime(
       new ProjectConversationResponseSubjectResolver(
         projectConversations,
         responseDrafts,
-        contextRepository
+        contextRepository,
+        documentPages
       ),
       new RegistryFeatureCandidateSource(
         providerRegistry,
@@ -327,7 +335,7 @@ export function createChatContextRuntime(
     const executionCoordinator = new ConversationExecutionCoordinator();
     // After a process restart no in-memory adapter exists to resume these streams.
     const responseRecovery = interruptOrphanedConversationResponses(responseLifecycle, projectConversations, now)
-      .then(() => settlePublishedConversationDocuments(workflowService, responseExecutions, projectConversations))
+      .then(() => settleRecoverableConversationDocuments(workflowService, responseExecutions, projectConversations, now))
       .then(() => workflowService.recoverInterruptedExecutions())
       .then(() => undefined);
     const responses: ConversationResponseControllerRuntime = {
@@ -341,6 +349,7 @@ export function createChatContextRuntime(
       streamChannel,
       workflowService,
       attachments,
+      documentPages,
       ready: responseRecovery
     };
     if (canSubmit && textSubmission && authorization) {
@@ -354,6 +363,7 @@ export function createChatContextRuntime(
         contexts: contextRepository,
         executions: responseExecutions,
         attachments,
+        documentPages,
         nextMessageId: () => conversationIds.nextMessageId(),
         now
       });
@@ -718,10 +728,11 @@ async function projectInterruptedAssistant(
   }
 }
 
-async function settlePublishedConversationDocuments(
+async function settleRecoverableConversationDocuments(
   workflows: ConversationWorkflowService,
   executions: JsonConversationResponseExecutionRepository,
-  conversations: JsonProjectConversationRepository
+  conversations: JsonProjectConversationRepository,
+  now: () => string
 ): Promise<void> {
   for (const workflow of await workflows.list()) {
     const executionId = workflow.executionId;
@@ -730,11 +741,43 @@ async function settlePublishedConversationDocuments(
     const messageId = execution?.snapshot.assistantMessageId ?? workflow.deliveries?.find((item) =>
       item.status === 'executing' && item.executionId === executionId)?.resultMessageId;
     if (!messageId) continue;
-    const conversation = await conversations.get(workflow.conversationId);
-    const message = conversation?.messages.find((item) => item.id === messageId && item.role === 'assistant');
-    const result = message?.documentResult;
-    if (result && result.kind === workflow.plan.documentKind && result.validatedContent) {
-      await workflows.finishDocumentExecution(executionId, 'completed', { messageId, workId: result.workId });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const conversation = await conversations.get(workflow.conversationId);
+      const message = conversation?.messages.find((item) => item.id === messageId && item.role === 'assistant');
+      const result = message?.documentResult;
+      if (result && result.kind === workflow.plan.documentKind && result.validatedContent) {
+        await workflows.finishDocumentExecution(executionId, 'completed', { messageId, workId: result.workId });
+        break;
+      }
+      const status = message?.documentGenerationStatus;
+      if (message?.state === 'completed' && status?.state === 'failed' && status.kind === workflow.plan.documentKind &&
+        (execution ? execution.state === 'completed' && execution.snapshot.userMessageId === workflow.sourceMessageId
+          : executionId.startsWith('local-document-revision-'))) {
+        await workflows.finishDocumentExecution(executionId, 'failed', { messageId }, documentDeliveryFailureReason(status, true));
+        break;
+      }
+      if (!conversation || message?.state !== 'completed' ||
+        (execution ? execution.state !== 'completed' || execution.snapshot.userMessageId !== workflow.sourceMessageId
+          : !executionId.startsWith('local-document-revision-')) ||
+        (workflow.deliveries && !workflow.deliveries.some((item) => item.kind === workflow.plan.documentKind &&
+          item.status === 'executing' && item.executionId === executionId &&
+          (!item.resultMessageId || item.resultMessageId === messageId))) ||
+        status?.kind !== workflow.plan.documentKind ||
+        !status || !['validating_outline', 'generating_file', 'interrupted'].includes(status.state)) break;
+      // These local phases follow persistence of the original render inputs.
+      // Persist interrupted first so retry must reload those inputs, including
+      // after a second crash between message recovery and workflow settlement.
+      if (status.state !== 'interrupted') {
+        try {
+          await conversations.save(setDocumentGenerationStatusOnMessage(conversation, toMessageId(messageId),
+            { state: 'interrupted', kind: status.kind }, toIsoTimestamp(now())), conversation.revision);
+        } catch (error) {
+          if (!(error instanceof ConversationRevisionConflictError) || attempt === 3) throw error;
+          continue;
+        }
+      }
+      await workflows.finishDocumentExecution(executionId, 'failed', { messageId }, 'execution_failed');
+      break;
     }
   }
 }

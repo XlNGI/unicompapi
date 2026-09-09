@@ -28,6 +28,7 @@ export class ConversationDocumentInputStore {
         return current;
       }
       const saved = documentGenerationRequestParsers.generateFromMessage(input);
+      resolved = toDocumentGenerationApplicationInput({ ...saved, images: saved.images ?? [] });
       return { schemaVersion: 1, projectId: this.projectId, input: saved };
     });
     return resolved;

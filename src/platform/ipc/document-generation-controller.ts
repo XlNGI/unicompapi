@@ -264,6 +264,14 @@ function mapApplicationError<T>(
       return failure('generation_failed', 'AI content generation did not complete');
     case 'generation_failed':
       return failure('generation_failed', 'Document generation failed');
+    case 'verification_failed':
+      return failure('verification_failed', 'Document verification failed; the original document is preserved');
+    case 'write_failed':
+      return failure('write_failed', 'The new document could not be written');
+    case 'registration_failed':
+      return failure('registration_failed', 'The new document could not be registered');
+    case 'result_sync_pending':
+      return failure('result_sync_pending', 'The document is saved; result synchronization is pending');
     case 'local_revision_not_supported':
       return failure('local_revision_not_supported', error.message);
     case 'revision_scope_violation':

@@ -19,6 +19,27 @@ const t0 = toIsoTimestamp('2026-08-03T04:00:00.000Z');
 const t1 = toIsoTimestamp('2026-08-03T04:01:00.000Z');
 
 describe('project conversation and response draft contracts', () => {
+  it('preserves an optional bounded attachment query while accepting legacy drafts', () => {
+    const legacy = createConversationResponseDraft({
+      id: toConversationResponseDraftId('response-draft-attachment-query'), projectId,
+      conversationId: toConversationId('conversation-project-owned'), conversationRevision: 1,
+      userMessageId: toMessageId('user-message-1'), userMessageRevision: 0,
+      productFeature: 'text_chat', createdAt: t0
+    });
+    expect(parseConversationResponseDraft(JSON.parse(JSON.stringify(legacy)))).not.toHaveProperty('attachmentQuery');
+    const attachmentQuery = '帮我做个总结\n后续要求：Excel，统计全表总计金额';
+    const draft = createConversationResponseDraft({ ...legacy, attachmentQuery });
+    expect(parseConversationResponseDraft(JSON.parse(JSON.stringify(draft))).attachmentQuery).toBe(attachmentQuery);
+    expect(replaceConversationResponseParameterValues(draft, { max_tokens: 1024 }, t1).attachmentQuery).toBe(attachmentQuery);
+    for (const invalid of ['', '  ', 42, null, undefined, '字'.repeat(1_000_001)]) {
+      expect(() => parseConversationResponseDraft({ ...legacy, attachmentQuery: invalid })).toThrow();
+      expect(() => parseConversationResponseDraft({ ...legacy, documentPageQuery: invalid })).toThrow();
+    }
+    const pageDraft = createConversationResponseDraft({ ...legacy, documentPageQuery: '第 5 页讲了什么？' });
+    expect(parseConversationResponseDraft(JSON.parse(JSON.stringify(pageDraft))).documentPageQuery).toBe('第 5 页讲了什么？');
+    expect(parseConversationResponseDraft(legacy)).not.toHaveProperty('documentPageQuery');
+  });
+
   it('requires every new optimized conversation to belong to a project', () => {
     expect(createProjectConversation({
       id: toConversationId('conversation-project-owned'),

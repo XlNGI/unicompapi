@@ -15,6 +15,7 @@ import {
   type MessageId,
   type ProjectId
 } from '../domain';
+import type { PresentationRevisionSelection } from '../domain/entities/document-generation';
 import {
   ConversationIntentOrchestrationError,
   type ConversationIntentOrchestrator,
@@ -48,7 +49,11 @@ export class ConversationWorkflowService {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly nextId: () => ConversationWorkflowId = () =>
       toConversationWorkflowId(`conversation-workflow-${secureRandomUuid()}`),
-    private readonly confirmationTtlMs = 10 * 60 * 1_000
+    private readonly confirmationTtlMs = 10 * 60 * 1_000,
+    private readonly documentScope?: {
+      resolve(conversationId: ConversationId, artifactRef: string, plan: ConversationIntentPlan): Promise<PresentationRevisionSelection | undefined>;
+      canRetry?(workflow: ConversationWorkflowV1): Promise<boolean>;
+    }
   ) {}
 
   async create(input: {
@@ -63,8 +68,11 @@ export class ConversationWorkflowService {
     const decision = await this.orchestrator.analyze({ rawText: input.rawText, context: input.context, signal: input.signal });
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const createdAt = toIsoTimestamp(this.now());
+    const presentation = !decision.cancelled && decision.resolvedTarget && this.documentScope
+      ? await this.documentScope.resolve(input.conversationId, decision.resolvedTarget.messageId, decision.plan) : undefined;
+    const plan = presentation ? parseConversationIntentPlan({ ...decision.plan, needsConfirmation: true }) : decision.plan;
     const confirmation = await confirmationForPlan(
-      decision.plan,
+      plan,
       createdAt,
       this.confirmationTtlMs
     );
@@ -73,13 +81,14 @@ export class ConversationWorkflowService {
       projectId: input.projectId,
       conversationId: input.conversationId,
       sourceMessageId: input.sourceMessageId,
-      plan: decision.plan,
+      plan,
       pendingQuestions: questionsForDecision(decision.plan),
       ...(decision.resolvedTarget
         ? {
             resolvedTarget: {
               artifactRef: decision.resolvedTarget.messageId,
-              version: 1
+              version: 1,
+              ...(presentation ? { presentation } : {})
             }
           }
         : {}),
@@ -119,9 +128,13 @@ export class ConversationWorkflowService {
     const updatedAt = toIsoTimestamp(this.now());
     const deliveries = synchronizeDeliveries(current, decision.plan, decision.cancelled);
     const nextDelivery = deliveries?.find((item) => item.status === 'pending');
-    const nextPlan = nextDelivery && decision.plan.kind === 'document'
-      ? parseConversationIntentPlan({ ...decision.plan, documentKind: nextDelivery.kind })
-      : decision.plan;
+    const resolvedArtifact = decision.resolvedTarget?.messageId ?? (decision.plan.action === 'revise' ? current.resolvedTarget?.artifactRef : undefined);
+    const presentation = !decision.cancelled && resolvedArtifact && this.documentScope
+      ? await this.documentScope.resolve(current.conversationId, resolvedArtifact, decision.plan) : undefined;
+    const decisionPlan = presentation ? parseConversationIntentPlan({ ...decision.plan, needsConfirmation: true }) : decision.plan;
+    const nextPlan = nextDelivery && decisionPlan.kind === 'document'
+      ? parseConversationIntentPlan({ ...decisionPlan, documentKind: nextDelivery.kind })
+      : decisionPlan;
     const confirmation = await confirmationForPlan(nextPlan, updatedAt, this.confirmationTtlMs);
     const nextBase = {
       ...current,
@@ -138,11 +151,12 @@ export class ConversationWorkflowService {
       ...(deliveries !== undefined ? { deliveries } : {}),
       ...(decision.cancelled ? { status: 'cancelled' as const } : {}),
       pendingQuestions: decision.cancelled ? [] : questionsForDecision(decision.plan),
-      ...(decision.resolvedTarget
+      ...(resolvedArtifact
         ? {
             resolvedTarget: {
-              artifactRef: decision.resolvedTarget.messageId,
-              version: 1
+              artifactRef: resolvedArtifact,
+              version: 1,
+              ...(presentation ? { presentation } : {})
             }
           }
         : decision.plan.action === 'revise' && decision.plan.targetHint?.name === current.plan.targetHint?.name && current.resolvedTarget
@@ -161,6 +175,7 @@ export class ConversationWorkflowService {
     readonly expectedRevision: number;
   }): Promise<ConversationWorkflowV1> {
     const current = await this.require(input.workflowId, input.expectedRevision);
+    await this.verifyDocumentScope(current);
     if (current.status !== 'needs_confirmation') {
       throw new ConversationWorkflowApplicationError(
         'confirmation_required',
@@ -232,6 +247,7 @@ export class ConversationWorkflowService {
     readonly executionId: string;
   }): Promise<ConversationWorkflowV1> {
     const current = await this.require(input.workflowId, input.expectedRevision);
+    await this.verifyDocumentScope(current);
     if (current.status !== 'ready') {
       throw new ConversationWorkflowApplicationError(
         current.status === 'needs_clarification'
@@ -307,6 +323,18 @@ export class ConversationWorkflowService {
     return updated;
   }
 
+  async bindDocumentMessage(executionId: string, messageId: string): Promise<void> {
+    const current = (await this.repository.list()).find((item) => item.status === 'executing' && item.executionId === executionId && item.plan.kind === 'document');
+    if (!current?.deliveries) throw new ConversationWorkflowApplicationError('workflow_not_ready', 'Document workflow is not executing');
+    const updated = updateConversationWorkflow(current, {
+      status: 'executing',
+      deliveries: current.deliveries.map((item) => item.status === 'executing' && item.executionId === executionId
+        ? { ...item, resultMessageId: messageId } : item),
+      updatedAt: toIsoTimestamp(this.now())
+    });
+    await this.repository.save(updated, current.revision);
+  }
+
   async finishDocumentExecution(
     executionId: string,
     status: 'completed' | 'failed' | 'cancelled',
@@ -348,6 +376,10 @@ export class ConversationWorkflowService {
     readonly expectedRevision: number;
   }): Promise<ConversationWorkflowV1> {
     const current = await this.require(input.workflowId, input.expectedRevision);
+    if (this.documentScope?.canRetry && !await this.documentScope.canRetry(current)) {
+      throw new ConversationWorkflowApplicationError('workflow_not_ready', '本次失败需要先核对修改范围或内容，不能原样重试；对话和原作品均已保留。', current.revision);
+    }
+    await this.verifyDocumentScope(current);
     const failed = current.deliveries?.find((item) => item.kind === current.plan.documentKind && item.status === 'failed');
     if (current.status !== 'failed' || failed?.failureReason !== 'execution_failed') {
       throw new ConversationWorkflowApplicationError('workflow_not_ready', '请先核对上次外部调用的实际结果，结果未知的请求不能直接重试', current.revision);
@@ -363,6 +395,15 @@ export class ConversationWorkflowService {
     });
     await this.repository.save(updated, current.revision);
     return updated;
+  }
+
+  private async verifyDocumentScope(workflow: ConversationWorkflowV1): Promise<void> {
+    const target = workflow.resolvedTarget;
+    if (!target?.presentation) return;
+    const current = await this.documentScope?.resolve(workflow.conversationId, target.artifactRef, workflow.plan);
+    if (JSON.stringify(current) !== JSON.stringify(target.presentation)) {
+      throw new ConversationWorkflowApplicationError('confirmation_required', '作品版本或实际页面范围已经变化，请重新发起修改并核对范围。');
+    }
   }
 
   async recoverInterruptedExecutions(): Promise<number> {

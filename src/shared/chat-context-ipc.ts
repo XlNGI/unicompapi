@@ -88,6 +88,10 @@ export type ChatContextIpcErrorCode =
   | 'attachment_changed'
   | 'attachment_unsupported'
   | 'attachment_scope_exceeded'
+  | 'document_page_unavailable'
+  | 'document_page_out_of_range'
+  | 'document_page_ambiguous'
+  | 'document_page_scope_exceeded'
   | 'planning_cancelled'
   | 'storage_error';
 
@@ -144,6 +148,10 @@ export interface MessageDto {
       | 'unvalidated_output'
       | 'page_count_mismatch'
       | 'generation_failed'
+      | 'verification_failed'
+      | 'write_failed'
+      | 'registration_failed'
+      | 'result_sync_pending'
       | 'storage_error';
   };
   readonly documentResult?: {
@@ -429,7 +437,7 @@ export interface ConversationWorkflowDto {
     readonly executionId?: string;
     readonly resultMessageId?: string;
     readonly workId?: string;
-    readonly failureReason?: 'execution_failed' | 'outcome_unknown' | 'interrupted';
+    readonly failureReason?: 'execution_failed' | 'outcome_unknown' | 'interrupted' | 'input_required';
   }[];
   readonly pendingQuestions: readonly {
     readonly field: string;
@@ -439,6 +447,13 @@ export interface ConversationWorkflowDto {
   readonly resolvedTarget?: {
     readonly artifactRef: string;
     readonly version: number;
+    readonly presentation?: {
+      readonly workId: string;
+      readonly unit: 'page' | 'section';
+      readonly ordinal: number;
+      readonly heading: string;
+      readonly pages: readonly number[];
+    };
   };
   readonly confirmationId?: string;
   readonly planHash?: string;

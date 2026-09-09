@@ -116,6 +116,46 @@ function textCandidate(): ResolvedFeatureCandidateV1 {
 }
 
 describe('ConversationResponseArtifactFactory', () => {
+  it.each(['snapshot', 'legacy-display', 'legacy-content'] as const)(
+    'uses the persisted source query or legacy user text without interpreting internal prompts: %s', async (mode) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-attachment-query-'));
+      roots.push(root);
+      const source = path.join(root, 'report.txt');
+      await writeFile(source, `${'普通正文'.repeat(1200)}\n末节独有事实：现金缺口为三万元。`);
+      const imported = await new AttachmentImportService({ rootDirectory: root, projectId }).importAttachment({ sourcePath: source });
+      const attachments = new ConversationAttachmentContextService({ rootDirectory: root, projectId, maxReferenceTokens: 512 });
+      const storage = new NodeProjectStorage(root);
+      const conversations = new JsonProjectConversationRepository(storage, projectId, () => t1);
+      const drafts = new JsonConversationResponseDraftRepository(storage, projectId, () => t1);
+      const contexts = new JsonProjectContextRepository(storage, projectId, () => t1);
+      const executions = new JsonConversationResponseExecutionRepository(storage, projectId);
+      const query = '最后一节列出了哪些风险？';
+      const internalPrompt = '内部生成提示：总结全文';
+      const empty = createProjectConversation({ id: toConversationId('query-conversation'), projectId, title: '附件资料', createdAt: t0 });
+      await conversations.create(empty);
+      const conversation = addUserMessage(empty, { id: toMessageId('query-user'), createdAt: t0,
+        content: mode === 'legacy-content' ? query : internalPrompt,
+        ...(mode === 'legacy-display' ? { displayContent: query } : {}),
+        attachments: await attachments.pin([imported.fileId]) });
+      await conversations.save(conversation, 0);
+      const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('query-draft'), projectId,
+        conversationId: conversation.id, conversationRevision: conversation.revision, userMessageId: toMessageId('query-user'),
+        userMessageRevision: 0, productFeature: 'text_chat', createdAt: t0, promptContent: internalPrompt,
+        ...(mode === 'snapshot' ? { attachmentQuery: query } : {}) });
+      await drafts.create(draft);
+      const subject = await new ProjectConversationResponseSubjectResolver(conversations, drafts, contexts).resolve({
+        kind: 'conversation_response_draft', conversationId: conversation.id, conversationRevision: conversation.revision,
+        responseDraftId: draft.id, responseDraftRevision: draft.revision, userMessageId: draft.userMessageId });
+      const created = await new ConversationResponseArtifactFactory({ conversations, drafts, contexts, executions, attachments }).create({
+        subject, candidate: textCandidate(), routeSnapshotId: toProviderExecutionRouteSnapshotId('query-route'),
+        invocationAttemptId: toProviderInvocationAttemptId('query-attempt'), authorizationClaimId: 'query-claim', createdAt: t1 });
+      const reference = created.dispatchRequest.messages.find((message) => message.content.includes('REFERENCE DATA'));
+      expect(reference?.content).toContain('现金缺口为三万元');
+      expect(reference?.content).toContain('问题相关片段');
+      expect(created.dispatchRequest.messages.at(-1)?.content).toBe(internalPrompt);
+    }
+  );
+
   it('binds attachment hashes before authorization and dispatches complete bounded source text as reference data', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-attachment-'));
     roots.push(root);

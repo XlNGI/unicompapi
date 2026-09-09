@@ -129,17 +129,16 @@ describe('chat composer event behavior', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-  it.each(['enter', 'button'] as const)('%s uses the same workflow entry and treats manual Office selection as a hint', async (method) => {
+  it.each(['enter', 'button'] as const)('%s sends natural language through the same workflow without a mode hint', async (method) => {
     await settle();
-    const mode = find(tree, (item) => item.props.title === '生成 Office 文档（Word/Excel/PPT）');
-    (mode!.props.onClick as () => void)();
-    await settle();
+    expect(find(tree, (item) => item.props.title === '生成 Office 文档（Word/Excel/PPT）')).toBeUndefined();
     await type('这份报告主要讲了什么？');
     await send(method);
     expect(startWorkflow).toHaveBeenCalledTimes(1);
     expect(startWorkflow.mock.calls[0][0]).toMatchObject({
-      content: '这份报告主要讲了什么？', intentHint: { kind: 'document', documentKind: 'auto' }
+      content: '这份报告主要讲了什么？'
     });
+    expect(startWorkflow.mock.calls[0][0].intentHint).toBeUndefined();
     expect(startResponse).not.toHaveBeenCalled();
   });
 
@@ -221,20 +220,19 @@ describe('chat composer event behavior', () => {
     expect(answerWorkflow.mock.calls[0][0].attachmentFileIds).toEqual([]);
   });
 
-  it('does not carry an unsent attachment or Office preference into a new conversation', async () => {
+  it('does not carry an unsent attachment or document request into a new conversation', async () => {
     await settle();
     const page = find(tree, (item) => typeof item.props.onDrop === 'function')!;
     (page.props.onDrop as (event: unknown) => void)({ preventDefault: vi.fn(), dataTransfer: { files: [{}] } });
     await settle();
-    const mode = find(tree, (item) => item.props.title === '生成 Office 文档（Word/Excel/PPT）')!;
-    (mode.props.onClick as () => void)();
-    await settle();
+    await type('制作一份融资 PPT，使用 AI 配图');
     (element('新建对话').props.onClick as () => void)();
     await settle();
     await type('谢谢');
     await send('button');
     expect(startWorkflow.mock.calls[0][0].attachmentFileIds).toBeUndefined();
     expect(startWorkflow.mock.calls[0][0].intentHint).toBeUndefined();
+    expect(startWorkflow.mock.calls[0][0].content).toBe('谢谢');
   });
 
   it('delivers Office outputs sequentially and retries local generation without repeating completed model responses', async () => {

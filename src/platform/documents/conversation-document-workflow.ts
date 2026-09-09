@@ -1,6 +1,12 @@
 import type { DocumentGenerationWorkflowPort } from '../../application/document-generation-service';
 import type { ConversationWorkflowService } from '../../application/conversation-workflow-service';
-import type { ConversationResponseExecutionRepository, ProjectConversationRepository } from '../../domain';
+import type { ConversationResponseExecutionRepository, ProjectConversationRepository, DocumentGenerationStatus, ConversationWorkflowDelivery } from '../../domain';
+
+export function documentDeliveryFailureReason(status: DocumentGenerationStatus | undefined, responseCompleted: boolean): ConversationWorkflowDelivery['failureReason'] {
+  return status?.state === 'failed' &&
+    ['revision_scope_violation', 'revision_patch_failed', 'revision_conflict', 'unvalidated_output', 'verification_failed', 'invalid_outline', 'resource_limit', 'document_layout_overflow', 'page_count_mismatch'].includes(status.errorCode)
+    ? 'input_required' : responseCompleted ? 'execution_failed' : 'outcome_unknown';
+}
 
 /** Resolve execution identity from persisted application state, never from model output. */
 export function createDocumentWorkflowSettlement(options: {
@@ -29,6 +35,6 @@ export function createDocumentWorkflowSettlement(options: {
     if (!workflow?.executionId) return;
     await options.workflows.finishDocumentExecution(workflow.executionId, input.status,
       { messageId: input.messageId, ...(input.status === 'completed' ? { workId: input.workId! } : {}) },
-      message.state === 'completed' ? 'execution_failed' : 'outcome_unknown');
+      documentDeliveryFailureReason(message.documentGenerationStatus, message.state === 'completed'));
   };
 }

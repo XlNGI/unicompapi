@@ -35,6 +35,12 @@ const outline = {
   ]
 };
 
+const presentationMap = { checksumSha256: '0'.repeat(64), totalPages: 5, sections: [
+  { sectionIndex: 0, heading: '第一章', pages: [2] },
+  { sectionIndex: 1, heading: '第二章', pages: [3] },
+  { sectionIndex: 2, heading: '第三章', pages: [4] }
+] };
+
 const ports = {
   readStructure: (document: DocumentOutline) =>
     readStructuredDocument(document),
@@ -49,6 +55,12 @@ const ports = {
 };
 
 describe('local document revision agent', () => {
+  it('does not infer a physical page from section ordinal without the actual file map', async () => {
+    const result = await runLocalDocumentRevisionAgent({ baseWorkId: 'work-parent' as never,
+      expectedRevision: 3, kind: 'ppt', requestText: '清空第二章', outline }, ports);
+    expect(result.changed).toBe(false);
+    expect(result.patches).toBeUndefined();
+  });
   it('only accepts one explicit clear target for provider-free execution', () => {
     expect(parseDeterministicClearRevisionTarget('将第二章的内容清空')).toEqual({
       unit: 'section',
@@ -79,7 +91,7 @@ describe('local document revision agent', () => {
       {
         baseWorkId: 'work-parent' as never,
         expectedRevision: 3,
-        kind: 'ppt',
+        kind: 'ppt', presentationMap,
         requestText: '清空第二章',
         outline
       },
@@ -106,7 +118,7 @@ describe('local document revision agent', () => {
       {
         baseWorkId: 'work-parent' as never,
         expectedRevision: 3,
-        kind: 'ppt',
+        kind: 'ppt', presentationMap,
         requestText: '将第二章的内容删掉',
         outline
       },
@@ -127,7 +139,7 @@ describe('local document revision agent', () => {
       {
         baseWorkId: 'work-parent' as never,
         expectedRevision: 3,
-        kind: 'ppt',
+        kind: 'ppt', presentationMap,
         requestText: '将第二页的内容清空，其他地方不动',
         outline
       },
@@ -179,7 +191,7 @@ describe('local document revision agent', () => {
     const result = await runLocalDocumentRevisionAgent({
       baseWorkId: 'work-parent' as never,
       expectedRevision: 3,
-      kind: 'ppt',
+      kind: 'ppt', presentationMap,
       requestText: '清空第二章和第三章',
       outline
     }, ports);
@@ -207,7 +219,7 @@ describe('local document revision agent', () => {
       {
         baseWorkId: 'work-parent' as never,
         expectedRevision: 3,
-        kind: 'ppt',
+        kind: 'ppt', presentationMap,
         requestText: '把第二章改写得更适合管理层',
         outline,
         proposedOutline: proposed
@@ -314,7 +326,7 @@ describe('local document revision agent', () => {
       {
         baseWorkId: 'work-parent' as never,
         expectedRevision: 3,
-        kind: 'ppt',
+        kind: 'ppt', presentationMap,
         requestText: '把第二章改得更简洁',
         outline
       },
@@ -333,7 +345,7 @@ describe('local document revision agent', () => {
       {
         baseWorkId: 'work-parent' as never,
         expectedRevision: 3,
-        kind: 'ppt',
+        kind: 'ppt', presentationMap,
         requestText: '清空第二章',
         outline,
         signal: controller.signal

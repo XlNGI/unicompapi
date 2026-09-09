@@ -298,7 +298,7 @@ describe('Office document file executor', () => {
   it('fails closed for fine-grained operations sent to the wrong Office format', async () => {
     const zip = new JSZip();
     zip.file('word/document.xml', '<w:document xmlns:w="urn:w"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>章</w:t></w:r></w:p><w:p><w:r><w:t>文</w:t></w:r></w:p></w:body></w:document>');
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     await expect(applyOfficeDocumentPatchToBuffer(source, 'word', {
       operation: 'update_cells',
       target: { sectionIndex: 0, blockIndex: 0, rowIndex: 0, columnIndex: 0 },
@@ -333,7 +333,7 @@ describe('Office document file executor', () => {
   it('fails closed when fine-grained patches omit a bounded replacement value', async () => {
     const zip = new JSZip();
     zip.file('word/document.xml', '<w:document xmlns:w="urn:w"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>章</w:t></w:r></w:p><w:p><w:r><w:t>文</w:t></w:r></w:p></w:body></w:document>');
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     await expect(applyOfficeDocumentPatchToBuffer(source, 'word', {
       operation: 'replace_text',
       target: { sectionIndex: 0, blockIndex: 0 },
@@ -348,7 +348,7 @@ describe('Office document file executor', () => {
     zip.file('ppt/slides/slide2.xml', slide('重复章节', '第一处内容'));
     zip.file('ppt/slides/slide3.xml', slide('重复章节', '第二处内容'));
     zip.file('ppt/slides/slide4.xml', slide('重复章节（续 2）', '第二处续页'));
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     const revised = await applyOfficeDocumentPatchToBuffer(source, 'ppt', {
       operation: 'clear_section',
       target: { sectionIndex: 1, sectionHeading: '重复章节', pageNumber: 3 }
@@ -366,7 +366,7 @@ describe('Office document file executor', () => {
     const zip = new JSZip();
     zip.file('ppt/slides/slide1.xml', slide('重复章节', '第一处内容'));
     zip.file('ppt/slides/slide2.xml', slide('重复章节', '第二处内容'));
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     await expect(applyOfficeDocumentPatchToBuffer(source, 'ppt', {
       operation: 'clear_section',
       target: { sectionIndex: 0, sectionHeading: '重复章节' }
@@ -375,11 +375,11 @@ describe('Office document file executor', () => {
 
   it('preserves the PPT footer page number when clearing slide content', async () => {
     const slide = (heading: string, body: string, pageNumber: number) =>
-      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${body}</a:t><a:t>${pageNumber}</a:t></p:sld>`;
+      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${body}</a:t><p:sp><p:nvSpPr><p:cNvPr id="9" name="UniComp Page Number"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>${pageNumber}</a:t></a:r></a:p></p:txBody></p:sp></p:sld>`;
     const zip = new JSZip();
     zip.file('ppt/slides/slide1.xml', slide('封面', '封面内容', 1));
     zip.file('ppt/slides/slide2.xml', slide('正文', '需要清空', 2));
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     const revised = await applyOfficeDocumentPatchToBuffer(source, 'ppt', {
       operation: 'clear_section',
       target: { sectionIndex: 0, sectionHeading: '正文', pageNumber: 2, targetUnit: 'page' }
@@ -393,12 +393,12 @@ describe('Office document file executor', () => {
 
   it('limits a physical PPT page revision to the named slide', async () => {
     const slide = (heading: string, body: string, pageNumber: number) =>
-      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${body}</a:t><a:t>${pageNumber}</a:t></p:sld>`;
+      `<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>${heading}</a:t><a:t>${body}</a:t><p:sp><p:nvSpPr><p:cNvPr id="9" name="UniComp Page Number"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>${pageNumber}</a:t></a:r></a:p></p:txBody></p:sp></p:sld>`;
     const zip = new JSZip();
     zip.file('ppt/slides/slide1.xml', slide('封面', '封面内容', 1));
     zip.file('ppt/slides/slide2.xml', slide('第二章', '目标页内容', 2));
     zip.file('ppt/slides/slide3.xml', slide('第二章（续 2）', '续页内容', 3));
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     const revised = await applyOfficeDocumentPatchToBuffer(source, 'ppt', {
       operation: 'clear_section',
       target: { sectionIndex: 0, sectionHeading: '第二章', pageNumber: 2, targetUnit: 'page' }
@@ -411,7 +411,7 @@ describe('Office document file executor', () => {
   it('rejects a physical PPT page when its heading does not match the revision target', async () => {
     const zip = new JSZip();
     zip.file('ppt/slides/slide1.xml', '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:t>实际章节</a:t><a:t>正文</a:t></p:sld>');
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     await expect(applyOfficeDocumentPatchToBuffer(source, 'ppt', {
       operation: 'clear_section',
       target: { sectionIndex: 0, sectionHeading: '错误章节', pageNumber: 1, targetUnit: 'page' }
@@ -424,7 +424,7 @@ describe('Office document file executor', () => {
       'ppt/slides/slide2.xml',
       '<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><p:sp><p:nvSpPr><p:cNvPr id="1" name="Title"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>年度目标</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>2026</a:t></a:r></a:p></p:txBody></p:sp></p:sld>'
     );
-    const source = await zip.generateAsync({ type: 'nodebuffer' });
+    const source = await testPackage(zip);
     const structure = await readOfficeDocumentStructureFromBuffer({
       buffer: source,
       kind: 'ppt',
@@ -437,3 +437,12 @@ describe('Office document file executor', () => {
     });
   });
 });
+
+async function testPackage(zip: JSZip) {
+  const names = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name));
+  if (names.length) {
+    zip.file('ppt/presentation.xml', `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${names.map((_, index) => `<p:sldId id="${256 + index}" r:id="r${index}"/>`).join('')}</p:sldIdLst></p:presentation>`);
+    zip.file('ppt/_rels/presentation.xml.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${names.map((name, index) => `<Relationship Id="r${index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${name.slice(4)}"/>`).join('')}</Relationships>`);
+  }
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
