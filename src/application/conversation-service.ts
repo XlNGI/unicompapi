@@ -18,6 +18,7 @@ import {
   startAssistantMessageStreaming,
   toIsoTimestamp,
   type Conversation,
+  type ConversationAttachmentReference,
   type ConversationId,
   type ConversationListOptions,
   type ConversationRepository,
@@ -120,11 +121,13 @@ export class ConversationApplicationService {
     readonly expectedRevision: number;
     readonly content: string;
     readonly displayContent?: string;
+    readonly attachments?: readonly ConversationAttachmentReference[];
   }): Promise<Conversation> {
     return this.update(input, (conversation) =>
       addUserMessage(conversation, {
         id: this.ids.nextMessageId(),
         content: input.content,
+        ...(input.attachments ? { attachments: input.attachments } : {}),
         ...(input.displayContent !== undefined
           ? { displayContent: input.displayContent }
           : {}),
@@ -139,12 +142,14 @@ export class ConversationApplicationService {
     readonly messageId: MessageId;
     readonly content: string;
     readonly displayContent?: string;
+    readonly attachments?: readonly ConversationAttachmentReference[];
   }): Promise<Conversation> {
     try {
       return await this.update(input, (conversation) =>
         editUserMessageAfterCancelledResponse(conversation, {
           messageId: input.messageId,
           content: input.content,
+          ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
           ...(input.displayContent !== undefined
             ? { displayContent: input.displayContent }
             : {}),

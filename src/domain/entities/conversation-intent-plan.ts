@@ -56,6 +56,7 @@ export interface ConversationIntentPlan {
   readonly kind: ConversationIntentKind;
   readonly action?: ConversationIntentAction;
   readonly documentKind?: DocumentWorkspaceKind | 'auto';
+  readonly deliverables?: readonly DocumentWorkspaceKind[];
   readonly targetHint?: ConversationIntentTargetHint;
   readonly parameters: Readonly<Record<string, ConversationIntentParameter>>;
   readonly sourcePolicy: ConversationIntentSourcePolicy;
@@ -82,6 +83,7 @@ export function parseConversationIntentPlan(
     'kind',
     'action',
     'documentKind',
+    'deliverables',
     'targetHint',
     'parameters',
     'sourcePolicy',
@@ -99,6 +101,7 @@ export function parseConversationIntentPlan(
     ? undefined
     : requireEnum(value.documentKind, ['auto', 'word', 'excel', 'ppt'] as const, 'documentKind');
   const parameters = parseParameters(value.parameters);
+  const deliverables = value.deliverables === undefined ? undefined : parseDeliverables(value.deliverables);
   const missing = parseTextList(value.missing, 'missing');
   const ambiguities = parseTextList(value.ambiguities, 'ambiguities');
   const confidence = requireEnum(
@@ -109,7 +112,7 @@ export function parseConversationIntentPlan(
   if (typeof value.needsConfirmation !== 'boolean') {
     throw new TypeError('Conversation intent plan needsConfirmation is invalid');
   }
-  if (kind === 'chat' && (action !== undefined || documentKind !== undefined || value.targetHint !== undefined)) {
+  if (kind === 'chat' && (action !== undefined || documentKind !== undefined || deliverables !== undefined || value.targetHint !== undefined)) {
     throw new TypeError('chat intent cannot contain document execution fields');
   }
   if (kind === 'document' && action === undefined) {
@@ -118,11 +121,15 @@ export function parseConversationIntentPlan(
   if (kind === 'unknown' && action !== undefined) {
     throw new TypeError('unknown intent cannot choose an action');
   }
+  if (deliverables && (kind !== 'document' || action !== 'create' || !documentKind || documentKind === 'auto' || !deliverables.includes(documentKind))) {
+    throw new TypeError('Document deliverables require a creation plan with an active output kind');
+  }
   return {
     schemaVersion: 1,
     kind,
     ...(action !== undefined ? { action } : {}),
     ...(documentKind !== undefined ? { documentKind } : {}),
+    ...(deliverables ? { deliverables } : {}),
     ...(value.targetHint !== undefined
       ? { targetHint: parseTargetHint(value.targetHint) }
       : {}),
@@ -137,6 +144,13 @@ export function parseConversationIntentPlan(
     confidence,
     needsConfirmation: value.needsConfirmation
   };
+}
+
+function parseDeliverables(value: unknown): readonly DocumentWorkspaceKind[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3 || new Set(value).size !== value.length) {
+    throw new TypeError('Document deliverables must contain one to three unique output kinds');
+  }
+  return value.map((item) => requireEnum(item, ['word', 'excel', 'ppt'] as const, 'deliverables[]'));
 }
 
 export function assessConversationIntentPlan(
@@ -185,7 +199,7 @@ function parseParameters(value: unknown): Readonly<Record<string, ConversationIn
     if (typeof item !== 'string' && typeof item !== 'number' && typeof item !== 'boolean') {
       throw new TypeError('Conversation intent parameter value is invalid');
     }
-    if (typeof item === 'string' && item.length > maxText) throw new TypeError('Conversation intent parameter is too long');
+    if (typeof item === 'string' && item.length > (key === 'requirements' ? 16_000 : maxText)) throw new TypeError('Conversation requirements exceed the supported task context; please start a new task or shorten the requirements');
     if (typeof item === 'number' && !Number.isFinite(item)) throw new TypeError('Conversation intent parameter number is invalid');
     result[key] = item;
   }

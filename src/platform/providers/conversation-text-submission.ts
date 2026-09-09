@@ -284,7 +284,7 @@ function dispatchFailureSafeCode(adapterKey: string, error: unknown): string {
   return `${adapterKey}.failed_before_submission`;
 }
 
-function createRegistryCredentialResolver(
+export function createRegistryCredentialResolver(
   registry: JsonProviderRegistryStore,
   vault: SecureCredentialVault
 ): DeepSeekCredentialResolverPort & NewApiCredentialResolverPort {
@@ -311,7 +311,7 @@ function createRegistryCredentialResolver(
   };
 }
 
-function createRegistryConnectionResolver(
+export function createRegistryConnectionResolver(
   registry: JsonProviderRegistryStore
 ): NewApiConnectionResolverPort {
   return {
@@ -322,7 +322,7 @@ function createRegistryConnectionResolver(
   };
 }
 
-function createTextParameterSchemaResolver(): NewApiParameterSchemaResolverPort {
+export function createTextParameterSchemaResolver(): NewApiParameterSchemaResolverPort {
   const schemas = createTextProviderFeatureContracts().map(
     (contract) => contract.parameterSchema
   );

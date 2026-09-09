@@ -19,9 +19,11 @@ export const chatContextIpcChannels = {
   submitResponse: 'chat-context:submit-response',
   startResponse: 'chat-context:start-response',
   startWorkflow: 'chat-context:start-workflow',
+  cancelPlanning: 'chat-context:cancel-planning',
   answerWorkflow: 'chat-context:answer-workflow',
   confirmWorkflow: 'chat-context:confirm-workflow',
   cancelWorkflow: 'chat-context:cancel-workflow',
+  resumeFailedWorkflow: 'chat-context:resume-failed-workflow',
   getWorkflow: 'chat-context:get-workflow',
   getPendingWorkflow: 'chat-context:get-pending-workflow',
   getResponseExecution: 'chat-context:get-response-execution',
@@ -82,6 +84,11 @@ export type ChatContextIpcErrorCode =
   | 'clarification_required'
   | 'confirmation_expired'
   | 'adapter_unavailable'
+  | 'attachment_unavailable'
+  | 'attachment_changed'
+  | 'attachment_unsupported'
+  | 'attachment_scope_exceeded'
+  | 'planning_cancelled'
   | 'storage_error';
 
 export type ChatContextIpcResult<T> =
@@ -105,6 +112,7 @@ export type ConversationAttachmentDto =
       readonly kind: 'file_reference';
       readonly projectId: string;
       readonly fileReferenceId: string;
+      readonly fileName?: string;
     };
 
 export interface MessageDto {
@@ -146,6 +154,7 @@ export interface MessageDto {
     readonly validatedContent?: string;
   };
   readonly attachments: readonly ConversationAttachmentDto[];
+  readonly attachmentSelection?: 'replace';
   readonly streamSequence?: number;
   readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'truncated' | 'unknown';
   readonly createdAt: string;
@@ -384,6 +393,7 @@ export interface ConversationIntentPlanDto {
   readonly kind: 'chat' | 'document' | 'unknown';
   readonly action?: 'answer' | 'create' | 'revise' | 'analyze';
   readonly documentKind?: 'word' | 'excel' | 'ppt' | 'auto';
+  readonly deliverables?: readonly ('word' | 'excel' | 'ppt')[];
   readonly targetHint?: {
     readonly unit: 'document' | 'version' | 'page' | 'section' | 'table' | 'cell' | 'block';
     readonly ordinal?: number;
@@ -413,6 +423,14 @@ export interface ConversationWorkflowDto {
     | 'failed'
     | 'cancelled';
   readonly plan: ConversationIntentPlanDto;
+  readonly deliveries?: readonly {
+    readonly kind: 'word' | 'excel' | 'ppt';
+    readonly status: 'pending' | 'executing' | 'completed' | 'failed' | 'cancelled';
+    readonly executionId?: string;
+    readonly resultMessageId?: string;
+    readonly workId?: string;
+    readonly failureReason?: 'execution_failed' | 'outcome_unknown' | 'interrupted';
+  }[];
   readonly pendingQuestions: readonly {
     readonly field: string;
     readonly question: string;
@@ -491,6 +509,7 @@ export interface SubmitResponseRequest extends ResponseDraftRevisionRequest {
 
 export interface StartResponseRequest {
   readonly clientCommandId: string;
+  readonly attachmentFileIds?: readonly string[];
   readonly conversation: {
     readonly conversationId: string;
     readonly expectedRevision: number;
@@ -518,6 +537,8 @@ export interface StartResponseRequest {
 
 export interface StartWorkflowRequest {
   readonly clientCommandId: string;
+  readonly attachmentFileIds?: readonly string[];
+  readonly semanticCandidate?: ConversationSemanticCandidate;
   readonly conversation: {
     readonly conversationId: string;
     readonly expectedRevision: number;
@@ -531,10 +552,18 @@ export interface StartWorkflowRequest {
 }
 
 export interface AnswerWorkflowRequest {
+  readonly clientCommandId?: string;
   readonly workflowId: string;
   readonly expectedWorkflowRevision: number;
   readonly expectedConversationRevision: number;
   readonly content: string;
+  readonly attachmentFileIds?: readonly string[];
+  readonly semanticCandidate?: ConversationSemanticCandidate;
+}
+
+export interface ConversationSemanticCandidate {
+  readonly candidateId: string;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
 }
 
 export interface WorkflowRevisionRequest {
@@ -771,6 +800,7 @@ export const chatContextRequestParsers = {
     };
   },
   startResponse(value: unknown): StartResponseRequest {
+    const hasAttachments = hasOwn(value, 'attachmentFileIds');
     const hasDisplayContent =
       typeof value === 'object' &&
       value !== null &&
@@ -788,6 +818,7 @@ export const chatContextRequestParsers = {
       'content',
       ...(hasDisplayContent ? ['displayContent'] : []),
       ...(hasWorkflow ? ['workflow'] : []),
+      ...(hasAttachments ? ['attachmentFileIds'] : []),
       'productFeature',
       'candidateId',
       'contextSelections',
@@ -860,6 +891,7 @@ export const chatContextRequestParsers = {
             }
           }
         : {}),
+      ...(hasAttachments ? { attachmentFileIds: attachmentIds(record.attachmentFileIds) } : {}),
       productFeature: record.productFeature,
       candidateId: controlledId(record.candidateId, 'candidateId'),
       contextSelections,
@@ -868,6 +900,8 @@ export const chatContextRequestParsers = {
     };
   },
   startWorkflow(value: unknown): StartWorkflowRequest {
+    const hasAttachments = hasOwn(value, 'attachmentFileIds');
+    const hasSemanticCandidate = hasOwn(value, 'semanticCandidate');
     const hasIntentHint =
       typeof value === 'object' &&
       value !== null &&
@@ -878,7 +912,9 @@ export const chatContextRequestParsers = {
       'conversation',
       'title',
       'content',
-      ...(hasIntentHint ? ['intentHint'] : [])
+      ...(hasIntentHint ? ['intentHint'] : []),
+      ...(hasAttachments ? ['attachmentFileIds'] : []),
+      ...(hasSemanticCandidate ? ['semanticCandidate'] : [])
     ]);
     const conversation = record.conversation === null
       ? null
@@ -903,6 +939,8 @@ export const chatContextRequestParsers = {
         : null,
       title: boundedText(record.title, 'title', 200, false),
       content: boundedText(record.content, 'content', 8_000, false),
+      ...(hasAttachments ? { attachmentFileIds: attachmentIds(record.attachmentFileIds) } : {}),
+      ...(hasSemanticCandidate ? { semanticCandidate: semanticCandidate(record.semanticCandidate) } : {}),
       ...(intentHint
         ? {
             intentHint: {
@@ -914,13 +952,22 @@ export const chatContextRequestParsers = {
     };
   },
   answerWorkflow(value: unknown): AnswerWorkflowRequest {
+    const hasCommandId = hasOwn(value, 'clientCommandId');
+    const hasAttachments = hasOwn(value, 'attachmentFileIds');
+    const hasSemanticCandidate = hasOwn(value, 'semanticCandidate');
     const record = exactRecord(value, [
       'workflowId',
       'expectedWorkflowRevision',
       'expectedConversationRevision',
-      'content'
+      'content',
+      ...(hasCommandId ? ['clientCommandId'] : []),
+      ...(hasAttachments ? ['attachmentFileIds'] : []),
+      ...(hasSemanticCandidate ? ['semanticCandidate'] : [])
     ]);
     return {
+      ...(hasCommandId ? { clientCommandId: controlledId(record.clientCommandId, 'clientCommandId') } : {}),
+      ...(hasAttachments ? { attachmentFileIds: attachmentIds(record.attachmentFileIds) } : {}),
+      ...(hasSemanticCandidate ? { semanticCandidate: semanticCandidate(record.semanticCandidate) } : {}),
       workflowId: controlledId(record.workflowId, 'workflowId'),
       expectedWorkflowRevision: revision(
         record.expectedWorkflowRevision,
@@ -932,6 +979,10 @@ export const chatContextRequestParsers = {
       ),
       content: boundedText(record.content, 'content', 8_000, false)
     };
+  },
+  planningCommand(value: unknown): { readonly clientCommandId: string } {
+    const record = exactRecord(value, ['clientCommandId']);
+    return { clientCommandId: controlledId(record.clientCommandId, 'clientCommandId') };
   },
   workflowRevision(value: unknown): WorkflowRevisionRequest {
     const record = exactRecord(value, ['workflowId', 'expectedRevision']);
@@ -1156,6 +1207,9 @@ export interface ChatContextApi {
   startWorkflow(
     request: StartWorkflowRequest
   ): Promise<ChatContextIpcResult<ConversationWorkflowStartDto>>;
+  cancelPlanning(
+    request: { readonly clientCommandId: string }
+  ): Promise<ChatContextIpcResult<{ readonly cancelled: boolean }>>;
   answerWorkflow(
     request: AnswerWorkflowRequest
   ): Promise<ChatContextIpcResult<ConversationWorkflowStartDto>>;
@@ -1164,6 +1218,10 @@ export interface ChatContextApi {
     expectedRevision: number
   ): Promise<ChatContextIpcResult<ConversationWorkflowDto>>;
   cancelWorkflow(
+    workflowId: string,
+    expectedRevision: number
+  ): Promise<ChatContextIpcResult<ConversationWorkflowDto>>;
+  resumeFailedWorkflow(
     workflowId: string,
     expectedRevision: number
   ): Promise<ChatContextIpcResult<ConversationWorkflowDto>>;
@@ -1259,6 +1317,26 @@ function exactRecord(
     throw new TypeError('Request contains unexpected or missing fields');
   }
   return record;
+}
+
+function hasOwn(value: unknown, key: string): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function attachmentIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length > 8) throw new TypeError('attachmentFileIds are invalid');
+  const ids = value.map((id) => controlledId(id, 'attachmentFileId'));
+  if (new Set(ids).size !== ids.length) throw new TypeError('attachmentFileIds contain duplicates');
+  return ids;
+}
+
+function semanticCandidate(value: unknown): ConversationSemanticCandidate {
+  const item = exactRecord(value, ['candidateId', 'productFeature']);
+  if (item.productFeature !== 'text_chat' && item.productFeature !== 'text_reasoning') {
+    throw new TypeError('semanticCandidate.productFeature is invalid');
+  }
+  return { candidateId: controlledId(item.candidateId, 'candidateId'), productFeature: item.productFeature };
 }
 
 function controlledId(value: unknown, field: string): string {

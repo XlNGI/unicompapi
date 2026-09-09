@@ -288,6 +288,7 @@ function toMessageDto(message: Message): MessageDto {
     ...(message.documentResult !== undefined
       ? { documentResult: message.documentResult }
       : {}),
+    ...(message.attachmentSelection ? { attachmentSelection: message.attachmentSelection } : {}),
     attachments: message.attachments.map((attachment) =>
       attachment.kind === 'asset'
         ? {
@@ -298,7 +299,8 @@ function toMessageDto(message: Message): MessageDto {
         : {
             kind: attachment.kind,
             projectId: attachment.projectId,
-            fileReferenceId: attachment.fileReferenceId
+            fileReferenceId: attachment.fileReferenceId,
+            ...(attachment.fileName ? { fileName: attachment.fileName } : {})
           }
     ),
     createdAt: message.createdAt,

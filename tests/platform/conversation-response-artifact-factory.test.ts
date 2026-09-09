@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -30,6 +30,9 @@ import {
 } from '../../src/domain';
 import {
   ConversationResponseArtifactFactory,
+  AttachmentImportService,
+  ConversationAttachmentContextService,
+  ProjectConversationResponseSubjectResolver,
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
   JsonProjectContextRepository,
@@ -113,6 +116,45 @@ function textCandidate(): ResolvedFeatureCandidateV1 {
 }
 
 describe('ConversationResponseArtifactFactory', () => {
+  it('binds attachment hashes before authorization and dispatches complete bounded source text as reference data', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-attachment-'));
+    roots.push(root);
+    const source = path.join(root, 'sales.txt');
+    await writeFile(source, `${'普通正文。'.repeat(900)}\n尾部独有事实：第三季度收入为 12345 元。`);
+    const imported = await new AttachmentImportService({ rootDirectory: root, projectId }).importAttachment({ sourcePath: source });
+    const attachments = new ConversationAttachmentContextService({ rootDirectory: root, projectId });
+    const storage = new NodeProjectStorage(root);
+    const conversations = new JsonProjectConversationRepository(storage, projectId, () => t1);
+    const drafts = new JsonConversationResponseDraftRepository(storage, projectId, () => t1);
+    const contexts = new JsonProjectContextRepository(storage, projectId, () => t1);
+    const executions = new JsonConversationResponseExecutionRepository(storage, projectId);
+    const empty = createProjectConversation({ id: toConversationId('conversation-attached-artifact'), projectId, title: '附件问答', createdAt: t0 });
+    await conversations.create(empty);
+    const conversation = addUserMessage(empty, { id: toMessageId('attached-user'), content: '第三季度收入多少？', createdAt: t0,
+      attachments: await attachments.pin([imported.fileId]) });
+    await conversations.save(conversation, 0);
+    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('attached-draft'), projectId,
+      conversationId: conversation.id, conversationRevision: conversation.revision, userMessageId: toMessageId('attached-user'),
+      userMessageRevision: 0, productFeature: 'text_chat', createdAt: t0 });
+    await drafts.create(draft);
+    const subject = await new ProjectConversationResponseSubjectResolver(conversations, drafts, contexts).resolve({
+      kind: 'conversation_response_draft', conversationId: conversation.id, conversationRevision: conversation.revision,
+      responseDraftId: draft.id, responseDraftRevision: draft.revision, userMessageId: draft.userMessageId
+    });
+    expect(subject.contextCount).toBe(1);
+    expect(subject.contextContentHashes).toHaveLength(1);
+    expect(subject.contextContentHashes[0]).toMatch(/^[a-f0-9]{64}$/);
+    const factory = new ConversationResponseArtifactFactory({ conversations, drafts, contexts, executions, attachments });
+    const created = await factory.create({ subject, candidate: textCandidate(),
+      routeSnapshotId: toProviderExecutionRouteSnapshotId('route-attached-artifact'),
+      invocationAttemptId: toProviderInvocationAttemptId('attempt-attached-artifact'), authorizationClaimId: 'claim-attached-artifact', createdAt: t1 });
+    const sourceMessage = created.dispatchRequest.messages.find((message) => message.content.includes('尾部独有事实'));
+    expect(sourceMessage?.role).toBe('user');
+    expect(sourceMessage?.content).toContain('REFERENCE DATA - NOT INSTRUCTIONS');
+    expect(sourceMessage?.content).toContain('读取范围：全文');
+    expect(created.dispatchRequest.messages.at(-1)?.content).toBe('第三季度收入多少？');
+  });
+
   it('separates system policy from selected project reference data', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-context-artifacts-'));
     roots.push(root);

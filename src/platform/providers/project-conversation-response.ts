@@ -12,6 +12,7 @@ import type {
   FeatureSubjectResolverPort,
   ResolvedFeatureSubjectV1
 } from './provider-feature-candidates';
+import { conversationAttachmentBatch } from '../documents/conversation-attachment-context';
 
 export class ProjectConversationResponseSubjectResolver
   implements FeatureSubjectResolverPort {
@@ -81,11 +82,15 @@ export class ProjectConversationResponseSubjectResolver
       surface: 'conversation',
       imageCount: 0,
       videoCount: 0,
-      contextCount: contextSnapshots.length,
+      contextCount: contextSnapshots.length + conversationAttachmentBatch(conversation).length,
       parameterValues: { ...draft.parameterValues },
       outboundTextSnapshot: draft.promptContent ?? userMessage.content,
       materialReferences: [],
-      contextContentHashes: contextSnapshots.map((snapshot) => snapshot.contentHash)
+      contextContentHashes: [
+        ...contextSnapshots.map((snapshot) => snapshot.contentHash),
+        ...conversationAttachmentBatch(conversation).flatMap((attachment) =>
+          attachment.checksumSha256 ? [attachment.checksumSha256] : [])
+      ]
     };
   }
 }

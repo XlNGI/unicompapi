@@ -74,6 +74,13 @@ export class FileExtractionService {
   }
 
   async extract(fileId: FileReference['id']): Promise<DocumentExtractionDto> {
+    const result = await this.extractContent(fileId);
+    return { fileId: result.fileId, format: result.format, status: result.status,
+      stats: result.stats, preview: result.preview, warnings: result.warnings };
+  }
+
+  /** Main-process content API. Renderer extraction responses remain previews only. */
+  async extractContent(fileId: FileReference['id']): Promise<DocumentExtractionDto & { readonly text: string }> {
     const file = await this.files.get(fileId);
     if (!file) {
       throw new FileExtractionError(
@@ -181,7 +188,7 @@ export class FileExtractionService {
     text: string,
     stats: DocumentExtractionStats,
     warnings: readonly string[]
-  ): DocumentExtractionDto {
+  ): DocumentExtractionDto & { readonly text: string } {
     const preview = text.slice(0, this.limits.maxPreviewCharacters);
     const extraWarnings: string[] = [...warnings];
     if (text.length > this.limits.maxPreviewCharacters) {
@@ -193,6 +200,7 @@ export class FileExtractionService {
       status,
       stats,
       preview,
+      text,
       warnings: extraWarnings
     };
   }

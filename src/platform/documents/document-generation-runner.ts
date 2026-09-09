@@ -146,6 +146,8 @@ export class DocumentGenerationRunner {
     const now = this.options.now ?? (() => new Date().toISOString());
     const createId = this.options.createId ?? (() => randomUUID());
     const context = this.context();
+    const existing = await this.findRegisteredResult(context, input);
+    if (existing) return existing;
     let task: Task | undefined;
     let execution: Execution | undefined;
     let temporaryPath: string | undefined;
@@ -340,6 +342,47 @@ export class DocumentGenerationRunner {
         await rm(finalPath, { force: true });
       }
     }
+  }
+
+  /**
+   * Generation is retried after the assistant message or workflow settlement
+   * can fail. Reuse only a fully registered, locally verified Work matching the
+   * exact source draft, format and content fingerprint; never trust a stale
+   * task, file name or an incomplete execution as an idempotency hit.
+   */
+  private async findRegisteredResult(
+    context: RunnerContext,
+    input: DocumentGenerationPlanInput
+  ): Promise<DocumentGenerationResult | undefined> {
+    const tasks = await context.tasks.list(this.options.projectId);
+    const candidates = tasks.filter((task) => {
+      if (task.submission.kind !== 'document_generation') return false;
+      const document = task.submission.document;
+      return task.sourceDraftId === input.sourceDraftId &&
+        document.kind === input.kind &&
+        document.contentFingerprint === input.contentFingerprint &&
+        document.draftRevision === input.draftRevision;
+    });
+    for (const task of candidates) {
+      const executions = await context.executions.list(task.id);
+      const completed = [...executions]
+        .filter((execution) => execution.state === 'completed' && execution.workId !== undefined)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      for (const execution of completed) {
+        const work = await context.works.get(execution.workId!);
+        if (!work || work.projectId !== this.options.projectId || work.mediaKind !== 'document' || work.sourceExecutionId !== execution.id) continue;
+        const file = await context.files.get(work.fileId);
+        if (!file || file.projectId !== this.options.projectId || file.state !== 'available' || !file.checksumSha256 || file.locator.kind !== 'project') continue;
+        try {
+          const verification = await new NodeFileStatusProbe(this.options.rootDirectory).inspect(file, { expectedChecksum: file.checksumSha256 });
+          if (verification.recommendedState !== 'available' || verification.verification?.matchesExpected !== true) continue;
+        } catch {
+          continue;
+        }
+        return { task, execution, file, work };
+      }
+    }
+    return undefined;
   }
 
   private async resolveRevisionSource(

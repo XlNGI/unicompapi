@@ -49,7 +49,8 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /uc-chat-page__image-model/);
   assert.match(page, /ragEnabled/);
   assert.match(page, /检索资料/);
-  assert.match(page, /retrieveContext/);
+  assert.doesNotMatch(page, /documentAttachments\.retrieveContext/);
+  assert.match(page, /attachmentFileIds/);
   assert.match(page, /cancelUnsupportedWebWorkflow/);
   assert.match(page, /preview\.value\.status === 'unavailable'[\s\S]*cancelUnsupportedWebWorkflow/);
   assert.match(page, /cancelUnsupportedWebWorkflow[\s\S]*webResearch\.cancel/);
@@ -82,7 +83,18 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /AI 正在撰写文档内容/);
   assert.match(page, /handlePageDrop/);
   assert.match(page, /uc-chat-page__drop-overlay/);
-  assert.match(page, /if \(!documentMode\) setDocumentMode\(true\)/);
+  assert.doesNotMatch(page, /if \(!documentMode\) setDocumentMode\(true\)/);
+  assert.doesNotMatch(page, /attachment\.preview\.slice/);
+});
+
+test('all composer sends use the semantic workflow entry and accept pending task cancellation', () => {
+  assert.doesNotMatch(page, /sendDocumentMessage\(\)/);
+  assert.doesNotMatch(page, /submitWorkflowInput\(true\)/);
+  assert.match(page, /documentMode[\s\S]*?intentHint/);
+  assert.match(page, /workflow\.status === 'cancelled'[\s\S]*?setActiveWorkflow\(undefined\)/);
+  assert.doesNotMatch(page, /activeWorkflow && activeWorkflow\.status !== 'needs_clarification'/);
+  assert.match(page, /semanticCandidate/);
+  assert.match(page, /resetComposerScope/);
 });
 
 test('chat page document card styles exist', () => {
@@ -176,7 +188,7 @@ test('a single confirmed clear revision bypasses provider response generation sa
   assert.match(page, /workflowTarget\.ordinal === deterministicTarget\.ordinal/);
   assert.match(page, /execution\.workflow\.plan\.sourcePolicy === 'none'/);
   assert.match(page, /attachments\.length === 0/);
-  assert.match(page, /这项修改需要模型生成内容，请选择一个可用模型后继续/);
+  assert.match(page, /这项文档任务需要模型生成内容，请选择一个可用模型后继续/);
 });
 
 test('composer resolves Office revisions in the background without a persistent action preview', () => {

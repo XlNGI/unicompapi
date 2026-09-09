@@ -185,6 +185,35 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('projects a provider completion that raced ahead of workflow execution binding', async () => {
+    const value = fixture();
+    vi.mocked(value.runtime.executions.readModel).mockResolvedValue(execution('completed'));
+    const result = await value.controller.start({
+      ...startRequest('fast-workflow-response'),
+      conversation: { conversationId: value.readyWorkflow.conversationId, expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: value.readyWorkflow.id, expectedRevision: value.readyWorkflow.revision }
+    });
+    expect(result).toMatchObject({ ok: true, value: { execution: { state: 'completed' } } });
+    expect(value.workflowService.finishExecution).toHaveBeenCalledWith('response-execution-controller', 'completed');
+    expect(value.workflowService.bindExecution.mock.invocationCallOrder[0]).toBeLessThan(value.workflowService.finishExecution.mock.invocationCallOrder[0]);
+    expect(value.runtime.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the dispatched execution when post-binding reconciliation fails', async () => {
+    const value = fixture();
+    const error = new Error('temporary read failure after dispatch');
+    vi.mocked(value.runtime.executions.readModel).mockRejectedValue(error);
+    const request = {
+      ...startRequest('post-dispatch-read-failure'),
+      conversation: { conversationId: value.readyWorkflow.conversationId, expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: value.readyWorkflow.id, expectedRevision: value.readyWorkflow.revision }
+    };
+    expect(await value.controller.start(request)).toMatchObject({ ok: true, value: { execution: { responseExecutionId: 'response-execution-controller' } } });
+    await value.controller.start(request);
+    expect(value.errors).toContain(error);
+    expect(value.runtime.start).toHaveBeenCalledTimes(1);
+  });
+
   it('does not expose an internal workflow prompt through the response draft DTO', () => {
     const promptContent = '受控内部提示：不要进入 Renderer';
     const draft = createConversationResponseDraft({

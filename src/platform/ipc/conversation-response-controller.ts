@@ -46,6 +46,7 @@ import { pinProjectContextSelection } from '../repositories';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { chatContextFailure, failure } from './chat-context-errors';
 import { toConversationDto } from './conversation-controller';
+import { ConversationAttachmentError, conversationAttachmentBatch, type ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 
 export interface ConversationResponseControllerRuntime {
   readonly conversationService: ConversationApplicationService;
@@ -57,6 +58,7 @@ export interface ConversationResponseControllerRuntime {
   readonly executionCoordinator: ConversationExecutionCoordinator;
   readonly streamChannel: ControlledConversationResponseStreamChannel;
   readonly workflowService?: ConversationWorkflowService;
+  readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   /** Completes startup recovery before this project accepts response operations. */
   readonly ready: Promise<void>;
   submit?(input: {
@@ -453,6 +455,13 @@ export class ConversationResponseController {
     const workflow = input.workflow
       ? await this.requireReadyWorkflow(runtime, input)
       : undefined;
+    const attachmentFileIds = input.attachmentFileIds ?? [];
+    if (attachmentFileIds.length && !runtime.attachments) {
+      throw new ConversationAttachmentError('attachment_unavailable', '附件读取服务尚未配置。');
+    }
+    const attachments = input.attachmentFileIds !== undefined
+      ? attachmentFileIds.length ? await runtime.attachments!.pin(attachmentFileIds) : []
+      : undefined;
     if (input.conversation) {
       const active = await runtime.executions.listActive(input.conversation.conversationId);
       if (active.length > 0) {
@@ -481,6 +490,11 @@ export class ConversationResponseController {
           conversation.revision
         );
       }
+      if (attachments && attachments.some((attachment) =>
+        !conversationAttachmentBatch(conversation).some((pinned) =>
+          pinned.fileReferenceId === attachment.fileReferenceId && pinned.checksumSha256 === attachment.checksumSha256))) {
+        throw new ConversationAttachmentError('attachment_changed', '新增附件须先绑定到当前需求，请补充资料后再执行。');
+      }
     } else if (input.conversation) {
       conversation = input.conversation.editedMessageId
         ? await runtime.conversationService.editCancelledUserMessage({
@@ -488,6 +502,7 @@ export class ConversationResponseController {
             expectedRevision: input.conversation.expectedRevision,
             messageId: toMessageId(input.conversation.editedMessageId),
             content: input.content,
+            ...(attachments ? { attachments } : {}),
             ...(input.displayContent !== undefined
               ? { displayContent: input.displayContent }
               : {})
@@ -496,6 +511,7 @@ export class ConversationResponseController {
             conversationId: conversation.id,
             expectedRevision: input.conversation.expectedRevision,
             content: input.content,
+            ...(attachments ? { attachments } : {}),
             ...(input.displayContent !== undefined
               ? { displayContent: input.displayContent }
               : {})
@@ -505,6 +521,7 @@ export class ConversationResponseController {
         conversationId: conversation.id,
         expectedRevision: conversation.revision,
         content: input.content,
+        ...(attachments ? { attachments } : {}),
         ...(input.displayContent !== undefined
           ? { displayContent: input.displayContent }
           : {})
@@ -520,6 +537,13 @@ export class ConversationResponseController {
     if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
       return failure('message_not_completed', 'The selected user message is not complete');
     }
+    // Fail locally before candidate authorization or provider dispatch. Factory
+    // revalidates the pinned hashes immediately before forming provider messages.
+    await runtime.attachments?.resolve({
+      conversation,
+      currentUserMessageId: userMessage.id,
+      query: userMessage.displayContent ?? userMessage.content
+    });
     let draft = createConversationResponseDraft({
       id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
       projectId: runtime.conversations.projectId,
@@ -600,7 +624,20 @@ export class ConversationResponseController {
           expectedRevision: executingWorkflow.revision,
           executionId: execution.responseExecutionId
         });
+        // A fast provider can finish while the workflow still has its temporary
+        // execution ID. Reconcile the persisted terminal state after binding so
+        // that an early observer event cannot leave the workflow executing.
+        const persisted = await runtime.executions.readModel(execution.responseExecutionId);
+        execution = persisted;
+        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(persisted.state)) {
+          await runtime.workflowService!.finishExecution(
+            persisted.responseExecutionId,
+            persisted.state === 'completed' ? 'completed' : persisted.state === 'cancelled' ? 'cancelled' : 'failed'
+          );
+        }
       } catch (error) {
+        // Dispatch has already happened. Return the real execution for recovery;
+        // throwing a start failure here would invite a duplicate paid request.
         this.dependencies.onError?.(error);
       }
     }

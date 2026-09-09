@@ -107,11 +107,17 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.answerWorkflow, (_event, request: unknown) =>
     workflows.answer(request)
   );
+  ipcMain.handle(chatContextIpcChannels.cancelPlanning, (_event, request: unknown) =>
+    workflows.cancelPlanning(request)
+  );
   ipcMain.handle(chatContextIpcChannels.confirmWorkflow, (_event, request: unknown) =>
     workflows.confirm(request)
   );
   ipcMain.handle(chatContextIpcChannels.cancelWorkflow, (_event, request: unknown) =>
     workflows.cancel(request)
+  );
+  ipcMain.handle(chatContextIpcChannels.resumeFailedWorkflow, (_event, request: unknown) =>
+    workflows.resumeFailed(request)
   );
   ipcMain.handle(chatContextIpcChannels.getWorkflow, (_event, request: unknown) =>
     workflows.get(request)

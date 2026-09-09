@@ -6,6 +6,7 @@ import {
 import {
   DomainError
 } from '../../domain';
+import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
 import type {
   ChatContextIpcErrorCode,
   ChatContextIpcResult
@@ -34,6 +35,9 @@ export function chatContextFailure<T>(
   onError?: (error: unknown) => void
 ): ChatContextIpcResult<T> {
   onError?.(error);
+  if (error instanceof ConversationAttachmentError) {
+    return failure(error.code, error.message);
+  }
   if (error instanceof TypeError) {
     return failure('invalid_request', 'The request is invalid');
   }

@@ -16,6 +16,7 @@ import { readOfficeDocumentStructureFromBuffer } from '../../src/platform/docume
 import {
   DocumentGenerationRunner,
   generateDocumentFile,
+  generateTemporaryDocumentFile,
   NodeProjectStorage,
   JsonExecutionRepository,
   JsonFileReferenceRepository,
@@ -145,6 +146,37 @@ const employeeSalaryOutline = parseDocumentOutline(
 );
 
 describe('document generation runner', () => {
+  it('reuses an already registered Work for an identical retry after settlement failure', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-idempotent-retry');
+    let generatorCalls = 0;
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      now: () => '2026-09-09T00:00:00.000Z',
+      generateTemporaryFile: async (input) => {
+        generatorCalls += 1;
+        return generateTemporaryDocumentFile(input);
+      }
+    });
+    const input = {
+      kind: 'word' as const,
+      title: outline.title,
+      contentFingerprint: '7'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'response-draft-idempotent',
+      outline
+    };
+    const first = await runner.run(input);
+    const second = await runner.run(input);
+    expect(second.work.id).toBe(first.work.id);
+    expect(second.file.id).toBe(first.file.id);
+    expect(second.execution.id).toBe(first.execution.id);
+    expect(generatorCalls).toBe(1);
+    expect(await new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId).list(projectId)).toHaveLength(1);
+    expect(await documentFiles(rootDirectory)).toEqual([first.file.locator.kind === 'project' ? path.basename(first.file.locator.relativePath) : '']);
+  });
+
   it('publishes exactly five PPT slides for three bounded body sections', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-exact-page-count');

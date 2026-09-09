@@ -11,11 +11,16 @@ import {
   type OfficeDocumentContext,
   type OfficeRequestContext
 } from './office-request-intent';
+import { conversationClarificationKey } from './conversation-clarification-fields';
 
 export interface ConversationSemanticContext extends OfficeRequestContext {
   readonly recentUserMessages?: readonly string[];
   readonly requestedIntentKind?: 'document';
   readonly requestedDocumentKind?: DocumentWorkspaceKind | 'auto';
+  readonly semanticCandidate?: {
+    readonly candidateId: string;
+    readonly productFeature: 'text_chat' | 'text_reasoning';
+  };
 }
 
 export interface ConversationIntentDecision {
@@ -23,6 +28,8 @@ export interface ConversationIntentDecision {
   readonly assessment: ConversationIntentAssessment;
   readonly route: 'local' | 'classifier' | 'fallback';
   readonly resolvedTarget?: OfficeDocumentContext;
+  /** A trusted user cancellation never becomes a model execution plan. */
+  readonly cancelled?: boolean;
   readonly failureCode?:
     | 'classification_timeout'
     | 'classification_unavailable'
@@ -58,18 +65,20 @@ export class ConversationIntentOrchestrator {
     readonly workflow?: ConversationWorkflowV1;
     readonly signal?: AbortSignal;
   }): Promise<ConversationIntentDecision> {
+    if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const context = input.context ?? {};
     const local = analyzeLocalConversationIntent({
       rawText: input.rawText,
       context,
       workflow: input.workflow
     });
-    if (local.plan.kind !== 'unknown' || !this.options.classifier) return local;
+    if (local.cancelled || local.plan.kind !== 'unknown' || !this.options.classifier ||
+      local.plan.ambiguities.some((item) => ['single_copy_per_kind', 'single_revision_target'].includes(item))) return local;
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const controller = new AbortController();
     const abort = () => controller.abort();
     input.signal?.addEventListener('abort', abort, { once: true });
-    const timeoutMs = this.options.classifierTimeoutMs ?? 3_000;
+    const timeoutMs = this.options.classifierTimeoutMs ?? 30_000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
       throw new TypeError('classifierTimeoutMs is invalid');
     }
@@ -77,14 +86,21 @@ export class ConversationIntentOrchestrator {
       () => controller.abort(),
       timeoutMs
     );
+    let rejectAborted: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAborted = () => reject(new Error('Intent classification aborted'));
+      controller.signal.addEventListener('abort', rejectAborted, { once: true });
+    });
     try {
       let candidate: unknown;
       try {
-        candidate = await this.options.classifier.classify({
+        candidate = await Promise.race([this.options.classifier.classify({
           rawText: input.rawText,
           context,
           signal: controller.signal
-        });
+        }), aborted]);
+        if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
+        if (controller.signal.aborted) throw new Error('Intent classification timed out');
       } catch {
         if (input.signal?.aborted) {
           throw new ConversationIntentOrchestrationError('cancelled');
@@ -103,10 +119,34 @@ export class ConversationIntentOrchestrator {
       } catch {
         return { ...local, route: 'fallback', failureCode: 'invalid_intent_plan' };
       }
-      const assessment = assessConversationIntentPlan(classified);
-      return { plan: classified, assessment, route: 'classifier' };
+      const trustedRequirements = input.workflow && context.recentUserMessages?.length
+        ? context.recentUserMessages.join('\n')
+        : input.rawText;
+      const sourcePolicy = inferSourcePolicy(trustedRequirements);
+      if (classified.kind === 'document' && classified.action !== 'create' && classified.action !== 'revise') {
+        return { ...local, route: 'fallback', failureCode: 'invalid_intent_plan' };
+      }
+      const target = classified.action === 'revise'
+        ? resolveSemanticTarget(input.rawText, inferExplicitKind(input.rawText), context.documents ?? [])
+        : undefined;
+      const missing = new Set(classified.missing.map(conversationClarificationKey));
+      if (classified.action === 'revise' && !target) missing.add('document_target');
+      const plan = parseConversationIntentPlan({
+        ...classified,
+        sourcePolicy,
+        ...(target ? { documentKind: target.kind } : {}),
+        ...(classified.kind === 'document' ? {
+          parameters: { ...classified.parameters, requirements: trustedRequirements },
+          targetHint: targetHintFromText(input.rawText) ?? (target ? { unit: 'document', name: target.fileName } : undefined)
+        } : {}),
+        missing: [...missing],
+        confidence: missing.size > 0 ? 'low' : classified.confidence,
+        needsConfirmation: classified.needsConfirmation || (classified.kind === 'document' && isDestructiveRevision(trustedRequirements))
+      });
+      return { plan, assessment: assessConversationIntentPlan(plan), route: 'classifier', ...(target ? { resolvedTarget: target } : {}) };
     } finally {
       clearTimeout(timeout);
+      if (rejectAborted) controller.signal.removeEventListener('abort', rejectAborted);
       input.signal?.removeEventListener('abort', abort);
     }
   }
@@ -119,7 +159,20 @@ export function analyzeLocalConversationIntent(input: {
 }): ConversationIntentDecision {
   const text = input.rawText.trim();
   const context = input.context ?? {};
-  if (input.workflow && input.workflow.status === 'needs_clarification') {
+  if (!text) return decision(unknownPlan('empty_input'), 'local');
+  if (isExplicitInformationOnly(text)) return decision(chatPlan(text), 'local');
+  if (isConversationCancellation(text)) {
+    return { ...decision(unknownPlan('已取消当前请求'), 'local'), cancelled: true };
+  }
+  // An explicit question overrides a stale output preference and a pending task.
+  if (isQuestionOrAnalysis(text)) return decision(chatPlan(text), 'local');
+  const unsupported = unsupportedOutputScope(text);
+  if (unsupported) return decision(unknownPlan(unsupported, text), 'local');
+  if (requiresSemanticReview(text)) return decision(unknownPlan('semantic_operation', text), 'local');
+  if (input.workflow?.plan.deliverables?.every((kind) => negatedDocumentKinds(text).includes(kind))) {
+    return { ...decision(unknownPlan('已取消当前请求'), 'local'), cancelled: true };
+  }
+  if (input.workflow && ['needs_clarification', 'needs_confirmation', 'ready'].includes(input.workflow.status)) {
     const merged = mergeWorkflowClarification(input.workflow.plan, text, context);
     if (merged) {
       return {
@@ -128,17 +181,9 @@ export function analyzeLocalConversationIntent(input: {
       };
     }
   }
-  if (!text) return decision(unknownPlan('empty_input'), 'local');
-  if (isNegatedExecutionRequest(text)) {
-    return isExplicitInformationOnly(text)
-      ? decision(chatPlan(), 'local')
-      : decision(unknownPlan('检测到否定或撤销表达，请明确是否只需要咨询'), 'local');
-  }
-  if (context.requestedIntentKind === 'document') {
+  if (context.requestedIntentKind === 'document' && inferExplicitKinds(text).length < 2) {
     const explicitKind = inferExplicitKind(text);
-    const requestedKind = context.requestedDocumentKind === 'auto'
-      ? explicitKind ?? 'auto'
-      : context.requestedDocumentKind ?? explicitKind ?? 'auto';
+    const requestedKind = explicitKind ?? context.requestedDocumentKind ?? 'auto';
     const office = analyzeOfficeRequest(text, context);
     const action = office.kind === 'document' && office.action === 'revise'
       ? 'revise'
@@ -146,8 +191,8 @@ export function analyzeLocalConversationIntent(input: {
     const target = action === 'revise'
       ? resolveSemanticTarget(text, requestedKind === 'auto' ? undefined : requestedKind, context.documents ?? [])
       : undefined;
-    const missing = action === 'revise' && !target && (context.documents?.length ?? 0) > 1
-      ? ['要修改的文档']
+    const missing = action === 'revise' && !target
+      ? ['document_target']
       : [];
     const plan = documentPlan(
       action,
@@ -155,36 +200,37 @@ export function analyzeLocalConversationIntent(input: {
       text,
       missing.length > 0 ? 'low' : 'high',
       missing,
-      missing.length > 0 ? ['当前会话中有多份候选文档'] : [],
+      missing.length > 0 && (context.documents?.length ?? 0) > 1 ? ['multiple_document_targets'] : [],
       targetHintFromText(text) ?? (target ? { unit: 'document', name: target.fileName } : undefined)
     );
     return { ...decision(plan, 'local'), ...(target ? { resolvedTarget: target } : {}) };
   }
-  if (isQuestionOrAnalysis(text)) return decision(chatPlan(), 'local');
   const explicitKinds = inferExplicitKinds(text);
   if (explicitKinds.length > 1 && /(?:并|同时|以及|和|再|然后)/.test(text)) {
     return decision(documentPlan(
       'create',
-      'auto',
+      explicitKinds[0],
       text,
-      'low',
-      ['单一交付类型'],
-      [`同时识别到 ${explicitKinds.map(documentKindLabel).join('、')}`]
+      'high',
+      [],
+      [],
+      undefined,
+      explicitKinds
     ), 'local');
   }
   if (looksLikeProblemReport(text) && !hasStrongCreateCommand(text)) {
-    return decision(unknownPlan('请求是在分析问题还是创建/修改文档'), 'local');
+    return decision(unknownPlan('intent_operation'), 'local');
   }
   if (isBareTableCreation(text)) {
     return decision(documentPlan('create', 'excel', text, 'high'), 'local');
   }
-  if (isSummaryDeliverable(text)) {
+  if (isSummaryDeliverable(text) && inferExplicitKind(text) === undefined) {
     return decision(documentPlan(
       'create',
       'auto',
       text,
       'low',
-      ['文档类型（Word、Excel 或 PPT）']
+      ['document_kind']
     ), 'local');
   }
 
@@ -203,12 +249,12 @@ export function analyzeLocalConversationIntent(input: {
       looksLikeUnderspecifiedOperation(text) ||
       hasStrongCreateCommand(text)
     ) {
-      return decision(unknownPlan('无法确定是普通问答还是文档操作'), 'local');
+      return decision(unknownPlan('intent_operation'), 'local');
     }
-    return decision(chatPlan(), 'local');
+    return decision(chatPlan(text), 'local');
   }
   if (office.action === 'create' && !hasStrongCreateCommand(text)) {
-    return decision(unknownPlan('未识别到明确的创建指令'), 'local');
+    return decision(unknownPlan('create_instruction'), 'local');
   }
 
   const target = office.action === 'revise'
@@ -227,8 +273,8 @@ export function analyzeLocalConversationIntent(input: {
       office.documentKind ?? 'auto',
       text,
       'low',
-      ['要修改的文档'],
-      ['当前会话中有多份候选文档']
+      ['document_target'],
+      ['multiple_document_targets']
     ), 'local');
   }
   const plan = documentPlan(
@@ -236,7 +282,7 @@ export function analyzeLocalConversationIntent(input: {
     office.documentKind ?? 'auto',
     text,
     office.missing.length > 0 ? 'low' : 'high',
-    office.missing,
+    office.missing.map(conversationClarificationKey),
     [],
     targetHintFromText(text) ?? (target ? { unit: 'document', name: target.fileName } : undefined)
   );
@@ -250,6 +296,17 @@ function mergeWorkflowClarification(
 ): { readonly plan: ConversationIntentPlan; readonly resolvedTarget?: OfficeDocumentContext } | undefined {
   if (!answer) return undefined;
   if (plan.kind === 'unknown') {
+    if (plan.ambiguities.includes('single_copy_per_kind') && /(?:先|只)(?:做|生成|制作|要)/.test(answer)) {
+      const kind = inferExplicitKind(answer);
+      if (kind) return { plan: documentPlan('create', kind, `${String(plan.parameters.requirements ?? '')}\n本次仅执行：${answer}`, 'high') };
+    }
+    if (plan.ambiguities.includes('single_revision_target') && /(?:先|只)(?:修改|调整|修订|改)/.test(answer)) {
+      const selected = analyzeLocalConversationIntent({ rawText: answer, context });
+      if (selected.plan.kind === 'document' && selected.plan.action === 'revise') {
+        const requirements = `${String(plan.parameters.requirements ?? '')}\n本次仅修改：${answer}`;
+        return { ...selected, plan: parseConversationIntentPlan({ ...selected.plan, parameters: { ...selected.plan.parameters, requirements } }) };
+      }
+    }
     const recent = context.recentUserMessages ?? [];
     const turns = recent.at(-1)?.trim() === answer.trim()
       ? recent
@@ -268,24 +325,35 @@ function mergeWorkflowClarification(
       };
     }
   }
+  if (plan.kind !== 'document') return undefined;
+  // A complete new request starts its own semantic plan; terse answers update
+  // the pending one. This prevents an unrelated new task inheriting old targets.
+  if (hasStrongCreateCommand(answer) && /(?:关于|一份|一个|培训|报告|方案|课件)/.test(answer)) {
+    return undefined;
+  }
   const parameters = { ...plan.parameters };
-  const remaining = new Set(plan.missing);
-  const kind = inferExplicitKind(answer);
-  if (kind) remaining.delete('文档类型（Word、Excel 或 PPT）');
+  const remaining = new Set(plan.missing.map(conversationClarificationKey));
+  const excludedKinds = negatedDocumentKinds(answer);
+  const retainedKinds = plan.deliverables?.filter((item) => !excludedKinds.includes(item));
+  const kind = inferExplicitKind(answer) ?? retainedKinds?.[0];
+  if (kind) {
+    remaining.delete('document_kind');
+    remaining.delete('single_deliverable');
+  }
   const pageCount = answer.match(/(?:共|做|要)?\s*(\d{1,3})\s*(?:页|张)/)?.[1];
   if (pageCount) {
     parameters.pageCount = Number(pageCount);
-    remaining.delete('页数');
+    remaining.delete('page_count');
   }
   const audience = answer.match(/(?:给|面向|用于)([^，。；]{2,30})(?:看|使用|汇报|，|。|；|$)/)?.[1];
   if (audience) {
     parameters.audience = audience.trim();
-    remaining.delete('受众');
+    remaining.delete('audience');
   }
   const style = answer.match(/(简洁|简约|商务|专业|科技|自然|正式|活泼)(?:风|一点|一些)?/)?.[1];
   if (style) {
     parameters.style = style;
-    remaining.delete('风格');
+    remaining.delete('style');
   }
   const target = plan.action === 'revise'
     ? resolveSemanticTarget(
@@ -295,20 +363,39 @@ function mergeWorkflowClarification(
       )
     : undefined;
   if (target) {
-    remaining.delete('要修改的文档');
+    remaining.delete('document_target');
   }
-  if (!kind && !pageCount && !audience && !style && !target) return undefined;
-  const ambiguities = target
-    ? plan.ambiguities.filter((item) => item !== '当前会话中有多份候选文档')
-    : plan.ambiguities;
+  const isSupplement = /(?:重点|保留|不要|不用|不做|改为|改成|改得|补充|加入|增加|删除|删掉|清空|用|只|再|先)/.test(answer);
+  if (!kind && !pageCount && !audience && !style && !target && !isSupplement) return undefined;
+  const ambiguities = plan.ambiguities.map(conversationClarificationKey).filter((item) =>
+    !(target && item === 'multiple_document_targets') &&
+    !(kind && item === 'multiple_deliverable_kinds')
+  );
+  const previous = typeof parameters.requirements === 'string'
+    ? parameters.requirements
+    : typeof parameters.topic === 'string' ? parameters.topic : '';
+  const requirements = `${previous}\n后续要求（与此前冲突时以此为准）：${answer}`;
+  if (requirements.length > 16_000) throw new TypeError('累计需求超过当前任务的 16000 字符上限，请开始新任务或缩短补充内容');
+  parameters.requirements = requirements;
+  parameters.topic = requirements.slice(0, 2_000);
+  const sourcePolicy = /(?:不要|不用|无需|禁止)(?:再)?(?:联网|上网|搜索网络)/.test(answer)
+    ? inferSourcePolicy(requirements)
+    : inferSourcePolicy(answer) === 'none' ? plan.sourcePolicy : inferSourcePolicy(requirements);
   const merged = parseConversationIntentPlan({
     ...plan,
     documentKind: kind ?? target?.kind ?? plan.documentKind,
+    ...(plan.deliverables && kind ? {
+      deliverables: /(?:只做|只要|仅做)/.test(answer)
+        ? [kind]
+        : [kind, ...(retainedKinds ?? plan.deliverables).filter((item) => item !== kind)]
+    } : {}),
     ...(target ? { targetHint: { unit: 'document', name: target.fileName } } : {}),
     parameters,
+    sourcePolicy,
     missing: [...remaining],
     ambiguities,
-    confidence: remaining.size === 0 && ambiguities.length === 0 ? 'high' : plan.confidence
+    confidence: remaining.size === 0 && ambiguities.length === 0 ? 'high' : plan.confidence,
+    needsConfirmation: plan.needsConfirmation || isDestructiveRevision(answer)
   });
   return { plan: merged, ...(target ? { resolvedTarget: target } : {}) };
 }
@@ -320,15 +407,17 @@ function documentPlan(
   confidence: 'high' | 'medium' | 'low',
   missing: readonly string[] = [],
   ambiguities: readonly string[] = [],
-  targetHint?: ConversationIntentPlan['targetHint']
+  targetHint?: ConversationIntentPlan['targetHint'],
+  deliverables?: readonly DocumentWorkspaceKind[]
 ): ConversationIntentPlan {
   return parseConversationIntentPlan({
     schemaVersion: 1,
     kind: 'document',
     action,
     documentKind,
+    ...(deliverables ? { deliverables } : {}),
     ...(targetHint ? { targetHint } : {}),
-    parameters: { topic: topic.slice(0, 2_000) },
+    parameters: { topic: topic.slice(0, 2_000), requirements: topic },
     sourcePolicy: inferSourcePolicy(topic),
     missing,
     ambiguities,
@@ -337,11 +426,11 @@ function documentPlan(
   });
 }
 
-function unknownPlan(reason: string): ConversationIntentPlan {
+function unknownPlan(reason: string, requirements?: string): ConversationIntentPlan {
   return parseConversationIntentPlan({
     schemaVersion: 1,
     kind: 'unknown',
-    parameters: {},
+    parameters: requirements ? { requirements } : {},
     sourcePolicy: 'none',
     missing: [],
     ambiguities: [reason],
@@ -350,12 +439,12 @@ function unknownPlan(reason: string): ConversationIntentPlan {
   });
 }
 
-function chatPlan(): ConversationIntentPlan {
+function chatPlan(text: string): ConversationIntentPlan {
   return parseConversationIntentPlan({
     schemaVersion: 1,
     kind: 'chat',
     parameters: {},
-    sourcePolicy: 'none',
+    sourcePolicy: inferSourcePolicy(text),
     missing: [],
     ambiguities: [],
     confidence: 'high',
@@ -400,18 +489,61 @@ function targetHintFromText(text: string): ConversationIntentPlan['targetHint'] 
 }
 
 function inferExplicitKind(text: string): DocumentWorkspaceKind | undefined {
-  if (/(?:\bpptx?\b|幻灯片|演示文稿|课件)/i.test(text)) return 'ppt';
-  if (/(?:\bexcel\b|\bxlsx\b|工作簿|电子表格|表格)/i.test(text)) return 'excel';
-  if (/(?:\bword\b|\bdocx\b|文字文档)/i.test(text)) return 'word';
-  return undefined;
+  return inferExplicitKinds(text)[0];
 }
 
 function inferExplicitKinds(text: string): readonly DocumentWorkspaceKind[] {
+  const positive = affirmativeClauses(text);
   const kinds: DocumentWorkspaceKind[] = [];
-  if (/(?:\bpptx?\b|幻灯片|演示文稿|课件)/i.test(text)) kinds.push('ppt');
-  if (/(?:\bexcel\b|\bxlsx\b|工作簿|电子表格|表格|台账)/i.test(text)) kinds.push('excel');
-  if (/(?:\bword\b|\bdocx\b|文字文档)/i.test(text)) kinds.push('word');
-  return kinds;
+  if (/(?:\bpptx?\b|幻灯片|演示文稿|课件)/i.test(positive)) kinds.push('ppt');
+  if (/(?:\bexcel\b|\bxlsx\b|工作簿|电子表格)/i.test(positive)) kinds.push('excel');
+  if (/(?:\bword\b|\bdocx\b|文字文档)/i.test(positive)) kinds.push('word');
+  // A table inside Word/PPT is content, not another Excel deliverable.
+  if (kinds.length === 0 && /(?:表格|台账)/.test(positive)) kinds.push('excel');
+  const position = (kind: DocumentWorkspaceKind) => positive.search(kind === 'ppt'
+    ? /(?:\bpptx?\b|幻灯片|演示文稿|课件)/i
+    : kind === 'word' ? /(?:\bword\b|\bdocx\b|文字文档)/i
+      : /(?:\bexcel\b|\bxlsx\b|工作簿|电子表格|表格|台账)/i);
+  return kinds.sort((a, b) => position(a) - position(b));
+}
+
+function affirmativeClauses(text: string): string {
+  return text.split(/[，,。；;\n]/).map((clause) =>
+    clause.replace(/(?:取消|不要|不是|不用|不需要|无需)(?:再)?(?:做|生成|制作)?\s*(?:PPTX?|Word|DOCX|Excel|XLSX|幻灯片|演示文稿|课件|表格|工作簿|文字文档)/ig, '')
+      .replace(/(?:PPTX?|Word|DOCX|Excel|XLSX|幻灯片|演示文稿|课件|表格|工作簿|文字文档)\s*(?:不做|不要|不用做|取消)(?:了)?/ig, '')
+  ).join('，');
+}
+
+function negatedDocumentKinds(text: string): readonly DocumentWorkspaceKind[] {
+  const negativeText = text.split(/[，,。；;\n]/).filter((clause) =>
+    /^(?:取消|不要|不用|不做|不需要)/.test(clause.trim()) || /(?:PPTX?|Word|DOCX|Excel|XLSX)\s*(?:不做|不要|取消|不用做)/i.test(clause)
+  ).join('，');
+  const matches = negativeText.match(/PPTX?|Word|DOCX|Excel|XLSX/ig) ?? [];
+  return [...new Set(matches.flatMap((item) => {
+    if (/ppt/i.test(item)) return ['ppt' as const];
+    if (/word|docx/i.test(item)) return ['word' as const];
+    return ['excel' as const];
+  }))];
+}
+
+function unsupportedOutputScope(text: string): 'single_copy_per_kind' | 'single_revision_target' | undefined {
+  if (/(?:做|生成|制作|创建|导出)[^，。；]{0,20}(?:[2-9]|\d{2,}|两|二|三|四|五|六|七|八|九|十|多|若干)\s*(?:份|个|套|本)[^，。；]{0,15}(?:PPT|Word|Excel|报告|方案|文档|演示)/i.test(text)) return 'single_copy_per_kind';
+  const types = [...text.matchAll(/\b(pptx?|word|docx|excel|xlsx)\b/ig)].map((match) => match[1].toLowerCase().replace('pptx', 'ppt').replace('docx', 'word').replace('xlsx', 'excel'));
+  if (types.length > new Set(types).size && /(?:分别|各做|各生成|两份|另做|另一份)/.test(text)) return 'single_copy_per_kind';
+  if (/(?:修改|调整|更新|修订|删除|改)/.test(text) &&
+    (/(?:这两份|这几份|两份|所有文档|全部文档)/.test(text) ||
+      (inferExplicitKinds(text).length > 1 && /(?:和|以及|同时|都|分别)/.test(text)))) return 'single_revision_target';
+  return undefined;
+}
+
+function requiresSemanticReview(text: string): boolean {
+  const topicText = text.split(/(?:关于|介绍|解释|讲解|比较|对比|转换|转成|转为)/).slice(1).join(' ');
+  if (hasStrongCreateCommand(text) && inferExplicitKinds(text).length > 1 &&
+    inferExplicitKinds(topicText).length > 0) return true;
+  return !hasStrongCreateCommand(text) &&
+    /(?:准备|压缩|转换|变成|转成|转为|重写|梳理)/.test(text) &&
+    /(?:资料|材料|附件|文件|文档|演示|汇报|领导|董事会|客户)/.test(text) &&
+    !/(?:怎么|如何|为什么|是什么|[？?])/.test(text);
 }
 
 function hasStrongCreateCommand(text: string): boolean {
@@ -435,10 +567,18 @@ function isSummaryDeliverable(text: string): boolean {
 }
 
 function isQuestionOrAnalysis(text: string): boolean {
+  if (/(?:在这里|在会话里|直接|只要|只需)(?:回复|回答)|(?:不用|无需|不要)(?:生成|创建|导出)(?:文件|文档)/.test(text)) return true;
+  if (/^(?:谢谢|感谢|好的|收到|你好|您好)[！!。\s]*$/.test(text)) return true;
+  const explicitDeliverable = hasStrongCreateCommand(text) && inferDeliverableKind(text) !== 'auto';
+  const informationAboutCreating =
+    /(?:怎么|如何)(?:做|生成|制作|创建|写|编写|导出)/.test(text) ||
+    /(?:生成|制作|创建|编写|导出)[^，。；]{0,30}(?:时|的过程|的步骤)[^，。；]{0,20}(?:注意|如何|怎么|什么)/.test(text);
+  if (explicitDeliverable && !informationAboutCreating) return false;
+  if (/(?:告诉我|给我解释|帮我看看|主要讲了什么)/.test(text)) return true;
   const hasQuestionConstruction =
     /(?:怎么|如何|为什么|是什么|有哪些|有什么区别|需要注意什么|是否|能否|能不能|可不可以|可以吗)/u.test(text);
   const politeDocumentRequest =
-    /^(?:请问)?(?:能否|能不能|可以(?:请你)?)(?:帮我|给我)?\s*(?:做|生成|制作|创建|写|编写|起草|整理|输出|导出)/.test(text) ||
+    /^(?:请问)?(?:能否|能不能|可不可以|可以(?:请你)?)(?:帮我|给我)?\s*(?:做|生成|制作|创建|写|编写|起草|整理|输出|导出)/.test(text) ||
     /^(?:请|帮我|给我|麻烦(?:你)?)[\s\S]{0,20}(?:做|生成|制作|创建|写|编写|起草|整理|输出|导出)[\s\S]*[？?]$/.test(text);
   return (
     ((hasQuestionConstruction || /[？?]\s*$/u.test(text)) && !politeDocumentRequest) ||
@@ -447,12 +587,16 @@ function isQuestionOrAnalysis(text: string): boolean {
   );
 }
 
-function isNegatedExecutionRequest(text: string): boolean {
-  return (
-    /(?:不要|别|不用|无需|不需要|不必|不想)[\s\S]{0,30}(?:做|生成|制作|创建|写|修改|调整|删除|清空|导出)/.test(text) ||
-    /(?:做|生成|制作|创建|写|修改|调整|删除|清空|导出)[\s\S]{0,15}(?:不要|别|不用|无需)/.test(text) ||
-    /(?:撤销|取消)(?:刚才|这个|本次)?(?:任务|操作|生成|修改)?/.test(text)
+export function isConversationCancellation(text: string): boolean {
+  const clauses = text.trim().split(/[，,。；;\n]/).map((item) => item.trim()).filter(Boolean);
+  if (clauses.some((clause) => /^(?:请|帮我|麻烦)?(?:先|立即|现在)?(?:撤销|取消|停止)(?:(?:刚才|这个|本次|当前|全部|所有|的|任务|操作|生成|制作|修改|执行|吧|了)|\s)*[！!]?$/u.test(clause))) return true;
+  const negatedOperation = /^(?:我)?(?:不要|别|不用|无需|不需要|不必|不想)(?:再|继续|帮我)?(?:做|生成|制作|创建|写|修改|调整|删除|清空|导出)[^？?]{0,60}$/;
+  const cancellation = clauses.some((clause) => negatedOperation.test(clause) || /^(?:先)?(?:不做|不改|不生成|不需要做)(?:了|啦|吧)?[！!]?$/.test(clause));
+  // A positive replacement such as “不要做 PPT，改做 Word” is a correction.
+  const replacement = clauses.some((clause) =>
+    !negatedOperation.test(clause) && /^(?:而是|改为|改成|改做|只要|只做|要|做|生成)/.test(clause) && inferExplicitKind(clause) !== undefined
   );
+  return cancellation && !replacement;
 }
 
 function isExplicitInformationOnly(text: string): boolean {
@@ -504,12 +648,6 @@ function parseOrdinal(value: string): number {
   return digits[value] ?? 1;
 }
 
-function documentKindLabel(kind: DocumentWorkspaceKind): string {
-  if (kind === 'ppt') return 'PPT';
-  if (kind === 'excel') return 'Excel';
-  return 'Word';
-}
-
 function hasExplicitTargetReference(
   text: string,
   documents: readonly OfficeDocumentContext[]
@@ -528,7 +666,9 @@ function isDestructiveRevision(text: string): boolean {
 }
 
 function inferSourcePolicy(text: string): ConversationIntentPlan['sourcePolicy'] {
-  const web = /(?:联网|网上|网络|最新公开|实时信息)/.test(text);
+  const web = /(?:联网|网上|网络|最新公开|实时信息)/.test(text) &&
+    !/(?:不要|不用|无需|禁止)(?:再)?(?:联网|上网|搜索网络)/.test(text) &&
+    !/(?:联网|网络|网上)(?:检索|搜索)?(?:的)?(?:工作原理|是什么|有什么|怎么配置)/.test(text);
   const internal = /(?:项目资料|附件|上传文件|内部资料|知识库)/.test(text);
   if (web && internal) return 'mixed';
   if (web) return 'web';

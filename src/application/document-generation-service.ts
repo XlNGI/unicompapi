@@ -124,6 +124,15 @@ export interface DocumentGenerationWorkflowPort {
     executionId: string,
     status: 'completed' | 'failed' | 'cancelled'
   ): Promise<void>;
+  settleDocumentResult?(input: {
+    readonly conversationId: ConversationId;
+    readonly messageId: MessageId;
+    readonly kind: DocumentWorkspaceKind;
+    readonly status: 'completed' | 'failed' | 'cancelled';
+    readonly workId?: WorkId;
+    /** Set only by the local revision service; never accepted from renderer or model input. */
+    readonly localExecutionId?: string;
+  }): Promise<void>;
 }
 
 export interface DocumentGenerationExecutionInput {
@@ -206,9 +215,15 @@ export async function waitForDocumentResponseCompletion<
 >(input: {
   readonly read: () => Promise<T>;
   readonly wait: (milliseconds: number) => Promise<void>;
+  readonly signal?: AbortSignal;
+  readonly maxWaitMs?: number;
 }): Promise<T | undefined> {
+  const maxWaitMs = input.maxWaitMs ?? 10 * 60_000;
+  if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs < 1 || maxWaitMs > 10 * 60_000) throw new TypeError('Document response wait budget is invalid');
+  const deadline = Date.now() + maxWaitMs;
   let consecutiveReadFailures = 0;
-  for (;;) {
+  for (let attempt = 0; attempt < Math.ceil(maxWaitMs / 1_000); attempt += 1) {
+    if (input.signal?.aborted || Date.now() >= deadline) return undefined;
     let response: T;
     try {
       response = await input.read();
@@ -229,6 +244,7 @@ export async function waitForDocumentResponseCompletion<
     }
     await input.wait(1_000);
   }
+  return undefined;
 }
 
 export class DocumentGenerationApplicationService {
@@ -255,6 +271,9 @@ export class DocumentGenerationApplicationService {
       readonly projectId: ProjectId;
       readonly conversations: DocumentGenerationConversationPort;
       readonly workflows?: DocumentGenerationWorkflowPort;
+      readonly generationInputs?: {
+        resolve(input: GenerateDocumentFromMessageInput, reuse: boolean): Promise<GenerateDocumentFromMessageInput>;
+      };
       readonly compiler: DocumentDraftCompilerPort;
       readonly generator: DocumentGenerationExecutorPort;
       /** Optional bounded local/provider-backed revision workflow. */
@@ -495,12 +514,12 @@ export class DocumentGenerationApplicationService {
     const abortController = new AbortController();
     const queueKey = messageQueueKey(this.dependencies.projectId, input);
     const previous = this.messageTails.get(queueKey) ?? Promise.resolve();
-    const operation = this.track(this.settleLocalRevisionWorkflow(
+    const operation = this.track(this.settleDocumentWorkflow(input, this.settleLocalRevisionWorkflow(
       queueKey,
       previous
         .catch(() => undefined)
         .then(() => this.runGeneration(key, input, abortController))
-    ));
+    )));
     const tail = operation.then(
       () => undefined,
       () => undefined
@@ -588,12 +607,42 @@ export class DocumentGenerationApplicationService {
     await Promise.all([...this.operations]);
   }
 
+  private async settleDocumentWorkflow(
+    input: GenerateDocumentFromMessageInput,
+    operation: Promise<GenerateDocumentFromMessageResult>
+  ): Promise<GenerateDocumentFromMessageResult> {
+    const settle = this.dependencies.workflows?.settleDocumentResult;
+    if (!settle) return operation;
+    const localExecutionId = this.localRevisionWorkflows.get(messageQueueKey(this.dependencies.projectId, input));
+    let result: GenerateDocumentFromMessageResult;
+    try {
+      result = await operation;
+    } catch (error) {
+      await settle({ conversationId: input.conversationId, messageId: input.messageId, kind: input.kind,
+        ...(localExecutionId ? { localExecutionId } : {}),
+        status: error instanceof DocumentGenerationApplicationError && error.code === 'cancelled' ? 'cancelled' : 'failed' });
+      throw error;
+    }
+    // runGeneration has persisted the validated document result and Work before advancing the queue.
+    await settle({ conversationId: input.conversationId, messageId: input.messageId, kind: input.kind,
+      ...(localExecutionId ? { localExecutionId } : {}),
+      status: 'completed', workId: result.workId });
+    return result;
+  }
+
   private async settleLocalRevisionWorkflow<T>(
     queueKey: string,
     operation: Promise<T>
   ): Promise<T> {
     const executionId = this.localRevisionWorkflows.get(queueKey);
     if (!executionId || !this.dependencies.workflows) return operation;
+    if (this.dependencies.workflows.settleDocumentResult) {
+      try {
+        return await operation;
+      } finally {
+        this.localRevisionWorkflows.delete(queueKey);
+      }
+    }
     try {
       const result = await operation;
       await this.dependencies.workflows.finishExecution(executionId, 'completed');
@@ -630,6 +679,10 @@ export class DocumentGenerationApplicationService {
         'message_not_found',
         'Assistant message disappeared during document generation'
       );
+    }
+    if (this.dependencies.generationInputs) {
+      input = await this.dependencies.generationInputs.resolve(input,
+        message.documentGenerationStatus?.state === 'failed' || message.documentGenerationStatus?.state === 'interrupted');
     }
     const content = message.content.trim();
     if (!content) {
@@ -816,9 +869,15 @@ export class DocumentGenerationApplicationService {
       const generated = await this.dependencies.generator.run({
       kind: input.kind,
       title: outline.title,
-      contentFingerprint: this.dependencies.fingerprint(
-        useDeterministicClearRevision ? requestText : content
-      ),
+      contentFingerprint: this.dependencies.fingerprint(JSON.stringify({
+        content: useDeterministicClearRevision ? requestText : content,
+        kind: input.kind,
+        theme: input.theme ?? null,
+        presentationTemplate: input.presentationTemplate ?? null,
+        parentWorkId: input.parentWorkId ?? null,
+        images: input.images,
+        outline
+      })),
       draftRevision: 1,
       sourceDraftId: `message-${input.messageId}`,
       outline,
