@@ -37,6 +37,7 @@ vi.mock('react', async (original) => ({
 }));
 
 import { ChatPage } from '../../src/pages/chat/ChatPage';
+import { ChatAttachment } from '../../src/pages/chat/ChatAttachment';
 
 type Element = ReactElement<Record<string, unknown>>;
 function find(node: ReactNode, predicate: (element: Element) => boolean): Element | undefined {
@@ -173,7 +174,7 @@ describe('chat composer event behavior', () => {
     await settle();
     expect(preventDefault).toHaveBeenCalled();
     expect(importImage).toHaveBeenCalledWith({ image: { mimeType: 'image/png', base64: 'aGVsbG8=' } });
-    expect(find(tree, item => item.type === 'img')?.props.src).toBe(preview);
+    expect(find(tree, item => item.type === ChatAttachment)?.props.previewUrl).toBe(preview);
     await type('分析一下图片');
     await send('button');
     expect(startWorkflow.mock.calls[0][0].attachmentFileIds).toEqual(['image-1']);
@@ -309,7 +310,7 @@ describe('chat composer event behavior', () => {
     await settle();
     await type('做个总结');
     await send('button');
-    (element('移除附件 report.pdf').props.onClick as () => void)();
+    (find(tree, item => item.type === ChatAttachment && item.props.fileName === 'report.pdf')!.props.onRemove as () => void)();
     await settle();
     await type('不使用附件，在这里回复');
     await send('button');

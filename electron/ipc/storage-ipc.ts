@@ -438,6 +438,7 @@ export function registerStorageIpcHandlers(options: {
   projectStorageMonitor.start();
   const localMedia = new ControlledLocalMediaController({
     catalog,
+    getSession: () => sessionRegistry.get(),
     handles: mediaHandles,
     revealFile: (target) => shell.showItemInFolder(target)
   });
@@ -526,6 +527,9 @@ export function registerStorageIpcHandlers(options: {
   );
   ipcMain.handle(storageIpcChannels.revealWorkFile, (_event, request: unknown) =>
     localMedia.revealWorkFile(request)
+  );
+  ipcMain.handle(storageIpcChannels.createAttachmentMediaHandle, (_event, request: unknown) =>
+    localMedia.createAttachmentHandle(request)
   );
   ipcMain.handle(storageIpcChannels.closeProject, () =>
     projectController.closeProject()

@@ -146,6 +146,8 @@ const storage: StorageApi = {
   listWorks: () => ipcRenderer.invoke(storageIpcChannels.listWorks),
   getWorkDetails: (workId) =>
     ipcRenderer.invoke(storageIpcChannels.getWorkDetails, { workId }),
+  createAttachmentMediaHandle: (fileId, projectId) =>
+    ipcRenderer.invoke(storageIpcChannels.createAttachmentMediaHandle, { fileId, projectId }),
   createWorkMediaHandle: (workId, projectId) =>
     ipcRenderer.invoke(storageIpcChannels.createWorkMediaHandle, {
       workId,
