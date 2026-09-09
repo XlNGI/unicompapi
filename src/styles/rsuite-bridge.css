@@ -1,0 +1,85 @@
+/*
+ * RSuite (React Suite) 主题桥接层。
+ *
+ * 目的:把 RSuite v6 的 --rs-* 设计变量对齐到项目现有的 --uc-* 令牌,
+ * 让 RSuite 组件在深色/浅色两套主题下与自研组件视觉一致。
+ *
+ * 机制:CustomProvider 会把 rs-theme-light / rs-theme-dark class 加到 <body>。
+ * RSuite 自身在 :root 定义浅色默认值、在 .rs-theme-dark 定义深色值。
+ * 这里用 body.rs-theme-light / body.rs-theme-dark(specificity 0,1,1)稳定压过
+ * RSuite 的 :root(0,1,0)与 .rs-theme-dark(0,1,0),且本文件在 main.tsx 中
+ * 于 rsuite 样式之后引入,顺序上再兜底一层。
+ *
+ * 组件级变量(如 --rs-btn-primary-bg)大多引用基础层(--rs-primary-500 等),
+ * 因此以下只需覆盖 primary 色阶、语义基础层与少量高频组件面即可级联到全部组件。
+ */
+
+body.rs-theme-light,
+body.rs-theme-dark {
+  /* 主色阶:锚定在项目强调色,派生阶梯用 color-mix 保持随令牌联动 */
+  --rs-primary-50: color-mix(in srgb, var(--uc-color-accent-fill) 8%, #ffffff);
+  --rs-primary-100: color-mix(in srgb, var(--uc-color-accent-fill) 16%, #ffffff);
+  --rs-primary-200: color-mix(in srgb, var(--uc-color-accent-fill) 30%, #ffffff);
+  --rs-primary-300: color-mix(in srgb, var(--uc-color-accent-fill) 45%, #ffffff);
+  --rs-primary-400: color-mix(in srgb, var(--uc-color-accent-fill) 70%, #ffffff);
+  --rs-primary-500: var(--uc-color-accent-fill);
+  --rs-primary-600: var(--uc-color-accent-hover);
+  --rs-primary-700: var(--uc-color-accent-pressed);
+  --rs-primary-800: color-mix(in srgb, var(--uc-color-accent-pressed) 82%, #000000);
+  --rs-primary-900: color-mix(in srgb, var(--uc-color-accent-pressed) 66%, #000000);
+
+  /* 文本 */
+  --rs-text-primary: var(--uc-color-text-primary);
+  --rs-text-secondary: var(--uc-color-text-secondary);
+  --rs-text-tertiary: var(--uc-color-text-tertiary);
+  --rs-text-disabled: var(--uc-color-text-disabled);
+  --rs-text-heading: var(--uc-color-text-primary);
+  --rs-text-inverse: var(--uc-color-text-inverse);
+  --rs-text-link: var(--uc-color-text-accent);
+  --rs-text-link-hover: var(--uc-color-accent-hover);
+  --rs-text-link-active: var(--uc-color-accent-pressed);
+
+  /* 边框 */
+  --rs-border-primary: var(--uc-color-border-default);
+  --rs-border-secondary: var(--uc-color-border-subtle);
+
+  /* 背景 / 表面 */
+  --rs-body: var(--uc-color-bg-app);
+  --rs-bg-card: var(--uc-color-surface-base);
+  --rs-bg-overlay: var(--uc-color-surface-panel);
+  --rs-bg-well: var(--uc-color-surface-subtle);
+  --rs-bg-active: var(--uc-color-accent-fill);
+  --rs-state-hover-bg: var(--uc-color-surface-subtle);
+
+  /* 状态色:对齐项目 status 令牌 */
+  --rs-state-success: var(--uc-color-status-success);
+  --rs-state-info: var(--uc-color-status-info);
+  --rs-state-warning: var(--uc-color-status-warning);
+  --rs-state-error: var(--uc-color-status-danger);
+  --rs-bg-success: var(--uc-color-status-success-bg);
+  --rs-bg-info: var(--uc-color-status-info-bg);
+  --rs-bg-warning: var(--uc-color-status-warning-bg);
+  --rs-bg-error: var(--uc-color-status-danger-bg);
+
+  /* 焦点态:统一走项目焦点色 */
+  --rs-state-focus-outline: 0 0 0 3px color-mix(in srgb, var(--uc-color-border-focus) 35%, transparent);
+  --rs-state-focus-shadow: 0 0 0 3px color-mix(in srgb, var(--uc-color-border-focus) 35%, transparent);
+  --rs-color-focus-ring: 0 0 0 3px color-mix(in srgb, var(--uc-color-border-focus) 35%, transparent);
+
+  /* 高频组件面:直接引用 gray 的少数变量需单独对齐 */
+  --rs-input-bg: var(--uc-color-surface-base);
+  --rs-input-disabled-bg: var(--uc-color-surface-disabled);
+  --rs-input-focus-border: var(--uc-color-border-focus);
+  --rs-btn-default-bg: var(--uc-color-surface-subtle);
+  --rs-btn-default-hover-bg: var(--uc-color-surface-raised);
+  --rs-btn-default-active-bg: var(--uc-color-surface-selected);
+  --rs-btn-default-text: var(--uc-color-text-primary);
+  --rs-btn-default-hover-text: var(--uc-color-text-primary);
+  --rs-btn-default-disabled-bg: var(--uc-color-surface-disabled);
+  --rs-btn-default-disabled-text: var(--uc-color-text-disabled);
+  --rs-listbox-option-hover-bg: var(--uc-color-surface-subtle);
+  --rs-listbox-option-hover-text: var(--uc-color-text-primary);
+  --rs-listbox-option-selected-bg: var(--uc-color-accent-subtle);
+  --rs-listbox-option-selected-text: var(--uc-color-text-accent);
+  --rs-picker-value: var(--uc-color-text-accent);
+}

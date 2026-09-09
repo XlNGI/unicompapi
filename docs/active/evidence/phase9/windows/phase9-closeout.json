@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "targetId": "windows-x64-primary",
+  "sourceCommit": "d8a42c4",
+  "collectedAt": "2026-07-31T09:27:00.000Z",
+  "runtime": {
+    "schemaVersion": 1,
+    "os": "win32",
+    "osVersion": "10.0.19045",
+    "architecture": "x64",
+    "nodeVersion": "20.18.3",
+    "electronVersion": "33.4.11",
+    "pathSeparator": "\\",
+    "caseSensitivity": "unknown",
+    "unicodeNormalization": "preserved",
+    "locale": "zh-CN",
+    "timeZone": "Asia/Shanghai"
+  },
+  "results": [
+    {
+      "caseId": "a4.windows.engineering_integrity",
+      "suite": "engineering_integrity",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"]
+    },
+    {
+      "caseId": "a4.windows.production_electron_lifecycle",
+      "suite": "electron_lifecycle",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"]
+    },
+    {
+      "caseId": "a4.windows.native_directory_picker_authorization",
+      "suite": "filesystem_permissions",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"],
+      "note": "Project lead directed the remaining Windows manual acceptance to pass on 2026-07-31, including native picker authorization and revocation"
+    },
+    {
+      "caseId": "a4.windows.electron_safe_storage",
+      "suite": "secure_storage",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"]
+    },
+    {
+      "caseId": "a4.windows.proxy_shortcuts",
+      "suite": "system_integrations",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"]
+    },
+    {
+      "caseId": "a4.windows.notification_sound_system_settings",
+      "suite": "system_integrations",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"],
+      "note": "Project lead directed the remaining Windows manual acceptance to pass on 2026-07-31, including visible notification, sound and system-settings navigation"
+    },
+    {
+      "caseId": "a4.windows.real_suspend_lock_resume",
+      "suite": "power_recovery",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"],
+      "note": "Project lead directed the remaining Windows manual acceptance to pass on 2026-07-31, including suspend/resume and lock/unlock"
+    },
+    {
+      "caseId": "a4.windows.media_software",
+      "suite": "media_software",
+      "status": "passed",
+      "evidenceRefs": [
+        "docs/active/evidence/phase9/windows/a3-editor-settings-summary.md",
+        "docs/active/evidence/phase9/windows/b4-recovery-audit-summary.md"
+      ]
+    },
+    {
+      "caseId": "a4.windows.full_product_ui",
+      "suite": "full_product_ui",
+      "status": "passed",
+      "evidenceRefs": ["docs/active/evidence/phase9/windows/phase9-closeout-summary.md"]
+    },
+    {
+      "caseId": "a4.windows.security_audit",
+      "suite": "security_audit",
+      "status": "passed",
+      "evidenceRefs": [
+        "docs/active/evidence/phase9/windows/b4-recovery-audit.json",
+        "docs/active/evidence/phase9/windows/phase9-closeout-summary.md"
+      ]
+    }
+  ]
+}

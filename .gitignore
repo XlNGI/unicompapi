@@ -33,6 +33,7 @@ Thumbs.db
 
 # local runtime data
 .cache/
+.tools/
 tmp/
 temp/
 
@@ -41,3 +42,5 @@ temp/
 *.exe
 *.msi
 *.AppImage
+release/
+release-nsis/

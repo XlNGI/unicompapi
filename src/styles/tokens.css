@@ -1,0 +1,130 @@
+:root {
+  color-scheme: dark;
+
+  --uc-color-bg-app: #0b0f17;
+  --uc-color-bg-navigation: #0e131d;
+  --uc-color-surface-base: #121821;
+  --uc-color-surface-panel: #171f2b;
+  --uc-color-surface-subtle: #1d2735;
+  --uc-color-surface-raised: #222d3d;
+  --uc-color-surface-selected: #272a55;
+  --uc-color-surface-disabled: #151b25;
+
+  --uc-color-text-primary: #f1f5f9;
+  --uc-color-text-secondary: #b8c2d1;
+  --uc-color-text-tertiary: #8d99ab;
+  --uc-color-text-disabled: #697587;
+  --uc-color-text-inverse: #10151e;
+  --uc-color-text-accent: #9b91ff;
+
+  --uc-color-border-subtle: #222d3d;
+  --uc-color-border-default: #2d394b;
+  --uc-color-border-strong: #41516a;
+  --uc-color-border-focus: #9b91ff;
+
+  --uc-color-accent-fill: #6d5dfb;
+  --uc-color-accent-hover: #6252ed;
+  --uc-color-accent-pressed: #5848d8;
+  --uc-color-accent-subtle: #272a55;
+
+  --uc-color-status-success: #55d7a7;
+  --uc-color-status-success-bg: #102d25;
+  --uc-color-status-success-border: #276b56;
+  --uc-color-status-info: #69b0ff;
+  --uc-color-status-info-bg: #12283f;
+  --uc-color-status-info-border: #285a84;
+  --uc-color-status-warning: #f4c15d;
+  --uc-color-status-warning-bg: #302612;
+  --uc-color-status-warning-border: #7a5a19;
+  --uc-color-status-danger: #ff7d8e;
+  --uc-color-status-danger-bg: #351820;
+  --uc-color-status-danger-border: #873343;
+  --uc-color-status-unknown: #aab4c3;
+  --uc-color-status-unknown-bg: #202733;
+  --uc-color-status-unknown-border: #485465;
+
+  --uc-font-family-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable",
+    "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --uc-font-family-mono: "SFMono-Regular", "Cascadia Mono",
+    "Noto Sans Mono CJK SC", monospace;
+
+  --uc-font-size-title-1: 24px;
+  --uc-line-height-title-1: 34px;
+  --uc-font-size-title-2: 20px;
+  --uc-line-height-title-2: 30px;
+  --uc-font-size-title-3: 16px;
+  --uc-line-height-title-3: 24px;
+  --uc-font-size-body: 14px;
+  --uc-line-height-body: 22px;
+  --uc-font-size-label: 13px;
+  --uc-line-height-label: 20px;
+  --uc-font-size-caption: 12px;
+  --uc-line-height-caption: 18px;
+
+  --uc-space-1: 4px;
+  --uc-space-2: 8px;
+  --uc-space-3: 12px;
+  --uc-space-4: 16px;
+  --uc-space-5: 20px;
+  --uc-space-6: 24px;
+  --uc-space-8: 32px;
+  --uc-space-10: 40px;
+  --uc-space-12: 48px;
+
+  --uc-radius-4: 4px;
+  --uc-radius-6: 6px;
+  --uc-radius-8: 8px;
+  --uc-radius-10: 10px;
+  --uc-radius-12: 12px;
+  --uc-radius-16: 16px;
+  --uc-radius-full: 999px;
+
+  --uc-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.28);
+  --uc-shadow-md: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --uc-shadow-lg: 0 22px 56px rgba(0, 0, 0, 0.48);
+
+  --uc-duration-fast: 120ms;
+  --uc-duration-standard: 180ms;
+  --uc-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --uc-color-bg-app: #f3f5f8;
+  --uc-color-bg-navigation: #f7f9fb;
+  --uc-color-surface-base: #ffffff;
+  --uc-color-surface-panel: #f8fafc;
+  --uc-color-surface-subtle: #eef2f6;
+  --uc-color-surface-raised: #ffffff;
+  --uc-color-surface-selected: #ece9ff;
+  --uc-color-surface-disabled: #f1f3f6;
+  --uc-color-text-primary: #131a24;
+  --uc-color-text-secondary: #4e5968;
+  --uc-color-text-tertiary: #657180;
+  --uc-color-text-disabled: #98a2b1;
+  --uc-color-text-inverse: #f8fafc;
+  --uc-color-text-accent: #5946cb;
+  --uc-color-border-subtle: #e4e9f0;
+  --uc-color-border-default: #d5dce6;
+  --uc-color-border-strong: #b7c1cf;
+  --uc-color-border-focus: #5f4bd8;
+  --uc-color-accent-subtle: #ece9ff;
+  --uc-color-status-success: #0f6b46;
+  --uc-color-status-success-bg: #e7f7ef;
+  --uc-color-status-success-border: #5cbd92;
+  --uc-color-status-info: #1a4f86;
+  --uc-color-status-info-bg: #e8f1fd;
+  --uc-color-status-info-border: #7db0e6;
+  --uc-color-status-warning: #7a4b00;
+  --uc-color-status-warning-bg: #fff7e6;
+  --uc-color-status-warning-border: #d6a23a;
+  --uc-color-status-danger: #a3203a;
+  --uc-color-status-danger-bg: #fdeaed;
+  --uc-color-status-danger-border: #e08a97;
+  --uc-color-status-unknown: #4e5968;
+  --uc-color-status-unknown-bg: #eef1f5;
+  --uc-color-status-unknown-border: #c2cad6;
+  --uc-shadow-sm: 0 2px 6px rgba(23, 34, 52, 0.1);
+  --uc-shadow-md: 0 10px 28px rgba(23, 34, 52, 0.14);
+  --uc-shadow-lg: 0 22px 56px rgba(23, 34, 52, 0.2);
+}

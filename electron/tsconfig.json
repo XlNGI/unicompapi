@@ -4,12 +4,19 @@
     "module": "CommonJS",
     "lib": ["ES2020"],
     "outDir": "../dist-electron",
-    "rootDir": ".",
+    "rootDir": "..",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "moduleResolution": "Node",
     "types": ["node", "electron"]
   },
-  "include": ["main.ts", "preload.ts"]
+  "include": [
+    "main.ts",
+    "preload.ts",
+    "ipc/**/*.ts",
+    "../src/domain/**/*.ts",
+    "../src/platform/**/*.ts",
+    "../src/shared/**/*.ts"
+  ]
 }

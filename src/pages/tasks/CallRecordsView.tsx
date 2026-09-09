@@ -1,0 +1,894 @@
+import { useEffect, useMemo, useState } from 'react';
+import { DateRangePicker, SelectPicker } from 'rsuite';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { EmptyState } from '../../components/EmptyState';
+import { FloatingStatusBar } from '../../components/FloatingStatusBar';
+import { StatusPill, type StatusTone } from '../../components/StatusPill';
+import type {
+  StorageApi,
+  StorageCallDetailsDto,
+  StorageCallRecordFilterDto,
+  StorageCallRecordSummaryDto,
+  StorageLocalMediaHandleDto,
+  StorageReadModelIssueDto,
+  StorageWorkDetailsDto
+} from '../../shared/storage-ipc';
+import {
+  describeGenerationSafeCode,
+  type GenerationSafeReason
+} from '../../ui/notifications/generation-failure-reasons';
+import { TaskCenterWorkspace } from './TaskCenterWorkspace';
+import {
+  calculateSuccessfulCallFee,
+  formatCallFee,
+  formatCallFeeFormula
+} from './call-fees';
+
+export type TaskCenterNavigate = (itemId: 'projects' | 'library') => void;
+
+interface CallRecordsViewProps {
+  readonly onNavigate?: TaskCenterNavigate;
+}
+
+interface CallFilters {
+  readonly projectId: string;
+  readonly productFeature: string;
+  readonly providerId: string;
+  readonly connectionId: string;
+  readonly modelId: string;
+  readonly state: string;
+  readonly createdFrom: string;
+  readonly createdTo: string;
+}
+
+const emptyFilters: CallFilters = {
+  projectId: 'all',
+  productFeature: 'all',
+  providerId: 'all',
+  connectionId: 'all',
+  modelId: 'all',
+  state: 'all',
+  createdFrom: '',
+  createdTo: ''
+};
+
+/** 把 YYYY-MM-DD 字符串解析为本地零点的 Date；空串返回 null。用本地分量避免 UTC 时区漂移。 */
+function parseYmdToDate(value: string): Date | null {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+/** 把 Date 格式化为本地 YYYY-MM-DD；null 返回空串。保持与既有字符串比较语义一致。 */
+function formatDateToYmd(date: Date | null): string {
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateRange(createdFrom: string, createdTo: string): [Date, Date] | null {
+  const start = parseYmdToDate(createdFrom);
+  const end = parseYmdToDate(createdTo);
+  return start && end ? [start, end] : null;
+}
+
+export const callStates: Record<string, { readonly label: string; readonly tone: StatusTone }> = {
+  submitting: { label: '正在提交', tone: 'info' },
+  failed_before_submission: { label: '提交失败', tone: 'danger' },
+  accepted: { label: '提交成功', tone: 'info' },
+  running: { label: '生成中', tone: 'info' },
+  completed: { label: '已完成', tone: 'success' },
+  failed: { label: '生成失败', tone: 'danger' },
+  cancelled: { label: '已取消', tone: 'neutral' },
+  unknown_outcome: { label: '结果未知', tone: 'warning' }
+};
+
+export const featureLabels: Record<string, string> = {
+  text_chat: '文本对话',
+  text_to_image: '文生图',
+  reference_to_image: '图生图',
+  image_edit: '图片编辑',
+  image_understanding: '图片识别',
+  image_to_prompt: '图片转提示词',
+  text_to_video: '文生视频',
+  image_to_video: '图生视频',
+  video_edit: '视频编辑'
+};
+
+export const usageLabels: Record<string, string> = {
+  reported_complete: '服务商已完整报告',
+  reported_partial: '服务商仅部分报告',
+  not_reported: '服务商未返回用量',
+  invalid_response: '用量响应无效',
+  unknown_outcome: '调用结果未知，用量无法确认',
+  not_applicable: '不适用',
+  not_collected_legacy: '历史记录未采集'
+};
+
+const eventLabels: Record<string, string> = {
+  submission_started: '开始提交',
+  submission_failed_before_request: '请求发出前失败',
+  provider_accepted: '服务商已接受',
+  provider_progressed: '服务商状态更新',
+  cancel_requested: '已请求取消',
+  cancelled: '已取消',
+  result_received: '已接收结果',
+  completed: '调用完成',
+  failed: '调用失败',
+  outcome_unknown: '调用结果未知'
+};
+
+export function CallRecordsView({ onNavigate }: CallRecordsViewProps) {
+  const storage = window.unicomp?.storage;
+  const [filters, setFilters] = useState<CallFilters>(emptyFilters);
+  const [records, setRecords] = useState<readonly StorageCallRecordSummaryDto[]>([]);
+  const [catalogRecords, setCatalogRecords] = useState<readonly StorageCallRecordSummaryDto[]>([]);
+  const [issues, setIssues] = useState<readonly StorageReadModelIssueDto[]>([]);
+  const [selectedCallId, setSelectedCallId] = useState<string>();
+  const [details, setDetails] = useState<StorageCallDetailsDto>();
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const selectedCallProjectId = records.find(
+    (record) => record.invocationAttemptId === selectedCallId
+  )?.projectId;
+
+  useEffect(() => {
+    let active = true;
+    if (!storage) {
+      setMessage('当前运行环境未连接桌面调用记录能力');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    if (
+      filters.createdFrom &&
+      filters.createdTo &&
+      filters.createdFrom > filters.createdTo
+    ) {
+      setMessage('开始日期不能晚于结束日期');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoading(true);
+    setMessage('');
+    void storage.listCallRecords(toRequest(filters))
+      .then((result) => {
+        if (!active) return;
+        if (!result.ok) {
+          setMessage('读取调用记录失败，请重试');
+          return;
+        }
+        setRecords(result.value.items);
+        setIssues(result.value.issues);
+        setTotal(result.value.total);
+        if (isEmptyFilter(filters)) setCatalogRecords(result.value.items);
+        setSelectedCallId((current) =>
+          current && result.value.items.some(
+            (record) => record.invocationAttemptId === current
+          )
+            ? current
+            : result.value.items[0]?.invocationAttemptId
+        );
+      })
+      .catch(() => {
+        if (active) setMessage('读取调用记录失败，请重试');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    filters.connectionId,
+    filters.createdFrom,
+    filters.createdTo,
+    filters.modelId,
+    filters.productFeature,
+    filters.projectId,
+    filters.providerId,
+    filters.state,
+    storage
+  ]);
+
+  useEffect(() => {
+    let active = true;
+    if (!storage || !selectedCallId || !selectedCallProjectId) {
+      setDetails(undefined);
+      return () => {
+        active = false;
+      };
+    }
+
+    setDetails(undefined);
+    setDetailsLoading(true);
+    void storage.getCallDetails(selectedCallProjectId, selectedCallId)
+      .then((result) => {
+        if (!active) return;
+        if (!result.ok) {
+          setMessage('读取调用详情失败，请重试');
+          return;
+        }
+        setDetails(result.value);
+        if (!result.value) setMessage('调用记录已不存在或所属项目当前不可用');
+      })
+      .catch(() => {
+        if (active) setMessage('读取调用详情失败，请重试');
+      })
+      .finally(() => {
+        if (active) setDetailsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCallId, selectedCallProjectId, storage]);
+
+  const options = useMemo(() => ({
+    projects: uniqueOptions(catalogRecords, 'projectId', 'projectName'),
+    features: uniqueValues(catalogRecords.map((record) => record.productFeature)),
+    providers: uniqueOptions(catalogRecords, 'providerId', 'providerName'),
+    connections: uniqueOptions(catalogRecords, 'connectionId', 'connectionName'),
+    models: uniqueOptions(catalogRecords, 'modelId', 'modelName')
+  }), [catalogRecords]);
+
+  function changeFilter<TKey extends keyof CallFilters>(key: TKey, value: CallFilters[TKey]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="uc-task-center__call-view">
+      <Card className="uc-task-center__filters uc-task-center__call-filters">
+        <SelectFilter
+          label="所属项目"
+          onChange={(value) => changeFilter('projectId', value)}
+          options={options.projects}
+          value={filters.projectId}
+        />
+        <SelectFilter
+          label="调用功能"
+          onChange={(value) => changeFilter('productFeature', value)}
+          options={options.features.map((value) => ({
+            value,
+            label: featureLabels[value] ?? '其他功能'
+          }))}
+          value={filters.productFeature}
+        />
+        <SelectFilter
+          label="服务商"
+          onChange={(value) => changeFilter('providerId', value)}
+          options={options.providers}
+          value={filters.providerId}
+        />
+        <SelectFilter
+          label="连接"
+          onChange={(value) => changeFilter('connectionId', value)}
+          options={options.connections}
+          value={filters.connectionId}
+        />
+        <SelectFilter
+          label="模型"
+          onChange={(value) => changeFilter('modelId', value)}
+          options={options.models}
+          value={filters.modelId}
+        />
+        <SelectFilter
+          label="调用状态"
+          onChange={(value) => changeFilter('state', value)}
+          options={Object.entries(callStates).map(([value, item]) => ({
+            value,
+            label: item.label
+          }))}
+          value={filters.state}
+        />
+        <div className="uc-rsuite-field uc-task-center__date-range">
+          日期范围
+          <DateRangePicker
+            aria-label="日期范围"
+            block
+            character=" 至 "
+            format="yyyy-MM-dd"
+            onChange={(range) => setFilters((current) => ({
+              ...current,
+              createdFrom: formatDateToYmd(range?.[0] ?? null),
+              createdTo: formatDateToYmd(range?.[1] ?? null)
+            }))}
+            placeholder="选择日期范围"
+            showOneCalendar
+            value={parseDateRange(filters.createdFrom, filters.createdTo)}
+          />
+        </div>
+      </Card>
+
+      {issues.length > 0 ? (
+        <FloatingStatusBar label="状态" tone="warning">
+          <p>
+            部分项目的调用记录无法读取：{' '}
+            {issues.map((issue) => (
+              `${issue.projectName}：${issue.reason === 'unavailable'
+                ? '项目失效或断盘'
+                : '调用数据损坏或缺少精确参数定义'}`
+            )).join('；')}
+          </p>
+        </FloatingStatusBar>
+      ) : null}
+
+      {loading ? (
+        <EmptyState
+          busy
+          description="正在汇总项目级调用与上游用量事实。"
+          icon="载"
+          role="status"
+          title="正在读取调用记录"
+        />
+      ) : records.length === 0 ? (
+        <EmptyState
+          description="预检、候选读取和连接验证不会创建业务调用记录。"
+          icon="调"
+          title="没有符合条件的调用"
+        />
+      ) : (
+        <TaskCenterWorkspace
+          details={(
+            <>
+              <h2 id="call-details-title">调用详情</h2>
+              {detailsLoading ? (
+                <p className="uc-task-center__muted" role="status">正在读取调用详情…</p>
+              ) : details ? (
+                <CallDetails details={details} onNavigate={onNavigate} />
+              ) : (
+                <p className="uc-task-center__muted">选择左侧调用查看脱敏时间线和用量事实。</p>
+              )}
+            </>
+          )}
+          detailsLabelledBy="call-details-title"
+          list={(
+            <>
+              <h2 id="call-list-title">调用列表（{records.length} / {total}）</h2>
+              {records.map((record) => (
+                <CallRecordButton
+                  key={record.invocationAttemptId}
+                  onSelect={() => setSelectedCallId(record.invocationAttemptId)}
+                  record={record}
+                  selected={selectedCallId === record.invocationAttemptId}
+                />
+              ))}
+            </>
+          )}
+          listLabelledBy="call-list-title"
+        />
+      )}
+
+      <p className="uc-task-center__message" aria-live="polite">{message}</p>
+    </div>
+  );
+}
+
+export function CallRecordButton({
+  onSelect,
+  record,
+  selected
+}: {
+  readonly onSelect: () => void;
+  readonly record: StorageCallRecordSummaryDto;
+  readonly selected: boolean;
+}) {
+  const state = callState(record.state);
+  return (
+    <button
+      aria-pressed={selected}
+      className="uc-task-center__task uc-task-center__call"
+      onClick={onSelect}
+      type="button"
+    >
+      <span>
+        <strong>{featureLabels[record.productFeature] ?? '其他功能'}</strong>
+        <small>{record.projectName}</small>
+      </span>
+      <StatusPill tone={state.tone}>{state.label}</StatusPill>
+      <small>{displayRoute(record)}</small>
+      <small>{formatTimestamp(record.createdAt)}</small>
+      <small>{usageLabels[record.usageAvailability] ?? '用量状态未知'}</small>
+    </button>
+  );
+}
+
+export function CallDetails({
+  details,
+  onNavigate
+}: {
+  readonly details: StorageCallDetailsDto;
+  readonly onNavigate?: TaskCenterNavigate;
+}) {
+  const state = callState(details.state);
+  return (
+    <div className="uc-task-center__details-content">
+      <div className="uc-task-center__details-heading">
+        <div>
+          <strong>{featureLabels[details.productFeature] ?? '其他功能'}</strong>
+          <small>{details.invocationAttemptId}</small>
+        </div>
+        <StatusPill tone={state.tone}>{state.label}</StatusPill>
+      </div>
+
+      <dl className="uc-task-center__facts">
+        <div><dt>所属项目</dt><dd>{details.projectName}</dd></div>
+        <div><dt>提交时间</dt><dd>{formatTimestamp(details.createdAt)}</dd></div>
+        <div><dt>服务商</dt><dd>{details.providerName ?? '提交时显示名不可用'}</dd></div>
+        <div><dt>连接</dt><dd>{details.connectionName ?? '提交时显示名不可用'}</dd></div>
+        <div><dt>模型</dt><dd>{details.modelName ?? '提交时显示名不可用'}</dd></div>
+        <div><dt>总耗时</dt><dd>{formatDuration(details.durationMs)}</dd></div>
+        <div><dt>调用对象</dt><dd>{callSubjectLabel(details.subject.kind)}</dd></div>
+        <div><dt>重试归属</dt><dd>{details.retryOfInvocationAttemptId ?? '首次调用'}</dd></div>
+      </dl>
+
+      <section className="uc-task-center__call-section">
+        <h3>状态时间线</h3>
+        <ol className="uc-task-center__timeline">
+          {details.timeline.map((event) => {
+            const tone = timelineEventTone(event.type);
+            const reason = timelineFailureReason(event);
+            return (
+              <li
+                className={`uc-task-center__timeline-item uc-task-center__timeline-item--${tone}`}
+                key={event.sequence}
+              >
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{eventLabels[event.type] ?? '其他状态更新'}</strong>
+                  <small>{formatTimestamp(event.occurredAt)}</small>
+                  {reason ? (
+                    <div className={`uc-task-center__timeline-reason uc-task-center__timeline-reason--${tone}`}>
+                      <strong>{reason.label}</strong>
+                      {reason.technicalCode ? (
+                        <code>技术代码：{reason.technicalCode}</code>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      <section className="uc-task-center__call-section">
+        <div className="uc-task-center__details-heading">
+          <h3>上游用量与费用</h3>
+          <StatusPill tone={usageTone(details.usage.availability)}>
+            {usageLabels[details.usage.availability] ?? '用量状态未知'}
+          </StatusPill>
+        </div>
+        <CallFeeSummary details={details} />
+        {details.usage.facts.length === 0 ? (
+          <p className="uc-task-center__muted">
+            {usageLabels[details.usage.availability] ?? '没有可展示的上游用量事实。'}
+          </p>
+        ) : (
+          <dl className="uc-task-center__usage-list">
+            {details.usage.facts.map((fact) => (
+              <div key={`${fact.metricId}:${fact.unit}`}>
+                <dt>{usageMetricLabel(fact.metricId)}</dt>
+                <dd>{fact.quantity} {usageUnitLabel(fact.unit)}</dd>
+                <small>{usageSourceLabel(fact.source)}</small>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+
+      <section className="uc-task-center__call-section">
+        <div className="uc-task-center__details-heading">
+          <h3>本地结果</h3>
+          <StatusPill tone={registrationTone(details.resultRegistration.state)}>
+            {registrationLabel(details.resultRegistration.state)}
+          </StatusPill>
+        </div>
+        {details.resultRegistration.workIds.length > 0 ? (
+          <div className="uc-task-center__result-list">
+            {details.resultRegistration.workIds.map((workId, index) => (
+              <RegisteredWorkResultCard
+                key={workId}
+                localResult={details.localResults[index] ?? details.localResults[0]}
+                onNavigate={onNavigate}
+                workId={workId}
+              />
+            ))}
+          </div>
+        ) : details.localResults.length === 0 ? (
+          <p className="uc-task-center__muted">当前调用没有已记录的本地结果属性。</p>
+        ) : (
+          <div className="uc-task-center__result-list">
+            {details.localResults.map((result, index) => (
+              <article className="uc-task-center__result-summary" key={`${result.observedAt}:${index}`}>
+                <strong>{mediaLabel(result.mediaKind)} · {result.outputCount} 个结果</strong>
+                <small>{localResultFacts(result)}</small>
+                <small>{validationLabel(result.validationState)} · {formatTimestamp(result.observedAt)}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="uc-task-center__actions">
+        <Button onClick={() => onNavigate?.('projects')} variant="secondary">返回来源项目</Button>
+        {details.resultRegistration.state === 'registered' ? (
+          <Button onClick={() => onNavigate?.('library')} variant="secondary">查看已登记作品</Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CallFeeSummary({ details }: { readonly details: StorageCallDetailsDto }) {
+  const fee = calculateSuccessfulCallFee(details);
+  return (
+    <dl className="uc-task-center__usage-list uc-task-center__usage-list--fee">
+      <div>
+        <dt>费用</dt>
+        <dd>{formatCallFee(fee)}</dd>
+        <small>{fee.state === 'calculated' ? formatCallFeeFormula(fee) : fee.reason}</small>
+      </div>
+    </dl>
+  );
+}
+
+function callSubjectLabel(kind: 'media' | 'conversation' | 'prompt_once'): string {
+  if (kind === 'media') return '媒体任务';
+  if (kind === 'conversation') return '项目对话';
+  return '一次性提示词增强';
+}
+
+function RegisteredWorkResultCard({
+  localResult,
+  onNavigate,
+  workId
+}: {
+  readonly localResult?: StorageCallDetailsDto['localResults'][number];
+  readonly onNavigate?: TaskCenterNavigate;
+  readonly workId: string;
+}) {
+  const storage: StorageApi | undefined = window.unicomp?.storage;
+  const [work, setWork] = useState<StorageWorkDetailsDto>();
+  const [media, setMedia] = useState<StorageLocalMediaHandleDto>();
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [revealing, setRevealing] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setWork(undefined);
+    setMedia(undefined);
+    setMessage('');
+    setLoading(true);
+    if (!storage) {
+      setMessage('本地作品读取能力不可用');
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    void storage.getWorkDetails(workId)
+      .then(async (result) => {
+        if (!active) return;
+        if (!result.ok || !result.value) {
+          setMessage('本地作品信息不可用');
+          setLoading(false);
+          return;
+        }
+        setWork(result.value);
+        if (result.value.fileState !== 'available') {
+          setMessage('本地文件当前不可用');
+          setLoading(false);
+          return;
+        }
+        const mediaResult = await storage.createWorkMediaHandle(workId);
+        if (!active) return;
+        if (mediaResult.ok) setMedia(mediaResult.value);
+        else setMessage('本地预览暂不可用');
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active) {
+          setMessage('本地预览暂不可用');
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [storage, workId]);
+
+  async function revealWork() {
+    if (!storage || revealing) return;
+    setRevealing(true);
+    setMessage('');
+    try {
+      const result = await storage.revealWorkFile(workId);
+      setMessage(result.ok ? '已在文件管理器中定位作品' : '无法定位本地作品');
+    } catch {
+      setMessage('无法定位本地作品');
+    } finally {
+      setRevealing(false);
+    }
+  }
+
+  const kind = work?.mediaKind ?? media?.mediaKind ?? localResult?.mediaKind ?? 'image';
+  const title = work?.name ?? `${mediaLabel(kind)}作品`;
+  const fileAvailable = work?.fileState === 'available';
+
+  return (
+    <article className="uc-task-center__result-card">
+      <div className="uc-task-center__result-preview">
+        {media && kind === 'image' ? (
+          <img alt={`${title}预览`} loading="lazy" src={media.url} />
+        ) : media && kind === 'video' ? (
+          <video controls playsInline preload="metadata" src={media.url} />
+        ) : (
+          <span>{kind === 'video' ? '视频预览暂不可用' : '图片预览暂不可用'}</span>
+        )}
+      </div>
+      <div className="uc-task-center__result-info">
+        <div className="uc-task-center__result-heading">
+          <strong title={title}>{title}</strong>
+          <StatusPill tone={fileAvailable ? 'success' : 'warning'}>
+            {fileAvailable ? '本地可用' : loading ? '读取中' : '本地不可用'}
+          </StatusPill>
+        </div>
+        <small>{mediaLabel(kind)}{localResult ? ` · ${localResultFacts(localResult)}` : ''}</small>
+        <small>
+          {localResult ? `${validationLabel(localResult.validationState)} · ` : ''}
+          已保存到当前项目
+        </small>
+        <div className="uc-task-center__result-actions">
+          <Button disabled={!storage || !fileAvailable || revealing} loading={revealing} onClick={revealWork} variant="secondary">
+            打开文件位置
+          </Button>
+          <Button onClick={() => onNavigate?.('library')} variant="secondary">
+            查看作品
+          </Button>
+        </div>
+        {message ? <small aria-live="polite" role="status">{message}</small> : null}
+      </div>
+    </article>
+  );
+}
+
+function SelectFilter({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly options: readonly { readonly value: string; readonly label: string }[];
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <div className="uc-rsuite-field">
+      {label}
+      <SelectPicker
+        aria-label={label}
+        block
+        cleanable={false}
+        data={[{ value: 'all', label: '全部' }, ...options]}
+        onChange={(next) => onChange(next ?? 'all')}
+        searchable={false}
+        value={value}
+      />
+    </div>
+  );
+}
+
+function toRequest(filters: CallFilters): StorageCallRecordFilterDto {
+  return {
+    ...(filters.projectId === 'all' ? {} : { projectId: filters.projectId }),
+    ...(filters.productFeature === 'all'
+      ? {}
+      : { productFeature: filters.productFeature }),
+    ...(filters.providerId === 'all' ? {} : { providerId: filters.providerId }),
+    ...(filters.connectionId === 'all'
+      ? {}
+      : { connectionId: filters.connectionId }),
+    ...(filters.modelId === 'all' ? {} : { modelId: filters.modelId }),
+    ...(filters.state === 'all' ? {} : { state: filters.state }),
+    ...(filters.createdFrom
+      ? { createdFrom: new Date(`${filters.createdFrom}T00:00:00`).toISOString() }
+      : {}),
+    ...(filters.createdTo
+      ? { createdTo: new Date(`${filters.createdTo}T23:59:59.999`).toISOString() }
+      : {}),
+    offset: 0,
+    limit: 200
+  };
+}
+
+function isEmptyFilter(filters: CallFilters): boolean {
+  return Object.entries(filters).every(([, value]) => value === 'all' || value === '');
+}
+
+function uniqueOptions(
+  records: readonly StorageCallRecordSummaryDto[],
+  idKey: 'projectId' | 'providerId' | 'connectionId' | 'modelId',
+  nameKey: 'projectName' | 'providerName' | 'connectionName' | 'modelName'
+) {
+  return [...new Map(records.map((record) => [
+    record[idKey],
+    {
+      value: record[idKey],
+      label: record[nameKey] ?? '提交时显示名不可用'
+    }
+  ])).values()].sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+}
+
+function uniqueValues(values: readonly string[]): readonly string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+export function callState(state: string) {
+  return callStates[state] ?? { label: '未知调用状态', tone: 'neutral' as const };
+}
+
+export function displayRoute(record: StorageCallRecordSummaryDto): string {
+  if (record.displayNameAvailability !== 'snapshotted') return '提交时路由显示名不可用';
+  return [record.providerName, record.connectionName, record.modelName].filter(Boolean).join(' / ');
+}
+
+export function formatTimestamp(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '时间不可用' : date.toLocaleString('zh-CN');
+}
+
+function formatDuration(value?: string): string {
+  if (!value) return '尚未结束';
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '耗时不可用';
+  if (milliseconds < 1000) return `${milliseconds} 毫秒`;
+  const seconds = Math.floor(milliseconds / 1000);
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder === 0 ? `${minutes} 分钟` : `${minutes} 分 ${remainder} 秒`;
+}
+
+function usageTone(availability: string): StatusTone {
+  if (availability === 'reported_complete' || availability === 'not_applicable') return 'success';
+  if (availability === 'reported_partial' || availability === 'unknown_outcome') return 'warning';
+  if (availability === 'invalid_response') return 'danger';
+  return 'neutral';
+}
+
+function usageSourceLabel(source: string): string {
+  if (source === 'provider_body') return '来源：服务商响应正文白名单字段';
+  if (source === 'provider_header') return '来源：服务商响应头白名单字段';
+  if (source === 'provider_usage_endpoint') return '来源：服务商用量接口白名单字段';
+  return '来源不可用';
+}
+
+function usageMetricLabel(metric: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    input_tokens: '输入文本用量',
+    output_tokens: '输出文本用量',
+    prompt_tokens: '提示词用量',
+    completion_tokens: '输出用量',
+    total_tokens: '总文本用量',
+    cached_tokens: '缓存用量',
+    reasoning_tokens: '推理用量',
+    credit_amount: '积分用量',
+    cash_amount: '现金扣费',
+    cash_list_price: '原价金额',
+    package_unit_amount: '资源包用量',
+    input_images: '输入图片数',
+    output_images: '输出图片数',
+    image_count: '输出图片数',
+    video_seconds: '视频时长',
+    duration_ms: '处理时长'
+  };
+  return labels[metric] ?? '其他用量';
+}
+
+function usageUnitLabel(unit: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    token: '个文本单位',
+    tokens: '个文本单位',
+    credit: '积分',
+    credits: '积分',
+    provider_unit: '资源包单位',
+    currency_amount: '金额',
+    image: '张',
+    images: '张',
+    millisecond: '毫秒',
+    milliseconds: '毫秒',
+    second: '秒',
+    seconds: '秒',
+    byte: '字节',
+    bytes: '字节'
+  };
+  return labels[unit] ?? '单位';
+}
+
+function registrationTone(state: string): StatusTone {
+  if (state === 'registered' || state === 'not_applicable') return 'success';
+  return 'warning';
+}
+
+function registrationLabel(state: string): string {
+  if (state === 'registered') return '已登记作品';
+  if (state === 'not_applicable') return '无需登记作品';
+  return '尚未登记作品';
+}
+
+function mediaLabel(kind: string): string {
+  if (kind === 'image') return '图片';
+  if (kind === 'video') return '视频';
+  return '文本';
+}
+
+function validationLabel(state: string): string {
+  if (state === 'valid') return '本地校验通过';
+  if (state === 'invalid') return '本地校验失败';
+  return '等待本地校验';
+}
+
+function localResultFacts(result: StorageCallDetailsDto['localResults'][number]): string {
+  const facts = [];
+  if (result.width !== undefined && result.height !== undefined) {
+    facts.push(`${result.width} × ${result.height}`);
+  }
+  if (result.durationMs) facts.push(`${result.durationMs} 毫秒`);
+  if (result.byteLength) facts.push(formatByteLength(result.byteLength));
+  return facts.join(' · ') || '没有额外的本地媒体属性';
+}
+
+function timelineEventTone(type: string): StatusTone {
+  if (type === 'completed') return 'success';
+  if (type === 'submission_failed_before_request' || type === 'failed') return 'danger';
+  if (type === 'cancel_requested' || type === 'outcome_unknown') return 'warning';
+  if (type === 'cancelled') return 'neutral';
+  return 'info';
+}
+
+function timelineFailureReason(
+  event: StorageCallDetailsDto['timeline'][number]
+): GenerationSafeReason | undefined {
+  if (!['submission_failed_before_request', 'failed', 'outcome_unknown'].includes(event.type)) {
+    return undefined;
+  }
+  const safeReason = describeGenerationSafeCode(event.safeCode);
+  if (safeReason) return safeReason;
+  return {
+    label: event.type === 'outcome_unknown'
+      ? '调用结果暂时无法确认'
+      : '未记录可公开的具体失败原因',
+    recognized: true
+  };
+}
+
+function formatByteLength(value: string): string {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return `${value} 字节`;
+  if (bytes < 1_024) return `${bytes} 字节`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let amount = bytes;
+  let unit = -1;
+  do {
+    amount /= 1_024;
+    unit += 1;
+  } while (amount >= 1_024 && unit < units.length - 1);
+  return `${amount >= 10 ? amount.toFixed(1) : amount.toFixed(2)} ${units[unit]}`;
+}

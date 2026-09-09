@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "targetId": "windows-x64-primary",
+  "sourceCommit": "674b603",
+  "collectedAt": "2026-07-28T02:05:40.644Z",
+  "runtime": {
+    "schemaVersion": 1,
+    "os": "win32",
+    "osVersion": "10.0.19045",
+    "architecture": "x64",
+    "nodeVersion": "26.5.0",
+    "electronVersion": null,
+    "pathSeparator": "\\",
+    "caseSensitivity": "unknown",
+    "unicodeNormalization": "unknown",
+    "locale": "zh-CN",
+    "timeZone": "Asia/Shanghai"
+  },
+  "results": [
+    {
+      "caseId": "b1.engineering_integrity",
+      "suite": "engineering_integrity",
+      "status": "passed",
+      "evidenceRefs": [],
+      "note": "B1 platform contract baseline verified on the recorded runtime"
+    },
+    {
+      "caseId": "b1.electron_lifecycle",
+      "suite": "electron_lifecycle",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.filesystem_permissions",
+      "suite": "filesystem_permissions",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.secure_storage",
+      "suite": "secure_storage",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.system_integrations",
+      "suite": "system_integrations",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.power_recovery",
+      "suite": "power_recovery",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.media_software",
+      "suite": "media_software",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.full_product_ui",
+      "suite": "full_product_ui",
+      "status": "not_run",
+      "evidenceRefs": []
+    },
+    {
+      "caseId": "b1.security_audit",
+      "suite": "security_audit",
+      "status": "not_run",
+      "evidenceRefs": []
+    }
+  ]
+}
