@@ -1,3 +1,4 @@
+import { parseConversationImageInput, type ConversationImageInput } from '../conversation-image-input';
 ﻿import { randomUUID } from 'node:crypto';
 import {
   createProviderUsageObservation,
@@ -146,6 +147,7 @@ export interface NewApiChatMessageV1 {
 }
 
 export interface NewApiChatDispatchRequestV1 {
+  readonly image?: ConversationImageInput;
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
   readonly messages: readonly NewApiChatMessageV1[];
@@ -952,7 +954,7 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
   const item = exactRecord(
     value,
     ['responseExecutionId', 'invocationAttemptId', 'messages', 'parameterValues'],
-    ['tools'],
+    ['tools', 'image'],
     'NewApi chat dispatch request'
   );
   if (!Array.isArray(item.messages) || item.messages.length < 1 || item.messages.length > 200) {
@@ -985,6 +987,7 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
       256
     ) as ProviderInvocationAttemptId,
     messages,
+    ...(item.image !== undefined ? { image: parseConversationImageInput(item.image) } : {}),
     parameterValues: plainRecord(item.parameterValues, 'NewApi parameter values') as Readonly<
       Record<string, ParameterValue>
     >,
@@ -1001,9 +1004,11 @@ function serializeRequest(
   // UniCompAPI / OpenAI-compatible gateways accept temperature and top_p together.
   const body: Record<string, unknown> = {
     model: route.providerModelKey,
-    messages: request.messages.map((message) => ({
+    messages: request.messages.map((message, index) => ({
       role: message.role,
-      content: message.content,
+      content: request.image && message.role === 'user' && index === request.messages.map(item => item.role).lastIndexOf('user')
+        ? [{ type: 'text', text: message.content }, { type: 'image_url', image_url: { url: `data:${request.image.mimeType};base64,${request.image.base64}` } }]
+        : message.content,
       ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
       ...(message.name !== undefined ? { name: message.name } : {})
     })),
@@ -1094,7 +1099,7 @@ function serializeRequest(
     body.user = parameters.user.trim();
   }
   const encoded = new TextEncoder().encode(JSON.stringify(body));
-  if (encoded.byteLength > 2 * 1024 * 1024) {
+  if (encoded.byteLength > (request.image ? 14 : 2) * 1024 * 1024) {
     throw invalidRequest('NewApi request exceeded the local size limit');
   }
   return encoded;

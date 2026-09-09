@@ -155,6 +155,31 @@ describe('chat composer event behavior', () => {
     expect(request.content).toBe('总结主要观点，在这里回复就行');
   });
 
+  it('imports a pasted image, previews it, and submits its registered reference', async () => {
+    const preview = 'data:image/png;base64,aGVsbG8=';
+    vi.stubGlobal('FileReader', class {
+      result = preview;
+      onload?: () => void;
+      readAsDataURL() { this.onload?.(); }
+    });
+    const importImage = vi.fn(async () => ({ ok: true, value: { fileId: 'image-1', fileName: 'clipboard.png', sizeBytes: 5,
+      extraction: { status: 'unsupported', warnings: [], preview: '' } } }));
+    Object.assign(window.unicomp!, { getPathForFile: () => '' });
+    Object.assign(window.unicomp!.documentAttachments!, { importAttachment: importImage });
+    await settle();
+    const preventDefault = vi.fn();
+    (element('对话输入').props.onPaste as (event: unknown) => void)({ preventDefault, clipboardData: { files: [{ type: 'image/png', size: 5 }] } });
+    await settle();
+    expect(preventDefault).toHaveBeenCalled();
+    expect(importImage).toHaveBeenCalledWith({ image: { mimeType: 'image/png', base64: 'aGVsbG8=' } });
+    expect(find(tree, item => item.type === 'img')?.props.src).toBe(preview);
+    await type('分析一下图片');
+    await send('button');
+    expect(startWorkflow.mock.calls[0][0].attachmentFileIds).toEqual(['image-1']);
+    expect(startWorkflow.mock.calls[0][0].content).toBe('分析一下图片');
+    expect(JSON.stringify(startWorkflow.mock.calls[0][0])).not.toContain('base64');
+  });
+
   it('does not submit when Enter is only committing Chinese input composition', async () => {
     await settle();
     await type('销售分析');

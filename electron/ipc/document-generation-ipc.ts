@@ -196,7 +196,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
           projectId: session.projectId,
           now
         });
-        return { ok: true, value: await service.importAttachment(input) };
+        return { ok: true, value: 'image' in input ? await service.importImage(input.image) : await service.importAttachment(input) };
       })
   );
   ipcMain.handle(

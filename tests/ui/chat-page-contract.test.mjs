@@ -164,9 +164,12 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /上下文 \{includedContextIds\.length\}/);
 });
 
-test('chat composer does not advertise unsupported attachments', () => {
-  assert.doesNotMatch(source, /type="file"|FileReader|fetch\(|upload|localStorage|sessionStorage/);
+test('chat composer imports images through the controlled attachment API', () => {
+  assert.doesNotMatch(source, /type="file"|fetch\(|upload|localStorage|sessionStorage/);
   assert.doesNotMatch(source, /原生附件登记未进入本支范围|>附件</);
+  assert.match(source, /onPaste=/);
+  assert.match(source, /documentAttachments\.importAttachment/);
+  assert.match(source, /本条消息的附件/);
 });
 
 test('project context uses a single explicit registration action and separates use from deletion', () => {

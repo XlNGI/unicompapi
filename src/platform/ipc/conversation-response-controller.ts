@@ -1,3 +1,5 @@
+import { FeatureSubmissionError } from '../providers/provider-feature-candidates';
+import { isConversationImageRequest, declinesConversationImageInput } from '../../application/conversation-image-request';
 import {
   createConversationResponseDraft,
   replaceConversationResponseContextSelections,
@@ -46,7 +48,7 @@ import { pinProjectContextSelection } from '../repositories';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import { chatContextFailure, failure } from './chat-context-errors';
 import { toConversationDto } from './conversation-controller';
-import { ConversationAttachmentError, conversationAttachmentBatch, type ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { ConversationAttachmentError, conversationAttachmentBatch, isImageAttachment, type ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
@@ -130,6 +132,7 @@ export class ConversationResponseController {
       if (!pageReferences.length) await runtime.attachments?.resolve({
         conversation, currentUserMessageId: message.id, query: attachmentQuery
       });
+      const imageQuery = isPlainUserMessage && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
       const draft = createConversationResponseDraft({
         id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
         projectId: runtime.conversations.projectId,
@@ -138,6 +141,7 @@ export class ConversationResponseController {
         userMessageId: message.id,
         userMessageRevision: message.revision,
         attachmentQuery,
+      ...(imageQuery ? { imageQuery } : {}),
         ...(pageReferences.length ? { documentPageQuery: attachmentQuery } : {}),
         productFeature: input.productFeature,
         createdAt: toIsoTimestamp(this.now())
@@ -564,6 +568,7 @@ export class ConversationResponseController {
       currentUserMessageId: userMessage.id,
       query: attachmentQuery
     });
+    const imageQuery = isPageQuestion && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
     let draft = createConversationResponseDraft({
       id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
       projectId: runtime.conversations.projectId,
@@ -573,6 +578,7 @@ export class ConversationResponseController {
       userMessageRevision: userMessage.revision,
       ...(workflow ? { promptContent: input.content } : {}),
       attachmentQuery,
+      ...(imageQuery ? { imageQuery } : {}),
       ...(pageReferences.length ? { documentPageQuery } : {}),
       productFeature: input.productFeature,
       createdAt: toIsoTimestamp(this.now())
@@ -611,6 +617,11 @@ export class ConversationResponseController {
     const prepared = await runtime.candidates.prepareSubmission({
       subject: subject(draft),
       candidateId: input.candidateId
+    }).catch(error => {
+      if (imageQuery && error instanceof FeatureSubmissionError && error.code === 'candidate_unavailable') {
+        throw new ConversationAttachmentError('attachment_unsupported', '当前所选模型或通道不能接收图片，请选择支持图片输入的模型后重新发送。');
+      }
+      throw error;
     });
     const pendingExecutionId = workflow
       ? `pending:${input.clientCommandId}`

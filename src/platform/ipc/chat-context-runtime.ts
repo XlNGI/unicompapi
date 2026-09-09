@@ -303,7 +303,8 @@ export function createChatContextRuntime(
         projectConversations,
         responseDrafts,
         contextRepository,
-        documentPages
+        documentPages,
+        attachments
       ),
       new RegistryFeatureCandidateSource(
         providerRegistry,

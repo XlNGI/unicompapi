@@ -39,6 +39,7 @@ export interface ConversationResponseDraftV1 {
   readonly attachmentQuery?: string;
   /** Main-process-only query for reading an already delivered document page. */
   readonly documentPageQuery?: string;
+  readonly imageQuery?: string;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
@@ -56,6 +57,7 @@ export interface CreateConversationResponseDraftInput {
   readonly promptContent?: string;
   readonly attachmentQuery?: string;
   readonly documentPageQuery?: string;
+  readonly imageQuery?: string;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections?: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues?: Readonly<Record<string, ParameterValue>>;
@@ -79,6 +81,7 @@ export function createConversationResponseDraft(
       : {}),
     ...(input.attachmentQuery !== undefined ? { attachmentQuery: input.attachmentQuery } : {}),
     ...(input.documentPageQuery !== undefined ? { documentPageQuery: input.documentPageQuery } : {}),
+    ...(input.imageQuery !== undefined ? { imageQuery: input.imageQuery } : {}),
     productFeature: input.productFeature,
     contextSelections: input.contextSelections ?? [],
     parameterValues: input.parameterValues ?? {},
@@ -150,8 +153,8 @@ export function parseConversationResponseDraft(
   const hasAttachmentQuery = Object.prototype.hasOwnProperty.call(item, 'attachmentQuery');
   const hasDocumentPageQuery = Object.prototype.hasOwnProperty.call(item, 'documentPageQuery');
   if (
-    keys.some((key) => !requiredKeys.has(key) && !['parameterValues', 'promptContent', 'attachmentQuery', 'documentPageQuery'].includes(key)) ||
-    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) + (hasAttachmentQuery ? 1 : 0) + (hasDocumentPageQuery ? 1 : 0) !== keys.length ||
+    keys.some((key) => !requiredKeys.has(key) && !['parameterValues', 'promptContent', 'attachmentQuery', 'documentPageQuery', 'imageQuery'].includes(key)) ||
+    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) + (hasAttachmentQuery ? 1 : 0) + (hasDocumentPageQuery ? 1 : 0) + (item.imageQuery !== undefined ? 1 : 0) !== keys.length ||
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
     Number(item.revision) < 0 ||
@@ -183,6 +186,8 @@ export function parseConversationResponseDraft(
   if (attachmentQuery !== undefined && attachmentQuery.length > 1_000_000) {
     throw new InvariantViolationError('conversation response draft attachmentQuery is too long');
   }
+  const imageQuery = item.imageQuery === undefined ? undefined : nonBlank(item.imageQuery, 'draft.imageQuery');
+  if (imageQuery !== undefined && imageQuery.length > 1_000_000) throw new InvariantViolationError('Image query is too long');
   const documentPageQuery = hasDocumentPageQuery
     ? nonBlank(item.documentPageQuery, 'draft.documentPageQuery')
     : undefined;
@@ -211,6 +216,7 @@ export function parseConversationResponseDraft(
     ...(promptContent !== undefined ? { promptContent } : {}),
     ...(attachmentQuery !== undefined ? { attachmentQuery } : {}),
     ...(documentPageQuery !== undefined ? { documentPageQuery } : {}),
+    ...(imageQuery !== undefined ? { imageQuery } : {}),
     productFeature,
     contextSelections,
     parameterValues: hasParameterValues
