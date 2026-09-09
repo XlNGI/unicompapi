@@ -1,6 +1,7 @@
 import {
   createConversationWorkflow,
   parseConversationIntentPlan,
+  parseConversationWorkflow,
   toConversationWorkflowId,
   toIsoTimestamp,
   updateConversationWorkflow,
@@ -8,14 +9,18 @@ import {
   type ConversationWorkflowId,
   type ConversationWorkflowRepository,
   type ConversationWorkflowV1,
+  type ConversationWorkflowDelivery,
+  type ConversationIntentPlan,
   type ConversationWorkflowStatus,
   type MessageId,
   type ProjectId
 } from '../domain';
-import type {
-  ConversationIntentOrchestrator,
-  ConversationSemanticContext
+import {
+  ConversationIntentOrchestrationError,
+  type ConversationIntentOrchestrator,
+  type ConversationSemanticContext
 } from './conversation-intent-orchestrator';
+import { conversationClarificationKey, conversationClarificationLabel } from './conversation-clarification-fields';
 
 export type ConversationWorkflowApplicationErrorCode =
   | 'workflow_not_found'
@@ -52,16 +57,18 @@ export class ConversationWorkflowService {
     readonly sourceMessageId: MessageId;
     readonly rawText: string;
     readonly context?: ConversationSemanticContext;
+    readonly signal?: AbortSignal;
   }): Promise<ConversationWorkflowV1> {
     if (input.projectId !== this.repository.projectId) throw new TypeError('Conversation workflow project does not match repository scope');
-    const decision = await this.orchestrator.analyze({ rawText: input.rawText, context: input.context });
+    const decision = await this.orchestrator.analyze({ rawText: input.rawText, context: input.context, signal: input.signal });
+    if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const createdAt = toIsoTimestamp(this.now());
     const confirmation = await confirmationForPlan(
       decision.plan,
       createdAt,
       this.confirmationTtlMs
     );
-    const workflow = createConversationWorkflow({
+    const created = createConversationWorkflow({
       id: this.nextId(),
       projectId: input.projectId,
       conversationId: input.conversationId,
@@ -79,6 +86,13 @@ export class ConversationWorkflowService {
       ...confirmation,
       createdAt
     });
+    const workflow = decision.cancelled
+      ? parseConversationWorkflow({
+          ...created, status: 'cancelled', pendingQuestions: [],
+          ...(created.deliveries ? { deliveries: created.deliveries.map((item) => ({ ...item, status: 'cancelled' as const })) } : {})
+        })
+      : created;
+    if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     await this.repository.createSupersedingPending(workflow);
     return workflow;
   }
@@ -87,24 +101,43 @@ export class ConversationWorkflowService {
     readonly workflowId: ConversationWorkflowId;
     readonly expectedRevision: number;
     readonly rawText: string;
+    readonly sourceMessageId?: MessageId;
     readonly context?: ConversationSemanticContext;
+    readonly signal?: AbortSignal;
   }): Promise<ConversationWorkflowV1> {
     const current = await this.require(input.workflowId, input.expectedRevision);
-    if (current.status !== 'needs_clarification') throw new TypeError('Conversation workflow is not awaiting clarification');
+    if (!['needs_clarification', 'needs_confirmation', 'ready'].includes(current.status)) {
+      throw new TypeError('Conversation workflow cannot accept an answer in its current state');
+    }
     const decision = await this.orchestrator.analyze({
       rawText: input.rawText,
       context: input.context,
+      signal: input.signal,
       workflow: current
     });
+    if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const updatedAt = toIsoTimestamp(this.now());
-    const confirmation = await confirmationForPlan(
-      decision.plan,
-      updatedAt,
-      this.confirmationTtlMs
-    );
-    const updated = updateConversationWorkflow(current, {
-      plan: decision.plan,
-      pendingQuestions: questionsForDecision(decision.plan),
+    const deliveries = synchronizeDeliveries(current, decision.plan, decision.cancelled);
+    const nextDelivery = deliveries?.find((item) => item.status === 'pending');
+    const nextPlan = nextDelivery && decision.plan.kind === 'document'
+      ? parseConversationIntentPlan({ ...decision.plan, documentKind: nextDelivery.kind })
+      : decision.plan;
+    const confirmation = await confirmationForPlan(nextPlan, updatedAt, this.confirmationTtlMs);
+    const nextBase = {
+      ...current,
+      ...(input.sourceMessageId && (decision.plan.kind === 'chat' || decision.plan.parameters.requirements === input.rawText)
+        ? { sourceMessageId: input.sourceMessageId } : {}),
+      deliveries: undefined,
+      resolvedTarget: undefined,
+      confirmationId: undefined,
+      planHash: undefined,
+      confirmationExpiresAt: undefined
+    };
+    const updated = updateConversationWorkflow(nextBase, {
+      plan: nextPlan,
+      ...(deliveries !== undefined ? { deliveries } : {}),
+      ...(decision.cancelled ? { status: 'cancelled' as const } : {}),
+      pendingQuestions: decision.cancelled ? [] : questionsForDecision(decision.plan),
       ...(decision.resolvedTarget
         ? {
             resolvedTarget: {
@@ -112,10 +145,13 @@ export class ConversationWorkflowService {
               version: 1
             }
           }
-        : {}),
+        : decision.plan.action === 'revise' && decision.plan.targetHint?.name === current.plan.targetHint?.name && current.resolvedTarget
+          ? { resolvedTarget: current.resolvedTarget }
+          : {}),
       ...confirmation,
       updatedAt
     });
+    if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     await this.repository.save(updated, input.expectedRevision);
     return updated;
   }
@@ -168,6 +204,7 @@ export class ConversationWorkflowService {
     const current = await this.require(input.workflowId, input.expectedRevision);
     const updated = updateConversationWorkflow(current, {
       status: 'cancelled',
+      ...(current.deliveries ? { deliveries: current.deliveries.map((item) => item.status === 'completed' ? item : { ...item, status: 'cancelled' as const }) } : {}),
       updatedAt: toIsoTimestamp(this.now())
     });
     await this.repository.save(updated, input.expectedRevision);
@@ -184,7 +221,8 @@ export class ConversationWorkflowService {
 
   async getPending(conversationId: ConversationId): Promise<ConversationWorkflowV1 | undefined> {
     return (await this.repository.list(conversationId)).find((workflow) =>
-      ['needs_clarification', 'needs_confirmation', 'ready'].includes(workflow.status)
+      ['needs_clarification', 'needs_confirmation', 'ready'].includes(workflow.status) ||
+      (workflow.status === 'failed' && workflow.deliveries?.some((item) => item.status === 'failed'))
     );
   }
 
@@ -205,9 +243,17 @@ export class ConversationWorkflowService {
         current.revision
       );
     }
+    if (current.deliveries && current.plan.kind === 'document' && !current.deliveries.some((item) => item.kind === current.plan.documentKind && item.status === 'pending')) {
+      throw new ConversationWorkflowApplicationError('workflow_not_ready', 'The current document has already been delivered or cancelled', current.revision);
+    }
     const updated = updateConversationWorkflow(current, {
       status: 'executing',
       executionId: input.executionId,
+      ...(current.deliveries ? { deliveries: current.deliveries.map((item) =>
+        item.kind === current.plan.documentKind && item.status === 'pending'
+          ? { ...item, status: 'executing' as const, executionId: input.executionId }
+          : item
+      ) } : {}),
       updatedAt: toIsoTimestamp(this.now())
     });
     await this.repository.save(updated, input.expectedRevision);
@@ -230,6 +276,9 @@ export class ConversationWorkflowService {
     const updated = updateConversationWorkflow(current, {
       status: 'executing',
       executionId: input.executionId,
+      ...(current.deliveries ? { deliveries: current.deliveries.map((item) =>
+        item.status === 'executing' ? { ...item, executionId: input.executionId } : item
+      ) } : {}),
       updatedAt: toIsoTimestamp(this.now())
     });
     await this.repository.save(updated, input.expectedRevision);
@@ -244,8 +293,72 @@ export class ConversationWorkflowService {
       (workflow) => workflow.status === 'executing' && workflow.executionId === executionId
     );
     if (!current) return undefined;
+    // Provider text is only an intermediate Office input. Official completion
+    // must arrive with the locally registered work through finishDocumentExecution.
+    if (current.plan.kind === 'document') {
+      if (status === 'completed') return current;
+      return this.finishDocumentExecution(executionId, status);
+    }
     const updated = updateConversationWorkflow(current, {
       status,
+      updatedAt: toIsoTimestamp(this.now())
+    });
+    await this.repository.save(updated, current.revision);
+    return updated;
+  }
+
+  async finishDocumentExecution(
+    executionId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    result?: { readonly messageId: string; readonly workId?: string },
+    failureReason: ConversationWorkflowDelivery['failureReason'] = 'outcome_unknown'
+  ): Promise<ConversationWorkflowV1 | undefined> {
+    const current = (await this.repository.list()).find((workflow) =>
+      workflow.status === 'executing' && workflow.executionId === executionId && workflow.plan.kind === 'document');
+    if (!current) return undefined;
+    if (status === 'completed' && (!result?.messageId || !result.workId)) {
+      throw new TypeError('Official document completion requires a registered work and result message');
+    }
+    const currentKind = current.plan.documentKind;
+    if (!currentKind || currentKind === 'auto') throw new TypeError('An executing document needs an output kind');
+    const existing = current.deliveries ?? [{ kind: currentKind, status: 'executing' as const, executionId }];
+    const deliveries: readonly ConversationWorkflowDelivery[] = existing.map((item) => {
+      if (item.kind === currentKind && item.status !== 'completed' && item.status !== 'cancelled') {
+        return {
+          ...item, status, executionId,
+          ...(result ? { resultMessageId: result.messageId, ...(status === 'completed' ? { workId: result.workId } : {}) } : {}),
+          ...(status === 'failed' ? { failureReason } : {})
+        };
+      }
+      return status === 'cancelled' && item.status === 'pending' ? { ...item, status: 'cancelled' } : item;
+    });
+    const next = status === 'completed' ? deliveries.find((item) => item.status === 'pending') : undefined;
+    const updated = updateConversationWorkflow(current, {
+      deliveries,
+      status: next ? 'ready' : status,
+      ...(next ? { plan: parseConversationIntentPlan({ ...current.plan, documentKind: next.kind }) } : {}),
+      updatedAt: toIsoTimestamp(this.now())
+    });
+    await this.repository.save(updated, current.revision);
+    return updated;
+  }
+
+  async resumeFailedDelivery(input: {
+    readonly workflowId: ConversationWorkflowId;
+    readonly expectedRevision: number;
+  }): Promise<ConversationWorkflowV1> {
+    const current = await this.require(input.workflowId, input.expectedRevision);
+    const failed = current.deliveries?.find((item) => item.kind === current.plan.documentKind && item.status === 'failed');
+    if (current.status !== 'failed' || failed?.failureReason !== 'execution_failed') {
+      throw new ConversationWorkflowApplicationError('workflow_not_ready', '请先核对上次外部调用的实际结果，结果未知的请求不能直接重试', current.revision);
+    }
+    const updated = updateConversationWorkflow(current, {
+      status: failed.resultMessageId && failed.executionId ? 'executing' : 'ready',
+      deliveries: current.deliveries?.map((item) => item === failed
+        ? failed.resultMessageId && failed.executionId
+          ? { kind: item.kind, status: 'executing', resultMessageId: failed.resultMessageId, executionId: failed.executionId }
+          : { kind: item.kind, status: 'pending' }
+        : item),
       updatedAt: toIsoTimestamp(this.now())
     });
     await this.repository.save(updated, current.revision);
@@ -259,6 +372,9 @@ export class ConversationWorkflowService {
     for (const workflow of executing) {
       const failed = updateConversationWorkflow(workflow, {
         status: 'failed',
+        ...(workflow.deliveries ? { deliveries: workflow.deliveries.map((item) => item.status === 'executing'
+          ? { ...item, status: 'failed' as const, failureReason: 'interrupted' as const }
+          : item) } : {}),
         updatedAt: toIsoTimestamp(this.now())
       });
       await this.repository.save(failed, workflow.revision);
@@ -285,10 +401,25 @@ export class ConversationWorkflowService {
   }
 }
 
+function synchronizeDeliveries(
+  current: ConversationWorkflowV1,
+  plan: ConversationIntentPlan,
+  cancelled = false
+): readonly ConversationWorkflowDelivery[] | undefined {
+  if (cancelled) return current.deliveries?.map((item) => item.status === 'completed' ? item : { ...item, status: 'cancelled' });
+  if (plan.kind !== 'document' || !plan.documentKind || plan.documentKind === 'auto') return undefined;
+  const kinds = plan.deliverables ?? [plan.documentKind];
+  const previous = current.deliveries ?? [];
+  const completed = previous.filter((item) => item.status === 'completed');
+  const remaining = kinds.filter((kind) => !completed.some((item) => item.kind === kind)).map((kind) => ({ kind, status: 'pending' as const }));
+  const removed = previous.filter((item) => item.status !== 'completed' && !kinds.includes(item.kind)).map((item) => ({ ...item, status: 'cancelled' as const }));
+  return [...completed, ...remaining, ...removed].slice(0, 3);
+}
+
 function questionsForDecision(plan: ReturnType<typeof parseConversationIntentPlan>) {
-  return [...plan.missing, ...plan.ambiguities].slice(0, 3).map((reason) => ({
+  return [...new Set([...plan.missing, ...plan.ambiguities].map(conversationClarificationKey))].slice(0, 3).map((reason) => ({
     field: reason,
-    question: `请补充或确认：${reason}`,
+    question: `请补充或确认：${conversationClarificationLabel(reason)}`,
     required: true
   }));
 }

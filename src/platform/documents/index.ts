@@ -10,6 +10,7 @@ export * from './document-generation-runner';
 export * from './document-generation-application-adapters';
 export * from './file-extraction-service';
 export * from './attachment-import-service';
+export * from './conversation-attachment-context';
 export * from './document-theme';
 export * from './document-layout';
 export * from './document-components';

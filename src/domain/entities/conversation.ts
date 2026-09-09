@@ -57,6 +57,9 @@ export type ConversationAttachmentReference =
       readonly kind: 'file_reference';
       readonly projectId: ProjectId;
       readonly fileReferenceId: FileReferenceId;
+      /** Pinned by the main process when the user selects the attachment. */
+      readonly checksumSha256?: string;
+      readonly fileName?: string;
     };
 
 interface MessageBase {
@@ -71,6 +74,7 @@ interface MessageBase {
   readonly documentGenerationStatus?: DocumentGenerationStatus;
   readonly documentResult?: DocumentMessageResult;
   readonly attachments: readonly ConversationAttachmentReference[];
+  readonly attachmentSelection?: 'replace';
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -165,6 +169,7 @@ export interface EditCancelledUserMessageInput {
   readonly messageId: MessageId;
   readonly content: string;
   readonly displayContent?: string;
+  readonly attachments?: readonly ConversationAttachmentReference[];
   readonly editedAt: IsoTimestamp;
 }
 
@@ -322,6 +327,7 @@ export function addUserMessage(
       ? { displayContent: input.displayContent }
       : {}),
     attachments: input.attachments ?? [],
+    ...(input.attachments !== undefined ? { attachmentSelection: 'replace' } : {}),
     streamSequence: 0,
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
@@ -358,6 +364,7 @@ export function editUserMessageAfterCancelledResponse(
     ...messageWithoutDisplayContent,
     revision: message.revision + 1,
     content: input.content,
+    ...(input.attachments !== undefined ? { attachments: input.attachments, attachmentSelection: 'replace' } : {}),
     ...(input.displayContent !== undefined
       ? { displayContent: input.displayContent }
       : {}),
@@ -707,6 +714,7 @@ export function parseMessage(value: unknown): Message {
     [
       ...messageBaseKeys,
       ...(hasDisplayContent ? ['displayContent'] : []),
+      ...(record.attachmentSelection !== undefined ? ['attachmentSelection'] : []),
       ...(hasReasoningContent ? ['reasoningContent'] : []),
       ...(hasDocumentGenerationStatus ? ['documentGenerationStatus'] : []),
       ...(hasDocumentResult ? ['documentResult'] : []),
@@ -723,6 +731,9 @@ export function parseMessage(value: unknown): Message {
   );
   const revision = requireNonNegativeInteger(record.revision, 'message.revision');
   const role = oneOf(record.role, messageRoles, 'message.role');
+  if (record.attachmentSelection !== undefined && (record.attachmentSelection !== 'replace' || role !== 'user')) {
+    throw new TypeError('message.attachmentSelection is invalid');
+  }
   const content = requireString(record.content, 'message.content');
   if (content.length > 1_000_000) {
     throw new TypeError('message.content exceeds the maximum length');
@@ -775,6 +786,7 @@ export function parseMessage(value: unknown): Message {
       : {}),
     ...(documentResult !== undefined ? { documentResult } : {}),
     attachments,
+    ...(record.attachmentSelection === 'replace' ? { attachmentSelection: 'replace' as const } : {}),
     createdAt,
     updatedAt
   };
@@ -952,15 +964,28 @@ function parseAttachmentReference(value: unknown): ConversationAttachmentReferen
   if (record.kind === 'file_reference') {
     requireExactKeys(
       record,
-      ['kind', 'projectId', 'fileReferenceId'],
+      ['kind', 'projectId', 'fileReferenceId',
+        ...(record.checksumSha256 !== undefined ? ['checksumSha256'] : []),
+        ...(record.fileName !== undefined ? ['fileName'] : [])],
       'file reference attachment'
     );
+    if (record.checksumSha256 !== undefined &&
+      (typeof record.checksumSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(record.checksumSha256))) {
+      throw new TypeError('attachment.checksumSha256 is invalid');
+    }
+    if (record.fileName !== undefined &&
+      (typeof record.fileName !== 'string' || !record.fileName.trim() ||
+        record.fileName.length > 256 || /[\u0000-\u001f\\/]/.test(record.fileName))) {
+      throw new TypeError('attachment.fileName is invalid');
+    }
     return {
       kind: 'file_reference',
       projectId: toProjectId(requireNonBlankString(record.projectId, 'attachment.projectId')),
       fileReferenceId: toFileReferenceId(
         requireNonBlankString(record.fileReferenceId, 'attachment.fileReferenceId')
-      )
+      ),
+      ...(record.checksumSha256 !== undefined ? { checksumSha256: record.checksumSha256 as string } : {}),
+      ...(record.fileName !== undefined ? { fileName: record.fileName as string } : {})
     };
   }
   throw new TypeError('message attachment kind is unsupported');

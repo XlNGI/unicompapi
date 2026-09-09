@@ -43,6 +43,8 @@ import {
   ConversationRevisionConflictError
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
+import { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { ConversationSemanticClassifier, conversationSemanticLimits } from '../providers/conversation-semantic-classifier';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
 import {
@@ -192,6 +194,7 @@ export function createChatContextRuntime(
     readonly conversationRepository: JsonProjectConversationRepository;
     readonly contextService: ProjectContextRegistryService;
     readonly workflowService: ConversationWorkflowService;
+    readonly attachments: ConversationAttachmentContextService;
     readonly webResearch: ConversationWebResearchControllerRuntime;
     readonly responses: ConversationResponseControllerRuntime;
   };
@@ -235,11 +238,6 @@ export function createChatContextRuntime(
       storage,
       session.projectId
     );
-    const workflowService = new ConversationWorkflowService(
-      new JsonConversationWorkflowRepository(storage, session.projectId, now),
-      new ConversationIntentOrchestrator(),
-      now
-    );
     const invocationRoutes = new JsonProviderExecutionRouteSnapshotRepository(
       storage,
       session.projectId
@@ -247,6 +245,36 @@ export function createChatContextRuntime(
     const invocations = new JsonProviderInvocationRepository(
       storage,
       session.projectId
+    );
+    const authorization = dependencies.runtimeAuthorization;
+    const textSubmission = dependencies.textSubmission;
+    const canSubmit = Boolean(
+      textSubmission &&
+      authorization &&
+      typeof authorization.claimSubmission === 'function' &&
+      typeof authorization.markRequestStarted === 'function' &&
+      typeof authorization.releaseBeforeRequest === 'function' &&
+      typeof authorization.recordOutcome === 'function'
+    );
+    const usage = new JsonProviderUsageObservationRepository(storage);
+    const classifier = canSubmit && textSubmission && authorization
+      ? new ConversationSemanticClassifier({
+          projectId: session.projectId,
+          runtimes: { ...textSubmission, providerRegistry, providerPackages, usage },
+          authorization: authorization as ProviderCandidateRuntimeAuthorizationPort & RuntimeAuthorizationOrchestrationPort,
+          audit: { routes: invocationRoutes, invocations, usage },
+          now
+        })
+      : undefined;
+    const attachments = new ConversationAttachmentContextService({
+      rootDirectory: session.rootDirectory,
+      projectId: session.projectId,
+      summarizer: classifier
+    });
+    const workflowService = new ConversationWorkflowService(
+      new JsonConversationWorkflowRepository(storage, session.projectId, now),
+      new ConversationIntentOrchestrator({ classifier, classifierTimeoutMs: conversationSemanticLimits.timeoutMs }),
+      now
     );
     const retrieval = new RagRetrievalService({
       rootDirectory: session.rootDirectory,
@@ -298,20 +326,10 @@ export function createChatContextRuntime(
     );
     const executionCoordinator = new ConversationExecutionCoordinator();
     // After a process restart no in-memory adapter exists to resume these streams.
-    const responseRecovery = responseLifecycle
-      .interruptActiveForApplicationShutdown()
+    const responseRecovery = interruptOrphanedConversationResponses(responseLifecycle, projectConversations, now)
+      .then(() => settlePublishedConversationDocuments(workflowService, responseExecutions, projectConversations))
       .then(() => workflowService.recoverInterruptedExecutions())
       .then(() => undefined);
-    const authorization = dependencies.runtimeAuthorization;
-    const textSubmission = dependencies.textSubmission;
-    const canSubmit = Boolean(
-      textSubmission &&
-      authorization &&
-      typeof authorization.claimSubmission === 'function' &&
-      typeof authorization.markRequestStarted === 'function' &&
-      typeof authorization.releaseBeforeRequest === 'function' &&
-      typeof authorization.recordOutcome === 'function'
-    );
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,
@@ -322,6 +340,7 @@ export function createChatContextRuntime(
       executionCoordinator,
       streamChannel,
       workflowService,
+      attachments,
       ready: responseRecovery
     };
     if (canSubmit && textSubmission && authorization) {
@@ -334,6 +353,7 @@ export function createChatContextRuntime(
         drafts: responseDrafts,
         contexts: contextRepository,
         executions: responseExecutions,
+        attachments,
         nextMessageId: () => conversationIds.nextMessageId(),
         now
       });
@@ -445,6 +465,7 @@ export function createChatContextRuntime(
                 }
               }
             }
+            await workflowService.finishExecution(executionId, 'failed');
             await responseLifecycle.publish(event);
             const failed = await acceptances.get(submissionIntentId);
             if (failed) {
@@ -474,6 +495,7 @@ export function createChatContextRuntime(
       conversationRepository: projectConversations,
       contextService,
       workflowService,
+      attachments,
       webResearch: {
         conversationService: new ConversationApplicationService(
           projectConversations,
@@ -508,7 +530,9 @@ export function createChatContextRuntime(
       Promise.resolve(failure('project_not_open', 'A project must be open')),
     get: (request) => safeConversationOperation(async () => {
       const session = dependencies.getSession();
-      const project = session ? getProjectRuntime(session).conversations : undefined;
+      const runtime = session ? getProjectRuntime(session) : undefined;
+      await runtime?.responses.ready;
+      const project = runtime?.conversations;
       if (project) {
         const result = await project.get(request);
         if (result.ok || result.error.code !== 'conversation_not_found') return result;
@@ -535,6 +559,7 @@ export function createChatContextRuntime(
         ...(input.includeDeleted ? ['deleted' as const] : [])
       ];
       const session = dependencies.getSession();
+      if (session) await getProjectRuntime(session).responses.ready;
       const projectItems = session
         ? await getProjectRuntime(session).conversations.list(request)
         : { ok: true as const, value: [] };
@@ -618,7 +643,9 @@ export function createChatContextRuntime(
           conversationIds,
           now
         ),
-        workflowService: runtime.workflowService
+        workflowService: runtime.workflowService,
+        attachments: runtime.attachments,
+        ready: runtime.responses.ready
       };
     }
   });
@@ -643,6 +670,7 @@ export function createChatContextRuntime(
     workflows,
     webResearch,
     interruptActiveResponses: async () => {
+      const cancelledPlanning = workflows.cancelActivePlanning();
       const interrupted = await Promise.all([...runtimes].map(async (runtime) => {
         // Adapter completion owns the terminal transition. Only persisted handles
         // left without a live adapter are marked interrupted directly.
@@ -653,10 +681,11 @@ export function createChatContextRuntime(
             execution.responseExecutionId,
             'application_shutdown'
           );
+          await projectInterruptedAssistant(runtime.conversationRepository, execution.conversationId, execution.assistantMessageId, now);
         }
         return cancelled + orphaned.length;
       }));
-      return interrupted.reduce((total, count) => total + count, 0);
+      return interrupted.reduce((total, count) => total + count, cancelledPlanning);
     },
     waitForMutations: async () => {
       await Promise.all([
@@ -668,6 +697,58 @@ export function createChatContextRuntime(
       ]);
     }
   };
+}
+
+async function projectInterruptedAssistant(
+  conversations: JsonProjectConversationRepository,
+  conversationId: string,
+  messageId: string,
+  now: () => string
+): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const conversation = await conversations.get(toConversationId(conversationId));
+    const message = conversation?.messages.find((item) => item.id === messageId);
+    if (!conversation || !message || !['pending', 'streaming'].includes(message.state)) return;
+    try {
+      await conversations.save(failAssistantMessage(conversation, toMessageId(messageId), 'interrupted', toIsoTimestamp(now())), conversation.revision);
+      return;
+    } catch (error) {
+      if (!(error instanceof ConversationRevisionConflictError) || attempt === 3) throw error;
+    }
+  }
+}
+
+async function settlePublishedConversationDocuments(
+  workflows: ConversationWorkflowService,
+  executions: JsonConversationResponseExecutionRepository,
+  conversations: JsonProjectConversationRepository
+): Promise<void> {
+  for (const workflow of await workflows.list()) {
+    const executionId = workflow.executionId;
+    if (workflow.status !== 'executing' || workflow.plan.kind !== 'document' || !executionId) continue;
+    const execution = (await executions.list(workflow.conversationId)).find((item) => item.id === executionId);
+    const messageId = execution?.snapshot.assistantMessageId ?? workflow.deliveries?.find((item) =>
+      item.status === 'executing' && item.executionId === executionId)?.resultMessageId;
+    if (!messageId) continue;
+    const conversation = await conversations.get(workflow.conversationId);
+    const message = conversation?.messages.find((item) => item.id === messageId && item.role === 'assistant');
+    const result = message?.documentResult;
+    if (result && result.kind === workflow.plan.documentKind && result.validatedContent) {
+      await workflows.finishDocumentExecution(executionId, 'completed', { messageId, workId: result.workId });
+    }
+  }
+}
+
+async function interruptOrphanedConversationResponses(
+  executions: ConversationResponseExecutionLifecycle,
+  conversations: JsonProjectConversationRepository,
+  now: () => string
+): Promise<void> {
+  const active = await executions.listActive();
+  for (const execution of active) {
+    await executions.interrupt(execution.responseExecutionId, 'application_shutdown');
+    await projectInterruptedAssistant(conversations, execution.conversationId, execution.assistantMessageId, now);
+  }
 }
 
 function createConversationTerminalObserver(

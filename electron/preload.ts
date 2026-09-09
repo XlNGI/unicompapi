@@ -812,6 +812,8 @@ const chatContexts: ChatContextApi = {
     ipcRenderer.invoke(chatContextIpcChannels.startWorkflow, request),
   answerWorkflow: (request) =>
     ipcRenderer.invoke(chatContextIpcChannels.answerWorkflow, request),
+  cancelPlanning: (request) =>
+    ipcRenderer.invoke(chatContextIpcChannels.cancelPlanning, request),
   confirmWorkflow: (workflowId, expectedRevision) =>
     ipcRenderer.invoke(chatContextIpcChannels.confirmWorkflow, {
       workflowId,
@@ -819,6 +821,11 @@ const chatContexts: ChatContextApi = {
     }),
   cancelWorkflow: (workflowId, expectedRevision) =>
     ipcRenderer.invoke(chatContextIpcChannels.cancelWorkflow, {
+      workflowId,
+      expectedRevision
+    }),
+  resumeFailedWorkflow: (workflowId, expectedRevision) =>
+    ipcRenderer.invoke(chatContextIpcChannels.resumeFailedWorkflow, {
       workflowId,
       expectedRevision
     }),

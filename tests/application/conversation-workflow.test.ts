@@ -27,6 +27,165 @@ afterEach(async () => {
 });
 
 describe('Conversation workflow', () => {
+  async function regressionService() {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-language-'));
+    roots.push(root);
+    const now = () => '2026-09-09T00:00:00.000Z';
+    const repository = new JsonConversationWorkflowRepository(new NodeProjectStorage(root), projectId, now);
+    let nextId = 0;
+    return new ConversationWorkflowService(repository, new ConversationIntentOrchestrator(), now, () =>
+      toConversationWorkflowId(`workflow-language-${nextId++}`));
+  }
+
+  it.each([
+    ['帮我做个总结', 'needs_clarification'],
+    ['帮我做一份 PPT', 'ready'],
+    ['删除刚才 PPT 的第二页', 'needs_confirmation']
+  ])('accepts natural cancellation from a %s workflow', async (rawText, status) => {
+    const service = await regressionService();
+    const created = await service.create({
+      projectId, conversationId, sourceMessageId: toMessageId('message-cancel-language'), rawText,
+      context: { documents: [{ messageId: 'ppt-target', kind: 'ppt', fileName: '汇报.pptx' }] }
+    });
+    expect(created.status).toBe(status);
+    const cancelled = await service.answer({
+      workflowId: created.id, expectedRevision: created.revision, rawText: '不用做 PPT 了，取消'
+    });
+    expect(cancelled).toMatchObject({ status: 'cancelled', pendingQuestions: [] });
+    await expect(service.beginExecution({
+      workflowId: cancelled.id, expectedRevision: cancelled.revision, executionId: 'must-not-start'
+    })).rejects.toMatchObject({ code: 'workflow_not_ready' });
+    expect(await service.getPending(conversationId)).toBeUndefined();
+  });
+
+  it('records cancellation without an existing task as a valid new terminal workflow', async () => {
+    const service = await regressionService();
+    const cancelled = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-new-cancellation'), rawText: '取消' });
+    expect(cancelled).toMatchObject({ status: 'cancelled', revision: 0, pendingQuestions: [] });
+    expect((await service.get(cancelled.id))?.status).toBe('cancelled');
+    expect(await service.getPending(conversationId)).toBeUndefined();
+  });
+
+  it('supersedes a failed workflow without reviving it after a new request completes', async () => {
+    const service = await regressionService();
+    const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-old-failed'), rawText: '做 Word 和 PPT' });
+    await service.beginExecution({ workflowId: initial.id, expectedRevision: initial.revision, executionId: 'old-failed' });
+    await service.finishDocumentExecution('old-failed', 'failed');
+    const fresh = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-fresh-question'), rawText: '你好' });
+    expect(await service.get(initial.id)).toMatchObject({ status: 'cancelled', deliveries: [{ status: 'cancelled' }, { status: 'cancelled' }] });
+    await service.beginExecution({ workflowId: fresh.id, expectedRevision: fresh.revision, executionId: 'fresh-response' });
+    await service.finishExecution('fresh-response', 'completed');
+    expect(await service.getPending(conversationId)).toBeUndefined();
+  });
+
+  it('uses stable question fields and replaces a negated type before execution', async () => {
+    const service = await regressionService();
+    const created = await service.create({
+      projectId, conversationId, sourceMessageId: toMessageId('message-correct-language'), rawText: '帮我做个总结'
+    });
+    expect(created.pendingQuestions).toEqual([{
+      field: 'document_kind', question: '请补充或确认：文档类型（Word、Excel 或 PPT）', required: true
+    }]);
+    const corrected = await service.answer({
+      workflowId: created.id, expectedRevision: created.revision,
+      rawText: '不要 PPT，要 Word，重点讲第三季度销售'
+    });
+    expect(corrected).toMatchObject({ status: 'ready', plan: { documentKind: 'word', missing: [], ambiguities: [] } });
+    expect(corrected.plan.parameters.requirements).toContain('第三季度销售');
+  });
+
+  it('re-evaluates destructive changes to a ready task with a fresh confirmation', async () => {
+    const service = await regressionService();
+    const context = { documents: [{ messageId: 'ppt-target', kind: 'ppt' as const, fileName: '汇报.pptx' }] };
+    const created = await service.create({
+      projectId, conversationId, sourceMessageId: toMessageId('message-destructive-language'),
+      rawText: '把刚才 PPT 第二页改成时间线', context
+    });
+    expect(created.status).toBe('ready');
+    const corrected = await service.answer({
+      workflowId: created.id, expectedRevision: created.revision, rawText: '再删除第三页', context
+    });
+    expect(corrected).toMatchObject({ status: 'needs_confirmation', plan: { needsConfirmation: true }, confirmationId: expect.any(String) });
+    await expect(service.beginExecution({ workflowId: corrected.id, expectedRevision: corrected.revision, executionId: 'unconfirmed' }))
+      .rejects.toMatchObject({ code: 'confirmation_required' });
+  });
+
+  it('persists ordered Office deliveries and advances only after official Work registration', async () => {
+    const service = await regressionService();
+    const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-multiple'), rawText: '做一份 Word 方案和 PPT 汇报' });
+    expect(initial).toMatchObject({ status: 'ready', plan: { documentKind: 'word', deliverables: ['word', 'ppt'] } });
+    const reordered = await service.answer({ workflowId: initial.id, expectedRevision: initial.revision, rawText: '先做 PPT' });
+    expect(reordered.deliveries?.map((item) => item.kind)).toEqual(['ppt', 'word']);
+    const first = await service.beginExecution({ workflowId: reordered.id, expectedRevision: reordered.revision, executionId: 'delivery-ppt' });
+    expect((await service.finishExecution('delivery-ppt', 'completed'))?.status).toBe('executing');
+    await expect(service.finishDocumentExecution('delivery-ppt', 'completed')).rejects.toThrow('registered work');
+    expect((await service.get(first.id))?.status).toBe('executing');
+    const next = await service.finishDocumentExecution('delivery-ppt', 'completed', { messageId: 'result-ppt', workId: 'work-ppt' });
+    expect(next).toMatchObject({ status: 'ready', plan: { documentKind: 'word' }, deliveries: [
+      { kind: 'ppt', status: 'completed', workId: 'work-ppt', resultMessageId: 'result-ppt' },
+      { kind: 'word', status: 'pending' }
+    ] });
+    expect(await service.finishDocumentExecution('delivery-ppt', 'completed', { messageId: 'duplicate', workId: 'duplicate' })).toBeUndefined();
+    if (!next) throw new Error('Missing next document');
+    await service.beginExecution({ workflowId: next.id, expectedRevision: next.revision, executionId: 'delivery-word' });
+    expect(await service.finishDocumentExecution('delivery-word', 'completed', { messageId: 'result-word', workId: 'work-word' })).toMatchObject({
+      status: 'completed', deliveries: [{ workId: 'work-ppt' }, { workId: 'work-word' }]
+    });
+    expect(await service.getPending(conversationId)).toBeUndefined();
+  });
+
+  it('keeps completed Work when a later delivery fails and retries only a known failed step', async () => {
+    const service = await regressionService();
+    const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-partial'), rawText: '做 Excel 和 PPT' });
+    await service.beginExecution({ workflowId: initial.id, expectedRevision: initial.revision, executionId: 'first-excel' });
+    const second = await service.finishDocumentExecution('first-excel', 'completed', { messageId: 'result-excel', workId: 'work-excel' });
+    if (!second) throw new Error('Missing second document');
+    await service.beginExecution({ workflowId: second.id, expectedRevision: second.revision, executionId: 'failed-ppt' });
+    const failed = await service.finishDocumentExecution('failed-ppt', 'failed', undefined, 'execution_failed');
+    expect(failed).toMatchObject({ status: 'failed', deliveries: [{ kind: 'excel', status: 'completed', workId: 'work-excel' }, { kind: 'ppt', status: 'failed' }] });
+    if (!failed) throw new Error('Missing failure');
+    expect((await service.getPending(conversationId))?.id).toBe(failed.id);
+    const resumed = await service.resumeFailedDelivery({ workflowId: failed.id, expectedRevision: failed.revision });
+    expect(resumed).toMatchObject({ status: 'ready', plan: { documentKind: 'ppt' }, deliveries: [{ workId: 'work-excel', status: 'completed' }, { kind: 'ppt', status: 'pending' }] });
+    await service.beginExecution({ workflowId: resumed.id, expectedRevision: resumed.revision, executionId: 'retried-ppt' });
+    expect(await service.finishDocumentExecution('retried-ppt', 'completed', { messageId: 'result-ppt', workId: 'work-ppt' })).toMatchObject({ status: 'completed' });
+  });
+
+  it.each(['outcome_unknown', 'interrupted'] as const)('does not resubmit a delivery whose external result is %s', async (failureReason) => {
+    const service = await regressionService();
+    const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-unknown'), rawText: '做 Word 和 PPT' });
+    await service.beginExecution({ workflowId: initial.id, expectedRevision: initial.revision, executionId: 'unknown-result' });
+    const failed = await service.finishDocumentExecution('unknown-result', 'failed', undefined, failureReason);
+    if (!failed) throw new Error('Missing unknown result');
+    await expect(service.resumeFailedDelivery({ workflowId: failed.id, expectedRevision: failed.revision })).rejects.toMatchObject({ code: 'workflow_not_ready' });
+  });
+
+  it('reuses persisted model content when only local document generation failed', async () => {
+    const service = await regressionService();
+    const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-local-failure'), rawText: '做 Word 和 PPT' });
+    await service.beginExecution({ workflowId: initial.id, expectedRevision: initial.revision, executionId: 'original-model-execution' });
+    const failed = await service.finishDocumentExecution('original-model-execution', 'failed', { messageId: 'persisted-model-content' }, 'execution_failed');
+    if (!failed) throw new Error('Missing local failure');
+    const resumed = await service.resumeFailedDelivery({ workflowId: failed.id, expectedRevision: failed.revision });
+    expect(resumed).toMatchObject({ status: 'executing', executionId: 'original-model-execution', deliveries: [
+      { kind: 'word', status: 'executing', resultMessageId: 'persisted-model-content', executionId: 'original-model-execution' },
+      { kind: 'ppt', status: 'pending' }
+    ] });
+    await expect(service.beginExecution({ workflowId: resumed.id, expectedRevision: resumed.revision, executionId: 'unnecessary-model-call' })).rejects.toMatchObject({ code: 'workflow_not_ready' });
+    expect(await service.finishDocumentExecution('original-model-execution', 'completed', { messageId: 'persisted-model-content', workId: 'work-after-local-retry' }))
+      .toMatchObject({ status: 'ready', plan: { documentKind: 'ppt' } });
+  });
+
+  it('cancels unstarted Office outputs without cancelling completed Work', async () => {
+    const service = await regressionService();
+    const initial = await service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-selective'), rawText: '做 Word 和 PPT' });
+    const selected = await service.answer({ workflowId: initial.id, expectedRevision: initial.revision, rawText: '只做 PPT，Word 不做了' });
+    expect(selected).toMatchObject({ plan: { deliverables: ['ppt'], documentKind: 'ppt' }, deliveries: [{ kind: 'ppt', status: 'pending' }, { kind: 'word', status: 'cancelled' }] });
+    await service.beginExecution({ workflowId: selected.id, expectedRevision: selected.revision, executionId: 'selected-ppt' });
+    const completed = await service.finishDocumentExecution('selected-ppt', 'completed', { messageId: 'result-ppt', workId: 'work-ppt' });
+    expect(completed).toMatchObject({ status: 'completed', deliveries: [{ status: 'completed' }, { status: 'cancelled' }] });
+  });
+
   it('persists clarification state and merges a later answer into the same workflow', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-'));
     roots.push(root);
@@ -316,7 +475,8 @@ describe('Conversation workflow', () => {
       expectedRevision: executing.revision,
       executionId: 'response-confirm'
     });
-    const completed = await service.finishExecution('response-confirm', 'completed');
+    expect((await service.finishExecution('response-confirm', 'completed'))?.status).toBe('executing');
+    const completed = await service.finishDocumentExecution('response-confirm', 'completed', { messageId: 'result-confirm', workId: 'work-confirm' });
     expect(bound.status).toBe('executing');
     expect(completed?.status).toBe('completed');
     expect(await service.getPending(conversationId)).toBeUndefined();

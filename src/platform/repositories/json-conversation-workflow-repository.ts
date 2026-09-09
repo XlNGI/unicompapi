@@ -98,7 +98,7 @@ export class JsonConversationWorkflowRepository
         const workflows = supersedePending
           ? document.workflows.map((item) =>
               item.conversationId === validated.conversationId &&
-              ['needs_clarification', 'needs_confirmation', 'ready'].includes(item.status)
+              ['needs_clarification', 'needs_confirmation', 'ready', 'failed'].includes(item.status)
                 ? updateConversationWorkflow(item, {
                     status: 'cancelled',
                     updatedAt: operationTimestamp

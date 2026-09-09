@@ -40,6 +40,9 @@ import {
 } from '../../src/shared/document-attachment-ipc';
 import { documentGenerationIpcChannels } from '../../src/shared/document-generation-ipc';
 import { toDocumentGenerationLogError } from './document-generation-logging';
+import { createDocumentWorkflowSettlement } from '../../src/platform/documents/conversation-document-workflow';
+import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
+import { JsonConversationResponseExecutionRepository } from '../../src/platform/repositories/json-conversation-response-execution-repository';
 
 export function registerDocumentGenerationIpcHandlers(options: {
   readonly sessionRegistry: StorageProjectSessionRegistry;
@@ -81,6 +84,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
       });
       const application = new DocumentGenerationApplicationService({
         projectId: session.projectId,
+        generationInputs: new ConversationDocumentInputStore(storage, session.projectId),
         conversations: {
           load: (conversationId) => repository.get(conversationId),
           createCompletedLocalAssistantMessage: (input) =>
@@ -99,7 +103,12 @@ export function registerDocumentGenerationIpcHandlers(options: {
           },
           finishExecution: async (executionId, status) => {
             await workflowService.finishExecution(executionId, status);
-          }
+          },
+          settleDocumentResult: createDocumentWorkflowSettlement({
+            workflows: workflowService,
+            conversations: repository,
+            executions: new JsonConversationResponseExecutionRepository(storage, session.projectId)
+          })
         },
         compiler: new PlatformDocumentDraftCompiler(),
         generator: new PlatformDocumentGenerationExecutor(runner),

@@ -15,6 +15,16 @@ import {
   type ConversationIntentAssessment,
   type ConversationIntentPlan
 } from './conversation-intent-plan';
+import type { DocumentWorkspaceKind } from './document-generation';
+
+export interface ConversationWorkflowDelivery {
+  readonly kind: DocumentWorkspaceKind;
+  readonly status: 'pending' | 'executing' | 'completed' | 'failed' | 'cancelled';
+  readonly executionId?: string;
+  readonly resultMessageId?: string;
+  readonly workId?: string;
+  readonly failureReason?: 'execution_failed' | 'outcome_unknown' | 'interrupted';
+}
 
 export const conversationWorkflowStatuses = [
   'draft',
@@ -43,6 +53,7 @@ export interface ConversationWorkflowV1 {
   readonly revision: number;
   readonly status: ConversationWorkflowStatus;
   readonly plan: ConversationIntentPlan;
+  readonly deliveries?: readonly ConversationWorkflowDelivery[];
   readonly pendingQuestions: readonly ConversationWorkflowQuestion[];
   readonly resolvedTarget?: {
     readonly artifactRef: string;
@@ -88,6 +99,9 @@ export function createConversationWorkflow(
     revision: 0,
     status: statusFromAssessment(assessment),
     plan,
+    ...(plan.kind === 'document' && plan.documentKind && plan.documentKind !== 'auto'
+      ? { deliveries: (plan.deliverables ?? [plan.documentKind]).map((kind) => ({ kind, status: 'pending' })) }
+      : {}),
     pendingQuestions,
     ...(input.resolvedTarget !== undefined ? { resolvedTarget: input.resolvedTarget } : {}),
     ...(input.confirmationId !== undefined ? { confirmationId: input.confirmationId } : {}),
@@ -104,6 +118,7 @@ export function updateConversationWorkflow(
   workflow: ConversationWorkflowV1,
   input: {
     readonly plan?: ConversationIntentPlan;
+    readonly deliveries?: readonly ConversationWorkflowDelivery[];
     readonly pendingQuestions?: readonly ConversationWorkflowQuestion[];
     readonly resolvedTarget?: {
       readonly artifactRef: string;
@@ -120,12 +135,16 @@ export function updateConversationWorkflow(
   const plan = input.plan === undefined ? workflow.plan : parseConversationIntentPlan(input.plan);
   const assessment = assessConversationIntentPlan(plan);
   const status = input.status ?? statusFromAssessment(assessment);
+  const deliveries = input.deliveries ?? (status === 'cancelled'
+    ? workflow.deliveries?.map((item) => item.status === 'completed' ? item : { ...item, status: 'cancelled' as const })
+    : workflow.deliveries);
   assertWorkflowTransition(workflow.status, status);
   return parseConversationWorkflow({
     ...workflow,
     revision: workflow.revision + 1,
     status,
     plan,
+    ...(deliveries !== undefined ? { deliveries } : {}),
     pendingQuestions: input.pendingQuestions ?? workflow.pendingQuestions,
     ...(input.resolvedTarget !== undefined ? { resolvedTarget: input.resolvedTarget } : {}),
     ...(input.confirmationId !== undefined ? { confirmationId: input.confirmationId } : {}),
@@ -142,7 +161,7 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
   if (!isRecord(value)) throw new TypeError('Conversation workflow must be an object');
   const allowed = new Set([
     'schemaVersion', 'id', 'projectId', 'conversationId', 'sourceMessageId',
-    'revision', 'status', 'plan', 'pendingQuestions', 'resolvedTarget', 'confirmationId',
+    'revision', 'status', 'plan', 'deliveries', 'pendingQuestions', 'resolvedTarget', 'confirmationId',
     'planHash', 'confirmationExpiresAt', 'executionId', 'createdAt', 'updatedAt'
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key)) || value.schemaVersion !== 1) {
@@ -159,6 +178,7 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
   const updatedAt = toIsoTimestamp(String(value.updatedAt));
   if (updatedAt < createdAt) throw new TypeError('Conversation workflow updatedAt is stale');
   const plan = parseConversationIntentPlan(value.plan);
+  const deliveries = value.deliveries === undefined ? undefined : parseDeliveries(value.deliveries);
   if (value.confirmationId !== undefined && !boundedString(value.confirmationId, 256)) throw new TypeError('Conversation workflow confirmationId is invalid');
   if (value.planHash !== undefined && !boundedString(value.planHash, 256)) throw new TypeError('Conversation workflow planHash is invalid');
   const confirmationExpiresAt = value.confirmationExpiresAt === undefined
@@ -174,6 +194,7 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
     revision: Number(value.revision),
     status: value.status as ConversationWorkflowStatus,
     plan,
+    ...(deliveries ? { deliveries } : {}),
     pendingQuestions,
     ...(resolvedTarget !== undefined ? { resolvedTarget } : {}),
     ...(value.confirmationId !== undefined ? { confirmationId: value.confirmationId as string } : {}),
@@ -211,13 +232,32 @@ function assertWorkflowTransition(from: ConversationWorkflowStatus, to: Conversa
     draft: ['needs_clarification', 'needs_confirmation', 'ready', 'cancelled'],
     needs_clarification: ['needs_clarification', 'needs_confirmation', 'ready', 'cancelled'],
     needs_confirmation: ['ready', 'cancelled', 'needs_clarification'],
-    ready: ['executing', 'needs_clarification', 'cancelled'],
-    executing: ['completed', 'failed', 'cancelled'],
+    ready: ['executing', 'needs_clarification', 'needs_confirmation', 'cancelled'],
+    executing: ['completed', 'failed', 'cancelled', 'ready'],
     completed: [],
-    failed: ['ready', 'cancelled'],
+    failed: ['ready', 'executing', 'cancelled'],
     cancelled: []
   };
   if (!allowed[from].includes(to)) throw new TypeError(`Conversation workflow cannot transition from ${from} to ${to}`);
+}
+
+function parseDeliveries(value: unknown): readonly ConversationWorkflowDelivery[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3) throw new TypeError('Conversation workflow deliveries are invalid');
+  const kinds = new Set<string>();
+  return value.map((item) => {
+    if (!isRecord(item) || Object.keys(item).some((key) => !['kind', 'status', 'executionId', 'resultMessageId', 'workId', 'failureReason'].includes(key))) {
+      throw new TypeError('Conversation workflow delivery contains unsupported fields');
+    }
+    if (typeof item.kind !== 'string' || !['word', 'excel', 'ppt'].includes(item.kind) || kinds.has(item.kind)) throw new TypeError('Conversation workflow delivery kind is invalid');
+    kinds.add(item.kind);
+    if (typeof item.status !== 'string' || !['pending', 'executing', 'completed', 'failed', 'cancelled'].includes(item.status)) throw new TypeError('Conversation workflow delivery status is invalid');
+    for (const key of ['executionId', 'resultMessageId', 'workId']) {
+      if (item[key] !== undefined && !boundedString(item[key], 256)) throw new TypeError(`Conversation workflow delivery ${key} is invalid`);
+    }
+    if (item.failureReason !== undefined && !['execution_failed', 'outcome_unknown', 'interrupted'].includes(String(item.failureReason))) throw new TypeError('Conversation workflow delivery failure reason is invalid');
+    if (item.status === 'completed' && (!item.resultMessageId || !item.workId)) throw new TypeError('Completed document delivery requires a registered work and result message');
+    return item as unknown as ConversationWorkflowDelivery;
+  });
 }
 
 function parseQuestion(value: unknown): ConversationWorkflowQuestion {

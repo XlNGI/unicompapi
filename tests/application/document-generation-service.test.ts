@@ -590,7 +590,7 @@ describe('document generation application service', () => {
       fileName: '关于龙的PPT-新版.pptx',
       sizeBytes: 4096
     }));
-    const fingerprint = vi.fn(() => 'clear-page-content-sha256');
+    const fingerprint = vi.fn<(content: string) => string>(() => 'clear-page-content-sha256');
     const service = new DocumentGenerationApplicationService({
       projectId,
       conversations: {
@@ -630,7 +630,10 @@ describe('document generation application service', () => {
       kind: 'ppt'
     });
     expect(recover).not.toHaveBeenCalled();
-    expect(fingerprint).toHaveBeenCalledWith('将第二页的内容清空');
+    expect(JSON.parse(fingerprint.mock.calls[0][0])).toMatchObject({
+      content: '将第二页的内容清空', kind: 'ppt', theme: null, presentationTemplate: null,
+      parentWorkId, images: []
+    });
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
         parentWorkId,
@@ -1228,6 +1231,16 @@ describe('presentation total-page request parsing', () => {
 });
 
 describe('waitForDocumentResponseCompletion', () => {
+  it('stops polling an unresolved request at its budget and respects cancellation without another read', async () => {
+    const read = vi.fn(async () => ({ state: 'streaming' as const }));
+    await expect(waitForDocumentResponseCompletion({ read, wait: async () => undefined, maxWaitMs: 3_000 })).resolves.toBeUndefined();
+    expect(read).toHaveBeenCalledTimes(3);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(waitForDocumentResponseCompletion({ read, wait: async () => undefined, signal: controller.signal })).resolves.toBeUndefined();
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps waiting past the former renderer limit while the response is still active', async () => {
     let reads = 0;
 

@@ -14,6 +14,7 @@ interface GoldenCase {
   readonly expectedKind: 'chat' | 'document' | 'unknown';
   readonly expectedAction?: 'create' | 'revise';
   readonly expectedDocumentKind?: 'word' | 'excel' | 'ppt' | 'auto';
+  readonly expectedDeliverables?: readonly ('word' | 'excel' | 'ppt')[];
   readonly expectedSourcePolicy?: 'none' | 'internal' | 'web' | 'mixed';
   readonly expectedReadiness?: 'ready' | 'needs_clarification' | 'needs_confirmation';
   readonly expectedTargetUnit?: 'document' | 'version' | 'page' | 'section' | 'table' | 'cell' | 'block';
@@ -40,10 +41,10 @@ describe('Conversation intent golden evaluation', () => {
     expect(suite).toMatchObject({
       schemaVersion: 1,
       suiteId: 'conversation-intent-offline-golden',
-      version: '1.0.1',
-      updatedAt: '2026-09-04'
+      version: '1.1.0',
+      updatedAt: '2026-09-09'
     });
-    expect(suite.cases).toHaveLength(46);
+    expect(suite.cases).toHaveLength(56);
     const failures: string[] = [];
     for (const item of suite.cases) {
       const decision = analyzeLocalConversationIntent({
@@ -54,6 +55,7 @@ describe('Conversation intent golden evaluation', () => {
       if (actual.kind !== item.expectedKind) failures.push(`${item.input}: kind=${actual.kind}`);
       if (item.expectedAction !== undefined && actual.action !== item.expectedAction) failures.push(`${item.input}: action=${String(actual.action)}`);
       if (item.expectedDocumentKind !== undefined && actual.documentKind !== item.expectedDocumentKind) failures.push(`${item.input}: documentKind=${String(actual.documentKind)}`);
+      if (item.expectedDeliverables && JSON.stringify(actual.deliverables) !== JSON.stringify(item.expectedDeliverables)) failures.push(`${item.input}: deliverables=${JSON.stringify(actual.deliverables)}`);
       if (item.expectedSourcePolicy !== undefined && actual.sourcePolicy !== item.expectedSourcePolicy) failures.push(`${item.input}: sourcePolicy=${actual.sourcePolicy}`);
       if (item.expectedReadiness !== undefined && decision.assessment.readiness !== item.expectedReadiness) failures.push(`${item.input}: readiness=${decision.assessment.readiness}`);
       if (item.expectedTargetUnit !== undefined && actual.targetHint?.unit !== item.expectedTargetUnit) failures.push(`${item.input}: targetUnit=${String(actual.targetHint?.unit)}`);

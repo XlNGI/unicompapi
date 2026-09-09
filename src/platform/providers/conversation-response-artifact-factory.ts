@@ -24,6 +24,7 @@ import {
 } from './newapi/newapi-contracts';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
+import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 
 export interface ConversationResponseArtifactFactoryDependencies {
   readonly conversations: ProjectConversationRepository;
@@ -31,6 +32,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
   readonly contextBuilder?: ConversationContextBuilder;
+  readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'>;
   nextMessageId?: () => MessageId;
   nextExecutionId?: () => string;
   nextStreamEventId?: () => string;
@@ -82,15 +84,20 @@ export class ConversationResponseArtifactFactory
       contexts: selectedContexts,
       selections: draft.contextSelections
     });
-    const references: readonly ConversationContextReference[] = contextSnapshots.map(
+    const attachmentReferences = await this.dependencies.attachments?.resolve({
+      conversation,
+      currentUserMessageId: draft.userMessageId,
+      query: conversation.messages.find((message) => message.id === draft.userMessageId)?.content ?? input.subject.outboundTextSnapshot
+    }) ?? [];
+    const references: readonly ConversationContextReference[] = [...attachmentReferences, ...contextSnapshots.map(
       (snapshot) => ({
         sourceId: snapshot.contextId,
-        sourceType: 'project',
+        sourceType: 'project' as const,
         revision: snapshot.contextRevision,
         contentHash: snapshot.contentHash,
         excerpt: snapshot.contentSnapshot
       })
-    );
+    )];
     const contextEnvelope = this.contextBuilder.build({
       conversation,
       currentUserMessageId: draft.userMessageId,
