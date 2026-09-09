@@ -115,7 +115,8 @@ describe('chat composer event behavior', () => {
             candidateId: 'candidate-1', available: true, providerName: 'Test', modelName: 'Test',
             parameterSchema: { productFeature: 'text_chat', fields: [] }
           }] : [] })),
-          getPendingWorkflow, startWorkflow, answerWorkflow, startResponse
+          getPendingWorkflow, startWorkflow, answerWorkflow, startResponse,
+          getConversation: vi.fn(async () => ({ ok: true, value: conversation }))
         },
         storage: { getProjectSession: vi.fn(async () => ({ ok: true, value: session })) },
         getPathForFile: () => '/selected/report.pdf',
@@ -188,6 +189,76 @@ describe('chat composer event behavior', () => {
     });
     await settle();
     expect(startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it.each(['new', 'answer'] as const)('synchronizes the saved conversation before a %s follow-up', async (phase) => {
+    initialConversationId = conversation.conversationId;
+    if (phase === 'answer') getPendingWorkflow.mockResolvedValue({ ok: true, value: workflow });
+    Object.assign(window.unicomp!.chatContexts!, {
+      getConversation: vi.fn(async () => ({ ok: true, value: { ...conversation, revision: 12 } }))
+    });
+    await settle();
+    await type('生成提示词');
+    await send('button');
+    const request = (phase === 'new' ? startWorkflow : answerWorkflow).mock.calls[0][0];
+    expect(phase === 'new' ? request.conversation.expectedRevision : request.expectedConversationRevision).toBe(12);
+    expect(request.content).toBe('生成提示词');
+  });
+
+  it('keeps the input and does not submit when synchronizing the conversation fails', async () => {
+    initialConversationId = conversation.conversationId;
+    Object.assign(window.unicomp!.chatContexts!, {
+      getConversation: vi.fn(async () => ({ ok: false, error: { code: 'storage_error' } }))
+    });
+    await settle();
+    await type('生成提示词');
+    await send('button');
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('生成提示词');
+  });
+
+  it('does not submit after cancellation during conversation synchronization', async () => {
+    initialConversationId = conversation.conversationId;
+    let resolveRead!: (result: unknown) => void;
+    Object.assign(window.unicomp!.chatContexts!, {
+      getConversation: vi.fn(() => new Promise(resolve => { resolveRead = resolve; })),
+      cancelPlanning: vi.fn(async () => ({ ok: true, value: { cancelled: false } }))
+    });
+    await settle();
+    await type('生成提示词');
+    await send('button');
+    (element('停止需求理解').props.onClick as () => void)();
+    await settle();
+    resolveRead({ ok: true, value: { ...conversation, revision: 12 } });
+    await settle();
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('生成提示词');
+  });
+
+  it('does not let a late workflow or focus snapshot replace a newer saved conversation', async () => {
+    initialConversationId = conversation.conversationId;
+    const title = '已保存的新会话标题';
+    Object.assign(window.unicomp!.chatContexts!, {
+      getConversation: vi.fn(async () => ({ ok: true, value: { ...conversation, revision: 12, title } }))
+    });
+    await settle();
+    await type('生成提示词');
+    await send('button');
+    expect(find(tree, item => item.props.children === title)).toBeDefined();
+    const onFocus = vi.mocked(window.addEventListener).mock.calls.find(call => call[0] === 'focus')![1] as () => void;
+    onFocus();
+    await settle();
+    expect(find(tree, item => item.props.children === title)).toBeDefined();
+  });
+
+  it('preserves a real write conflict without automatically submitting the same message twice', async () => {
+    initialConversationId = conversation.conversationId;
+    startWorkflow.mockResolvedValue({ ok: false, error: { code: 'revision_conflict' } });
+    await settle();
+    await type('生成提示词');
+    await send('button');
+    expect(startWorkflow).toHaveBeenCalledTimes(1);
+    expect(element('对话输入').props.value).toBe('生成提示词');
   });
 
   it.each(['needs_confirmation', 'ready'] as const)('accepts natural cancellation while %s and leaves no executable workflow', async (status) => {
