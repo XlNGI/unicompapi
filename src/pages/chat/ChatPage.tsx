@@ -445,6 +445,7 @@ function workflowConfirmationDetails(
 }
 
 interface AttachmentDraft {
+  readonly previewUrl?: string;
   readonly fileId: string;
   readonly fileName: string;
   readonly sizeBytes: number;
@@ -1850,14 +1851,21 @@ export function ChatPage({
   async function importDroppedFile(file: File) {
     if (!documentAttachments || !session || responseInProgress) return;
     const sourcePath = window.unicomp?.getPathForFile(file);
-    if (!sourcePath) {
-      setNotice('无法读取拖入的文件，请尝试使用本地选择。');
+    if (!sourcePath && !file.type?.startsWith('image/')) {
+      setNotice('无法读取文件，请尝试拖入本地文件。');
       return;
     }
     setNotice('');
     const inputScope = composerScopeRef.current;
     try {
-      const result = await documentAttachments.importAttachment({ sourcePath });
+      const previewUrl = file.type?.startsWith('image/') && file.size <= 8 * 1024 * 1024 ? await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error('Image read failed'));
+        reader.readAsDataURL(file);
+      }) : undefined;
+      if (!sourcePath && !previewUrl) { setNotice('图片超过 8 MB，请压缩后发送。'); return; }
+      const result = await documentAttachments.importAttachment(sourcePath ? { sourcePath } : { image: { mimeType: file.type, base64: previewUrl!.split(',')[1] } });
       if (inputScope !== composerScopeRef.current) return;
       if (!result.ok) {
         setNotice(
@@ -1875,12 +1883,13 @@ export function ChatPage({
           fileId: result.value.fileId,
           fileName: result.value.fileName,
           sizeBytes: result.value.sizeBytes,
+          ...(previewUrl ? { previewUrl } : {}),
           status: result.value.extraction.status,
           warnings: result.value.extraction.warnings
         }
       ]);
       attachmentSelectionChangedRef.current = true;
-      if (result.value.extraction.status !== 'extracted') {
+      if (result.value.extraction.status !== 'extracted' && !isImageFileName(result.value.fileName)) {
         setNotice(
           result.value.extraction.warnings.join('；') ||
           '附件已导入，但当前无法读取正文；请提供可提取文本的资料。'
@@ -3026,7 +3035,7 @@ export function ChatPage({
                           {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
                         </div>
                       ) : (
-                        <p className="uc-chat-page__message-bubble">{item.content}</p>
+                        <div className="uc-chat-page__message-bubble">{item.attachments.length ? <ul aria-label="本条消息的附件">{item.attachments.map(attachment => <li key={attachment.kind === 'file_reference' ? attachment.fileReferenceId : attachment.assetId}>{attachment.kind === 'file_reference' ? attachment.fileName ?? '附件' : '图片素材'}</li>)}</ul> : null}<p>{item.content}</p></div>
                       )}
                       {item.role === 'assistant' && item.documentResult ? (
                         <section className="uc-chat-page__document-card" aria-label="生成的 Office 文档">
@@ -3216,6 +3225,13 @@ export function ChatPage({
                   ? '请先打开项目'
                   : '输入问题或任务，可拖入图片、文档或电子书'
               }
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.files).filter(file => file.type?.startsWith('image/'));
+                if (files.length && session && !busy && !responseInProgress) {
+                  event.preventDefault();
+                  void importDroppedFiles(files);
+                }
+              }}
               ref={composerRef}
               rows={1}
               value={input}
@@ -3224,9 +3240,9 @@ export function ChatPage({
               <ul className="uc-chat-page__attachments">
                 {attachments.map((attachment) => (
                   <li key={attachment.fileId}>
-                    <LuPaperclip aria-hidden="true" />
+                    <>{attachment.previewUrl ? <img src={attachment.previewUrl} alt={attachment.fileName} style={{ width: 48, height: 48, objectFit: 'contain' }} /> : <LuPaperclip aria-hidden="true" />}</>
                     <span title={[attachment.fileName, ...attachment.warnings].join('；')}>
-                      {attachment.fileName}{attachment.status !== 'extracted' ? '（正文未读取）' : ''}
+                      {attachment.fileName}{isImageFileName(attachment.fileName) ? '（图片）' : attachment.status !== 'extracted' ? '（正文未读取）' : ''}
                     </span>
                     <button
                       aria-label={`移除附件 ${attachment.fileName}`}

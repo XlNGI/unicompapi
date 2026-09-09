@@ -1,3 +1,4 @@
+import { supportsConversationImageInput } from './conversation-image-input';
 import { createHash } from 'node:crypto';
 import {
   parseUsageSchema,
@@ -220,7 +221,8 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
               catalogState: model.catalogState ?? 'present',
               connectionState: connection.state,
               profileStatus: profile.status,
-              featureSupported: true,
+              featureSupported: subject.surface !== 'conversation' || !['text_chat', 'text_reasoning'].includes(subject.productFeature) || subject.imageCount === 0 ||
+                supportsConversationImageInput(profile.adapterKey, snapshot.capabilities.filter(evidence => evidence.modelId === model.id && evidence.capability === 'image_understanding')),
               bindingAvailable,
               runtimeAllowed: runtime.allowed,
               schemasInterpretable: true

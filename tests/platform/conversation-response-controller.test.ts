@@ -188,6 +188,14 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('pins an explicit image question for main-process reading without exposing internal routing in the DTO', async () => {
+    const value = fixture(undefined, '分析一下图片');
+    const result = await value.controller.start({ ...startRequest(), content: '分析一下图片' });
+    expect(result.ok).toBe(true);
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ imageQuery: '分析一下图片' }));
+    expect(JSON.stringify(result)).not.toContain('imageQuery');
+  });
+
   it.each(['content', 'matching displayContent'] as const)('preflights and pins the stored %s page query through the legacy createDraft entry', async (source) => {
     const query = '第 5 页讲了什么？';
     const documentPages = { resolve: vi.fn(async () => [{ sourceId: 'delivered-work', sourceType: 'project' as const,

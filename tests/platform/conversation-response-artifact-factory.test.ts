@@ -116,6 +116,52 @@ function textCandidate(): ResolvedFeatureCandidateV1 {
 }
 
 describe('ConversationResponseArtifactFactory', () => {
+  it.each(['unchanged', 'changed', 'unbound'] as const)('sends only the pinned image bytes and fails closed when %s', async (mode) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-conversation-image-'));
+    roots.push(root);
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGf8AAAAASUVORK5CYII=';
+    const imported = await new AttachmentImportService({ rootDirectory: root, projectId }).importImage({ mimeType: 'image/png', base64 });
+    const attachments = new ConversationAttachmentContextService({ rootDirectory: root, projectId });
+    const storage = new NodeProjectStorage(root);
+    const conversations = new JsonProjectConversationRepository(storage, projectId, () => t1);
+    const drafts = new JsonConversationResponseDraftRepository(storage, projectId, () => t1);
+    const contexts = new JsonProjectContextRepository(storage, projectId, () => t1);
+    const executions = new JsonConversationResponseExecutionRepository(storage, projectId);
+    const empty = createProjectConversation({ id: toConversationId('image-conversation'), projectId, title: '图片分析', createdAt: t0 });
+    await conversations.create(empty);
+    const conversation = addUserMessage(empty, { id: toMessageId('image-user'), content: '分析一下图片', createdAt: t0,
+      attachments: await attachments.pin([imported.fileId]) });
+    await conversations.save(conversation, 0);
+    const draft = createConversationResponseDraft({ id: toConversationResponseDraftId('image-draft'), projectId,
+      conversationId: conversation.id, conversationRevision: conversation.revision, userMessageId: toMessageId('image-user'),
+      userMessageRevision: 0, productFeature: 'text_chat', createdAt: t0, imageQuery: '分析一下图片' });
+    await drafts.create(draft);
+    const subject = await new ProjectConversationResponseSubjectResolver(conversations, drafts, contexts, undefined, attachments).resolve({
+      kind: 'conversation_response_draft', conversationId: conversation.id, conversationRevision: conversation.revision,
+      responseDraftId: draft.id, responseDraftRevision: draft.revision, userMessageId: draft.userMessageId });
+    expect(subject.imageCount).toBe(1);
+    expect(subject.materialReferences[0].referenceId).toBe(imported.fileId);
+    expect(JSON.stringify(subject)).not.toContain(base64);
+    if (mode === 'changed') {
+      const { readdir } = await import('node:fs/promises');
+      const directory = path.join(root, 'files', 'attachments');
+      const files = await readdir(directory);
+      expect(files).toHaveLength(1);
+      await writeFile(path.join(directory, files[0]), 'changed');
+    }
+    const factory = new ConversationResponseArtifactFactory({ conversations, drafts, contexts, executions, attachments });
+    const create = () => factory.create({ subject: mode === 'unbound' ? { ...subject, contextContentHashes: [] } : subject,
+      candidate: textCandidate(), routeSnapshotId: toProviderExecutionRouteSnapshotId('image-route'),
+      invocationAttemptId: toProviderInvocationAttemptId('image-attempt'), authorizationClaimId: 'image-claim', createdAt: t1 });
+    if (mode !== 'unchanged') { await expect(create()).rejects.toMatchObject({ code: 'attachment_changed' }); return; }
+    const created = await create();
+    expect(created.dispatchRequest.image?.base64).toBe(base64);
+    expect(created.dispatchRequest.messages.at(-1)?.content).toBe('分析一下图片');
+    expect(JSON.stringify(created.dispatchRequest.messages)).not.toContain('没有读取其图像内容');
+    expect(JSON.stringify(created.subjectArtifacts)).not.toContain(base64);
+    expect(JSON.stringify(await drafts.get(draft.id))).not.toContain(base64);
+  });
+
   it.each(['snapshot', 'legacy-display', 'legacy-content'] as const)(
     'uses the persisted source query or legacy user text without interpreting internal prompts: %s', async (mode) => {
       const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-response-attachment-query-'));

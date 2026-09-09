@@ -7573,6 +7573,10 @@ button.uc-project-center__project-card:disabled {
   line-height: 1.6;
 }
 
+.uc-chat-page__message-bubble > p {
+  margin: 0;
+}
+
 .uc-chat-page__message-content {
   min-width: 0;
 }

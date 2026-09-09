@@ -296,6 +296,7 @@ export function validateProductFeatureRequest(
     if (videoCount !== 0) throw featureConstraint(`${feature} cannot accept video media`);
     return;
   }
+  if ((feature === 'text_chat' || feature === 'text_reasoning') && subject.surface === 'conversation' && imageCount <= 1 && videoCount === 0) return;
   if (imageCount !== 0 || videoCount !== 0) {
     throw featureConstraint(`${feature} cannot accept media`);
   }

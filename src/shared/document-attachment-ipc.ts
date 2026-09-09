@@ -65,9 +65,7 @@ export type DocumentAttachmentIpcResult<T> =
       };
     };
 
-export interface AttachmentImportRequest {
-  readonly sourcePath: string;
-}
+export type AttachmentImportRequest = { readonly sourcePath: string } | { readonly image: { readonly mimeType: string; readonly base64: string } };
 
 export interface FileExtractionRequest {
   readonly fileId: string;
@@ -123,6 +121,12 @@ export const documentAttachmentRequestParsers = {
   importAttachment(value: unknown): AttachmentImportRequest {
     if (!isRecord(value)) {
       throw new TypeError('Invalid attachment import request');
+    }
+    if ('image' in value) {
+      if (Object.keys(value).length !== 1 || !isRecord(value.image) || Object.keys(value.image).length !== 2 ||
+        typeof value.image.base64 !== 'string' || value.image.base64.length > 11184812 ||
+        !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(String(value.image.mimeType))) throw new TypeError('Invalid clipboard image');
+      return { image: { mimeType: String(value.image.mimeType), base64: value.image.base64 } };
     }
     return { sourcePath: requireString(value.sourcePath, 'sourcePath') };
   },

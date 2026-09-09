@@ -222,7 +222,7 @@ export class NewApiSharedRuntime {
       onResponseRequestId: input.onResponseRequestId,
       accept: 'text/event-stream',
       contentType: 'application/json',
-      maximumRequestBytes: 2 * 1024 * 1024,
+      maximumRequestBytes: 14 * 1024 * 1024,
       maximumResponseBytes: 8 * 1024 * 1024,
       requireReadyConnection: true,
       expectedResponse: 'stream',

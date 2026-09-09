@@ -25,6 +25,7 @@ import {
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './newapi/unicompapi-contracts';
 import type { SubmissionArtifactFactoryPort } from './provider-submission-orchestrator';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
+import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export interface ConversationResponseArtifactFactoryDependencies {
@@ -33,7 +34,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
   readonly contextBuilder?: ConversationContextBuilder;
-  readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'>;
+  readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   nextMessageId?: () => MessageId;
   nextExecutionId?: () => string;
@@ -96,10 +97,15 @@ export class ConversationResponseArtifactFactory
     if (pageReferences.some((reference) => !input.subject.contextContentHashes?.includes(reference.contentHash))) {
       throw new ConversationDocumentPageError('document_page_unavailable', '作品页面在请求准备后发生变化，请重新核对后再提问。');
     }
+    const imageInput = draft.imageQuery ? await this.dependencies.attachments?.resolveImage?.({ conversation, currentUserMessageId: draft.userMessageId }) : undefined;
+    if (draft.imageQuery && (!imageInput || input.subject.imageCount !== 1 || !input.subject.materialReferences.some(item => item.referenceId === imageInput.fileId) || !input.subject.contextContentHashes.includes(imageInput.image.checksumSha256))) {
+      throw new ConversationAttachmentError('attachment_changed', '图片与已确认的发送范围不一致，请重新确认。');
+    }
     const attachmentReferences = pageReferences.length ? [] : await this.dependencies.attachments?.resolve({
       conversation,
       currentUserMessageId: draft.userMessageId,
-      query: draft.attachmentQuery ?? userMessage.displayContent ?? userMessage.content
+      query: draft.attachmentQuery ?? userMessage.displayContent ?? userMessage.content,
+      ...(imageInput ? { imageFileId: imageInput.fileId } : {})
     }) ?? [];
     const references: readonly ConversationContextReference[] = [...pageReferences, ...attachmentReferences, ...contextSnapshots.map(
       (snapshot) => ({
@@ -185,6 +191,7 @@ export class ConversationResponseArtifactFactory
         responseExecutionId: responseExecution.id,
         invocationAttemptId: input.invocationAttemptId,
         messages,
+        ...(imageInput ? { image: imageInput.image } : {}),
         parameterValues: input.subject.parameterValues
       }
     };

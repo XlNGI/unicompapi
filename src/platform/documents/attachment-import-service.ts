@@ -1,5 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import { copyFile, stat } from 'node:fs/promises';
+import { parseConversationImageInput } from '../providers/conversation-image-input';
+import { NodeImageInspector } from '../files/node-image-inspector';
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFile, stat, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import {
   createFileReference,
@@ -145,6 +147,20 @@ export class AttachmentImportService {
       sizeBytes: file.sizeBytes,
       extraction
     };
+  }
+
+  async importImage(input: { readonly mimeType: string; readonly base64: string }): Promise<DocumentAttachmentImportDto> {
+    const image = parseConversationImageInput({ ...input, checksumSha256: createHash('sha256').update(Buffer.from(input.base64, 'base64')).digest('hex') });
+    await this.storage.ensureDirectory(toProjectRelativePath('files/attachments'));
+    const extension = image.mimeType.slice('image/'.length);
+    const temporaryPath = resolveInsideRoot(path.resolve(this.options.rootDirectory), toProjectRelativePath(`files/attachments/clipboard-${randomUUID()}.${extension}`));
+    await writeFile(temporaryPath, Buffer.from(image.base64, 'base64'), { flag: 'wx' });
+    try {
+      await new NodeImageInspector().inspect(temporaryPath);
+      return await this.importAttachment({ sourcePath: temporaryPath });
+    } finally {
+      await unlink(temporaryPath);
+    }
   }
 
   private maxFileBytes(): number {

@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { stat, open } from 'node:fs/promises';
+import { NodeImageInspector } from '../files/node-image-inspector';
+import { conversationImageMaxBytes, parseConversationImageInput, type ConversationImageInput } from '../providers/conversation-image-input';
 import {
   toFileReferenceId,
   type Conversation,
@@ -163,6 +165,7 @@ export class ConversationAttachmentContextService {
     readonly conversation: Conversation;
     readonly currentUserMessageId: MessageId;
     readonly query: string;
+    readonly imageFileId?: string;
   }): Promise<readonly ConversationContextReference[]> {
     if (input.conversation.projectId !== this.options.projectId ||
       !input.conversation.messages.some((message) => message.id === input.currentUserMessageId && message.role === 'user')) {
@@ -184,6 +187,7 @@ export class ConversationAttachmentContextService {
       await this.verify(file, attachment.checksumSha256);
       const fileName = attachment.fileName ?? path.basename(file.locator.kind === 'project' ? file.locator.relativePath : '附件');
       if (isImageAttachment(fileName)) {
+        if (input.imageFileId === file.id) continue;
         references.push({ sourceId: file.id, sourceType: 'attachment', contentHash: attachment.checksumSha256,
           location: fileName, excerpt: `附件：${fileName}\n该附件为图片，仅可作为文档插图。当前会话没有读取其图像内容，不能据此描述或分析图片。` });
         continue;
@@ -199,6 +203,48 @@ export class ConversationAttachmentContextService {
         excerpt: `附件：${fileName}\n原文件 SHA-256：${attachment.checksumSha256}\n${excerpt}` });
     }
     return references;
+  }
+
+  async resolveImage(input: {
+    readonly conversation: Conversation;
+    readonly currentUserMessageId: MessageId;
+  }): Promise<{ readonly fileId: string; readonly image: ConversationImageInput }> {
+    if (input.conversation.projectId !== this.options.projectId ||
+      !input.conversation.messages.some(message => message.id === input.currentUserMessageId && message.role === 'user')) {
+      throw new ConversationAttachmentError('attachment_unavailable', '图片不属于当前项目会话。');
+    }
+    const images = conversationAttachmentBatch(input.conversation).filter(item => isImageAttachment(item.fileName ?? ''));
+    if (images.length !== 1) throw new ConversationAttachmentError('attachment_scope_exceeded', images.length
+      ? '请保留一张要分析的图片后发送。' : '请先拖入或粘贴一张要分析的图片。');
+    const attachment = images[0];
+    if (attachment.projectId !== this.options.projectId) throw new ConversationAttachmentError('attachment_unavailable', '图片不属于当前项目。');
+    const file = await this.requireFile(attachment.fileReferenceId);
+    await this.verify(file, attachment.checksumSha256);
+    const target = await resolveFileReferencePathSafely(this.options.rootDirectory, file);
+    const inspected = await new NodeImageInspector().inspect(target).catch(() => undefined);
+    if (!inspected || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(inspected.mimeType)) {
+      throw new ConversationAttachmentError('attachment_unsupported', '请使用有效的 PNG、JPEG、WebP 或 GIF 图片。');
+    }
+    if (inspected.sizeBytes > conversationImageMaxBytes || inspected.width * inspected.height > 40_000_000) {
+      throw new ConversationAttachmentError('attachment_scope_exceeded', '图片超过本次读取上限（8 MB、4000 万像素），请压缩后发送。');
+    }
+    const handle = await open(target, 'r');
+    try {
+      const bytes = Buffer.alloc(conversationImageMaxBytes + 1);
+      let length = 0;
+      while (length < bytes.length) {
+        const read = await handle.read(bytes, length, bytes.length - length, length);
+        if (!read.bytesRead) break;
+        length += read.bytesRead;
+      }
+      if (length !== inspected.sizeBytes || createHash('sha256').update(bytes.subarray(0, length)).digest('hex') !== attachment.checksumSha256) {
+        throw new ConversationAttachmentError('attachment_changed', '图片内容发生变化，请重新导入后发送。');
+      }
+      const image = parseConversationImageInput({ mimeType: inspected.mimeType, base64: bytes.subarray(0, length).toString('base64'), checksumSha256: attachment.checksumSha256 });
+      return { fileId: file.id, image };
+    } finally {
+      await handle.close();
+    }
   }
 
   private summaryKey(conversation: Conversation): string {
@@ -286,7 +332,7 @@ function selectAttachmentText(text: string, query: string, budget: number, fileN
 function isSummaryRequest(query: string): boolean {
   return /摘要|总结|概述|主要观点|归纳|提炼/.test(query) && !/全表|总计|合计|平均|汇总|统计/.test(query);
 }
-function isImageAttachment(name: string): boolean { return /\.(?:png|jpe?g|webp|gif|bmp)$/i.test(name); }
+export function isImageAttachment(name: string): boolean { return /\.(?:png|jpe?g|webp|gif|bmp)$/i.test(name); }
 function requireCompleteSummary(parts: readonly AttachmentSummaryPart[], textLength: number): void {
   let cursor = 0;
   for (const part of parts) {

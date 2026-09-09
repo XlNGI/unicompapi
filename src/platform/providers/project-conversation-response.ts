@@ -12,7 +12,7 @@ import type {
   FeatureSubjectResolverPort,
   ResolvedFeatureSubjectV1
 } from './provider-feature-candidates';
-import { conversationAttachmentBatch } from '../documents/conversation-attachment-context';
+import { ConversationAttachmentError, type ConversationAttachmentContextService, conversationAttachmentBatch } from '../documents/conversation-attachment-context';
 import { resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export class ProjectConversationResponseSubjectResolver
@@ -21,7 +21,8 @@ export class ProjectConversationResponseSubjectResolver
     private readonly conversations: ProjectConversationRepository,
     private readonly drafts: ConversationResponseDraftRepository,
     private readonly contexts: ProjectContextRepository,
-    private readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>
+    private readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>,
+    private readonly attachments?: Pick<ConversationAttachmentContextService, 'resolveImage'>
   ) {
     if (
       conversations.projectId !== drafts.projectId ||
@@ -69,6 +70,8 @@ export class ProjectConversationResponseSubjectResolver
     const pageReferences = await resolveConversationResponseDocumentPages({
       conversation, draft, service: this.documentPages
     });
+    const imageInput = draft.imageQuery ? await this.attachments?.resolveImage({ conversation, currentUserMessageId: draft.userMessageId }) : undefined;
+    if (draft.imageQuery && !imageInput) throw new ConversationAttachmentError('attachment_unsupported', '当前图片读取通道不可用。');
     const selectedContexts = [];
     for (const selection of pageReferences.length ? [] : draft.contextSelections) {
       const context = await this.contexts.get(selection.contextId);
@@ -86,12 +89,12 @@ export class ProjectConversationResponseSubjectResolver
       subject: parsed,
       productFeature: draft.productFeature,
       surface: 'conversation',
-      imageCount: 0,
+      imageCount: imageInput ? 1 : 0,
       videoCount: 0,
       contextCount: contextSnapshots.length + attachmentBatch.length + pageReferences.length,
       parameterValues: { ...draft.parameterValues },
       outboundTextSnapshot: draft.promptContent ?? userMessage.content,
-      materialReferences: [],
+      materialReferences: imageInput ? [{ kind: 'file_reference', referenceId: imageInput.fileId, revision: 1 }] : [],
       contextContentHashes: [
         ...pageReferences.map((reference) => reference.contentHash),
         ...contextSnapshots.map((snapshot) => snapshot.contentHash),
