@@ -11,6 +11,7 @@ import type {
   DocumentWorkspaceKind,
   WorkId
 } from '../domain';
+import { mappedPresentationTarget, type PresentationRevisionMap } from './presentation-revision-map';
 
 export interface DocumentRevisionAgentInput {
   readonly baseWorkId: WorkId;
@@ -20,6 +21,7 @@ export interface DocumentRevisionAgentInput {
   readonly outline: DocumentOutline;
   /** Provider output is content data only; it cannot choose tools or paths. */
   readonly proposedOutline?: DocumentOutline;
+  readonly presentationMap?: PresentationRevisionMap;
   readonly signal?: AbortSignal;
 }
 
@@ -254,10 +256,11 @@ function nextLocalDecision(
 function resolveRevisionPatches(
   input: DocumentRevisionAgentInput
 ): readonly DocumentRevisionPatch[] {
+  if (input.kind === 'ppt' && !input.presentationMap) return [];
   const targets = parseRevisionTargets(input.requestText)
     .map((target) => ({
       target,
-      sectionIndex: revisionSectionIndex(input.kind, target)
+      sectionIndex: revisionSectionIndex(input.kind, target, input.presentationMap)
     }))
     .filter(({ sectionIndex }) =>
       sectionIndex >= 0 && sectionIndex < input.outline.sections.length
@@ -284,7 +287,7 @@ function resolveRevisionPatches(
     return [];
   }
   return targets.map(({ target }) => {
-    const sectionIndex = revisionSectionIndex(input.kind, target);
+    const sectionIndex = revisionSectionIndex(input.kind, target, input.presentationMap);
     const replacementSection = input.proposedOutline!.sections[sectionIndex];
     const revisionTargetValue = revisionTarget(input, target);
     return resolveFineGrainedPatches(
@@ -333,12 +336,16 @@ function parseOrdinalToken(token: string): number {
 
 export function revisionSectionIndex(
   kind: DocumentWorkspaceKind,
-  target: RevisionOrdinalTarget
+  target: RevisionOrdinalTarget,
+  presentationMap?: PresentationRevisionMap
 ): number {
-  // PPT page numbers are physical slide numbers; slide 1 is the cover.
-  // Section ordinals continue to address logical content sections.
+  if (kind === 'ppt' && presentationMap) {
+    return (target.unit === 'page' ? presentationMap.sections.find((section) => section.pages.includes(target.ordinal))
+      : presentationMap.sections.find((section) => section.sectionIndex === target.ordinal - 1))?.sectionIndex ?? -1;
+  }
+  // A physical page has no logical section index without a file-derived map.
   if (target.unit === 'page') {
-    return kind === 'ppt' ? target.ordinal - 2 : -1;
+    return -1;
   }
   return target.ordinal - 1;
 }
@@ -362,16 +369,17 @@ function revisionTarget(
   input: DocumentRevisionAgentInput,
   target: RevisionOrdinalTarget
 ) {
+  if (input.kind === 'ppt' && input.presentationMap) {
+    const mapped = mappedPresentationTarget(input.presentationMap, target);
+    return { sectionIndex: mapped.sectionIndex, sectionHeading: mapped.sectionHeading,
+      pageNumber: mapped.pageNumber, targetUnit: mapped.targetUnit };
+  }
+  if (input.kind === 'ppt') throw new Error('A PPT revision requires an actual page map');
   const sectionIndex = revisionSectionIndex(input.kind, target);
   return {
     sectionIndex,
     sectionHeading: input.outline.sections[sectionIndex].heading,
-    ...(input.kind === 'ppt'
-      ? {
-          pageNumber: target.unit === 'page' ? target.ordinal : sectionIndex + 2,
-          ...(target.unit === 'page' ? { targetUnit: target.unit } : {})
-        }
-      : target.unit === 'page'
+    ...(target.unit === 'page'
         ? { targetUnit: target.unit }
         : {})
   };

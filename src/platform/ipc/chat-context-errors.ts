@@ -7,6 +7,7 @@ import {
   DomainError
 } from '../../domain';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
+import { ConversationDocumentPageError } from '../documents/conversation-document-page-context';
 import type {
   ChatContextIpcErrorCode,
   ChatContextIpcResult
@@ -36,6 +37,9 @@ export function chatContextFailure<T>(
 ): ChatContextIpcResult<T> {
   onError?.(error);
   if (error instanceof ConversationAttachmentError) {
+    return failure(error.code, error.message);
+  }
+  if (error instanceof ConversationDocumentPageError) {
     return failure(error.code, error.message);
   }
   if (error instanceof TypeError) {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import JSZip from 'jszip';
@@ -54,12 +54,17 @@ import {
 } from './office-document-tool-executor';
 import type { DocumentStructureSnapshot } from './structured-document-tools';
 import type { DocumentRenderResult } from './temporary-document-workflow';
+import { readPptxDocument, readPptxSlideOrder } from './pptx-page-reader';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
   | 'cancelled'
   | 'generation_failed'
   | 'verification_failed'
+  | 'revision_scope_violation'
+  | 'write_failed'
+  | 'registration_failed'
+  | 'result_sync_pending'
   | 'page_count_mismatch'
   | 'storage_error';
 
@@ -81,6 +86,7 @@ export interface DocumentGenerationPlanInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
+  readonly sourceChecksumSha256?: string;
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
@@ -101,6 +107,7 @@ export interface DocumentGenerationResult {
   readonly execution: Execution;
   readonly file: FileReference;
   readonly work: Work;
+  readonly validatedOutline?: DocumentOutline;
 }
 
 interface RunnerContext {
@@ -195,7 +202,7 @@ export class DocumentGenerationRunner {
       const sourceStructure =
         revisionSource.revisionSourcePath && (input.revisionPatch || input.revisionPatches)
           ? await readOfficeDocumentStructureFromBuffer({
-              buffer: await readFile(revisionSource.revisionSourcePath),
+              buffer: revisionSource.revisionSourceBuffer!,
               kind: input.kind,
               displayName: path.basename(revisionSource.revisionSourcePath)
             })
@@ -247,6 +254,9 @@ export class DocumentGenerationRunner {
           input.kind,
           input.revisionPatches ?? [input.revisionPatch!]
         );
+        if (input.kind === 'ppt') await this.assertUntouchedPptParts(
+          revisionSource.revisionSourceBuffer!, generated, input.revisionPatches ?? [input.revisionPatch!], sourceStructure
+        );
       }
       const temporaryVerification = await this.verifyTemporaryOutput(
         execution,
@@ -254,6 +264,8 @@ export class DocumentGenerationRunner {
         input.signal
       );
       this.assertNotCancelled(input.signal);
+      const validatedOutline = input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
+        ? await this.readRevisedOutline(input, generated.temporaryPath) : undefined;
       await syncFile(generated.temporaryPath);
       await (this.options.publishFile ?? rename)(
         generated.temporaryPath,
@@ -297,9 +309,17 @@ export class DocumentGenerationRunner {
         task: await this.requireTask(context, execution.taskId),
         execution,
         file,
-        work
+        work,
+        ...(validatedOutline ? { validatedOutline } : {})
       };
     } catch (error) {
+      if (workRegistered) throw new DocumentGenerationError('result_sync_pending', 'The new document is registered; execution status synchronization must be retried');
+      const errorCode = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+      const classified = error instanceof DocumentGenerationError ? error
+        : errorCode === 'target_not_found' ? new DocumentGenerationError('revision_scope_violation', 'The requested range could not be applied to the actual document')
+        : execution?.state === 'registering_work' ? new DocumentGenerationError('registration_failed', 'The new document could not be registered')
+        : ['ENOSPC', 'EACCES', 'EPERM', 'EBUSY', 'EROFS'].includes(String(errorCode)) ? new DocumentGenerationError('write_failed', 'The new document could not be written to local storage')
+        : error;
       const cancelled =
         input.signal?.aborted === true ||
         (error instanceof DocumentGenerationError && error.code === 'cancelled') ||
@@ -307,7 +327,9 @@ export class DocumentGenerationRunner {
       if (file && !workRegistered) {
         await this.removeRegisteredOutput(context, file);
       }
-      if (execution) {
+      // A registered Work is already published. Keep its final write recoverable
+      // instead of turning it into a failed execution that a retry would duplicate.
+      if (execution && !workRegistered) {
         const current = (await context.executions.get(execution.id)) ?? execution;
         if (!['completed', 'cancelled', 'failed'].includes(current.state)) {
           if (cancelled) {
@@ -317,10 +339,10 @@ export class DocumentGenerationRunner {
               transitionExecution(current, 'failed', toIsoTimestamp(now()), {
                 failure: {
                   stage: current.state,
-                  message: error instanceof Error ? error.message : String(error),
+                  message: classified instanceof DocumentGenerationError ? classified.code : 'document_execution_failed',
                   retryability:
-                    error instanceof DocumentGenerationError &&
-                    error.code === 'generation_failed'
+                    classified instanceof DocumentGenerationError &&
+                    ['generation_failed', 'write_failed', 'registration_failed', 'storage_error'].includes(classified.code)
                       ? 'retryable'
                       : 'not_retryable'
                 }
@@ -335,7 +357,7 @@ export class DocumentGenerationRunner {
           'Document generation was cancelled'
         );
       }
-      throw error;
+      throw classified;
     } finally {
       if (temporaryPath) await rm(temporaryPath, { force: true });
       if (finalPath && !workRegistered) {
@@ -348,7 +370,8 @@ export class DocumentGenerationRunner {
    * Generation is retried after the assistant message or workflow settlement
    * can fail. Reuse only a fully registered, locally verified Work matching the
    * exact source draft, format and content fingerprint; never trust a stale
-   * task, file name or an incomplete execution as an idempotency hit.
+   * task or file name as an idempotency hit. A registration awaiting only its
+   * final execution write can be settled after validating all persisted links.
    */
   private async findRegisteredResult(
     context: RunnerContext,
@@ -358,28 +381,45 @@ export class DocumentGenerationRunner {
     const candidates = tasks.filter((task) => {
       if (task.submission.kind !== 'document_generation') return false;
       const document = task.submission.document;
-      return task.sourceDraftId === input.sourceDraftId &&
+      return task.projectId === this.options.projectId &&
+        task.sourceDraftId === input.sourceDraftId &&
         document.kind === input.kind &&
         document.contentFingerprint === input.contentFingerprint &&
         document.draftRevision === input.draftRevision;
     });
     for (const task of candidates) {
       const executions = await context.executions.list(task.id);
-      const completed = [...executions]
-        .filter((execution) => execution.state === 'completed' && execution.workId !== undefined)
+      const registered = [...executions]
+        .filter((execution) => (execution.state === 'completed' || execution.state === 'registering_work') &&
+          execution.taskId === task.id && task.executionIds.includes(execution.id) &&
+          execution.workId !== undefined && execution.outputFileId !== undefined)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-      for (const execution of completed) {
+      for (const execution of registered) {
         const work = await context.works.get(execution.workId!);
-        if (!work || work.projectId !== this.options.projectId || work.mediaKind !== 'document' || work.sourceExecutionId !== execution.id) continue;
+        if (!work || work.projectId !== this.options.projectId || work.mediaKind !== 'document' ||
+          work.sourceTaskId !== task.id || work.sourceExecutionId !== execution.id ||
+          work.fileId !== execution.outputFileId || work.parentWorkId !== input.parentWorkId) continue;
         const file = await context.files.get(work.fileId);
-        if (!file || file.projectId !== this.options.projectId || file.state !== 'available' || !file.checksumSha256 || file.locator.kind !== 'project') continue;
+        if (!file || file.projectId !== this.options.projectId || file.sourceExecutionId !== execution.id ||
+          file.state !== 'available' || !file.checksumSha256 || file.locator.kind !== 'project') continue;
         try {
           const verification = await new NodeFileStatusProbe(this.options.rootDirectory).inspect(file, { expectedChecksum: file.checksumSha256 });
           if (verification.recommendedState !== 'available' || verification.verification?.matchesExpected !== true) continue;
         } catch {
           continue;
         }
-        return { task, execution, file, work };
+        if (execution.state === 'registering_work') {
+          const completed = transitionExecution(execution, 'completed', toIsoTimestamp(
+            (this.options.now ?? (() => new Date().toISOString()))()
+          ), { outputFileId: file.id, workId: work.id });
+          await context.executions.save(completed);
+          return { task, execution: completed, file, work,
+            ...(input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
+              ? { validatedOutline: await this.readRevisedOutline(input, await resolveFileReferencePathSafely(this.options.rootDirectory, file)) } : {}) };
+        }
+        return { task, execution, file, work,
+          ...(input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
+            ? { validatedOutline: await this.readRevisedOutline(input, await resolveFileReferencePathSafely(this.options.rootDirectory, file)) } : {}) };
       }
     }
     return undefined;
@@ -390,6 +430,7 @@ export class DocumentGenerationRunner {
     input: DocumentGenerationPlanInput
   ): Promise<{
     readonly revisionSourcePath?: string;
+    readonly revisionSourceBuffer?: Uint8Array;
     readonly revisionTargetSectionHeading?: string;
     readonly revisionPatch?: DocumentRevisionPatch;
     readonly revisionPatches?: readonly DocumentRevisionPatch[];
@@ -421,8 +462,18 @@ export class DocumentGenerationRunner {
         this.options.rootDirectory,
         file
       );
+      if (file.state !== 'available' || file.sourceExecutionId !== parent.sourceExecutionId || !file.checksumSha256) {
+        throw new DocumentGenerationError('revision_scope_violation', 'Parent file is not a verified revision source');
+      }
+      const revisionSourceBuffer = await readFile(sourcePath);
+      if (revisionSourceBuffer.length > maximumGeneratedDocumentBytes || revisionSourceBuffer.length !== file.sizeBytes ||
+        createHash('sha256').update(revisionSourceBuffer).digest('hex') !== file.checksumSha256 ||
+        (input.sourceChecksumSha256 && input.sourceChecksumSha256 !== file.checksumSha256)) {
+        throw new DocumentGenerationError('revision_scope_violation', 'Parent file changed after revision scope was prepared');
+      }
       return {
         revisionSourcePath: sourcePath,
+        revisionSourceBuffer,
         ...(input.revisionTargetSectionHeading !== undefined
           ? { revisionTargetSectionHeading: input.revisionTargetSectionHeading }
           : {}),
@@ -499,9 +550,7 @@ export class DocumentGenerationRunner {
       );
     }
     if (kind === 'ppt' && requestedTotalPages !== undefined) {
-      const actualPages = Object.keys(zip.files).filter((name) =>
-        /^ppt\/slides\/slide\d+\.xml$/u.test(name)
-      ).length;
+      const actualPages = (await readPptxSlideOrder(zip)).length;
       if (actualPages !== requestedTotalPages) {
         throw new DocumentGenerationError(
           'page_count_mismatch',
@@ -568,7 +617,7 @@ export class DocumentGenerationRunner {
           sectionHeading === undefined ||
           !isPptContinuationHeading(source.sections[pageIndex].heading, sectionHeading)
         ) {
-          throw new DocumentGenerationError('verification_failed', 'Scoped document revision page target was not found');
+          throw new DocumentGenerationError('revision_scope_violation', 'Scoped document revision page target was not found');
         }
         targetIndexes.add(pageIndex);
         if (patch.target.targetUnit !== 'page') {
@@ -620,6 +669,47 @@ export class DocumentGenerationRunner {
       if (patch.operation === 'replace_text' || patch.operation === 'update_cells') {
         this.assertFineGrainedRevisionScope(source, candidate, patch);
       }
+    }
+  }
+
+  private async readRevisedOutline(input: DocumentGenerationPlanInput, filePath: string): Promise<DocumentOutline> {
+    const pages = await readPptxDocument(await readFile(filePath));
+    const targets = new Set((input.revisionPatches ?? (input.revisionPatch ? [input.revisionPatch] : [])).map((patch) => patch.target.sectionIndex));
+    return { ...input.outline, sections: input.outline.sections.map((section, index) => {
+      if (!targets.has(index)) return section;
+      const sectionPages = pages.filter((page) => page.pageNumber > 1 && isPptContinuationHeading(page.heading, section.heading));
+      if (!sectionPages.length) throw new DocumentGenerationError('revision_scope_violation', 'Revised section was not found');
+      const blocks = sectionPages.flatMap((page) => {
+        const lines = page.contentText.split('\n').map((line) => line.trim()).filter(Boolean);
+        if (lines[0] === page.heading) lines.shift();
+        return lines.map((text) => ({ type: 'paragraph' as const, text }));
+      });
+      return { heading: section.heading, level: section.level, ...(section.pageKind ? { pageKind: section.pageKind } : {}), blocks };
+    }) };
+  }
+
+  private async assertUntouchedPptParts(source: Uint8Array, generated: GeneratedTemporaryDocumentFile,
+    patches: readonly DocumentRevisionPatch[], structure: DocumentStructureSnapshot): Promise<void> {
+    const before = await JSZip.loadAsync(source);
+    const after = await JSZip.loadAsync(await readFile(generated.temporaryPath));
+    const names = await readPptxSlideOrder(before);
+    const allowed = new Set<string>();
+    for (const patch of patches) {
+      if (!('pageNumber' in patch.target) || !patch.target.pageNumber) continue;
+      let index = patch.target.pageNumber - 1;
+      allowed.add(names[index]);
+      if (patch.target.targetUnit !== 'page') {
+        while (++index < names.length && isPptContinuationHeading(structure.sections[index].heading, patch.target.sectionHeading)) allowed.add(names[index]);
+      }
+    }
+    if (!allowed.size) return;
+    if (Object.keys(before.files).sort().join('\n') !== Object.keys(after.files).sort().join('\n')) {
+      throw new DocumentGenerationError('revision_scope_violation', 'Revision changed package structure outside its scope');
+    }
+    for (const name of Object.keys(before.files)) {
+      if (allowed.has(name) || before.files[name].dir) continue;
+      const [original, candidate] = await Promise.all([before.file(name)!.async('nodebuffer'), after.file(name)!.async('nodebuffer')]);
+      if (!original.equals(candidate)) throw new DocumentGenerationError('revision_scope_violation', 'Revision changed another page or shared resource');
     }
   }
 

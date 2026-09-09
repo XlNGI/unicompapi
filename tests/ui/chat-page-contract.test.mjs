@@ -101,7 +101,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__header-actions \.uc-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;/);
   assert.match(styles, /\.uc-chat-page__composer \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);[\s\S]*grid-template-rows: minmax\(40px, auto\) auto;[\s\S]*min-height: 96px;/);
   assert.match(styles, /@media \(max-width: 520px\)[\s\S]*\.uc-chat-page__composer \{[\s\S]*min-height: 92px;/);
-  assert.match(source, /询问 UniComp AI/);
+  assert.match(source, /输入问题或任务，可拖入图片、文档或电子书/);
   assert.match(source, /open=\{contextOpen\}/);
   assert.match(source, /uc-chat-page__delete-dialog/);
   assert.match(source, /停止生成/);

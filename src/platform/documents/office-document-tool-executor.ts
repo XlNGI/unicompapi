@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
+import { readPptxSlideOrder } from './pptx-page-reader';
 import type {
   DocumentOutline,
   DocumentOutlineBlock,
@@ -499,9 +500,7 @@ async function parseExcelOutline(buffer: Uint8Array, relativePath: string): Prom
 }
 
 async function parsePptOutline(zip: JSZip, relativePath: string): Promise<DocumentOutline> {
-  const names = Object.keys(zip.files)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
-    .sort((a, b) => Number(/slide(\d+)/u.exec(a)?.[1] ?? 0) - Number(/slide(\d+)/u.exec(b)?.[1] ?? 0));
+  const names = await readPptxSlideOrder(zip);
   const sections: DocumentOutlineSection[] = [];
   for (const name of names) {
     const xml = await zip.file(name)!.async('string');
@@ -515,9 +514,8 @@ async function parsePptOutline(zip: JSZip, relativePath: string): Promise<Docume
     const headingIndex = texts.findIndex(
       (text, index) => index !== pageNumberIndex && text.trim().length > 0
     );
-    if (headingIndex < 0) continue;
     sections.push({
-      heading: texts[headingIndex],
+      heading: headingIndex < 0 ? `空白页 ${sections.length + 1}` : texts[headingIndex],
       level: 1,
       pageKind: 'insight',
       blocks: texts
@@ -609,9 +607,7 @@ async function clearPptSection(
   pageNumber?: number,
   targetUnit?: DocumentPatchTargetUnit
 ): Promise<Uint8Array> {
-  const names = Object.keys(zip.files)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
-    .sort((a, b) => Number(/slide(\d+)/u.exec(a)?.[1] ?? 0) - Number(/slide(\d+)/u.exec(b)?.[1] ?? 0));
+  const names = await readPptxSlideOrder(zip);
   const targets = await resolvePptTargetNames(
     zip,
     names,
@@ -628,8 +624,7 @@ async function clearPptSection(
     const pageNumberIndex = pptPageNumberTextIndex(
       xml,
       originalTexts,
-      pptSlideNumber(name),
-      targetUnit === 'page'
+      pptSlideNumber(name)
     );
     const physicalPageHeadingIndex = targetUnit === 'page'
       ? originalTexts.findIndex(
@@ -673,9 +668,7 @@ async function replacePptSection(
   targetUnit: DocumentPatchTargetUnit | undefined,
   replacement: DocumentOutlineSection
 ): Promise<Uint8Array> {
-  const names = Object.keys(zip.files)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
-    .sort((a, b) => Number(/slide(\d+)/u.exec(a)?.[1] ?? 0) - Number(/slide(\d+)/u.exec(b)?.[1] ?? 0));
+  const names = await readPptxSlideOrder(zip);
   const targets = await resolvePptTargetNames(
     zip,
     names,
@@ -699,8 +692,7 @@ async function replacePptSection(
     const pageNumberIndex = pptPageNumberTextIndex(
       item.xml,
       texts,
-      pptSlideNumber(item.name),
-      targetUnit === 'page'
+      pptSlideNumber(item.name)
     );
     return total + texts.filter((_text, index) => index !== headingIndex && index !== pageNumberIndex).length;
   }, 0);
@@ -723,8 +715,7 @@ async function replacePptSection(
     const pageNumberIndex = pptPageNumberTextIndex(
       item.xml,
       originalTexts,
-      pptSlideNumber(item.name),
-      targetUnit === 'page'
+      pptSlideNumber(item.name)
     );
     let runIndex = 0;
     const patched = item.xml.replace(
@@ -803,6 +794,7 @@ async function resolvePptTargetNames(
         return targets;
       }
     }
+    if (pageNumber !== undefined) throw new OfficeDocumentToolError('target_not_found', 'PPT section heading does not match the selected page');
     const exactMatches: number[] = [];
     for (let index = 0; index < names.length; index += 1) {
       const xml = await zip.file(names[index])!.async('string');
@@ -860,8 +852,7 @@ function pptSlideNumber(name: string): number | undefined {
 function pptPageNumberTextIndex(
   xml: string,
   texts: readonly string[],
-  expectedPageNumber: number | undefined,
-  allowLegacyFallback = false
+  expectedPageNumber: number | undefined
 ): number {
   if (expectedPageNumber === undefined) return -1;
   const expected = String(expectedPageNumber);
@@ -877,9 +868,7 @@ function pptPageNumberTextIndex(
     return values.length === 1 && values[0] === expected;
   });
   if (!pageNumberShape || pageNumberShape.index === undefined) {
-    return allowLegacyFallback && texts.length > 1 && texts.at(-1)?.trim() === expected
-      ? texts.length - 1
-      : -1;
+    return -1;
   }
   const shapeText = /<a:t(?:\s[^>]*)?>[\s\S]*?<\/a:t>/u.exec(pageNumberShape[0]);
   if (!shapeText || shapeText.index === undefined) return -1;

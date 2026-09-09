@@ -99,7 +99,7 @@ describe('semantic document revisions', () => {
       ]
     };
 
-    const revised = preserveUntargetedDocumentSections(previous, next, '把第二页改成新的表达');
+    const revised = preserveUntargetedDocumentSections(previous, next, '把第二页改成新的表达', { checksumSha256: '0'.repeat(64), totalPages: 4, sections: [{ sectionIndex: 0, heading: '第一页', pages: [2] }, { sectionIndex: 1, heading: '第二页', pages: [3] }] });
     expect(revised.title).toBe(previous.title);
     expect(revised.sections[0].blocks).toEqual(next.sections[0].blocks);
     expect(revised.sections[1]).toEqual(previous.sections[1]);
@@ -178,6 +178,8 @@ function environment(content = '{"kind":"ppt" "title":"缺少逗号"}') {
     sizeBytes: 4096
   }));
   const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
     projectId,
     conversations: {
       load: async () => conversation,
@@ -322,6 +324,8 @@ describe('document generation application service', () => {
       outline: input.outline
     }));
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -437,6 +441,8 @@ describe('document generation application service', () => {
     });
     const createCompletedLocalAssistantMessage = vi.fn();
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -592,6 +598,8 @@ describe('document generation application service', () => {
     }));
     const fingerprint = vi.fn<(content: string) => string>(() => 'clear-page-content-sha256');
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -775,6 +783,8 @@ describe('document generation application service', () => {
       );
     });
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -934,6 +944,8 @@ describe('document generation application service', () => {
       sizeBytes: 8192
     }));
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -1020,6 +1032,8 @@ describe('document generation application service', () => {
     const run = vi.fn();
     const statuses: unknown[] = [];
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => conversation,
@@ -1154,6 +1168,8 @@ describe('document generation application service', () => {
       now
     );
     const service = new DocumentGenerationApplicationService({
+    resolvePresentationMap: async (_workId, outline) => ({ checksumSha256: '0'.repeat(64), totalPages: outline.sections.length + 2,
+      sections: outline.sections.map((section, index) => ({ sectionIndex: index, heading: section.heading, pages: [index + 2] })) }),
       projectId,
       conversations: {
         load: async () => current,

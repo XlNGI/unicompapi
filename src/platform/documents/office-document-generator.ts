@@ -73,6 +73,7 @@ export interface GenerateDocumentFileInput {
   }[];
   /** Optional parent PPTX used for a safe text-only local revision. */
   readonly revisionSourcePath?: string;
+  readonly revisionSourceBuffer?: Uint8Array;
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
   readonly revisionPatches?: readonly DocumentRevisionPatch[];
@@ -130,10 +131,10 @@ async function buildDocumentOutput(
             input.images ?? []
         );
   const revisedBuffer =
-    input.revisionSourcePath && (input.revisionPatch || input.revisionPatches)
+    (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
       ? Buffer.from(
           await applyOfficeDocumentPatchesToBuffer(
-            await readFile(input.revisionSourcePath),
+            input.revisionSourceBuffer ?? await readFile(input.revisionSourcePath!),
             input.kind,
             input.revisionPatches ?? [input.revisionPatch!]
           )

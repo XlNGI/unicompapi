@@ -11,7 +11,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readOfficeDocumentStructureFromBuffer } from '../../src/platform/documents/office-document-tool-executor';
 import {
   DocumentGenerationRunner,
@@ -25,7 +25,7 @@ import {
   parseDocumentOutline,
   projectStoragePaths
 } from '../../src/platform';
-import { toProjectId } from '../../src/domain';
+import { toExecutionId, toFileReferenceId, toProjectId, toTaskId, toWorkId } from '../../src/domain';
 
 const temporaryRoots: string[] = [];
 
@@ -146,6 +146,107 @@ const employeeSalaryOutline = parseDocumentOutline(
 );
 
 describe('document generation runner', () => {
+  it('settles an already registered Work after the final execution write fails without generating it again', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-project-registration-recovery');
+    const generateTemporaryFile = vi.fn(generateTemporaryDocumentFile);
+    const options = { rootDirectory, projectId, generateTemporaryFile };
+    const input = {
+      kind: 'word' as const,
+      title: outline.title,
+      contentFingerprint: '9'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'message-registration-recovery',
+      outline
+    };
+    const saveExecution = JsonExecutionRepository.prototype.save;
+    let failedFinalWrite = false;
+    const save = vi.spyOn(JsonExecutionRepository.prototype, 'save').mockImplementation(async function (this: JsonExecutionRepository, execution) {
+      if (!failedFinalWrite && execution.state === 'completed') {
+        failedFinalWrite = true;
+        throw new Error('simulated final execution write failure');
+      }
+      return saveExecution.call(this, execution);
+    });
+    try {
+      await expect(new DocumentGenerationRunner(options).run(input)).rejects.toMatchObject({ code: 'result_sync_pending' });
+    } finally {
+      save.mockRestore();
+    }
+    const storage = new NodeProjectStorage(rootDirectory);
+    const works = new JsonWorkRepository(storage, projectId);
+    const registered = await works.list(projectId);
+    expect(registered).toHaveLength(1);
+    expect(await persistedExecutionStates(rootDirectory)).toEqual(['registering_work']);
+
+    // A new runner has no in-memory generation or response cache to rely on.
+    const recovered = await new DocumentGenerationRunner(options).run(input);
+    expect(recovered.work.id).toBe(registered[0].id);
+    expect(recovered.execution.id).toBe(registered[0].sourceExecutionId);
+    expect(recovered.file.id).toBe(registered[0].fileId);
+    expect(recovered.execution.state).toBe('completed');
+    expect(await persistedExecutionStates(rootDirectory)).toEqual(['completed']);
+    expect(await works.list(projectId)).toHaveLength(1);
+    expect(await documentFiles(rootDirectory)).toHaveLength(1);
+    expect(generateTemporaryFile).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'missing_work', 'wrong_task', 'missing_task_execution', 'wrong_parent', 'wrong_output_file',
+    'wrong_file_execution', 'changed_file', 'failed_execution'
+  ] as const)('does not settle an incomplete registration with %s', async (invalidState) => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId(`doc-project-recovery-${invalidState}`);
+    const input = {
+      kind: 'word' as const,
+      title: outline.title,
+      contentFingerprint: '8'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: `message-recovery-${invalidState}`,
+      outline
+    };
+    const generated = await new DocumentGenerationRunner({ rootDirectory, projectId }).run(input);
+    const storage = new NodeProjectStorage(rootDirectory);
+    const executions = new JsonExecutionRepository(storage);
+    const works = new JsonWorkRepository(storage, projectId);
+    const persistedState = invalidState === 'failed_execution' ? 'failed' : 'registering_work';
+    await executions.save({
+      ...generated.execution,
+      state: persistedState,
+      ...(invalidState === 'failed_execution'
+        ? { failure: { stage: 'registering_work' as const, message: 'unverified failure', retryability: 'not_retryable' as const } }
+        : {}),
+      ...(invalidState === 'wrong_output_file' ? { outputFileId: toFileReferenceId('unrelated-file') } : {})
+    });
+    if (invalidState === 'wrong_task') {
+      await works.save({ ...generated.work, sourceTaskId: toTaskId('unrelated-task') });
+    } else if (invalidState === 'missing_task_execution') {
+      await new JsonTaskRepository(storage, projectId).save({ ...generated.task, executionIds: [] });
+    } else if (invalidState === 'wrong_parent') {
+      await works.save({ ...generated.work, parentWorkId: toWorkId('unrelated-parent') });
+    } else if (invalidState === 'wrong_file_execution') {
+      await new JsonFileReferenceRepository(storage, projectId).save({
+        ...generated.file, sourceExecutionId: toExecutionId('unrelated-execution')
+      });
+    } else if (invalidState === 'changed_file') {
+      if (generated.file.locator.kind !== 'project') throw new Error('Expected a local document');
+      await writeFile(path.join(rootDirectory, generated.file.locator.relativePath), 'changed bytes', { flag: 'a' });
+    }
+    const missingWork = invalidState === 'missing_work'
+      ? vi.spyOn(JsonWorkRepository.prototype, 'get').mockResolvedValue(undefined)
+      : undefined;
+    const generateTemporaryFile = vi.fn(async () => { throw new Error('new generation required'); });
+    try {
+      await expect(new DocumentGenerationRunner({ rootDirectory, projectId, generateTemporaryFile }).run(input))
+        .rejects.toThrow('new generation required');
+    } finally {
+      missingWork?.mockRestore();
+    }
+    expect(generateTemporaryFile).toHaveBeenCalledTimes(1);
+    expect((await executions.get(generated.execution.id))?.state).toBe(persistedState);
+    expect(await works.list(projectId)).toHaveLength(1);
+  });
+
   it('reuses an already registered Work for an identical retry after settlement failure', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-idempotent-retry');

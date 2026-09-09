@@ -29,6 +29,7 @@ import {
   isExplicitClearRevisionRequest,
   parseDeterministicClearRevisionTarget,
   parseRevisionTarget,
+  parseRevisionTargets,
   revisionSectionIndex
 } from './document-revision-agent';
 import {
@@ -36,6 +37,7 @@ import {
   parseRequestedPresentationTotalPages,
   presentationBodySectionCount
 } from './presentation-page-count';
+import type { PresentationRevisionMap } from './presentation-revision-map';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
@@ -60,6 +62,10 @@ export type DocumentGenerationApplicationErrorCode =
   | 'cancelled'
   | 'response_failed'
   | 'generation_failed'
+  | 'verification_failed'
+  | 'write_failed'
+  | 'registration_failed'
+  | 'result_sync_pending'
   | 'local_revision_not_supported'
   | 'revision_scope_violation'
   | 'revision_patch_failed'
@@ -114,6 +120,7 @@ export interface DocumentGenerationConversationPort {
 }
 
 export interface DocumentGenerationWorkflowPort {
+  bindDocumentMessage?(executionId: string, messageId: MessageId): Promise<void>;
   load(workflowId: ConversationWorkflowId): Promise<ConversationWorkflowV1 | undefined>;
   beginExecution(input: {
     readonly workflowId: ConversationWorkflowId;
@@ -143,6 +150,7 @@ export interface DocumentGenerationExecutionInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly parentWorkId?: WorkId;
+  readonly sourceChecksumSha256?: string;
   /** Stable identity and validated patch for a scoped parent revision. */
   readonly revisionTargetSectionHeading?: string;
   readonly revisionPatch?: DocumentRevisionPatch;
@@ -165,6 +173,7 @@ export interface DocumentGenerationExecutionResult {
   readonly workId: WorkId;
   readonly fileName: string;
   readonly sizeBytes: number;
+  readonly validatedOutline?: DocumentOutline;
 }
 
 export interface DocumentGenerationExecutorPort {
@@ -276,6 +285,9 @@ export class DocumentGenerationApplicationService {
       };
       readonly compiler: DocumentDraftCompilerPort;
       readonly generator: DocumentGenerationExecutorPort;
+      readonly resolvePresentationMap?: (workId: WorkId, outline: DocumentOutline) => Promise<PresentationRevisionMap>;
+      readonly validatePresentationSelection?: (input: GenerateDocumentFromMessageInput, map: PresentationRevisionMap, target: { unit: 'page' | 'section'; ordinal: number }) => Promise<void>;
+      readonly canRetryMessage?: (conversationId: ConversationId, messageId: MessageId) => Promise<boolean>;
       /** Optional bounded local/provider-backed revision workflow. */
       readonly revisionAgent?: (
         input: {
@@ -285,6 +297,7 @@ export class DocumentGenerationApplicationService {
           readonly requestText: string;
           readonly outline: DocumentOutline;
           readonly proposedOutline?: DocumentOutline;
+          readonly presentationMap?: PresentationRevisionMap;
           readonly signal: AbortSignal;
         }
       ) => Promise<DocumentRevisionAgentResult>;
@@ -381,7 +394,9 @@ export class DocumentGenerationApplicationService {
       parent.documentResult.validatedContent,
       input.kind
     );
-    const targetIndex = revisionSectionIndex(input.kind, target);
+    const presentationMap = input.kind === 'ppt' && this.dependencies.resolvePresentationMap
+      ? await this.dependencies.resolvePresentationMap(input.parentWorkId, previousOutline) : undefined;
+    const targetIndex = revisionSectionIndex(input.kind, target, presentationMap);
     if (targetIndex < 0 || targetIndex >= previousOutline.sections.length) {
       throw new DocumentGenerationApplicationError(
         'revision_scope_violation',
@@ -407,6 +422,7 @@ export class DocumentGenerationApplicationService {
         messageId: created.messageId
       });
       this.localRevisionWorkflows.set(key, executionId);
+      await workflows.bindDocumentMessage?.(executionId, created.messageId);
       await this.persistStatus(
         {
           conversationId: conversation.id,
@@ -620,13 +636,19 @@ export class DocumentGenerationApplicationService {
     } catch (error) {
       await settle({ conversationId: input.conversationId, messageId: input.messageId, kind: input.kind,
         ...(localExecutionId ? { localExecutionId } : {}),
-        status: error instanceof DocumentGenerationApplicationError && error.code === 'cancelled' ? 'cancelled' : 'failed' });
+        status: error instanceof DocumentGenerationApplicationError && error.code === 'cancelled' ? 'cancelled' : 'failed' }).catch(() => undefined);
       throw error;
     }
     // runGeneration has persisted the validated document result and Work before advancing the queue.
-    await settle({ conversationId: input.conversationId, messageId: input.messageId, kind: input.kind,
-      ...(localExecutionId ? { localExecutionId } : {}),
-      status: 'completed', workId: result.workId });
+    try {
+      await settle({ conversationId: input.conversationId, messageId: input.messageId, kind: input.kind,
+        ...(localExecutionId ? { localExecutionId } : {}),
+        status: 'completed', workId: result.workId });
+    } catch {
+      const error = new DocumentGenerationApplicationError('result_sync_pending', '新版文档已保存，任务完成状态同步未完成。');
+      await this.persistTerminalFailure(input, error);
+      throw error;
+    }
     return result;
   }
 
@@ -679,6 +701,13 @@ export class DocumentGenerationApplicationService {
         'message_not_found',
         'Assistant message disappeared during document generation'
       );
+    }
+    if (message.documentGenerationStatus?.state === 'failed') {
+      const code = message.documentGenerationStatus.errorCode;
+      if (['revision_scope_violation', 'revision_patch_failed', 'revision_conflict', 'unvalidated_output', 'verification_failed', 'invalid_outline', 'resource_limit', 'document_layout_overflow', 'page_count_mismatch'].includes(code) ||
+        (this.dependencies.canRetryMessage && !await this.dependencies.canRetryMessage(input.conversationId, input.messageId))) {
+        throw new DocumentGenerationApplicationError('revision_scope_violation', '请核对修改范围或内容后重新发起任务，当前失败不可原样重试。');
+      }
     }
     if (this.dependencies.generationInputs) {
       input = await this.dependencies.generationInputs.resolve(input,
@@ -734,6 +763,18 @@ export class DocumentGenerationApplicationService {
       const revisionTarget = requestText === undefined
         ? undefined
         : parseRevisionTarget(requestText);
+      if (input.kind === 'ppt' && input.parentWorkId && revisionTarget && this.dependencies.validatePresentationSelection &&
+        parseRevisionTargets(requestText ?? '').length !== 1) {
+        throw new DocumentGenerationApplicationError('revision_scope_violation', '请指定一个明确的 PPT 页面或章节并确认实际范围。');
+      }
+      const presentationMap = input.kind === 'ppt' && input.parentWorkId && previousOutline && this.dependencies.resolvePresentationMap
+        ? await this.dependencies.resolvePresentationMap(input.parentWorkId, previousOutline) : undefined;
+      if (input.kind === 'ppt' && input.parentWorkId && revisionTarget && !presentationMap) {
+        throw new DocumentGenerationApplicationError('revision_scope_violation', '无法取得原 PPT 的实际页面映射，请核对作品后重新发起修改。');
+      }
+      if (presentationMap && revisionTarget && this.dependencies.validatePresentationSelection) {
+        await this.dependencies.validatePresentationSelection(input, presentationMap, revisionTarget);
+      }
       const useDeterministicClearRevision =
         input.parentWorkId !== undefined &&
         requestText !== undefined &&
@@ -785,6 +826,7 @@ export class DocumentGenerationApplicationService {
                 kind: input.kind,
                 requestText,
                 outline: previousOutline,
+                ...(presentationMap ? { presentationMap } : {}),
                 ...(useDeterministicClearRevision
                   ? {}
                   : { proposedOutline: outline }),
@@ -824,7 +866,7 @@ export class DocumentGenerationApplicationService {
                 'Document revision workflow did not produce a scoped change'
               );
             }
-            validateRevisionScope(previousOutline, revision);
+            validateRevisionScope(previousOutline, revision, presentationMap);
             outline = revision.outline;
             revisionPatch = revision.patch;
             revisionPatches = revision.patches;
@@ -832,7 +874,7 @@ export class DocumentGenerationApplicationService {
           }
           if (revisionTarget !== undefined) {
             const heading = previousOutline.sections[
-              revisionSectionIndex(previousOutline.kind, revisionTarget)
+              revisionSectionIndex(previousOutline.kind, revisionTarget, presentationMap)
             ]?.heading;
             if (heading === undefined) {
               throw new DocumentGenerationApplicationError(
@@ -846,7 +888,8 @@ export class DocumentGenerationApplicationService {
             outline = preserveUntargetedDocumentSections(
               previousOutline,
               outline,
-              requestText
+              requestText,
+              presentationMap
             );
           }
         } else if (this.dependencies.revisionAgent !== undefined) {
@@ -867,6 +910,7 @@ export class DocumentGenerationApplicationService {
         kind: input.kind
       });
       const generated = await this.dependencies.generator.run({
+      ...(presentationMap ? { sourceChecksumSha256: presentationMap.checksumSha256 } : {}),
       kind: input.kind,
       title: outline.title,
       contentFingerprint: this.dependencies.fingerprint(JSON.stringify({
@@ -875,6 +919,7 @@ export class DocumentGenerationApplicationService {
         theme: input.theme ?? null,
         presentationTemplate: input.presentationTemplate ?? null,
         parentWorkId: input.parentWorkId ?? null,
+        ...(presentationMap ? { sourceChecksumSha256: presentationMap.checksumSha256 } : {}),
         images: input.images,
         outline
       })),
@@ -900,7 +945,15 @@ export class DocumentGenerationApplicationService {
       images: input.images
       });
 
-      await this.attachResult(input, generated, outline);
+      try {
+        await this.attachResult(input, generated, generated.validatedOutline ?? outline);
+      } catch {
+        throw new DocumentGenerationApplicationError('result_sync_pending', '新版文档已保存，结果状态同步未完成，请重试同步；不会重新生成作品。');
+      }
+      if (input.kind === 'ppt' && this.dependencies.resolvePresentationMap) {
+        // The index is derived and rebuildable. Index failure cannot undo a saved Work.
+        await this.dependencies.resolvePresentationMap(generated.workId, generated.validatedOutline ?? outline).catch(() => undefined);
+      }
       return {
         conversationId: input.conversationId,
         messageId: input.messageId,
@@ -1148,6 +1201,7 @@ function documentFailureCode(error: unknown): DocumentGenerationFailureCode {
     if (error.code === 'revision_conflict') return 'revision_conflict';
     if (error.code === 'unvalidated_output') return 'unvalidated_output';
     if (error.code === 'page_count_mismatch') return 'page_count_mismatch';
+    if (error.code === 'verification_failed' || error.code === 'write_failed' || error.code === 'registration_failed' || error.code === 'result_sync_pending') return error.code;
     return 'generation_failed';
   }
   if (
@@ -1221,7 +1275,8 @@ function validateFullPresentationPageCountRevision(
 
 function validateRevisionScope(
   previous: DocumentOutline,
-  revision: DocumentRevisionAgentResult
+  revision: DocumentRevisionAgentResult,
+  presentationMap?: PresentationRevisionMap
 ): void {
   const patches = revision.patch
     ? [revision.patch]
@@ -1247,7 +1302,7 @@ function validateRevisionScope(
       (previous.kind === 'ppt' &&
         'pageNumber' in target &&
         target.pageNumber !== undefined &&
-        target.pageNumber !== sectionIndex + 2)
+        !presentationMap?.sections[sectionIndex]?.pages.includes(target.pageNumber))
     ) {
       throw new DocumentGenerationApplicationError(
         'revision_scope_violation',
@@ -1325,12 +1380,13 @@ export function toPrepareDeterministicDocumentRevisionInput(input: {
 export function preserveUntargetedDocumentSections(
   previous: DocumentOutline,
   next: DocumentOutline,
-  requestText: string
+  requestText: string,
+  presentationMap?: PresentationRevisionMap
 ): DocumentOutline {
   if (previous.kind !== next.kind) return next;
   const revisionTarget = parseRevisionTarget(requestText);
   if (revisionTarget === undefined) return next;
-  const targetIndex = revisionSectionIndex(previous.kind, revisionTarget);
+  const targetIndex = revisionSectionIndex(previous.kind, revisionTarget, presentationMap);
   if (targetIndex < 0 || targetIndex >= previous.sections.length) return next;
   const target = next.sections[targetIndex];
   const base = previous.sections[targetIndex];

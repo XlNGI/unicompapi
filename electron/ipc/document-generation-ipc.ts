@@ -41,6 +41,7 @@ import {
 import { documentGenerationIpcChannels } from '../../src/shared/document-generation-ipc';
 import { toDocumentGenerationLogError } from './document-generation-logging';
 import { createDocumentWorkflowSettlement } from '../../src/platform/documents/conversation-document-workflow';
+import { createPresentationWorkflowScope, RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
 import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
 import { JsonConversationResponseExecutionRepository } from '../../src/platform/repositories/json-conversation-response-execution-repository';
 
@@ -66,6 +67,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
         now
       );
       const streaming = new ConversationStreamingService(repository, ids, now);
+      const presentationScope = createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId });
       const workflowService = new ConversationWorkflowService(
         new JsonConversationWorkflowRepository(
           storage,
@@ -73,7 +75,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
           now
         ),
         new ConversationIntentOrchestrator(),
-        now
+        now, undefined, undefined, presentationScope
       );
       const runner = new DocumentGenerationRunner({
         rootDirectory: session.rootDirectory,
@@ -84,6 +86,12 @@ export function registerDocumentGenerationIpcHandlers(options: {
       });
       const application = new DocumentGenerationApplicationService({
         projectId: session.projectId,
+        resolvePresentationMap: async (workId, outline) => {
+          const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(workId, outline);
+          return source.map!;
+        },
+        validatePresentationSelection: presentationScope.validatePresentationSelection,
+        canRetryMessage: presentationScope.canRetryMessage,
         generationInputs: new ConversationDocumentInputStore(storage, session.projectId),
         conversations: {
           load: (conversationId) => repository.get(conversationId),
@@ -97,6 +105,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
           }
         },
         workflows: {
+          bindDocumentMessage: (executionId, messageId) => workflowService.bindDocumentMessage(executionId, messageId),
           load: (workflowId) => workflowService.get(workflowId),
           beginExecution: async (input) => {
             await workflowService.beginExecution(input);

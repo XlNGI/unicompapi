@@ -35,6 +35,10 @@ export interface ConversationResponseDraftV1 {
   readonly userMessageId: MessageId;
   readonly userMessageRevision: number;
   readonly promptContent?: string;
+  /** Internal snapshot of validated source-reading requirements, never a provider prompt. */
+  readonly attachmentQuery?: string;
+  /** Main-process-only query for reading an already delivered document page. */
+  readonly documentPageQuery?: string;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
@@ -50,6 +54,8 @@ export interface CreateConversationResponseDraftInput {
   readonly userMessageId: MessageId;
   readonly userMessageRevision: number;
   readonly promptContent?: string;
+  readonly attachmentQuery?: string;
+  readonly documentPageQuery?: string;
   readonly productFeature: ConversationResponseProductFeature;
   readonly contextSelections?: readonly PinnedProjectContextSelectionV1[];
   readonly parameterValues?: Readonly<Record<string, ParameterValue>>;
@@ -71,6 +77,8 @@ export function createConversationResponseDraft(
     ...(input.promptContent !== undefined
       ? { promptContent: input.promptContent }
       : {}),
+    ...(input.attachmentQuery !== undefined ? { attachmentQuery: input.attachmentQuery } : {}),
+    ...(input.documentPageQuery !== undefined ? { documentPageQuery: input.documentPageQuery } : {}),
     productFeature: input.productFeature,
     contextSelections: input.contextSelections ?? [],
     parameterValues: input.parameterValues ?? {},
@@ -139,9 +147,11 @@ export function parseConversationResponseDraft(
   const keys = Object.keys(item);
   const hasParameterValues = Object.prototype.hasOwnProperty.call(item, 'parameterValues');
   const hasPromptContent = Object.prototype.hasOwnProperty.call(item, 'promptContent');
+  const hasAttachmentQuery = Object.prototype.hasOwnProperty.call(item, 'attachmentQuery');
+  const hasDocumentPageQuery = Object.prototype.hasOwnProperty.call(item, 'documentPageQuery');
   if (
-    keys.some((key) => !requiredKeys.has(key) && key !== 'parameterValues' && key !== 'promptContent') ||
-    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) !== keys.length ||
+    keys.some((key) => !requiredKeys.has(key) && !['parameterValues', 'promptContent', 'attachmentQuery', 'documentPageQuery'].includes(key)) ||
+    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) + (hasAttachmentQuery ? 1 : 0) + (hasDocumentPageQuery ? 1 : 0) !== keys.length ||
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
     Number(item.revision) < 0 ||
@@ -167,6 +177,18 @@ export function parseConversationResponseDraft(
   if (promptContent !== undefined && promptContent.length > 1_000_000) {
     throw new InvariantViolationError('conversation response draft promptContent is too long');
   }
+  const attachmentQuery = hasAttachmentQuery
+    ? nonBlank(item.attachmentQuery, 'draft.attachmentQuery')
+    : undefined;
+  if (attachmentQuery !== undefined && attachmentQuery.length > 1_000_000) {
+    throw new InvariantViolationError('conversation response draft attachmentQuery is too long');
+  }
+  const documentPageQuery = hasDocumentPageQuery
+    ? nonBlank(item.documentPageQuery, 'draft.documentPageQuery')
+    : undefined;
+  if (documentPageQuery !== undefined && documentPageQuery.length > 1_000_000) {
+    throw new InvariantViolationError('conversation response draft documentPageQuery is too long');
+  }
   const contextSelections = item.contextSelections.map(
     parsePinnedProjectContextSelection
   );
@@ -187,6 +209,8 @@ export function parseConversationResponseDraft(
     userMessageId: toMessageId(nonBlank(item.userMessageId, 'draft.userMessageId')),
     userMessageRevision: Number(item.userMessageRevision),
     ...(promptContent !== undefined ? { promptContent } : {}),
+    ...(attachmentQuery !== undefined ? { attachmentQuery } : {}),
+    ...(documentPageQuery !== undefined ? { documentPageQuery } : {}),
     productFeature,
     contextSelections,
     parameterValues: hasParameterValues

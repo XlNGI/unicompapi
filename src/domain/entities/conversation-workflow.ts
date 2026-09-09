@@ -15,7 +15,7 @@ import {
   type ConversationIntentAssessment,
   type ConversationIntentPlan
 } from './conversation-intent-plan';
-import type { DocumentWorkspaceKind } from './document-generation';
+import { parsePresentationRevisionSelection, type PresentationRevisionSelection, type DocumentWorkspaceKind } from './document-generation';
 
 export interface ConversationWorkflowDelivery {
   readonly kind: DocumentWorkspaceKind;
@@ -23,7 +23,7 @@ export interface ConversationWorkflowDelivery {
   readonly executionId?: string;
   readonly resultMessageId?: string;
   readonly workId?: string;
-  readonly failureReason?: 'execution_failed' | 'outcome_unknown' | 'interrupted';
+  readonly failureReason?: 'execution_failed' | 'outcome_unknown' | 'interrupted' | 'input_required';
 }
 
 export const conversationWorkflowStatuses = [
@@ -58,6 +58,7 @@ export interface ConversationWorkflowV1 {
   readonly resolvedTarget?: {
     readonly artifactRef: string;
     readonly version: number;
+    readonly presentation?: PresentationRevisionSelection;
   };
   readonly confirmationId?: string;
   readonly planHash?: string;
@@ -77,6 +78,7 @@ export interface CreateConversationWorkflowInput {
   readonly resolvedTarget?: {
     readonly artifactRef: string;
     readonly version: number;
+    readonly presentation?: PresentationRevisionSelection;
   };
   readonly confirmationId?: string;
   readonly planHash?: string;
@@ -123,6 +125,7 @@ export function updateConversationWorkflow(
     readonly resolvedTarget?: {
       readonly artifactRef: string;
       readonly version: number;
+      readonly presentation?: PresentationRevisionSelection;
     };
     readonly status?: ConversationWorkflowStatus;
     readonly confirmationId?: string;
@@ -254,7 +257,7 @@ function parseDeliveries(value: unknown): readonly ConversationWorkflowDelivery[
     for (const key of ['executionId', 'resultMessageId', 'workId']) {
       if (item[key] !== undefined && !boundedString(item[key], 256)) throw new TypeError(`Conversation workflow delivery ${key} is invalid`);
     }
-    if (item.failureReason !== undefined && !['execution_failed', 'outcome_unknown', 'interrupted'].includes(String(item.failureReason))) throw new TypeError('Conversation workflow delivery failure reason is invalid');
+    if (item.failureReason !== undefined && !['execution_failed', 'outcome_unknown', 'interrupted', 'input_required'].includes(String(item.failureReason))) throw new TypeError('Conversation workflow delivery failure reason is invalid');
     if (item.status === 'completed' && (!item.resultMessageId || !item.workId)) throw new TypeError('Completed document delivery requires a registered work and result message');
     return item as unknown as ConversationWorkflowDelivery;
   });
@@ -267,18 +270,18 @@ function parseQuestion(value: unknown): ConversationWorkflowQuestion {
   return { field: value.field as string, question: value.question as string, required: value.required };
 }
 
-function parseResolvedTarget(value: unknown): { readonly artifactRef: string; readonly version: number } {
+function parseResolvedTarget(value: unknown): NonNullable<ConversationWorkflowV1['resolvedTarget']> {
   if (
     !isRecord(value) ||
-    Object.keys(value).length !== 2 ||
-    Object.keys(value).some((key) => !['artifactRef', 'version'].includes(key)) ||
+    Object.keys(value).some((key) => !['artifactRef', 'version', 'presentation'].includes(key)) ||
     !boundedString(value.artifactRef, 256) ||
     !Number.isSafeInteger(value.version) ||
     Number(value.version) < 1
   ) {
     throw new TypeError('Conversation workflow resolved target is invalid');
   }
-  return { artifactRef: value.artifactRef as string, version: Number(value.version) };
+  return { artifactRef: value.artifactRef as string, version: Number(value.version),
+    ...(value.presentation !== undefined ? { presentation: parsePresentationRevisionSelection(value.presentation) } : {}) };
 }
 
 function boundedString(value: unknown, max: number): value is string {

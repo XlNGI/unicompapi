@@ -1,6 +1,10 @@
 const documentGenerationLogCodes = [
   'cancelled',
   'generation_failed',
+  'revision_scope_violation',
+  'write_failed',
+  'registration_failed',
+  'result_sync_pending',
   'invalid_plan',
   'storage_error',
   'verification_failed'

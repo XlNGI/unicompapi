@@ -10,20 +10,10 @@ const failureNoticeSource = await readFile(
 );
 
 test('chat page exposes a document generation entry without making chat the only path', () => {
-  assert.match(page, /documentMode/);
-  assert.match(page, /uc-chat-page__doc-kind/);
-  assert.match(page, /\{ value: 'auto', label: '自动' \}/);
-  assert.match(page, /\{ value: 'word', label: 'Word' \}/);
-  assert.match(page, /\{ value: 'excel', label: 'Excel' \}/);
-  assert.match(page, /\{ value: 'ppt', label: 'PPT' \}/);
-  assert.match(page, /documentThemeOptions/);
-  assert.match(page, /\{ value: 'blueprint', label: '商务蓝' \}/);
-  assert.match(page, /presentationTemplateOptions/);
-  assert.match(page, /\{ value: 'work_report', label: '工作汇报' \}/);
-  assert.match(page, /\{ value: 'natural_minimal', label: '自然简约' \}/);
-  assert.match(page, /\{ value: 'business_minimal', label: '极简商务' \}/);
-  assert.match(page, /\{ value: 'technology', label: '科技风' \}/);
-  assert.match(page, /\{ value: 'financing', label: '融资演讲稿' \}/);
+  assert.doesNotMatch(page, /documentMode|setDocumentKind|intentHint/);
+  assert.doesNotMatch(page, /aria-label="(?:文档类型|文档主题|PPT 模板)"/);
+  assert.doesNotMatch(page, /uc-chat-page__(?:doc-mode|doc-kind|image-model|presentation-template)/);
+  assert.match(page, /输入问题或任务，可拖入图片、文档或电子书/);
   assert.match(page, /kind === 'ppt'[\s\S]*?presentationTemplate/);
   assert.match(page, /kind !== 'ppt'[\s\S]*?theme: documentTheme/);
   assert.match(page, /composeDocumentRevisionInput/);
@@ -36,7 +26,7 @@ test('chat page exposes a document generation entry without making chat the only
   assert.doesNotMatch(page, /extractTheme/);
   assert.doesNotMatch(page, /customTheme/);
   assert.doesNotMatch(page, /作为样式模板/);
-  assert.match(page, /aiImagesEnabled/);
+  assert.match(page, /aiImagesRequested/);
   assert.match(page, /AI 配图/);
   assert.match(page, /ai_images_unavailable/);
   assert.match(page, /generateAiSlideImages/);
@@ -44,11 +34,6 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /extractSectionHeadings/);
   assert.match(page, /canAutoGenerateImageCandidate/);
   assert.match(page, /绝对不能出现任何文字/);
-  assert.match(page, /imageCandidateOptions/);
-  assert.match(page, /selectedImageCandidateId/);
-  assert.match(page, /uc-chat-page__image-model/);
-  assert.match(page, /ragEnabled/);
-  assert.match(page, /检索资料/);
   assert.doesNotMatch(page, /documentAttachments\.retrieveContext/);
   assert.match(page, /attachmentFileIds/);
   assert.match(page, /cancelUnsupportedWebWorkflow/);
@@ -78,7 +63,12 @@ test('chat page exposes a document generation entry without making chat the only
     /case 'revision_scope_violation':[\s\S]*?case 'revision_patch_failed':[\s\S]*?case 'unvalidated_output'/
   );
   assert.match(page, /generation_cancelled/);
-  assert.match(page, /文档生成或写入失败，未登记作品/);
+  assert.match(page, /本次文档未交付，已有作品保留/);
+  assert.match(page, /新版文档已保存，结果状态同步未完成/);
+  assert.match(page, /input_required/);
+  assert.match(page, /重试同步/);
+  assert.match(page, /实际页码：第/);
+  assert.doesNotMatch(page, /文档生成失败，未保存文件/);
   assert.match(page, /awaitDocumentCompletion/);
   assert.match(page, /AI 正在撰写文档内容/);
   assert.match(page, /handlePageDrop/);
@@ -90,7 +80,8 @@ test('chat page exposes a document generation entry without making chat the only
 test('all composer sends use the semantic workflow entry and accept pending task cancellation', () => {
   assert.doesNotMatch(page, /sendDocumentMessage\(\)/);
   assert.doesNotMatch(page, /submitWorkflowInput\(true\)/);
-  assert.match(page, /documentMode[\s\S]*?intentHint/);
+  assert.doesNotMatch(page, /intentHint/);
+  assert.match(page, /chat\.startWorkflow\(/);
   assert.match(page, /workflow\.status === 'cancelled'[\s\S]*?setActiveWorkflow\(undefined\)/);
   assert.doesNotMatch(page, /activeWorkflow && activeWorkflow\.status !== 'needs_clarification'/);
   assert.match(page, /semanticCandidate/);
@@ -101,49 +92,15 @@ test('chat page document card styles exist', () => {
   assert.match(styles, /\.uc-chat-page__document-card/);
   assert.match(styles, /\.uc-chat-page__attachments/);
   assert.match(styles, /\.uc-chat-page__drop-overlay/);
-  assert.match(styles, /\.uc-chat-page__doc-kind/);
 });
 
-test('PPT template selection follows the resolved composer kind', () => {
-  assert.doesNotMatch(
-    page,
-    /\{documentMode \?\s*\(\s*<div\s+aria-label="文档主题"/
-  );
-  assert.match(
-    page,
-    /\{documentMode && composerDocumentKind !== 'ppt' \?\s*\(\s*<div\s+aria-label="文档主题"/
-  );
-});
-
-test('PPT mode keeps the document type switch available', () => {
-  assert.match(
-    page,
-    /\{documentMode \?\s*\(\s*<div\s+aria-label="文档类型"/
-  );
-  assert.doesNotMatch(
-    page,
-    /\{documentMode && documentKind !== 'ppt' \?\s*\(\s*<div\s+aria-label="文档类型"/
-  );
-});
-
-test('PPT template picker defaults to automatic matching and opens above the composer', () => {
-  assert.match(page, /useState<PresentationTemplateSelection>\('auto'\)/);
-  assert.match(page, /\{ value: 'auto', label: '自动匹配' \}/);
-  assert.match(page, /aria-label="PPT 模板"/);
-  assert.match(page, /placement="topStart"/);
-  assert.match(page, /preventOverflow/);
-  assert.match(
-    page,
-    /resolvePresentationTemplate\(\s*presentationTemplate,\s*requirements\s*\)/
-  );
-  assert.doesNotMatch(
-    page,
-    /<details className="uc-chat-page__image-model uc-chat-page__presentation-template"/
-  );
-  assert.doesNotMatch(
-    page,
-    /uc-chat-page__image-model-menu uc-chat-page__presentation-template-menu/
-  );
+test('document settings come from this workflow request instead of persistent composer switches', () => {
+  assert.match(page, /documentPresentationPreferences\(execution\.requirements\)/);
+  assert.match(page, /resolvePresentationTemplate\(\s*'auto',\s*requirements\s*\)/);
+  assert.match(page, /useInternalSources: workflow\.plan\.sourcePolicy === 'internal'/);
+  assert.doesNotMatch(page, /setAiImagesEnabled|setRagEnabled|setPresentationTemplate/);
+  assert.match(page, /if \(!requested\) return \[\];/);
+  assert.match(page, /window\.confirm\([\s\S]*?可能消耗模型额度/);
 });
 
 test('document outline generation uses one model response and local application recovery', () => {
@@ -212,7 +169,7 @@ test('document submission refreshes one stale revision without another click', (
 test('document composer keeps its controls reachable in the compact chat width', () => {
   assert.match(styles, /\.uc-chat-page__composer-actions\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
   assert.match(styles, /@media \(max-width: 900px\)[\s\S]*?\.uc-chat-page__composer-actions\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
-  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*?\.uc-chat-page__doc-kind\s*\{[\s\S]*?max-width:\s*100%;/);
+  assert.doesNotMatch(styles, /\.uc-chat-page__doc-kind/);
 });
 
 test('document response failures retain the safe provider reason after polling', () => {

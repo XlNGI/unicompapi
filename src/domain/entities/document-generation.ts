@@ -111,10 +111,38 @@ export const documentGenerationFailureCodes = [
   'unvalidated_output',
   'page_count_mismatch',
   'generation_failed',
+  'verification_failed',
+  'write_failed',
+  'registration_failed',
+  'result_sync_pending',
   'storage_error'
 ] as const;
 export type DocumentGenerationFailureCode =
   (typeof documentGenerationFailureCodes)[number];
+
+export interface PresentationRevisionSelection {
+  readonly workId: string;
+  readonly checksumSha256: string;
+  readonly unit: 'page' | 'section';
+  readonly ordinal: number;
+  readonly heading: string;
+  readonly pages: readonly number[];
+}
+
+export function parsePresentationRevisionSelection(value: unknown): PresentationRevisionSelection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid presentation scope');
+  const item = value as Record<string, unknown>;
+  if (Object.keys(item).some((key) => !['workId', 'checksumSha256', 'unit', 'ordinal', 'heading', 'pages'].includes(key)) ||
+    typeof item.workId !== 'string' || item.workId.length > 256 || !item.workId ||
+    typeof item.checksumSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(item.checksumSha256) ||
+    !['page', 'section'].includes(String(item.unit)) || !Number.isSafeInteger(item.ordinal) || Number(item.ordinal) < 1 ||
+    typeof item.heading !== 'string' || !item.heading.trim() || item.heading.length > 2000 ||
+    !Array.isArray(item.pages) || !item.pages.length || item.pages.length > 128 ||
+    item.pages.some((page, index) => !Number.isSafeInteger(page) || page < 1 || page > 128 || (index > 0 && page <= (item.pages as number[])[index - 1])) ||
+    (item.unit === 'page' && (item.pages.length !== 1 || item.pages[0] !== item.ordinal))) throw new TypeError('Invalid presentation scope');
+  return { workId: toWorkId(item.workId), checksumSha256: item.checksumSha256, unit: item.unit as 'page' | 'section',
+    ordinal: Number(item.ordinal), heading: item.heading, pages: item.pages as number[] };
+}
 
 export type DocumentGenerationStatus =
   | {

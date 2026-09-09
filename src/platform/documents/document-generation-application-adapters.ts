@@ -49,7 +49,8 @@ export class PlatformDocumentGenerationExecutor
           result.file.locator.kind === 'project'
             ? result.file.locator.relativePath.split('/').pop() ?? result.work.name
             : result.work.name,
-        sizeBytes: result.file.sizeBytes ?? 0
+        sizeBytes: result.file.sizeBytes ?? 0,
+        ...(result.validatedOutline ? { validatedOutline: result.validatedOutline } : {})
       };
     } catch (error) {
       if (error instanceof PresentationLayoutError) {
@@ -64,8 +65,9 @@ export class PlatformDocumentGenerationExecutor
             ? 'cancelled'
             : error.code === 'page_count_mismatch'
               ? 'page_count_mismatch'
-            : error.code === 'generation_failed' ||
-                error.code === 'verification_failed'
+            : ['revision_scope_violation', 'write_failed', 'registration_failed', 'result_sync_pending', 'verification_failed'].includes(error.code)
+              ? error.code as 'revision_scope_violation' | 'write_failed' | 'registration_failed' | 'result_sync_pending' | 'verification_failed'
+            : error.code === 'generation_failed'
               ? 'generation_failed'
               : 'storage_error',
           error.message
