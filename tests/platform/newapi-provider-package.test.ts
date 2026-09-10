@@ -754,6 +754,123 @@ describe('NewAPI management and runtime safety', () => {
 });
 
 describe('NewAPI chat adapter', () => {
+  it.each(['bytewise', 'split-crlf'] as const)('accepts multiline SSE JSON with %s network chunks', async (mode) => {
+    const data = JSON.stringify({
+      id: 'chatcmpl-compat', object: 'chat.completion.chunk', created: 1,
+      model: modelKey,
+      choices: [{ index: 0, delta: { content: '跨块中文' }, finish_reason: 'stop' }]
+    }, null, 2);
+    const sse = data.split('\n').map((line) => `data: ${line}`).join('\r\n') +
+      '\r\n\r\ndata: [DONE]\r\n';
+    const bytes = new TextEncoder().encode(sse);
+    const chunks = mode === 'bytewise'
+      ? Array.from(bytes, (byte) => Uint8Array.of(byte))
+      : sse.split(/(?<=\r)/).map((text) => new TextEncoder().encode(text));
+
+    const result = await runChatStream(chunks);
+
+    expect(result.terminal).toMatchObject({ state: 'completed' });
+    expect(result.lifecycle.content).toBe('跨块中文');
+    expect(result.lifecycle.states).toEqual(['started', 'completed']);
+  });
+
+  it.each([
+    { prompt_tokens_details: null, completion_tokens_details: null },
+    { prompt_tokens_details: { cached_tokens: null }, completion_tokens_details: { reasoning_tokens: null } }
+  ])('accepts absent optional usage details represented by null (%j)', async (details) => {
+    const sse = chatStreamEvent({ content: 'Complete answer' }, 'stop') +
+      chatStreamEvent({}, undefined, {
+        choices: [],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5, ...details }
+      }) + 'data: [DONE]\n\n';
+
+    const result = await runChatStream([new TextEncoder().encode(sse)]);
+
+    expect(result.terminal).toMatchObject({ state: 'completed', usageAvailability: 'reported' });
+    expect(result.usage.observations[0].facts).toEqual([
+      tokenFact('completion_tokens', 2), tokenFact('prompt_tokens', 3), tokenFact('total_tokens', 5)
+    ]);
+  });
+
+  it.each([null, []])('keeps text and reasoning when optional tool calls are %j', async (toolCalls) => {
+    const sse = chatStreamEvent({ content: 'Answer', reasoning_content: 'Reasoning', tool_calls: toolCalls }, 'stop') +
+      'data: [DONE]\n\n';
+
+    const result = await runChatStream([new TextEncoder().encode(sse)], 'text_reasoning');
+
+    expect(result.terminal).toMatchObject({ state: 'completed' });
+    expect(result.lifecycle.content).toBe('Answer');
+    expect(result.lifecycle.reasoningContent).toBe('Reasoning');
+  });
+
+  it('preserves text beside a tool call while rejecting execution without a tool bridge', async () => {
+    const sse = chatStreamEvent({
+      content: 'Partial answer', reasoning_content: 'Reasoning',
+      tool_calls: [{ index: 0, id: 'call-compat', type: 'function',
+        function: { name: 'read_document_structure', arguments: '{}' } }]
+    }, 'tool_calls') + 'data: [DONE]\n\n';
+
+    const result = await runChatStream([new TextEncoder().encode(sse)], 'text_reasoning');
+
+    expect(result.terminal).toMatchObject({ state: 'failed', safeCode: 'newapi.tool_loop_limit' });
+    expect(result.lifecycle.content).toBe('Partial answer');
+    expect(result.lifecycle.reasoningContent).toBe('Reasoning');
+    expect(result.lifecycle.states).toEqual(['started', 'failed']);
+  });
+
+  it.each([
+    { tail: 'data: {private malformed JSON\n\n', reason: 'json_invalid' },
+    { tail: 'data: [DONE]\n\n', reason: 'finish_reason_missing' },
+    { tail: chatStreamEvent({}, 'stop'), reason: 'terminal_marker_missing' },
+    { tail: chatStreamEvent({}, 'unexpected'), reason: 'finish_reason_invalid' },
+    { tail: chatStreamEvent({}, 'stop') + chatStreamEvent({}, 'stop'), reason: 'finish_reason_repeated' },
+    { tail: chatStreamEvent({ content: 'private text' }, undefined, { id: 'other-response' }), reason: 'identity_changed' },
+    { tail: chatStreamEvent({}, undefined, { model: 'other-model' }), reason: 'identity_changed' },
+    { tail: chatStreamEvent({}, undefined, { object: 'unknown.chunk' }), reason: 'chunk_metadata_invalid' },
+    { tail: chatStreamEvent({}, undefined, { choices: [] }), reason: 'choices_invalid' },
+    { tail: chatStreamEvent({ content: ['private text'] }), reason: 'delta_invalid' },
+    { tail: chatStreamEvent({ tool_calls: { private: 'text' } }), reason: 'tool_calls_invalid' },
+    { tail: chatStreamEvent({}, 'stop', { usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 6 } }), reason: 'usage_inconsistent' },
+    { tail: chatStreamEvent({}, 'stop', { usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5, prompt_tokens_details: [] } }), reason: 'usage_invalid' },
+    { tail: chatStreamEvent({}, 'stop', { usage: { prompt_tokens: 3, completion_tokens: null, total_tokens: 3 } }), reason: 'usage_invalid' },
+    { tail: chatStreamEvent({}, 'stop') + 'data: [DONE]\n\n' + chatStreamEvent({ content: 'late' }), reason: 'data_after_terminal' }
+  ])('retains partial content and reports a controlled $reason diagnostic', async ({ tail, reason }) => {
+    const sse = chatStreamEvent({ content: 'Partial answer' }) + tail;
+    const result = await runChatStream([new TextEncoder().encode(sse)]);
+
+    expect(result.terminal).toMatchObject({
+      state: 'failed', safeCode: `newapi.invalid_response.${reason}`
+    });
+    expect(result.lifecycle.content).toBe('Partial answer');
+    expect(result.lifecycle.states).toEqual(['started', 'failed']);
+    expect(result.usage.observations[0]).toMatchObject({ status: 'invalid_response', facts: [] });
+    expect(JSON.stringify(result.terminal)).not.toMatch(/private|malformed JSON|other-model/);
+  });
+
+  it('distinguishes malformed UTF-8 from missing terminal markers', async () => {
+    const result = await runChatStream([
+      new TextEncoder().encode(chatStreamEvent({ content: 'Partial answer' })),
+      Uint8Array.of(0xc3, 0x28)
+    ]);
+
+    expect(result.terminal).toMatchObject({
+      state: 'failed', safeCode: 'newapi.invalid_response.encoding_invalid'
+    });
+    expect(result.lifecycle.content).toBe('Partial answer');
+  });
+
+  it.each(['appendContent', 'appendReasoning'] as const)('does not label a local %s write failure as invalid encoding', async (method) => {
+    const sse = chatStreamEvent({ content: 'Answer', reasoning_content: 'Reasoning' }, 'stop') + 'data: [DONE]\n\n';
+    const result = await runChatStream([new TextEncoder().encode(sse)], 'text_reasoning', {
+      [method]: async () => { throw new Error('EACCES private local response path'); }
+    });
+
+    expect(result.terminal).toMatchObject({ state: 'failed', safeCode: 'newapi.local_response_write_failed' });
+    expect(result.lifecycle.states).toEqual(['started', 'failed']);
+    expect(result.usage.observations[0]).toMatchObject({ status: 'unknown_outcome', facts: [] });
+    expect(JSON.stringify(result.terminal)).not.toMatch(/EACCES|private|encoding/);
+  });
+
   it.each(['valid', 'tampered', 'large'] as const)('serializes a validated image with the current user question (%s)', async (mode) => {
     const { createHash } = await import('node:crypto');
     let base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGf8AAAAASUVORK5CYII=';
@@ -3296,6 +3413,44 @@ function streamResponse(value: string): NewApiHttpTransportResponse {
       yield new TextEncoder().encode(value);
     })()
   };
+}
+
+function chatStreamEvent(
+  delta: Readonly<Record<string, unknown>>,
+  finishReason?: string,
+  extra: Readonly<Record<string, unknown>> = {}
+): string {
+  return event({
+    id: 'chatcmpl-compat', object: 'chat.completion.chunk', created: 1, model: modelKey,
+    choices: [{ index: 0, delta, ...(finishReason ? { finish_reason: finishReason } : {}) }],
+    ...extra
+  });
+}
+
+async function runChatStream(
+  chunks: readonly Uint8Array[],
+  feature: 'text_chat' | 'text_reasoning' = 'text_chat',
+  lifecycleOverrides: Partial<ReturnType<typeof lifecycleFixture>['port']> = {}
+) {
+  const fixture = runtimeFixture(async () => ({
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+    stream: (async function* () { yield* chunks; })()
+  }));
+  const lifecycle = lifecycleFixture();
+  const usage = usageSink();
+  const adapter = new NewApiChatAdapter(
+    fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(),
+    { ...lifecycle.port, ...lifecycleOverrides }, usage.port
+  );
+  const handle = await adapter.submit({
+    routeSnapshot: routeFor(feature),
+    request: {
+      responseExecutionId: 'response-stream-compat', invocationAttemptId: 'attempt-stream-compat',
+      messages: [{ role: 'user', content: 'Synthetic stream verification' }], parameterValues: {}
+    }
+  });
+  return { terminal: await handle.completion, lifecycle, usage };
 }
 
 function delayedStreamResponse(

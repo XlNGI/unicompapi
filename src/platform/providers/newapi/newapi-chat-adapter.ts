@@ -592,7 +592,8 @@ export class NewApiChatAdapter {
     operation: ActiveOperation,
     error: unknown
   ): Promise<void> {
-    const invalid = error instanceof NewApiChatAdapterError;
+    const invalid = error instanceof NewApiChatAdapterError &&
+      error.safeCode.startsWith('newapi.invalid_response.');
     const status = invalid ? 'invalid_response' : 'unknown_outcome';
     await this.persistUsageStatus(operation, status);
   }
@@ -615,13 +616,13 @@ export class NewApiChatAdapter {
 
 export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
   if (!isRecord(value)) {
-    throw invalidStream('NewAPI usage must be an object');
+    throw invalidStream('NewAPI usage must be an object', 'usage_invalid');
   }
   // Compatible gateways may add token-detail metrics over time. Validate the
   // accounting fields we consume and ignore unknown forward-compatible keys.
   for (const key of ['completion_tokens', 'prompt_tokens', 'total_tokens'] as const) {
     if (!(key in value)) {
-      throw invalidStream('NewAPI usage is missing required fields');
+      throw invalidStream('NewAPI usage is missing required fields', 'usage_invalid');
     }
   }
   const completionTokens = nonNegativeInteger(
@@ -631,16 +632,16 @@ export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
   const promptTokens = nonNegativeInteger(value.prompt_tokens, 'prompt_tokens');
   const totalTokens = nonNegativeInteger(value.total_tokens, 'total_tokens');
   if (totalTokens !== promptTokens + completionTokens) {
-    throw invalidStream('NewAPI total token usage is inconsistent');
+    throw invalidStream('NewAPI total token usage is inconsistent', 'usage_inconsistent');
   }
   const facts: UsageFactV1[] = [
     tokenFact('completion_tokens', completionTokens),
     tokenFact('prompt_tokens', promptTokens),
     tokenFact('total_tokens', totalTokens)
   ];
-  if (value.prompt_tokens_details !== undefined) {
+  if (value.prompt_tokens_details !== undefined && value.prompt_tokens_details !== null) {
     if (!isRecord(value.prompt_tokens_details)) {
-      throw invalidStream('NewAPI prompt token details must be an object');
+      throw invalidStream('NewAPI prompt token details must be an object', 'usage_invalid');
     }
     const cachedTokens = optionalNonNegativeInteger(
       value.prompt_tokens_details.cached_tokens,
@@ -648,14 +649,14 @@ export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
     );
     if (cachedTokens !== undefined) {
       if (cachedTokens > promptTokens) {
-        throw invalidStream('NewAPI cached token usage is inconsistent');
+        throw invalidStream('NewAPI cached token usage is inconsistent', 'usage_inconsistent');
       }
       facts.push(tokenFact('cached_tokens', cachedTokens));
     }
   }
-  if (value.completion_tokens_details !== undefined) {
+  if (value.completion_tokens_details !== undefined && value.completion_tokens_details !== null) {
     if (!isRecord(value.completion_tokens_details)) {
-      throw invalidStream('NewAPI completion token details must be an object');
+      throw invalidStream('NewAPI completion token details must be an object', 'usage_invalid');
     }
     const reasoningTokens = optionalNonNegativeInteger(
       value.completion_tokens_details.reasoning_tokens,
@@ -663,7 +664,7 @@ export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
     );
     if (reasoningTokens !== undefined) {
       if (reasoningTokens > completionTokens) {
-        throw invalidStream('NewAPI reasoning token usage is inconsistent');
+        throw invalidStream('NewAPI reasoning token usage is inconsistent', 'usage_inconsistent');
       }
       facts.push(tokenFact('reasoning_tokens', reasoningTokens));
     }
@@ -715,11 +716,11 @@ async function consumeNewApiStream(
       .split('\n')
       .filter((line) => line.length > 0 && !line.startsWith(':'));
     if (dataLines.length === 0) return;
-    if (done) throw invalidStream('NewApi streamed data after the terminal marker');
+    if (done) throw invalidStream('NewApi streamed data after the terminal marker', 'data_after_terminal');
     const data = parseDataOnlyEvent(dataLines.join('\n'));
     if (data === '[DONE]') {
       if (!terminalReason) {
-        throw invalidStream('NewApi stream ended before a finish reason');
+        throw invalidStream('NewApi stream ended before a finish reason', 'finish_reason_missing');
       }
       done = true;
       return;
@@ -732,26 +733,26 @@ async function consumeNewApiStream(
       !sameProviderModelKey(chunk.model, responseModel) ||
       !sameProviderModelKey(chunk.model, expectedModel)
     ) {
-      throw invalidStream('NewApi stream identity changed');
+      throw invalidStream('NewApi stream identity changed', 'identity_changed');
     }
     if (chunk.usage) {
-      if (usage) throw invalidStream('NewApi stream reported usage more than once');
+      if (usage) throw invalidStream('NewApi stream reported usage more than once', 'usage_repeated');
       usage = chunk.usage;
     }
     if (chunk.reasoningDelta) {
-      await onReasoning(chunk.reasoningDelta);
+      await appendLocalDelta(onReasoning, chunk.reasoningDelta);
     }
     if (chunk.contentDelta) {
       content += chunk.contentDelta;
       contentLength += chunk.contentDelta.length;
       if (contentLength > 1_000_000) {
-        throw invalidStream('NewApi stream content exceeded the local limit');
+        throw invalidStream('NewApi stream content exceeded the local limit', 'content_limit_exceeded');
       }
-      await onContent(chunk.contentDelta);
+      await appendLocalDelta(onContent, chunk.contentDelta);
     }
     if (chunk.toolCalls) toolDeltas.push(...chunk.toolCalls);
     if (chunk.finishReason) {
-      if (terminalReason) throw invalidStream('NewApi stream reported multiple finish reasons');
+      if (terminalReason) throw invalidStream('NewApi stream reported multiple finish reasons', 'finish_reason_repeated');
       terminalReason = chunk.finishReason;
     }
   };
@@ -767,26 +768,48 @@ async function consumeNewApiStream(
         await processEvent(eventText);
       }
     }
-    buffer = normalizeNewlines(buffer + decoder.decode());
+    buffer = normalizeNewlines(buffer + decoder.decode(), true);
   } catch (error) {
     if (error instanceof NewApiRuntimeError) throw error;
     if (error instanceof NewApiChatAdapterError) throw error;
-    throw invalidStream('NewApi stream encoding is invalid');
+    throw invalidStream('NewApi stream encoding is invalid', 'encoding_invalid');
   }
   if (buffer.trim().length > 0) await processEvent(buffer);
   if (!done || !terminalReason) {
-    throw invalidStream('NewApi stream ended without a terminal marker');
+    throw invalidStream('NewApi stream ended without a terminal marker', 'terminal_marker_missing');
   }
   if (terminalReason === 'stop' && contentLength === 0) {
-    throw invalidStream('NewApi completed with empty content');
+    throw invalidStream('NewApi completed with empty content', 'empty_content');
+  }
+  let toolCalls: readonly ControlledProviderToolCall[] | undefined;
+  if (toolDeltas.length > 0) {
+    try {
+      toolCalls = assembleControlledToolCalls(toolDeltas);
+    } catch {
+      throw invalidStream('NewApi tool calls are invalid', 'tool_calls_invalid');
+    }
   }
   return {
     finishReason: terminalReason,
     contentLength,
     ...(usage ? { usage } : {}),
     ...(content ? { content } : {}),
-    ...(toolDeltas.length > 0 ? { toolCalls: assembleControlledToolCalls(toolDeltas) } : {})
+    ...(toolCalls ? { toolCalls } : {})
   };
+}
+
+async function appendLocalDelta(
+  append: (delta: string) => Promise<void>,
+  delta: string
+): Promise<void> {
+  try {
+    await append(delta);
+  } catch {
+    throw new NewApiChatAdapterError(
+      'newapi.local_response_write_failed',
+      'The local response could not be saved'
+    );
+  }
 }
 
 function sameProviderModelKey(left: string, right: string): boolean {
@@ -813,7 +836,7 @@ function parseStreamChunk(data: string): {
   try {
     parsed = JSON.parse(data);
   } catch {
-    throw invalidStream('NewApi SSE data is not valid JSON');
+    throw invalidStream('NewApi SSE data is not valid JSON', 'json_invalid');
   }
   // UniCompAPI / NewAPI gateways may add extension fields (e.g. service_tier,
   // first_token_return_time). Require the OpenAI chunk core, ignore unknowns.
@@ -822,25 +845,25 @@ function parseStreamChunk(data: string): {
     ['id', 'choices', 'created', 'model', 'object'],
     'NewApi stream chunk'
   );
-  const id = safeString(item.id, 'NewApi response ID', 512);
-  const model = safeString(item.model, 'NewApi response model', 256);
+  const id = safeString(item.id, 'NewApi response ID', 512, 'identity_invalid');
+  const model = safeString(item.model, 'NewApi response model', 256, 'identity_invalid');
   if (
     item.object !== 'chat.completion.chunk' ||
     !Number.isSafeInteger(item.created) ||
     Number(item.created) < 0 ||
     !Array.isArray(item.choices)
   ) {
-    throw invalidStream('NewApi stream chunk metadata is invalid');
+    throw invalidStream('NewApi stream chunk metadata is invalid', 'chunk_metadata_invalid');
   }
   const usage = item.usage === undefined || item.usage === null
     ? undefined
     : mapNewApiUsage(item.usage);
   if (item.choices.length === 0) {
-    if (!usage) throw invalidStream('NewApi empty choices require final usage');
+    if (!usage) throw invalidStream('NewApi empty choices require final usage', 'choices_invalid');
     return { id, model, usage };
   }
   if (item.choices.length !== 1) {
-    throw invalidStream('NewApi stream choices are ambiguous');
+    throw invalidStream('NewApi stream choices are ambiguous', 'choices_invalid');
   }
   // Intermediate gateway chunks often omit finish_reason entirely (not null).
   const choice = requireRecord(
@@ -852,21 +875,22 @@ function parseStreamChunk(data: string): {
     choice.index !== 0 ||
     (choice.logprobs !== undefined && choice.logprobs !== null)
   ) {
-    throw invalidStream('NewApi stream choice is unsupported');
+    throw invalidStream('NewApi stream choice is unsupported', 'choices_invalid');
   }
   const finishReason = choice.finish_reason === undefined || choice.finish_reason === null
     ? undefined
     : parseFinishReason(choice.finish_reason);
   const delta = requireRecord(choice.delta, [], 'NewApi stream delta');
-  if (delta.tool_calls !== undefined) {
-    return {
-      id, model, ...(usage ? { usage } : {}),
-      toolCalls: parseControlledToolCallDeltas(delta.tool_calls),
-      ...(finishReason ? { finishReason } : {})
-    };
+  let toolCalls: readonly ControlledProviderToolCallDelta[] | undefined;
+  if (delta.tool_calls !== undefined && delta.tool_calls !== null) {
+    try {
+      toolCalls = parseControlledToolCallDeltas(delta.tool_calls);
+    } catch {
+      throw invalidStream('NewApi tool call delta is invalid', 'tool_calls_invalid');
+    }
   }
   if (delta.role !== undefined && delta.role !== 'assistant') {
-    throw invalidStream('NewApi stream role is invalid');
+    throw invalidStream('NewApi stream role is invalid', 'delta_invalid');
   }
   const contentDelta = optionalDeltaText(delta.content, 'NewApi content delta');
   const reasoningDelta = optionalDeltaText(
@@ -879,7 +903,8 @@ function parseStreamChunk(data: string): {
     ...(reasoningDelta ? { reasoningDelta } : {}),
     ...(contentDelta ? { contentDelta } : {}),
     ...(finishReason ? { finishReason } : {}),
-    ...(usage ? { usage } : {})
+    ...(usage ? { usage } : {}),
+    ...(toolCalls ? { toolCalls } : {})
   };
 }
 
@@ -1136,17 +1161,21 @@ function parseDataOnlyEvent(eventText: string): string {
     .split('\n')
     .filter((line) => line.length > 0);
   if (lines.some((line) => !line.startsWith('data:'))) {
-    throw invalidStream('NewApi SSE contains unsupported fields');
+    throw invalidStream('NewApi SSE contains unsupported fields', 'sse_fields_invalid');
   }
   const data = lines.map((line) => line.slice(5).replace(/^ /, '')).join('\n');
   if (data.length < 1 || data.length > 1_000_000) {
-    throw invalidStream('NewApi SSE data field is invalid');
+    throw invalidStream('NewApi SSE data field is invalid', 'sse_data_invalid');
   }
   return data;
 }
 
-function normalizeNewlines(value: string): string {
-  return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+function normalizeNewlines(value: string, final = false): string {
+  // A trailing CR may be the first half of a CRLF split across network chunks.
+  const pendingCarriageReturn = !final && value.endsWith('\r');
+  const complete = pendingCarriageReturn ? value.slice(0, -1) : value;
+  return complete.replace(/\r\n/g, '\n').replace(/\r/g, '\n') +
+    (pendingCarriageReturn ? '\r' : '');
 }
 
 function parseFinishReason(value: unknown): NewApiFinishReason {
@@ -1154,7 +1183,7 @@ function parseFinishReason(value: unknown): NewApiFinishReason {
     !['stop', 'length', 'content_filter', 'tool_calls', 'insufficient_system_resource']
       .includes(String(value))
   ) {
-    throw invalidStream('NewApi finish reason is invalid');
+    throw invalidStream('NewApi finish reason is invalid', 'finish_reason_invalid');
   }
   return value as NewApiFinishReason;
 }
@@ -1181,8 +1210,20 @@ class NewApiChatAdapterError extends Error {
   }
 }
 
-function invalidStream(message: string): NewApiChatAdapterError {
-  return new NewApiChatAdapterError('newapi.invalid_response', message);
+type NewApiInvalidResponseReason =
+  | 'payload_invalid' | 'encoding_invalid' | 'json_invalid'
+  | 'sse_fields_invalid' | 'sse_data_invalid' | 'chunk_metadata_invalid'
+  | 'identity_invalid' | 'identity_changed' | 'choices_invalid' | 'delta_invalid'
+  | 'tool_calls_invalid' | 'usage_invalid' | 'usage_inconsistent' | 'usage_repeated'
+  | 'finish_reason_invalid' | 'finish_reason_repeated' | 'finish_reason_missing'
+  | 'terminal_marker_missing' | 'data_after_terminal' | 'empty_content'
+  | 'content_limit_exceeded';
+
+function invalidStream(
+  message: string,
+  reason: NewApiInvalidResponseReason = 'payload_invalid'
+): NewApiChatAdapterError {
+  return new NewApiChatAdapterError(`newapi.invalid_response.${reason}`, message);
 }
 
 function invalidRequest(message: string): NewApiChatAdapterError {
@@ -1212,9 +1253,9 @@ function requireRecord(
   required: readonly string[],
   label: string
 ): Record<string, unknown> {
-  if (!isRecord(value)) throw invalidStream(`${label} must be an object`);
+  if (!isRecord(value)) throw invalidStream(`${label} must be an object`, 'chunk_metadata_invalid');
   if (required.some((key) => !(key in value))) {
-    throw invalidStream(`${label} is missing required fields`);
+    throw invalidStream(`${label} is missing required fields`, 'chunk_metadata_invalid');
   }
   return value;
 }
@@ -1228,14 +1269,19 @@ function plainRecord(value: unknown, label: string): Record<string, unknown> {
   return value;
 }
 
-function safeString(value: unknown, label: string, maximum: number): string {
+function safeString(
+  value: unknown,
+  label: string,
+  maximum: number,
+  reason: NewApiInvalidResponseReason = 'payload_invalid'
+): string {
   if (
     typeof value !== 'string' ||
     value.trim().length < 1 ||
     value.length > maximum ||
     /[\u0000-\u001f\u007f]/.test(value)
   ) {
-    throw invalidStream(`${label} is invalid`);
+    throw invalidStream(`${label} is invalid`, reason);
   }
   return value;
 }
@@ -1254,7 +1300,7 @@ function boundedText(value: unknown, label: string, maximum: number): string {
 
 function safeDelta(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.length > 65_536 || /\u0000/.test(value)) {
-    throw invalidStream(`${label} is invalid`);
+    throw invalidStream(`${label} is invalid`, 'delta_invalid');
   }
   return value;
 }
@@ -1266,13 +1312,13 @@ function optionalDeltaText(value: unknown, label: string): string | undefined {
 
 function nonNegativeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw invalidStream(`NewApi ${label} is invalid`);
+    throw invalidStream(`NewApi ${label} is invalid`, 'usage_invalid');
   }
   return Number(value);
 }
 
 function optionalNonNegativeInteger(value: unknown, label: string): number | undefined {
-  return value === undefined ? undefined : nonNegativeInteger(value, label);
+  return value === undefined || value === null ? undefined : nonNegativeInteger(value, label);
 }
 
 function tokenFact(metricId: string, quantity: number): UsageFactV1 {
