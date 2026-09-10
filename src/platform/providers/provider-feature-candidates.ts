@@ -359,10 +359,7 @@ export class ProviderFeatureCandidateService {
         `The selected candidate is unavailable: ${dto.unavailableReasons.join(',')}`
       );
     }
-    const projectionMode = parameterProjectionMode(
-      resolvedSubject.surface,
-      resolvedSubject.productFeature
-    );
+    const projectionMode = parameterProjectionMode(resolvedSubject.surface);
     const parameterValues = pruneParameterValuesToSchema(
       candidate.parameterSchema,
       projectionMode,
@@ -418,7 +415,7 @@ export class ProviderFeatureCandidateService {
     const reasons = candidateReasons(subject, candidate);
     const projection = projectParameterSchema(
       validateParameterSchemaV2(candidate.parameterSchema),
-      parameterProjectionMode(subject.surface, subject.productFeature)
+      parameterProjectionMode(subject.surface)
     );
     return parseFeatureCandidateDto({
       schemaVersion: 1,
@@ -481,13 +478,8 @@ function bindingFingerprint(
   }));
 }
 
-function parameterProjectionMode(
-  surface: ProductFeatureSurface,
-  productFeature?: ProductFeature
-): ParameterProjectionMode {
-  // Quick video uses the same provider contract as text-to-video. Keep the
-  // full user-visible schema so optional model controls are not silently lost.
-  return surface === 'quick' && productFeature !== 'text_to_video' ? 'required_only' : 'full';
+function parameterProjectionMode(surface: ProductFeatureSurface): ParameterProjectionMode {
+  return surface === 'quick' ? 'required_only' : 'full';
 }
 
 /** Drop stale draft keys removed from the current schema (e.g. legacy `size`). */
