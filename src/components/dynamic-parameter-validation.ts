@@ -64,6 +64,9 @@ export function validateDynamicParameterValue(
     if (field.valueType === 'integer' && !Number.isSafeInteger(value)) {
       return `${label}必须是整数。`;
     }
+    if (isDurationField(field) && value < 0) {
+      return `${label}不能为负数。`;
+    }
     return validateNumericConstraint(field, value, label);
   }
   if (field.valueType === 'boolean') {
@@ -128,7 +131,16 @@ function parameterValidationLabel(field: DynamicParameterField): string {
   const key = (field.fieldId || field.labelId)
     .replace(/^provider\.parameter\./, '')
     .replace(/^provider\./, '');
-  return /[\u3400-\u9fff]/u.test(key) ? key : `参数“${key}”`;
+  const labels: Readonly<Record<string, string>> = {
+    duration_seconds: '视频时长', seconds: '视频时长', duration: '视频时长',
+    generation_mode: '生成模式', aspect_ratio: '画面比例', resolution: '分辨率'
+  };
+  return labels[key] ?? (/[^A-Za-z0-9_.-]/u.test(key) ? key : `参数“${key}”`);
+}
+
+function isDurationField(field: DynamicParameterField): boolean {
+  const key = (field.fieldId || field.labelId).replace(/^provider\.parameter\./, '');
+  return key === 'duration' || key === 'duration_seconds' || key === 'seconds';
 }
 
 function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {

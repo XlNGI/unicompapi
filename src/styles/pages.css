@@ -153,6 +153,7 @@
 
 .uc-generation-two-pane {
   grid-template-columns: minmax(340px, 0.9fr) minmax(520px, 1.35fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   height: clamp(600px, calc(100dvh - 260px), 840px);
 }
@@ -654,6 +655,9 @@
 
 .uc-image-quick__inspector {
   grid-area: inspector;
+  align-self: start;
+  height: max-content;
+  overflow: visible;
 }
 
 .uc-image-quick__delivery-strip {
@@ -965,6 +969,7 @@
 
 .uc-image-professional__workspace {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(440px, 0.95fr) minmax(520px, 1.05fr);
   gap: var(--uc-space-3);
   height: clamp(600px, calc(100dvh - 260px), 840px);
@@ -1531,6 +1536,37 @@
 .uc-creation-simple .uc-generation-two-pane__preparation-scroll,
 .uc-creation-simple .uc-image-professional__before-scroll {
   padding: 0;
+}
+
+/* Compact mode hides the heading and footer; keep a single scroll track.
+   Give spare space to the prompt, while parameter cards retain their height. */
+.uc-creation-simple .uc-generation-two-pane__preparation,
+.uc-creation-simple .uc-image-professional__before-pane {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-scroll {
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-flow,
+.uc-creation-simple .uc-image-professional__before-scroll {
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-flow > .uc-card:first-child,
+.uc-creation-simple .uc-image-professional__before-scroll > .uc-card:first-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-flow > .uc-card:first-child > .uc-image-quick__field,
+.uc-creation-simple .uc-image-professional__before-scroll > .uc-card:first-child > .uc-image-quick__field {
+  flex: 1;
+}
+
+.uc-creation-simple .uc-image-professional__prompt-input {
+  display: grid;
 }
 
 .uc-creation-simple .uc-generation-two-pane__preparation-flow {
@@ -4067,6 +4103,7 @@
 
   .uc-generation-two-pane {
     height: auto;
+    grid-template-rows: none;
   }
 
   .uc-generation-two-pane__controls {
@@ -6750,13 +6787,6 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-dynamic-parameters__tooltip {
-  position: absolute;
-  z-index: 20;
-  bottom: calc(100% + var(--uc-space-2));
-  left: 50%;
-  width: max-content;
-  max-width: min(18rem, calc(100vw - 2rem));
-  visibility: hidden;
   border: 1px solid var(--uc-color-border-default);
   border-radius: var(--uc-radius-6);
   padding: var(--uc-space-2) var(--uc-space-3);
@@ -6765,13 +6795,28 @@ button.uc-project-center__project-card:disabled {
   box-shadow: var(--uc-shadow-md);
   font-size: var(--uc-font-size-caption);
   line-height: var(--uc-line-height-caption);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, var(--uc-space-1));
-  transition:
-    opacity var(--uc-duration-fast) var(--uc-easing-standard),
-    transform var(--uc-duration-fast) var(--uc-easing-standard),
-    visibility var(--uc-duration-fast) var(--uc-easing-standard);
+}
+
+/* Quick video can expose a full provider parameter schema. Let both cards keep
+   their content height and scroll the pane instead of compressing the prompt
+   card underneath the parameter card. */
+.uc-video-quick__workspace.uc-generation-two-pane .uc-generation-two-pane__controls {
+  grid-template-rows: minmax(min-content, 1fr) max-content;
+  align-content: stretch;
+  overflow-y: auto;
+}
+
+.uc-video-quick__workspace.uc-image-quick__workspace.uc-generation-two-pane .uc-image-quick__composer.uc-image-quick__compact-card,
+.uc-video-quick__workspace.uc-image-quick__workspace.uc-generation-two-pane .uc-image-quick__composer.uc-image-quick__compact-card .uc-image-quick__field {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+.uc-video-quick__workspace.uc-image-quick__workspace.uc-generation-two-pane .uc-image-quick__composer.uc-image-quick__compact-card textarea {
+  height: 100%;
+  min-height: 10rem;
+  resize: none;
 }
 
 .uc-dynamic-parameters__tooltip > span {
@@ -6782,11 +6827,18 @@ button.uc-project-center__project-card:disabled {
   margin-top: var(--uc-space-2);
 }
 
-.uc-dynamic-parameters__info-wrap:hover .uc-dynamic-parameters__tooltip,
-.uc-dynamic-parameters__info-wrap:focus-within .uc-dynamic-parameters__tooltip {
-  visibility: visible;
-  opacity: 1;
-  transform: translate(-50%, 0);
+.rs-tooltip.uc-dynamic-parameters__tooltip { z-index: 1300; max-width: min(18rem, calc(100vw - 2rem)); }
+.rs-tooltip.uc-dynamic-parameters__tooltip,
+.rs-tooltip.uc-dynamic-parameters__tooltip.rs-tooltip {
+  --rs-tooltip-bg: var(--uc-color-surface-raised);
+  --rs-tooltip-text: var(--uc-color-text-primary);
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-raised);
+  border: 1px solid var(--uc-color-border-default);
+}
+.rs-picker-popup.uc-dynamic-parameters__popup {
+  --rs-picker-popup-z-index: 1300;
+  z-index: 1300;
 }
 
 .uc-dynamic-parameters__required {
@@ -6869,6 +6921,16 @@ button.uc-project-center__project-card:disabled {
 
 .uc-dynamic-parameters__field--boolean {
   grid-template-areas: "label control";
+}
+
+.uc-dynamic-parameters__field[data-value-type='boolean'] .uc-dynamic-parameters__control {
+  display: flex;
+  align-items: center;
+  min-height: 2.25rem;
+}
+
+.uc-dynamic-parameters__field[data-value-type='boolean'] .rs-toggle-label {
+  margin-left: var(--uc-space-2);
 }
 
 .uc-dynamic-parameters__field--boolean .rs-toggle {

@@ -33,6 +33,22 @@ describe('dynamic parameter validation', () => {
     }, 2)).toContain('不能小于');
   });
 
+  it('enforces each projected provider schema numeric contract', () => {
+    const field: DynamicParameterField = {
+      fieldId: 'duration_seconds', labelId: 'duration_seconds', valueType: 'integer',
+      required: false, minimum: 4, maximum: 15, step: 1
+    };
+    expect(validateDynamicParameterValue(field, 12343534)).toBe('视频时长不能大于 15。');
+    expect(validateDynamicParameterValue(field, 4.5)).toBe('视频时长必须是整数。');
+    expect(validateDynamicParameterValue(field, 10)).toBeUndefined();
+  });
+
+  it('rejects negative duration values for numeric provider contracts', () => {
+    expect(validateDynamicParameterValue({
+      fieldId: 'duration', labelId: 'duration', valueType: 'integer', required: false
+    }, -1)).toBe('视频时长不能为负数。');
+  });
+
   it('accepts a valid enum and plain object', () => {
     expect(validateDynamicParameterValues([
       requiredSize,

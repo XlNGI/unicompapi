@@ -102,6 +102,6 @@ test('dynamic parameters use accessible controls and responsive stable layout', 
   assert.match(styles, /min-height: 3\.25rem/);
   assert.match(styles, /min-height: 2\.25rem/);
   assert.match(styles, /data-invalid='true'/);
-  assert.match(styles, /\.uc-dynamic-parameters__info-wrap:focus-within/);
+  assert.match(source, /trigger=\{\['hover', 'focus'\]\}/);
   assert.match(styles, /\.uc-dynamic-parameters__tooltip/);
 });
