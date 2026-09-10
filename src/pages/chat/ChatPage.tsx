@@ -3087,9 +3087,16 @@ export function ChatPage({
                           ) : (
                             <StreamingMarkdown
                               streaming={item.state === 'streaming' && Boolean(item.content)}
-                              content={item.content || (item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
+                              content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
                             />
                           )}
+                          {item.state === 'failed' ? (
+                            <p aria-label="回复失败原因">
+                              {failedResponseNotice(item, isCurrentAssistant &&
+                                responseFailureSafeCodeRef.current?.executionId === responseExecution?.responseExecutionId
+                                ? responseFailureSafeCodeRef.current?.safeCode : undefined)}
+                            </p>
+                          ) : null}
                           {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
                         </div>
                       ) : (

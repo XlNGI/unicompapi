@@ -179,7 +179,7 @@ test('document response failures retain the safe provider reason after polling',
   assert.match(page, /responseFailureSafeCodeRef\.current = undefined/);
   assert.match(
     failureNoticeSource,
-    /safeCode\?\.includes\('timeout'\) \|\| message\?\.failureReason === 'unknown'/
+    /controlledCode\?\.includes\('timeout'\) \|\| message\?\.failureReason === 'unknown'/
   );
   assert.match(failureNoticeSource, /远端状态和费用可能已经产生/);
   assert.match(failureNoticeSource, /避免立即重复发送/);

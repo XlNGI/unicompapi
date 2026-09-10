@@ -153,7 +153,7 @@ class ElectronDeepSeekHttpTransport implements DeepSeekHttpTransport {
   }
 }
 
-class ElectronNewApiHttpTransport implements NewApiHttpTransport {
+export class ElectronNewApiHttpTransport implements NewApiHttpTransport {
   async send(request: NewApiHttpTransportRequest): Promise<NewApiHttpTransportResponse> {
     try {
       if (isNewApiVideoResultRequest(request)) {
@@ -178,7 +178,7 @@ class ElectronNewApiHttpTransport implements NewApiHttpTransport {
         redirect: request.redirect
       });
       const headers = Object.fromEntries(response.headers.entries());
-      if (wantsEventStream(request.headers)) {
+      if (response.status >= 200 && response.status < 300 && wantsEventStream(request.headers)) {
         await rejectOversizedDeclaredLength(
           response,
           request.maxResponseBytes,

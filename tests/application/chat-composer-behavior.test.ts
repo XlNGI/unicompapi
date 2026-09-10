@@ -131,6 +131,27 @@ describe('chat composer event behavior', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it.each([
+    ['request_rejected', '', '参数'],
+    ['access_denied', '', '权限'],
+    ['request_rejected', '已接收到的部分内容', '已保留接收到的内容']
+  ] as const)('shows a saved %s failure inside the message after reopening', async (failureReason, content, expected) => {
+    initialConversationId = conversation.conversationId;
+    const saved = { ...conversation, messages: [{
+      messageId: 'failed-assistant', role: 'assistant', state: 'failed', content,
+      failureReason, attachments: [], createdAt: conversation.updatedAt
+    }] };
+    Object.assign(window.unicomp!.chatContexts!, {
+      listConversations: vi.fn(async () => ({ ok: true, value: [saved] })),
+      getConversation: vi.fn(async () => ({ ok: true, value: saved }))
+    });
+    await settle();
+    expect(element('回复失败原因').props.children).toContain(expected);
+    expect(element('回复失败原因').props.children).not.toContain('数据格式异常');
+    expect(find(tree, (item) => item.props.content === '尚无内容')).toBeUndefined();
+    if (content) expect(find(tree, (item) => item.props.content === content)).toBeDefined();
+  });
+
   it.each(['enter', 'button'] as const)('%s sends natural language through the same workflow without a mode hint', async (method) => {
     await settle();
     expect(find(tree, (item) => item.props.title === '生成 Office 文档（Word/Excel/PPT）')).toBeUndefined();

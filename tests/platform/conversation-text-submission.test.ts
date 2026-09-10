@@ -3,6 +3,7 @@ import {
   addUserMessage,
   beginAssistantMessage,
   createConversation,
+  parseConversation,
   toConversationId,
   toConversationResponseExecutionId,
   toIsoTimestamp,
@@ -132,7 +133,17 @@ describe('createConversationLinkedLifecycle', () => {
     ]);
   });
 
-  it('projects an unconfirmed provider timeout as an unknown remote outcome', async () => {
+  it.each([
+    ['newapi.timeout', 'unknown'],
+    ['newapi.invalid_request', 'request_rejected'],
+    ['newapi.invalid_parameters', 'request_rejected'],
+    ['newapi.upstream_rejected', 'upstream_rejected'],
+    ['newapi.model_not_found', 'model_unavailable'],
+    ['newapi.local_response_write_failed', 'local_write_failed'],
+    ['newapi.permission_denied', 'access_denied'],
+    ['newapi.authentication_failed', 'access_denied'],
+    ['newapi.invalid_response', 'invalid_response']
+  ] as const)('preserves the failure category for %s across conversation reload', async (safeCode, failureReason) => {
     const conversationId = toConversationId('conversation-linked-timeout');
     const assistantMessageId = toMessageId('assistant-linked-timeout');
     const executionId = toConversationResponseExecutionId('execution-linked-timeout');
@@ -166,7 +177,7 @@ describe('createConversationLinkedLifecycle', () => {
       projectId: conversation.projectId,
       get: async () => conversation,
       save: async (updated: Conversation) => {
-        conversation = updated;
+        conversation = parseConversation(JSON.parse(JSON.stringify(updated)));
       }
     } as unknown as ProjectConversationRepository;
     const linked = createConversationLinkedLifecycle(
@@ -175,10 +186,10 @@ describe('createConversationLinkedLifecycle', () => {
       () => '2026-08-28T04:10:47.000Z'
     );
 
-    await linked.fail(executionId, 'newapi.timeout');
+    await linked.fail(executionId, safeCode);
 
     expect(
       conversation.messages.find((message) => message.id === assistantMessageId)
-    ).toMatchObject({ state: 'failed', failureReason: 'unknown' });
+    ).toMatchObject({ state: 'failed', failureReason, content: '' });
   });
 });

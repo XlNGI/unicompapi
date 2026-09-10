@@ -577,7 +577,22 @@ function failureReasonFromSafeCode(safeCode: string): MessageFailureReason {
   if (safeCode.includes('finish.length')) {
     return 'truncated';
   }
-  if (safeCode.includes('invalid_response') || safeCode.includes('invalid_request')) {
+  if (safeCode.includes('upstream_rejected')) {
+    return 'upstream_rejected';
+  }
+  if (safeCode.includes('model_not_found')) {
+    return 'model_unavailable';
+  }
+  if (safeCode.includes('local_response_write_failed')) {
+    return 'local_write_failed';
+  }
+  if (safeCode.includes('invalid_request') || safeCode.includes('invalid_parameters')) {
+    return 'request_rejected';
+  }
+  if (safeCode.includes('authentication_failed') || safeCode.includes('permission_denied')) {
+    return 'access_denied';
+  }
+  if (safeCode.includes('invalid_response')) {
     return 'invalid_response';
   }
   if (safeCode.includes('interrupted') || safeCode.includes('application_shutdown')) {

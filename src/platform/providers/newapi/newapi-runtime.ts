@@ -46,6 +46,7 @@ export const newApiRuntimeErrorCodes = [
   'invalid_parameters',
   'rate_limited',
   'provider_unavailable',
+  'upstream_rejected',
   'timeout',
   'cancelled',
   'request_too_large',
@@ -1042,6 +1043,9 @@ function classifyOpenAiErrorBody(body: Uint8Array | undefined): NewApiRuntimeErr
   if (token === 'rate_limit_exceeded' || token === 'rate_limit_error') {
     return new NewApiRuntimeError('rate_limited', 'retryable');
   }
+  if (token === 'bad_response_status_code') {
+    return new NewApiRuntimeError('upstream_rejected', 'not_retryable');
+  }
   if (
     token === 'invalid_request_error' ||
     token === 'invalid_request' ||
@@ -1136,6 +1140,7 @@ function messageForCode(code: NewApiRuntimeErrorCode): string {
     invalid_parameters: 'NewAPI rejected the request parameters',
     rate_limited: 'NewAPI rate limited the request',
     provider_unavailable: 'NewAPI is temporarily unavailable',
+    upstream_rejected: 'The NewAPI gateway reported an upstream rejection',
     timeout: 'The NewAPI request timed out',
     cancelled: 'The NewAPI request was cancelled',
     request_too_large: NEWAPI_REQUEST_TOO_LARGE_MESSAGE,

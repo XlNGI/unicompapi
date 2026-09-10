@@ -164,7 +164,7 @@ export interface MessageDto {
   readonly attachments: readonly ConversationAttachmentDto[];
   readonly attachmentSelection?: 'replace';
   readonly streamSequence?: number;
-  readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'truncated' | 'unknown';
+  readonly failureReason?: 'unavailable' | 'interrupted' | 'invalid_response' | 'request_rejected' | 'access_denied' | 'upstream_rejected' | 'model_unavailable' | 'local_write_failed' | 'truncated' | 'unknown';
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly startedAt?: string;

@@ -42,6 +42,11 @@ export const messageFailureReasons = [
   'unavailable',
   'interrupted',
   'invalid_response',
+  'request_rejected',
+  'access_denied',
+  'upstream_rejected',
+  'model_unavailable',
+  'local_write_failed',
   'truncated',
   'unknown'
 ] as const;
