@@ -232,6 +232,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 720,
     show: false,
     title: 'UniComp',
+    icon: path.join(app.getAppPath(), 'build-resources', 'icon.png'),
     backgroundColor: '#0B0F17',
     frame: isMac,
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
@@ -294,6 +295,9 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.unicomp.desktop');
+  }
   await settingsLifecycle.activate();
   const registrySnapshot = await viduComposition.registry.load();
   await runtimeAuthorizationSync.reconcileConnections(registrySnapshot.connections);

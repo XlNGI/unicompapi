@@ -1,5 +1,9 @@
 # UniComp 开发计划
 
+### 安装包与快捷方式 Logo 补齐（2026-09-11）
+
+负责人指出安装包和快捷方式未设置 Logo。基于最新 develop `3e2fc80` 在独立维护分支补齐现有品牌 ICO/PNG/ICNS、NSIS 向导页眉、主程序/安装器/卸载器图标，以及窗口图标与 Windows AppUserModelID。图标变更已增量同步主工作区，原有未提交修复保留。真实生产构建和 Windows x64 NSIS 打包通过，主 EXE/安装器 9 层图标逐帧 Hash 与源 ICO 一致，ASAR 内 PNG/最终 main.js 校验通过；类型/lint/平台审计通过。首轮工具缓存符号链接权限失败已记录，补齐 Windows 工具缓存后重打成功；未用禁用资源编辑绕过。样包未签名、未安装、未上架；不含主工作区未提交对话修复，不作为正式交付版本。实现、证据和后续安装验收边界见 [安装图标维护记录](docs/current/WINDOWS_PACKAGE_ICONS.md)。
+
 ### 视频缩略图分支合并与删除保护（2026-09-11）
 
 负责人在删除保护核对后明确授权将 `fix/video-thumbnail-preview` 合入 develop。以 develop `97d924a` 和 fix `fb7eb69` 在隔离维护分支执行三方合并，PLANS 两处冲突保留双方追加记录及最新维护事实；此前删除的 64 路径保持缺失，恢复 0。补齐隐藏视频页初始化取消边界、develop 新增服务商选择器的公共包装，并清除聊天页无用 import。全量 Vitest 212 文件 1560/1560、Node/UI 359/360，唯一既有失败为已删除 handoff 校验资料缺失；未恢复资料或跳过校验。类型/lint/build/平台与恢复审计、6 项真实 Electron preload/IPC 冒烟通过，真实媒体 40 帧测试执行通过。默认并发首轮 3 项 Office 超时已记录，降低并发后全量通过。原工作区 29 个修改/未跟踪文件 Hash 一致，未混入此次合并；保留来源与集成分支。具体范围、验收和交付边界见 [合并交付记录](docs/current/VIDEO_THUMBNAIL_MERGE_DELIVERY.md)。
