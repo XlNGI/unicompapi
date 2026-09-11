@@ -8,6 +8,10 @@ files:
   - dist/**/*
   - dist-electron/**/*
   - package.json
+  - from: build-resources
+    to: build-resources
+    filter:
+      - icon.png
   - '!**/*.map'
   - '!tests{,/**}'
   - '!docs{,/**}'
@@ -20,12 +24,19 @@ compression: maximum
 npmRebuild: false
 forceCodeSigning: false
 win:
+  icon: build-resources/icon.ico
   target:
     - target: nsis
       arch:
         - x64
   artifactName: UniComp-${version}-setup-${arch}.${ext}
+mac:
+  icon: build-resources/icon.icns
 nsis:
+  installerIcon: build-resources/icon.ico
+  uninstallerIcon: build-resources/icon.ico
+  installerHeader: build-resources/installer-header.bmp
+  installerHeaderIcon: build-resources/icon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

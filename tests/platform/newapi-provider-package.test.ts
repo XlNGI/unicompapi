@@ -754,6 +754,19 @@ describe('NewAPI management and runtime safety', () => {
 });
 
 describe('NewAPI chat adapter', () => {
+  it('does not announce a waiting search when the provider rejects the request', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse({ error: { code: 'permission_denied', message: 'denied' } }, 403));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const request = { responseExecutionId: 'response-native-rejected', invocationAttemptId: 'attempt-native-rejected', messages: [{ role: 'user', content: '查询新闻' }], parameterValues: {},
+      nativeSearch: { grantId: 'native-00000000-0000-0000-0000-000000000000', protocol: 'kimi_builtin', mode: 'auto' } };
+    const requested = vi.fn(async () => undefined), observe = vi.fn(async () => undefined);
+    await expect(adapter.submit({ routeSnapshot: routeFor('text_chat'), request, nativeSearchGuard: async () => undefined,
+      observeSearch: observe, searchRequestStarted: requested })).rejects.toThrow();
+    expect(fixture.requests).toHaveLength(1);
+    expect(requested).not.toHaveBeenCalled();
+    expect(observe).not.toHaveBeenCalled();
+  });
+
   it('dispatches native search only with a validated grant and sends the exact Kimi continuation envelope', async () => {
     let round = 0;
     const fixture = runtimeFixture(async () => streamResponse((round++ === 0
@@ -766,7 +779,11 @@ describe('NewAPI chat adapter', () => {
     await expect(adapter.submit({ routeSnapshot: routeFor('text_chat'), request })).rejects.toThrow();
     expect(fixture.requests).toHaveLength(0);
     const guard = vi.fn(async () => undefined), observe = vi.fn(async () => undefined);
-    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request, nativeSearchGuard: guard, observeSearch: observe });
+    const requested = vi.fn(async () => {
+      expect(fixture.requests).toHaveLength(1);
+      expect(observe).not.toHaveBeenCalled();
+    });
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request, nativeSearchGuard: guard, observeSearch: observe, searchRequestStarted: requested });
     await expect(handle.completion).resolves.toMatchObject({ state: 'completed', usageAvailability: 'reported' });
     expect(fixture.requests).toHaveLength(2);
     const first = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
@@ -775,6 +792,8 @@ describe('NewAPI chat adapter', () => {
     expect(second.messages[1].tool_calls[0]).toMatchObject({ id: 'call_1', function: { name: '$web_search' } });
     expect(second.messages[2]).toMatchObject({ role: 'tool', tool_call_id: 'call_1', name: '$web_search', content: '{"query":"news"}' });
     expect(guard).toHaveBeenCalledTimes(3);
+    expect(requested).toHaveBeenCalledTimes(1);
+    expect(requested).toHaveBeenCalledWith(request.nativeSearch.grantId);
     expect(observe).toHaveBeenCalledWith(request.nativeSearch.grantId, expect.objectContaining({ status: 'completed', toolCalls: 1 }));
     expect(lifecycle.content).toBe('公开结果');
     expect(usage.observations[0].facts).toContainEqual(tokenFact('total_tokens', 10));

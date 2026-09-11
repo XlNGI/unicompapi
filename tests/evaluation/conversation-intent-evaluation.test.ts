@@ -41,10 +41,10 @@ describe('Conversation intent golden evaluation', () => {
     expect(suite).toMatchObject({
       schemaVersion: 1,
       suiteId: 'conversation-intent-offline-golden',
-      version: '1.1.0',
-      updatedAt: '2026-09-09'
+      version: '1.3.0',
+      updatedAt: '2026-09-11'
     });
-    expect(suite.cases).toHaveLength(56);
+    expect(suite.cases).toHaveLength(73);
     const failures: string[] = [];
     for (const item of suite.cases) {
       const decision = analyzeLocalConversationIntent({

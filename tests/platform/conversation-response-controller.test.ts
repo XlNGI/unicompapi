@@ -2,6 +2,7 @@ import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '.
 import { describe, expect, it, vi } from 'vitest';
 import {
   addUserMessage,
+  addCompletedAssistantMessage,
   beginAssistantMessage,
   createConversation,
   createConversationResponseDraft,
@@ -75,7 +76,11 @@ function fixture(documentPages?: ConversationResponseControllerRuntime['document
     create: vi.fn(async () => base),
     get: vi.fn(async () => withAssistant),
     addUserMessage: vi.fn(async () => withUser),
-    editCancelledUserMessage: vi.fn(async () => withUser)
+    editCancelledUserMessage: vi.fn(async () => withUser),
+    ensureLocalReply: vi.fn(async (_id: string, key: string, content: string) => addCompletedAssistantMessage(withAssistant, {
+      id: toMessageId('message-source-disclosure'), content,
+      workflowReply: { workflowId: key, revision: 0 }, createdAt
+    }))
   };
   const draftRepository = {
     projectId,
@@ -83,6 +88,7 @@ function fixture(documentPages?: ConversationResponseControllerRuntime['document
     save: vi.fn(async () => undefined)
   };
   const candidateService = {
+    listCatalogForFeature: vi.fn(async () => []),
     prepareSubmission: vi.fn(async () => ({
       routeSelectionToken: 'route-selection-controller',
       confirmation: {
@@ -189,6 +195,47 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('lists text candidates after startup recovery fails while response writes stay blocked', async () => {
+    const value = fixture();
+    const error = new Error('legacy recovery record is unsupported');
+    const ready = Promise.reject(error);
+    void ready.catch(() => undefined);
+    Object.assign(value.runtime, { ready });
+
+    await expect(value.controller.listTextCandidates({
+      productFeature: 'text_chat'
+    })).resolves.toEqual({ ok: true, value: [] });
+    expect(value.candidateService.listCatalogForFeature).toHaveBeenCalledWith({
+      projectId,
+      productFeature: 'text_chat'
+    });
+    await expect(value.controller.start(startRequest())).resolves.toMatchObject({ ok: false });
+    expect(value.errors).toEqual([error]);
+    expect(value.service.create).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).not.toHaveBeenCalled();
+    expect(value.candidateService.prepareSubmission).not.toHaveBeenCalled();
+    expect(value.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for pending project recovery before listing the model catalog', async () => {
+    const value = fixture();
+    let finishRecovery: () => void = () => undefined;
+    const ready = new Promise<void>((resolve) => { finishRecovery = resolve; });
+    Object.assign(value.runtime, { ready });
+    try {
+      await expect(value.controller.listTextCandidates({
+        productFeature: 'text_reasoning'
+      })).resolves.toEqual({ ok: true, value: [] });
+      expect(value.candidateService.listCatalogForFeature).toHaveBeenCalledWith({
+        projectId,
+        productFeature: 'text_reasoning'
+      });
+      expect(value.runtime.conversations.get).not.toHaveBeenCalled();
+    } finally {
+      finishRecovery();
+    }
+  });
+
   it('stops before workflow execution and provider dispatch while native search authorization is pending', async () => {
     const f = fixture();
     const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, sourcePolicy: 'web' as const } };
@@ -200,6 +247,64 @@ describe('ConversationResponseController', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'native_search_authorization_required' } });
     expect(f.workflowService.beginExecution).not.toHaveBeenCalled();
     expect(f.runtime.start).not.toHaveBeenCalled();
+  });
+
+  it('discloses document sources before pinning the response revision', async () => {
+    const f = fixture();
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    f.workflowService.get.mockResolvedValue(workflow);
+    const result = await f.controller.start({ ...startRequest(), conversation: { conversationId: 'conversation-controller', expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: workflow.id, expectedRevision: workflow.revision } });
+    expect(result.ok).toBe(true);
+    expect(f.service.ensureLocalReply).toHaveBeenCalledWith('conversation-controller', expect.stringContaining('sources-'), expect.stringContaining('本次制作不联网搜索'));
+    const disclosed = await f.service.ensureLocalReply.mock.results[0].value;
+    expect(f.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ conversationRevision: disclosed.revision }));
+    expect(f.service.ensureLocalReply.mock.invocationCallOrder[0]).toBeLessThan(f.draftRepository.create.mock.invocationCallOrder[0]);
+    expect(f.runtime.start).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a reusable conversation grant eligible without claiming offline creation', async () => {
+    const f = fixture();
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    f.workflowService.get.mockResolvedValue(workflow);
+    const native = { prepare: vi.fn(async () => undefined), allowsConversation: vi.fn(async () => true) };
+    Object.assign(f.runtime, { nativeSearch: native });
+    Object.assign(f.candidateService, { resolveBinding: vi.fn(async () => ({ candidate: {} })) });
+    const result = await f.controller.start({ ...startRequest(), conversation: { conversationId: 'conversation-controller', expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: workflow.id, expectedRevision: workflow.revision } });
+    expect(result.ok).toBe(true);
+    expect(native.prepare).toHaveBeenCalledOnce();
+    expect(f.service.ensureLocalReply).not.toHaveBeenCalled();
+  });
+
+  it.each(['不要联网', '不需要联网', '取消网络搜索', '关闭联网', '只使用内部资料'])('honors %s before considering reusable grants', async (content) => {
+    const f = fixture(undefined, content);
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, sourcePolicy: 'web' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    f.workflowService.get.mockResolvedValue(workflow);
+    const native = { revoke: vi.fn(async () => undefined), prepare: vi.fn(), allowsConversation: vi.fn(async () => true) };
+    Object.assign(f.runtime, { nativeSearch: native });
+    const result = await f.controller.start({ ...startRequest(), conversation: { conversationId: 'conversation-controller', expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: workflow.id, expectedRevision: workflow.revision } });
+    expect(result.ok).toBe(true);
+    expect(native.revoke).toHaveBeenCalledWith('conversation-controller');
+    expect(native.allowsConversation).not.toHaveBeenCalled();
+    expect(native.prepare).not.toHaveBeenCalled();
+    expect(f.service.ensureLocalReply).toHaveBeenCalledOnce();
+  });
+
+  it('discloses local retrieval for mixed requests without opening search preparation', async () => {
+    const f = fixture();
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, sourcePolicy: 'mixed' as const, action: 'create' as const, documentKind: 'ppt' as const } };
+    f.workflowService.get.mockResolvedValue(workflow);
+    const native = { preferLocal: vi.fn(async () => true), prepare: vi.fn(), allowsConversation: vi.fn(async () => true) };
+    Object.assign(f.runtime, { nativeSearch: native });
+    const result = await f.controller.start({ ...startRequest(), conversation: { conversationId: 'conversation-controller', expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: workflow.id, expectedRevision: workflow.revision } });
+    expect(result.ok).toBe(true);
+    expect(native.prepare).not.toHaveBeenCalled();
+    expect(f.service.ensureLocalReply).toHaveBeenCalledWith('conversation-controller', expect.any(String), expect.stringContaining('已检索到本地资料'));
+    const disclosed = await f.service.ensureLocalReply.mock.results[0].value;
+    expect(f.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ conversationRevision: disclosed.revision }));
   });
 
   it('pins an explicit image question for main-process reading without exposing internal routing in the DTO', async () => {

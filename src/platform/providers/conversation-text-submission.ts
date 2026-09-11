@@ -169,7 +169,11 @@ export function createConversationTextDispatchBridge(
       adapterVersion: NEWAPI_ADAPTER_VERSION,
       protocolId: NEWAPI_CHAT_PROTOCOL_ID,
       protocolVersion: NEWAPI_PROTOCOL_VERSION,
-      submit: (input) => newApiAdapter.submit({ ...input, nativeSearchGuard: options.nativeSearch?.validate.bind(options.nativeSearch), observeSearch: options.nativeSearch?.observe.bind(options.nativeSearch) }),
+      submit: (input) => newApiAdapter.submit({ ...input,
+        nativeSearchGuard: options.nativeSearch?.validate.bind(options.nativeSearch),
+        observeSearch: options.nativeSearch?.observe.bind(options.nativeSearch),
+        searchRequestStarted: options.nativeSearch?.requestStarted.bind(options.nativeSearch)
+      }),
       toolCalling: options.toolCalling,
       cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,

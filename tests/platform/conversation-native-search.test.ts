@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConversationApplicationService } from '../../src/application';
 import { createConversationResponseDraft, createConversationWorkflow, toConversationId, toConversationResponseDraftId, toConversationWorkflowId, toIsoTimestamp, toMessageId, toProjectId } from '../../src/domain';
 import { JsonProjectConversationRepository } from '../../src/platform/repositories';
-import { NodeProjectStorage } from '../../src/platform/storage';
+import { NodeProjectStorage, toProjectRelativePath } from '../../src/platform/storage';
 import { ConversationNativeSearch, NativeSearchAuthorizationError } from '../../src/platform/providers/conversation-native-search';
 import type { JsonProviderRegistryStore } from '../../src/platform/providers/provider-registry';
 import type { ResolvedFeatureCandidateV1 } from '../../src/platform/providers/provider-feature-candidates';
+import type { NativeSearchEvidence } from '../../src/domain/entities/native-search';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
 async function setup(packageId = 'provider-package-kimi') {
@@ -30,12 +31,23 @@ async function setup(packageId = 'provider-package-kimi') {
   const input = { conversation, workflow, draft, candidate };
   return { native, input, service, registry, storage, repo, now, setTime: (t: string) => { time = t; } };
 }
+async function submitted() {
+  const f = await setup();
+  await expect(f.native.prepare(f.input)).rejects.toBeInstanceOf(NativeSearchAuthorizationError);
+  const conversation = await f.service.get(f.input.conversation.id);
+  await f.native.answer({ workflow: f.input.workflow, conversation, candidateId: f.input.candidate.candidateId, content: '允许本次联网' });
+  const grant = await f.native.dispatch(f.input.draft, f.input.candidate);
+  expect(grant).toBeDefined();
+  return { ...f, grantId: grant!.grantId };
+}
+const ledgerFile = toProjectRelativePath('entities/conversation-native-search.json');
 describe('durable conversational native search authorization', () => {
   it('persists a single question, restores it after restart, and only grants the exact reply', async () => {
     const f = await setup();
     await expect(f.native.prepare(f.input)).rejects.toBeInstanceOf(NativeSearchAuthorizationError);
     const question = await f.service.get(f.input.conversation.id);
     expect(question.messages.at(-1)?.content).toContain('是否允许本次联网');
+    expect(question.messages.at(-1)?.content).toContain('这项需求涉及公开或时效信息');
     expect(question.revision).toBe(2);
     const recovered = new ConversationNativeSearch(f.storage, f.registry, f.service, f.now);
     await expect(recovered.prepare({ ...f.input, conversation: question })).rejects.toBeInstanceOf(NativeSearchAuthorizationError);
@@ -44,7 +56,7 @@ describe('durable conversational native search authorization', () => {
     await recovered.answer({ ...f.input, conversation: question, candidateId: f.input.candidate.candidateId, content: '允许本次联网' });
     const authorized = await f.service.get(question.id);
     expect(authorized.messages.at(-1)?.content).toContain('已允许本次联网');
-    await recovered.prepare({ ...f.input, conversation: authorized });
+    await expect(recovered.prepare({ ...f.input, conversation: authorized })).resolves.toBe('native');
     const grant = await recovered.dispatch(f.input.draft, f.input.candidate);
     expect(grant).toMatchObject({ protocol: 'kimi_builtin', mode: 'auto' });
     expect(await recovered.dispatch(f.input.draft, f.input.candidate)).toBeUndefined();
@@ -64,6 +76,8 @@ describe('durable conversational native search authorization', () => {
     const f = await setup('provider-package-newapi');
     await expect(f.native.prepare(f.input)).rejects.toThrow();
     expect((await f.service.get(f.input.conversation.id)).messages.at(-1)?.content).toContain('尚无可用');
+    expect((await f.service.get(f.input.conversation.id)).messages.at(-1)?.content).toContain('模型与服务商→文本模型→联网搜索设置');
+    expect((await f.service.get(f.input.conversation.id)).messages.at(-1)?.content).toContain('保存配置不代表服务商实际支持');
     expect(await f.native.dispatch(f.input.draft, f.input.candidate)).toBeUndefined();
   });
   it('invalidates a grant when the outbound prompt changes', async () => {
@@ -80,7 +94,7 @@ describe('durable conversational native search authorization', () => {
     const conversation = await f.service.addUserMessage({ conversationId: question.id, expectedRevision: (await f.service.get(question.id)).revision, content: '再查公开天气' });
     const workflow = { ...f.input.workflow, id: toConversationWorkflowId('workflow-next'), sourceMessageId: conversation.messages.at(-1)!.id };
     const draft = { ...f.input.draft, userMessageId: workflow.sourceMessageId, promptContent: '再查公开天气' };
-    await f.native.prepare({ ...f.input, conversation, workflow, draft });
+    await expect(f.native.prepare({ ...f.input, conversation, workflow, draft })).resolves.toBe('native');
     const grant = await f.native.dispatch(draft, f.input.candidate);
     expect(grant?.protocol).toBe('kimi_builtin');
     await f.native.revoke(question.id);
@@ -92,10 +106,64 @@ describe('durable conversational native search authorization', () => {
     await f.native.answer({ workflow: f.input.workflow, conversation, candidateId: f.input.candidate.candidateId, content: '允许本会话联网' });
     const grant = await f.native.dispatch(f.input.draft, f.input.candidate);
     await f.native.revoke(conversation.id);
+    const revision = (await f.service.get(conversation.id)).revision;
+    await f.native.requestStarted(grant!.grantId);
     await f.native.observe(grant!.grantId, { status: 'started', toolCalls: 1, cost: 'not_reported', retrievedAt: f.now(), sources: [] });
     expect(await f.native.allowsConversation(conversation.id)).toBe(false);
     await f.native.observe(grant!.grantId, { status: 'completed', toolCalls: 1, cost: 'not_reported', retrievedAt: f.now(), sources: [] });
     expect(await f.native.allowsConversation(conversation.id)).toBe(false);
+    expect((await f.service.get(conversation.id)).revision).toBe(revision);
+    expect(await f.storage.readJson(ledgerFile)).toMatchObject({ sessions: [{ status: 'declined', evidence: { status: 'completed' } }] });
+  });
+  it('projects a submitted request once without fabricating search evidence', async () => {
+    const f = await submitted();
+    await Promise.all([f.native.requestStarted(f.grantId), f.native.requestStarted(f.grantId)]);
+    const messages = (await f.service.get(f.input.conversation.id)).messages;
+    expect(messages.filter(m => m.workflowReply?.workflowId === `${f.grantId}-request-started`)).toHaveLength(1);
+    expect(messages.at(-1)?.content).toContain('正在等待服务商返回搜索记录');
+    const ledger = await f.storage.readJson<{ sessions: { status: string; evidence?: unknown }[] }>(ledgerFile);
+    expect(ledger?.sessions[0].status).toBe('submitted');
+    expect(ledger?.sessions[0].evidence).toBeUndefined();
+  });
+  it('does not project a request that has only been authorized', async () => {
+    const f = await setup();
+    await expect(f.native.prepare(f.input)).rejects.toThrow();
+    const question = await f.service.get(f.input.conversation.id);
+    await f.native.answer({ workflow: f.input.workflow, conversation: question, candidateId: f.input.candidate.candidateId, content: '允许本次联网' });
+    const before = await f.service.get(question.id);
+    await f.native.requestStarted(question.messages.at(-1)!.workflowReply!.workflowId);
+    expect((await f.service.get(question.id)).revision).toBe(before.revision);
+  });
+  it.each([
+    ['structured sources', null, [{ title: '来源', url: 'https://example.com/news' }], '已收到服务商返回的 1 条结构化搜索来源'],
+    ['tool calls', 1, [], '已收到模型原生搜索工具调用记录'],
+    ['no facts', null, [], undefined]
+  ] as const)('describes started search using %s', async (_label, toolCalls, sources, expected) => {
+    const f = await submitted();
+    const before = await f.service.get(f.input.conversation.id);
+    await f.native.observe(f.grantId, { status: 'started', toolCalls, sources, cost: 'not_reported', retrievedAt: f.now() });
+    const after = await f.service.get(before.id);
+    if (expected) expect(after.messages.at(-1)?.content).toContain(expected);
+    else expect(after.revision).toBe(before.revision);
+    await f.native.requestStarted(f.grantId);
+    expect((await f.service.get(before.id)).revision).toBe(after.revision);
+  });
+  it.each([
+    ['cancelled', '本次联网搜索已取消'],
+    ['failed', '联网搜索失败'],
+    ['completed', '已收到服务商的搜索执行记录']
+  ] as const)('keeps a %s request terminal when delayed callbacks arrive after restart', async (status, expected) => {
+    const f = await submitted();
+    const evidence: NativeSearchEvidence = { status, toolCalls: 1, sources: [], cost: 'not_reported', retrievedAt: f.now() };
+    await f.native.observe(f.grantId, evidence);
+    const terminal = await f.service.get(f.input.conversation.id);
+    expect(terminal.messages.at(-1)?.content).toContain(expected);
+    const recovered = new ConversationNativeSearch(f.storage, f.registry, f.service, f.now);
+    await recovered.requestStarted(f.grantId);
+    await recovered.observe(f.grantId, { ...evidence, status: 'started' });
+    await recovered.observe(f.grantId, { ...evidence, status: 'completed' });
+    expect((await f.service.get(terminal.id)).revision).toBe(terminal.revision);
+    expect(await f.storage.readJson(ledgerFile)).toMatchObject({ sessions: [{ status, evidence: { status: 'completed' } }] });
   });
   it('preserves concurrent conversation writes while projecting a search event', async () => {
     const f = await setup(); await expect(f.native.prepare(f.input)).rejects.toThrow();
@@ -120,7 +188,7 @@ describe('durable conversational native search authorization', () => {
     const f = await setup();
     const local = { retrieve: vi.fn(async () => [{ text: '本地结果' }]) };
     const native = new ConversationNativeSearch(f.storage, f.registry, f.service, f.now, local);
-    await native.prepare({ ...f.input, workflow: { ...f.input.workflow, plan: { ...f.input.workflow.plan, sourcePolicy: 'mixed' } } });
+    await expect(native.prepare({ ...f.input, workflow: { ...f.input.workflow, plan: { ...f.input.workflow.plan, sourcePolicy: 'mixed' } } })).resolves.toBe('local');
     expect((await f.service.get(f.input.conversation.id)).revision).toBe(1);
     expect(await native.dispatch(f.input.draft, f.input.candidate)).toBeUndefined();
   });

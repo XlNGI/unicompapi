@@ -64,6 +64,13 @@ export interface ConversationWorkflowV1 {
   readonly planHash?: string;
   readonly confirmationExpiresAt?: IsoTimestamp;
   readonly executionId?: string;
+  /** Retired draft metadata, preserved for read compatibility and never executed. */
+  readonly documentCommand?: {
+    readonly action: 'recreate';
+    readonly requestText: string;
+    readonly candidates: readonly [];
+    readonly stage: 'choose_target';
+  };
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -165,7 +172,7 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
   const allowed = new Set([
     'schemaVersion', 'id', 'projectId', 'conversationId', 'sourceMessageId',
     'revision', 'status', 'plan', 'deliveries', 'pendingQuestions', 'resolvedTarget', 'confirmationId',
-    'planHash', 'confirmationExpiresAt', 'executionId', 'createdAt', 'updatedAt'
+    'planHash', 'confirmationExpiresAt', 'executionId', 'documentCommand', 'createdAt', 'updatedAt'
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key)) || value.schemaVersion !== 1) {
     throw new TypeError('Conversation workflow contains unsupported fields');
@@ -182,6 +189,13 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
   if (updatedAt < createdAt) throw new TypeError('Conversation workflow updatedAt is stale');
   const plan = parseConversationIntentPlan(value.plan);
   const deliveries = value.deliveries === undefined ? undefined : parseDeliveries(value.deliveries);
+  const documentCommand = value.documentCommand === undefined
+    ? undefined : parseRetiredDocumentCommand(value.documentCommand);
+  if (documentCommand && (plan.kind !== 'chat' || !['ready', 'cancelled'].includes(String(value.status)) ||
+    resolvedTarget !== undefined || deliveries !== undefined || value.executionId !== undefined ||
+    value.confirmationId !== undefined || value.planHash !== undefined || value.confirmationExpiresAt !== undefined)) {
+    throw new TypeError('Retired document command cannot contain active execution state');
+  }
   if (value.confirmationId !== undefined && !boundedString(value.confirmationId, 256)) throw new TypeError('Conversation workflow confirmationId is invalid');
   if (value.planHash !== undefined && !boundedString(value.planHash, 256)) throw new TypeError('Conversation workflow planHash is invalid');
   const confirmationExpiresAt = value.confirmationExpiresAt === undefined
@@ -195,7 +209,9 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
     conversationId: toConversationId(nonBlank(value.conversationId, 'workflow.conversationId')),
     sourceMessageId: toMessageId(nonBlank(value.sourceMessageId, 'workflow.sourceMessageId')),
     revision: Number(value.revision),
-    status: value.status as ConversationWorkflowStatus,
+    // The retired selector is not an executable chat plan. Keep its request for
+    // history, but require a fresh workflow before any action can be taken.
+    status: documentCommand ? 'cancelled' : value.status as ConversationWorkflowStatus,
     plan,
     ...(deliveries ? { deliveries } : {}),
     pendingQuestions,
@@ -204,9 +220,21 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
     ...(value.planHash !== undefined ? { planHash: value.planHash as string } : {}),
     ...(confirmationExpiresAt !== undefined ? { confirmationExpiresAt } : {}),
     ...(value.executionId !== undefined ? { executionId: value.executionId as string } : {}),
+    ...(documentCommand !== undefined ? { documentCommand } : {}),
     createdAt,
     updatedAt
   };
+}
+
+function parseRetiredDocumentCommand(value: unknown): NonNullable<ConversationWorkflowV1['documentCommand']> {
+  if (!isRecord(value) || Object.keys(value).length !== 4 ||
+      Object.keys(value).some((key) => !['action', 'requestText', 'candidates', 'stage'].includes(key)) ||
+      value.action !== 'recreate' || value.stage !== 'choose_target' ||
+      typeof value.requestText !== 'string' || !value.requestText.trim() || value.requestText.length > 32_000 ||
+      !Array.isArray(value.candidates) || value.candidates.length !== 0) {
+    throw new TypeError('Retired document command is invalid');
+  }
+  return { action: 'recreate', requestText: value.requestText, candidates: [], stage: 'choose_target' };
 }
 
 export function assessConversationWorkflow(

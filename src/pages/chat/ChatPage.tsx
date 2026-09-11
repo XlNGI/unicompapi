@@ -530,6 +530,8 @@ export function ChatPage({
   const [planningCancelRequested, setPlanningCancelRequested] = useState(false);
   const [notice, setNotice] = useState('');
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidateLoadFailures, setCandidateLoadFailures] = useState<readonly string[]>([]);
+  const [candidateReloadVersion, setCandidateReloadVersion] = useState(0);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const dragDepthRef = useRef(0);
@@ -580,6 +582,7 @@ export function ChatPage({
   const featureCandidates = responseCandidates.filter(
     (candidate) => candidate.parameterSchema.productFeature === responseFeature
   );
+  const candidateLoadFailed = candidateLoadFailures.includes(responseFeature);
   const completedMessages = selected?.messages.filter(
     (message) => message.state === 'completed'
   ) ?? [];
@@ -751,7 +754,7 @@ export function ChatPage({
     if (!content || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
       const messages = messagesRef.current;
-      if (messages && followOutputRef.current) messages.scrollTop = messages.scrollHeight;
+      if (messages && followOutputRef.current) messages.scrollTo({ top: messages.scrollHeight, behavior: 'instant' });
     });
     observer.observe(content);
     return () => observer.disconnect();
@@ -835,24 +838,25 @@ export function ChatPage({
         (selected && (selected.readOnly || selected.status !== 'active'))
       ) {
         setResponseCandidates([]);
+        setCandidateLoadFailures([]);
+        setCandidatesLoading(false);
         return;
       }
       setCandidatesLoading(true);
       try {
-        const [chatResult, reasoningResult] = await Promise.all([
+        const results = await Promise.allSettled([
           chat.listTextCandidates('text_chat'),
           chat.listTextCandidates('text_reasoning')
         ]);
         if (!active) return;
-        if (!chatResult.ok && !reasoningResult.ok) {
-          setResponseCandidates([]);
-          setNotice(errorMessages[chatResult.error.code]);
-          return;
-        }
-        const candidates = [
-          ...(chatResult.ok ? chatResult.value : []),
-          ...(reasoningResult.ok ? reasoningResult.value : [])
-        ];
+        const features = ['text_chat', 'text_reasoning'] as const;
+        setCandidateLoadFailures(features.filter((_, index) => {
+          const result = results[index];
+          return result.status === 'rejected' || !result.value.ok;
+        }));
+        const candidates = results.flatMap((result) =>
+          result.status === 'fulfilled' && result.value.ok ? result.value.value : []
+        );
         const candidatesById = new Map<string, ConversationResponseCandidateDto>();
         candidates.forEach((candidate) => {
           candidatesById.set(candidate.candidateId, candidate);
@@ -868,7 +872,7 @@ export function ChatPage({
       } catch {
         if (active) {
           setResponseCandidates([]);
-          setNotice('读取文本模型候选失败，请重试。');
+          setCandidateLoadFailures(['text_chat', 'text_reasoning']);
         }
       } finally {
         if (active) setCandidatesLoading(false);
@@ -876,7 +880,7 @@ export function ChatPage({
     }
     void loadCandidates();
     return () => { active = false; };
-  }, [chat, session, selected?.conversationId, selected?.readOnly, selected?.status]);
+  }, [chat, session, selected?.conversationId, selected?.readOnly, selected?.status, candidateReloadVersion]);
 
   useEffect(() => {
     const execution = responseExecutionSnapshotRef.current;
@@ -1040,7 +1044,9 @@ export function ChatPage({
   useEffect(() => {
     const messages = messagesRef.current;
     if (!messages || !followOutputRef.current) return;
-    messages.scrollTop = messages.scrollHeight;
+    // Smooth programmatic scrolling emits intermediate scroll events away from
+    // the bottom, which would be mistaken for the user opting out of following.
+    messages.scrollTo({ top: messages.scrollHeight, behavior: 'instant' });
     setShowScrollToBottom(false);
   }, [
     lastDisplayMessage?.content,
@@ -2741,7 +2747,7 @@ export function ChatPage({
     const messages = messagesRef.current;
     if (!messages) return;
     followOutputRef.current = true;
-    messages.scrollTop = messages.scrollHeight;
+    messages.scrollTo({ top: messages.scrollHeight, behavior: 'instant' });
     setShowScrollToBottom(false);
   }
 
@@ -3227,7 +3233,9 @@ export function ChatPage({
                               ? '对话已保存，新版文档已保存，结果同步待恢复。'
                               : '对话已保存，原作品已保留，本次修改未交付。'
                             : '任务尚未全部完成，已交付的作品已保留。'
-                          : '这项任务已准备好。'}
+                          : activeWorkflow.status === 'ready' && !selectedCandidate?.available
+                            ? '需求已准备好，请先选择一个可用模型，再点“继续执行”。'
+                            : '这项任务已准备好。'}
                 </span>
                 {activeWorkflow.deliveries && activeWorkflow.deliveries.length > 1 ? (
                   <div className="uc-chat-page__workflow-details" role="note">
@@ -3302,7 +3310,13 @@ export function ChatPage({
             </p>
           ) : null}
           {selected && !canCompose && session ? <p className="uc-chat-page__message" role="status">当前对话不可写，请从对话列表选择其他记录。</p> : null}
-          {canCompose && featureCandidates.length === 0 && !candidatesLoading && !notice ? (
+          {canCompose && candidateLoadFailed && !candidatesLoading ? (
+            <div className="uc-chat-page__message" role="status">
+              <span>读取模型列表失败，请重新加载。输入内容已保留。</span>
+              <Button onClick={() => setCandidateReloadVersion((version) => version + 1)} variant="ghost">重新加载模型</Button>
+            </div>
+          ) : null}
+          {canCompose && featureCandidates.length === 0 && !candidatesLoading && !candidateLoadFailed && !notice ? (
             <p className="uc-chat-page__message" role="status">当前没有已登记的文本候选，请切换回复方式，或到「模型与服务商」页完成连接和模型配置。</p>
           ) : null}
             </div>
@@ -3416,15 +3430,22 @@ export function ChatPage({
                       <section className="uc-chat-page__model-list-section">
                         <div className="uc-chat-page__model-menu-heading">
                           <span>选择模型</span>
-                          <small>{featureCandidates.filter((candidate) => candidate.available).length} 个可用</small>
+                          <small>{candidatesLoading ? '正在加载' : candidateLoadFailed ? '加载失败' : `${featureCandidates.filter((candidate) => candidate.available).length} 个可用`}</small>
                         </div>
+                        {candidateLoadFailed ? (
+                          <Button disabled={candidatesLoading} onClick={() => setCandidateReloadVersion((version) => version + 1)} variant="ghost">重新加载模型</Button>
+                        ) : null}
                       </section>
                     </div>
                   )}
                   listboxMaxHeight={250}
                   noResultsText={candidatesLoading
                     ? '正在加载可用模型…'
-                    : '没有匹配的模型'}
+                    : candidateLoadFailed
+                      ? '模型列表加载失败，请重新加载'
+                      : featureCandidates.length === 0
+                        ? '当前回复方式没有已配置的模型，请到「模型与服务商」配置'
+                        : '没有匹配的模型'}
                   onChange={changeCandidate}
                   options={featureCandidates.map((candidate) => ({
                     id: candidate.candidateId,
