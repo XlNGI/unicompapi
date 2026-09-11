@@ -10,6 +10,7 @@ export const providerIpcChannels = {
   registerExactModel: 'providers:register-exact-model',
   setConnectionEnabled: 'providers:set-managed-connection-enabled',
   setModelEnabled: 'providers:set-managed-model-enabled',
+  setNativeSearch: 'providers:set-native-search',
   attachOpenAiCompatibleImageProfile: 'providers:attach-openai-compatible-image-profile',
   deleteModel: 'providers:delete-managed-model',
   deleteConnection: 'providers:delete-managed-connection'
@@ -214,6 +215,7 @@ export interface ProviderModelSummaryDto {
   readonly lastSeenAt?: string;
   readonly displayName: string;
   readonly enabled: boolean;
+  readonly nativeSearch?: { readonly protocol: 'kimi_builtin' | 'glm_web_search'; readonly state: string; readonly evidenceUrl: string };
   readonly profileStatus?: 'declared' | 'verified' | 'restricted' | 'disabled';
   readonly productFeatures?: readonly string[];
 }
@@ -380,6 +382,7 @@ export interface ProviderApi {
     readonly connectionId: string;
     readonly state: 'enabled' | 'disabled';
   }>>;
+  setNativeSearch?(request: { readonly modelId: string; readonly expectedRevision: number; readonly protocol: 'kimi_builtin' | 'glm_web_search'; readonly enabled: boolean; readonly evidenceUrl: string }): Promise<ProviderFrameworkResult<{ readonly state: string }>>;
   setModelEnabled(
     modelId: string,
     enabled: boolean

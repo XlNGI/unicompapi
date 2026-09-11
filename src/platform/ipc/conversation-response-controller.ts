@@ -1,3 +1,4 @@
+import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../providers/conversation-native-search';
 import { FeatureSubmissionError } from '../providers/provider-feature-candidates';
 import { isConversationImageRequest, declinesConversationImageInput } from '../../application/conversation-image-request';
 import {
@@ -53,6 +54,7 @@ import { conversationAttachmentQuery } from '../../application/conversation-atta
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export interface ConversationResponseControllerRuntime {
+  readonly nativeSearch?: ConversationNativeSearch;
   readonly conversationService: ConversationApplicationService;
   readonly conversations: ProjectConversationRepository;
   readonly drafts: ConversationResponseDraftRepository;
@@ -613,6 +615,17 @@ export class ConversationResponseController {
       );
       await runtime.drafts.save(contextualized, draft.revision);
       draft = contextualized;
+    }
+    const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
+    if (workflow && (/(?:不要|禁止|关闭|取消)联网/u.test(lastUserText) || workflow.plan.sourcePolicy === 'internal')) await runtime.nativeSearch?.revoke(conversation.id);
+    if (workflow && runtime.nativeSearch && (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await runtime.nativeSearch.allowsConversation(conversation.id))) {
+      const binding = await runtime.candidates.resolveBinding(subject(draft), input.candidateId);
+      try {
+        await runtime.nativeSearch.prepare({ conversation, workflow, draft, candidate: binding.candidate });
+      } catch (error) {
+        if (error instanceof NativeSearchAuthorizationError) return failure('native_search_authorization_required', '请在对话中回应联网提示。');
+        throw error;
+      }
     }
     const prepared = await runtime.candidates.prepareSubmission({
       subject: subject(draft),

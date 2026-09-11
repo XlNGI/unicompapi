@@ -1,3 +1,5 @@
+import { parseNativeSearchRequest, type NativeSearchRequest, type NativeSearchEvidence } from '../../../domain/entities/native-search';
+import { nativeSearchTools, runNativeSearch, type NativeSearchMessage } from '../native-search-stream';
 import { parseConversationImageInput, type ConversationImageInput } from '../conversation-image-input';
 ﻿import { randomUUID } from 'node:crypto';
 import {
@@ -139,7 +141,7 @@ export interface NewApiChatTerminalObserverPort {
   }): Promise<void>;
 }
 
-export interface NewApiChatMessageV1 {
+export interface NewApiChatMessageV1 extends NativeSearchMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
   readonly content: string;
   readonly toolCallId?: string;
@@ -147,6 +149,7 @@ export interface NewApiChatMessageV1 {
 }
 
 export interface NewApiChatDispatchRequestV1 {
+  readonly nativeSearch?: NativeSearchRequest;
   readonly image?: ConversationImageInput;
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
@@ -183,6 +186,9 @@ export interface NewApiChatOperationHandle {
 }
 
 interface ActiveOperation {
+  readonly abort: () => void;
+  readonly nativeSearch?: NativeSearchRequest;
+  readonly observeSearch?: (evidence: NativeSearchEvidence) => Promise<void>;
   readonly providerOperationId: string;
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
@@ -292,6 +298,8 @@ export class NewApiChatAdapter {
     readonly signal?: AbortSignal;
     readonly toolBridge?: ControlledProviderToolBridge;
     readonly maxToolRounds?: number;
+    readonly nativeSearchGuard?: (request: NativeSearchRequest, route: ReturnType<typeof validateRoute>) => Promise<void>;
+    readonly observeSearch?: (grantId: string, evidence: NativeSearchEvidence) => Promise<void>;
   }): Promise<NewApiChatOperationHandle> {
     if (this.disposed) {
       throw new NewApiRuntimeError('runtime_shutting_down', 'not_retryable');
@@ -319,6 +327,14 @@ export class NewApiChatAdapter {
         'The NewAPI parameter schema captured by the route is unavailable'
       );
     }
+    if (request.nativeSearch) {
+      if (!input.nativeSearchGuard || !input.observeSearch || request.tools || request.image) throw invalidRequest('Native search requires a separate scoped grant');
+      await input.nativeSearchGuard(request.nativeSearch, route);
+    }
+    const guardedStart = async () => {
+      if (request.nativeSearch) await input.nativeSearchGuard!(request.nativeSearch, route);
+      await input.beforeRequestStarted?.();
+    };
     const body = serializeRequest(route, request, parameterSchema);
     const providerOperationId = requireOpaqueId(
       this.ids.nextProviderOperationId(),
@@ -341,7 +357,7 @@ export class NewApiChatAdapter {
           credentials: credential,
           body: serializeRequest(route, { ...request, messages }, parameterSchema),
           signal: externalController.signal,
-          beforeRequestStarted: input.beforeRequestStarted
+          beforeRequestStarted: guardedStart
         })
       );
     try {
@@ -355,7 +371,7 @@ export class NewApiChatAdapter {
           credentials: credential,
           body,
           signal: externalController.signal,
-          beforeRequestStarted: input.beforeRequestStarted
+          beforeRequestStarted: guardedStart
         })
       );
       await this.lifecycle.start(request.responseExecutionId);
@@ -375,6 +391,7 @@ export class NewApiChatAdapter {
       );
     }
     const operation: ActiveOperation = {
+      abort: () => externalController.abort(),
       providerOperationId,
       responseExecutionId: request.responseExecutionId,
       invocationAttemptId: request.invocationAttemptId,
@@ -384,6 +401,7 @@ export class NewApiChatAdapter {
       session,
       openSession,
       messages: [...request.messages],
+      ...(request.nativeSearch ? { nativeSearch: request.nativeSearch, observeSearch: (evidence: NativeSearchEvidence) => input.observeSearch!(request.nativeSearch!.grantId, evidence) } : {}),
       ...(input.toolBridge !== undefined ? { toolBridge: input.toolBridge } : {}),
       maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4),
       signal: externalController.signal,
@@ -404,6 +422,7 @@ export class NewApiChatAdapter {
       operation.cancelReason = 'user';
       operation.cancelRequest = this.lifecycle.requestCancel(operation.responseExecutionId);
       void operation.cancelRequest.catch(() => undefined);
+      operation.abort();
       operation.session.cancel();
     }
     return true;
@@ -415,6 +434,7 @@ export class NewApiChatAdapter {
     const operations = [...this.active.values()];
     for (const operation of operations) {
       operation.cancelReason = 'application_shutdown';
+      operation.abort();
       operation.session.cancel();
     }
     await Promise.all(operations.map((operation) => operation.completion));
@@ -431,7 +451,14 @@ export class NewApiChatAdapter {
   ): Promise<NewApiChatTerminalResult> {
     let usagePersisted = false;
     try {
-      let stream = await consumeNewApiStream(
+      const native = operation.nativeSearch ? await runNativeSearch({
+        request: operation.nativeSearch, session: operation.session, messages: operation.messages,
+        model: expectedModel, signal: operation.signal,
+        open: async messages => { operation.session = await operation.openSession(messages); return operation.session; },
+        observe: operation.observeSearch!
+      }) : undefined;
+      if (native) await this.lifecycle.appendContent(operation.responseExecutionId, native.content);
+      let stream = native ?? await consumeNewApiStream(
         operation.session.stream,
         expectedModel,
         async (contentDelta) => {
@@ -979,7 +1006,7 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
   const item = exactRecord(
     value,
     ['responseExecutionId', 'invocationAttemptId', 'messages', 'parameterValues'],
-    ['tools', 'image'],
+    ['tools', 'image', 'nativeSearch'],
     'NewApi chat dispatch request'
   );
   if (!Array.isArray(item.messages) || item.messages.length < 1 || item.messages.length > 200) {
@@ -1012,6 +1039,7 @@ function parseDispatchRequest(value: unknown): NewApiChatDispatchRequestV1 {
       256
     ) as ProviderInvocationAttemptId,
     messages,
+    ...(item.nativeSearch !== undefined ? { nativeSearch: parseNativeSearchRequest(item.nativeSearch) } : {}),
     ...(item.image !== undefined ? { image: parseConversationImageInput(item.image) } : {}),
     parameterValues: plainRecord(item.parameterValues, 'NewApi parameter values') as Readonly<
       Record<string, ParameterValue>
@@ -1035,13 +1063,16 @@ function serializeRequest(
         ? [{ type: 'text', text: message.content }, { type: 'image_url', image_url: { url: `data:${request.image.mimeType};base64,${request.image.base64}` } }]
         : message.content,
       ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
-      ...(message.name !== undefined ? { name: message.name } : {})
+      ...(message.name !== undefined ? { name: message.name } : {}),
+      ...(message.nativeToolCalls ? { tool_calls: message.nativeToolCalls } : {}),
+      ...(message.reasoningContent ? { reasoning_content: message.reasoningContent } : {})
     })),
     // Product chat path always streams; do not expose stream as a user field.
     stream: true,
     stream_options: { include_usage: true }
   };
   if (request.tools) body.tools = request.tools;
+  if (request.nativeSearch) { body.tools = nativeSearchTools(request.nativeSearch); body.tool_choice = 'auto'; }
   if (typeof parameters.max_tokens === 'number') {
     body.max_tokens = parameters.max_tokens;
   }
@@ -1104,7 +1135,7 @@ function serializeRequest(
   if (modelKey.startsWith('qwen3-') && typeof parameters.enable_thinking === 'boolean') {
     body.enable_thinking = parameters.enable_thinking;
   }
-  if (typeof parameters.tool_choice === 'string' && parameters.tool_choice.trim()) {
+  if (!request.nativeSearch && typeof parameters.tool_choice === 'string' && parameters.tool_choice.trim()) {
     body.tool_choice = parameters.tool_choice.trim();
   }
   if (typeof parameters.parallel_tool_calls === 'boolean') {
@@ -1194,6 +1225,7 @@ function finishReasonSafeCode(reason: Exclude<NewApiFinishReason, 'stop'>): stri
 
 function safeCodeForError(error: unknown): string {
   if (error instanceof NewApiChatAdapterError) return error.safeCode;
+  if (error && typeof error === 'object' && 'safeCode' in error && typeof error.safeCode === 'string') return error.safeCode;
   return runtimeSafeCode(error);
 }
 

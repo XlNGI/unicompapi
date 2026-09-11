@@ -1,5 +1,6 @@
 /** Stable keys keep persisted clarification state independent of translated copy. */
 const labels: Readonly<Record<string, string>> = {
+  document_topic: 'PPT 的主题或具体内容',
   document_kind: '文档类型（Word、Excel 或 PPT）',
   single_deliverable: '当前先完成哪一种文档',
   document_target: '要修改的文档',

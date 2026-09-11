@@ -1,3 +1,4 @@
+import { ConversationNativeSearch } from '../providers/conversation-native-search';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
@@ -298,6 +299,7 @@ export function createChatContextRuntime(
       },
       now
     );
+    const nativeSearch = new ConversationNativeSearch(storage, providerRegistry, service, now, retrieval);
     const candidateService = new ProviderFeatureCandidateService(
       new ProjectConversationResponseSubjectResolver(
         projectConversations,
@@ -351,6 +353,7 @@ export function createChatContextRuntime(
       workflowService,
       attachments,
       documentPages,
+      nativeSearch,
       ready: responseRecovery
     };
     if (canSubmit && textSubmission && authorization) {
@@ -359,6 +362,7 @@ export function createChatContextRuntime(
       );
       const journal = new SubmissionIntentJournal(storage, now);
       const artifacts = new ConversationResponseArtifactFactory({
+        nativeSearch,
         conversations: projectConversations,
         drafts: responseDrafts,
         contexts: contextRepository,
@@ -369,6 +373,7 @@ export function createChatContextRuntime(
         now
       });
       const dispatch = createConversationTextDispatchBridge({
+        nativeSearch,
         ...textSubmission,
         providerRegistry,
         providerPackages,
@@ -515,6 +520,7 @@ export function createChatContextRuntime(
         ),
         workflowService,
         research: webResearchService,
+        nativeSearch,
         local: retrieval
       },
       responses

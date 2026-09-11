@@ -22,6 +22,7 @@ import {
   type ConversationSemanticContext
 } from './conversation-intent-orchestrator';
 import { conversationClarificationKey, conversationClarificationLabel } from './conversation-clarification-fields';
+import { documentClarificationQuestion } from './document-request-completeness';
 
 export type ConversationWorkflowApplicationErrorCode =
   | 'workflow_not_found'
@@ -117,6 +118,12 @@ export class ConversationWorkflowService {
     const current = await this.require(input.workflowId, input.expectedRevision);
     if (!['needs_clarification', 'needs_confirmation', 'ready'].includes(current.status)) {
       throw new TypeError('Conversation workflow cannot accept an answer in its current state');
+    }
+    // Exact replies are bound to this persisted workflow and its revision. They
+    // do not authorize web research or change any outbound scope.
+    if (current.status === 'needs_confirmation' && /^(?:确认执行|确认并继续|同意执行|继续)[。！!\s]*$/u.test(input.rawText.trim())) {
+      if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
+      return this.confirm({ workflowId: current.id, expectedRevision: current.revision });
     }
     const decision = await this.orchestrator.analyze({
       rawText: input.rawText,
@@ -460,7 +467,7 @@ function synchronizeDeliveries(
 function questionsForDecision(plan: ReturnType<typeof parseConversationIntentPlan>) {
   return [...new Set([...plan.missing, ...plan.ambiguities].map(conversationClarificationKey))].slice(0, 3).map((reason) => ({
     field: reason,
-    question: `请补充或确认：${conversationClarificationLabel(reason)}`,
+    question: documentClarificationQuestion(reason, conversationClarificationLabel(reason)),
     required: true
   }));
 }

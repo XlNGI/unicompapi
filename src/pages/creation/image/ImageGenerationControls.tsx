@@ -64,26 +64,6 @@ export const emptyImageConfirmations: ImageSubmissionConfirmationDto = {
   model: false
 };
 
-export function ImageGenerationModelFields({
-  draft,
-  registry,
-  onDraftChange
-}: {
-  readonly draft: GenerationImageDraftDto;
-  readonly registry?: ProviderRegistryDto;
-  readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
-}) {
-  return (
-    <ImageModelFields
-      label="图片生成模型"
-      model={draft.generation.model}
-      onChange={(generation) => onDraftChange({ ...draft, generation })}
-      parameters={draft.generation.parameters}
-      purpose={draft.input ? 'reference_to_image' : 'image_generation'}
-      registry={registry}
-    />
-  );
-}
 
 export function ImageEditingModelFields({
   draft,

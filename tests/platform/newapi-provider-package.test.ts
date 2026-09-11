@@ -754,6 +754,32 @@ describe('NewAPI management and runtime safety', () => {
 });
 
 describe('NewAPI chat adapter', () => {
+  it('dispatches native search only with a validated grant and sends the exact Kimi continuation envelope', async () => {
+    let round = 0;
+    const fixture = runtimeFixture(async () => streamResponse((round++ === 0
+      ? chatStreamEvent({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: '$web_search', arguments: '{"query":"news"}' } }] }, 'tool_calls')
+      : chatStreamEvent({ content: '公开结果' }, 'stop')) + chatStreamEvent({}, undefined, { choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } }) + 'data: [DONE]\n\n'));
+    const lifecycle = lifecycleFixture(), usage = usageSink();
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycle.port, usage.port);
+    const request = { responseExecutionId: 'response-native', invocationAttemptId: 'attempt-native', messages: [{ role: 'user', content: '查询新闻' }], parameterValues: {},
+      nativeSearch: { grantId: 'native-00000000-0000-0000-0000-000000000000', protocol: 'kimi_builtin', mode: 'auto' } };
+    await expect(adapter.submit({ routeSnapshot: routeFor('text_chat'), request })).rejects.toThrow();
+    expect(fixture.requests).toHaveLength(0);
+    const guard = vi.fn(async () => undefined), observe = vi.fn(async () => undefined);
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'), request, nativeSearchGuard: guard, observeSearch: observe });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed', usageAvailability: 'reported' });
+    expect(fixture.requests).toHaveLength(2);
+    const first = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
+    const second = JSON.parse(Buffer.from(fixture.requests[1].body!).toString('utf8'));
+    expect(first.tools).toEqual([{ type: 'builtin_function', function: { name: '$web_search' } }]);
+    expect(second.messages[1].tool_calls[0]).toMatchObject({ id: 'call_1', function: { name: '$web_search' } });
+    expect(second.messages[2]).toMatchObject({ role: 'tool', tool_call_id: 'call_1', name: '$web_search', content: '{"query":"news"}' });
+    expect(guard).toHaveBeenCalledTimes(3);
+    expect(observe).toHaveBeenCalledWith(request.nativeSearch.grantId, expect.objectContaining({ status: 'completed', toolCalls: 1 }));
+    expect(lifecycle.content).toBe('公开结果');
+    expect(usage.observations[0].facts).toContainEqual(tokenFact('total_tokens', 10));
+  });
+
   it.each(['bytewise', 'split-crlf'] as const)('accepts multiline SSE JSON with %s network chunks', async (mode) => {
     const data = JSON.stringify({
       id: 'chatcmpl-compat', object: 'chat.completion.chunk', created: 1,

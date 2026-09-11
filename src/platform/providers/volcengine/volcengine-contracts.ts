@@ -364,12 +364,6 @@ export function createSeedanceVideoModelContract(
   };
 }
 
-export function createSeedanceVideoModelDefinition(
-  providerModelKey: string,
-  declaration: SeedanceVideoProfileDeclarationV1
-): ProviderModelDefinition {
-  return createSeedanceVideoModelContract(providerModelKey, declaration).definition;
-}
 
 function requireProviderModelKey(value: string): string {
   const normalized = value.trim();

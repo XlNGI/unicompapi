@@ -99,12 +99,6 @@ export function createLiveProviderManagementComposition(options: {
   };
 }
 
-export function createLiveProviderManagementAdapters(options: {
-  readonly getProxyMode: () => Promise<ProxyMode>;
-  readonly logger?: (event: NewApiSafeLogEvent) => void;
-}): ProviderManagementAdapterPort[] {
-  return [...createLiveProviderManagementComposition(options).adapters];
-}
 
 class ElectronDeepSeekHttpTransport implements DeepSeekHttpTransport {
   async send(request: DeepSeekHttpTransportRequest): Promise<DeepSeekHttpTransportResponse> {

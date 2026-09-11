@@ -49,6 +49,7 @@ export const chatContextIpcChannels = {
 } as const;
 
 export type ChatContextIpcErrorCode =
+  | 'native_search_authorization_required'
   | 'invalid_request'
   | 'project_not_open'
   | 'project_scope_mismatch'
@@ -120,6 +121,7 @@ export type ConversationAttachmentDto =
     };
 
 export interface MessageDto {
+  readonly workflowReply?: { readonly workflowId: string; readonly revision: number };
   readonly messageId: string;
   readonly conversationId: string;
   readonly revision: number;

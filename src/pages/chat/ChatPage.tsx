@@ -79,6 +79,7 @@ const errorMessages: Record<ChatContextIpcErrorCode, string> = {
   response_execution_not_found: '本次文本执行记录不存在。',
   response_execution_not_active: '当前回复没有可控制的活动请求，请刷新后确认状态。',
   response_execution_in_progress: '该会话已有回复正在进行，请等待完成或先停止。',
+  native_search_authorization_required: '',
   candidate_not_found: '所选服务商、连接或模型候选已不存在。',
   candidate_unavailable: '所选候选当前不可用于文本回复。',
   route_selection_invalid: '本次候选选择已失效，请重新选择。',
@@ -769,10 +770,14 @@ export function ChatPage({
         active = false;
       };
     }
-    void chat.getPendingWorkflow(selected.conversationId).then((result) => {
+    void chat.getPendingWorkflow(selected.conversationId).then(async (result) => {
       if (!active) return;
       setActiveWorkflow(result.ok ? result.value ?? undefined : undefined);
       setWebResearchSession(undefined);
+      if (result.ok && result.value) {
+        const restored = await chat.getConversation(selected.conversationId);
+        if (active && restored.ok) replaceConversation(restored.value);
+      }
     }).catch(() => {
       if (active) setActiveWorkflow(undefined);
     });
@@ -780,6 +785,20 @@ export function ChatPage({
       active = false;
     };
   }, [chat, selected?.conversationId]);
+
+  useEffect(() => {
+    if (!chat || !responseInProgress || !selected?.conversationId || !selected.messages.some(message => message.workflowReply?.workflowId.startsWith('native-'))) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      const current = await chat.getConversation(selected.conversationId).catch(() => undefined);
+      if (!active) return;
+      if (current?.ok) replaceConversation(current.value);
+      timer = setTimeout(() => void refresh(), 1000);
+    };
+    timer = setTimeout(() => void refresh(), 1000);
+    return () => { active = false; clearTimeout(timer); };
+  }, [chat, responseInProgress, selected?.conversationId]);
 
   useEffect(() => {
     setRenameTitle(selected?.title ?? '');
@@ -846,9 +865,6 @@ export function ChatPage({
             : undefined;
           return candidate?.available ? candidate.candidateId : undefined;
         });
-        if (distinctCandidates.length === 0) {
-          setNotice('当前没有已登记的文本候选，请到「模型与服务商」页完成连接和模型配置。');
-        }
       } catch {
         if (active) {
           setResponseCandidates([]);
@@ -1231,6 +1247,26 @@ export function ChatPage({
   async function submitWorkflowInput() {
     if (workflowSubmissionInFlightRef.current) return;
     if (!chat || !session || !input.trim() || busy || responseInProgress) return;
+    if (activeWorkflow?.status === 'ready' && selected && selectedCandidateId && webResearch?.answerNative &&
+        /^允许本(?:次|会话)联网[。！!]?$/u.test(input.trim()) && !attachmentSelectionChangedRef.current) {
+      workflowSubmissionInFlightRef.current = true;
+      setBusy(true);
+      try {
+        const refreshed = await chat.getConversation(selected.conversationId);
+        if (!refreshed.ok) { setNotice(describeChatError(refreshed.error)); return; }
+        const answered = await webResearch.answerNative({ workflowId: activeWorkflow.workflowId,
+          expectedWorkflowRevision: activeWorkflow.revision, expectedConversationRevision: refreshed.value.revision,
+          candidateId: selectedCandidateId, content: input.trim() });
+        if (!answered.ok) { setNotice(answered.error.message); return; }
+        const current = await chat.getConversation(selected.conversationId);
+        if (!current.ok) { setNotice(describeChatError(current.error)); return; }
+        replaceConversation(current.value);
+        updateInput('');
+        setNotice('');
+        if (answered.value === 'authorized') await executeReadyWorkflow(activeWorkflow, current.value, []);
+      } finally { setBusy(false); workflowSubmissionInFlightRef.current = false; }
+      return;
+    }
     workflowSubmissionInFlightRef.current = true;
     const planningCommand = { clientCommandId: `chat-workflow-${crypto.randomUUID()}`, cancelled: false };
     planningCommandRef.current = planningCommand;
@@ -1326,15 +1362,15 @@ export function ChatPage({
         setActiveWorkflow(undefined);
         setWebResearchSession(undefined);
 
-        setNotice('任务已取消，可以直接发送新的需求。');
+        setNotice('');
         return;
       }
       if (result.value.workflow.status === 'needs_clarification') {
-        setNotice(workflowQuestion(result.value.workflow));
+        setNotice('');
         return;
       }
       if (result.value.workflow.status === 'needs_confirmation') {
-        setNotice('请确认当前任务计划后再执行。');
+        setNotice('');
         return;
       }
       if (result.value.workflow.status !== 'ready') {
@@ -1471,7 +1507,11 @@ export function ChatPage({
     suppliedResearchReferences?: readonly WebResearchReferenceDto[]
   ): Promise<boolean | undefined> {
     let researchReferences = suppliedResearchReferences ?? [];
-    if (!suppliedResearchReferences &&
+    if (webResearch?.answerNative && workflow.plan.sourcePolicy === 'mixed' && !suppliedResearchReferences) {
+      const local = await webResearch.preview({ workflowId: workflow.workflowId, expectedWorkflowRevision: workflow.revision, expectedConversationRevision: conversation.revision });
+      if (local.ok && local.value.status === 'local_ready') researchReferences = local.value.references;
+    }
+    if (!webResearch?.answerNative && !suppliedResearchReferences &&
         (workflow.plan.sourcePolicy === 'web' || workflow.plan.sourcePolicy === 'mixed')) {
       if (!webResearch) {
         await cancelUnsupportedWebWorkflow(workflow);
@@ -3168,22 +3208,8 @@ export function ChatPage({
                 })}
               </ol>
             )}
-          </div>
-          {showScrollToBottom ? (
-            <Button
-              aria-label="回到最新消息"
-              className="uc-chat-page__scroll-to-bottom"
-              onClick={scrollMessagesToBottom}
-              title="回到最新消息"
-              variant="secondary"
-            >
-              <LuArrowDown aria-hidden="true" />
-            </Button>
-          ) : null}
-        </div>
-
-        <div className="uc-chat-page__composer-region">
-          {activeWorkflow ? (
+            <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">
+          {activeWorkflow && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
             <div className="uc-chat-page__workflow-status" role="status">
               <div className="uc-chat-page__workflow-copy">
                 <span>
@@ -3275,6 +3301,26 @@ export function ChatPage({
               {notice}
             </p>
           ) : null}
+          {selected && !canCompose && session ? <p className="uc-chat-page__message" role="status">当前对话不可写，请从对话列表选择其他记录。</p> : null}
+          {canCompose && featureCandidates.length === 0 && !candidatesLoading && !notice ? (
+            <p className="uc-chat-page__message" role="status">当前没有已登记的文本候选，请切换回复方式，或到「模型与服务商」页完成连接和模型配置。</p>
+          ) : null}
+            </div>
+          </div>
+          {showScrollToBottom ? (
+            <Button
+              aria-label="回到最新消息"
+              className="uc-chat-page__scroll-to-bottom"
+              onClick={scrollMessagesToBottom}
+              title="回到最新消息"
+              variant="secondary"
+            >
+              <LuArrowDown aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="uc-chat-page__composer-region">
           <section
             aria-labelledby="chat-composer-title"
             className="uc-chat-page__composer"
@@ -3452,10 +3498,6 @@ export function ChatPage({
               </div>
             </div>
           </section>
-          {selected && !canCompose && session ? <p className="uc-chat-page__notice">当前对话不可写，请从对话列表选择其他记录。</p> : null}
-          {canCompose && featureCandidates.length === 0 && !candidatesLoading ? (
-            <p className="uc-chat-page__notice">当前回复方式没有可选模型。请切换回复方式，或到「模型与服务商」添加并启用兼容模型。</p>
-          ) : null}
         </div>
       </section>
       {dragging ? (

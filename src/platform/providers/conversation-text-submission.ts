@@ -1,3 +1,4 @@
+import type { ConversationNativeSearch } from './conversation-native-search';
 import { randomUUID } from 'node:crypto';
 import {
   appendAssistantMessageChunk,
@@ -71,6 +72,7 @@ import { ConversationRevisionConflictError } from '../repositories/json-conversa
 import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from './provider-tool-calling';
 
 export interface ConversationTextSubmissionRuntimes {
+  readonly nativeSearch?: ConversationNativeSearch;
   readonly deepSeekRuntime: DeepSeekSharedRuntime;
   readonly newApiRuntime: NewApiSharedRuntime;
   readonly credentialVault: SecureCredentialVault;
@@ -167,7 +169,7 @@ export function createConversationTextDispatchBridge(
       adapterVersion: NEWAPI_ADAPTER_VERSION,
       protocolId: NEWAPI_CHAT_PROTOCOL_ID,
       protocolVersion: NEWAPI_PROTOCOL_VERSION,
-      submit: (input) => newApiAdapter.submit(input),
+      submit: (input) => newApiAdapter.submit({ ...input, nativeSearchGuard: options.nativeSearch?.validate.bind(options.nativeSearch), observeSearch: options.nativeSearch?.observe.bind(options.nativeSearch) }),
       toolCalling: options.toolCalling,
       cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
@@ -210,7 +212,7 @@ function wrapChatAdapter(input: {
     protocolVersion: input.protocolVersion,
     async submit(dispatchRequest): Promise<SubmissionDispatchOutcome> {
       try {
-        const adapterRequest = input.toolCalling && isRecord(dispatchRequest.request)
+        const adapterRequest = input.toolCalling && isRecord(dispatchRequest.request) && !dispatchRequest.request.nativeSearch
           ? { ...dispatchRequest.request, tools: input.toolCalling.tools }
           : dispatchRequest.request;
         const handle = await input.submit({

@@ -1,3 +1,4 @@
+import type { NativeSearchCapability } from './native-search';
 import type { ProductFeature } from './product-feature';
 
 export const catalogStates = ['present', 'missing', 'retired'] as const;
@@ -38,6 +39,7 @@ export interface ProviderModelDefinition {
 }
 
 export interface ModelFeatureProfile {
+  readonly nativeSearch?: NativeSearchCapability;
   readonly schemaVersion: 1;
   readonly profileId: string;
   readonly revision: number;

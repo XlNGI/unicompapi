@@ -125,6 +125,7 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.getPendingWorkflow, (_event, request: unknown) =>
     workflows.getPending(request)
   );
+  ipcMain.handle(webResearchIpcChannels.answerNative, (_event, request: unknown) => webResearch.answerNative(request));
   ipcMain.handle(webResearchIpcChannels.preview, (_event, request: unknown) =>
     webResearch.preview(request)
   );

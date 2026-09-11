@@ -589,7 +589,6 @@ export class RuntimeAuthorizationLedger {
   }
 }
 
-export const RuntimeAccessPolicyService = RuntimeAuthorizationLedger;
 
 export function parseRuntimeAuthorizationLedger(
   value: unknown

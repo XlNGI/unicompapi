@@ -1,3 +1,4 @@
+import { kimiProviderPackageDescriptor } from '../../src/platform/providers/kimi/kimi-contracts';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,6 +51,36 @@ afterEach(async () => {
 });
 
 describe('provider management framework', () => {
+  it('persists per-model native search declarations without sending a request or claiming verification', async () => {
+    const root = await makeRoot();
+    const packages = new ProviderPackageRegistry([kimiProviderPackageDescriptor]);
+    const registry = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+    const vault = new SecureCredentialVault(path.join(root, 'credentials.json'), protector());
+    const descriptor = kimiProviderPackageDescriptor.adapters[0];
+    const network = vi.fn(async () => ({ state: 'available' as const, identityState: 'verified' as const, credentialState: 'valid' as const, observedAt: t1 }));
+    const adapter: ProviderManagementAdapterPort = { identity: { packageId: kimiProviderPackageDescriptor.packageId, ...descriptor }, validateConnection: network,
+      discoverModels: async () => ({ entries: [{ providerModelKey: 'kimi-k3', displayName: 'Kimi K3' }], observedAt: t1 }) };
+    const framework = new ProviderManagementFramework(packages, registry, vault, new ProviderManagementAdapterRegistry(packages, [adapter]), new JsonProviderManagementAuditStore(path.join(root, 'audit.json')), { now: () => t2 });
+    const created = await framework.addConnection({ packageId: kimiProviderPackageDescriptor.packageId, templateId: 'kimi-official', name: 'Synthetic native', credentials: { api_key: 'fixture-native' } });
+    expect(created.ok).toBe(true);
+    const model = (await registry.load()).models[0];
+    expect(model).toBeDefined();
+    const enabledNative = await framework.setModelEnabled({ modelId: model.id, enabled: true });
+    if (!enabledNative.ok) throw new Error(JSON.stringify(enabledNative));
+    const current = (await registry.load()).models[0];
+    const request = { modelId: current.id, expectedRevision: current.revision, protocol: 'kimi_builtin', enabled: true, evidenceUrl: 'https://platform.kimi.com/docs/guide/use-web-search' };
+    const callsBefore = network.mock.calls.length;
+    const configured = await framework.setNativeSearch(request);
+    if (!configured.ok) throw new Error(configured.error.message);
+    expect(configured).toMatchObject({ ok: true, value: { state: 'declared' } });
+    const saved = await registry.load();
+    expect(saved.modelProfiles?.filter(p => p.modelId === current.id).every(p => p.nativeSearch?.state === 'declared')).toBe(true);
+    expect(network.mock.calls.length).toBe(callsBefore);
+    expect(await framework.setNativeSearch({ ...request, expectedRevision: 0 })).toMatchObject({ ok: false });
+    expect(await framework.setNativeSearch({ ...request, evidenceUrl: 'https://user:secret@example.com' })).toMatchObject({ ok: false });
+    expect(await framework.setNativeSearch({ ...request, enabled: false })).toMatchObject({ ok: true, value: { state: 'unsupported' } });
+  });
+
   it('lists only safe templates and creates a package-owned connection without transport', async () => {
     const fixture = await frameworkFixture();
     const fetchSpy = vi.spyOn(globalThis, 'fetch');

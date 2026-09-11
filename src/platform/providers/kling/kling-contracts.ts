@@ -199,12 +199,6 @@ export function createKlingVideoModelContract(
   };
 }
 
-export function createKlingVideoModelDefinition(
-  providerModelKey: string,
-  declaration: KlingVideoProfileDeclarationV1
-): ProviderModelDefinition {
-  return createKlingVideoModelContract(providerModelKey, declaration).definition;
-}
 
 function normalizeDeclaration(
   declaration: KlingVideoProfileDeclarationV1

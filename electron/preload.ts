@@ -99,6 +99,7 @@ const documentAttachments: DocumentAttachmentApi = {
 };
 
 const webResearch: WebResearchApi = {
+  answerNative: (request) => ipcRenderer.invoke(webResearchIpcChannels.answerNative, request),
   preview: (request) => ipcRenderer.invoke(webResearchIpcChannels.preview, request),
   authorize: (request) => ipcRenderer.invoke(webResearchIpcChannels.authorize, request),
   cancel: (request) => ipcRenderer.invoke(webResearchIpcChannels.cancel, request),
@@ -200,6 +201,7 @@ const providers: ProviderApi = {
       confirmLocalDeletion: true,
       abandonActiveOperations
     }),
+  setNativeSearch: (request) => ipcRenderer.invoke(providerIpcChannels.setNativeSearch, request),
   setModelEnabled: (modelId, enabled) =>
     ipcRenderer.invoke(providerIpcChannels.setModelEnabled, { modelId, enabled }),
   attachOpenAiCompatibleImageProfile: (modelId) =>

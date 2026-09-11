@@ -1,3 +1,4 @@
+import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../../src/platform/providers/conversation-native-search';
 import { describe, expect, it, vi } from 'vitest';
 import {
   addUserMessage,
@@ -188,6 +189,19 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('stops before workflow execution and provider dispatch while native search authorization is pending', async () => {
+    const f = fixture();
+    const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, sourcePolicy: 'web' as const } };
+    f.workflowService.get.mockResolvedValue(workflow);
+    Object.assign(f.candidateService, { resolveBinding: vi.fn(async () => ({ candidate: {} })) });
+    Object.assign(f.runtime, { nativeSearch: { prepare: vi.fn(async () => { throw new NativeSearchAuthorizationError(); }), allowsConversation: vi.fn(async () => false) } as unknown as ConversationNativeSearch });
+    const result = await f.controller.start({ ...startRequest(), conversation: { conversationId: 'conversation-controller', expectedRevision: 2, editedMessageId: null },
+      workflow: { workflowId: workflow.id, expectedRevision: workflow.revision } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'native_search_authorization_required' } });
+    expect(f.workflowService.beginExecution).not.toHaveBeenCalled();
+    expect(f.runtime.start).not.toHaveBeenCalled();
+  });
+
   it('pins an explicit image question for main-process reading without exposing internal routing in the DTO', async () => {
     const value = fixture(undefined, '分析一下图片');
     const result = await value.controller.start({ ...startRequest(), content: '分析一下图片' });

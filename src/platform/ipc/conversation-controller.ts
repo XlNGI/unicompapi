@@ -273,6 +273,7 @@ export function toConversationDto(
 
 function toMessageDto(message: Message): MessageDto {
   return {
+    ...(message.workflowReply ? { workflowReply: message.workflowReply } : {}),
     messageId: message.id,
     conversationId: message.conversationId,
     revision: message.revision,

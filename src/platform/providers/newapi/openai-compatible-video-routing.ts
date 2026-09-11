@@ -99,6 +99,8 @@ export function routeOpenAiCompatibleVideoProfile(
     return { snapshot, model, state: 'skipped' };
   }
 
+  if (!template.adapters.some(adapter => adapter.adapterId === NEWAPI_VIDEO_ADAPTER_ID)) return { snapshot, model, state: 'skipped' };
+
   const existingVideoProfile = (snapshot.modelProfiles ?? []).find((candidate) =>
     candidate.modelId === model.id &&
     candidate.status === 'verified' &&

@@ -108,7 +108,7 @@ export class ConversationContextBuilder {
     }
 
     const completedHistory = (input.omitHistory ? [] : input.conversation.messages)
-      .filter((message) => message.state === 'completed' && message.id !== current.id)
+      .filter((message) => message.state === 'completed' && !message.workflowReply && message.id !== current.id)
       .slice(-this.maxRecentMessages)
       .map((message) => ({
         role: message.role === 'assistant' ? 'assistant' as const : 'user' as const,
@@ -118,7 +118,7 @@ export class ConversationContextBuilder {
       }));
     if (
       input.conversation.messages.filter(
-        (message) => message.state === 'completed' && message.id !== current.id
+        (message) => message.state === 'completed' && !message.workflowReply && message.id !== current.id
       ).length > completedHistory.length
     ) {
       truncated = true;
@@ -130,7 +130,7 @@ export class ConversationContextBuilder {
     const candidates = [...system, ...referenceMessages, ...completedHistory, currentMessage];
     while (estimateMessages(candidates) > this.maxInputTokens) {
       const removableIndex = candidates.findIndex(
-        (message, index) =>
+        (_message, index) =>
           index >= system.length + referenceMessages.length &&
           index < candidates.length - 1
       );
