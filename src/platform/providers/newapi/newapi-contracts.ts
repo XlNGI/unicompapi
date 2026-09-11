@@ -660,7 +660,8 @@ export function createOpenAiCompatibleDefaultTextDefinition(input: {
   const providerModelKey = requireProviderModelKey(input.providerModelKey);
   if (
     input.packageId !== NEWAPI_PROVIDER_PACKAGE_ID &&
-    input.packageId !== 'provider-package-unicompapi'
+    input.packageId !== 'provider-package-unicompapi' &&
+    input.packageId !== 'provider-package-kimi'
   ) {
     throw new TypeError('OpenAI-compatible text definitions require a known package id');
   }
@@ -1158,12 +1159,6 @@ export function createNewApiModelContract(
   };
 }
 
-export function createNewApiModelDefinition(
-  providerModelKey: string,
-  declaration: NewApiModelProfileDeclarationV1
-): ProviderModelDefinition {
-  return createNewApiModelContract(providerModelKey, declaration).definition;
-}
 
 function normalizeDeclaration(
   declaration: NewApiModelProfileDeclarationV1

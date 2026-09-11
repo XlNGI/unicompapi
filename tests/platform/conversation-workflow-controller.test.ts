@@ -1,10 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import type { ConversationIdFactory } from '../../src/application';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ConversationApplicationService, ConversationIntentOrchestrator, ConversationWorkflowService, type ConversationIdFactory } from '../../src/application';
 import {
   toConversationId,
+  toConversationWorkflowId,
+  createConversationWorkflow,
+  toIsoTimestamp,
   toMessageId,
   toProjectId
 } from '../../src/domain';
@@ -12,6 +15,9 @@ import {
   createChatContextRuntime,
   type StorageProjectSession
 } from '../../src/platform';
+import { ConversationWorkflowController } from '../../src/platform/ipc/conversation-workflow-controller';
+import { JsonProjectConversationRepository, JsonConversationWorkflowRepository } from '../../src/platform/repositories';
+import { NodeProjectStorage } from '../../src/platform/storage';
 
 const roots: string[] = [];
 
@@ -22,6 +28,49 @@ afterEach(async () => {
 });
 
 describe('ConversationWorkflowController', () => {
+  it('requires the current displayed confirmation and refuses to expand it with new attachments', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-confirmation-binding-'));
+    roots.push(root);
+    const projectId = toProjectId('project-confirmation-binding');
+    const now = () => '2026-09-10T00:00:00.000Z';
+    const storage = new NodeProjectStorage(root);
+    const conversations = new JsonProjectConversationRepository(storage, projectId, now);
+    const workflows = new JsonConversationWorkflowRepository(storage, projectId, now);
+    let message = 0;
+    const service = new ConversationApplicationService(conversations, {
+      nextConversationId: () => toConversationId('conversation-confirmation-binding'),
+      nextMessageId: () => toMessageId(`message-confirmation-${++message}`)
+    }, now);
+    const conversation = await service.create({ title: '确认范围', projectId });
+    const withSource = await service.addUserMessage({ conversationId: conversation.id, expectedRevision: 0, content: '制作销售汇报 PPT' });
+    const workflow = createConversationWorkflow({
+      id: toConversationWorkflowId('workflow-confirmation-binding'), conversationId: conversation.id, projectId,
+      sourceMessageId: withSource.messages[0].id, createdAt: toIsoTimestamp(now()),
+      plan: { schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt', parameters: { topic: '销售汇报' }, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: true },
+      confirmationId: 'confirmation-binding', planHash: 'a'.repeat(64), confirmationExpiresAt: toIsoTimestamp('2026-09-10T00:10:00.000Z')
+    });
+    await workflows.create(workflow);
+    const workflowService = new ConversationWorkflowService(workflows, new ConversationIntentOrchestrator(), now);
+    const answer = vi.spyOn(workflowService, 'answer');
+    const pin = vi.fn();
+    const controller = new ConversationWorkflowController({
+      getSession: () => ({ projectId, projectName: '合成测试', rootDirectory: root }),
+      getRuntime: () => ({ conversationService: service, workflowService, attachments: { pin } })
+    });
+    const request = { workflowId: workflow.id, expectedWorkflowRevision: 0, expectedConversationRevision: 1, content: '确认执行' };
+    expect(await controller.answer(request)).toMatchObject({ ok: false, error: { code: 'confirmation_required' } });
+    await controller.getPending({ conversationId: conversation.id });
+    const restored = await service.get(conversation.id);
+    expect(restored.messages.at(-1)?.workflowReply).toEqual({ workflowId: workflow.id, revision: 0 });
+    expect(await controller.answer({ ...request, expectedConversationRevision: restored.revision, attachmentFileIds: ['file-new-scope'] }))
+      .toMatchObject({ ok: false, error: { code: 'confirmation_required' } });
+    expect(answer).not.toHaveBeenCalled();
+    expect(pin).not.toHaveBeenCalled();
+    expect((await service.get(conversation.id)).revision).toBe(restored.revision);
+    await controller.getPending({ conversationId: conversation.id });
+    expect((await service.get(conversation.id)).revision).toBe(restored.revision);
+  });
+
   it('persists, resumes, and safely answers one clarification workflow', async () => {
     const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-user-'));
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-project-'));
@@ -62,7 +111,7 @@ describe('ConversationWorkflowController', () => {
     expect(started).toMatchObject({
       ok: true,
       value: {
-        conversation: { revision: 1, messages: [{ content: '帮我做个总结' }] },
+        conversation: { revision: 2, messages: [{ content: '帮我做个总结' }, { role: 'assistant', content: '你希望做成 Word 文档、Excel 表格，还是 PPT 演示？' }] },
         workflow: { status: 'needs_clarification', revision: 0 }
       }
     });
@@ -81,7 +130,7 @@ describe('ConversationWorkflowController', () => {
     const unchanged = await runtime.conversations.get({
       conversationId: started.value.conversation.conversationId
     });
-    expect(unchanged).toMatchObject({ ok: true, value: { messages: [{ content: '帮我做个总结' }] } });
+    expect(unchanged).toMatchObject({ ok: true, value: { messages: [{ content: '帮我做个总结' }, { role: 'assistant' }] } });
 
     const answered = await runtime.workflows.answer({
       workflowId: started.value.workflow.workflowId,
@@ -92,7 +141,7 @@ describe('ConversationWorkflowController', () => {
     expect(answered).toMatchObject({
       ok: true,
       value: {
-        conversation: { revision: 2, messages: [{}, { content: 'PPT，8页，面向管理层，简洁一点' }] },
+        conversation: { revision: 3, messages: [{}, { role: 'assistant' }, { content: 'PPT，8页，面向管理层，简洁一点' }] },
         workflow: {
           workflowId: started.value.workflow.workflowId,
           revision: 1,

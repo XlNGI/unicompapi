@@ -1,3 +1,4 @@
+import { parseNativeSearchCapability } from '../../domain/entities/native-search';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -317,6 +318,7 @@ export class ProviderRegistryController {
             lastSeenAt: model.lastSeenAt,
             displayName: model.displayName,
             enabled: model.enabled,
+            nativeSearch: modelProfiles.find(profile => profile.nativeSearch)?.nativeSearch,
             profileStatus: activeProfile?.status,
             productFeatures: productFeatures.length > 0 ? productFeatures : undefined
             };
@@ -975,6 +977,7 @@ function parseModelProfile(value: unknown): ModelFeatureProfile {
   return {
     schemaVersion: 1,
     profileId: requireStableString(item.profileId),
+    ...(item.nativeSearch !== undefined ? { nativeSearch: parseNativeSearchCapability(item.nativeSearch) } : {}),
     revision: Number(item.revision),
     packageId: requireStableString(item.packageId),
     sourceTemplateId: requireStableString(item.sourceTemplateId),

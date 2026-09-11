@@ -1,3 +1,4 @@
+import type { ConversationNativeSearch } from './conversation-native-search';
 import { randomUUID } from 'node:crypto';
 import {
   beginAssistantMessage,
@@ -29,6 +30,7 @@ import { ConversationAttachmentError } from '../documents/conversation-attachmen
 import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export interface ConversationResponseArtifactFactoryDependencies {
+  readonly nativeSearch?: ConversationNativeSearch;
   readonly conversations: ProjectConversationRepository;
   readonly drafts: ConversationResponseDraftRepository;
   readonly contexts: ProjectContextRepository;
@@ -47,7 +49,6 @@ export class ConversationResponseArtifactFactory
   private readonly nextMessageId: () => MessageId;
   private readonly nextExecutionId: () => string;
   private readonly nextStreamEventId: () => string;
-  private readonly now: () => string;
   private readonly contextBuilder: ConversationContextBuilder;
 
   constructor(
@@ -59,7 +60,6 @@ export class ConversationResponseArtifactFactory
       (() => `response-execution-${randomUUID()}`);
     this.nextStreamEventId = dependencies.nextStreamEventId ??
       (() => `response-stream-${randomUUID()}`);
-    this.now = dependencies.now ?? (() => new Date().toISOString());
     this.contextBuilder = dependencies.contextBuilder ?? new ConversationContextBuilder();
   }
 
@@ -80,6 +80,7 @@ export class ConversationResponseArtifactFactory
     if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
       throw new TypeError('Conversation response user message is unavailable for artifact creation');
     }
+    const nativeSearch = await this.dependencies.nativeSearch?.dispatch(draft, input.candidate);
     const pageReferences = await resolveConversationResponseDocumentPages({
       conversation, draft, service: this.dependencies.documentPages
     });
@@ -116,11 +117,12 @@ export class ConversationResponseArtifactFactory
         excerpt: snapshot.contentSnapshot
       })
     )];
+    if (nativeSearch && references.length) throw new TypeError('Native search context exceeds the authorized scope');
     const contextEnvelope = this.contextBuilder.build({
       conversation,
       currentUserMessageId: draft.userMessageId,
       currentUserContent: input.subject.outboundTextSnapshot,
-      omitHistory: pageReferences.length > 0,
+      omitHistory: pageReferences.length > 0 || !!nativeSearch,
       references
     });
     if (pageReferences.some((page) => !contextEnvelope.references.some((reference) =>
@@ -191,6 +193,7 @@ export class ConversationResponseArtifactFactory
         responseExecutionId: responseExecution.id,
         invocationAttemptId: input.invocationAttemptId,
         messages,
+        ...(nativeSearch ? { nativeSearch } : {}),
         ...(imageInput ? { image: imageInput.image } : {}),
         parameterValues: input.subject.parameterValues
       }

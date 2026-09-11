@@ -1,5 +1,6 @@
 export const webResearchIpcChannels = {
   preview: 'conversation.web.preview',
+  answerNative: 'conversation.web.answerNative',
   authorize: 'conversation.web.authorize',
   cancel: 'conversation.web.cancel',
   getStatus: 'conversation.web.getStatus'
@@ -108,6 +109,12 @@ export interface WebResearchStatusRequest {
 }
 
 export const webResearchRequestParsers = {
+  answerNative(value: unknown): NativeSearchAnswerRequest {
+    const r = exactRecord(value, ['workflowId', 'expectedWorkflowRevision', 'expectedConversationRevision', 'candidateId', 'content']);
+    if (typeof r.content !== 'string' || r.content.length > 100) throw new TypeError('Invalid authorization reply');
+    return { workflowId: controlledId(r.workflowId, 'workflowId'), expectedWorkflowRevision: revision(r.expectedWorkflowRevision, 'expectedWorkflowRevision'),
+      expectedConversationRevision: revision(r.expectedConversationRevision, 'expectedConversationRevision'), candidateId: controlledId(r.candidateId, 'candidateId'), content: r.content };
+  },
   preview(value: unknown): WebResearchPreviewRequest {
     const record = exactRecord(value, [
       'workflowId',
@@ -170,7 +177,12 @@ export const webResearchRequestParsers = {
   }
 } as const;
 
+export interface NativeSearchAnswerRequest extends WebResearchPreviewRequest {
+  readonly candidateId: string;
+  readonly content: string;
+}
 export interface WebResearchApi {
+  answerNative?(request: NativeSearchAnswerRequest): Promise<WebResearchIpcResult<'authorized' | 'declined'>>;
   preview(
     request: WebResearchPreviewRequest
   ): Promise<WebResearchIpcResult<WebResearchSessionDto>>;

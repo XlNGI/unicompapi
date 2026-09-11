@@ -128,6 +128,3 @@ export function freezeProjectContextOutboundSnapshots(input: {
     })];
   });
 }
-
-export const freezeProjectContextOutboundSnapshot =
-  freezeProjectContextOutboundSnapshots;

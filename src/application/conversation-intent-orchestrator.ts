@@ -12,6 +12,7 @@ import {
   type OfficeRequestContext
 } from './office-request-intent';
 import { conversationClarificationKey } from './conversation-clarification-fields';
+import { hasDocumentSubject } from './document-request-completeness';
 
 export interface ConversationSemanticContext extends OfficeRequestContext {
   readonly recentUserMessages?: readonly string[];
@@ -131,6 +132,9 @@ export class ConversationIntentOrchestrator {
         : undefined;
       const missing = new Set(classified.missing.map(conversationClarificationKey));
       if (classified.action === 'revise' && !target) missing.add('document_target');
+      if (classified.kind === 'document' && classified.action === 'create' && classified.documentKind === 'ppt' && !hasDocumentSubject(trustedRequirements)) {
+        missing.add('document_topic');
+      }
       const plan = parseConversationIntentPlan({
         ...classified,
         sourcePolicy,
@@ -164,6 +168,8 @@ export function analyzeLocalConversationIntent(input: {
   if (isConversationCancellation(text)) {
     return { ...decision(unknownPlan('已取消当前请求'), 'local'), cancelled: true };
   }
+  if (input.workflow?.status === 'needs_clarification' && input.workflow.plan.missing.includes('document_topic') &&
+    /^(?:好的?|继续|谢谢|收到|其他你来安排)[。！!\s]*$/u.test(text)) return decision(input.workflow.plan, 'local');
   // An explicit question overrides a stale output preference and a pending task.
   if (isQuestionOrAnalysis(text)) return decision(chatPlan(text), 'local');
   const unsupported = unsupportedOutputScope(text);
@@ -179,6 +185,9 @@ export function analyzeLocalConversationIntent(input: {
         ...decision(merged.plan, 'local'),
         ...(merged.resolvedTarget ? { resolvedTarget: merged.resolvedTarget } : {})
       };
+    }
+    if (input.workflow.plan.missing.includes('document_topic') && !hasDocumentSubject(text)) {
+      return decision(input.workflow.plan, 'local');
     }
   }
   if (context.requestedIntentKind === 'document' && inferExplicitKinds(text).length < 2) {
@@ -333,12 +342,15 @@ function mergeWorkflowClarification(
   }
   const parameters = { ...plan.parameters };
   const remaining = new Set(plan.missing.map(conversationClarificationKey));
+  const answersTopic = remaining.has('document_topic') && hasDocumentSubject(answer);
+  if (answersTopic) remaining.delete('document_topic');
   const excludedKinds = negatedDocumentKinds(answer);
   const retainedKinds = plan.deliverables?.filter((item) => !excludedKinds.includes(item));
   const kind = inferExplicitKind(answer) ?? retainedKinds?.[0];
   if (kind) {
     remaining.delete('document_kind');
     remaining.delete('single_deliverable');
+    if (kind !== 'ppt') remaining.delete('document_topic');
   }
   const pageCount = answer.match(/(?:共|做|要)?\s*(\d{1,3})\s*(?:页|张)/)?.[1];
   if (pageCount) {
@@ -366,7 +378,7 @@ function mergeWorkflowClarification(
     remaining.delete('document_target');
   }
   const isSupplement = /(?:重点|保留|不要|不用|不做|改为|改成|改得|补充|加入|增加|删除|删掉|清空|用|只|再|先)/.test(answer);
-  if (!kind && !pageCount && !audience && !style && !target && !isSupplement) return undefined;
+  if (!kind && !pageCount && !audience && !style && !target && !isSupplement && !answersTopic) return undefined;
   const ambiguities = plan.ambiguities.map(conversationClarificationKey).filter((item) =>
     !(target && item === 'multiple_document_targets') &&
     !(kind && item === 'multiple_deliverable_kinds')
@@ -378,6 +390,9 @@ function mergeWorkflowClarification(
   if (requirements.length > 16_000) throw new TypeError('累计需求超过当前任务的 16000 字符上限，请开始新任务或缩短补充内容');
   parameters.requirements = requirements;
   parameters.topic = requirements.slice(0, 2_000);
+  if (plan.action === 'create' && (kind ?? plan.documentKind) === 'ppt' && !hasDocumentSubject(requirements)) {
+    remaining.add('document_topic');
+  }
   const sourcePolicy = /(?:不要|不用|无需|禁止)(?:再)?(?:联网|上网|搜索网络)/.test(answer)
     ? inferSourcePolicy(requirements)
     : inferSourcePolicy(answer) === 'none' ? plan.sourcePolicy : inferSourcePolicy(requirements);
@@ -419,7 +434,8 @@ function documentPlan(
     ...(targetHint ? { targetHint } : {}),
     parameters: { topic: topic.slice(0, 2_000), requirements: topic },
     sourcePolicy: inferSourcePolicy(topic),
-    missing,
+    missing: action === 'create' && documentKind === 'ppt' && !hasDocumentSubject(topic)
+      ? [...new Set([...missing, 'document_topic'])] : missing,
     ambiguities,
     confidence,
     needsConfirmation: isDestructiveRevision(topic)
@@ -548,6 +564,7 @@ function requiresSemanticReview(text: string): boolean {
 
 function hasStrongCreateCommand(text: string): boolean {
   return (
+    /^(?:我)?(?:想|想要|要|需要)(?:请你)?\s*(?:做|制作|生成|创建|写|导出)/u.test(text) ||
     /(?:帮我|给我|麻烦(?:你)?|请(?:你)?)\s*(?:(?:只|就|先|再|直接|简单(?:地)?|尽量|最好)\s*)*(?:做|生成|制作|创建|写|编写|起草|拟定|整理|输出|导出)(?:成|个|一份|一个)?/.test(text) ||
     /^(?:(?:只|就|先|再|直接|简单(?:地)?|尽量|最好)\s*)*(?:做|生成|制作|创建|写|编写|起草|拟定|整理|输出|导出|出)(?:成|个|一份|一个)?/.test(text) ||
     /^(?:把|将)[\s\S]{1,100}(?:做成|整理成|输出为|导出为)/.test(text) ||
@@ -666,7 +683,8 @@ function isDestructiveRevision(text: string): boolean {
 }
 
 function inferSourcePolicy(text: string): ConversationIntentPlan['sourcePolicy'] {
-  const web = /(?:联网|网上|网络|最新公开|实时信息)/.test(text) &&
+  const web = (/(?:联网|网上|网络|上网|最新公开|实时信息)/.test(text) ||
+    (/(?:查询|查一下|查查|搜索|检索)/.test(text) && /(?:最新|今天|当前|实时|新闻|天气|股价|汇率)/.test(text))) &&
     !/(?:不要|不用|无需|禁止)(?:再)?(?:联网|上网|搜索网络)/.test(text) &&
     !/(?:联网|网络|网上)(?:检索|搜索)?(?:的)?(?:工作原理|是什么|有什么|怎么配置)/.test(text);
   const internal = /(?:项目资料|附件|上传文件|内部资料|知识库)/.test(text);

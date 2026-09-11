@@ -5,7 +5,6 @@ import {
   presentationBodySectionCount
 } from '../../application/presentation-page-count';
 
-export type DocumentKindOption = 'auto' | 'word' | 'excel' | 'ppt';
 export type PresentationTemplateSelection = 'auto' | PresentationTemplateId;
 
 export const DOCUMENT_GENERATION_INSTRUCTION =

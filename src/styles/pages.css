@@ -7562,6 +7562,7 @@ button.uc-project-center__project-card:disabled {
   width: min(var(--uc-chat-content-width), 100%);
   min-height: 100%;
   margin: 0 auto;
+  padding-bottom: 180px;
 }
 
 .uc-chat-page__empty {
@@ -7597,7 +7598,7 @@ button.uc-project-center__project-card:disabled {
   gap: var(--uc-space-6);
   width: 100%;
   max-width: none;
-  padding-bottom: 180px;
+  padding-bottom: var(--uc-space-4);
 }
 
 .uc-chat-page__message-item {
@@ -7801,13 +7802,10 @@ button.uc-project-center__project-card:disabled {
   justify-content: space-between;
   gap: var(--uc-space-3);
   width: 100%;
-  border: 1px solid var(--uc-color-border-subtle);
-  border-radius: 8px;
-  padding: var(--uc-space-2) var(--uc-space-3);
-  background: var(--uc-color-surface-raised);
-  box-shadow: var(--uc-shadow-sm);
-  color: var(--uc-color-text-secondary);
-  font-size: var(--uc-font-size-caption);
+  border: 0;
+  padding: var(--uc-space-2) 0;
+  background: transparent;
+  color: var(--uc-color-text-primary);
 }
 
 .uc-chat-page__workflow-copy {
@@ -8118,14 +8116,12 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-chat-page__message {
-  width: fit-content;
-  max-width: min(720px, 100%);
-  margin: 0 auto;
-  border: 1px solid var(--uc-color-border-subtle);
-  border-radius: var(--uc-radius-full);
-  padding: var(--uc-space-1) var(--uc-space-3);
-  background: var(--uc-color-surface-subtle);
-  text-align: center;
+  max-width: 100%;
+  margin: 0;
+  padding: var(--uc-space-2) 0;
+  overflow-wrap: anywhere;
+  color: var(--uc-color-text-primary);
+  text-align: start;
 }
 
 .uc-chat-page__context {

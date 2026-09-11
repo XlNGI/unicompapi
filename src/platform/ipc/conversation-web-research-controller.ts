@@ -1,3 +1,4 @@
+import type { ConversationNativeSearch } from '../providers/conversation-native-search';
 import {
   ConversationWebResearchError,
   type ConversationApplicationService,
@@ -20,6 +21,7 @@ import type { RagRetrievalService } from '../search';
 import type { StorageProjectSession } from './storage-ipc-controller';
 
 export interface ConversationWebResearchControllerRuntime {
+  readonly nativeSearch?: ConversationNativeSearch;
   readonly conversationService: ConversationApplicationService;
   readonly workflowService: {
     get(id: ReturnType<typeof toConversationWorkflowId>): Promise<ConversationWorkflowV1 | undefined>;
@@ -36,6 +38,19 @@ export class ConversationWebResearchController implements WebResearchApi {
     getRuntime(session: StorageProjectSession): ConversationWebResearchControllerRuntime;
     onError?(error: unknown): void;
   }) {}
+
+  answerNative(request: unknown): Promise<WebResearchIpcResult<'authorized' | 'declined'>> {
+    return this.execute(async () => {
+      const input = webResearchRequestParsers.answerNative(request);
+      const runtime = this.requireRuntime();
+      if (!runtime.ok) return failure('project_not_open', runtime.error.message);
+      const workflow = await this.requireWorkflow(runtime.value, input.workflowId);
+      if (!workflow || workflow.status !== 'ready' || workflow.revision !== input.expectedWorkflowRevision || !runtime.value.nativeSearch) return failure('workflow_not_ready', '当前联网问题已失效。');
+      const conversation = await runtime.value.conversationService.get(toConversationId(workflow.conversationId));
+      if (conversation.revision !== input.expectedConversationRevision) return failure('revision_conflict', '会话已变化，请重新准备请求。');
+      return { ok: true, value: await runtime.value.nativeSearch.answer({ workflow, conversation, candidateId: input.candidateId, content: input.content }) };
+    });
+  }
 
   preview(request: unknown): Promise<WebResearchIpcResult<WebResearchSessionDto>> {
     return this.execute(async () => {

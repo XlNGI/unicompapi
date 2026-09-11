@@ -99,7 +99,6 @@ export interface ParameterSchemaV2 {
   readonly fields: readonly ParameterFieldSchemaV2[];
 }
 
-export type ParameterSchema = ParameterSchemaV2;
 
 export interface ProductFeatureRequestSubject {
   readonly productFeature: ProductFeature;
@@ -146,7 +145,6 @@ export function productFeatureToInternalPurpose(
   return productFeatureInternalPurposes[parseProductFeature(feature)];
 }
 
-export const productFeatureToPurpose = productFeatureToInternalPurpose;
 
 export function validateProductFeatureDefinition(
   definition: ProductFeatureDefinition
@@ -213,7 +211,6 @@ export function projectParameterSchema(
   return { ...validated, fields: visible };
 }
 
-export const projectParameterSchemaV2 = projectParameterSchema;
 
 export function validateParameterValues(
   schema: ParameterSchemaV2,
@@ -255,7 +252,6 @@ export function validateParameterValues(
   return result;
 }
 
-export const validateParameterSchemaValues = validateParameterValues;
 
 export function validateProductFeatureRequest(
   subject: ProductFeatureRequestSubject
@@ -302,8 +298,6 @@ export function validateProductFeatureRequest(
   }
 }
 
-export const validateFeatureRequest = validateProductFeatureRequest;
-export const validateProductFeatureSubject = validateProductFeatureRequest;
 
 export type ParameterValue = string | number | boolean | readonly ParameterValue[] | {
   readonly [key: string]: ParameterValue;

@@ -28,6 +28,8 @@ import {
   type MessageId,
   type ProjectId
 } from '../domain';
+import type { ConversationWorkflowV1 } from '../domain';
+import { conversationWorkflowReply } from './conversation-workflow-reply';
 
 export type ConversationApplicationErrorCode =
   | 'conversation_not_found'
@@ -73,6 +75,31 @@ export class ConversationApplicationService {
 
   async get(conversationId: ConversationId): Promise<Conversation> {
     return this.requireConversation(conversationId);
+  }
+
+  async ensureWorkflowReply(workflow: ConversationWorkflowV1): Promise<Conversation> {
+    const conversation = await this.requireConversation(workflow.conversationId);
+    const content = conversationWorkflowReply(workflow, conversation);
+    if (!content || conversation.status !== 'active' || conversation.messages.some((message) =>
+      message.workflowReply?.workflowId === workflow.id && message.workflowReply.revision >= workflow.revision)) return conversation;
+    const updated = addCompletedAssistantMessage(conversation, {
+      id: this.ids.nextMessageId(), content,
+      workflowReply: { workflowId: workflow.id, revision: workflow.revision },
+      createdAt: toIsoTimestamp(this.now())
+    });
+    await this.repository.save(updated, conversation.revision);
+    return updated;
+  }
+
+  async ensureLocalReply(conversationId: ConversationId, key: string, content: string): Promise<Conversation> {
+    const conversation = await this.requireConversation(conversationId);
+    if (conversation.messages.some(message => message.workflowReply?.workflowId === key)) return conversation;
+    const updated = addCompletedAssistantMessage(conversation, {
+      id: this.ids.nextMessageId(), content, workflowReply: { workflowId: key, revision: 0 },
+      createdAt: toIsoTimestamp(this.now())
+    });
+    await this.repository.save(updated, conversation.revision);
+    return updated;
   }
 
   list(options?: ConversationListOptions): Promise<readonly Conversation[]> {

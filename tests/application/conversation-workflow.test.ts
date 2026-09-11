@@ -37,9 +37,35 @@ describe('Conversation workflow', () => {
       toConversationWorkflowId(`workflow-language-${nextId++}`));
   }
 
+  it('binds an exact confirmation reply to the current plan and rejects an expired confirmation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-workflow-confirmation-'));
+    roots.push(root);
+    let timestamp = '2026-09-10T00:00:00.000Z';
+    const now = () => timestamp;
+    const repository = new JsonConversationWorkflowRepository(new NodeProjectStorage(root), projectId, now);
+    let id = 0;
+    const service = new ConversationWorkflowService(repository, new ConversationIntentOrchestrator(), now,
+      () => toConversationWorkflowId(`workflow-confirm-${++id}`), 1_000);
+    const create = () => service.create({ projectId, conversationId, sourceMessageId: toMessageId('message-confirm'),
+      rawText: '删除刚才 PPT 的第二页',
+      context: { documents: [{ messageId: 'ppt-confirm-target', kind: 'ppt', fileName: '汇报.pptx' }] }
+    });
+    const pending = await create();
+    expect(pending.status).toBe('needs_confirmation');
+    const confirmed = await service.answer({ workflowId: pending.id, expectedRevision: pending.revision, rawText: '确认执行' });
+    expect(confirmed).toMatchObject({ status: 'ready', plan: { needsConfirmation: false } });
+    expect(confirmed.plan.parameters).toEqual(pending.plan.parameters);
+    expect(confirmed.plan.sourcePolicy).toBe(pending.plan.sourcePolicy);
+    const expired = await create();
+    timestamp = '2026-09-10T00:00:02.000Z';
+    await expect(service.answer({ workflowId: expired.id, expectedRevision: expired.revision, rawText: '继续' }))
+      .rejects.toMatchObject({ code: 'confirmation_expired' });
+    expect((await service.get(expired.id))?.status).toBe('cancelled');
+  });
+
   it.each([
     ['帮我做个总结', 'needs_clarification'],
-    ['帮我做一份 PPT', 'ready'],
+    ['帮我做一份 PPT', 'needs_clarification'],
     ['删除刚才 PPT 的第二页', 'needs_confirmation']
   ])('accepts natural cancellation from a %s workflow', async (rawText, status) => {
     const service = await regressionService();
@@ -84,7 +110,7 @@ describe('Conversation workflow', () => {
       projectId, conversationId, sourceMessageId: toMessageId('message-correct-language'), rawText: '帮我做个总结'
     });
     expect(created.pendingQuestions).toEqual([{
-      field: 'document_kind', question: '请补充或确认：文档类型（Word、Excel 或 PPT）', required: true
+      field: 'document_kind', question: '你希望做成 Word 文档、Excel 表格，还是 PPT 演示？', required: true
     }]);
     const corrected = await service.answer({
       workflowId: created.id, expectedRevision: created.revision,

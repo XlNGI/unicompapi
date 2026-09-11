@@ -43,6 +43,7 @@ export function registerProviderIpcHandlers(options: {
   ipcMain.handle(providerIpcChannels.setConnectionEnabled, (_event, input) =>
     options.management.setConnectionEnabled(input)
   );
+  ipcMain.handle(providerIpcChannels.setNativeSearch, (_event, input) => options.management.setNativeSearch(input));
   ipcMain.handle(providerIpcChannels.setModelEnabled, (_event, input) =>
     options.management.setModelEnabled(input)
   );

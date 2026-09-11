@@ -8,7 +8,7 @@ import {
   LuTrash2,
   LuX
 } from 'react-icons/lu';
-import { Input, Toggle } from 'rsuite';
+import { Input, Toggle, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
@@ -105,6 +105,8 @@ export function ProviderManageView({
 }: ProviderManageViewProps) {
   const [manualModelOpen, setManualModelOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
+  const [searchProtocol, setSearchProtocol] = useState<'kimi_builtin' | 'glm_web_search'>('kimi_builtin');
+  const [searchEvidence, setSearchEvidence] = useState('');
   const selectedConnection = registry.connections.find(
     (item) => item.connectionId === selectedConnectionId
   );
@@ -449,6 +451,28 @@ export function ProviderManageView({
               </StatusPill>
             )}
           </div>
+          {selectedModel && providersApi?.setNativeSearch && (
+            <form className="uc-provider-page__stack-form" onSubmit={event => {
+              event.preventDefault();
+              void runAction(() => providersApi!.setNativeSearch!({ modelId: selectedModel.modelId, expectedRevision: selectedModel.revision,
+                protocol: searchProtocol, enabled: true, evidenceUrl: searchEvidence }), '已记录当前模型的搜索协议声明；每次使用仍需会话授权。', selectedConnectionId);
+            }}>
+              <p>原生联网：{selectedModel.nativeSearch ? `${selectedModel.nativeSearch.protocol === 'kimi_builtin' ? 'Kimi' : '智谱'} / ${selectedModel.nativeSearch.state === 'verified' ? '已验证' : selectedModel.nativeSearch.state === 'unsupported' ? '已禁用' : '已声明，未实测'}` : '未单独配置'}</p>
+              <div><span>连接提供的搜索协议</span>
+                <SelectPicker aria-label="连接提供的搜索协议" cleanable={false} searchable={false} value={searchProtocol}
+                  data={[{ value: 'kimi_builtin', label: 'Kimi 内置搜索' }, { value: 'glm_web_search', label: '智谱对话搜索' }]}
+                  onChange={value => { if (value === 'kimi_builtin' || value === 'glm_web_search') setSearchProtocol(value); }} />
+              </div>
+              <label>当前连接的协议依据
+                <Input required type="url" placeholder="服务商确认支持该协议的 HTTPS 文档" value={searchEvidence} onChange={setSearchEvidence} maxLength={2048} />
+              </label>
+              <Button disabled={busy || !searchEvidence.startsWith('https://')} type="submit">保存协议声明</Button>
+              {selectedModel.nativeSearch && <Button disabled={busy} type="button" onClick={() => void runAction(() => providersApi!.setNativeSearch!({
+                modelId: selectedModel.modelId, expectedRevision: selectedModel.revision, protocol: selectedModel.nativeSearch!.protocol,
+                evidenceUrl: selectedModel.nativeSearch!.evidenceUrl, enabled: false
+              }), '已禁用当前模型的联网搜索。', selectedConnectionId)}>禁用联网</Button>}
+            </form>
+          )}
           <div className="uc-provider-page__summary-features" aria-label="产品功能">
             {selectedModel?.productFeatures?.length ? selectedModel.productFeatures.map((feature) => (
               <span className="uc-provider-page__summary-feature" key={feature}>

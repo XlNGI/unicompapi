@@ -19,6 +19,7 @@ import { chatContextFailure, failure } from './chat-context-errors';
 import type { StorageProjectSession } from './storage-ipc-controller';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
+import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
 
 export interface ConversationWorkflowControllerRuntime {
   readonly ready?: Promise<void>;
@@ -86,6 +87,16 @@ export class ConversationWorkflowController {
       if (!['needs_clarification', 'needs_confirmation', 'ready'].includes(workflow.status)) {
         return failure('workflow_not_ready', 'Conversation workflow cannot accept an answer in its current state');
       }
+      if (workflow.status === 'needs_confirmation' && /^(?:确认执行|确认并继续|同意执行|继续)[。！!\s]*$/u.test(input.content.trim())) {
+        if (input.attachmentFileIds?.length) {
+          return failure('confirmation_required', '本次新增了附件，请先说明它们的使用范围，再确认更新后的任务。');
+        }
+        const snapshot = await runtime.conversationService.get(workflow.conversationId);
+        const question = snapshot.messages.at(-1)?.workflowReply;
+        if (question?.workflowId !== workflow.id || question.revision !== workflow.revision) {
+          return failure('confirmation_required', '请先查看当前任务的确认回复，再确认执行。');
+        }
+      }
       const attachments = input.attachmentFileIds !== undefined
         ? input.attachmentFileIds.length ? await runtime.attachments?.pin(input.attachmentFileIds) : []
         : undefined;
@@ -121,7 +132,7 @@ export class ConversationWorkflowController {
       return {
         ok: true,
         value: {
-          conversation: toConversationDto(conversation),
+          conversation: toConversationDto(await this.ensureReply(runtime, updated)),
           workflow: toWorkflowDto(updated)
         }
       };
@@ -257,12 +268,29 @@ export class ConversationWorkflowController {
       const workflow = await runtime.value.workflowService.getPending(
         toConversationId(input.conversationId)
       );
+      if (workflow) await this.ensureReply(runtime.value, workflow);
       return { ok: true, value: workflow ? toWorkflowDto(workflow) : null };
     });
   }
 
   async waitForOperations(): Promise<void> {
     await Promise.all([...this.operations]);
+  }
+
+  private async ensureReply(runtime: ConversationWorkflowControllerRuntime, workflow: ConversationWorkflowV1) {
+    // The durable workflow is the replay source after a crash between its save
+    // and the conversation projection. Only retry this idempotent projection.
+    for (let attempt = 0; ; attempt += 1) {
+      const current = await runtime.workflowService.get(workflow.id);
+      if (!current || current.revision !== workflow.revision || current.status !== workflow.status) {
+        return runtime.conversationService.get(workflow.conversationId);
+      }
+      try {
+        return await runtime.conversationService.ensureWorkflowReply(current);
+      } catch (error) {
+        if (!(error instanceof ConversationRevisionConflictError) || attempt >= 2) throw error;
+      }
+    }
   }
 
   private async startValidated(
@@ -322,7 +350,7 @@ export class ConversationWorkflowController {
     return {
       ok: true,
       value: {
-        conversation: toConversationDto(conversation),
+        conversation: toConversationDto(await this.ensureReply(runtime, workflow)),
         workflow: toWorkflowDto(workflow)
       }
     };

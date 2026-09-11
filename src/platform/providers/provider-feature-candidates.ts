@@ -338,7 +338,8 @@ export class ProviderFeatureCandidateService {
     return this.tokens.inspect(token);
   }
 
-  private async resolveBinding(
+  /** Main-process capability checks reuse the same eligibility gates as submission. */
+  async resolveBinding(
     subject: FeatureCandidateSubjectV1,
     candidateId: string
   ): Promise<{

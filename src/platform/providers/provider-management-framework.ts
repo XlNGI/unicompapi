@@ -1,3 +1,4 @@
+import { parseNativeSearchCapability } from '../../domain/entities/native-search';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -223,7 +224,7 @@ export class ProviderManagementAdapterRegistry {
   private readonly ports: ReadonlyMap<string, ProviderManagementAdapterPort>;
 
   constructor(
-    private readonly packages: ProviderPackageRegistry,
+    packages: ProviderPackageRegistry,
     ports: readonly ProviderManagementAdapterPort[]
   ) {
     const entries = ports.map((port) => {
@@ -1171,6 +1172,25 @@ export class ProviderManagementFramework {
     } catch (error) {
       return frameworkFailure(error);
     }
+  }
+
+  async setNativeSearch(input: unknown): Promise<ProviderManagementFrameworkResult<{ readonly state: string }>> {
+    try {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Invalid native search configuration');
+      const request = input as Record<string, unknown>;
+      if (Object.keys(request).length !== 5 || typeof request.modelId !== 'string' || !Number.isSafeInteger(request.expectedRevision) || typeof request.enabled !== 'boolean') throw new TypeError('Invalid native search configuration');
+      const capability = parseNativeSearchCapability({ protocol: request.protocol, state: request.enabled ? 'declared' : 'unsupported', evidenceUrl: request.evidenceUrl, recordedAt: this.now() });
+      await this.registry.mutate(snapshot => {
+        const model = snapshot.models.find(m => m.id === request.modelId);
+        if (!model || model.revision !== request.expectedRevision) throw new TypeError('Model changed before capability configuration');
+        resolveOwnedConnection(snapshot, this.packages, model.connectionId);
+        const profiles = (snapshot.modelProfiles ?? []).filter(p => p.modelId === model.id && p.modelRevision <= model.revision && p.adapterKey === NEWAPI_CHAT_ADAPTER_ID && p.features.some(f => f.productFeature === 'text_chat' || f.productFeature === 'text_reasoning'));
+        if (!profiles.length) throw new TypeError('No compatible text profile');
+        return { snapshot: { ...snapshot, modelProfiles: snapshot.modelProfiles?.map(p => profiles.some(selected => selected.profileId === p.profileId)
+          ? { ...p, revision: p.revision + 1, nativeSearch: capability } : p) }, result: undefined };
+      });
+      return { ok: true, value: { state: capability.state } };
+    } catch (error) { return frameworkFailure(error); }
   }
 
   async setModelEnabled(input: unknown): Promise<ProviderManagementFrameworkResult<{

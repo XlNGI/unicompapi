@@ -68,6 +68,8 @@ export type ConversationAttachmentReference =
     };
 
 interface MessageBase {
+  /** Application-authored workflow reply, excluded from model conversation history. */
+  readonly workflowReply?: { readonly workflowId: string; readonly revision: number };
   readonly schemaVersion: 1;
   readonly id: MessageId;
   readonly conversationId: ConversationId;
@@ -184,6 +186,7 @@ export interface BeginAssistantMessageInput {
 }
 
 export interface AddCompletedAssistantMessageInput {
+  readonly workflowReply?: { readonly workflowId: string; readonly revision: number };
   readonly id: MessageId;
   readonly content: string;
   readonly createdAt: IsoTimestamp;
@@ -418,6 +421,7 @@ export function addCompletedAssistantMessage(
     role: 'assistant',
     state: 'completed',
     content: input.content,
+    ...(input.workflowReply ? { workflowReply: input.workflowReply } : {}),
     attachments: [],
     streamSequence: 0,
     createdAt: input.createdAt,
@@ -718,6 +722,7 @@ export function parseMessage(value: unknown): Message {
     record,
     [
       ...messageBaseKeys,
+      ...(record.workflowReply !== undefined ? ['workflowReply'] : []),
       ...(hasDisplayContent ? ['displayContent'] : []),
       ...(record.attachmentSelection !== undefined ? ['attachmentSelection'] : []),
       ...(hasReasoningContent ? ['reasoningContent'] : []),
@@ -736,6 +741,17 @@ export function parseMessage(value: unknown): Message {
   );
   const revision = requireNonNegativeInteger(record.revision, 'message.revision');
   const role = oneOf(record.role, messageRoles, 'message.role');
+  let workflowReply: MessageBase['workflowReply'];
+  if (record.workflowReply !== undefined) {
+    const reply = requireRecord(record.workflowReply, 'message.workflowReply');
+    requireExactKeys(reply, ['workflowId', 'revision'], 'message.workflowReply');
+    if (role !== 'assistant' || state !== 'completed' || record.documentResult !== undefined || record.documentGenerationStatus !== undefined) {
+      throw new TypeError('Workflow replies must be completed application messages');
+    }
+    const workflowId = requireNonBlankString(reply.workflowId, 'workflowId');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(workflowId)) throw new TypeError('Invalid workflow reply identity');
+    workflowReply = { workflowId, revision: requireNonNegativeInteger(reply.revision, 'workflowRevision') };
+  }
   if (record.attachmentSelection !== undefined && (record.attachmentSelection !== 'replace' || role !== 'user')) {
     throw new TypeError('message.attachmentSelection is invalid');
   }
@@ -784,6 +800,7 @@ export function parseMessage(value: unknown): Message {
     revision,
     role,
     content,
+    ...(workflowReply ? { workflowReply } : {}),
     ...(displayContent !== undefined ? { displayContent } : {}),
     ...(reasoningContent !== undefined ? { reasoningContent } : {}),
     ...(documentGenerationStatus !== undefined
