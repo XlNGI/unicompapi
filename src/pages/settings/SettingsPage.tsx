@@ -1,3 +1,4 @@
+import { SelectPicker } from '../../components/Pickers';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { IconType } from 'react-icons';
 import {
@@ -13,14 +14,7 @@ import {
   LuShield,
   LuWifi
 } from 'react-icons/lu';
-import {
-  Checkbox,
-  Input,
-  InputNumber,
-  SelectPicker,
-  Slider,
-  Toggle as RSuiteToggle
-} from 'rsuite';
+import { Checkbox, Input, InputNumber, Slider, Toggle as RSuiteToggle } from 'rsuite';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill, type StatusTone } from '../../components/StatusPill';

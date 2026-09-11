@@ -1,7 +1,8 @@
+import { SelectPicker } from './Pickers';
 import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { LuInfo } from 'react-icons/lu';
-import { Input, InputNumber, SelectPicker, Toggle } from 'rsuite';
+import { Input, InputNumber, Toggle } from 'rsuite';
 import type {
   DynamicParameterField,
   DynamicParameterValue

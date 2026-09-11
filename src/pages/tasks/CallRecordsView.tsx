@@ -1,5 +1,6 @@
+import { DateRangePicker, SelectPicker } from '../../components/Pickers';
 import { useEffect, useMemo, useState } from 'react';
-import { DateRangePicker, SelectPicker } from 'rsuite';
+
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';

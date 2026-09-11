@@ -1,5 +1,6 @@
+import { SelectPicker } from './Pickers';
 import { useEffect, useState, type ReactNode } from 'react';
-import { SelectPicker } from 'rsuite';
+
 import { EmptyState } from './EmptyState';
 
 export interface ModelSelectOption {

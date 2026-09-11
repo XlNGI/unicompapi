@@ -14,6 +14,24 @@
  * 因此以下只需覆盖 primary 色阶、语义基础层与少量高频组件面即可级联到全部组件。
  */
 
+.uc-picker-layer {
+  position: fixed;
+  inset: 42px 8px 60px;
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.uc-picker-layer > * {
+  pointer-events: auto;
+}
+
+/* Leave room for the trigger even when it is centered in the usable viewport. */
+.uc-picker-layer .rs-picker-popup {
+  max-height: calc((100dvh - 150px) / 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 body.rs-theme-light,
 body.rs-theme-dark {
   /* 主色阶:锚定在项目强调色,派生阶梯用 color-mix 保持随令牌联动 */
