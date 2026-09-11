@@ -7774,6 +7774,7 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-chat-page__messages {
+  display: block;
   padding: var(--uc-space-5) var(--uc-space-6) 0;
   line-height: var(--uc-line-height-body);
   scroll-padding-bottom: 180px;
@@ -8938,7 +8939,6 @@ button.uc-project-center__project-card:disabled {
   overflow: hidden;
   border: 1px solid var(--uc-color-border-subtle);
   border-radius: var(--uc-radius-12);
-  padding-bottom: calc(56px + var(--uc-space-4));
   background: var(--uc-color-surface-base);
 }
 
@@ -9128,7 +9128,7 @@ button.uc-project-center__project-card:disabled {
 
 .uc-provider-page__model {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) minmax(90px, 0.7fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: var(--uc-space-3);
   width: 100%;
@@ -9145,7 +9145,7 @@ button.uc-project-center__project-card:disabled {
 
 .uc-provider-page__model-select {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--uc-space-3);
   min-width: 0;
@@ -9263,20 +9263,37 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-provider-page__capabilities {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 200px;
-  z-index: 60;
-  display: block;
+  display: grid;
+  gap: var(--uc-space-3);
   min-width: 0;
-  overflow: hidden;
-  border: 0;
-  border-top: 1px solid var(--uc-color-border-default);
-  border-radius: 0;
-  padding: var(--uc-space-2) calc(var(--uc-space-4) + var(--uc-space-6));
-  background: var(--uc-navigation-surface);
-  box-shadow: var(--uc-shadow-md);
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: var(--uc-radius-10);
+  padding: var(--uc-space-3);
+  background: var(--uc-color-surface-panel);
+}
+
+.uc-provider-page__native-search {
+  border-top: 1px solid var(--uc-color-border-subtle);
+  padding-top: var(--uc-space-2);
+}
+
+.uc-provider-page__native-search summary {
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  cursor: pointer;
+}
+
+.uc-provider-page__native-search[open] summary {
+  margin-bottom: var(--uc-space-3);
+}
+
+.uc-provider-page__native-search p {
+  margin: 0;
+}
+
+.uc-provider-page__native-search-field {
+  display: grid;
+  gap: var(--uc-space-2);
 }
 
 .uc-provider-page__summary-bar,
@@ -9337,8 +9354,6 @@ button.uc-project-center__project-card:disabled {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--uc-space-1);
-  max-height: 42px;
-  overflow: hidden;
 }
 
 .uc-provider-page__summary-feature {

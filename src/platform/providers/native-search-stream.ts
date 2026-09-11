@@ -38,6 +38,7 @@ export async function runNativeSearch(input: {
   let session = input.session;
   const messages = [...input.messages];
   let calls = 0;
+  let glmStarted = false;
   let searchContentTokens: number | null = 0;
   const requestUsage: (Record<string, number> | null)[] = [];
   const sources = new Map<string, { title: string; url: string }>();
@@ -47,11 +48,21 @@ export async function runNativeSearch(input: {
     status, toolCalls: input.request.protocol === 'kimi_builtin' ? calls : null,
     sources: [...sources.values()], requestUsage: [...requestUsage], searchContentTokens: input.request.protocol === 'kimi_builtin' ? searchContentTokens : null, retrievedAt: new Date().toISOString(), cost: 'not_reported'
   });
+  const checkCancelled = () => { if (input.signal.aborted) throw new NativeSearchProtocolError('newapi.cancelled'); };
   try {
     // At most three requests, no automatic retry or provider fallback.
     for (let round = 0; round < 3; round += 1) {
-      if (input.signal.aborted) throw new NativeSearchProtocolError('newapi.cancelled');
-      const parsed = await readNativeStream(session.stream, input.model, input.request.protocol);
+      checkCancelled();
+      const parsed = await readNativeStream(session.stream, input.model, input.request.protocol, checkCancelled, async observedSources => {
+        for (const source of observedSources) if (sources.size < 30) sources.set(source.url, source);
+        if (!glmStarted && sources.size > 0) {
+          checkCancelled();
+          glmStarted = true;
+          await input.observe(evidence('started'));
+          checkCancelled();
+        }
+      });
+      checkCancelled();
       requestUsage.push(parsed.usage ?? null);
       if (parsed.usage) for (const [key, n] of Object.entries(parsed.usage)) totals.set(key, (totals.get(key) ?? 0) + n);
       else allUsageReported = false;
@@ -70,12 +81,15 @@ export async function runNativeSearch(input: {
           messages.push({ role: 'tool', content: call.function.arguments, toolCallId: call.id, name: '$web_search' });
         }
         await input.observe(evidence('started'));
+        checkCancelled();
         session.close();
+        checkCancelled();
         session = await input.open(messages);
         continue;
       }
       const observed = calls > 0 || sources.size > 0;
       if (!parsed.content.trim()) throw invalid();
+      checkCancelled();
       await input.observe(evidence(observed ? 'completed' : 'unobserved'));
       if (input.request.mode === 'required' && !observed) throw new NativeSearchProtocolError('newapi.native_search_unobserved');
       return {
@@ -91,19 +105,23 @@ export async function runNativeSearch(input: {
     throw error;
   } finally { session.close(); }
 }
-async function readNativeStream(stream: AsyncIterable<Uint8Array>, model: string, protocol: NativeSearchRequest['protocol']) {
+async function readNativeStream(
+  stream: AsyncIterable<Uint8Array>, model: string, protocol: NativeSearchRequest['protocol'], checkCancelled: () => void,
+  observeSources: (sources: readonly { title: string; url: string }[]) => Promise<void>
+) {
   let content = '', reasoning = '', buffer = '', id: string | undefined;
   let bytes = 0, done = false, finish: 'stop' | 'length' | 'tool_calls' | undefined;
   let usage: Record<string, number> | undefined;
   const calls = new Map<number, { id: string; name: string; arguments: string }>();
   const sources: { title: string; url: string }[] = [];
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  const event = (raw: string) => {
+  const event = (raw: string): { title: string; url: string }[] => {
+    const eventSources: { title: string; url: string }[] = [];
     const lines = raw.split('\n').filter(line => line && !line.startsWith(':'));
-    if (!lines.length) return;
+    if (!lines.length) return eventSources;
     if (done || lines.some(line => !line.startsWith('data:'))) throw invalid();
     const data = lines.map(line => line.slice(5).trimStart()).join('\n');
-    if (data === '[DONE]') { if (!finish) throw invalid(); done = true; return; }
+    if (data === '[DONE]') { if (!finish) throw invalid(); done = true; return eventSources; }
     const chunk: unknown = JSON.parse(data);
     if (!record(chunk) || typeof chunk.id !== 'string' || typeof chunk.model !== 'string' || chunk.model.toLowerCase() !== model.toLowerCase() || !Array.isArray(chunk.choices)) throw invalid();
     id ??= chunk.id;
@@ -120,11 +138,11 @@ async function readNativeStream(stream: AsyncIterable<Uint8Array>, model: string
       for (const s of chunk.web_search) {
         if (!record(s)) throw invalid();
         const title = text(s.title, 500), url = safeSourceUrl(s.link);
-        if (url) sources.push({ title, url });
+        if (url) eventSources.push({ title, url });
       }
     }
     if (chunk.choices.length > 1) throw invalid();
-    if (!chunk.choices.length) return;
+    if (!chunk.choices.length) return eventSources;
     const choice = chunk.choices[0];
     if (!record(choice) || choice.index !== 0 || !record(choice.delta)) throw invalid();
     const d = choice.delta;
@@ -152,17 +170,30 @@ async function readNativeStream(stream: AsyncIterable<Uint8Array>, model: string
       if (finish || !['stop', 'length', 'tool_calls'].includes(String(choice.finish_reason))) throw invalid();
       finish = choice.finish_reason as 'stop' | 'length' | 'tool_calls';
     }
+    return eventSources;
+  };
+  const consumeEvent = async (raw: string) => {
+    checkCancelled();
+    // Publish only after the complete event passes structural validation.
+    const eventSources = event(raw);
+    if (eventSources.length) {
+      for (const source of eventSources) if (sources.length < 30 && !sources.some(existing => existing.url === source.url)) sources.push(source);
+      await observeSources(eventSources);
+      checkCancelled();
+    }
   };
   for await (const chunk of stream) {
+    checkCancelled();
     bytes += chunk.byteLength;
     if (bytes > 8 * 1024 * 1024) throw invalid();
     buffer += decoder.decode(chunk, { stream: true });
     buffer = buffer.replace(/\r\n/g, '\n');
     let boundary: number;
-    while ((boundary = buffer.indexOf('\n\n')) >= 0) { event(buffer.slice(0, boundary)); buffer = buffer.slice(boundary + 2); }
+    while ((boundary = buffer.indexOf('\n\n')) >= 0) { await consumeEvent(buffer.slice(0, boundary)); buffer = buffer.slice(boundary + 2); }
   }
+  checkCancelled();
   buffer += decoder.decode();
-  if (buffer.trim()) event(buffer);
+  if (buffer.trim()) await consumeEvent(buffer);
   if (!done || !finish || (calls.size > 0 && finish !== 'tool_calls')) throw invalid();
   const resultCalls: NativeToolCall[] = [...calls].sort(([a], [b]) => a - b).map(([, c]) => {
     if (!/^[A-Za-z0-9_-]{1,200}$/.test(c.id) || c.name !== '$web_search' || !record(JSON.parse(c.arguments))) throw invalid();

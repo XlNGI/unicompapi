@@ -23,7 +23,7 @@ interface SearchSession {
   readonly protocol: NativeSearchRequest['protocol'];
   readonly mode: 'auto' | 'required';
   readonly expiresAt: string;
-  readonly status: 'authorization_required' | 'authorized' | 'declined' | 'submitted' | 'completed' | 'failed';
+  readonly status: 'authorization_required' | 'authorized' | 'declined' | 'submitted' | 'completed' | 'failed' | 'cancelled';
   readonly expectedConversationRevision: number;
   readonly evidence?: NativeSearchEvidence;
   readonly authorizationScope?: 'request' | 'conversation';
@@ -44,20 +44,30 @@ export class ConversationNativeSearch {
     private readonly conversations: ConversationApplicationService, private readonly now = () => new Date().toISOString(),
     private readonly local?: { retrieve(input: { query: string; k: number }): Promise<readonly unknown[]> }) {}
 
-  prepare(input: Parameters<ConversationNativeSearch['prepareInternal']>[0]): Promise<void> { return this.exclusive(() => this.prepareInternal(input)); }
-  private async prepareInternal(input: { conversation: Conversation; workflow: ConversationWorkflowV1; draft: ConversationResponseDraftV1; candidate: ResolvedFeatureCandidateV1 }): Promise<void> {
-    const { conversation, workflow, draft, candidate } = input;
-    if (workflow.plan.sourcePolicy === 'mixed' && this.local && (await this.local.retrieve({ query: conversation.messages.find(m => m.id === workflow.sourceMessageId)?.content ?? '', k: 3 }).catch(() => [])).length > 0) {
-      for (const session of await this.load()) if (session.workflowId === workflow.id && session.status === 'authorized') await this.put({ ...session, status: 'declined' });
-      return;
+  preferLocal(conversation: Conversation, workflow: ConversationWorkflowV1): Promise<boolean> {
+    return this.exclusive(() => this.preferLocalInternal(conversation, workflow));
+  }
+  private async preferLocalInternal(conversation: Conversation, workflow: ConversationWorkflowV1): Promise<boolean> {
+    if (workflow.plan.sourcePolicy !== 'mixed' || !this.local || !(await this.local.retrieve({
+      query: conversation.messages.find(m => m.id === workflow.sourceMessageId)?.content ?? '', k: 3
+    }).catch(() => [])).length) return false;
+    for (const session of await this.load()) if (session.workflowId === workflow.id && session.status === 'authorized') {
+      await this.put({ ...session, status: 'declined' });
     }
+    return true;
+  }
+
+  prepare(input: Parameters<ConversationNativeSearch['prepareInternal']>[0]): Promise<'local' | 'native'> { return this.exclusive(() => this.prepareInternal(input)); }
+  private async prepareInternal(input: { conversation: Conversation; workflow: ConversationWorkflowV1; draft: ConversationResponseDraftV1; candidate: ResolvedFeatureCandidateV1 }): Promise<'local' | 'native'> {
+    const { conversation, workflow, draft, candidate } = input;
+    if (await this.preferLocalInternal(conversation, workflow)) return 'local';
     const capability = await this.capability(candidate);
     const bindingHash = hash([workflow.id, workflow.revision, workflow.plan, routeIdentity(candidate.routeTemplate), draft.promptContent,
       draft.parameterValues, draft.contextSelections, conversation.messages.filter(m => (m.attachments?.length ?? 0) > 0).map(m => m.attachments)]);
     const sessions = await this.load();
     const old = [...sessions].reverse().find(s => s.workflowId === workflow.id);
     const reusable = [...sessions].reverse().find(s => s.conversationId === conversation.id && s.authorizationScope === 'conversation' && s.status !== 'declined' && s.expiresAt > this.now() && s.routeHash === hash(routeIdentity(candidate.routeTemplate)));
-    if (old?.bindingHash === bindingHash && old.status === 'authorized' && old.expiresAt > this.now()) return;
+    if (old?.bindingHash === bindingHash && old.status === 'authorized' && old.expiresAt > this.now()) return 'native';
     if (old?.bindingHash === bindingHash && old.status === 'authorization_required' && old.expiresAt > this.now()) {
       const restored = await this.conversations.get(conversation.id);
       if (restored.messages.at(-1)?.workflowReply?.workflowId === old.id) {
@@ -68,7 +78,7 @@ export class ConversationNativeSearch {
     const key = `native-unavailable-${hash([workflow.id, workflow.revision, candidate.candidateId]).slice(0, 32)}`;
     if (!capability || !['declared', 'verified', 'limited'].includes(capability.state)) {
       await this.reply(conversation.id, key,
-        '当前连接尚无可用的模型原生联网搜索协议证据，因此没有发起搜索。请切换已配置原生搜索能力的模型，或告诉我“不要联网”，按现有资料继续。');
+        '这项需求涉及公开或时效信息，但当前连接尚无可用的模型原生联网搜索协议证据，因此没有发起搜索。可到“模型与服务商→文本模型→联网搜索设置”检查协议及服务商支持文档；保存配置不代表服务商实际支持。请切换有搜索协议支持依据的模型，或告诉我“不要联网”，按现有资料继续。');
       throw new NativeSearchAuthorizationError();
     }
     // Native services can derive queries from every supplied context. Keep this first scope exact.
@@ -91,11 +101,11 @@ export class ConversationNativeSearch {
     };
     if (reusable) {
       await this.put({ ...session, status: 'authorized', authorizationScope: 'conversation', grantedAt: reusable.grantedAt, expiresAt: reusable.expiresAt });
-      return;
+      return 'native';
     }
     await this.put(session);
     const updated = await this.reply(conversation.id, id,
-      `是否允许本次联网？将由 ${candidate.providerName} 的 ${candidate.modelName} 根据当前任务内容及格式要求自行决定是否搜索，不发送历史对话。搜索可能另行收费，具体费用未报告；服务端查询次数、域名和费用上限无法保证，客户端最多继续 2 轮，取消后上游仍可能计费。请回复“允许本次联网”或“不要联网”。也可以回复“允许本会话联网”，授权当前连接在一小时内使用本会话后续任务正文自动搜索（仍不含附件、项目资料和历史对话）。`);
+      `这项需求涉及公开或时效信息，联网检索可以补充并核实资料。是否允许本次联网？将由 ${candidate.providerName} 的 ${candidate.modelName} 根据当前任务内容及格式要求自行决定是否搜索，不发送历史对话。搜索可能另行收费，具体费用未报告；服务端查询次数、域名和费用上限无法保证，客户端最多继续 2 轮，取消后上游仍可能计费。请回复“允许本次联网”或“不要联网”。也可以回复“允许本会话联网”，授权当前连接在一小时内使用本会话后续任务正文自动搜索（仍不含附件、项目资料和历史对话）。`);
     session = { ...session, expectedConversationRevision: updated.revision };
     await this.put(session);
     throw new NativeSearchAuthorizationError();
@@ -152,18 +162,32 @@ export class ConversationNativeSearch {
     if (!session || session.status !== 'submitted' || session.protocol !== request.protocol || session.mode !== request.mode ||
         session.routeHash !== hash(routeIdentity(route)) || session.expiresAt <= this.now()) throw new NativeSearchAuthorizationError();
   }
+  requestStarted(grantId: string): Promise<void> { return this.exclusive(async () => {
+    const session = (await this.load()).find(s => s.id === grantId);
+    if (!session) throw new NativeSearchAuthorizationError();
+    if (session.status !== 'submitted' || session.evidence) return;
+    await this.reply(session.conversationId as Conversation['id'], `${session.id}-request-started`,
+      '已向模型提交本次联网请求，正在等待服务商返回搜索记录。只有收到真实搜索工具调用或结构化来源，才会确认已搜索。');
+  }); }
   observe(grantId: string, evidence: NativeSearchEvidence): Promise<void> { return this.exclusive(() => this.observeInternal(grantId, evidence)); }
   private async observeInternal(grantId: string, evidence: NativeSearchEvidence): Promise<void> {
     const session = (await this.load()).find(s => s.id === grantId);
     if (!session) throw new NativeSearchAuthorizationError();
-    await this.put({ ...session, evidence, status: session.status === 'declined' ? 'declined' : evidence.status === 'started' ? 'submitted' : evidence.status === 'completed' || evidence.status === 'unobserved' ? 'completed' : 'failed' });
+    const terminal = ['declined', 'cancelled', 'failed', 'completed'].includes(session.status);
+    await this.put({ ...session, evidence, status: terminal ? session.status : evidence.status === 'started' ? 'submitted' : evidence.status === 'completed' || evidence.status === 'unobserved' ? 'completed' : evidence.status === 'cancelled' ? 'cancelled' : 'failed' });
+    // Late provider callbacks remain auditable without reopening or announcing a finished request.
+    if (terminal) return;
+    const hasSources = evidence.sources.length > 0;
+    const hasToolCalls = typeof evidence.toolCalls === 'number' && evidence.toolCalls > 0;
     if (evidence.status === 'started') {
-      await this.reply(session.conversationId as Conversation['id'], `${session.id}-started`, '模型已调用原生搜索工具，正在根据返回的资料整理回答。');
+      if (hasSources || hasToolCalls) await this.reply(session.conversationId as Conversation['id'], `${session.id}-started`, hasSources
+        ? `已收到服务商返回的 ${evidence.sources.length} 条结构化搜索来源，正在整理资料。`
+        : '已收到模型原生搜索工具调用记录，正在等待搜索结果。');
       return;
     }
     const sources = evidence.sources.map((s, i) => `${i + 1}. ${s.title.replace(/[\r\n\[\]()*_<>!`]/g, ' ')} — ${s.url}`).join('\n');
     await this.reply(session.conversationId as Conversation['id'], `${session.id}-result`,
-      (evidence.status === 'completed' ? '已收到服务商的搜索执行记录。' : evidence.status === 'unobserved' ? '模型未返回可确认的搜索执行记录，本次回答不能标为联网核实。' : '联网搜索未完成，未自动重试。') +
+      (evidence.status === 'completed' && (hasSources || hasToolCalls) ? '已收到服务商的搜索执行记录。' : evidence.status === 'unobserved' || evidence.status === 'completed' ? '模型未返回可确认的搜索执行记录，本次回答不能标为联网核实。' : evidence.status === 'cancelled' ? '本次联网搜索已取消，未自动重试。' : '联网搜索失败，未自动重试。') +
       `搜索费用未报告。${sources ? `\n\n服务商返回的来源（未额外抓取核验）：\n${sources}` : '服务商未返回可展示的结构化来源。'}`);
   }
   private async reply(conversationId: Conversation['id'], key: string, content: string): Promise<Conversation> {
@@ -211,7 +235,7 @@ function parseSession(value: unknown): SearchSession {
   if ([s.workflowId, s.conversationId, s.userMessageId, s.candidateId].some(v => typeof v !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(v)) ||
       [s.bindingHash, s.promptHash, s.optionsHash, s.routeHash].some(v => typeof v !== 'string' || !/^[a-f0-9]{64}$/.test(v)) ||
       !Number.isSafeInteger(s.workflowRevision) || s.workflowRevision < 0 || !Number.isSafeInteger(s.expectedConversationRevision) || s.expectedConversationRevision < 0 ||
-      !Number.isFinite(Date.parse(s.expiresAt)) || !['authorization_required', 'authorized', 'declined', 'submitted', 'completed', 'failed'].includes(s.status) ||
+      !Number.isFinite(Date.parse(s.expiresAt)) || !['authorization_required', 'authorized', 'declined', 'submitted', 'completed', 'failed', 'cancelled'].includes(s.status) ||
       (s.authorizationScope !== undefined && !['request', 'conversation'].includes(s.authorizationScope)) ||
       (s.grantedAt !== undefined && !Number.isFinite(Date.parse(s.grantedAt)))) throw new TypeError('Invalid search session');
   return s;

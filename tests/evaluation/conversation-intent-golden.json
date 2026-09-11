@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "suiteId": "conversation-intent-offline-golden",
-  "version": "1.1.0",
-  "updatedAt": "2026-09-09",
+  "version": "1.3.0",
+  "updatedAt": "2026-09-11",
   "cases": [
   { "input": "帮我做一份关于如何提高销售额的 PPT", "expectedKind": "document", "expectedDocumentKind": "ppt", "expectedReadiness": "ready" },
   { "input": "可不可以帮我做一份 PPT，介绍公司的产品", "expectedKind": "document", "expectedDocumentKind": "ppt", "expectedReadiness": "ready" },
@@ -103,6 +103,23 @@
   { "input": "联网查找最新公开数据并生成 Excel", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "excel", "expectedSourcePolicy": "web" },
   { "input": "用网上实时信息做一份市场汇报 PPT", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt", "expectedSourcePolicy": "web" },
   { "input": "结合内部资料和最新公开信息制作报告", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word", "expectedSourcePolicy": "mixed" },
-  { "input": "根据 2025 年销售数据生成报表", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "none" }
+  { "input": "根据 2025 年销售数据生成报表", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "none" },
+  { "input": "做一份介绍最新行业趋势的 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "web" },
+  { "input": "做一份近期政策解读 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "web" },
+  { "input": "制作 PPT，使用 2026 年最新数据", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "web" },
+  { "input": "制作 PPT，分析新能源行业现状", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "web" },
+  { "input": "结合内部资料和最新行业数据做一份 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "mixed" },
+  { "input": "根据最新上传附件里的行业趋势做一份 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "internal" },
+  { "input": "根据最新版本文档做一份培训 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "none" },
+  { "input": "做一份介绍网络工作原理的 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "none" },
+  { "input": "做一份最新政策 PPT，不要联网", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "none" },
+  { "input": "只根据附件里的最新行业数据制作 PPT", "expectedKind": "document", "expectedAction": "create", "expectedSourcePolicy": "internal" },
+  { "input": "生成提示词", "expectedKind": "chat", "expectedReadiness": "ready" },
+  { "input": "根据这张图片生成提示词", "expectedKind": "chat", "expectedReadiness": "ready" },
+  { "input": "生成 PPT 的提示词", "expectedKind": "chat", "expectedReadiness": "ready" },
+  { "input": "给图片生成一段描述", "expectedKind": "chat", "expectedReadiness": "ready" },
+  { "input": "生成提示词 PPT", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "ppt", "expectedReadiness": "ready" },
+  { "input": "生成提示词并保存为 Word", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word", "expectedReadiness": "ready" },
+  { "input": "根据图片生成一份分析报告", "expectedKind": "document", "expectedAction": "create", "expectedDocumentKind": "word", "expectedReadiness": "ready" }
   ]
 }

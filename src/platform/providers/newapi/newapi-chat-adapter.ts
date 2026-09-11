@@ -300,6 +300,7 @@ export class NewApiChatAdapter {
     readonly maxToolRounds?: number;
     readonly nativeSearchGuard?: (request: NativeSearchRequest, route: ReturnType<typeof validateRoute>) => Promise<void>;
     readonly observeSearch?: (grantId: string, evidence: NativeSearchEvidence) => Promise<void>;
+    readonly searchRequestStarted?: (grantId: string) => Promise<void>;
   }): Promise<NewApiChatOperationHandle> {
     if (this.disposed) {
       throw new NewApiRuntimeError('runtime_shutting_down', 'not_retryable');
@@ -375,6 +376,9 @@ export class NewApiChatAdapter {
         })
       );
       await this.lifecycle.start(request.responseExecutionId);
+      if (request.nativeSearch && !externalController.signal.aborted) {
+        await input.searchRequestStarted?.(request.nativeSearch.grantId);
+      }
     } catch (error) {
       removeExternalAbort();
       session?.close();

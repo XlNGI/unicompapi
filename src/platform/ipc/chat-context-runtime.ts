@@ -341,6 +341,9 @@ export function createChatContextRuntime(
       .then(() => settleRecoverableConversationDocuments(workflowService, responseExecutions, projectConversations, now))
       .then(() => workflowService.recoverInterruptedExecutions())
       .then(() => undefined);
+    // Recovery may finish before any operation waits for ready. Observe a
+    // failure immediately, while preserving the rejected barrier for writes.
+    void responseRecovery.catch((error: unknown) => dependencies.onError?.(error));
     const responses: ConversationResponseControllerRuntime = {
       conversationService: service,
       conversations: projectConversations,

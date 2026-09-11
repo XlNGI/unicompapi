@@ -51,6 +51,7 @@ import { chatContextFailure, failure } from './chat-context-errors';
 import { toConversationDto } from './conversation-controller';
 import { ConversationAttachmentError, conversationAttachmentBatch, isImageAttachment, type ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
+import { declinesWebResearch } from '../../application/conversation-intent-orchestrator';
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 
 export interface ConversationResponseControllerRuntime {
@@ -66,7 +67,7 @@ export interface ConversationResponseControllerRuntime {
   readonly workflowService?: ConversationWorkflowService;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
-  /** Completes startup recovery before this project accepts response operations. */
+  /** Completes startup recovery before accessing persisted response state or executing writes. */
   readonly ready: Promise<void>;
   submit?(input: {
     readonly subject: FeatureCandidateSubjectV1;
@@ -233,7 +234,11 @@ export class ConversationResponseController {
   ): Promise<ChatContextIpcResult<readonly ConversationResponseCandidateDto[]>> {
     return this.execute(async () => {
       const input = chatContextRequestParsers.listTextCandidates(request);
-      const runtime = await this.requireRuntime();
+      // Candidate discovery only reads the provider registry and authorization
+      // policy. It must remain available while project recovery repairs legacy
+      // workflow/execution records; mutating and execution operations still
+      // use requireRuntime() and wait for the recovery barrier.
+      const runtime = await this.requireRuntime({ waitForReady: false });
       return {
         ok: true,
         value: await runtime.candidates.listCatalogForFeature({
@@ -571,6 +576,24 @@ export class ConversationResponseController {
       query: attachmentQuery
     });
     const imageQuery = isPageQuestion && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
+    const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
+    const declinedSearch = declinesWebResearch(lastUserText);
+    if (workflow && (declinedSearch || workflow.plan.sourcePolicy === 'internal')) {
+      await runtime.nativeSearch?.revoke(conversation.id);
+    }
+    const localSources = Boolean(workflow?.plan.sourcePolicy === 'mixed' && runtime.nativeSearch &&
+      await runtime.nativeSearch.preferLocal(conversation, workflow));
+    const prepareNativeSearch = Boolean(workflow && runtime.nativeSearch && !declinedSearch && !localSources &&
+      (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await runtime.nativeSearch.allowsConversation(conversation.id)));
+    if (workflow?.plan.kind === 'document' && !prepareNativeSearch) {
+      // Persist source disclosure before pinning the conversation revision for
+      // execution. This local reply is excluded from the model's history.
+      conversation = await runtime.conversationService.ensureLocalReply(conversation.id,
+        `sources-${workflow.id}-${workflow.revision}`,
+        localSources
+          ? '已检索到本地资料，本次优先使用本地资料制作，不联网搜索；最新公开信息未联网核实。'
+          : '本次制作不联网搜索，将依据当前需求、可用资料和模型已有知识生成内容；最新数据、政策等信息未联网核实。');
+    }
     let draft = createConversationResponseDraft({
       id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
       projectId: runtime.conversations.projectId,
@@ -616,9 +639,7 @@ export class ConversationResponseController {
       await runtime.drafts.save(contextualized, draft.revision);
       draft = contextualized;
     }
-    const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
-    if (workflow && (/(?:不要|禁止|关闭|取消)联网/u.test(lastUserText) || workflow.plan.sourcePolicy === 'internal')) await runtime.nativeSearch?.revoke(conversation.id);
-    if (workflow && runtime.nativeSearch && (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await runtime.nativeSearch.allowsConversation(conversation.id))) {
+    if (workflow && runtime.nativeSearch && prepareNativeSearch) {
       const binding = await runtime.candidates.resolveBinding(subject(draft), input.candidateId);
       try {
         await runtime.nativeSearch.prepare({ conversation, workflow, draft, candidate: binding.candidate });
@@ -740,11 +761,13 @@ export class ConversationResponseController {
     return workflow;
   }
 
-  private async requireRuntime(): Promise<ConversationResponseControllerRuntime> {
+  private async requireRuntime(
+    options: { readonly waitForReady?: boolean } = {}
+  ): Promise<ConversationResponseControllerRuntime> {
     const session = this.dependencies.getSession();
     if (!session) throw new ProjectNotOpenError();
     const runtime = this.dependencies.getRuntime(session);
-    await runtime.ready;
+    if (options.waitForReady !== false) await runtime.ready;
     return runtime;
   }
 

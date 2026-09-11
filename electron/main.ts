@@ -44,6 +44,7 @@ import { ElectronViduComposition } from './ipc/vidu-composition';
 import { createLiveProviderManagementComposition } from './ipc/management-adapters';
 import { LedgerRuntimeAuthorizationSync } from './ipc/runtime-authorization-sync';
 import { createLocalMediaResponse } from './ipc/local-media-response';
+import { createRuntimeMediaEngine } from './ipc/runtime-media-engine';
 import {
   autosaveDiagnosticsIpcChannel,
   isAutosaveDiagnosticsEvent
@@ -89,7 +90,11 @@ protocol.registerSchemesAsPrivileged([
 
 let sleepBlockerId: number | undefined;
 let powerPolicyRead = Promise.resolve();
-const settingsLifecycle = registerSettingsIpcHandlers();
+const mediaEngine = createRuntimeMediaEngine({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath
+});
+const settingsLifecycle = registerSettingsIpcHandlers({ getMediaEngine: () => mediaEngine });
 const viduComposition = new ElectronViduComposition({
   getProxyMode: () => settingsLifecycle.getProxyMode()
 });
@@ -158,6 +163,7 @@ const documentLifecycle = registerDocumentGenerationIpcHandlers({
   sessionRegistry: projectSessionRegistry
 });
 const storageLifecycle = registerStorageIpcHandlers({
+  getMediaEngine: () => mediaEngine,
   sessionRegistry: projectSessionRegistry,
   providerPackages,
   additionalSessionChangeGuards: [
@@ -295,7 +301,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && !process.windowsStore) {
     app.setAppUserModelId('com.unicomp.desktop');
   }
   await settingsLifecycle.activate();

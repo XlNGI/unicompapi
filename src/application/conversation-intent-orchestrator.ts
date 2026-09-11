@@ -170,6 +170,9 @@ export function analyzeLocalConversationIntent(input: {
   }
   if (input.workflow?.status === 'needs_clarification' && input.workflow.plan.missing.includes('document_topic') &&
     /^(?:好的?|继续|谢谢|收到|其他你来安排)[。！!\s]*$/u.test(text)) return decision(input.workflow.plan, 'local');
+  // Writing a prompt or describing an image is an inline response even when a
+  // previous turn left a document workflow or output preference behind.
+  if (isInlineContentRequest(text)) return decision(chatPlan(text), 'local');
   // An explicit question overrides a stale output preference and a pending task.
   if (isQuestionOrAnalysis(text)) return decision(chatPlan(text), 'local');
   const unsupported = unsupportedOutputScope(text);
@@ -393,9 +396,7 @@ function mergeWorkflowClarification(
   if (plan.action === 'create' && (kind ?? plan.documentKind) === 'ppt' && !hasDocumentSubject(requirements)) {
     remaining.add('document_topic');
   }
-  const sourcePolicy = /(?:不要|不用|无需|禁止)(?:再)?(?:联网|上网|搜索网络)/.test(answer)
-    ? inferSourcePolicy(requirements)
-    : inferSourcePolicy(answer) === 'none' ? plan.sourcePolicy : inferSourcePolicy(requirements);
+  const sourcePolicy = inferSourcePolicy(requirements);
   const merged = parseConversationIntentPlan({
     ...plan,
     documentKind: kind ?? target?.kind ?? plan.documentKind,
@@ -583,6 +584,21 @@ function isSummaryDeliverable(text: string): boolean {
   return /(?:帮我|请|给我|麻烦)(?:做|写|生成|整理)(?:个|一份|一个)?总结/.test(text);
 }
 
+function isInlineContentRequest(text: string): boolean {
+  const promptRequest = /(?:提示词|\bprompts?\b)/i.test(text);
+  const imageAnalysis = /(?:图片|图像|截图|照片|这张图)/.test(text) &&
+    /(?:分析|识别|描述|解释|提取|反推|解读|看看|看一下)/.test(text);
+  if (!promptRequest && !imageAnalysis) return false;
+  // “生成 PPT 的提示词” asks for text; “生成提示词 PPT” asks for a file.
+  // Remove only the former content reference before checking file delivery.
+  const delivery = affirmativeClauses(text).replace(
+    /(?:PPTX?|Word|DOCX|Excel|XLSX|幻灯片|演示文稿|课件|文档)\s*(?:制作|生成)?(?:的|用的)\s*(?:提示词|prompts?)/ig,
+    ''
+  );
+  return inferDeliverableKind(delivery) === 'auto' &&
+    !/(?:保存|导出|输出|整理)(?:成|为)?(?:一份|一个)?(?:文件|文档)/.test(delivery);
+}
+
 function isQuestionOrAnalysis(text: string): boolean {
   if (/(?:在这里|在会话里|直接|只要|只需)(?:回复|回答)|(?:不用|无需|不要)(?:生成|创建|导出)(?:文件|文档)/.test(text)) return true;
   if (/^(?:谢谢|感谢|好的|收到|你好|您好)[！!。\s]*$/.test(text)) return true;
@@ -683,13 +699,61 @@ function isDestructiveRevision(text: string): boolean {
 }
 
 function inferSourcePolicy(text: string): ConversationIntentPlan['sourcePolicy'] {
-  const web = (/(?:联网|网上|网络|上网|最新公开|实时信息)/.test(text) ||
-    (/(?:查询|查一下|查查|搜索|检索)/.test(text) && /(?:最新|今天|当前|实时|新闻|天气|股价|汇率)/.test(text))) &&
-    !/(?:不要|不用|无需|禁止)(?:再)?(?:联网|上网|搜索网络)/.test(text) &&
-    !/(?:联网|网络|网上)(?:检索|搜索)?(?:的)?(?:工作原理|是什么|有什么|怎么配置)/.test(text);
-  const internal = /(?:项目资料|附件|上传文件|内部资料|知识库)/.test(text);
+  // This policy only proposes sources. Network authorization remains a separate
+  // application gate; neither a recency match nor a model plan can grant it.
+  let web = false;
+  let disabled = false;
+  const internal = INTERNAL_SOURCE_REFERENCE.test(text);
+  // Requirements append trusted user follow-ups on new lines. A later refusal
+  // wins over old research needs, and only a later explicit request lifts it.
+  for (const requirement of text.split(/\n/)) {
+    if (declinesWebResearch(requirement)) {
+      disabled = true;
+      web = false;
+    } else if (requestsWebResearch(requirement)) {
+      disabled = false;
+      web = true;
+    } else if (!disabled && needsCurrentPublicFacts(requirement)) {
+      web = true;
+    }
+  }
   if (web && internal) return 'mixed';
   if (web) return 'web';
   if (internal) return 'internal';
   return 'none';
+}
+
+const INTERNAL_SOURCE_REFERENCE = /(?:项目资料|附件|上传[^，。；;\n]{0,8}(?:文件|资料|数据)|内部资料|知识库|本地资料)/;
+const CURRENT_INFORMATION_MARKER = /(?:最新|近期|最近|今天|当前|目前|现今|当下|今年|实时)/;
+const PUBLIC_FACT_SUBJECT = /(?:数据|信息|政策|法规|标准|趋势|进展|动态|新闻|报道|行情|天气|股价|汇率|价格|市场|行业|产业|竞品|统计)/;
+
+export function declinesWebResearch(text: string): boolean {
+  const exclusiveSource = text.match(/(?:仅|只)(?:参考|依据|根据|使用|用)([^，。；;\n]{1,24})/)?.[1];
+  return /(?:不要|不用|无需|禁止|不需要|不允许|别|不|停止|取消|关闭)(?:再|进行|使用|启用)?\s*(?:联网|上网|(?:网络|网上|互联网)(?:搜索|检索)|(?:搜索|检索)(?:网络|网上|互联网))/.test(text) ||
+    /(?:联网|上网|网络)(?:搜索|检索)?(?:先)?(?:不用|不需要|不要|禁止|停止|取消)/.test(text) ||
+    (exclusiveSource !== undefined && INTERNAL_SOURCE_REFERENCE.test(exclusiveSource));
+}
+
+function requestsWebResearch(text: string): boolean {
+  // Network concepts and product features are subjects, not search requests.
+  const request = text.replace(/(?:物联网|联网|上网|网络|互联网)(?:检索|搜索)?(?:的)?(?:工作原理|原理|是什么|有什么|怎么配置|配置|设置|功能|协议|技术|安全|基础|知识|教程)/g, '');
+  return /(?<!物)(?:联网|上网)/.test(request) ||
+    /(?:网上|网络|互联网)(?:上)?(?:搜索|检索|查询|查找|查一下|查查|核实|搜集|收集)/.test(request) ||
+    /(?:搜索|检索|查询|查找|查一下|查查|核实|搜集|收集)(?:一下)?(?:网上|网络|互联网)/.test(request) ||
+    /(?:根据|结合|使用|用)(?:网上|网络|互联网)(?:的)?(?:资料|信息|数据|来源|新闻|报道|内容)/.test(request);
+}
+
+function needsCurrentPublicFacts(text: string): boolean {
+  return text.split(/[，,。；;\n]/).some((clause) => {
+    // File recency describes the user's material; it does not request fresh
+    // public information. Keep other recency markers in the same clause.
+    const facts = clause
+      .replace(/(?:最新|近期|最近|当前|今天)(?:的|刚)?(?:上传|提供|提交|编辑|修改|保存)(?:的)?/g, '')
+      .replace(/(?:最新|当前)(?:的)?(?:附件|文件|文档|版本|草稿|模板)/g, '');
+    if (CURRENT_INFORMATION_MARKER.test(facts) && PUBLIC_FACT_SUBJECT.test(facts)) return true;
+    // “行业现状” already asks about the present without saying “最新”. A
+    // clause grounded in local material keeps using that material by default.
+    return !INTERNAL_SOURCE_REFERENCE.test(clause) &&
+      /(?:行业|产业|市场|竞品)[^，。；;\n]{0,12}(?:现状|趋势|动态|格局)/.test(facts);
+  });
 }

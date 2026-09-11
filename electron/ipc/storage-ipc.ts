@@ -32,10 +32,12 @@ import {
   VideoEditorMediaController,
   VideoExportController,
   type ExportLifecycleInterruptionReason,
-  createFfmpegMediaEngineAdapterFromEnvironment,
+  type FfmpegMediaEngineAdapter,
+  type VideoEditorPreviewArtifactAdapter,
   VideoWorkspaceController,
   VideoWorkspaceMutationCoordinator,
   createDevelopmentVideoEditorPreviewAdapter,
+  UnavailableDevelopmentVideoEditorPreviewAdapter,
   type ProviderUsageSchemaResolverPort,
   type CurrencyConversionFactResolverPort,
   type StorageProjectSession,
@@ -70,6 +72,7 @@ import { videoWorkspaceIpcChannels } from '../../src/shared/video-workspace-ipc'
 import { videoFeatureIpcChannels } from '../../src/shared/video-feature-ipc';
 import { videoEditorIpcChannels } from '../../src/shared/video-editor-ipc';
 import type { ElectronViduComposition } from './vidu-composition';
+import { createRuntimeMediaEngine } from './runtime-media-engine';
 
 export interface StorageIpcLifecycle {
   resolveEntry(token: string): ReturnType<LocalMediaHandleRegistry['resolveEntry']>;
@@ -79,6 +82,7 @@ export interface StorageIpcLifecycle {
 }
 
 export function registerStorageIpcHandlers(options: {
+  readonly getMediaEngine?: () => FfmpegMediaEngineAdapter | undefined;
   readonly onActiveExportCountChanged?: (count: number) => void;
   readonly sessionRegistry?: StorageProjectSessionRegistry;
   readonly additionalSessionChangeGuards?: readonly (() => Promise<void>)[];
@@ -355,8 +359,13 @@ export function registerStorageIpcHandlers(options: {
     getSession: () => sessionRegistry.get(),
     mutations: videoMutations
   });
-  const mediaEngine = createFfmpegMediaEngineAdapterFromEnvironment();
-  const previewAdapter = mediaEngine ?? createDevelopmentVideoEditorPreviewAdapter();
+  const mediaEngine = options.getMediaEngine ? options.getMediaEngine() : createRuntimeMediaEngine({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath
+  });
+  const previewAdapter: VideoEditorPreviewArtifactAdapter = mediaEngine ?? (app.isPackaged
+    ? new UnavailableDevelopmentVideoEditorPreviewAdapter()
+    : createDevelopmentVideoEditorPreviewAdapter());
   const videoEditorMedia = new VideoEditorMediaController({
     getSession: () => sessionRegistry.get(),
     chooseAudioFile: () =>

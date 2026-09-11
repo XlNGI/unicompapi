@@ -19,6 +19,46 @@ function pending(rawText: string) {
 
 describe('Conversation intent orchestrator', () => {
   it.each([
+    '生成提示词',
+    '根据这张图片生成提示词',
+    '帮我反推这张图片的提示词',
+    '优化刚才的提示词',
+    '生成 PPT 的提示词',
+    'Generate a prompt for this image',
+    '给图片生成一段描述',
+    '提取图片中的文字',
+    '把图片详细分析一下'
+  ])('routes inline prompt writing and image analysis directly to chat: %s', async (rawText) => {
+    let classifierCalls = 0;
+    const orchestrator = new ConversationIntentOrchestrator({ classifier: { async classify() {
+      classifierCalls++;
+      throw new Error('A clear inline request does not need semantic classification');
+    } } });
+    const result = await orchestrator.analyze({
+      rawText,
+      workflow: pending('我要生成 PPT'),
+      context: {
+        requestedIntentKind: 'document', requestedDocumentKind: 'ppt',
+        documents: [{ messageId: 'old-document', kind: 'ppt', fileName: '旧文档.pptx' }]
+      }
+    });
+    expect(result).toMatchObject({ route: 'local', plan: { kind: 'chat' }, assessment: { readiness: 'ready' } });
+    expect(result.resolvedTarget).toBeUndefined();
+    expect(classifierCalls).toBe(0);
+  });
+
+  it.each([
+    ['生成提示词 PPT', 'ppt'],
+    ['生成提示词并保存为 Word', 'word'],
+    ['根据图片生成一份分析报告', 'word'],
+    ['根据图片生成提示词并导出 Excel', 'excel']
+  ])('keeps explicit document delivery in the document workflow: %s', (rawText, documentKind) => {
+    expect(analyzeLocalConversationIntent({ rawText })).toMatchObject({
+      plan: { kind: 'document', action: 'create', documentKind }, assessment: { readiness: 'ready' }
+    });
+  });
+
+  it.each([
     '帮我做一份关于如何提高销售额的 PPT',
     '可不可以帮我做一份 PPT，介绍公司的产品',
     '帮我做一份 PPT，不要太花哨',
@@ -34,6 +74,64 @@ describe('Conversation intent orchestrator', () => {
     expect(analyzeLocalConversationIntent({
       rawText: '分析附件里的销售数据，然后做一份 Excel 报表'
     }).plan).toMatchObject({ kind: 'document', action: 'create', documentKind: 'excel', sourcePolicy: 'internal' });
+  });
+
+  it.each([
+    ['做一份介绍最新行业趋势的 PPT', 'web'],
+    ['做一份近期政策解读 PPT', 'web'],
+    ['制作 PPT，使用 2026 年最新数据', 'web'],
+    ['制作 PPT，分析新能源行业现状', 'web'],
+    ['结合内部资料和最新行业数据做一份 PPT', 'mixed'],
+    ['根据附件做一份 PPT，并补充当前市场数据', 'mixed'],
+    ['做一份关于龙的 PPT', 'none'],
+    ['根据最新上传附件里的行业趋势做一份 PPT', 'internal'],
+    ['根据今天上传的销售数据做一份 PPT', 'internal'],
+    ['根据最新版本文档做一份培训 PPT', 'none'],
+    ['做一份介绍网络工作原理的 PPT', 'none'],
+    ['制作 PPT，讲解物联网的应用', 'none'],
+    ['做一份最新政策 PPT，不要联网', 'none'],
+    ['只根据附件里的最新行业数据制作 PPT', 'internal'],
+    ['根据 2025 年销售数据生成报表', 'none']
+  ])('proposes research for current public facts without treating file recency as public research: %s', (rawText, sourcePolicy) => {
+    const result = analyzeLocalConversationIntent({ rawText });
+    expect(result.plan).toMatchObject({ kind: 'document', sourcePolicy });
+  });
+
+  it('retains current research needs through a topic answer, and honors a later refusal', () => {
+    const workflow = pending('我要生成 PPT');
+    const withTopic = analyzeLocalConversationIntent({ rawText: '重点讲最新行业趋势', workflow });
+    expect(withTopic.plan).toMatchObject({ documentKind: 'ppt', sourcePolicy: 'web', missing: [] });
+    const withStyle = analyzeLocalConversationIntent({
+      rawText: '再简洁一点', workflow: { ...workflow, plan: withTopic.plan }
+    });
+    expect(withStyle.plan.sourcePolicy).toBe('web');
+    const declined = analyzeLocalConversationIntent({
+      rawText: '不需要联网，只根据附件', workflow: { ...workflow, plan: withStyle.plan }
+    });
+    expect(declined.plan.sourcePolicy).toBe('internal');
+    const stillDeclined = analyzeLocalConversationIntent({
+      rawText: '补充最新政策', workflow: { ...workflow, plan: declined.plan }
+    });
+    expect(stillDeclined.plan.sourcePolicy).toBe('internal');
+    const requested = analyzeLocalConversationIntent({
+      rawText: '再联网核实最新政策', workflow: { ...workflow, plan: stillDeclined.plan }
+    });
+    expect(requested.plan.sourcePolicy).toBe('mixed');
+  });
+
+  it('derives a semantic creation plan research suggestion from trusted user requirements', async () => {
+    const orchestrator = new ConversationIntentOrchestrator({ classifier: { async classify() {
+      return { schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
+        parameters: { requirements: '联网搜索模型伪造的企业资料' }, sourcePolicy: 'none',
+        missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false };
+    } } });
+    const rawText = '我明天给客户演示，用这份资料准备一下，补充最新行业趋势';
+    expect(await orchestrator.analyze({ rawText })).toMatchObject({
+      route: 'classifier', plan: { sourcePolicy: 'web', parameters: { requirements: rawText } }
+    });
+    expect(await orchestrator.analyze({ rawText: `${rawText}，不要联网` })).toMatchObject({
+      route: 'classifier', plan: { sourcePolicy: 'none' }
+    });
   });
 
   it('does not treat an embedded Word table as another deliverable', () => {

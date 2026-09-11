@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "usage": "production",
+  "engine": "ffmpeg",
+  "platform": "win32",
+  "architecture": "x64",
+  "version": "",
+  "files": [
+    { "path": "bin/ffmpeg.exe", "sha256": "" },
+    { "path": "bin/ffprobe.exe", "sha256": "" }
+  ]
+}

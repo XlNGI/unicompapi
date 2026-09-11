@@ -189,18 +189,28 @@ test('manual model registration stays collapsed behind an accessible add icon', 
   assert.match(pageStyles, /\.uc-provider-page__icon-button\[aria-expanded='true'\]/);
 });
 
-test('model summary stays docked at the page bottom as a compact always-visible row', () => {
+test('model summary stays in the catalog flow without overlapping the global task dock', () => {
+  const summaryStyles = pageStyles.match(/\.uc-provider-page__capabilities \{([^}]+)\}/)?.[1] ?? '';
   assert.match(manage, /className="uc-provider-page__summary-features" aria-label="产品功能"/);
   assert.match(manage, /selectedModel\.productFeatures\.map/);
   assert.match(manage, /uc-provider-page__summary-feature/);
   assert.match(manage, /selectedModel\.providerModelKey\.toLocaleLowerCase\('zh-CN'\) !==/);
-  assert.doesNotMatch(manage, /modelSummaryOpen|provider-model-summary-details|LuChevron/);
-  assert.match(pageStyles, /\.uc-provider-page__capabilities \{[\s\S]*?position: fixed;[\s\S]*?right: 0;[\s\S]*?bottom: 0;[\s\S]*?left: 200px;/);
-  assert.match(pageStyles, /border-radius: 0;/);
-  assert.match(pageStyles, /padding: var\(--uc-space-2\) calc\(var\(--uc-space-4\) \+ var\(--uc-space-6\)\);/);
-  assert.match(pageStyles, /\.uc-provider-page__capabilities \{[\s\S]*?background: var\(--uc-navigation-surface\);/);
-  assert.match(pageStyles, /padding-bottom: calc\(56px \+ var\(--uc-space-4\)\);/);
-  assert.match(pageStyles, /\.uc-provider-page__summary-features \{[\s\S]*?max-height: 42px;[\s\S]*?overflow: hidden;/);
+  assert.match(manage, /activeTab === 'models'[\s\S]*?<aside aria-label="模型概要"[\s\S]*?aria-label="搜索模型"/);
+  assert.doesNotMatch(summaryStyles, /position:\s*(fixed|absolute)|z-index|overflow:\s*hidden/);
+  assert.match(summaryStyles, /background: var\(--uc-color-surface-panel\)/);
+});
+
+test('native search configuration belongs only to the selected text model and opens on demand', () => {
+  assert.match(manage, /feature === 'text_chat' \|\| feature === 'text_reasoning'/);
+  assert.match(manage, /selectedModel && canConfigureNativeSearch && providersApi\?\.setNativeSearch/);
+  assert.match(manage, /<details className="uc-provider-page__native-search" key=\{selectedModel\.modelId\}>/);
+  assert.match(manage, /setSearchProtocol\(selectedModel\?\.nativeSearch\?\.protocol \?\? null\)/);
+  assert.match(manage, /setSearchEvidence\(selectedModel\?\.nativeSearch\?\.evidenceUrl \?\? ''\)/);
+  assert.match(manage, /\[selectedModel\?\.modelId, selectedModel\?\.nativeSearch\?\.protocol, selectedModel\?\.nativeSearch\?\.evidenceUrl\]/);
+  assert.match(manage, /placeholder="请选择已确认支持的协议"/);
+  assert.match(manage, /disabled=\{busy \|\| !searchProtocol/);
+  assert.match(manage, /仅配置当前连接下的/);
+  assert.doesNotMatch(manage, /连接提供的搜索协议|当前连接的协议依据/);
 });
 
 test('deleted connections are never listed in the manage view', () => {

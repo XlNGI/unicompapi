@@ -106,7 +106,7 @@ export function ProviderManageView({
 }: ProviderManageViewProps) {
   const [manualModelOpen, setManualModelOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
-  const [searchProtocol, setSearchProtocol] = useState<'kimi_builtin' | 'glm_web_search'>('kimi_builtin');
+  const [searchProtocol, setSearchProtocol] = useState<'kimi_builtin' | 'glm_web_search' | null>(null);
   const [searchEvidence, setSearchEvidence] = useState('');
   const selectedConnection = registry.connections.find(
     (item) => item.connectionId === selectedConnectionId
@@ -124,6 +124,14 @@ export function ProviderManageView({
   );
   const selectedModel = connectionModels.find((item) => item.modelId === selectedModelId)
     ?? connectionModels[0];
+  const canConfigureNativeSearch = selectedModel?.productFeatures?.some(
+    (feature) => feature === 'text_chat' || feature === 'text_reasoning'
+  ) ?? false;
+
+  useEffect(() => {
+    setSearchProtocol(selectedModel?.nativeSearch?.protocol ?? null);
+    setSearchEvidence(selectedModel?.nativeSearch?.evidenceUrl ?? '');
+  }, [selectedModel?.modelId, selectedModel?.nativeSearch?.protocol, selectedModel?.nativeSearch?.evidenceUrl]);
 
   useEffect(() => {
     onSelectModel(connectionModels[0]?.modelId ?? '');
@@ -308,6 +316,76 @@ export function ProviderManageView({
                   </div>
                 </div>
 
+                <aside aria-label="模型概要" className="uc-provider-page__capabilities">
+                  <div className="uc-provider-page__summary-bar">
+                    <div className="uc-provider-page__summary-heading">
+                      <h2>模型概要</h2>
+                      {selectedModel ? (
+                        <p>
+                          <strong>{selectedModel.displayName}</strong>
+                          {selectedModel.providerModelKey.toLocaleLowerCase('zh-CN') !==
+                            selectedModel.displayName.toLocaleLowerCase('zh-CN') && (
+                            <span>{selectedModel.providerModelKey}</span>
+                          )}
+                        </p>
+                      ) : <p><span>从模型目录选择模型</span></p>}
+                    </div>
+                    <div className="uc-provider-page__summary-actions">
+                      {selectedModel && (
+                        <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>
+                          {selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无功能配置'}
+                        </StatusPill>
+                      )}
+                    </div>
+                    <div className="uc-provider-page__summary-features" aria-label="产品功能">
+                      {selectedModel?.productFeatures?.length ? selectedModel.productFeatures.map((feature) => (
+                        <span className="uc-provider-page__summary-feature" key={feature}>
+                          {productFeatureLabels[feature] ?? '其他功能'}
+                        </span>
+                      )) : (
+                        <span className="uc-provider-page__muted">
+                          {selectedModel ? '没有可公开的精确功能配置' : '未选择模型'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {selectedModel && canConfigureNativeSearch && providersApi?.setNativeSearch && (
+                    <details className="uc-provider-page__native-search" key={selectedModel.modelId}>
+                      <summary>当前模型的联网搜索设置</summary>
+                      <form className="uc-provider-page__stack-form" onSubmit={event => {
+                        event.preventDefault();
+                        if (busy || !searchProtocol || !searchEvidence.trim().startsWith('https://')) return;
+                        void runAction(() => providersApi.setNativeSearch!({
+                          modelId: selectedModel.modelId, expectedRevision: selectedModel.revision,
+                          protocol: searchProtocol, enabled: true, evidenceUrl: searchEvidence.trim()
+                        }), '已记录当前模型的搜索协议声明；每次使用仍需会话授权。', selectedConnectionId);
+                      }}>
+                        <p>原生联网：{selectedModel.nativeSearch ? `${selectedModel.nativeSearch.protocol === 'kimi_builtin' ? 'Kimi' : '智谱'} / ${selectedModel.nativeSearch.state === 'verified' ? '已验证' : selectedModel.nativeSearch.state === 'unsupported' ? '已禁用' : '已声明，未实测'}` : '未单独配置'}</p>
+                        <p className="uc-provider-page__muted">仅配置当前连接下的「{selectedModel.displayName}」。请按服务商文档选择协议；保存不会发起联网请求，每次使用仍需会话授权。</p>
+                        <div className="uc-provider-page__native-search-field">
+                          <span>当前模型支持的搜索协议</span>
+                          <SelectPicker aria-label="当前模型支持的搜索协议" cleanable={false} searchable={false}
+                            block disabled={busy} placeholder="请选择已确认支持的协议" value={searchProtocol}
+                            data={[{ value: 'kimi_builtin', label: 'Kimi 内置搜索' }, { value: 'glm_web_search', label: '智谱对话搜索' }]}
+                            onChange={value => { if (value === 'kimi_builtin' || value === 'glm_web_search') setSearchProtocol(value); }} />
+                        </div>
+                        <label>当前模型的协议依据
+                          <Input required disabled={busy} type="url" placeholder="服务商确认支持该协议的 HTTPS 文档" value={searchEvidence} onChange={setSearchEvidence} maxLength={2048} />
+                        </label>
+                        <div className="uc-provider-page__header-actions">
+                          <Button disabled={busy || !searchProtocol || !searchEvidence.trim().startsWith('https://')} type="submit">保存协议声明</Button>
+                          {selectedModel.nativeSearch && selectedModel.nativeSearch.state !== 'unsupported' && (
+                            <Button disabled={busy} type="button" variant="secondary" onClick={() => void runAction(() => providersApi.setNativeSearch!({
+                              modelId: selectedModel.modelId, expectedRevision: selectedModel.revision, protocol: selectedModel.nativeSearch!.protocol,
+                              evidenceUrl: selectedModel.nativeSearch!.evidenceUrl, enabled: false
+                            }), '已禁用当前模型的联网搜索。', selectedConnectionId)}>禁用联网</Button>
+                          )}
+                        </div>
+                      </form>
+                    </details>
+                  )}
+                </aside>
+
                 {selectedConnection.state === 'available' && manualModelOpen && (
                   <form className="uc-provider-page__inline-form" id="provider-manual-model-form" onSubmit={onRegisterModel}>
                     <div className="uc-provider-page__manual-model-copy">
@@ -430,63 +508,6 @@ export function ProviderManageView({
           </>
         )}
       </section>
-
-      <aside aria-label="模型概要" className="uc-provider-page__capabilities">
-        <div className="uc-provider-page__summary-bar">
-          <div className="uc-provider-page__summary-heading">
-            <h2>模型概要</h2>
-            {selectedModel ? (
-              <p>
-                <strong>{selectedModel.displayName}</strong>
-                {selectedModel.providerModelKey.toLocaleLowerCase('zh-CN') !==
-                  selectedModel.displayName.toLocaleLowerCase('zh-CN') && (
-                  <span>{selectedModel.providerModelKey}</span>
-                )}
-              </p>
-            ) : <p><span>从模型目录选择模型</span></p>}
-          </div>
-          <div className="uc-provider-page__summary-actions">
-            {selectedModel && (
-              <StatusPill tone={toneForState(selectedModel.profileStatus ?? 'unknown')}>
-                {selectedModel.profileStatus ? profileLabels[selectedModel.profileStatus] : '无功能配置'}
-              </StatusPill>
-            )}
-          </div>
-          {selectedModel && providersApi?.setNativeSearch && (
-            <form className="uc-provider-page__stack-form" onSubmit={event => {
-              event.preventDefault();
-              void runAction(() => providersApi!.setNativeSearch!({ modelId: selectedModel.modelId, expectedRevision: selectedModel.revision,
-                protocol: searchProtocol, enabled: true, evidenceUrl: searchEvidence }), '已记录当前模型的搜索协议声明；每次使用仍需会话授权。', selectedConnectionId);
-            }}>
-              <p>原生联网：{selectedModel.nativeSearch ? `${selectedModel.nativeSearch.protocol === 'kimi_builtin' ? 'Kimi' : '智谱'} / ${selectedModel.nativeSearch.state === 'verified' ? '已验证' : selectedModel.nativeSearch.state === 'unsupported' ? '已禁用' : '已声明，未实测'}` : '未单独配置'}</p>
-              <div><span>连接提供的搜索协议</span>
-                <SelectPicker aria-label="连接提供的搜索协议" cleanable={false} searchable={false} value={searchProtocol}
-                  data={[{ value: 'kimi_builtin', label: 'Kimi 内置搜索' }, { value: 'glm_web_search', label: '智谱对话搜索' }]}
-                  onChange={value => { if (value === 'kimi_builtin' || value === 'glm_web_search') setSearchProtocol(value); }} />
-              </div>
-              <label>当前连接的协议依据
-                <Input required type="url" placeholder="服务商确认支持该协议的 HTTPS 文档" value={searchEvidence} onChange={setSearchEvidence} maxLength={2048} />
-              </label>
-              <Button disabled={busy || !searchEvidence.startsWith('https://')} type="submit">保存协议声明</Button>
-              {selectedModel.nativeSearch && <Button disabled={busy} type="button" onClick={() => void runAction(() => providersApi!.setNativeSearch!({
-                modelId: selectedModel.modelId, expectedRevision: selectedModel.revision, protocol: selectedModel.nativeSearch!.protocol,
-                evidenceUrl: selectedModel.nativeSearch!.evidenceUrl, enabled: false
-              }), '已禁用当前模型的联网搜索。', selectedConnectionId)}>禁用联网</Button>}
-            </form>
-          )}
-          <div className="uc-provider-page__summary-features" aria-label="产品功能">
-            {selectedModel?.productFeatures?.length ? selectedModel.productFeatures.map((feature) => (
-              <span className="uc-provider-page__summary-feature" key={feature}>
-                {productFeatureLabels[feature] ?? '其他功能'}
-              </span>
-            )) : (
-              <span className="uc-provider-page__muted">
-                {selectedModel ? '没有可公开的精确功能配置' : '未选择模型'}
-              </span>
-            )}
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }

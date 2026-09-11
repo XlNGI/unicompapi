@@ -44,3 +44,9 @@ temp/
 *.AppImage
 release/
 release-nsis/
+release-store/
+*.appx
+*.appxupload
+*.msix
+*.msixupload
+config/microsoft-store.local.json

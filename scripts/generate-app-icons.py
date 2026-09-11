@@ -41,7 +41,19 @@ def generate() -> None:
     header_mark = ImageOps.contain(mark, (42, 45), Image.Resampling.LANCZOS)
     header.alpha_composite(header_mark, (146 - header_mark.width, (57 - header_mark.height) // 2))
     header.convert("RGB").save(OUTPUT / "installer-header.bmp")
-    print("Generated icon.png, icon.ico, icon.icns and installer-header.bmp")
+    appx = OUTPUT / "appx"
+    appx.mkdir(exist_ok=True)
+    for name, width, height in (
+        ("StoreLogo", 50, 50), ("Square150x150Logo", 150, 150),
+        ("Square44x44Logo", 44, 44), ("Wide310x150Logo", 310, 150),
+    ):
+        for scale in (1, 2, 4):
+            tile = Image.new("RGBA", (width * scale, height * scale))
+            fitted_icon = ImageOps.contain(icon, tile.size, Image.Resampling.LANCZOS)
+            tile.alpha_composite(fitted_icon, ((tile.width - fitted_icon.width) // 2, (tile.height - fitted_icon.height) // 2))
+            suffix = "" if scale == 1 else f".scale-{scale * 100}"
+            tile.save(appx / f"{name}{suffix}.png", optimize=True)
+    print("Generated desktop, NSIS and Microsoft Store AppX icon assets")
 
 
 if __name__ == "__main__":
