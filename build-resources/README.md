@@ -6,6 +6,7 @@
 - `icon.png`：1024×1024，Electron 窗口使用；随应用打入 ASAR，开发与安装环境均可读取。
 - `icon.icns`：macOS 打包图标资源。提供资源不表示 macOS 构建、签名、公证或实机验收已完成。
 - `installer-header.bmp`：150×57、24 位 RGB，当前 NSIS 向导安装器的顶部 Logo。
+- `appx/`：Microsoft Store AppX 清单使用的 StoreLogo、方形图标和宽磁贴，包含默认、200%、400% 三档。由相同生成器输出，避免打包工具回退到 SampleAppx 默认图标。
 
 需要调整资源时，在仓库根目录运行 `python scripts/generate-app-icons.py`（Python 3 + Pillow）。正常应用构建直接使用这些已生成文件，不依赖 Python。生成器只读取现有 Logo，不访问网络；原始素材为 149×167 PNG，高分辨率输出是重采样，后续有正式矢量原稿时可替换生成源。
 

@@ -17,6 +17,8 @@ import {
   SettingsController,
   UpdatesService
 } from '../../src/platform';
+import type { MediaEngineAdapter } from '../../src/platform/videos/media-engine-adapter';
+import { createRuntimeMediaEngine } from './runtime-media-engine';
 import {
   directoryPurposes,
   settingsIpcChannels
@@ -47,8 +49,14 @@ export interface SettingsIpcLifecycle {
   dispose(): void;
 }
 
-export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
+export function registerSettingsIpcHandlers(options: {
+  readonly getMediaEngine?: () => MediaEngineAdapter | undefined;
+} = {}): SettingsIpcLifecycle {
   const userDataPath = app.getPath('userData');
+  const mediaEngine = options.getMediaEngine ? options.getMediaEngine() : createRuntimeMediaEngine({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath
+  });
   const repository = new JsonSettingsRepository(
     path.join(userDataPath, 'settings', 'settings.json')
   );
@@ -89,7 +97,7 @@ export function registerSettingsIpcHandlers(): SettingsIpcLifecycle {
       directoryMigration: new DirectoryMigrationService(directoryRegistry),
       cleanup: new CleanupService(userDataPath, directoryRegistry),
       performance: new PerformancePolicyService(),
-      media: new MediaSettingsStatusService()
+      media: new MediaSettingsStatusService(() => mediaEngine, app.isPackaged)
     },
     {
       privacy: new PrivacyPermissionService(new ElectronPermissionAdapter()),

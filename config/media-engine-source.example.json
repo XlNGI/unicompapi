@@ -1,0 +1,7 @@
+{
+  "ffmpegRevision": "",
+  "buildRecipeUrl": "",
+  "sourceArchives": [
+    { "path": "sources/ffmpeg-and-dependencies.zip", "sha256": "" }
+  ]
+}

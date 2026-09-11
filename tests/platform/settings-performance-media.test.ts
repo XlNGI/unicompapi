@@ -112,4 +112,34 @@ describe('MediaSettingsStatusService', () => {
         softwareExportBlockedByHardwareFailure: false
       });
   });
+
+  it('distinguishes an unavailable packaged component from development setup', async () => {
+    const status = await new MediaSettingsStatusService(() => undefined, true).getStatus();
+    expect(status.engine).toMatchObject({
+      state: 'unavailable',
+      reason: 'packaged_media_engine_unavailable',
+      distributionScope: 'not_configured',
+      supportsSoftwareExport: false
+    });
+  });
+
+  it('reports production scope only after the packaged adapter probes successfully', async () => {
+    const adapter = {
+      descriptor: { adapterId: 'ffmpeg', adapterVersion: '8.1.2' },
+      getCapabilities: async () => ({
+        descriptor: { adapterId: 'ffmpeg', adapterVersion: '8.1.2' },
+        version: 'ffmpeg version 8.1.2',
+        supportsProbe: true,
+        supportsPreview: true,
+        supportsExport: true
+      })
+    } as unknown as MediaEngineAdapter;
+    const status = await new MediaSettingsStatusService(() => adapter, true).getStatus();
+    expect(status.engine).toMatchObject({
+      state: 'available',
+      distributionScope: 'production',
+      supportsSoftwareExport: true
+    });
+    expect(JSON.stringify(status)).not.toMatch(/resourcesPath|ffmpegPath|ffprobePath/);
+  });
 });

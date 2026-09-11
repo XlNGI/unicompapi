@@ -1394,7 +1394,7 @@ function MediaSettingsPanel({ directories, disabled, onChange, onHardware, onMig
           <Metric label="引擎状态" value={capabilityLabel(status.engine)} />
           <Metric label="适配器" value={status.engine.adapterId ? '已配置' : '未配置'} />
           <Metric label="版本" value={status.engine.version ?? '未知'} />
-          <Metric label="分发范围" value={status.engine.distributionScope === 'development_test_only' ? '仅本地开发/测试' : '未配置'} />
+          <Metric label="分发范围" value={status.engine.distributionScope === 'production' ? '随应用安装' : status.engine.distributionScope === 'development_test_only' ? '仅本地开发/测试' : '未配置'} />
         </div>
         <div className="uc-settings__group-actions">
           <Button disabled={disabled} onClick={onRefresh} variant="secondary">重新检查媒体环境</Button>
@@ -2186,7 +2186,7 @@ function CategorySystemStatus({ activeCategory, maintenance, status, unit }: {
         <h3>媒体与回退</h3>
         <dl className="uc-settings__facts">
           <Fact label="媒体引擎" value={capabilityLabel(status.media.engine)} />
-          <Fact label="组件范围" value={status.media.engine.distributionScope === 'development_test_only' ? '仅开发/测试' : '未配置'} />
+          <Fact label="组件范围" value={status.media.engine.distributionScope === 'production' ? '随应用安装' : status.media.engine.distributionScope === 'development_test_only' ? '仅开发/测试' : '未配置'} />
           <Fact label="硬件加速" value={capabilityLabel(status.media.hardwareAcceleration)} />
           <Fact label="软件回退" value={status.media.automaticSoftwareFallback ? '已启用' : '未启用'} />
         </dl>

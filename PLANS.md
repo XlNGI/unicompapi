@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 微软商店正式发布与 FFmpeg 随包分发（2026-09-11）
+
+已加入 Windows x64 AppX 构建脚本、Partner Center 身份门禁、AppX 图标生成、生产媒体组件哈希/路径/源码归档校验，以及安装后从 `resources/media-engine` 加载 FFmpeg 的运行时接线。正式发布仍被两项外部材料阻断：Partner Center 产品标识尚未填入，当前 `.tools` FFmpeg 与记录版本不一致且缺少可审计的完整源码/依赖许可归档。不得用开发目录或合成身份生成可上传包。具体命令和材料清单见 [微软商店正式发布](docs/current/MICROSOFT_STORE_FORMAL_RELEASE.md)。
+
+首发版本已设为 `1.0.0`。TypeScript、lint、生产构建与平台审计通过；全量 Vitest 214 文件 1652/1652，Node/UI 最终 369/370（唯一既有失败仍是已删除 handoff 校验清单缺失），打包定向 9/9。隔离资源目录真实 MP4 探测、VP9 软件导出通过；包含媒体测试夹具的真实 AppX 构建及内置二进制 Hash 核对通过。验证包使用合成身份，不可上传。尚未执行真实身份打包、生产媒体来源完整性复核、安装/WACK、商店审核；下一步由负责人提供 Partner Center 四项公开身份字段，工程侧固定媒体构建和完整源码归档，再做安装验收与提交。此批改动尚未提交或合并，不恢复之前删除文件。
+
 ### 安装包与快捷方式 Logo 补齐（2026-09-11）
 
 负责人指出安装包和快捷方式未设置 Logo。基于最新 develop `3e2fc80` 在独立维护分支补齐现有品牌 ICO/PNG/ICNS、NSIS 向导页眉、主程序/安装器/卸载器图标，以及窗口图标与 Windows AppUserModelID。图标变更已增量同步主工作区，原有未提交修复保留。真实生产构建和 Windows x64 NSIS 打包通过，主 EXE/安装器 9 层图标逐帧 Hash 与源 ICO 一致，ASAR 内 PNG/最终 main.js 校验通过；类型/lint/平台审计通过。首轮工具缓存符号链接权限失败已记录，补齐 Windows 工具缓存后重打成功；未用禁用资源编辑绕过。样包未签名、未安装、未上架；不含主工作区未提交对话修复，不作为正式交付版本。实现、证据和后续安装验收边界见 [安装图标维护记录](docs/current/WINDOWS_PACKAGE_ICONS.md)。

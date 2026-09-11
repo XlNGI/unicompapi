@@ -1,6 +1,6 @@
 {
   "name": "unicomp-desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "UniComp desktop application built with Electron, React and TypeScript.",
   "license": "Apache-2.0",
@@ -12,6 +12,8 @@
     "verify:media-engine": "node scripts/verify-media-engine.mjs",
     "package:win": "pnpm build && electron-builder --win nsis --config electron-builder.yml",
     "package:win:dir": "pnpm build && electron-builder --win dir --config electron-builder.yml",
+    "package:store:check": "node scripts/package-microsoft-store.mjs --check",
+    "package:store": "node scripts/package-microsoft-store.mjs",
     "verify:handoff": "node scripts/verify-handoff.mjs",
     "audit:platform": "node scripts/audit-platform-assumptions.mjs",
     "verify:recovery-audit": "node scripts/verify-phase9-recovery-audit.mjs",

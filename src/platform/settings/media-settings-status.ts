@@ -7,7 +7,8 @@ import {
 export class MediaSettingsStatusService {
   constructor(
     private readonly createAdapter: () => MediaEngineAdapter | undefined = () =>
-      createFfmpegMediaEngineAdapterFromEnvironment()
+      createFfmpegMediaEngineAdapterFromEnvironment(),
+    private readonly isPackaged = false
   ) {}
 
   async getStatus(): Promise<SettingsSystemStatusDto['media']> {
@@ -17,7 +18,9 @@ export class MediaSettingsStatusService {
         engine: {
           id: 'media_engine',
           state: 'unavailable',
-          reason: 'development_media_engine_not_configured',
+          reason: this.isPackaged
+            ? 'packaged_media_engine_unavailable'
+            : 'development_media_engine_not_configured',
           distributionScope: 'not_configured',
           supportsProbe: false,
           supportsPreview: false,
@@ -40,7 +43,7 @@ export class MediaSettingsStatusService {
           state: 'available',
           adapterId: capabilities.descriptor.adapterId,
           version: capabilities.version,
-          distributionScope: 'development_test_only',
+          distributionScope: this.isPackaged ? 'production' : 'development_test_only',
           supportsProbe: capabilities.supportsProbe,
           supportsPreview: capabilities.supportsPreview,
           supportsSoftwareExport: capabilities.supportsExport
@@ -60,7 +63,7 @@ export class MediaSettingsStatusService {
           state: 'failed',
           reason: 'media_engine_probe_failed',
           adapterId: adapter.descriptor.adapterId,
-          distributionScope: 'development_test_only',
+          distributionScope: this.isPackaged ? 'production' : 'development_test_only',
           supportsProbe: false,
           supportsPreview: false,
           supportsSoftwareExport: false

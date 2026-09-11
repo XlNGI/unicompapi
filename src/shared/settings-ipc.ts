@@ -204,7 +204,7 @@ export interface SettingsSystemStatusDto {
     readonly engine: SettingsCapabilityDto & {
       readonly adapterId?: string;
       readonly version?: string;
-      readonly distributionScope: 'development_test_only' | 'not_configured';
+      readonly distributionScope: 'production' | 'development_test_only' | 'not_configured';
       readonly supportsProbe: boolean;
       readonly supportsPreview: boolean;
       readonly supportsSoftwareExport: boolean;
