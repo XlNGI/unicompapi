@@ -69,7 +69,8 @@ test('professional image requires an explicit text or reference feature', () => 
   assert.match(professionalSource, /aria-label="添加图片"/);
   assert.match(professionalSource, /onClick=\{\(\) => void selectReference\(\)\}/);
   assert.match(professionalSource, /uc-image-professional__preview-overlay/);
-  assert.match(professionalSource, /uc-image-professional__preview-meta/);
+  // 缩略图上不再叠加“文件名 · 宽 × 高”标签
+  assert.doesNotMatch(professionalSource, /uc-image-professional__preview-meta/);
   assert.doesNotMatch(professionalSource, /<strong>项目图片<\/strong>/);
   assert.match(professionalSource, /aria-label="删除图片"/);
   assert.match(professionalSource, /onClick=\{\(\) => void clearReference\(\)\}/);
@@ -103,7 +104,8 @@ test('professional image embeds a compact reference control in the enlarged prom
 test('professional image can drag a verified result into the reference slot', () => {
   assert.match(historySource, /imageWorkDragDataType/);
   assert.match(historySource, /handleWorkDragStart/);
-  assert.match(historySource, /draggable=\{Boolean\(selectedWorkId\)\}/);
+  assert.match(historySource, /draggable=\{Boolean\(selectedWorkId && mediaKind === 'image'\)\}/);
+  assert.match(historySource, /onDragStart=\{selectedWorkId && mediaKind === 'image'/);
   assert.match(professionalSource, /onDropWork=\{\(workId\)/);
   assert.match(professionalSource, /imageWorkspaces\.useWorkAsInput\(/);
   assert.doesNotMatch(professionalSource, /uc-image-professional__after-drop-zone/);

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const history = await readFile('src/components/GenerationHistory.tsx', 'utf8');
+const preview = await readFile('src/components/VideoPreview.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
 const consumers = await Promise.all([
   ['src/pages/creation/image/ImageProfessionalWorkspace.tsx', 'image'],
@@ -41,7 +42,7 @@ test('shared history supports image and video previews with stable selection', (
   assert.match(history, /mediaKind === 'image'/);
   assert.match(history, /<img/);
   assert.match(history, /<video/);
-  assert.match(history, /preload="none"/);
+  assert.match(history, /preload="metadata"/);
   assert.match(history, /loading="lazy"/);
   assert.match(history, /decoding="async"/);
   assert.match(history, /IntersectionObserver/);
@@ -56,12 +57,19 @@ test('shared history supports image and video previews with stable selection', (
     styles,
     /\.uc-generation-history__preview \.uc-generation-result-preview\s*{[\s\S]*grid-template-rows: minmax\(0, 1fr\);/
   );
-  assert.match(styles, /\.uc-generation-history__preview \.uc-generation-result-preview video/);
   assert.match(styles, /\.uc-generation-history__work video/);
+  assert.match(preview, /setExpanded\(\(value\) => !value\)/);
+  assert.match(preview, /controlsList="nofullscreen"/);
+  assert.match(preview, /event\.key === 'Escape'/);
+  assert.match(preview, /uc-video-preview--expanded/);
+  assert.match(styles, /\.uc-video-preview--expanded\s*{[\s\S]*position: fixed;[\s\S]*z-index: 1000;[\s\S]*inset: 0;/);
+  assert.match(styles, /\.uc-generation-history__preview \.uc-generation-result-preview video/);
   assert.match(
     styles,
     /\.uc-generation-history__preview \.uc-generation-result-preview img,[\s\S]*\.uc-generation-history__preview \.uc-generation-result-preview video\s*{[\s\S]*width: 100%;[\s\S]*height: 100%;[\s\S]*object-fit: contain;/
   );
+  // 拖拽仅对图片开放，视频结果不可拖拽
+  assert.match(history, /draggable=\{Boolean\(selectedWorkId && mediaKind === 'image'\)\}/);
 });
 
 test('shared history maps wheel gestures to horizontal overflow without trapping boundaries', () => {

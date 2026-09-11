@@ -15,9 +15,11 @@ import { imageWorkDragDataType } from '../shared/image-workspace-ipc';
 
 interface GenerationHistoryProps {
   readonly draftId: string;
+  readonly extraDraftIds?: readonly string[];
   readonly mediaKind: 'image' | 'video';
   readonly projectId: string;
   readonly refreshKey: number;
+  readonly expectedWorkId?: string;
   readonly submissionProgress: {
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -99,21 +101,27 @@ const liveUncertainPhases = new Set<SubmissionProgressPhase>([
 
 export function GenerationHistory({
   draftId,
+  extraDraftIds,
   mediaKind,
   projectId,
   refreshKey,
+  expectedWorkId,
   submissionProgress
 }: GenerationHistoryProps) {
   const storage = window.unicomp?.storage;
   const [works, setWorks] = useState<readonly HistoryWork[]>([]);
   const [tasks, setTasks] = useState<readonly HistoryTask[]>([]);
-  const [nextCursor, setNextCursor] = useState<string>();
-  const [loadingMore, setLoadingMore] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [liveStartedAt, setLiveStartedAt] = useState<string>();
   const [selectedWorkId, setSelectedWorkId] = useState<string>();
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // 当前模式下所有草稿ID（当前草稿 + 同模式兄弟草稿），用于按模式过滤历史
+  const modeDraftIds = useMemo(
+    () => Array.from(new Set([draftId, ...(extraDraftIds ?? [])])),
+    [draftId, extraDraftIds]
+  );
 
   useEffect(() => {
     setLiveStartedAt(undefined);
@@ -122,22 +130,46 @@ export function GenerationHistory({
 
   useEffect(() => {
     let cancelled = false;
+    // [DIAG image-auto-select] 临时诊断：每次历史拉取的全貌
+    const diag = {
+      refreshKey,
+      expectedWorkId,
+      draftCount: modeDraftIds.length,
+      startedAt: Date.now()
+    };
 
     if (!storage) {
       setWorks([]);
       setTasks([]);
-      setNextCursor(undefined);
       setLoadFailed(true);
       setHistoryLoaded(true);
       return;
     }
 
     setHistoryLoaded(false);
-    void loadHistory(storage, draftId, projectId, mediaKind).then((history) => {
-      if (cancelled) return;
+    console.log('[DIAG image-auto-select] fetch start', diag);
+    void loadProjectHistory(storage, projectId, mediaKind, modeDraftIds).then((history) => {
+      const expectedPresent = expectedWorkId
+        ? history.works.some((work) => work.workId === expectedWorkId)
+        : null;
+      if (cancelled) {
+        console.log('[DIAG image-auto-select] fetch result IGNORED (cancelled/superseded)', {
+          ...diag,
+          works: history.works.length,
+          latestWorkId: history.works[history.works.length - 1]?.workId,
+          expectedPresent
+        });
+        return;
+      }
+      console.log('[DIAG image-auto-select] fetch APPLIED', {
+        ...diag,
+        works: history.works.length,
+        latestWorkId: history.works[history.works.length - 1]?.workId,
+        expectedPresent,
+        waitedMs: Date.now() - diag.startedAt
+      });
       setWorks(history.works);
       setTasks(history.tasks);
-      setNextCursor(history.nextCursor);
       setSelectedWorkId(history.works[history.works.length - 1]?.workId);
       setLoadFailed(false);
       setHistoryLoaded(true);
@@ -145,15 +177,15 @@ export function GenerationHistory({
       if (cancelled) return;
       setWorks([]);
       setTasks([]);
-      setNextCursor(undefined);
       setLoadFailed(true);
       setHistoryLoaded(true);
     });
 
     return () => {
       cancelled = true;
+      console.log('[DIAG image-auto-select] effect cleanup (previous fetch superseded?)', diag);
     };
-  }, [draftId, mediaKind, projectId, refreshKey, storage]);
+  }, [mediaKind, modeDraftIds, projectId, refreshKey, expectedWorkId, storage]);
 
   useEffect(() => {
     const phase = submissionProgress.phase;
@@ -230,28 +262,6 @@ export function GenerationHistory({
     event.dataTransfer.setData('text/plain', workId);
   }
 
-  async function loadOlderHistory() {
-    if (!storage || !nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const history = await loadHistory(
-        storage,
-        draftId,
-        projectId,
-        mediaKind,
-        nextCursor
-      );
-      setWorks((current) => sortHistoryWorks([...history.works, ...current]));
-      setTasks((current) => sortHistoryTasks([...history.tasks, ...current]));
-      setNextCursor(history.nextCursor);
-      setLoadFailed(false);
-    } catch {
-      setLoadFailed(true);
-    } finally {
-      setLoadingMore(false);
-    }
-  }
-
   return (
     <div className="uc-generation-history">
       <section
@@ -280,9 +290,9 @@ export function GenerationHistory({
         </header>
 
         <div
-          className={`uc-generation-history__preview${selectedWorkId ? ' is-draggable' : ''}`}
-          draggable={Boolean(selectedWorkId)}
-          onDragStart={selectedWorkId
+          className={`uc-generation-history__preview${selectedWorkId && mediaKind === 'image' ? ' is-draggable' : ''}`}
+          draggable={Boolean(selectedWorkId && mediaKind === 'image')}
+          onDragStart={selectedWorkId && mediaKind === 'image'
             ? (event) => handleWorkDragStart(event, selectedWorkId)
             : undefined}
         >
@@ -323,11 +333,7 @@ export function GenerationHistory({
             <strong>生成历史</strong>
             <span>{works.length} 张作品</span>
           </div>
-          {nextCursor ? (
-            <button disabled={loadingMore} onClick={() => void loadOlderHistory()} type="button">
-              {loadingMore ? '正在加载' : '加载更早记录'}
-            </button>
-          ) : <span>最新在右侧</span>}
+          <span>最新在右侧</span>
         </header>
 
         <div
@@ -342,11 +348,7 @@ export function GenerationHistory({
                     aria-label={`查看作品 ${node.work.name}`}
                     aria-pressed={node.work.workId === selectedWorkId}
                     className="uc-generation-history__work"
-                    draggable
                     onClick={() => setSelectedWorkId(node.work.workId)}
-                    onDragStart={(event) =>
-                      handleWorkDragStart(event, node.work.workId)
-                    }
                     type="button"
                   >
                     <HistoryMediaThumbnail
@@ -380,52 +382,53 @@ export function GenerationHistory({
   );
 }
 
-async function loadHistory(
+async function loadProjectHistory(
   storage: NonNullable<typeof window.unicomp>['storage'],
-  draftId: string,
   projectId: string,
   mediaKind: 'image' | 'video',
-  cursor?: string
+  draftIds: readonly string[]
 ): Promise<{
   readonly works: readonly HistoryWork[];
   readonly tasks: readonly HistoryTask[];
-  readonly nextCursor?: string;
 }> {
-  const result = await storage.listGenerationHistory({
-    projectId,
-    draftId,
-    mediaKind,
-    ...(cursor ? { cursor } : {}),
-    limit: 20
-  });
-  if (!result.ok) throw new Error('history_read_failed');
-  if (result.value.issues.length > 0 && result.value.items.length === 0) {
-    throw new Error('history_read_failed');
-  }
-  const works = sortHistoryWorks(
-    result.value.items.filter((item): item is HistoryWork => item.kind === 'work')
+  // 按当前模式下所有草稿ID查询后端历史，合并去重后取最近10个
+  const responses = await Promise.all(
+    draftIds.map((draftId) =>
+      storage.listGenerationHistory({
+        projectId,
+        draftId,
+        mediaKind,
+        limit: 20
+      })
+    )
   );
-  const tasks = sortHistoryTasks(result.value.items.flatMap((item) => item.kind === 'status'
-    ? [{
-        taskId: item.taskId,
-        createdAt: item.createdAt,
-        latestExecutionState: item.state,
-        latestExecutionUpdatedAt: item.occurredAt
-      }]
-    : []));
-  return { works, tasks, nextCursor: result.value.nextCursor };
+
+  const allWorks: HistoryWork[] = [];
+  let anyOk = false;
+  for (const result of responses) {
+    if (!result.ok) continue;
+    anyOk = true;
+    for (const item of result.value.items) {
+      if (item.kind === 'work') allWorks.push(item);
+    }
+  }
+
+  if (!anyOk && responses.length > 0) throw new Error('history_read_failed');
+
+  // 按 workId 去重，按时间倒序取最近10个，再反转为时间线所需的升序
+  const recentWorks = [...new Map(allWorks.map((w) => [w.workId, w])).values()]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 10);
+
+  const works = sortHistoryWorks(recentWorks);
+  const tasks: readonly HistoryTask[] = [];
+
+  return { works, tasks };
 }
 
 function sortHistoryWorks(works: readonly HistoryWork[]): readonly HistoryWork[] {
   return [...new Map(works.map((work) => [work.workId, work])).values()].sort((a, b) =>
     a.createdAt.localeCompare(b.createdAt) || a.workId.localeCompare(b.workId)
-  );
-}
-
-function sortHistoryTasks(tasks: readonly HistoryTask[]): readonly HistoryTask[] {
-  return [...new Map(tasks.map((task) => [task.taskId, task])).values()].sort((a, b) =>
-    a.latestExecutionUpdatedAt.localeCompare(b.latestExecutionUpdatedAt) ||
-    a.taskId.localeCompare(b.taskId)
   );
 }
 
@@ -547,11 +550,14 @@ function HistoryMediaThumbnail({
   ) : (
     <video
       aria-label={`${work.name} 视频缩略图`}
+      key={work.workId}
       muted
       playsInline
-      preload="none"
+      poster=""
+      preload="metadata"
       ref={elementRef as RefObject<HTMLVideoElement>}
       src={visible ? localUrl : undefined}
+      style={{ backgroundColor: 'transparent' }}
     />
   );
 }
@@ -608,25 +614,52 @@ function TimelineMarker({ tone }: {
   );
 }
 
-function formatTimelineTime(timestamp: string): string {
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function formatClockTime(date: Date): string {
   return new Intl.DateTimeFormat('zh-CN', {
     hour: '2-digit',
     hour12: false,
     minute: '2-digit'
-  }).format(new Date(timestamp));
+  }).format(date);
+}
+
+function formatTimelineTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const clock = formatClockTime(date);
+  // 今天只显示时分；今年内非今天显示月日+时分；跨年显示年月日+时分
+  if (isSameDay(date, now)) return clock;
+  if (date.getFullYear() === now.getFullYear()) {
+    const md = new Intl.DateTimeFormat('zh-CN', {
+      month: '2-digit',
+      day: '2-digit'
+    }).format(date);
+    return `${md} ${clock}`;
+  }
+  const ymd = new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+  return `${ymd} ${clock}`;
 }
 
 function formatWorkDate(timestamp: string): string {
   const date = new Date(timestamp);
-  const today = new Date();
-  const sameDay =
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth() &&
-    date.getDate() === today.getDate();
-  const time = formatTimelineTime(timestamp);
-  if (sameDay) return `今天 ${time}`;
-  return `${new Intl.DateTimeFormat('zh-CN', {
+  const now = new Date();
+  const clock = formatClockTime(date);
+  if (isSameDay(date, now)) return `今天 ${clock}`;
+  const ymd = new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).format(date)} ${time}`;
+  }).format(date);
+  return `${ymd} ${clock}`;
 }

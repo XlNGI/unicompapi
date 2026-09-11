@@ -14,11 +14,8 @@ import type {
   StorageReadModelIssueDto,
   StorageWorkDetailsDto
 } from '../../shared/storage-ipc';
-import {
-  describeGenerationSafeCode,
-  type GenerationSafeReason
-} from '../../ui/notifications/generation-failure-reasons';
 import { TaskCenterWorkspace } from './TaskCenterWorkspace';
+import { FailureDiagnostic } from './FailureDiagnostic';
 import {
   calculateSuccessfulCallFee,
   formatCallBilling,
@@ -440,7 +437,6 @@ export function CallDetails({
         <ol className="uc-task-center__timeline">
           {details.timeline.map((event) => {
             const tone = timelineEventTone(event.type);
-            const reason = timelineFailureReason(event);
             return (
               <li
                 className={`uc-task-center__timeline-item uc-task-center__timeline-item--${tone}`}
@@ -450,14 +446,7 @@ export function CallDetails({
                 <div>
                   <strong>{eventLabels[event.type] ?? '其他状态更新'}</strong>
                   <small>{formatTimestamp(event.occurredAt)}</small>
-                  {reason ? (
-                    <div className={`uc-task-center__timeline-reason uc-task-center__timeline-reason--${tone}`}>
-                      <strong>{reason.label}</strong>
-                      {reason.technicalCode ? (
-                        <code>技术代码：{reason.technicalCode}</code>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  <FailureDiagnostic event={event} />
                 </div>
               </li>
             );
@@ -864,22 +853,6 @@ function timelineEventTone(type: string): StatusTone {
   if (type === 'cancel_requested' || type === 'outcome_unknown') return 'warning';
   if (type === 'cancelled') return 'neutral';
   return 'info';
-}
-
-function timelineFailureReason(
-  event: StorageCallDetailsDto['timeline'][number]
-): GenerationSafeReason | undefined {
-  if (!['submission_failed_before_request', 'failed', 'outcome_unknown'].includes(event.type)) {
-    return undefined;
-  }
-  const safeReason = describeGenerationSafeCode(event.safeCode);
-  if (safeReason) return safeReason;
-  return {
-    label: event.type === 'outcome_unknown'
-      ? '调用结果暂时无法确认'
-      : '未记录可公开的具体失败原因',
-    recognized: true
-  };
 }
 
 function formatByteLength(value: string): string {

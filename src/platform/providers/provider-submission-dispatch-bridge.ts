@@ -84,6 +84,7 @@ export function normalizeProviderSubmitOutcome(
   if (outcome.kind === 'failed_before_submission') {
     return {
       kind: 'failed_before_submission',
+      ...(outcome.failureDiagnostic ? { failureDiagnostic: outcome.failureDiagnostic } : {}),
       safeCode: safeCodeForProviderMessage(
         outcome.message,
         'adapter.failed_before_submission'
@@ -93,6 +94,7 @@ export function normalizeProviderSubmitOutcome(
   if (outcome.kind === 'submission_outcome_unknown') {
     return {
       kind: 'unknown_outcome',
+      ...(outcome.failureDiagnostic ? { failureDiagnostic: outcome.failureDiagnostic } : {}),
       ...(outcome.providerOperationId
         ? { providerOperationId: outcome.providerOperationId }
         : {}),

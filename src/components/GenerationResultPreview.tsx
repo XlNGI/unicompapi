@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LuSparkles } from 'react-icons/lu';
 import { EmptyState } from './EmptyState';
+import { VideoPreview } from './VideoPreview';
 
 export interface GenerationResultPreviewProps {
   readonly workId?: string;
@@ -115,7 +116,7 @@ export function GenerationResultPreview({
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" decoding="async" src={localUrl} />
           ) : (
-            <video controls playsInline preload="metadata" src={localUrl} />
+            <VideoPreview key={localUrl} src={localUrl} />
           )}
         </article>
       ) : null}
@@ -137,7 +138,7 @@ export function GenerationResultPreview({
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" decoding="async" loading="lazy" src={url} />
           ) : (
-            <video controls playsInline preload="metadata" src={url} />
+            <VideoPreview src={url} />
           )}
         </article>
       ))}

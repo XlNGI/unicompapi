@@ -1149,15 +1149,7 @@
   overflow: hidden;
 }
 
-.uc-generation-history__preview.is-draggable,
-.uc-generation-history__work[draggable='true'] {
-  cursor: grab;
-}
-
-.uc-generation-history__preview.is-draggable:active,
-.uc-generation-history__work[draggable='true']:active {
-  cursor: grabbing;
-}
+.uc-generation-history__preview.is-draggable { cursor: default; }
 
 .uc-generation-history__preview > .uc-image-quick__result-list,
 .uc-generation-history__preview .uc-generation-result-preview {
@@ -1185,6 +1177,59 @@
   max-height: 100%;
   margin: 0;
   object-fit: contain;
+}
+
+.uc-video-preview {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+}
+
+.uc-video-preview video {
+  border-radius: var(--uc-radius-8);
+  background: #000;
+}
+
+.uc-video-preview video::-webkit-media-controls-fullscreen-button {
+  display: none;
+}
+
+.uc-video-preview--expanded {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: auto;
+  height: auto;
+  padding: var(--uc-space-8);
+  background: #000;
+}
+
+.uc-video-preview--expanded video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+.uc-video-preview__fullscreen {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: var(--uc-radius-8);
+  background: rgb(0 0 0 / 70%);
+  color: #fff;
+  cursor: pointer;
+}
+
+.uc-video-preview__fullscreen:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 .uc-generation-history__preview .uc-generation-result-preview__loading,
@@ -3455,12 +3500,72 @@
   width: 132px;
   height: 88px;
   gap: 0;
+  overflow: hidden;
 }
 
 .uc-image-professional__prompt-input
   > .uc-controlled-image-drop-zone
   > .uc-controlled-image-drop-zone__hint {
   display: none;
+}
+
+/*
+ * 修复首帧缩略图被放大、撑出 132x88 固定卡片的问题。
+ * 根因：dropzone 是 display:grid，必填角标占走第一条 grid 轨道，reference
+ * 落到 auto 轨道后其 height:100% 失效，并沿 reference->preview->media->img
+ * 逐层传导，img 只剩 width:100%，高度按原图比例撑开，越竖的图溢出越多。
+ * 做法（不移动卡片位置）：角标绝对定位脱离文档流；reference/preview/media
+ * 用 flex 把 88px 确定高度逐层传到 img，配合既有 object-fit:contain 让整张
+ * 图等比缩放到卡片内完整显示。
+ */
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  > .uc-dynamic-parameters__required {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  left: 4px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__reference {
+  display: flex;
+  flex-direction: column;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__preview {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__preview-media {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__preview img {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__placeholder {
+  flex: 1 1 auto;
 }
 
 .uc-image-professional__contexts--compact {
@@ -3555,25 +3660,6 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-}
-
-.uc-image-professional__preview-meta {
-  position: absolute;
-  z-index: 1;
-  top: var(--uc-space-3);
-  left: var(--uc-space-3);
-  max-width: calc(100% - var(--uc-space-6));
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--uc-color-border-default) 72%, transparent);
-  border-radius: var(--uc-radius-8);
-  padding: var(--uc-space-1) var(--uc-space-2);
-  color: var(--uc-color-text-primary);
-  background: color-mix(in srgb, var(--uc-color-surface-base) 78%, transparent);
-  font-size: var(--uc-font-size-caption);
-  line-height: var(--uc-line-height-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 .uc-image-professional__placeholder {
@@ -6767,7 +6853,7 @@ button.uc-project-center__project-card:disabled {
   padding: 0;
   color: var(--uc-color-text-tertiary);
   background: transparent;
-  cursor: help;
+  cursor: pointer;
 }
 
 .uc-dynamic-parameters__info:hover,

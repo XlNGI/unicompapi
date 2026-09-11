@@ -8,6 +8,8 @@ import {
 } from 'react';
 import { Input, SelectPicker } from 'rsuite';
 import { Button } from '../../components/Button';
+import { ExpandableText } from '../../components/ExpandableText';
+import { FailureDiagnostic } from './FailureDiagnostic';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
@@ -831,7 +833,7 @@ function TaskUnifiedTimeline({ details }: { readonly details: StorageTaskDetails
         <TimelineItem
           time={formatTimestamp(details.createdAt)}
           title="创建任务"
-          tone={taskState(details.latestExecutionState).tone}
+          tone="neutral"
         >
           <dl className="uc-task-center__timeline-facts">
             <div><dt>所属项目</dt><dd>{details.projectName}</dd></div>
@@ -843,12 +845,8 @@ function TaskUnifiedTimeline({ details }: { readonly details: StorageTaskDetails
         <TimelineItem time={formatTimestamp(details.createdAt)} title="确认输入" tone="neutral">
           <div className="uc-task-center__timeline-prompts">
             <div>
-              <strong>原始输入</strong>
-              <p>{details.originalInput}</p>
-            </div>
-            <div>
               <strong>最终提示词</strong>
-              <p>{details.finalPrompt}</p>
+              <ExpandableText key={details.taskId} text={details.finalPrompt || '本次任务未记录最终提示词'} />
             </div>
           </div>
         </TimelineItem>
@@ -913,13 +911,11 @@ function callTimelineItems(call: StorageCallDetailsDto) {
       tone={callEventTone(event.type)}
     >
       <div className="uc-task-center__timeline-call-summary">
-        <StatusPill tone={callState(call.state).tone}>{callState(call.state).label}</StatusPill>
+        <StatusPill tone={callEventTone(event.type)}>{callEventLabel(event.type)}</StatusPill>
         <span>{displayRoute(call)}</span>
         <span>{formatDuration(call.durationMs)}</span>
       </div>
-      {event.safeCode ? (
-        <code className="uc-task-center__timeline-code">技术代码：{event.safeCode}</code>
-      ) : null}
+      <FailureDiagnostic event={event} />
     </TimelineItem>
   ));
 

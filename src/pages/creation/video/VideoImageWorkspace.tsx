@@ -75,6 +75,7 @@ export function VideoImageWorkspace({
   const [preview, setPreview] = useState<VideoWorkspaceMaterialPreviewDto>();
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -85,6 +86,29 @@ export function VideoImageWorkspace({
   ) => {
     setSubmissionProgress({ phase, failureMessage });
   }, []);
+
+  // 收集当前项目下所有图生视频草稿ID，使生成历史按模式过滤而非仅当前草稿
+  useEffect(() => {
+    let active = true;
+    if (!videoWorkspaces) {
+      setSiblingDraftIds([]);
+      return;
+    }
+    void videoWorkspaces.list().then((result) => {
+      if (!active || !result.ok) return;
+      setSiblingDraftIds(
+        result.value
+          .filter((item) => item.mode === 'image_to_video')
+          .map((item) => item.draftId)
+      );
+    }).catch(() => {
+      if (active) setSiblingDraftIds([]);
+    });
+    return () => {
+      active = false;
+    };
+  }, [videoWorkspaces, historyRefreshKey]);
+
   const legacySelections = useMemo(
     () => draft.imageToVideo.materials?.slots.flatMap(
       (slot) => slot.selection ? [slot.selection] : []
@@ -387,7 +411,9 @@ export function VideoImageWorkspace({
                 onDropFile={(file, dropToken) => void importImage(file, dropToken)}
                 onReject={onMessage}
               >
-                <span className="uc-dynamic-parameters__required">首帧图片必填</span>
+                {!draft.imageToVideo.source ? (
+                  <span className="uc-dynamic-parameters__required">首帧图片必填</span>
+                ) : null}
                 <section
                   className={`uc-image-professional__reference${material ? ' has-image' : ' is-empty'}`}
                 >
@@ -398,11 +424,6 @@ export function VideoImageWorkspace({
                           alt={`图生视频输入：${material?.name ?? '本地图片'}`}
                           src={preview.url}
                         />
-                        {material ? (
-                          <span className="uc-image-professional__preview-meta">
-                            {`${material.name} · ${material.width} × ${material.height}`}
-                          </span>
-                        ) : null}
                         <div className="uc-image-professional__preview-overlay">
                           <Button
                             aria-label="删除图片"
@@ -568,6 +589,7 @@ export function VideoImageWorkspace({
           <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
             <GenerationHistory
               draftId={draft.draftId}
+              extraDraftIds={siblingDraftIds}
               key={draft.draftId}
               mediaKind="video"
               projectId={draft.projectId}

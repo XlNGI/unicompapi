@@ -36,7 +36,8 @@ test('task center provides filters, details, source navigation, and honest issue
   assert.match(source, /type="search"/);
   assert.match(source, /全部项目/);
   assert.match(source, /全部状态/);
-  assert.match(source, /originalInput/);
+  assert.doesNotMatch(source, /details\.originalInput/);
+  assert.match(source, /ExpandableText/);
   assert.match(source, /finalPrompt/);
   assert.match(source, /image_generation: '图片生成'/);
   assert.match(source, /返回来源项目/);

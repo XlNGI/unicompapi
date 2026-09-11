@@ -1,3 +1,4 @@
+import type { ProviderFailureDiagnosticV1 } from './provider-invocation';
 import type {
   CapabilityEvidenceId,
   ConnectionId,
@@ -157,11 +158,13 @@ export type ProviderSubmitOutcome =
     }
   | {
       readonly kind: 'submission_outcome_unknown';
+      readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
       readonly providerOperationId?: string;
       readonly message: string;
     }
   | {
       readonly kind: 'failed_before_submission';
+      readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
       readonly message: string;
       readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
     };

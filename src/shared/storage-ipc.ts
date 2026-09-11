@@ -314,6 +314,13 @@ export interface StorageCallTimelineEventDto {
   readonly sequence: number;
   readonly type: string;
   readonly safeCode?: string;
+  readonly failureDiagnostic?: {
+    readonly stage?: string;
+    readonly message: string;
+    readonly statusCode?: number;
+    readonly code?: string;
+    readonly requestId?: string;
+  };
   readonly occurredAt: string;
 }
 

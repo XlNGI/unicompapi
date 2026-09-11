@@ -747,6 +747,7 @@ function mapSubmissionFailure(
   if (requestStarted && submissionOutcomeIsUnknown(error)) {
     return {
       kind: 'submission_outcome_unknown',
+      ...(error instanceof NewApiRuntimeError && error.failureDiagnostic ? { failureDiagnostic: error.failureDiagnostic } : {}),
       message: 'The NewAPI image submission outcome is unknown'
     };
   }
@@ -754,6 +755,7 @@ function mapSubmissionFailure(
     return {
       kind: 'failed_before_submission',
       message: error.message,
+      ...(error.failureDiagnostic ? { failureDiagnostic: error.failureDiagnostic } : {}),
       retryability: error.retryability
     };
   }
