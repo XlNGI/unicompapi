@@ -49,10 +49,17 @@ test('V2-S15 bounds dynamic timeline extraction and drops stale zoom work', () =
   assert.match(editorSource, /onFrames\(extractedFrames\)/);
   assert.match(
     editorSource,
-    /const thumbnailUrl = thumbnailFrames\[slot\.key\] \?\? frameUrl/
+    /const contactSheetUrl = contactSheets\[segment\.clipId\]/
   );
+  assert.match(
+    editorSource,
+    /contactSheetTranslateX\(slot\.stripFrameIndex\)/
+  );
+  assert.doesNotMatch(editorSource, /backgroundPositionX: `\$\{\-\(/);
   assert.match(editorSource, /uc-video-editor__thumbnail-strip/);
   assert.match(stylesSource, /\.uc-video-editor__thumbnail \{/);
+  assert.match(stylesSource, /\.uc-video-editor__thumbnail \.uc-video-editor__contact-sheet \{[^}]*width: auto/);
+  assert.doesNotMatch(editorSource, /backgroundImage: `url\(\$\{contactSheetUrl\}\)`/);
 });
 
 test('V2-S3 select automatically loads preview with stale-response protection', () => {
@@ -266,6 +273,15 @@ test('V2-S7 aligns the timeline scale and wires drag reorder to move_clip', () =
   assert.match(editorSource, /onDragOver=/);
   assert.match(editorSource, /onDrop=/);
   assert.match(editorSource, /dataTransfer\.setData\('text\/plain', segment\.clipId\)/);
+  assert.match(editorSource, /dragPreviewRef = useRef<HTMLElement \| null>\(null\)/);
+  assert.match(editorSource, /classList\.add\('uc-video-editor__drag-preview'\)/);
+  assert.match(editorSource, /onDrag=\{\(event\) => updateDragPreviewPosition/);
+  assert.match(editorSource, /onDragEnd=\{clearDragPreview\}/);
+  assert.match(editorSource, /dragPreview\.style\.top = `\$\{clientY \+ 12\}px`/);
+  assert.match(editorSource, /dragPreview\.style\.left = `\$\{clientX \+ 12\}px`/);
+  assert.doesNotMatch(editorSource, /setTimeout\(\(\) => dragPreview\.remove\(\), 0\)/);
+  assert.doesNotMatch(stylesSource, /\.uc-video-editor__drag-preview \{[^}]*-10000px/);
+  assert.match(stylesSource, /\.uc-video-editor__drag-preview \{[^}]*position: fixed;[^}]*overflow: hidden;/);
   assert.match(editorSource, /kind: 'move_clip',[\s\S]{0,120}?clipId,[\s\S]{0,120}?toIndex/);
 });
 
@@ -315,6 +331,7 @@ test('V2-S9 keeps timeline seeks authoritative until the target frame is rendere
   assert.match(editorSource, /pendingPreviewSeekRef/);
   assert.match(editorSource, /onSeeked=\{completePreviewSeek\}/);
   assert.match(editorSource, /aria-busy=\{previewSeeking\}/);
+  assert.doesNotMatch(editorSource, /style=\{\{ visibility: previewSeeking \? 'hidden' : 'visible' \}\}/);
   assert.match(
     editorSource,
     /function syncPlayheadFromPreview\(\)[^{]*\{[\s\S]{0,180}?if \(pendingPreviewSeekRef\.current\) return;/
@@ -336,6 +353,25 @@ test('V2-S9 keeps timeline seeks authoritative until the target frame is rendere
   assert.doesNotMatch(stylesSource, /\.uc-video-editor__preview-switching/);
   assert.doesNotMatch(editorSource, /uc-video-editor__preview-playhead/);
   assert.doesNotMatch(stylesSource, /webkit-media-controls-current-time-display/);
+});
+
+test('V2-S5 keeps the playhead origin marker fully visible', () => {
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__playhead-line::before \{[^}]*top: 2px;[^}]*width: 10px;[^}]*height: 10px;[^}]*border-radius: 50%;/
+  );
+  assert.match(
+    stylesSource,
+    /\.uc-video-editor__playhead-line::after \{[^}]*top: 11px;/
+  );
+});
+
+test('V2-S17 keeps loading visible and scrubs the active video without reopening it', () => {
+  assert.match(editorSource, /className="uc-video-editor__video uc-video-editor__video-placeholder"/);
+  assert.match(
+    editorSource,
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,1100}?activePreview\?\.clipId === targetSegment\.clipId[\s\S]{0,500}?applyPendingPreviewSeek\(\)[\s\S]{0,120}?return;/
+  );
 });
 
 test('V2-S10 plays the timeline continuously with source audio, music and text overlays', () => {
@@ -395,7 +431,10 @@ test('V2-S11 mirrors the mature preview transport with real viewing controls', (
 });
 
 test('V2-S12 exposes zoom and the selected canvas ratio without a quality button', () => {
-  assert.doesNotMatch(editorSource, /requestPreviewArtifact\(/);
+  assert.match(
+    editorSource,
+    /requestPreviewArtifact\([\s\S]{0,160}'thumbnail_strip'/
+  );
   assert.doesNotMatch(editorSource, /type PreviewQuality =/);
   assert.match(editorSource, /type PreviewZoom =/);
   assert.match(editorSource, /适应/);

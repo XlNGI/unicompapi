@@ -1,3 +1,4 @@
+import { DateRangePicker, SelectPicker } from '../../components/Pickers';
 import {
   useEffect,
   useRef,
@@ -6,7 +7,8 @@ import {
   type ReactNode,
   type WheelEvent
 } from 'react';
-import { Input, SelectPicker } from 'rsuite';
+import { Input } from 'rsuite';
+import { isTaskInDateRange, recentTaskDateRange } from './task-date-range';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -94,6 +96,7 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   const [query, setQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
+  const [dateRange, setDateRange] = useState<[Date, Date] | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [reusingParameters, setReusingParameters] = useState(false);
@@ -107,6 +110,9 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   const storage = window.unicomp?.storage;
 
   function handleTaskCenterWheel(event: WheelEvent<HTMLElement>) {
+    // Portal wheel events still bubble through the React page tree.
+    if (!event.currentTarget.contains(event.target as Node) ||
+      document.querySelector('.uc-picker-layer .rs-picker-popup')) return;
     if (event.deltaY === 0) return;
     const direction = Math.sign(event.deltaY);
     const sincePreviousWheel = event.timeStamp - taskCenterWheelLastAt.current;
@@ -184,6 +190,7 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
 
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
   const filteredTasks = tasks.filter((task) =>
+    isTaskInDateRange(task.createdAt, dateRange) &&
     (projectFilter === 'all' || task.projectId === projectFilter) &&
     (stateFilter === 'all' || task.latestExecutionState === stateFilter) &&
     (!normalizedQuery || [task.taskId, task.kind, task.projectName].some((value) =>
@@ -311,7 +318,7 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
         <TaskConsumptionCharts />
       </div>
 
-      <Card className="uc-task-center__filters">
+      <Card className="uc-task-center__filters uc-task-center__task-filters">
         <label>
           搜索任务
           <Input
@@ -347,6 +354,27 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
             onChange={(value) => setStateFilter(value ?? 'all')}
             searchable={false}
             value={stateFilter}
+          />
+        </div>
+        <div className="uc-rsuite-field uc-task-center__task-date-range">
+          时间范围
+          <DateRangePicker
+            aria-label="时间范围"
+            block
+            character=" 至 "
+            editable={false}
+            format="yyyy-MM-dd"
+            onChange={setDateRange}
+            placeholder="全部时间"
+            placement="autoVerticalEnd"
+            preventOverflow
+            ranges={[
+              { label: '今天', value: () => recentTaskDateRange(1) },
+              { label: '近 7 天', value: () => recentTaskDateRange(7) },
+              { label: '近 30 天', value: () => recentTaskDateRange(30) }
+            ]}
+            showOneCalendar
+            value={dateRange}
           />
         </div>
       </Card>

@@ -2,6 +2,7 @@ import { statSync } from 'node:fs';
 import { link, mkdir, open, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { videoEditorThumbnailStripVersion } from '../../shared/video-editor-thumbnail-spec';
 import {
   FfmpegVideoEditorPreviewAdapter,
   type FfmpegVideoEditorPreviewAdapterOptions
@@ -276,7 +277,7 @@ export class FfmpegMediaEngineAdapter
     this.previewAdapter = new FfmpegVideoEditorPreviewAdapter(
       options.previewAdapter ?? {
         ffmpegPath: this.ffmpegPath,
-        adapterVersion: this.descriptor.adapterVersion,
+        adapterVersion: `${this.descriptor.adapterVersion}-${videoEditorThumbnailStripVersion}`,
         runCommand: async (command, args) => {
           const result = await runManagedProcess(
             this.processSupervisor,

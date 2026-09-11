@@ -21,7 +21,7 @@ test('A2 consumes every controlled B2 source and preview operation', () => {
   ]) {
     assert.match(editorSource, new RegExp(`videoEditors\\.${operation}\\(`));
   }
-  assert.doesNotMatch(editorSource, /showOpenDialog|readFileSync|file:\/\/|fetch\(/);
+  assert.doesNotMatch(editorSource, /showOpenDialog|readFileSync|file:\/\/|\bfetch\(/);
 });
 
 test('A2 sends domain commands for timeline and canvas edits', () => {

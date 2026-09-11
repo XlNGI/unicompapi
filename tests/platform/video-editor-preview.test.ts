@@ -1,4 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,6 +19,13 @@ import {
 } from '../../src/platform';
 
 const roots: string[] = [];
+const execFileAsync = promisify(execFile);
+const localFfmpegPath = path.resolve(
+  '.tools/media-engine/ffmpeg/8.1.2/win32-x64/bin/ffmpeg.exe'
+);
+const localFfprobePath = path.resolve(
+  '.tools/media-engine/ffmpeg/8.1.2/win32-x64/bin/ffprobe.exe'
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -149,6 +159,64 @@ describe('video editor preview cache boundary', () => {
     expect(calls[0].args).toContain('libopus');
     expect(calls[0].args.join(' ')).not.toContain('shell=true');
   });
+
+  it('builds a fixed-width thumbnail strip for short source ranges', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thumbnail-strip-'));
+    roots.push(root);
+    let args: readonly string[] = [];
+    const adapter = new FfmpegVideoEditorPreviewAdapter({
+      ffmpegPath: 'ffmpeg-development-placeholder',
+      runCommand: async (_command, nextArgs) => {
+        args = nextArgs;
+        const target = nextArgs.at(-1);
+        if (!target) throw new Error('missing output target');
+        await writeFile(target, 'fake-jpeg-artifact');
+      }
+    });
+
+    await adapter.requestArtifact({
+      plan: plan(),
+      kind: 'thumbnail_strip',
+      cache: new NodeVideoEditorPreviewCache(root),
+      sourcePath: path.join(root, 'source.mp4')
+    });
+
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      'fps=8.000000,scale=160:264:force_original_aspect_ratio=increase,crop=160:264,tile=40x1'
+    );
+    expect(args).toContain('-frames:v');
+    expect(args).toContain('1');
+  });
+
+  it.skipIf(!existsSync(localFfmpegPath) || !existsSync(localFfprobePath))(
+    'renders a real 40-frame strip at the timeline aspect ratio',
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-thumbnail-real-'));
+      roots.push(root);
+      const sourcePath = path.join(root, 'source.webm');
+      const cache = new NodeVideoEditorPreviewCache(root);
+      await execFileAsync(localFfmpegPath, [
+        '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+        '-i', 'testsrc2=size=720x1280:rate=24', '-t', '5',
+        '-c:v', 'libvpx-vp9', sourcePath
+      ]);
+      const adapter = new FfmpegVideoEditorPreviewAdapter({
+        ffmpegPath: localFfmpegPath
+      });
+      const result = await adapter.requestArtifact({
+        plan: plan(), kind: 'thumbnail_strip', cache, sourcePath
+      });
+      expect(result.status).toBe('available');
+      if (result.status !== 'available') return;
+      const dimensions = await execFileAsync(localFfprobePath, [
+        '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height', '-of', 'csv=p=0', result.artifact.target
+      ]);
+      expect(dimensions.stdout.trim()).toBe('6400,264');
+      expect((await stat(result.artifact.target)).size).toBeGreaterThan(20_000);
+    },
+    45_000
+  );
 
   it('builds distinct bounded FFmpeg proxies for each viewing quality', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-ffmpeg-quality-'));

@@ -17,6 +17,7 @@ export function RSuiteThemeBridge({ children }: RSuiteThemeBridgeProps) {
   return (
     <CustomProvider locale={zhCN} theme={resolvedTheme}>
       {children}
+      <div className="uc-picker-layer" id="uc-picker-layer" />
     </CustomProvider>
   );
 }

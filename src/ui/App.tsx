@@ -204,13 +204,15 @@ export function App() {
       ) : activeSubItemId === 'image-to-video' ? (
         <ImageToVideoPage preferredDraftId={openedVideoDraftId} />
       ) : activeSubItemId === 'video-editing' ? (
-        <VideoEditingPage
-          onNavigate={handleNavigate}
-          preferredDraftId={openedVideoDraftId}
-        />
+        null
       ) : (
         <ActivePage />
       )}
+      <VideoEditingPage
+        active={activeSubItemId === 'video-editing'}
+        onNavigate={handleNavigate}
+        preferredDraftId={openedVideoDraftId}
+      />
     </AppLayout>
   );
 }

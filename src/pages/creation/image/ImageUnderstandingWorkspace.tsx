@@ -1,3 +1,4 @@
+import { SelectPicker } from '../../../components/Pickers';
 import { useEffect, useState } from 'react';
 import {
   LuImage,
@@ -9,7 +10,7 @@ import {
   LuShieldCheck,
   LuSparkles
 } from 'react-icons/lu';
-import { Input, SelectPicker } from 'rsuite';
+import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { EmptyState } from '../../../components/EmptyState';

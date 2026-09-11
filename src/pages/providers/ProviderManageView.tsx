@@ -8,7 +8,8 @@ import {
   LuTrash2,
   LuX
 } from 'react-icons/lu';
-import { Input, Toggle, SelectPicker } from 'rsuite';
+import { Input, Toggle } from 'rsuite';
+import { SelectPicker } from '../../components/Pickers';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusPill } from '../../components/StatusPill';
