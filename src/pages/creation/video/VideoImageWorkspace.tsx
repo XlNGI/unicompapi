@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuPlus, LuRotateCcw, LuTrash2 } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
@@ -54,7 +54,6 @@ const imageSourceTarget = { kind: 'image_source' } as const;
 interface VideoImageWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: ImageVideoDraftDto;
-  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: ImageVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: ImageVideoDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
@@ -64,7 +63,6 @@ interface VideoImageWorkspaceProps {
 export function VideoImageWorkspace({
   dirty,
   draft,
-  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
@@ -75,17 +73,24 @@ export function VideoImageWorkspace({
   const [preview, setPreview] = useState<VideoWorkspaceMaterialPreviewDto>();
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
+  const userTookOverRef = useRef(false);
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
+    if (phase === 'preparing') userTookOverRef.current = false;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
+
+  useEffect(() => {
+    setExpectedWorkId(undefined);
+  }, [draft.draftId]);
 
   // 收集当前项目下所有图生视频草稿ID，使生成历史按模式过滤而非仅当前草稿
   useEffect(() => {
@@ -566,10 +571,14 @@ export function VideoImageWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
-              setHistoryRefreshKey((key) => key + 1);
-              if (submission.status === 'completed') {
-                onClearUi?.();
+              if (!userTookOverRef.current) {
+                setExpectedWorkId(
+                  submission.status === 'completed' ? submission.workId : undefined
+                );
+              } else {
+                setExpectedWorkId(undefined);
               }
+              setHistoryRefreshKey((key) => key + 1);
             }}
             showProgressSteps
           />
@@ -578,26 +587,22 @@ export function VideoImageWorkspace({
           </div>
         </section>
 
-        <section aria-label="生成过程与作品区域" className="uc-generation-two-pane__result uc-generation-two-pane__output">
-          <header className="uc-image-professional__pane-heading">
-            <span aria-hidden="true">2</span>
-            <div>
-              <h2>第二步 · 生成过程与作品</h2>
-              <p>提交状态与通过本地校验的作品会保留在这里。</p>
-            </div>
-          </header>
-          <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-video-image__canvas">
-            <GenerationHistory
-              draftId={draft.draftId}
-              extraDraftIds={siblingDraftIds}
-              key={draft.draftId}
-              mediaKind="video"
-              projectId={draft.projectId}
-              refreshKey={historyRefreshKey}
-              submissionProgress={submissionProgress}
-            />
-          </Card>
-        </section>
+        <Card
+          aria-label="生成过程与作品区域"
+          className="uc-generation-two-pane__result uc-image-professional__after-pane"
+        >
+          <GenerationHistory
+            draftId={draft.draftId}
+            extraDraftIds={siblingDraftIds}
+            key={draft.draftId}
+            mediaKind="video"
+            projectId={draft.projectId}
+            refreshKey={historyRefreshKey}
+            expectedWorkId={expectedWorkId}
+            userTookOverRef={userTookOverRef}
+            submissionProgress={submissionProgress}
+          />
+        </Card>
       </div>
 
     </>

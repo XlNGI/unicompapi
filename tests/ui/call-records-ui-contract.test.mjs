@@ -40,7 +40,7 @@ test('unified task timeline replaces nested call detail panels with compact time
   assert.match(page, /function callTimelineItems/);
   assert.match(styles, /\.uc-task-center__unified-timeline\s*\{[^}]*gap: var\(--uc-space-1\);/);
   assert.match(styles, /\.uc-task-center__timeline-card\s*\{[^}]*padding: var\(--uc-space-2\) var\(--uc-space-3\);/);
-  assert.match(styles, /\.uc-task-center__timeline-prompts\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(styles, /\.uc-task-center__timeline-prompts\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
   assert.match(styles, /\.uc-task-center__timeline-call-summary/);
   assert.doesNotMatch(styles, /\.uc-task-center__view-tabs/);
   assert.doesNotMatch(styles, /\.uc-task-center__embedded-calls|\.uc-task-center__details-content--embedded-call|\.uc-task-center__prompt-grid/);

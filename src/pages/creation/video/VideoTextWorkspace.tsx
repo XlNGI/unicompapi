@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LuTrash2 } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
@@ -20,7 +20,6 @@ type TextVideoDraftDto = Extract<
 interface VideoTextWorkspaceProps {
   readonly dirty: boolean;
   readonly draft: TextVideoDraftDto;
-  readonly onClearUi?: () => void;
   readonly onDraftChange: (draft: TextVideoDraftDto) => void;
   readonly onDraftPersisted: (draft: TextVideoDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
@@ -30,7 +29,6 @@ interface VideoTextWorkspaceProps {
 export function VideoTextWorkspace({
   dirty,
   draft,
-  onClearUi,
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
@@ -38,17 +36,24 @@ export function VideoTextWorkspace({
 }: VideoTextWorkspaceProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
+  const userTookOverRef = useRef(false);
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
+    if (phase === 'preparing') userTookOverRef.current = false;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
+
+  useEffect(() => {
+    setExpectedWorkId(undefined);
+  }, [draft.draftId]);
 
   // 收集当前项目下所有文生视频草稿ID，使生成历史按模式过滤而非仅当前草稿
   useEffect(() => {
@@ -263,10 +268,14 @@ export function VideoTextWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
-              setHistoryRefreshKey((key) => key + 1);
-              if (submission.status === 'completed') {
-                onClearUi?.();
+              if (!userTookOverRef.current) {
+                setExpectedWorkId(
+                  submission.status === 'completed' ? submission.workId : undefined
+                );
+              } else {
+                setExpectedWorkId(undefined);
               }
+              setHistoryRefreshKey((key) => key + 1);
             }}
             showProgressSteps
           />
@@ -286,6 +295,8 @@ export function VideoTextWorkspace({
             mediaKind="video"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
+            expectedWorkId={expectedWorkId}
+            userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />
         </Card>

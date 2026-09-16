@@ -25,7 +25,20 @@ test('professional image and video workspaces share one generation history compo
     assert.match(source, /projectId={draft\.projectId}/);
     assert.match(source, /refreshKey={historyRefreshKey}/);
     assert.match(source, /submissionProgress={submissionProgress}/);
+    assert.match(source, /userTookOverRef={userTookOverRef}/);
+    assert.match(source, /const userTookOverRef = useRef\(false\)/);
+    assert.match(source, /if \(phase === 'preparing'\) userTookOverRef\.current = false;/);
+    assert.doesNotMatch(source, /onUserSelection/);
   }
+});
+
+test('workspace owns the takeover state and shared history keeps no duplicate copy', () => {
+  assert.match(history, /readonly userTookOverRef: MutableRefObject<boolean>;/);
+  assert.match(history, /if \(isPendingGeneration && !userTookOverRef\.current\)/);
+  assert.match(history, /hasPendingGeneration: hasPendingGeneration && !userTookOverRef\.current/);
+  assert.match(history, /userTookOverRef\.current = true;/);
+  assert.doesNotMatch(history, /userSelectedRef/);
+  assert.doesNotMatch(history, /onUserSelection/);
 });
 
 test('shared history accepts only current-draft verified local media works', () => {
@@ -46,8 +59,8 @@ test('shared history supports image and video previews with stable selection', (
   assert.match(history, /loading="lazy"/);
   assert.match(history, /decoding="async"/);
   assert.match(history, /IntersectionObserver/);
-  assert.match(history, /setSelectedWorkId\(history\.works\[history\.works\.length - 1\]\?\.workId\)/);
-  assert.match(history, /setSelectedWorkId\(node\.work\.workId\)/);
+  assert.match(history, /resolveHistorySelection\(/);
+  assert.match(history, /handleWorkSelection\(node\.work\.workId\)/);
   assert.match(styles, /\.uc-generation-history\s*{[\s\S]*width: 100%;[\s\S]*height: 100%;/);
   assert.match(
     styles,
@@ -70,6 +83,19 @@ test('shared history supports image and video previews with stable selection', (
   );
   // 拖拽仅对图片开放，视频结果不可拖拽
   assert.match(history, /draggable=\{Boolean\(selectedWorkId && mediaKind === 'image'\)\}/);
+});
+
+test('shared history video fills the preview pane instead of shrinking to its intrinsic size', () => {
+  const rule = styles.match(
+    /\.uc-generation-history__preview \.uc-video-preview video\s*\{([\s\S]*?)\}/
+  );
+  assert.ok(rule, 'history preview must size the video element mounted by .uc-video-preview');
+  const body = rule[1];
+  assert.match(body, /width: 100%;/);
+  assert.match(body, /height: 100%;/);
+  assert.match(body, /max-height: 100%;/);
+  assert.doesNotMatch(body, /width: auto;/);
+  assert.doesNotMatch(body, /height: auto;/);
 });
 
 test('shared history maps wheel gestures to horizontal overflow without trapping boundaries', () => {

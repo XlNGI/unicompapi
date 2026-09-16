@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LuFileImage,
   LuPlus,
@@ -45,20 +45,23 @@ export function ImageProfessionalWorkspace({
   const [previewUrl, setPreviewUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const [diagExpectedWorkId, setDiagExpectedWorkId] = useState<string>();
+  const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
+  const userTookOverRef = useRef(false);
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
+    if (phase === 'preparing') userTookOverRef.current = false;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
   useEffect(() => {
     setHistoryRefreshKey(0);
+    setExpectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
   const productFeature = draft.featureSelection?.productFeature === 'text_to_image' ||
@@ -555,15 +558,13 @@ export function ImageProfessionalWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
-              // [DIAG image-auto-select] 临时诊断：记录本次完成返回的目标作品
-              console.log('[DIAG image-auto-select] onSubmissionComplete', {
-                workId: submission.workId,
-                status: submission.status,
-                taskId: submission.taskId,
-                executionId: submission.executionId,
-                ts: new Date().toISOString()
-              });
-              setDiagExpectedWorkId(submission.workId);
+              if (!userTookOverRef.current) {
+                setExpectedWorkId(
+                  submission.status === 'completed' ? submission.workId : undefined
+                );
+              } else {
+                setExpectedWorkId(undefined);
+              }
               setHistoryRefreshKey((key) => key + 1);
             }}
             requireExplicitFeature
@@ -586,7 +587,8 @@ export function ImageProfessionalWorkspace({
             mediaKind="image"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
-            expectedWorkId={diagExpectedWorkId}
+            expectedWorkId={expectedWorkId}
+            userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />
         </Card>

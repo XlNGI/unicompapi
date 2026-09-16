@@ -1,9 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { LuMaximize2, LuMinimize2 } from 'react-icons/lu';
 
-export function VideoPreview({ src }: { readonly src: string }) {
+export function VideoPreview({
+  ariaLabel = '视频预览',
+  className = '',
+  src
+}: {
+  readonly ariaLabel?: string;
+  readonly className?: string;
+  readonly src: string;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    setIsReady(false);
+  }, [src]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -20,10 +33,23 @@ export function VideoPreview({ src }: { readonly src: string }) {
   }, [expanded]);
 
   return (
-    <div className={`uc-video-preview${expanded ? ' uc-video-preview--expanded' : ''}`}>
+    <div
+      className={[
+        'uc-video-preview',
+        expanded ? 'uc-video-preview--expanded' : '',
+        isReady ? 'is-ready' : 'is-loading',
+        className
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <video
-        controls
+        aria-label={ariaLabel}
+        controls={isReady}
         controlsList="nofullscreen"
+        onCanPlay={() => setIsReady(true)}
+        onLoadedData={() => setIsReady(true)}
+        onLoadedMetadata={() => setIsReady(true)}
         playsInline
         preload="metadata"
         ref={videoRef}
@@ -44,3 +70,6 @@ export function VideoPreview({ src }: { readonly src: string }) {
     </div>
   );
 }
+
+
+

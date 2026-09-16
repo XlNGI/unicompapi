@@ -416,7 +416,6 @@ export function VideoWorkbenchPage({
         <VideoTextWorkspace
           dirty={dirty}
           draft={currentDraft}
-          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onFlushDraft={() => autosave.flush()}
@@ -426,7 +425,6 @@ export function VideoWorkbenchPage({
         <VideoImageWorkspace
           dirty={dirty}
           draft={currentDraft}
-          onClearUi={() => void clearUiAfterGeneration()}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}
           onDraftPersisted={(draft) => replaceCurrentDraft(draft, false)}
           onFlushDraft={() => autosave.flush()}
