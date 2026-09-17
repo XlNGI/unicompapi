@@ -110,6 +110,11 @@ test('image-to-video uses the unified feature panel and opens derived drafts', (
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
 });
 
+test('image-to-video keeps the current history mounted after completion', () => {
+  assert.doesNotMatch(source, /onClearUi/);
+  assert.doesNotMatch(source, /onClearUi\\?\\.\\(\\)/);
+});
+
 test('image-to-video identifies and validates real required inputs locally', () => {
   assert.match(source, /首帧图片必填/);
   assert.match(source, /uc-dynamic-parameters__required.*必填/);

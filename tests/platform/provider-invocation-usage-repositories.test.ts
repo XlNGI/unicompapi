@@ -89,6 +89,20 @@ const schema = createUsageSchema({
 });
 
 describe('provider invocation repository', () => {
+  it('round trips failure diagnostics without changing old events', async () => {
+    const { storage, invocations } = await fixture();
+    const { attempt, initialEvent } = invocation('diagnostic-attempt');
+    await invocations.create(attempt, initialEvent);
+    const failureDiagnostic = { stage: 'upstream_response' as const, message: 'Upstream request failed', statusCode: 500, requestId: 'Req-123' };
+    await invocations.appendEvent(createProviderInvocationEvent({
+      id: toProviderInvocationEventId('diagnostic-event'), invocationAttemptId: attempt.id,
+      sequence: 2, type: 'failed', occurredAt: t1, failureDiagnostic
+    }));
+    const reopened = new JsonProviderInvocationRepository(storage, projectId);
+    const events = await reopened.listEvents(attempt.id);
+    expect(events[0]).toEqual(initialEvent);
+    expect(events[1].failureDiagnostic).toEqual(failureDiagnostic);
+  });
   it('serializes project attempts, event state and explicit retry lineage', async () => {
     const { storage, invocations } = await fixture();
     const other = new JsonProviderInvocationRepository(storage, projectId);

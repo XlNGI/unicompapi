@@ -134,7 +134,7 @@ export function VideoQuickWorkspace({
 
   return (
     <>
-      <div className="uc-image-workbench__workspace uc-image-quick__workspace uc-generation-two-pane">
+      <div className="uc-image-workbench__workspace uc-image-quick__workspace uc-video-quick__workspace uc-generation-two-pane">
         <section aria-label="视频生成参数" className="uc-generation-two-pane__controls uc-scrollbar">
         <Card className="uc-image-workbench__panel uc-image-quick__composer uc-image-quick__compact-card">
           <header className="uc-image-workbench__panel-heading">

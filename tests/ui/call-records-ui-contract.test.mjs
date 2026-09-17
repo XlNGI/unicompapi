@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const page = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
 const calls = await readFile('src/pages/tasks/CallRecordsView.tsx', 'utf8');
+const diagnostic = await readFile('src/pages/tasks/FailureDiagnostic.tsx', 'utf8');
 const feeSource = await readFile('src/pages/tasks/call-fees.ts', 'utf8');
 const taskCenterWorkspace = await readFile(
   'src/pages/tasks/TaskCenterWorkspace.tsx',
@@ -168,9 +169,11 @@ test('registered call results use bounded local previews and never render provid
 });
 
 test('call timeline shows theme-aware safe failure reasons instead of a hidden placeholder', () => {
-  assert.match(calls, /describeGenerationSafeCode\(event\.safeCode\)/);
-  assert.match(calls, /未记录可公开的具体失败原因/);
-  assert.match(calls, /技术代码：\{reason\.technicalCode\}/);
+  assert.match(calls, /<FailureDiagnostic event=\{event\}/);
+  assert.match(page, /<FailureDiagnostic event=\{event\}/);
+  assert.match(diagnostic, /describeGenerationSafeCode\(event\.safeCode\)/);
+  assert.match(diagnostic, /本次记录未提供具体失败原因/);
+  assert.match(diagnostic, /HTTP 状态码/);
   assert.doesNotMatch(calls, /详细原因已记录/);
   assert.match(failureReasons, /authentication_failed: '服务商鉴权失败'/);
   assert.match(failureReasons, /label: '未识别的服务商错误'/);

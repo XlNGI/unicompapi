@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LuSparkles } from 'react-icons/lu';
 import { EmptyState } from './EmptyState';
+import { VideoPreview } from './VideoPreview';
 
 export interface GenerationResultPreviewProps {
   readonly workId?: string;
@@ -9,11 +10,14 @@ export interface GenerationResultPreviewProps {
   readonly remoteUrls?: readonly string[];
   readonly emptyTitle?: string;
   readonly emptyDescription?: string;
+  readonly emptyAction?: React.ReactNode;
+  readonly emptyIcon?: React.ReactNode;
   readonly loading?: boolean;
   readonly loadingTitle?: string;
   readonly loadingDescription?: string;
   readonly animateResult?: boolean;
   readonly compact?: boolean;
+  readonly role?: 'alert' | 'status';
 }
 
 /**
@@ -27,11 +31,14 @@ export function GenerationResultPreview({
   remoteUrls = [],
   emptyTitle = '尚无真实生成结果',
   emptyDescription = '结果必须经过本地文件校验后才会登记为作品。',
+  emptyAction,
+  emptyIcon,
   loading = false,
   loadingTitle = '正在生成',
   loadingDescription = '完成后将校验结果并登记到本地。',
   animateResult = false,
-  compact = false
+  compact = false,
+  role
 }: GenerationResultPreviewProps) {
   const storage = window.unicomp?.storage;
   const [localUrl, setLocalUrl] = useState<string>();
@@ -93,9 +100,11 @@ export function GenerationResultPreview({
   if (!workId && remoteUrls.length === 0) {
     return (
       <EmptyState
+        action={emptyAction}
         description={emptyDescription}
-        icon={mediaKind === 'video' ? '视' : '画'}
+        icon={emptyIcon ?? (mediaKind === 'video' ? '视' : '画')}
         readOnly
+        role={role}
         title={emptyTitle}
       />
     );
@@ -115,7 +124,7 @@ export function GenerationResultPreview({
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" decoding="async" src={localUrl} />
           ) : (
-            <video controls playsInline preload="metadata" src={localUrl} />
+            <VideoPreview key={localUrl} src={localUrl} />
           )}
         </article>
       ) : null}
@@ -137,7 +146,7 @@ export function GenerationResultPreview({
           {mediaKind === 'image' ? (
             <img alt="生成结果预览" decoding="async" loading="lazy" src={url} />
           ) : (
-            <video controls playsInline preload="metadata" src={url} />
+            <VideoPreview src={url} />
           )}
         </article>
       ))}

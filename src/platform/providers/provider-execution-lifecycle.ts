@@ -1,3 +1,4 @@
+import type { ProviderFailureDiagnosticV1 } from '../../domain';
 import {
   createProviderOperationRecord,
   isTerminalExecutionState,
@@ -194,6 +195,7 @@ export type ProviderAsyncOperationStatus =
       readonly state: 'failed';
       readonly message: string;
       readonly retryability: 'retryable' | 'not_retryable' | 'unknown';
+      readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
     }
   | { readonly state: 'cancelled' | 'expired' };
 

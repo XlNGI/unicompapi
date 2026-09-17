@@ -69,7 +69,8 @@ test('professional image requires an explicit text or reference feature', () => 
   assert.match(professionalSource, /aria-label="添加图片"/);
   assert.match(professionalSource, /onClick=\{\(\) => void selectReference\(\)\}/);
   assert.match(professionalSource, /uc-image-professional__preview-overlay/);
-  assert.match(professionalSource, /uc-image-professional__preview-meta/);
+  // 缩略图上不再叠加“文件名 · 宽 × 高”标签
+  assert.doesNotMatch(professionalSource, /uc-image-professional__preview-meta/);
   assert.doesNotMatch(professionalSource, /<strong>项目图片<\/strong>/);
   assert.match(professionalSource, /aria-label="删除图片"/);
   assert.match(professionalSource, /onClick=\{\(\) => void clearReference\(\)\}/);
@@ -103,7 +104,8 @@ test('professional image embeds a compact reference control in the enlarged prom
 test('professional image can drag a verified result into the reference slot', () => {
   assert.match(historySource, /imageWorkDragDataType/);
   assert.match(historySource, /handleWorkDragStart/);
-  assert.match(historySource, /draggable=\{Boolean\(selectedWorkId\)\}/);
+  assert.match(historySource, /draggable=\{Boolean\(selectedWorkId && mediaKind === 'image'\)\}/);
+  assert.match(historySource, /onDragStart=\{selectedWorkId && mediaKind === 'image'/);
   assert.match(professionalSource, /onDropWork=\{\(workId\)/);
   assert.match(professionalSource, /imageWorkspaces\.useWorkAsInput\(/);
   assert.doesNotMatch(professionalSource, /uc-image-professional__after-drop-zone/);
@@ -193,7 +195,8 @@ test('professional image uses a scrollable preparation pane and stable result pa
 
 test('professional image shows an honest animated loading state inside the result preview', () => {
   assert.match(historySource, /loading={showLoadingPreview}/);
-  assert.match(historySource, /const showLoadingPreview = generationInFlight && !selectedWorkId/);
+  assert.match(historySource, /resolveHistoryStageFlags\(/);
+  assert.match(historySource, /showLoadingPreview: generationInFlight && !input\.previewWorkId/);
   assert.match(historySource, /mediaKind === 'image' \? '图片' : '视频'/);
   assert.match(historySource, /完成后将校验并登记到本地/);
   assert.match(resultPreviewSource, /uc-generation-result-preview__loading/);
@@ -214,8 +217,8 @@ test('professional image preserves the current result after submission', () => {
   );
   assert.doesNotMatch(professionalSource, /resultSelection|setResultWorkId/);
   assert.match(professionalSource, /key={draft\.draftId}/);
-  assert.match(historySource, /if \(!historyLoaded\) return/);
-  assert.match(historySource, /works\.some\(\(work\) => work\.workId === selectedWorkId\)/);
+  assert.match(historySource, /resolveHistorySelection\(/);
+  assert.match(historySource, /selectedWorkId: selectedWorkIdRef\.current/);
   const start = workbenchSource.indexOf('<ImageProfessionalWorkspace');
   const end = workbenchSource.indexOf('/>', start);
   const invocation = workbenchSource.slice(start, end);
@@ -233,14 +236,15 @@ test('professional image history uses current-draft verified local works only', 
   assert.match(historySource, /limit: 20/);
   assert.match(historySource, /a\.createdAt\.localeCompare\(b\.createdAt\)/);
   assert.match(historySource, /aria-pressed={node\.work\.workId === selectedWorkId}/);
-  assert.match(historySource, /setSelectedWorkId\(node\.work\.workId\)/);
-  assert.doesNotMatch(historySource, /remoteUrls|resultImageUrl|fetch\(|localStorage/);
+  assert.match(historySource, /handleWorkSelection\(node\.work\.workId\)/);
+  assert.doesNotMatch(historySource, /remoteUrls|resultImageUrl|fetch\(|window\.localStorage/);
 });
 
 test('professional image history keeps concise truthful timeline states', () => {
   for (const text of [
     '生成历史',
-    '张作品',
+    '成功 ',
+    '失败 ',
     '最新在右侧',
     '生成中',
     '结果待接收',
@@ -249,6 +253,12 @@ test('professional image history keeps concise truthful timeline states', () => 
   ]) {
     assert.match(historySource, new RegExp(text));
   }
+  assert.match(
+    historySource,
+    /const historySummaryText = formatHistorySummary\(summarizeHistoryNodes\(nodes\)\);/
+  );
+  assert.match(historySource, /<span>\{historySummaryText\}<\/span>/);
+  assert.doesNotMatch(historySource, /\{works\.length\} 张作品/);
   assert.match(historySource, /const awaitingReceiptExecutionStates = new Set\(\[[\s\S]*'remote_completed'/);
   assert.match(historySource, /const receivingExecutionStates = new Set\(\[[\s\S]*'downloading'[\s\S]*'writing'[\s\S]*'verifying'/);
   const pendingStates = historySource.match(
@@ -262,7 +272,7 @@ test('professional image history keeps concise truthful timeline states', () => 
   assert.doesNotMatch(historySource, /当前草稿的生成历史|按生成时间排列/);
   assert.match(historySource, /latestExecutionUpdatedAt \?\? task\.createdAt/);
   assert.match(historySource, /startedAt \?\? new Date\(\)\.toISOString\(\)/);
-  assert.doesNotMatch(historySource, /onLocalStorageChanged/);
+  assert.match(historySource, /onLocalStorageChanged/);
   assert.match(historySource, /timeline\.scrollLeft = timeline\.scrollWidth/);
   assert.match(historySource, /onWheel={handleTimelineWheel}/);
   assert.match(historySource, /event\.deltaX/);

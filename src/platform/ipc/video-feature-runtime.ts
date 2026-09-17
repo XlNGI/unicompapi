@@ -1,4 +1,6 @@
+import type { ProviderFailureDiagnosticV1 } from '../../domain';
 import { randomUUID } from 'node:crypto';
+import { failureDiagnostic } from '../providers/failure-diagnostic';
 import {
   createProviderInvocationEvent,
   createLocalResultObservation,
@@ -334,6 +336,7 @@ export function createVideoFeatureControllerRuntime(
 
     let workId: string | undefined;
     let localResultError: string | undefined;
+    let diagnostic: ProviderFailureDiagnosticV1 | undefined;
     let finalStatus = orchestration.status;
     const resultVideoUrls = acceptance.providerOperationRecord
       ? extractVideoResultUrls(acceptance.providerOperationRecord.outcome)
@@ -393,6 +396,7 @@ export function createVideoFeatureControllerRuntime(
               '轮询超时：远端仍在排队或处理中。可稍后在任务中心刷新，禁止自动重试。';
             finalStatus = 'provider_accepted';
           } else if (pollStatus.state === 'failed') {
+            diagnostic = pollStatus.failureDiagnostic ?? failureDiagnostic({ stage: 'upstream_response', message: pollStatus.message });
             localResultError = `远端反馈：${pollStatus.message}`;
             finalStatus = 'failed';
           } else if (pollStatus.state === 'cancelled' || pollStatus.state === 'expired') {
@@ -400,6 +404,9 @@ export function createVideoFeatureControllerRuntime(
             finalStatus = 'cancelled';
           }
         } catch (error) {
+          diagnostic = error instanceof Error && 'failureDiagnostic' in error
+            ? (error as Error & { failureDiagnostic?: ProviderFailureDiagnosticV1 }).failureDiagnostic
+            : undefined;
           localResultError =
             error instanceof Error && error.message.trim().length > 0
               ? `视频轮询失败：${error.message}`
@@ -466,12 +473,13 @@ export function createVideoFeatureControllerRuntime(
     }
 
     const feedbackSafeCode = latestSafeCode(acceptance.invocationEvents);
-    if (finalStatus === 'completed' || finalStatus === 'failed' || finalStatus === 'cancelled') {
+    if (finalStatus === 'completed' || finalStatus === 'failed' || finalStatus === 'cancelled' || finalStatus === 'unknown_outcome') {
       await finalizeVideoInvocation({
         invocations,
         attemptId: acceptance.invocationAttempt.id,
         status: finalStatus,
         safeCode: feedbackSafeCode,
+        failureDiagnostic: diagnostic,
         now
       });
     }
@@ -663,13 +671,14 @@ async function persistCallRecordFacts(input: {
 async function finalizeVideoInvocation(input: {
   readonly invocations: JsonProviderInvocationRepository;
   readonly attemptId: ProviderInvocationAttemptId;
-  readonly status: 'completed' | 'failed' | 'cancelled';
+  readonly status: 'completed' | 'failed' | 'cancelled' | 'unknown_outcome';
   readonly safeCode?: string;
+  readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
   readonly now: () => string;
 }): Promise<void> {
   let events = await input.invocations.listEvents(input.attemptId);
   if (events.some((event) =>
-    event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled'
+    event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled' || event.type === 'outcome_unknown'
   )) return;
 
   if (input.status === 'completed' && !events.some((event) => event.type === 'result_received')) {
@@ -688,8 +697,9 @@ async function finalizeVideoInvocation(input: {
     id: toProviderInvocationEventId(`invocation-event-${randomUUID()}`),
     invocationAttemptId: input.attemptId,
     sequence: events.length + 1,
-    type: input.status,
+    type: input.status === 'unknown_outcome' ? 'outcome_unknown' : input.status,
     ...(input.safeCode ? { safeCode: input.safeCode } : {}),
+    ...(input.failureDiagnostic ? { failureDiagnostic: input.failureDiagnostic } : {}),
     occurredAt: toIsoTimestamp(input.now())
   });
   await input.invocations.appendEvent(terminal);

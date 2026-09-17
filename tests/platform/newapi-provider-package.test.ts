@@ -632,7 +632,10 @@ describe('NewAPI management and runtime safety', () => {
     await expect(fixture.runtime.requestModelCatalog({
       connection: connection('saved', 'saved'),
       credentials: credential()
-    })).rejects.toMatchObject({ code: 'invalid_parameters' });
+    })).rejects.toMatchObject({
+      code: 'invalid_parameters',
+      failureDiagnostic: { stage: 'upstream_response', statusCode: 422, code: 'invalid_parameters', requestId: 'req-abc-123' }
+    });
     const failed = logs.find((entry) =>
       typeof entry === 'object' && entry !== null &&
       (entry as { event?: unknown }).event === 'request_failed'
@@ -2257,7 +2260,7 @@ describe('NewAPI video adapter', () => {
         status: 'failed',
         error: {
           code: 'content_policy_violation',
-          message: 'private provider detail and prompt must not be exposed'
+          message: 'Content rejected; token=private-provider-token'
         }
       })
     ];
@@ -2276,6 +2279,7 @@ describe('NewAPI video adapter', () => {
     expect(failed).toEqual({
       state: 'failed',
       message: 'The NewAPI video task was rejected by the content safety policy',
+      failureDiagnostic: { stage: 'upstream_response', code: 'content_policy_violation', message: 'Content rejected; [凭证已隐藏]' },
       retryability: 'not_retryable'
     });
     expect(JSON.stringify(failed)).not.toContain('private provider detail');
@@ -2301,6 +2305,7 @@ describe('NewAPI video adapter', () => {
     await expect(adapter.query('video-coded-failure')).resolves.toEqual({
       state: 'failed',
       message: 'The NewAPI video task failed (upstream code: synthetic_failure)',
+      failureDiagnostic: { stage: 'upstream_response', code: 'synthetic_failure', message: 'provider detail' },
       retryability: 'not_retryable'
     });
   });

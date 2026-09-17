@@ -1,4 +1,5 @@
-﻿import { Readable } from 'node:stream';
+import type { ProviderFailureDiagnosticV1 } from '../../../domain';
+import { Readable } from 'node:stream';
 import {
   createProviderUsageObservation,
   parseProviderExecutionRouteSnapshot,
@@ -18,6 +19,7 @@ import {
   type UsageFactV1,
   type UsageSchemaV1
 } from '../../../domain';
+import { failureDiagnostic } from '../failure-diagnostic';
 import type {
   ProviderAsyncOperationPort,
   ProviderAsyncOperationStatus,
@@ -150,6 +152,7 @@ interface NewApiResultSnapshot {
 }
 
 interface ParsedNewApiTask {
+  readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
   readonly status: 'queued' | 'in_progress' | 'completed' | 'failed';
   readonly failureMessage?: string;
   readonly usageFacts?: readonly UsageFactV1[];
@@ -291,6 +294,7 @@ export class NewApiVideoAdapter
     this.requireActive();
     const remoteId = requireRemoteId(providerOperationId);
     const context = this.requireOperation(remoteId);
+    let queryRequestId: string | undefined;
     try {
       const responseBody = await this.credentials.useCredential(
         {
@@ -301,6 +305,7 @@ export class NewApiVideoAdapter
           connection: context.connection,
           credentials: credential,
           providerOperationId: remoteId,
+          onResponseRequestId: (value) => { queryRequestId = value; },
           signal
         })
       );
@@ -323,6 +328,10 @@ export class NewApiVideoAdapter
       this.results.delete(remoteId);
       return {
         state: 'failed',
+        ...(task.failureDiagnostic ? { failureDiagnostic: {
+          ...task.failureDiagnostic,
+          ...(queryRequestId ? { requestId: queryRequestId } : {})
+        } } : {}),
         message: task.failureMessage ?? 'NewApi reported that the video task failed',
         retryability: 'not_retryable'
       };
@@ -1112,7 +1121,8 @@ function parseTaskResponse(
   return {
     status: video.status,
     ...(video.usageFacts ? { usageFacts: video.usageFacts } : {}),
-    ...(video.failureMessage ? { failureMessage: video.failureMessage } : {})
+    ...(video.failureMessage ? { failureMessage: video.failureMessage } : {}),
+    ...(video.failureDiagnostic ? { failureDiagnostic: video.failureDiagnostic } : {})
   };
 }
 
@@ -1125,6 +1135,7 @@ function parseVideoObject(
   readonly id: string;
   readonly status: ParsedNewApiTask['status'];
   readonly failureMessage?: string;
+  readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
   readonly usageFacts?: readonly UsageFactV1[];
 } {
   const root = parseJsonObject(body, label);
@@ -1162,7 +1173,8 @@ function parseVideoObject(
     id,
     status,
     ...(usageFacts ? { usageFacts } : {}),
-    ...(failureMessage ? { failureMessage } : {})
+    ...(failureMessage ? { failureMessage } : {}),
+    ...(status === 'failed' ? { failureDiagnostic: videoTaskDiagnostic(item, root) } : {})
   };
 }
 
@@ -1192,6 +1204,16 @@ function parseCreditUsageFacts(
     unit: 'credit',
     source: 'provider_body'
   }];
+}
+
+function videoTaskDiagnostic(item: Readonly<Record<string, unknown>>, root: Readonly<Record<string, unknown>>) {
+  const error = isRecord(item.error) ? item.error : isRecord(item.failure) ? item.failure : isRecord(root.error) ? root.error : {};
+  return failureDiagnostic({
+    stage: 'upstream_response',
+    message: error.message ?? item.failure_reason ?? item.fail_reason ?? item.message,
+    code: error.code ?? item.error_code ?? item.failure_code,
+    requestId: item.request_id ?? root.request_id
+  });
 }
 
 function safeVideoTaskFailureMessage(
@@ -1342,11 +1364,13 @@ function mapSubmissionFailure(
   if (requestStarted && submissionOutcomeIsUnknown(error)) {
     return {
       kind: 'submission_outcome_unknown',
+      ...(error instanceof NewApiRuntimeError && error.failureDiagnostic ? { failureDiagnostic: error.failureDiagnostic } : {}),
       message: 'The NewApi video submission outcome is unknown'
     };
   }
   return {
     kind: 'failed_before_submission',
+    ...(error instanceof NewApiRuntimeError && error.failureDiagnostic ? { failureDiagnostic: error.failureDiagnostic } : {}),
     message: safeSubmissionMessage(error),
     retryability: runtimeRetryability(error)
   };

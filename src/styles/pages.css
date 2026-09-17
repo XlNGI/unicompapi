@@ -153,6 +153,7 @@
 
 .uc-generation-two-pane {
   grid-template-columns: minmax(340px, 0.9fr) minmax(520px, 1.35fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   height: clamp(600px, calc(100dvh - 260px), 840px);
 }
@@ -654,6 +655,9 @@
 
 .uc-image-quick__inspector {
   grid-area: inspector;
+  align-self: start;
+  height: max-content;
+  overflow: visible;
 }
 
 .uc-image-quick__delivery-strip {
@@ -965,6 +969,7 @@
 
 .uc-image-professional__workspace {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(440px, 0.95fr) minmax(520px, 1.05fr);
   gap: var(--uc-space-3);
   height: clamp(600px, calc(100dvh - 260px), 840px);
@@ -1144,15 +1149,7 @@
   overflow: hidden;
 }
 
-.uc-generation-history__preview.is-draggable,
-.uc-generation-history__work[draggable='true'] {
-  cursor: grab;
-}
-
-.uc-generation-history__preview.is-draggable:active,
-.uc-generation-history__work[draggable='true']:active {
-  cursor: grabbing;
-}
+.uc-generation-history__preview.is-draggable { cursor: default; }
 
 .uc-generation-history__preview > .uc-image-quick__result-list,
 .uc-generation-history__preview .uc-generation-result-preview {
@@ -1180,6 +1177,118 @@
   max-height: 100%;
   margin: 0;
   object-fit: contain;
+}
+
+.uc-generation-history__preview .uc-video-preview video {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+}
+
+.uc-video-preview {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000000;
+  border-radius: var(--uc-radius-8);
+  overflow: hidden;
+}
+
+.uc-video-preview.is-loading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    var(--uc-color-bg-subtle, #f8fafc) 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    var(--uc-color-bg-subtle, #f8fafc) 100%
+  );
+  background-size: 200% 100%;
+  animation: uc-skeleton-shimmer 1.5s infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes uc-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.uc-video-preview video {
+  border-radius: var(--uc-radius-8);
+  background: transparent;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.uc-video-preview video::-webkit-media-controls-fullscreen-button {
+  display: none;
+}
+
+.uc-video-preview--expanded,
+.uc-generation-history__preview .uc-video-preview--expanded {
+  position: fixed !important;
+  z-index: 1000 !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: var(--uc-space-8) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #000000 !important;
+}
+
+.uc-video-preview--expanded video,
+.uc-generation-history__preview .uc-video-preview--expanded video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: none !important;
+  object-fit: contain !important;
+  border-radius: 0 !important;
+}
+
+.uc-video-preview__fullscreen {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: var(--uc-radius-8);
+  background: rgb(0 0 0 / 70%);
+  color: #fff;
+  cursor: pointer;
+  z-index: 3;
+}
+
+.uc-video-preview--expanded .uc-video-preview__fullscreen {
+  top: var(--uc-space-5);
+  right: var(--uc-space-5);
+  border: 1px solid rgb(255 255 255 / 38%);
+  background: rgb(0 0 0 / 80%);
+}
+
+.uc-video-preview__fullscreen:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 .uc-generation-history__preview .uc-generation-result-preview__loading,
@@ -1282,6 +1391,33 @@
 .uc-generation-history__work:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
   outline-offset: 2px;
+}
+
+.uc-generation-history__status-button {
+  display: grid;
+  height: 86px;
+  min-width: 88px;
+  max-width: 140px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.uc-generation-history__status-button:hover > .uc-generation-history__status {
+  border-color: var(--uc-color-border-strong);
+}
+
+.uc-generation-history__status-button:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--uc-radius-6);
+}
+
+.uc-generation-history__status-button[aria-pressed='true'] > .uc-generation-history__status {
+  border-color: var(--uc-color-border-focus);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--uc-color-border-focus) 34%, transparent);
 }
 
 .uc-generation-history__work[aria-pressed='true'] {
@@ -1531,6 +1667,37 @@
 .uc-creation-simple .uc-generation-two-pane__preparation-scroll,
 .uc-creation-simple .uc-image-professional__before-scroll {
   padding: 0;
+}
+
+/* Compact mode hides the heading and footer; keep a single scroll track.
+   Give spare space to the prompt, while parameter cards retain their height. */
+.uc-creation-simple .uc-generation-two-pane__preparation,
+.uc-creation-simple .uc-image-professional__before-pane {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-scroll {
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-flow,
+.uc-creation-simple .uc-image-professional__before-scroll {
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-flow > .uc-card:first-child,
+.uc-creation-simple .uc-image-professional__before-scroll > .uc-card:first-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.uc-creation-simple .uc-generation-two-pane__preparation-flow > .uc-card:first-child > .uc-image-quick__field,
+.uc-creation-simple .uc-image-professional__before-scroll > .uc-card:first-child > .uc-image-quick__field {
+  flex: 1;
+}
+
+.uc-creation-simple .uc-image-professional__prompt-input {
+  display: grid;
 }
 
 .uc-creation-simple .uc-generation-two-pane__preparation-flow {
@@ -3499,12 +3666,72 @@
   width: 132px;
   height: 88px;
   gap: 0;
+  overflow: hidden;
 }
 
 .uc-image-professional__prompt-input
   > .uc-controlled-image-drop-zone
   > .uc-controlled-image-drop-zone__hint {
   display: none;
+}
+
+/*
+ * 修复首帧缩略图被放大、撑出 132x88 固定卡片的问题。
+ * 根因：dropzone 是 display:grid，必填角标占走第一条 grid 轨道，reference
+ * 落到 auto 轨道后其 height:100% 失效，并沿 reference->preview->media->img
+ * 逐层传导，img 只剩 width:100%，高度按原图比例撑开，越竖的图溢出越多。
+ * 做法（不移动卡片位置）：角标绝对定位脱离文档流；reference/preview/media
+ * 用 flex 把 88px 确定高度逐层传到 img，配合既有 object-fit:contain 让整张
+ * 图等比缩放到卡片内完整显示。
+ */
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  > .uc-dynamic-parameters__required {
+  position: absolute;
+  z-index: 3;
+  top: 4px;
+  left: 4px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__reference {
+  display: flex;
+  flex-direction: column;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__preview {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__preview-media {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__preview img {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.uc-image-professional__prompt-input
+  > .uc-controlled-image-drop-zone
+  .uc-image-professional__placeholder {
+  flex: 1 1 auto;
 }
 
 .uc-image-professional__contexts--compact {
@@ -3599,25 +3826,6 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-}
-
-.uc-image-professional__preview-meta {
-  position: absolute;
-  z-index: 1;
-  top: var(--uc-space-3);
-  left: var(--uc-space-3);
-  max-width: calc(100% - var(--uc-space-6));
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--uc-color-border-default) 72%, transparent);
-  border-radius: var(--uc-radius-8);
-  padding: var(--uc-space-1) var(--uc-space-2);
-  color: var(--uc-color-text-primary);
-  background: color-mix(in srgb, var(--uc-color-surface-base) 78%, transparent);
-  font-size: var(--uc-font-size-caption);
-  line-height: var(--uc-line-height-caption);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 .uc-image-professional__placeholder {
@@ -4147,6 +4355,7 @@
 
   .uc-generation-two-pane {
     height: auto;
+    grid-template-rows: none;
   }
 
   .uc-generation-two-pane__controls {
@@ -7021,7 +7230,7 @@ button.uc-project-center__project-card:disabled {
   padding: 0;
   color: var(--uc-color-text-tertiary);
   background: transparent;
-  cursor: help;
+  cursor: pointer;
 }
 
 .uc-dynamic-parameters__info:hover,
@@ -7041,13 +7250,6 @@ button.uc-project-center__project-card:disabled {
 }
 
 .uc-dynamic-parameters__tooltip {
-  position: absolute;
-  z-index: 20;
-  bottom: calc(100% + var(--uc-space-2));
-  left: 50%;
-  width: max-content;
-  max-width: min(18rem, calc(100vw - 2rem));
-  visibility: hidden;
   border: 1px solid var(--uc-color-border-default);
   border-radius: var(--uc-radius-6);
   padding: var(--uc-space-2) var(--uc-space-3);
@@ -7056,13 +7258,28 @@ button.uc-project-center__project-card:disabled {
   box-shadow: var(--uc-shadow-md);
   font-size: var(--uc-font-size-caption);
   line-height: var(--uc-line-height-caption);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, var(--uc-space-1));
-  transition:
-    opacity var(--uc-duration-fast) var(--uc-easing-standard),
-    transform var(--uc-duration-fast) var(--uc-easing-standard),
-    visibility var(--uc-duration-fast) var(--uc-easing-standard);
+}
+
+/* Quick video can expose a full provider parameter schema. Let both cards keep
+   their content height and scroll the pane instead of compressing the prompt
+   card underneath the parameter card. */
+.uc-video-quick__workspace.uc-generation-two-pane .uc-generation-two-pane__controls {
+  grid-template-rows: minmax(min-content, 1fr) max-content;
+  align-content: stretch;
+  overflow-y: auto;
+}
+
+.uc-video-quick__workspace.uc-image-quick__workspace.uc-generation-two-pane .uc-image-quick__composer.uc-image-quick__compact-card,
+.uc-video-quick__workspace.uc-image-quick__workspace.uc-generation-two-pane .uc-image-quick__composer.uc-image-quick__compact-card .uc-image-quick__field {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: minmax(min-content, 1fr);
+}
+
+.uc-video-quick__workspace.uc-image-quick__workspace.uc-generation-two-pane .uc-image-quick__composer.uc-image-quick__compact-card textarea {
+  height: 100%;
+  min-height: 10rem;
+  resize: none;
 }
 
 .uc-dynamic-parameters__tooltip > span {
@@ -7073,11 +7290,18 @@ button.uc-project-center__project-card:disabled {
   margin-top: var(--uc-space-2);
 }
 
-.uc-dynamic-parameters__info-wrap:hover .uc-dynamic-parameters__tooltip,
-.uc-dynamic-parameters__info-wrap:focus-within .uc-dynamic-parameters__tooltip {
-  visibility: visible;
-  opacity: 1;
-  transform: translate(-50%, 0);
+.rs-tooltip.uc-dynamic-parameters__tooltip { z-index: 1300; max-width: min(18rem, calc(100vw - 2rem)); }
+.rs-tooltip.uc-dynamic-parameters__tooltip,
+.rs-tooltip.uc-dynamic-parameters__tooltip.rs-tooltip {
+  --rs-tooltip-bg: var(--uc-color-surface-raised);
+  --rs-tooltip-text: var(--uc-color-text-primary);
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-raised);
+  border: 1px solid var(--uc-color-border-default);
+}
+.rs-picker-popup.uc-dynamic-parameters__popup {
+  --rs-picker-popup-z-index: 1300;
+  z-index: 1300;
 }
 
 .uc-dynamic-parameters__required {
@@ -7160,6 +7384,16 @@ button.uc-project-center__project-card:disabled {
 
 .uc-dynamic-parameters__field--boolean {
   grid-template-areas: "label control";
+}
+
+.uc-dynamic-parameters__field[data-value-type='boolean'] .uc-dynamic-parameters__control {
+  display: flex;
+  align-items: center;
+  min-height: 2.25rem;
+}
+
+.uc-dynamic-parameters__field[data-value-type='boolean'] .rs-toggle-label {
+  margin-left: var(--uc-space-2);
 }
 
 .uc-dynamic-parameters__field--boolean .rs-toggle {

@@ -1,12 +1,13 @@
 import { SelectPicker } from './Pickers';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { LuInfo } from 'react-icons/lu';
-import { Input, InputNumber, Toggle } from 'rsuite';
+import { Input, InputNumber, Toggle, Tooltip, Whisper } from 'rsuite';
 import type {
   DynamicParameterField,
   DynamicParameterValue
 } from './dynamic-parameter-validation';
+import { validateDynamicParameterValue } from './dynamic-parameter-validation';
 
 export type {
   DynamicParameterField,
@@ -22,6 +23,8 @@ const parameterLabels: Readonly<Record<string, string>> = {
   camera_fixed: '固定运镜',
   detail: '识别精度',
   duration: '视频时长',
+  duration_seconds: '视频时长（秒）',
+  generation_mode: '生成模式',
   fps: '帧率',
   frames: '帧数',
   generate_audio: '生成音频',
@@ -37,13 +40,14 @@ const parameterLabels: Readonly<Record<string, string>> = {
   output_compression: '输出压缩率',
   output_format: '输出格式',
   prompt: '提示词',
+  prompt_extend: '提示词扩展',
   quality: '画面质量',
   ratio: '画面比例',
   reasoning_effort: '推理强度',
   resolution: '分辨率',
   response_format: '返回格式',
   return_last_frame: '返回尾帧',
-  seconds: '时长（秒）',
+  seconds: '视频时长（秒）',
   seed: '随机种子',
   size: '输出尺寸',
   stop: '停止词',
@@ -148,6 +152,7 @@ export function displayParameterOption(
 ): string {
   const text = String(value);
   const normalized = text.toLowerCase();
+  if (text === '-1') return '自动（按服务默认）';
   if (parameterOptionLabels[normalized]) return parameterOptionLabels[normalized];
   if (
     !/[A-Za-z]/.test(text) ||
@@ -254,6 +259,18 @@ function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
         <span className="uc-dynamic-parameters__key">{text}</span>
         {description || constraint ? (
           <span className="uc-dynamic-parameters__info-wrap">
+            <Whisper
+              placement="auto"
+              preventOverflow
+              trigger={['hover', 'focus']}
+              speaker={(
+                <Tooltip className="uc-dynamic-parameters__tooltip" id={descriptionId} role="tooltip">
+                  {description ? <span>{description}</span> : null}
+                  {constraint ? <span className="uc-dynamic-parameters__constraint"><strong>填写要求</strong>{constraint}</span> : null}
+                </Tooltip>
+              )}
+              container={() => document.body}
+            >
             <button
               aria-describedby={descriptionId}
               aria-label={`${text}参数详情`}
@@ -262,19 +279,7 @@ function ParameterLabel({ field }: { readonly field: DynamicParameterField }) {
             >
               <LuInfo aria-hidden="true" />
             </button>
-            <span
-              className="uc-dynamic-parameters__tooltip"
-              id={descriptionId}
-              role="tooltip"
-            >
-              {description ? <span>{description}</span> : null}
-              {constraint ? (
-                <span className="uc-dynamic-parameters__constraint">
-                  <strong>填写要求</strong>
-                  {constraint}
-                </span>
-              ) : null}
-            </span>
+            </Whisper>
           </span>
         ) : null}
         {required ? (
@@ -351,6 +356,17 @@ function ParameterField({
   readonly onInputErrorChange: (error?: string) => void;
   readonly onChange: (value: DynamicParameterValue | undefined) => void;
 }) {
+  const pickerRef = useRef<React.ElementRef<typeof SelectPicker>>(null);
+  useEffect(() => {
+    // Dismiss on workspace scrolling, but allow the option list itself to scroll.
+    const closePicker = (event: Event) => {
+      const picker = pickerRef.current;
+      if (event.target instanceof Node && picker?.overlay?.contains(event.target)) return;
+      picker?.close?.();
+    };
+    window.addEventListener('scroll', closePicker, true);
+    return () => window.removeEventListener('scroll', closePicker, true);
+  }, []);
   if (field.valueType === 'boolean') {
     return (
       <ParameterShell error={error} field={field}>
@@ -359,7 +375,7 @@ function ParameterField({
           checked={value === true}
           checkedChildren="开启"
           disabled={disabled}
-          label={displayParameterKey(field.fieldId || field.labelId)}
+          aria-label={displayParameterKey(field.fieldId || field.labelId)}
           onChange={(next) => {
             onInputErrorChange(undefined);
             onChange(next);
@@ -377,6 +393,7 @@ function ParameterField({
     return (
       <ParameterShell error={error} field={field}>
         <SelectPicker
+          ref={pickerRef}
           aria-invalid={Boolean(error)}
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
           block
@@ -391,6 +408,10 @@ function ParameterField({
           placeholder={field.required ? '请选择（必填）' : '请选择'}
           searchable={false}
           value={value === undefined ? null : String(value)}
+          placement="autoVerticalStart"
+          popupClassName="uc-dynamic-parameters__popup"
+          listboxMaxHeight={200}
+          preventOverflow
         />
       </ParameterShell>
     );
@@ -405,8 +426,10 @@ function ParameterField({
           max={field.maximum}
           min={field.minimum}
           onChange={(next) => {
-            onInputErrorChange(undefined);
-            onChange(next === null || next === '' ? undefined : Number(next));
+            const parsed = next === null || next === '' ? undefined : Number(next);
+            const validation = validateDynamicParameterValue(field, parsed);
+            onInputErrorChange(validation);
+            onChange(parsed);
           }}
           required={field.required}
           step={field.valueType === 'integer' ? 1 : field.step}

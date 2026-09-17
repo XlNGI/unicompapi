@@ -54,6 +54,14 @@ export const providerInvocationEventTypes = [
 export type ProviderInvocationEventType =
   (typeof providerInvocationEventTypes)[number];
 
+export interface ProviderFailureDiagnosticV1 {
+  readonly stage?: 'before_request' | 'upstream_response' | 'result_receive' | 'local_persist';
+  readonly message: string;
+  readonly statusCode?: number;
+  readonly code?: string;
+  readonly requestId?: string;
+}
+
 export type ProviderInvocationSubjectV1 =
   | {
       readonly kind: 'media';
@@ -89,6 +97,7 @@ export interface ProviderInvocationEventV1 {
   readonly sequence: number;
   readonly type: ProviderInvocationEventType;
   readonly safeCode?: string;
+  readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
   readonly occurredAt: IsoTimestamp;
 }
 
@@ -104,6 +113,7 @@ export interface ProviderInvocationReadModelV1 {
     readonly sequence: number;
     readonly type: ProviderInvocationEventType;
     readonly safeCode?: string;
+    readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
     readonly occurredAt: IsoTimestamp;
   }[];
   readonly usage: ProviderUsageSummaryV1;
@@ -191,7 +201,7 @@ export function parseProviderInvocationEvent(
       'type',
       'occurredAt'
     ],
-    ['safeCode'],
+    ['safeCode', 'failureDiagnostic'],
     'provider invocation event'
   );
   if (
@@ -205,6 +215,9 @@ export function parseProviderInvocationEvent(
   const safeCode = item.safeCode === undefined
     ? undefined
     : parseSafeCode(item.safeCode);
+  const failureDiagnostic = item.failureDiagnostic === undefined
+    ? undefined
+    : parseFailureDiagnostic(item.failureDiagnostic);
   return {
     schemaVersion: 1,
     id: toProviderInvocationEventId(nonBlank(item.id, 'event.id')),
@@ -214,6 +227,7 @@ export function parseProviderInvocationEvent(
     sequence: Number(item.sequence),
     type: item.type as ProviderInvocationEventType,
     ...(safeCode ? { safeCode } : {}),
+    ...(failureDiagnostic ? { failureDiagnostic } : {}),
     occurredAt: toIsoTimestamp(String(item.occurredAt))
   };
 }
@@ -287,14 +301,43 @@ export function buildProviderInvocationReadModel(input: {
       : {}),
     state: attempt.state,
     createdAt: attempt.createdAt,
-    timeline: events.map(({ sequence, type, safeCode, occurredAt }) => ({
+    timeline: events.map(({ sequence, type, safeCode, failureDiagnostic, occurredAt }) => ({
       sequence,
       type,
       ...(safeCode ? { safeCode } : {}),
+      ...(failureDiagnostic ? { failureDiagnostic } : {}),
       occurredAt
     })),
     usage: structuredClone(usage),
     localResults: structuredClone(localResults)
+  };
+}
+
+function parseFailureDiagnostic(value: unknown): ProviderFailureDiagnosticV1 {
+  const item = exactRecord(value, ['message'], ['stage', 'statusCode', 'code', 'requestId'], 'failure diagnostic');
+  const message = nonBlank(item.message, 'failureDiagnostic.message');
+  if (message.length > 512) throw new InvariantViolationError('failure diagnostic message is too long');
+  if (/[\u0000-\u001f\u007f]/u.test(message)) throw new InvariantViolationError('failure diagnostic message is invalid');
+  const statusCode = item.statusCode === undefined ? undefined : Number(item.statusCode);
+  if (statusCode !== undefined && (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 599)) {
+    throw new InvariantViolationError('failure diagnostic status code is invalid');
+  }
+  const token = (name: string) => {
+    if (item[name] === undefined) return undefined;
+    const value = nonBlank(item[name], name);
+    if (!/^[a-z0-9][a-z0-9_.-]{0,127}$/i.test(value)) throw new InvariantViolationError('failure diagnostic identifier is invalid');
+    return value;
+  };
+  const stage = item.stage === undefined ? undefined : String(item.stage);
+  if (stage !== undefined && !['before_request', 'upstream_response', 'result_receive', 'local_persist'].includes(stage)) {
+    throw new InvariantViolationError('failure diagnostic stage is invalid');
+  }
+  return {
+    message,
+    ...(stage ? { stage: stage as ProviderFailureDiagnosticV1['stage'] } : {}),
+    ...(statusCode === undefined ? {} : { statusCode }),
+    ...(token('code') ? { code: token('code') } : {}),
+    ...(token('requestId') ? { requestId: token('requestId') } : {})
   };
 }
 

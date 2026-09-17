@@ -1,3 +1,4 @@
+import type { ProviderFailureDiagnosticV1 } from '../../domain';
 import {
   createProviderExecutionRouteSnapshot,
   createProviderInvocationAttempt,
@@ -79,6 +80,7 @@ export interface SubmissionArtifactFactoryPort {
 export type SubmissionDispatchOutcome =
   | {
       readonly kind: 'failed_before_submission';
+      readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
       readonly safeCode: string;
     }
   | {
@@ -93,6 +95,7 @@ export type SubmissionDispatchOutcome =
     }
   | {
       readonly kind: 'unknown_outcome';
+      readonly failureDiagnostic?: ProviderFailureDiagnosticV1;
       readonly providerOperationId?: string;
       readonly safeCode: string;
     };
@@ -386,15 +389,15 @@ export class ProviderSubmissionOrchestrator {
         // allowlisted explicit rejection can be classified as a confirmed
         // failure; transport/response failures remain unknown by design.
         if (isExplicitProviderRejection(outcome.safeCode)) {
-          return this.recordProviderRejection(intent, outcome.safeCode);
+          return this.recordProviderRejection(intent, outcome.safeCode, undefined, outcome.failureDiagnostic);
         }
         return this.recordUnknown(
           intent,
           outcome.safeCode || 'adapter.invalid_failed_before_request',
-          undefined
+          undefined, undefined, outcome.failureDiagnostic
         );
       }
-      return this.recordFailedBeforeRequest(intent, outcome.safeCode);
+      return this.recordFailedBeforeRequest(intent, outcome.safeCode, undefined, outcome.failureDiagnostic);
     }
     if (!requestStarted) {
       return this.recordFailedBeforeRequest(intent, 'adapter.request_start_hook_missing');
@@ -403,7 +406,7 @@ export class ProviderSubmissionOrchestrator {
       return this.recordUnknown(
         intent,
         outcome.safeCode,
-        outcome.providerOperationId
+        outcome.providerOperationId, undefined, outcome.failureDiagnostic
       );
     }
     if (outcome.kind === 'accepted_async') {
@@ -415,7 +418,8 @@ export class ProviderSubmissionOrchestrator {
   private async recordFailedBeforeRequest(
     intent: ProjectSubmissionAcceptanceV1['intent'],
     safeCode: string,
-    cause?: unknown
+    cause?: unknown,
+    failureDiagnostic?: ProviderFailureDiagnosticV1
   ): Promise<SubmissionOrchestrationResultV1> {
     const occurredAt = toIsoTimestamp(this.now());
     const event = this.invocationEvent(
@@ -423,7 +427,7 @@ export class ProviderSubmissionOrchestrator {
       2,
       'submission_failed_before_request',
       occurredAt,
-      safeCode
+      safeCode, failureDiagnostic
     );
     const next = transitionSubmissionIntent(
       intent,
@@ -445,7 +449,8 @@ export class ProviderSubmissionOrchestrator {
   private async recordProviderRejection(
     intent: ProjectSubmissionAcceptanceV1['intent'],
     safeCode: string,
-    cause?: unknown
+    cause?: unknown,
+    failureDiagnostic?: ProviderFailureDiagnosticV1
   ): Promise<SubmissionOrchestrationResultV1> {
     const occurredAt = toIsoTimestamp(this.now());
     const event = this.invocationEvent(
@@ -453,7 +458,7 @@ export class ProviderSubmissionOrchestrator {
       2,
       'failed',
       occurredAt,
-      safeCode
+      safeCode, failureDiagnostic
     );
     const next = transitionSubmissionIntent(intent, 'failed', occurredAt, {
       safeCode
@@ -476,7 +481,8 @@ export class ProviderSubmissionOrchestrator {
     intent: ProjectSubmissionAcceptanceV1['intent'],
     safeCode: string,
     providerOperationId?: string,
-    cause?: unknown
+    cause?: unknown,
+    failureDiagnostic?: ProviderFailureDiagnosticV1
   ): Promise<SubmissionOrchestrationResultV1> {
     const occurredAt = toIsoTimestamp(this.now());
     const event = this.invocationEvent(
@@ -484,7 +490,7 @@ export class ProviderSubmissionOrchestrator {
       2,
       'outcome_unknown',
       occurredAt,
-      safeCode
+      safeCode, failureDiagnostic
     );
     const next = transitionSubmissionIntent(intent, 'unknown_outcome', occurredAt, {
       ...(providerOperationId ? { providerOperationId } : {}),
@@ -571,7 +577,8 @@ export class ProviderSubmissionOrchestrator {
     sequence: number,
     type: ProviderInvocationEventV1['type'],
     occurredAt: IsoTimestamp,
-    safeCode?: string
+    safeCode?: string,
+    failureDiagnostic?: ProviderFailureDiagnosticV1
   ): ProviderInvocationEventV1 {
     return createProviderInvocationEvent({
       id: this.ids.nextProviderInvocationEventId(),
@@ -579,6 +586,7 @@ export class ProviderSubmissionOrchestrator {
       sequence,
       type,
       ...(safeCode ? { safeCode } : {}),
+      ...(failureDiagnostic ? { failureDiagnostic } : {}),
       occurredAt
     });
   }

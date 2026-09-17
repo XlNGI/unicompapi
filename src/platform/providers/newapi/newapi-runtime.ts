@@ -1,4 +1,6 @@
+import type { ProviderFailureDiagnosticV1 } from '../../../domain';
 import { isIP } from 'node:net';
+import { failureDiagnostic } from '../failure-diagnostic';
 import type {
   ProviderConnection,
   ProxyMode,
@@ -61,6 +63,7 @@ export type NewApiRuntimeErrorCode =
   (typeof newApiRuntimeErrorCodes)[number];
 
 export class NewApiRuntimeError extends Error {
+  failureDiagnostic?: ProviderFailureDiagnosticV1;
   constructor(
     readonly code: NewApiRuntimeErrorCode,
     readonly retryability: 'retryable' | 'not_retryable' | 'unknown',
@@ -410,6 +413,7 @@ export class NewApiSharedRuntime {
     readonly credentials: StructuredCredentialRecord;
     readonly providerOperationId: string;
     readonly signal?: AbortSignal;
+    readonly onResponseRequestId?: NewApiResponseRequestIdObserver;
   }): Promise<Uint8Array> {
     return requireBody(await this.request({
       connection: input.connection,
@@ -417,6 +421,7 @@ export class NewApiSharedRuntime {
       adapterId: NEWAPI_VIDEO_ADAPTER_ID,
       protocolId: NEWAPI_VIDEO_PROTOCOL_ID,
       operation: 'video_query',
+      onResponseRequestId: input.onResponseRequestId,
       method: 'GET',
       pathSegments: ['videos', remoteId(input.providerOperationId)],
       signal: input.signal,
@@ -608,12 +613,25 @@ export class NewApiSharedRuntime {
         responseUpstreamCode = upstream.code;
         responseUpstreamType = upstream.type;
         responseUpstreamParam = upstream.param;
-        throw mapHttpStatus(
+        const failure = mapHttpStatus(
           response.status,
           response.headers,
           input.notFoundKind,
           response.body
         );
+        let errorBody: unknown;
+        try { errorBody = response.body && response.body.byteLength <= 65536
+          ? JSON.parse(new TextDecoder().decode(response.body)) : undefined; } catch { /* Non-JSON error. */ }
+        const errorFields = isRecord(errorBody) && isRecord(errorBody.error) ? errorBody.error : errorBody;
+        failure.failureDiagnostic = failureDiagnostic({
+          stage: 'upstream_response',
+          message: isRecord(errorFields) && typeof errorFields.message === 'string'
+            ? errorFields.message : failure.message,
+          statusCode: response.status,
+          code: upstream.code,
+          requestId: responseRequestId
+        }, [credential]);
+        throw failure;
       }
       const headers = normalizeHeaders(response.headers);
       if (input.expectedResponse === 'stream') {

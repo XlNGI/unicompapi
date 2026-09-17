@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### H3 视频 UI 分支本地合并（2026-09-17）
+
+负责人授权将 `feature/h3-video-ui-optimization`（`8add238`）合并至本地 `develop`（合并前 `637fee6`），本次不推送远端，保留本地和远程功能分支。范围包含生成参数、共享图片/视频生成历史与预览、任务失败诊断及其调用链、测试和配套文档。唯一 Git 内容冲突位于 `DynamicParameterForm.tsx` 的导入：保留 develop 的共享 `SelectPicker`，补齐分支新增的 React/Tooltip 导入，并移除下拉框显式 `document.body` 容器覆盖，使其沿用统一弹层。
+
+新鲜验证：参数表单/弹层定向 Node 8/8；类型检查、lint、生产构建、平台审计通过；Vitest 218 文件、1684/1684 通过；全量 Node/UI 374/375，唯一失败为历史 handoff `manifests/SHA256SUMS.txt` 缺失。该测试及其校验脚本相对合并前 develop 均未修改，合并前 develop 已无 handoff 跟踪文件；不恢复已删除交接资料，不把此项标记为通过。构建仍提示大 chunk 与 Vite CJS 弃用。全合并 diff 检查提示功能分支原有文档尾随空格及 `VideoPreview.tsx` 文件末尾空行；本次冲突修复 diff 检查通过，未扩大到无关格式清理。
+
+未执行真实 Electron 人工播放/交互验收或付费服务商调用；未验证 macOS 实机。下一步为人工验收图片/视频生成历史、视频预览、参数下拉与失败诊断，再按负责人指示决定是否推送 develop。原有 `.workbuddy/`、`files/`、`outputs/` 不纳入提交。
+
 ### 新增维护代码上传与 develop 同步（2026-09-11）
 
 负责人明确授权将新增代码上传并合并 develop。本次以 `feature/microsoft-store-packaging` 为来源，包含此前本地对话修复 `12b9a64`、视频缩略图运行工作区集成 `22fbf72`，以及商店打包/媒体加载实现 `7e72311`；来源分支已推送，保留本地与远程功能分支。相对原 develop `1608d05` 共 63 个变更文件，非快进合并无冲突，合并代码树与已验证来源一致，仅追加本同步记录。此前删除的 64 个路径恢复 0；提交范围不含 `.tools`、FFmpeg 二进制、安装包、真实身份配置或测试运行产物。

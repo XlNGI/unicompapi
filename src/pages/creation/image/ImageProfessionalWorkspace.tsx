@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LuFileImage,
   LuPlus,
@@ -45,24 +45,53 @@ export function ImageProfessionalWorkspace({
   const [previewUrl, setPreviewUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [expectedWorkId, setExpectedWorkId] = useState<string>();
+  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
+  const userTookOverRef = useRef(false);
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
+    if (phase === 'preparing') userTookOverRef.current = false;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
   useEffect(() => {
     setHistoryRefreshKey(0);
+    setExpectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
   const productFeature = draft.featureSelection?.productFeature === 'text_to_image' ||
     draft.featureSelection?.productFeature === 'reference_to_image'
     ? draft.featureSelection.productFeature
     : undefined;
+
+  // 收集当前项目下全部专业生图草稿ID：文生图/图生图是同一草稿可切换的特性，
+  // 不作为历史拆分维度；专业生图统一显示最近10条作品，新建草稿后历史仍保留
+  useEffect(() => {
+    let active = true;
+    if (!imageWorkspaces) {
+      setSiblingDraftIds([]);
+      return;
+    }
+    void imageWorkspaces.list().then((result) => {
+      if (!active || !result.ok) return;
+      setSiblingDraftIds(
+        result.value
+          .filter((item) => item.mode === 'professional_image')
+          .map((item) => item.draftId)
+      );
+    }).catch(() => {
+      if (active) setSiblingDraftIds([]);
+    });
+    return () => {
+      active = false;
+    };
+  }, [imageWorkspaces, historyRefreshKey]);
+
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
       reference.kind !== 'project_context' ||
@@ -87,7 +116,7 @@ export function ImageProfessionalWorkspace({
           ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
           : !enhancementSatisfied
             ? '已填写结构化提示词内容，请先完成提示词增强并确认最终提示词。'
-          : undefined;
+            : undefined;
 
   useEffect(() => {
     onBlockingReasonChange?.(blockedReason);
@@ -382,11 +411,6 @@ export function ImageProfessionalWorkspace({
                       <figure className="uc-image-professional__preview">
                         <div className="uc-image-professional__preview-media">
                           <img alt={`项目图片：${input?.name ?? '本地图片'}`} src={previewUrl} />
-                          {input ? (
-                            <span className="uc-image-professional__preview-meta">
-                              {`${input.name} · ${input.width} × ${input.height}`}
-                            </span>
-                          ) : null}
                           <div className="uc-image-professional__preview-overlay">
                             <Button
                               aria-label="删除图片"
@@ -533,7 +557,14 @@ export function ImageProfessionalWorkspace({
             onFlushDraft={onFlushDraft}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
-            onSubmissionComplete={() => {
+            onSubmissionComplete={(submission) => {
+              if (!userTookOverRef.current) {
+                setExpectedWorkId(
+                  submission.status === 'completed' ? submission.workId : undefined
+                );
+              } else {
+                setExpectedWorkId(undefined);
+              }
               setHistoryRefreshKey((key) => key + 1);
             }}
             requireExplicitFeature
@@ -551,10 +582,13 @@ export function ImageProfessionalWorkspace({
         >
           <GenerationHistory
             draftId={draft.draftId}
+            extraDraftIds={siblingDraftIds}
             key={draft.draftId}
             mediaKind="image"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
+            expectedWorkId={expectedWorkId}
+            userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />
         </Card>

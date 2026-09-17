@@ -28,7 +28,8 @@ test('professional image shows real submit stages in its history preview', async
   assert.match(workspace, /onProgressChange={handleProgressChange}/);
   assert.match(workspace, /submissionProgress={submissionProgress}/);
   assert.match(history, /livePendingPhases/);
-  assert.match(history, /const showLoadingPreview = generationInFlight && !selectedWorkId/);
+  assert.match(history, /resolveHistoryStageFlags\(/);
+  assert.match(history, /showLoadingPreview: generationInFlight && !input\.previewWorkId/);
   assert.match(history, /loading={showLoadingPreview}/);
   assert.match(history, /mediaKind === 'image' \? '图片' : '视频'/);
 });
@@ -45,9 +46,18 @@ test('professional image and video share real submit stages in generation histor
     assert.match(source, /<GenerationHistory/);
     assert.match(source, /submissionProgress={submissionProgress}/);
   }
-  assert.match(history, /const showLoadingPreview = generationInFlight && !selectedWorkId/);
+  assert.match(history, /resolveHistoryStageFlags\(/);
+  assert.match(history, /showLoadingPreview: generationInFlight && !input\.previewWorkId/);
   assert.match(history, /loading={showLoadingPreview}/);
   assert.match(history, /mediaKind={mediaKind}/);
+});
+
+test('failed generation preview exposes a clear reason and task-center next step', async () => {
+  const history = await readFile('src/components/GenerationHistory.tsx', 'utf8');
+  const preview = await readFile('src/components/GenerationResultPreview.tsx', 'utf8');
+  assert.match(history, /请前往任务中心查看详情/);
+  assert.match(history, /role=\{generationFailed \? 'alert' : undefined\}/);
+  assert.match(preview, /readonly role\?: 'alert' \| 'status'/);
 });
 
 test('accepted asynchronous work remains visible while the provider is processing it', async () => {

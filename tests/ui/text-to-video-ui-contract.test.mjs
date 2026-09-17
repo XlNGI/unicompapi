@@ -70,6 +70,11 @@ test('text-to-video uses only the unified candidate and submission panel', () =>
   assert.doesNotMatch(source, /createTask\(|createExecution\(|invokeExecution\(|preflight\(/);
 });
 
+test('text-to-video keeps the current history mounted after completion', () => {
+  assert.doesNotMatch(source, /onClearUi/);
+  assert.doesNotMatch(source, /onClearUi\\?\\.\\(\\)/);
+});
+
 test('text-to-video identifies and validates real required inputs locally', () => {
   assert.match(source, /uc-dynamic-parameters__required.*必填/);
   assert.match(panel, /requiredInputError/);

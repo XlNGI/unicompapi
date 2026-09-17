@@ -1,3 +1,4 @@
+import type { ProviderFailureDiagnosticV1 } from '../../domain';
 import {
   createProviderInvocationEvent,
   toIsoTimestamp,
@@ -247,7 +248,8 @@ export class InvocationSupervisor<TResultReference, TReceiveResult> {
       'failed',
       status.state === 'expired'
         ? 'provider.operation_expired'
-        : 'provider.operation_failed'
+        : 'provider.operation_failed',
+      status.state === 'failed' ? status.failureDiagnostic : undefined
     );
   }
 
@@ -407,7 +409,8 @@ export class InvocationSupervisor<TResultReference, TReceiveResult> {
     acceptance: ProjectSubmissionAcceptanceV1,
     status: 'completed' | 'failed' | 'cancelled',
     eventType: 'completed' | 'failed' | 'cancelled',
-    safeCode?: string
+    safeCode?: string,
+    failureDiagnostic?: ProviderFailureDiagnosticV1
   ): Promise<ProjectSubmissionAcceptanceV1> {
     await this.authorization.recordOutcome(
       acceptance.intent.authorizationClaimId,
@@ -426,7 +429,8 @@ export class InvocationSupervisor<TResultReference, TReceiveResult> {
         acceptance.invocationEvents.length + 1,
         eventType,
         occurredAt,
-        safeCode
+        safeCode,
+        failureDiagnostic
       )
     });
   }
@@ -444,7 +448,8 @@ export class InvocationSupervisor<TResultReference, TReceiveResult> {
       | 'failed'
       | 'outcome_unknown',
     occurredAt: ReturnType<typeof toIsoTimestamp>,
-    safeCode?: string
+    safeCode?: string,
+    failureDiagnostic?: ProviderFailureDiagnosticV1
   ) {
     return createProviderInvocationEvent({
       id: this.ids.nextProviderInvocationEventId(),
@@ -452,6 +457,7 @@ export class InvocationSupervisor<TResultReference, TReceiveResult> {
       sequence,
       type,
       ...(safeCode ? { safeCode } : {}),
+      ...(failureDiagnostic ? { failureDiagnostic } : {}),
       occurredAt
     });
   }

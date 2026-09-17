@@ -81,12 +81,14 @@ export function cloneProviderSubmitOutcome(
       providerOperationId: outcome.providerOperationId
         ? requireNonBlank(outcome.providerOperationId, 'provider operation ID')
         : undefined,
-      message: requireNonBlank(outcome.message, 'unknown submission message')
+      message: requireNonBlank(outcome.message, 'unknown submission message'),
+      ...(outcome.failureDiagnostic ? { failureDiagnostic: structuredClone(outcome.failureDiagnostic) } : {})
     };
   }
   return {
     kind: outcome.kind,
     message: requireNonBlank(outcome.message, 'submission failure message'),
+    ...(outcome.failureDiagnostic ? { failureDiagnostic: structuredClone(outcome.failureDiagnostic) } : {}),
     retryability: outcome.retryability
   };
 }
