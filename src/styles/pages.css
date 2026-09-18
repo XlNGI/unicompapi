@@ -1185,6 +1185,22 @@
   max-height: 100%;
 }
 
+/* Image-to-video only: keep the native control strip out of the two-pane
+   inline-size cycle. Nested grid/flex plus the left-pane reference image
+   can make Chromium UA controls collapse to a clipped overlay, so the time
+   text overlaps (e.g. "0:05 0:(") and the bar flickers during playback. */
+.uc-video-image__workspace .uc-generation-history__preview .uc-video-preview {
+  contain: inline-size;
+  min-width: 0;
+}
+
+.uc-video-image__workspace .uc-generation-history__preview .uc-video-preview video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .uc-video-preview {
   position: relative;
   width: 100%;

@@ -1,5 +1,9 @@
 # UniComp 开发计划
 
+### 开发服务器避开 Windows 文件锁（2026-09-17）
+
+`npm run dev` 在 Windows 上会被 Vite 监视 `outputs/video-controls-repro/chrome-profile` 的 Cookies 文件锁打断，报 `EBUSY` 后整组退出。产品 `vite.config.ts` 已排除 `outputs/`、`.cache/`、`.tools/`、临时目录和 Chrome profile 路径的文件监视；`outputs/` 同步加入 `.gitignore`。这不影响从开发服务器读取这些静态文件。未启动完整 Electron 人工验收。
+
 ### H3 视频 UI 分支本地合并（2026-09-17）
 
 负责人授权将 `feature/h3-video-ui-optimization`（`8add238`）合并至本地 `develop`（合并前 `637fee6`），本次不推送远端，保留本地和远程功能分支。范围包含生成参数、共享图片/视频生成历史与预览、任务失败诊断及其调用链、测试和配套文档。唯一 Git 内容冲突位于 `DynamicParameterForm.tsx` 的导入：保留 develop 的共享 `SelectPicker`，补齐分支新增的 React/Tooltip 导入，并移除下拉框显式 `document.body` 容器覆盖，使其沿用统一弹层。

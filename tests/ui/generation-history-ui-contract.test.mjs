@@ -98,6 +98,28 @@ test('shared history video fills the preview pane instead of shrinking to its in
   assert.doesNotMatch(body, /height: auto;/);
 });
 
+test('image-to-video preview isolates native controls from the two-pane inline-size cycle', () => {
+  const host = styles.match(
+    /\.uc-video-image__workspace \.uc-generation-history__preview \.uc-video-preview\s*\{([\s\S]*?)\}/
+  );
+  assert.ok(host, 'image-to-video preview host must isolate inline size');
+  assert.match(host[1], /contain: inline-size;/);
+  assert.match(host[1], /min-width: 0;/);
+
+  const video = styles.match(
+    /\.uc-video-image__workspace \.uc-generation-history__preview \.uc-video-preview video\s*\{([\s\S]*?)\}/
+  );
+  assert.ok(video, 'image-to-video preview video must leave the size cycle');
+  assert.match(video[1], /position: absolute;/);
+  assert.match(video[1], /inset: 0;/);
+  assert.match(video[1], /width: 100%;/);
+  assert.match(video[1], /height: 100%;/);
+  assert.doesNotMatch(
+    styles,
+    /\.uc-video-text__workspace \.uc-generation-history__preview \.uc-video-preview video\s*\{/
+  );
+});
+
 test('shared history maps wheel gestures to horizontal overflow without trapping boundaries', () => {
   assert.match(history, /onWheel={handleTimelineWheel}/);
   assert.match(history, /event\.deltaX/);
