@@ -190,7 +190,46 @@ export interface StorageCallBillingDto {
   readonly actualQuota?: string;
   readonly sourceLabel?: string;
   readonly reconciledAt?: string;
+  /** Present when the state needs explaining; never contains upstream text. */
+  readonly reasonCode?: StorageCallBillingReasonCode;
 }
+
+/**
+ * Bounded, display-safe explanations for a call's billing outcome.
+ *
+ * These are the only reasons the task centre may show. The vocabulary is closed
+ * on purpose: no upstream URL, response body, credential or internal error text
+ * is forwarded to the renderer, so an operator learns *what* is missing without
+ * exposing station internals.
+ */
+export const storageCallBillingReasonCodes = [
+  /** The upstream response carried no allowlisted request id to correlate with. */
+  'request_id_unavailable',
+  /** The station's log endpoint answered 404/410. */
+  'logs_unavailable_404',
+  /** The station's log endpoint answered 429. */
+  'logs_rate_limited',
+  /** The log request failed in transport, or the station answered unexpectedly. */
+  'logs_transport_error',
+  /** The log endpoint answered 200 with an unusable payload. */
+  'logs_payload_invalid',
+  /** The station reported no usage for this call. */
+  'usage_not_reported',
+  /** The station's pricing list has no exact key for this model. */
+  'pricing_model_missing',
+  /** The pricing payload was malformed and was not treated as a price. */
+  'pricing_invalid',
+  /** The price is unknown because the pricing endpoint was unreachable. */
+  'pricing_unavailable',
+  /** A price exists but is not expressed in a currency this build can convert. */
+  'currency_unconvertible',
+  /** No official price rule is configured for this model. */
+  'official_rule_missing',
+  /** The connection exposes no billing protocol, so no bill can ever be fetched. */
+  'station_protocol_unsupported'
+] as const;
+export type StorageCallBillingReasonCode =
+  (typeof storageCallBillingReasonCodes)[number];
 
 export interface StorageCallRecordListDto {
   readonly items: readonly StorageCallRecordSummaryDto[];

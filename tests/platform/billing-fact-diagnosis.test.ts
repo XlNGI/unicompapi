@@ -1,16 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import {
-  NewApiBillingReconciler,
-  type NewApiTokenLogRecord
-} from '../../src/platform/providers/newapi/newapi-billing';
+import type { NewApiTokenLogRecord } from '../../src/platform/providers/newapi/newapi-billing';
 import {
   DESENSITIZED_BILLING_SCENARIOS,
   DESENSITIZED_CONNECTION_ID,
   DESENSITIZED_MATCHING_REQUEST_ID,
   DESENSITIZED_MODEL_KEY,
+  DESENSITIZED_SITE_STATUS_FAILURES,
   DESENSITIZED_USAGE_OBSERVATION,
-  type DesensitizedBillingScenario,
-  type DesensitizedTransportOutcome
+  createDesensitizedReconciler,
+  type DesensitizedBillingScenario
 } from '../fixtures/billing-desensitized-call';
 
 /**
@@ -27,52 +25,8 @@ import {
  * "distinguishes with `reasonCode`".
  */
 
-function createReconciler(scenario: DesensitizedBillingScenario): NewApiBillingReconciler {
-  const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
-  const respond = (outcome: DesensitizedTransportOutcome): Uint8Array => {
-    if (outcome.status === undefined) {
-      throw new Error(outcome.transportError ?? 'transport_error');
-    }
-    if (outcome.status >= 400) {
-      throw new Error(`HTTP ${outcome.status}`);
-    }
-    return encode(outcome.body);
-  };
-  return new NewApiBillingReconciler(
-    {
-      async load() {
-        return {
-          connections: [{
-            id: scenario.connectionId,
-            credentialReference: 'credential-desensitized-1'
-          }]
-        };
-      }
-    } as never,
-    {
-      async useRecord(
-        _reference: string,
-        operation: (record: unknown) => Promise<unknown>
-      ) {
-        return operation({
-          schemaId: 'openai-compatible.api-key',
-          schemaVersion: 1,
-          values: { api_key: 'redacted-in-fixture' }
-        });
-      }
-    } as never,
-    {
-      async requestTokenLogs() {
-        return respond(scenario.tokenLogs);
-      },
-      async requestSiteStatus() {
-        return respond(scenario.siteStatus);
-      },
-      async requestModelPricing() {
-        return respond(scenario.modelPricing);
-      }
-    } as never
-  );
+function createReconciler(scenario: DesensitizedBillingScenario) {
+  return createDesensitizedReconciler(scenario);
 }
 
 describe('P0 billing fact reconstruction from desensitized fixtures', () => {
@@ -130,66 +84,84 @@ describe('P0 billing fact reconstruction from desensitized fixtures', () => {
   });
 
   /**
-   * The defect P2 must fix is not "no outcome at all" — a healthy station does
-   * produce real amounts. It is that **distinct causes produce identical
-   * observable results**, so the task centre can never explain what is missing.
+   * P2 GREEN. These two cases were the P0 RED baseline, where every distinct
+   * cause collapsed into one observable outcome. The adapter now reports the
+   * cause through the bounded reason vocabulary instead of swallowing it.
    */
-  it('RED baseline: 404, 429 and a transport failure collide into the same empty result', async () => {
-    const results: readonly string[] = await Promise.all(
-      (['logs_unavailable_404', 'logs_rate_limited', 'logs_transport_error'] as const)
-        .map(async (scenarioId) => {
-          const reconciler = createReconciler(DESENSITIZED_BILLING_SCENARIOS[scenarioId]);
-          const logs = await reconciler.reconcile({ connectionId: DESENSITIZED_CONNECTION_ID });
-          return JSON.stringify({ size: logs.size, keys: [...logs.keys()] });
-        })
-    );
-    // Three different root causes; one single observable outcome.
-    expect(results[0]).toBe('{"size":0,"keys":[]}');
-    expect(new Set(results).size).toBe(1);
+  it('P2: 404, 429 and a transport failure report three different reasons', async () => {
+    const diagnosisFor = async (
+      scenarioId: 'logs_unavailable_404' | 'logs_rate_limited' | 'logs_transport_error'
+    ) => createReconciler(DESENSITIZED_BILLING_SCENARIOS[scenarioId])
+      .diagnose({ connectionId: DESENSITIZED_CONNECTION_ID, modelName: DESENSITIZED_MODEL_KEY });
+
+    const notFound = await diagnosisFor('logs_unavailable_404');
+    const rateLimited = await diagnosisFor('logs_rate_limited');
+    const transport = await diagnosisFor('logs_transport_error');
+
+    expect(notFound).toEqual(['logs_unavailable_404']);
+    expect(rateLimited).toEqual(['logs_rate_limited']);
+    expect(transport).toEqual(['logs_transport_error']);
+    // Three causes, three answers: the operator can now act on the difference.
+    expect(new Set([notFound[0], rateLimited[0], transport[0]]).size).toBe(3);
   });
 
-  it('RED baseline: a missing pricing key collides with a rate-limited pricing endpoint', async () => {
-    const estimateFor = async (scenarioId: 'usage_not_reported_pricing_missing' | 'pricing_endpoint_rate_limited') => {
-      const reconciler = createReconciler(DESENSITIZED_BILLING_SCENARIOS[scenarioId]);
-      return reconciler.estimate({
+  it('P2: a missing pricing key differs from an unreachable pricing endpoint', async () => {
+    const diagnosisFor = async (
+      scenarioId: 'usage_not_reported_pricing_missing' | 'pricing_endpoint_rate_limited'
+    ) => createReconciler(DESENSITIZED_BILLING_SCENARIOS[scenarioId])
+      .diagnose({ connectionId: DESENSITIZED_CONNECTION_ID, modelName: DESENSITIZED_MODEL_KEY });
+
+    expect(await diagnosisFor('usage_not_reported_pricing_missing'))
+      .toEqual(['pricing_model_missing']);
+    expect(await diagnosisFor('pricing_endpoint_rate_limited'))
+      .toEqual(['pricing_unavailable']);
+  });
+
+  it('P2: HTTP 200 with an unusable payload is not treated as a price or a log', async () => {
+    const pricing = await createReconciler(DESENSITIZED_BILLING_SCENARIOS.pricing_payload_invalid)
+      .diagnose({ connectionId: DESENSITIZED_CONNECTION_ID, modelName: DESENSITIZED_MODEL_KEY });
+    expect(pricing).toEqual(['pricing_invalid']);
+    // A 200 alone is never billing evidence, and no amount is invented.
+    expect(await createReconciler(DESENSITIZED_BILLING_SCENARIOS.pricing_payload_invalid)
+      .estimate({
         connectionId: DESENSITIZED_CONNECTION_ID,
         modelName: DESENSITIZED_MODEL_KEY,
         billableUnits: '1'
-      }).then(
-        (value) => JSON.stringify({ outcome: 'estimate', value }),
-        (error: unknown) => JSON.stringify({ outcome: 'rejected', message: String(error) })
-      );
-    };
-    const missingKey = await estimateFor('usage_not_reported_pricing_missing');
-    const rateLimited = await estimateFor('pricing_endpoint_rate_limited');
-    expect(missingKey).toBe('{"outcome":"estimate"}');
-    expect(rateLimited).toBe(missingKey);
+      })).toBeUndefined();
+
+    const logs = await createReconciler(DESENSITIZED_BILLING_SCENARIOS.logs_payload_invalid)
+      .diagnose({ connectionId: DESENSITIZED_CONNECTION_ID, modelName: DESENSITIZED_MODEL_KEY });
+    expect(logs).toEqual(['logs_payload_invalid']);
   });
 
-  it('RED baseline: a log row that cannot be correlated is still returned as an empty match', async () => {
+  it('P2: a log row that cannot be correlated is reported as an unavailable id', async () => {
     const reconciler = createReconciler(DESENSITIZED_BILLING_SCENARIOS.request_id_unavailable);
     const logs = await reconciler.reconcile({ connectionId: DESENSITIZED_CONNECTION_ID });
     // The station did return a consume row, but the invocation has no request id
-    // to look it up with, and no reason code records that gap.
+    // to look it up with. The row is not lost, but the gap is now reportable.
     expect(logs.size).toBe(1);
     expect(logs.has(DESENSITIZED_MATCHING_REQUEST_ID)).toBe(false);
     const onlyRow: NewApiTokenLogRecord | undefined = [...logs.values()][0];
     expect(onlyRow?.amountCny).toBeDefined();
+    expect(await reconciler.diagnose({
+      connectionId: DESENSITIZED_CONNECTION_ID,
+      modelName: DESENSITIZED_MODEL_KEY
+    })).toEqual([]);
   });
 
-  it('RED baseline: a failing site-status request aborts the whole context', async () => {
+  it('aborts the whole context when the site-status request fails', async () => {
     const healthy = createReconciler(DESENSITIZED_BILLING_SCENARIOS.station_healthy_bill_present);
     await expect(healthy.reconcile({ connectionId: DESENSITIZED_CONNECTION_ID }))
       .resolves.toHaveProperty('size', 1);
 
     const failingStatus = {
       ...DESENSITIZED_BILLING_SCENARIOS.station_healthy_bill_present,
-      siteStatus: { status: 429, body: { success: false, message: 'rate_limited' } }
+      siteStatus: DESENSITIZED_SITE_STATUS_FAILURES.rate_limited
     };
     const reconciler = createReconciler(failingStatus);
-    // Today the rejection escapes the adapter, so the caller can only fall back
-    // to `unestimated`; it never learns that the cause was rate limiting.
+    // A status failure is not a log/pricing fact: it removes the quota policy,
+    // so the adapter still rejects and the caller keeps its safe fallback.
     await expect(reconciler.reconcile({ connectionId: DESENSITIZED_CONNECTION_ID }))
-      .rejects.toThrow('HTTP 429');
+      .rejects.toMatchObject({ code: 'rate_limited' });
   });
 });

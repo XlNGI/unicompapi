@@ -1,6 +1,7 @@
 import type {
   StorageCallDetailsDto,
   StorageCallBillingDto,
+  StorageCallBillingReasonCode,
   StorageCallOfficialPricingRuleDto,
   StorageCallPricingRateDto,
   StorageCallUsageFactDto
@@ -63,9 +64,29 @@ export function formatCallFeeFormula(calculation: CallFeeCalculation): string {
   return calculation.formula;
 }
 
-export function formatCallBilling(billing: StorageCallBillingDto | undefined): string | undefined {
-  if (!billing) return undefined;
-  if (billing.amount !== undefined) return `¥${billing.amount}`;
+/**
+ * Short, display-safe explanations for a billing state that has no amount.
+ *
+ * Every entry is a fixed sentence owned by this file. No upstream URL, response
+ * body, status text or credential can reach the task centre through this path.
+ */
+const billingReasonLabels: Readonly<Record<StorageCallBillingReasonCode, string>> = {
+  request_id_unavailable: '缺少上游请求 ID，无法关联账单',
+  logs_unavailable_404: '中转站账单接口不可用',
+  logs_rate_limited: '中转站账单接口限流',
+  logs_transport_error: '中转站账单接口请求失败',
+  logs_payload_invalid: '中转站账单返回内容无效',
+  usage_not_reported: '中转站未上报用量',
+  pricing_model_missing: '中转站价格表缺少该模型精确键',
+  pricing_invalid: '中转站价格表格式无效',
+  pricing_unavailable: '中转站价格表不可用',
+  currency_unconvertible: '中转站价格单位无法换算为人民币',
+  official_rule_missing: '未配置官方价格规则',
+  station_protocol_unsupported: '该连接未提供账单协议'
+};
+
+/** The state's own label, before any reason is appended. */
+function billingStateLabel(billing: StorageCallBillingDto): string {
   if (billing.state === 'actual_bill') return '实际账单金额待显示';
   if (billing.state === 'pending_reconciliation') return '等待中转站账单确认';
   if (billing.state === 'unknown_need_check') return '调用结果未知，请核对中转站日志';
@@ -74,6 +95,16 @@ export function formatCallBilling(billing: StorageCallBillingDto | undefined): s
   if (billing.state === 'unestimated') return '无法估算';
   if (billing.state === 'estimated_station_price') return '中转站价格预估';
   return '上游价格预估';
+}
+
+export function formatCallBilling(billing: StorageCallBillingDto | undefined): string | undefined {
+  if (!billing) return undefined;
+  if (billing.amount !== undefined) return `¥${billing.amount}`;
+  const label = billingStateLabel(billing);
+  const reason = billing.reasonCode ? billingReasonLabels[billing.reasonCode] : undefined;
+  // "无法估算（缺什么）": the state says what happened, the reason says what is
+  // missing, so the operator can act instead of guessing.
+  return reason ? `${label}（${reason}）` : label;
 }
 
 export function formatFeeAmount(value: number): string {

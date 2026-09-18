@@ -12,6 +12,12 @@
  * without issuing a single real paid request.
  */
 
+import { NewApiBillingReconciler } from '../../src/platform/providers/newapi/newapi-billing';
+import {
+  NewApiRuntimeError,
+  NewApiTransportFailure
+} from '../../src/platform/providers/newapi/newapi-runtime';
+
 /** Outcome of one upstream billing-protocol request. */
 export interface DesensitizedTransportOutcome {
   /** HTTP status the station returned, or `undefined` for a transport failure. */
@@ -19,7 +25,7 @@ export interface DesensitizedTransportOutcome {
   /** Upstream body for successful responses only; omitted for failures. */
   readonly body?: unknown;
   /** Bounded transport failure label; never a raw error message. */
-  readonly transportError?: 'timeout' | 'connection_reset';
+  readonly transportError?: 'timeout' | 'network' | 'proxy_unavailable';
 }
 
 /** A complete desensitized billing scenario for one connection. */
@@ -145,6 +151,8 @@ export const DESENSITIZED_BILLING_SCENARIOS: Readonly<Record<
   | 'logs_transport_error'
   | 'usage_not_reported_pricing_missing'
   | 'pricing_endpoint_rate_limited'
+  | 'pricing_payload_invalid'
+  | 'logs_payload_invalid'
   | 'station_healthy_bill_present',
   DesensitizedBillingScenario
 >> = {
@@ -223,8 +231,30 @@ export const DESENSITIZED_BILLING_SCENARIOS: Readonly<Record<
     siteStatus: { status: 200, body: siteStatusOkBody },
     modelPricing: logsRateLimited
   },
+  /**
+   * HTTP 200 with a payload that is not a price list. A 200 alone must never be
+   * treated as a successful price, and it must not silently look like "no price".
+   */
+  pricing_payload_invalid: {
+    scenarioId: 'pricing_payload_invalid',
+    connectionId: DESENSITIZED_CONNECTION_ID,
+    modelKey: DESENSITIZED_MODEL_KEY,
+    tokenLogs: logsEmptyOk,
+    siteStatus: { status: 200, body: siteStatusOkBody },
+    modelPricing: { status: 200, body: { success: true, data: 'not-a-list' } }
+  },
+  /** HTTP 200 with an unusable billing-log payload. */
+  logs_payload_invalid: {
+    scenarioId: 'logs_payload_invalid',
+    connectionId: DESENSITIZED_CONNECTION_ID,
+    modelKey: DESENSITIZED_MODEL_KEY,
+    tokenLogs: { status: 200, body: { success: true, data: 'not-a-list' } },
+    siteStatus: { status: 200, body: siteStatusOkBody },
+    modelPricing: pricingOk
+  },
   /** Control scenario: the station answers everything and the bill is real. */
-  station_healthy_bill_present: {    scenarioId: 'station_healthy_bill_present',
+  station_healthy_bill_present: {
+    scenarioId: 'station_healthy_bill_present',
     connectionId: DESENSITIZED_CONNECTION_ID,
     modelKey: DESENSITIZED_MODEL_KEY,
     tokenLogs: {
@@ -250,3 +280,76 @@ export const DESENSITIZED_SITE_STATUS_FAILURES = {
   not_found: siteStatusNotFound,
   rate_limited: siteStatusRateLimited
 } as const;
+
+/**
+ * Turns one scenario into the exact error the real runtime would raise for that
+ * HTTP outcome, so the platform's failure classifiers are exercised for real.
+ */
+function transportErrorFor(outcome: DesensitizedTransportOutcome): Error {
+  if (outcome.status === undefined) {
+    return new NewApiTransportFailure(outcome.transportError ?? 'network');
+  }
+  if (outcome.status === 404 || outcome.status === 410) {
+    return new NewApiRuntimeError('model_not_found', 'not_retryable');
+  }
+  if (outcome.status === 429) {
+    return new NewApiRuntimeError('rate_limited', 'retryable');
+  }
+  if (outcome.status >= 500) {
+    return new NewApiRuntimeError('provider_unavailable', 'retryable');
+  }
+  return new NewApiRuntimeError('invalid_response', 'not_retryable');
+}
+
+/**
+ * Builds the read-only NewAPI billing adapter over one desensitized scenario.
+ *
+ * The credential record contains a placeholder value only; no real credential is
+ * read, and the mocked runtime never opens a socket.
+ */
+export function createDesensitizedReconciler(
+  scenario: DesensitizedBillingScenario
+): NewApiBillingReconciler {
+  const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+  const respond = (outcome: DesensitizedTransportOutcome): Uint8Array => {
+    if (outcome.status === undefined || outcome.status >= 400) {
+      throw transportErrorFor(outcome);
+    }
+    return encode(outcome.body);
+  };
+  return new NewApiBillingReconciler(
+    {
+      async load() {
+        return {
+          connections: [{
+            id: scenario.connectionId,
+            credentialReference: 'credential-desensitized-1'
+          }]
+        };
+      }
+    } as never,
+    {
+      async useRecord(
+        _reference: string,
+        operation: (record: unknown) => Promise<unknown>
+      ) {
+        return operation({
+          schemaId: 'openai-compatible.api-key',
+          schemaVersion: 1,
+          values: { api_key: 'placeholder-not-a-credential' }
+        });
+      }
+    } as never,
+    {
+      async requestTokenLogs() {
+        return respond(scenario.tokenLogs);
+      },
+      async requestSiteStatus() {
+        return respond(scenario.siteStatus);
+      },
+      async requestModelPricing() {
+        return respond(scenario.modelPricing);
+      }
+    } as never
+  );
+}

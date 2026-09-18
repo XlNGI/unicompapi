@@ -1,8 +1,13 @@
 import { TextDecoder } from 'node:util';
 import type { StructuredCredentialRecord } from '../../../domain';
+import type { StorageCallBillingReasonCode } from '../../../shared/storage-ipc';
 import type { JsonProviderRegistryStore } from '../provider-registry';
 import type { SecureCredentialVault } from '../credential-vault';
-import type { NewApiSharedRuntime } from './newapi-runtime';
+import {
+  NewApiRuntimeError,
+  NewApiTransportFailure,
+  type NewApiSharedRuntime
+} from './newapi-runtime';
 
 export const NEWAPI_LOG_TYPE_CONSUME = 2;
 export const NEWAPI_LOG_TYPE_REFUND = 6;
@@ -34,6 +39,15 @@ export interface NewApiBillingReconciliationPort {
     readonly completionTokens?: string;
     readonly billableUnits?: string;
   }): Promise<{ readonly amountCny: string; readonly source: string } | undefined>;
+  /**
+   * Bounded reasons for the billing facts this connection could not provide.
+   * Returns an ordered, de-duplicated subset of the shared reason vocabulary and
+   * never any upstream URL, body, status text or credential.
+   */
+  diagnose(input: {
+    readonly connectionId: string;
+    readonly modelName: string;
+  }): Promise<readonly StorageCallBillingReasonCode[]>;
   invalidate(): void;
 }
 
@@ -95,6 +109,32 @@ export class NewApiBillingReconciler implements NewApiBillingReconciliationPort 
     this.cache.clear();
   }
 
+  /**
+   * Explains what this connection could not provide, using the bounded shared
+   * vocabulary. Ordered by root-cause precedence so the task centre can show one
+   * short, actionable sentence instead of a bare "无法估算".
+   */
+  async diagnose(input: {
+    readonly connectionId: string;
+    readonly modelName: string;
+  }): Promise<readonly StorageCallBillingReasonCode[]> {
+    let context: NewApiBillingContext;
+    try {
+      context = await this.context(input.connectionId);
+    } catch (error) {
+      // The connection itself could not be reached; report the log-side reason.
+      return [classifyLogsFailure(error)];
+    }
+    const codes = new Set(context.reasonCodes);
+    const pricingFailed = codes.has('pricing_invalid') || codes.has('pricing_unavailable');
+    // A structurally valid pricing list that simply lacks this exact key is a
+    // different fact from an unreachable or malformed pricing endpoint.
+    if (!pricingFailed && !context.pricing.has(input.modelName)) {
+      codes.add('pricing_model_missing');
+    }
+    return newApiBillingReasonPrecedence.filter((code) => codes.has(code));
+  }
+
   private context(connectionId: string): Promise<NewApiBillingContext> {
     const cached = this.cache.get(connectionId);
     if (cached) return cached;
@@ -113,17 +153,28 @@ export class NewApiBillingReconciler implements NewApiBillingReconciliationPort 
     const result = await this.credentials.useRecord(
       connection.credentialReference,
       async (record: StructuredCredentialRecord) => {
+        const reasonCodes = new Set<StorageCallBillingReasonCode>();
         const [logs, status, pricing] = await Promise.all([
-          this.runtime.requestTokenLogs({ connection, credentials: record }).catch(() => undefined),
+          this.runtime.requestTokenLogs({ connection, credentials: record }).catch((error) => {
+            // A 404/429/transport failure on the log endpoint is a fact worth
+            // reporting, not something to swallow into an empty result set.
+            reasonCodes.add(classifyLogsFailure(error));
+            return undefined;
+          }),
           this.runtime.requestSiteStatus({ connection, credentials: record }),
-          this.runtime.requestModelPricing({ connection, credentials: record }).catch(() => undefined)
+          this.runtime.requestModelPricing({ connection, credentials: record }).catch(() => {
+            reasonCodes.add(classifyPricingFailure());
+            return undefined;
+          })
         ]);
         let parsedPricing: ReadonlyMap<string, NewApiModelPricing> = new Map();
         if (pricing) {
           try {
             parsedPricing = parseNewApiModelPricing(pricing);
           } catch {
-            // A malformed or legacy pricing response must not hide actual quota logs.
+            // A malformed or legacy pricing response must not hide actual quota
+            // logs, but it must not be silently treated as "no price" either.
+            reasonCodes.add('pricing_invalid');
           }
         }
         let parsedLogs = groupTokenLogs(
@@ -140,17 +191,60 @@ export class NewApiBillingReconciler implements NewApiBillingReconciliationPort 
             parsedLogs = groupTokenLogs([...rows.values()], parseNewApiBillingPolicy(status));
           } catch {
             // Keep the last valid snapshot when a response is malformed.
+            reasonCodes.add('logs_payload_invalid');
           }
         }
         return {
           logs: parsedLogs,
           policy: parseNewApiBillingPolicy(status),
-          pricing: parsedPricing
+          pricing: parsedPricing,
+          reasonCodes: newApiBillingReasonPrecedence.filter((code) => reasonCodes.has(code))
         };
       }
     );
     return result;
   }
+}
+
+/**
+ * Root-cause precedence for the bounded vocabulary. Earlier entries win when
+ * several facts are missing at once, because fixing the earlier one is what
+ * unblocks the later ones.
+ */
+const newApiBillingReasonPrecedence: readonly StorageCallBillingReasonCode[] = [
+  'logs_unavailable_404',
+  'logs_rate_limited',
+  'logs_transport_error',
+  'logs_payload_invalid',
+  'pricing_invalid',
+  'pricing_unavailable',
+  'pricing_model_missing',
+  'currency_unconvertible'
+];
+
+/** Classifies a failed billing-log request without leaking upstream text. */
+function classifyLogsFailure(error: unknown): StorageCallBillingReasonCode {
+  if (error instanceof NewApiRuntimeError) {
+    if (error.code === 'model_not_found' || error.code === 'operation_not_found') {
+      return 'logs_unavailable_404';
+    }
+    if (error.code === 'rate_limited') return 'logs_rate_limited';
+    return 'logs_transport_error';
+  }
+  if (error instanceof NewApiTransportFailure) return 'logs_transport_error';
+  return 'logs_transport_error';
+}
+
+/**
+ * Classifies a failed pricing request.
+ *
+ * Every way the pricing call can fail — 404, 429, transport, timeout, malformed
+ * error body — means the price is unknowable rather than absent. The vocabulary
+ * keeps `pricing_invalid` for the different fact of a payload that did arrive
+ * but could not be parsed, so this classifier never needs to split.
+ */
+function classifyPricingFailure(): StorageCallBillingReasonCode {
+  return 'pricing_unavailable';
 }
 
 function mergeTokenLogRows(
@@ -206,6 +300,8 @@ interface NewApiBillingContext {
   readonly logs: ReadonlyMap<string, NewApiTokenLogRecord>;
   readonly policy: NewApiBillingPolicy;
   readonly pricing: ReadonlyMap<string, NewApiModelPricing>;
+  /** Bounded facts this connection could not provide, already ordered. */
+  readonly reasonCodes: readonly StorageCallBillingReasonCode[];
 }
 
 interface NewApiModelPricing {

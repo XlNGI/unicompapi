@@ -23,6 +23,7 @@ import {
 import type {
   StorageCallDetailsDto,
   StorageCallBillingDto,
+  StorageCallBillingReasonCode,
   StorageCallOfficialPricingRuleDto,
   StorageCallRecordListDto,
   StorageCallRecordSummaryDto,
@@ -34,6 +35,10 @@ import type {
   StorageReadModelIssueDto,
   StorageTaskTimelineDto
 } from '../../shared/storage-ipc';
+import {
+  explainMissingBilling,
+  withReasonCode
+} from './call-billing-explanation';
 import type {
   NewApiBillingReconciliationPort,
   NewApiTokenLogRecord
@@ -724,8 +729,11 @@ export class ProviderInvocationReadModelController {
     pricingRule: StorageCallOfficialPricingRuleDto | undefined
   ): Promise<StorageCallBillingDto> {
     const fallback = billingState(state, providerRequestId, pricingRule);
-    if (!supportsNewApiBilling || !this.billingReconciliation || state !== 'completed') {
-      return fallback;
+    if (state !== 'completed') return fallback;
+    if (!supportsNewApiBilling || !this.billingReconciliation) {
+      // This connection publishes no billing protocol. Never invent a bill, and
+      // say plainly which protocol is missing so "无法估算" is explainable.
+      return withReasonCode(fallback, 'station_protocol_unsupported');
     }
     try {
       if (providerRequestId || providerOperationId) {
@@ -776,16 +784,29 @@ export class ProviderInvocationReadModelController {
           ? {}
           : { billableUnits: String(billableUnitCount) })
       });
-      return estimate
-        ? {
-            state: 'estimated_station_price',
-            currencyCode: 'CNY',
-            amount: estimate.amountCny,
-            sourceLabel: estimate.source
-          }
-        : fallback;
+      if (estimate) {
+        return {
+          state: 'estimated_station_price',
+          currencyCode: 'CNY',
+          amount: estimate.amountCny,
+          sourceLabel: estimate.source
+        };
+      }
+      const diagnosed = await this.billingReconciliation
+        .diagnose({ connectionId, modelName })
+        .catch((): readonly StorageCallBillingReasonCode[] => ['logs_transport_error']);
+      return withReasonCode(
+        fallback,
+        explainMissingBilling({
+          diagnosed,
+          providerRequestId,
+          providerOperationId,
+          usageFacts,
+          pricingRule
+        })
+      );
     } catch {
-      return fallback;
+      return withReasonCode(fallback, 'logs_transport_error');
     }
   }
 
