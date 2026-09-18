@@ -19,7 +19,9 @@ import {
   NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
   NEWAPI_PROVIDER_PACKAGE_VERSION,
+  OPENAI_COMPATIBLE_VIDEO_PROFILE_GATE_VERSION,
   ProviderPackageRegistry,
+  describeInvalidatedOpenAiCompatibleVideoProfiles,
   newApiProviderPackageDescriptor,
   routeOpenAiCompatibleVideoProfile,
   unicompapiProviderPackageDescriptor,
@@ -216,7 +218,7 @@ describe('openai-compatible video soft routing', () => {
     }
   });
 
-  it('keeps same-name Vidu models on generic schemas outside UniCompAPI', () => {
+  it('never infers per-model video capability from a generic OpenAI-compatible adapter', () => {
     const packages = new ProviderPackageRegistry([newApiProviderPackageDescriptor]);
     const snapshot = baseSnapshot('viduq3-turbo');
     const connection = {
@@ -231,30 +233,65 @@ describe('openai-compatible video soft routing', () => {
       snapshot.models[0]!,
       now
     );
-    expect(routed.state).toBe('attached');
-    expect(routed.snapshot.modelProfiles?.[0]?.features).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        productFeature: 'text_to_video',
-        parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
-      }),
-      expect.objectContaining({
-        productFeature: 'image_to_video',
-        parameterSchemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
-      })
-    ]));
+    // The connection publishes newapi.video, but that only proves a call
+    // channel exists. The concrete model published no capability evidence.
+    expect(routed.state).toBe('skipped');
+    expect(routed.reason).toBe('missing_capability_evidence');
+    expect(routed.profileId).toBeUndefined();
+    expect(routed.snapshot.modelProfiles).toEqual([]);
+    expect(routed.snapshot.capabilities.some((candidate) =>
+      candidate.capability === 'video_generation'
+    )).toBe(false);
   });
 
-  it('keeps a same-name model on a generic OpenAI-compatible schema', () => {
+  it('skips image-only and unknown-capability models behind a generic package', () => {
     const packages = new ProviderPackageRegistry([newApiProviderPackageDescriptor]);
-    const snapshot = baseSnapshot('doubao-seedance-2-0-fast-260128');
+    for (const providerModelKey of ['gpt-image-2.5', 'gpt-image-2-auto', 'ergouzi/e-image']) {
+      const snapshot = baseSnapshot(providerModelKey);
+      const connection = {
+        ...snapshot.connections[0]!,
+        packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+        packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
+        templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID
+      };
+      const routed = routeOpenAiCompatibleVideoProfile(
+        { ...snapshot, connections: [connection] },
+        packages,
+        snapshot.models[0]!,
+        now
+      );
+      expect(routed.state).toBe('skipped');
+      expect(routed.reason).toBe('missing_capability_evidence');
+      expect(routed.snapshot.modelProfiles).toEqual([]);
+    }
+  });
+
+  it('attaches a generic package profile once the user explicitly confirms the model', () => {
+    const packages = new ProviderPackageRegistry([newApiProviderPackageDescriptor]);
+    const snapshot = baseSnapshot('relay-video-model');
     const connection = {
       ...snapshot.connections[0]!,
       packageId: NEWAPI_PROVIDER_PACKAGE_ID,
       packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
       templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID
     };
+    const confirmation = createModelCapabilityEvidence({
+      id: toCapabilityEvidenceId(
+        `capability-${snapshot.models[0]!.id}-video_generation-user-confirmed-v1`
+      ),
+      modelId: snapshot.models[0]!.id,
+      revision: 1,
+      capability: 'video_generation',
+      state: 'user_confirmed',
+      source: 'user_confirmed',
+      recordedAt: now
+    });
     const routed = routeOpenAiCompatibleVideoProfile(
-      { ...snapshot, connections: [connection] },
+      {
+        ...snapshot,
+        connections: [connection],
+        capabilities: [...snapshot.capabilities, confirmation]
+      },
       packages,
       snapshot.models[0]!,
       now
@@ -270,6 +307,83 @@ describe('openai-compatible video soft routing', () => {
         parameterSchemaId: NEWAPI_DEFAULT_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID
       })
     ]));
+    // The user's own fact is reused; the platform does not restate it.
+    expect(routed.snapshot.capabilities.filter((candidate) =>
+      candidate.capability === 'video_generation'
+    )).toHaveLength(1);
+  });
+
+  it('ignores evidence the removed soft router synthesised for itself', () => {
+    const packages = new ProviderPackageRegistry([newApiProviderPackageDescriptor]);
+    const snapshot = baseSnapshot('gpt-image-2.5');
+    const connection = {
+      ...snapshot.connections[0]!,
+      packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION,
+      templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID
+    };
+    const forged = createModelCapabilityEvidence({
+      id: toCapabilityEvidenceId(
+        `capability-${snapshot.models[0]!.id}-video_generation-declared-v1`
+      ),
+      modelId: snapshot.models[0]!.id,
+      revision: 1,
+      capability: 'video_generation',
+      state: 'declared_supported',
+      source: 'provider_declared',
+      recordedAt: now
+    });
+    const legacyProfile = {
+      schemaVersion: 1 as const,
+      profileId: 'profile-legacy-forged-video',
+      revision: 1,
+      packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+      sourceTemplateId: 'profile-template.openai-compatible.video.legacy',
+      adapterKey: NEWAPI_VIDEO_ADAPTER_ID,
+      modelId: snapshot.models[0]!.id,
+      modelRevision: 1,
+      protocolBindingId: 'protocol-binding-chat',
+      status: 'verified' as const,
+      features: [
+        {
+          productFeature: 'text_to_video' as const,
+          internalPurpose: 'video_generation',
+          parameterSchemaId: NEWAPI_DEFAULT_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID,
+          resultSchemaId: 'results.newapi.video',
+          usageSchemaId: 'usage.newapi.video-not-reported',
+          constraintSetId: 'constraints.newapi.text-to-video'
+        }
+      ],
+      evidenceIds: [forged.id],
+      recordedAt: now
+    };
+    const routed = routeOpenAiCompatibleVideoProfile(
+      {
+        ...snapshot,
+        connections: [connection],
+        capabilities: [...snapshot.capabilities, forged],
+        modelProfiles: [legacyProfile]
+      },
+      packages,
+      snapshot.models[0]!,
+      now
+    );
+    expect(routed.state).toBe('skipped');
+    expect(routed.reason).toBe('missing_capability_evidence');
+    // The persisted mistake is left untouched so nothing is lost or rewritten.
+    expect(routed.snapshot.modelProfiles).toEqual([legacyProfile]);
+
+    const invalidations = describeInvalidatedOpenAiCompatibleVideoProfiles(
+      routed.snapshot,
+      (productFeature) => productFeature === 'text_to_video' || productFeature === 'image_to_video'
+    );
+    expect(invalidations).toEqual([
+      expect.objectContaining({
+        profileId: 'profile-legacy-forged-video',
+        reason: 'router_synthesized_evidence',
+        gateVersion: OPENAI_COMPATIBLE_VIDEO_PROFILE_GATE_VERSION
+      })
+    ]);
   });
 });
 

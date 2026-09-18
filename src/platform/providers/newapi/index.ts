@@ -2,6 +2,7 @@ export * from './newapi-contracts';
 export * from './newapi-runtime';
 export * from './openai-compatible-identity';
 export * from './openai-compatible-image-routing';
+export * from './openai-compatible-video-capability';
 export * from './openai-compatible-video-routing';
 export * from './unicompapi-contracts';
 export * from './unicompapi-model-capabilities';

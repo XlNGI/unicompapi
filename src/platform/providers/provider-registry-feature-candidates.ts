@@ -7,6 +7,7 @@ import {
   validateParameterSchemaV2,
   type ParameterSchemaV2,
   type ProductFeature,
+  type ProviderModel,
   type UsageSchemaV1
 } from '../../domain';
 import {
@@ -16,13 +17,22 @@ import {
 } from './newapi/openai-compatible-image-routing';
 import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/openai-compatible-video-routing';
 import {
+  evaluateOpenAiCompatibleVideoGate
+} from './newapi/openai-compatible-video-capability';
+import { isOpenAiCompatiblePackageId } from './newapi/openai-compatible-identity';
+import { NEWAPI_VIDEO_ADAPTER_ID } from './newapi/newapi-contracts';
+import {
   isKnownUniCompApiModel,
   isUniCompApiPackage,
   uniCompApiSupportsFeature,
+  uniCompApiVideoFeatures,
   type UniCompApiModelFeature
 } from './newapi/unicompapi-model-capabilities';
 import type { ProviderPackageRegistry } from './provider-package-registry';
-import type { JsonProviderRegistryStore } from './provider-registry';
+import type {
+  JsonProviderRegistryStore,
+  ProviderRegistrySnapshot
+} from './provider-registry';
 import type {
   FeatureCandidateSourcePort,
   ResolvedFeatureCandidateV1,
@@ -165,6 +175,19 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
             model.providerModelKey,
             feature.productFeature
           )) continue;
+          if (!openAiCompatibleVideoProfileAuthorised({
+            snapshot,
+            model,
+            packageId: profile.packageId,
+            adapterKey: profile.adapterKey,
+            providerModelKey: model.providerModelKey,
+            productFeature: feature.productFeature
+          })) {
+            // Unknown capability is excluded from video candidates entirely —
+            // never listed as "temporarily unavailable" — so a user cannot
+            // select a model whose video support was only assumed.
+            continue;
+          }
           const contract = this.contracts.resolve(feature);
           if (!contract) continue;
           if (!packagePublishesAdapter(this.packages, profile.packageId, profile.adapterKey)) {
@@ -308,6 +331,42 @@ function contractIdentity(input: {
     input.usageSchemaId ?? input.usageSchema!.id,
     input.constraintSetId
   ].join('\u0000');
+}
+
+/**
+ * Platform-layer capability gate for OpenAI-compatible video candidates.
+ *
+ * The candidate service is the last owner before a selector renders a model.
+ * A video profile that exists in the registry only because the old soft router
+ * assumed capability is rejected here, which is what makes the fix effective
+ * for data that was already persisted.
+ */
+function openAiCompatibleVideoProfileAuthorised(input: {
+  readonly snapshot: ProviderRegistrySnapshot;
+  readonly model: ProviderModel;
+  readonly packageId: string;
+  readonly adapterKey: string;
+  readonly providerModelKey: string;
+  readonly productFeature: ProductFeature;
+}): boolean {
+  if (input.productFeature !== 'text_to_video' && input.productFeature !== 'image_to_video') {
+    return true;
+  }
+  if (input.adapterKey !== NEWAPI_VIDEO_ADAPTER_ID) return true;
+  if (!isOpenAiCompatiblePackageId(input.packageId)) return true;
+  const mappingFeatures = isUniCompApiPackage(input.packageId)
+    ? uniCompApiVideoFeatures(input.providerModelKey)
+    : undefined;
+  return evaluateOpenAiCompatibleVideoGate({
+    snapshot: input.snapshot,
+    model: input.model,
+    modelId: input.model.id,
+    packageId: input.packageId,
+    providerModelKey: input.providerModelKey,
+    ...(mappingFeatures && mappingFeatures.length > 0
+      ? { exactMappingFeatures: mappingFeatures }
+      : {})
+  }).allowed;
 }
 
 function currentUniCompFeatureSupported(
