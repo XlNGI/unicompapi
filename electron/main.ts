@@ -49,6 +49,10 @@ import {
   autosaveDiagnosticsIpcChannel,
   isAutosaveDiagnosticsEvent
 } from '../src/shared/autosave-diagnostics-ipc';
+import {
+  isParameterInputPerformanceSummary,
+  parameterInputDiagnosticsIpcChannel
+} from '../src/shared/parameter-input-performance';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const isMac = process.platform === 'darwin';
@@ -73,6 +77,24 @@ ipcMain.on(autosaveDiagnosticsIpcChannel, (_event, value: unknown) => {
     const logsDirectory = path.join(app.getPath('userData'), 'logs');
     await mkdir(logsDirectory, { recursive: true });
     await appendFile(path.join(logsDirectory, 'autosave.log'), line, 'utf8');
+  }).catch(() => undefined);
+});
+
+// Development-time parameter input baseline. Only aggregate counts and
+// durations pass the validator, so the log can never contain prompts,
+// credentials or parameter payloads.
+let parameterInputLogQueue: Promise<void> = Promise.resolve();
+ipcMain.on(parameterInputDiagnosticsIpcChannel, (_event, value: unknown) => {
+  if (!isParameterInputPerformanceSummary(value)) return;
+  const line = `${JSON.stringify({
+    at: new Date().toISOString(),
+    category: 'parameter-input',
+    ...value
+  })}\n`;
+  parameterInputLogQueue = parameterInputLogQueue.then(async () => {
+    const logsDirectory = path.join(app.getPath('userData'), 'logs');
+    await mkdir(logsDirectory, { recursive: true });
+    await appendFile(path.join(logsDirectory, 'parameter-input.log'), line, 'utf8');
   }).catch(() => undefined);
 });
 

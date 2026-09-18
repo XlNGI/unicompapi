@@ -12,6 +12,7 @@ import type { VideoEditorApi } from './shared/video-editor-ipc';
 import type { SettingsApi } from './shared/settings-ipc';
 import type { ChatContextApi } from './shared/chat-context-ipc';
 import type { AutosaveDiagnosticsApi } from './shared/autosave-diagnostics-ipc';
+import type { ParameterInputDiagnosticsApi } from './shared/parameter-input-performance';
 import type { DocumentAttachmentApi } from './shared/document-attachment-ipc';
 import type { DocumentGenerationApi } from './shared/document-generation-ipc';
 import type { WebResearchApi } from './shared/web-research-ipc';
@@ -20,6 +21,7 @@ declare global {
   interface Window {
     unicomp?: {
       autosaveDiagnostics: AutosaveDiagnosticsApi;
+      parameterInputDiagnostics: ParameterInputDiagnosticsApi;
       chatContexts: ChatContextApi;
       documentAttachments: DocumentAttachmentApi;
       documentGeneration: DocumentGenerationApi;
