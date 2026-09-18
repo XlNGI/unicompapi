@@ -7,6 +7,13 @@ import {
   type ParameterInputSurface
 } from '../shared/parameter-input-performance';
 
+export type {
+  ParameterInputControlKind,
+  ParameterInputPerformanceSummary,
+  ParameterInputSample,
+  ParameterInputSurface
+} from '../shared/parameter-input-performance';
+
 /**
  * Development-time probe for one parameter editing session.
  *
@@ -28,6 +35,8 @@ export interface ParameterInputProbe {
   candidateRequest(): void;
   /** One autosave IPC message caused by this keystroke. */
   autosaveIpc(): void;
+  /** One render of the parameter area while the keystroke is still pending. */
+  parameterAreaRender(): void;
   /** Marks the moment the new value became visible on screen. */
   settle(): void;
   /** Number of settled samples in the current session. */
@@ -58,6 +67,7 @@ export function createParameterInputProbe(
   let pendingParentCommits = 0;
   let pendingCandidateRequests = 0;
   let pendingAutosaveIpcs = 0;
+  let pendingRenders = 0;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
   if (!enabled) {
@@ -66,6 +76,7 @@ export function createParameterInputProbe(
       parentCommit: () => undefined,
       candidateRequest: () => undefined,
       autosaveIpc: () => undefined,
+      parameterAreaRender: () => undefined,
       settle: () => undefined,
       sampleCount: () => 0,
       flush: () => undefined
@@ -102,6 +113,7 @@ export function createParameterInputProbe(
       pendingParentCommits = 0;
       pendingCandidateRequests = 0;
       pendingAutosaveIpcs = 0;
+      pendingRenders = 0;
     },
     parentCommit() {
       pendingParentCommits += 1;
@@ -111,6 +123,10 @@ export function createParameterInputProbe(
     },
     autosaveIpc() {
       pendingAutosaveIpcs += 1;
+    },
+    parameterAreaRender() {
+      if (pendingStart === undefined) return;
+      pendingRenders += 1;
     },
     settle() {
       if (pendingStart === undefined || pendingKind === undefined) return;
@@ -124,8 +140,15 @@ export function createParameterInputProbe(
         visibleLatencyMs: Math.max(0, now() - startedAt),
         parentCommitCount: pendingParentCommits,
         candidateRequestCount: pendingCandidateRequests,
-        autosaveIpcCount: pendingAutosaveIpcs
+        autosaveIpcCount: pendingAutosaveIpcs,
+        parameterAreaRenderCount: pendingRenders
       });
+      // Counters belong to exactly one keystroke: work the idle boundary
+      // triggers afterwards must not be charged to the key that preceded it.
+      pendingParentCommits = 0;
+      pendingCandidateRequests = 0;
+      pendingAutosaveIpcs = 0;
+      pendingRenders = 0;
       scheduleIdleFlush();
     },
     sampleCount() {
@@ -133,6 +156,32 @@ export function createParameterInputProbe(
     },
     flush
   };
+}
+
+/**
+ * The probe lives with the parameter form, but the work it must observe happens
+ * in other layers (candidate reads in the panel, autosave IPC in the save
+ * coordinator). The form registers its session probe here so those layers can
+ * report without threading a probe reference through every component.
+ */
+let activeProbe: ParameterInputProbe | undefined;
+
+export function setActiveParameterInputProbe(probe: ParameterInputProbe | undefined): void {
+  activeProbe = probe;
+}
+
+export function hasActiveParameterInputProbe(): boolean {
+  return activeProbe !== undefined;
+}
+
+/** One candidate-list read issued while a parameter edit is pending. */
+export function reportParameterInputCandidateRequest(): void {
+  activeProbe?.candidateRequest();
+}
+
+/** One autosave IPC persist issued while a parameter edit is pending. */
+export function reportParameterInputAutosaveIpc(): void {
+  activeProbe?.autosaveIpc();
 }
 
 /**

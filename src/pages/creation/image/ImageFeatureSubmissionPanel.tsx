@@ -6,8 +6,11 @@ import {
   DynamicParameterForm,
   toDynamicParameterFields,
   validateDynamicParameterValues,
+  type DynamicParameterBufferFlush,
+  type DynamicParameterFormHandle,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
+import { reportParameterInputCandidateRequest } from '../../../ui/parameter-input-performance-probe';
 import {
   isVisibleModelUnavailableReason,
   ModelSelect
@@ -152,9 +155,15 @@ export function ImageFeatureSubmissionPanel({
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
   const onMessageRef = useRef(onMessage);
+  const parameterFormRef = useRef<DynamicParameterFormHandle>(null);
+  // Commits are composed from refs, never from a render closure: the form can
+  // commit two fields in one tick (flush before submit), and the effective
+  // feature selection may be synthesized rather than taken from the draft.
+  const featureSelectionRef = useRef(featureSelection);
   busyRef.current = busy;
   draftRef.current = draft;
   onMessageRef.current = onMessage;
+  featureSelectionRef.current = featureSelection;
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
@@ -168,10 +177,12 @@ export function ImageFeatureSubmissionPanel({
   );
   const parameterForm = (
     <DynamicParameterForm
+      ref={parameterFormRef}
       disabled={busy}
       emptyHint="当前表面没有需要用户填写的参数。"
       fields={dynamicParameterFields}
       errors={parameterValidation.errors}
+      surface="image_generation"
       onInputErrorChange={(fieldId, error) => {
         setParameterInputErrors((current) => {
           const next = { ...current };
@@ -286,10 +297,11 @@ export function ImageFeatureSubmissionPanel({
     const timer = window.setTimeout(() => {
       void (async () => {
         if (busyRef.current) return;
-        const snapshot = draft;
+        const snapshot = draftRef.current;
         const draftId = snapshot.draftId;
         const draftUpdatedAt = snapshot.updatedAt;
         if (busyRef.current) return;
+        reportParameterInputCandidateRequest();
         const result = await api.listCandidates(draftId, draftUpdatedAt);
         if (!active || busyRef.current) return;
         if (!result.ok) {
@@ -332,23 +344,25 @@ export function ImageFeatureSubmissionPanel({
 
   function changeCandidate(candidateId: string) {
     const candidate = candidates.find((item) => item.candidateId === candidateId);
+    const snapshot = draftRef.current;
+    const selection = featureSelectionRef.current;
     const sameSchema = candidate &&
-      featureSelection.parameterSchemaId === candidate.parameterSchema.schemaId &&
-      featureSelection.parameterSchemaRevision === candidate.parameterSchema.revision;
+      selection.parameterSchemaId === candidate.parameterSchema.schemaId &&
+      selection.parameterSchemaRevision === candidate.parameterSchema.revision;
     const nextValues = {
       ...(!oneShot
         ? defaultUnsetWatermarkParameter(candidate?.parameterSchema.fields ?? [])
         : {}),
-      ...(sameSchema ? featureSelection.parameterValues : {})
+      ...(sameSchema ? selection.parameterValues : {})
     };
     onMessage('');
     setParameterInputErrors({});
-    onDraftChange({
-      ...draft,
+    const next: GenerationImageDraftDto = {
+      ...snapshot,
       state: 'editing',
       generation: {},
       featureSelection: {
-        productFeature: featureSelection.productFeature,
+        productFeature: selection.productFeature,
         ...(candidate
           ? {
               candidateId: candidate.candidateId,
@@ -358,7 +372,9 @@ export function ImageFeatureSubmissionPanel({
           : {}),
         parameterValues: nextValues
       }
-    });
+    };
+    draftRef.current = next;
+    onDraftChange(next);
   }
 
   function changeParameter(
@@ -371,26 +387,57 @@ export function ImageFeatureSubmissionPanel({
       delete next[fieldId];
       return next;
     });
-    const parameterValues = { ...featureSelection.parameterValues } as Record<
+    // Compose from the latest snapshot rather than the render closure: the
+    // parameter form may commit two fields in the same tick (flush before
+    // submit), and both changes must survive.
+    const snapshot = draftRef.current;
+    const selection = featureSelectionRef.current;
+    const parameterValues = { ...selection.parameterValues } as Record<
       string,
       ImageWorkspaceParameterValueDto
     >;
     if (value === undefined) delete parameterValues[fieldId];
     else parameterValues[fieldId] = value;
-    onDraftChange({
-      ...draft,
+    const next: GenerationImageDraftDto = {
+      ...snapshot,
       state: 'editing',
       generation: {},
-      featureSelection: { ...featureSelection, parameterValues }
-    });
+      featureSelection: { ...selection, parameterValues }
+    };
+    draftRef.current = next;
+    onDraftChange(next);
+  }
+
+  /**
+   * Commits whatever the user has typed but not yet blurred. Called before
+   * every save/submit so a focused control can never be left behind, and so an
+   * invalid intermediate value blocks the request instead of being dispatched.
+   */
+  function commitPendingParameterEdits(): DynamicParameterBufferFlush {
+    const handle = parameterFormRef.current;
+    if (!handle) return { values: {}, committedFieldIds: [], errors: {}, valid: true };
+    return handle.flush();
+  }
+
+  /**
+   * Full schema validation over the values that would actually be saved, after
+   * the pending buffers have been committed.
+   */
+  function validateSubmittedParameters(pendingEdits: DynamicParameterBufferFlush) {
+    return validateDynamicParameterValues(
+      dynamicParameterFields,
+      pendingEdits.values as Readonly<Record<string, DynamicParameterValue | undefined>>,
+      pendingEdits.errors
+    );
   }
 
   async function ensureSavedDraft(): Promise<GenerationImageDraftDto | undefined> {
     if (!imageWorkspaces) return undefined;
-    if (!dirty && draft.state === 'saved') return draft;
+    const snapshot = draftRef.current;
+    if (!dirty && snapshot.state === 'saved') return snapshot;
     if (onFlushDraft) {
       if (!(await onFlushDraft())) return undefined;
-      const refreshed = await imageWorkspaces.get(draft.draftId);
+      const refreshed = await imageWorkspaces.get(snapshot.draftId);
       if (!refreshed.ok || !refreshed.value) {
         showSubmissionError('无法读取刚刚保存的图片草稿，请重试。');
         return undefined;
@@ -411,8 +458,14 @@ export function ImageFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
-    if (!parameterValidation.valid) {
-      showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
+    // Commit the control the user is still typing in, then run the full schema
+    // validation on the merged values. An invalid intermediate state never
+    // leaves this function.
+    const pendingEdits = commitPendingParameterEdits();
+    const submittedValidation = validateSubmittedParameters(pendingEdits);
+    if (!submittedValidation.valid) {
+      setParameterInputErrors(pendingEdits.errors);
+      showSubmissionError(submittedValidation.firstError ?? '请先修正动态参数。');
       return;
     }
     setBusy(true);
@@ -547,8 +600,11 @@ export function ImageFeatureSubmissionPanel({
 
   async function generateOneShot() {
     if (busyRef.current) return;
-    if (!parameterValidation.valid) {
-      showGenerationError(parameterValidation.firstError ?? '请先修正动态参数。');
+    const pendingEdits = commitPendingParameterEdits();
+    const submittedValidation = validateSubmittedParameters(pendingEdits);
+    if (!submittedValidation.valid) {
+      setParameterInputErrors(pendingEdits.errors);
+      showGenerationError(submittedValidation.firstError ?? '请先修正动态参数。');
       return;
     }
     if (!api) {

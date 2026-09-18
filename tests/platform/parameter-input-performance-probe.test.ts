@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createParameterInputProbe,
-  emitParameterInputSummary
+  emitParameterInputSummary,
+  hasActiveParameterInputProbe,
+  reportParameterInputAutosaveIpc,
+  reportParameterInputCandidateRequest,
+  setActiveParameterInputProbe
 } from '../../src/ui/parameter-input-performance-probe';
 import type { ParameterInputPerformanceSummary } from '../../src/shared/parameter-input-performance';
 
@@ -10,9 +14,13 @@ import type { ParameterInputPerformanceSummary } from '../../src/shared/paramete
  * editing session, flush only when the session is long enough, and never hold
  * timers open. The probe must also be fully inert when disabled, so disabling it
  * restores the untouched interaction.
+ *
+ * P3 added the parameter-area render counter and the cross-layer reporters used
+ * by the candidate read and the autosave coordinator.
  */
 
 afterEach(() => {
+  setActiveParameterInputProbe(undefined);
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -39,6 +47,7 @@ describe('P0 parameter input probe', () => {
     probe.parentCommit();
     probe.candidateRequest();
     probe.autosaveIpc();
+    probe.parameterAreaRender();
     probe.settle();
     probe.flush();
     expect(probe.sampleCount()).toBe(0);
@@ -58,6 +67,7 @@ describe('P0 parameter input probe', () => {
       probe.begin('text');
       probe.parentCommit();
       probe.autosaveIpc();
+      probe.parameterAreaRender();
       time.advance(index + 1);
       probe.settle();
     }
@@ -72,7 +82,37 @@ describe('P0 parameter input probe', () => {
       visibleLatencyMaxMs: 32,
       parentCommitCount: 32,
       candidateRequestCount: 0,
-      autosaveIpcCount: 32
+      autosaveIpcCount: 32,
+      parameterAreaRenderCount: 32
+    });
+  });
+
+  it('keeps counters per keystroke, so idle-boundary work is not misattributed', () => {
+    const time = clock();
+    const emit = vi.fn();
+    const probe = createParameterInputProbe({
+      surface: 'video_generation',
+      emit,
+      enabled: true,
+      now: time.now
+    });
+    for (let index = 0; index < 30; index += 1) {
+      probe.begin('text');
+      probe.parameterAreaRender();
+      time.advance(1);
+      probe.settle();
+      // P3 commits the stable value on the idle boundary, i.e. after settle().
+      probe.parentCommit();
+      probe.autosaveIpc();
+      probe.candidateRequest();
+    }
+    probe.flush();
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      sampleCount: 30,
+      parentCommitCount: 0,
+      candidateRequestCount: 0,
+      autosaveIpcCount: 0,
+      parameterAreaRenderCount: 30
     });
   });
 
@@ -146,6 +186,7 @@ describe('P0 parameter input probe', () => {
     expect(Object.keys(summary).sort()).toEqual([
       'autosaveIpcCount',
       'candidateRequestCount',
+      'parameterAreaRenderCount',
       'parentCommitCount',
       'sampleCount',
       'surface',
@@ -171,6 +212,39 @@ describe('P0 parameter input probe', () => {
     expect(emit).not.toHaveBeenCalled();
   });
 
+  it('counts cross-layer work only while a keystroke is pending', () => {
+    const emit = vi.fn();
+    const probe = createParameterInputProbe({
+      surface: 'video_generation',
+      emit,
+      enabled: true,
+      now: () => 0
+    });
+    // No session probe registered: the reporters must stay inert.
+    expect(() => reportParameterInputCandidateRequest()).not.toThrow();
+    expect(hasActiveParameterInputProbe()).toBe(false);
+    setActiveParameterInputProbe(probe);
+    expect(hasActiveParameterInputProbe()).toBe(true);
+    for (let index = 0; index < 30; index += 1) {
+      probe.begin('text');
+      if (index === 0) {
+        reportParameterInputCandidateRequest();
+        reportParameterInputAutosaveIpc();
+      }
+      probe.settle();
+    }
+    // Reported outside a keystroke: not attributed to anything.
+    probe.parameterAreaRender();
+    probe.flush();
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      sampleCount: 30,
+      candidateRequestCount: 1,
+      autosaveIpcCount: 1,
+      parentCommitCount: 0,
+      parameterAreaRenderCount: 0
+    });
+  });
+
   it('stays inert when no preload bridge is present', () => {
     const summary = {
       surface: 'video_generation',
@@ -180,7 +254,8 @@ describe('P0 parameter input probe', () => {
       visibleLatencyMaxMs: 32,
       parentCommitCount: 32,
       candidateRequestCount: 0,
-      autosaveIpcCount: 32
+      autosaveIpcCount: 32,
+      parameterAreaRenderCount: 32
     } as unknown as ParameterInputPerformanceSummary;
     expect(() => emitParameterInputSummary(summary)).not.toThrow();
     const record = vi.fn();

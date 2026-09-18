@@ -32,6 +32,7 @@ function buildSamples(
     parentCommitCount: 1,
     candidateRequestCount: 0,
     autosaveIpcCount: 1,
+    parameterAreaRenderCount: 1,
     ...overrides
   }));
 }
@@ -50,7 +51,8 @@ describe('P0 parameter input performance baseline', () => {
       visibleLatencyMaxMs: 32,
       parentCommitCount: 32,
       candidateRequestCount: 0,
-      autosaveIpcCount: 32
+      autosaveIpcCount: 32,
+      parameterAreaRenderCount: 32
     });
     console.info(`parameter-input-baseline ${JSON.stringify(summary)}`);
   });
@@ -59,14 +61,16 @@ describe('P0 parameter input performance baseline', () => {
     const summary = summarizeParameterInputSamples(buildSamples({
       parentCommitCount: 2,
       candidateRequestCount: 1,
-      autosaveIpcCount: 3
+      autosaveIpcCount: 3,
+      parameterAreaRenderCount: 2
     }));
     // Today every keystroke replaces the whole draft and queues a save; the
     // candidate refresh is what P3 must drive to zero.
     expect(summary).toMatchObject({
       parentCommitCount: 64,
       candidateRequestCount: 32,
-      autosaveIpcCount: 96
+      autosaveIpcCount: 96,
+      parameterAreaRenderCount: 64
     });
   });
 
@@ -91,17 +95,6 @@ describe('P0 parameter input performance baseline', () => {
   });
 
   it('rejects any recorded payload that smuggles text or extra fields', () => {
-    expect(isParameterInputPerformanceSummary({
-      surface: 'video_generation',
-      sampleCount: 32,
-      visibleLatencyP50Ms: 16,
-      visibleLatencyP95Ms: 31,
-      visibleLatencyMaxMs: 32,
-      parentCommitCount: 32,
-      candidateRequestCount: 0,
-      autosaveIpcCount: 32
-    })).toBe(true);
-
     const base = {
       surface: 'video_generation',
       sampleCount: 32,
@@ -110,12 +103,17 @@ describe('P0 parameter input performance baseline', () => {
       visibleLatencyMaxMs: 32,
       parentCommitCount: 32,
       candidateRequestCount: 0,
-      autosaveIpcCount: 32
+      autosaveIpcCount: 32,
+      parameterAreaRenderCount: 32
     };
+    expect(isParameterInputPerformanceSummary(base)).toBe(true);
+
     // Extra key: the vector that would let a prompt or credential reach a log.
     expect(isParameterInputPerformanceSummary({ ...base, prompt: 'secret text' })).toBe(false);
     // Missing key: the shape is fixed, not partial.
     expect(isParameterInputPerformanceSummary({ ...base, candidateRequestCount: undefined }))
+      .toBe(false);
+    expect(isParameterInputPerformanceSummary({ ...base, parameterAreaRenderCount: undefined }))
       .toBe(false);
     // Text where a number belongs.
     expect(isParameterInputPerformanceSummary({ ...base, visibleLatencyP50Ms: '16' }))
@@ -138,7 +136,8 @@ describe('P0 parameter input performance baseline', () => {
       visibleLatencyMs: 12,
       parentCommitCount: 1,
       candidateRequestCount: 0,
-      autosaveIpcCount: 1
+      autosaveIpcCount: 1,
+      parameterAreaRenderCount: 1
     };
     expect(isValidSample(sample)).toBe(true);
     expect(isValidSample({ ...sample, controlKind: 'prompt' })).toBe(false);
@@ -146,6 +145,8 @@ describe('P0 parameter input performance baseline', () => {
     expect(isValidSample({ ...sample, value: '1280x720' })).toBe(false);
     expect(isValidSample({ ...sample, visibleLatencyMs: -1 })).toBe(false);
     expect(isValidSample({ ...sample, parentCommitCount: 1.5 })).toBe(false);
+    expect(isValidSample({ ...sample, parameterAreaRenderCount: 1.5 })).toBe(false);
+    expect(isValidSample({ ...sample, parameterAreaRenderCount: undefined })).toBe(false);
   });
 
   it('exposes no free-text field anywhere in the recorded vocabulary', () => {
@@ -157,7 +158,8 @@ describe('P0 parameter input performance baseline', () => {
       visibleLatencyMaxMs: 0,
       parentCommitCount: 0,
       candidateRequestCount: 0,
-      autosaveIpcCount: 0
+      autosaveIpcCount: 0,
+      parameterAreaRenderCount: 0
     });
     expect(summaryKeys).toEqual([
       'surface',
@@ -167,7 +169,8 @@ describe('P0 parameter input performance baseline', () => {
       'visibleLatencyMaxMs',
       'parentCommitCount',
       'candidateRequestCount',
-      'autosaveIpcCount'
+      'autosaveIpcCount',
+      'parameterAreaRenderCount'
     ]);
     // The gate compares the key count exactly, so a new field cannot be added
     // to the wire shape without updating the validator in the same change.

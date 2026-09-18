@@ -57,13 +57,16 @@ test('video submission returns local work identity for in-page preview', () => {
 
 test('video feature panel uses shared model select and dynamic parameter form', async () => {
   const form = await readFile('src/components/DynamicParameterForm.tsx', 'utf8');
+  // P3 moved JSON parsing out of the control into the editing buffer, so the
+  // message wording still comes from the shared validator.
+  const buffer = await readFile('src/components/dynamic-parameter-buffer.ts', 'utf8');
   assert.match(panel, /ModelSelect/);
   assert.match(panel, /DynamicParameterForm/);
   assert.match(panel, /已锁定参数合同/);
   assert.match(form, /field\.valueType === 'object'/);
   assert.match(form, /ObjectParameterField/);
-  assert.match(form, /JSON\.parse\(text\)/);
-  assert.match(form, /请输入有效的 JSON 对象/);
+  assert.match(buffer, /JSON\.parse\(text\)/);
+  assert.match(buffer, /validateDynamicParameterValue/);
 });
 
 test('video candidate loading is stable across parent callback renders', () => {

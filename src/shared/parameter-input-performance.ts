@@ -11,6 +11,9 @@
  * bounded enums, counts and millisecond numbers. There is no free-text field
  * anywhere in the DTO, so a prompt, credential, file path or parameter payload
  * cannot be smuggled into a diagnostic log even by mistake.
+ *
+ * P3 added the parameter-area render counter, so the same session can show that
+ * a keystroke now costs one local render instead of a whole-draft replacement.
  */
 
 export const parameterInputDiagnosticsIpcChannel = 'parameter-input-diagnostics:record';
@@ -40,7 +43,11 @@ export const parameterInputControlKinds = [
 ] as const;
 export type ParameterInputControlKind = (typeof parameterInputControlKinds)[number];
 
-/** One measured keystroke. Counts are cumulative for the editing session. */
+/**
+ * One measured keystroke. Counts are per keystroke, not cumulative: they are
+ * reset when the keystroke is settled, so a commit or candidate read that the
+ * idle boundary triggers later cannot be blamed on an earlier key.
+ */
 export interface ParameterInputSample {
   readonly surface: ParameterInputSurface;
   readonly controlKind: ParameterInputControlKind;
@@ -52,6 +59,8 @@ export interface ParameterInputSample {
   readonly candidateRequestCount: number;
   /** Autosave IPC messages caused by this keystroke. */
   readonly autosaveIpcCount: number;
+  /** Parameter-area renders caused by this keystroke. */
+  readonly parameterAreaRenderCount: number;
 }
 
 /** Aggregated result for one editing session of at least 30 inputs. */
@@ -64,6 +73,7 @@ export interface ParameterInputPerformanceSummary {
   readonly parentCommitCount: number;
   readonly candidateRequestCount: number;
   readonly autosaveIpcCount: number;
+  readonly parameterAreaRenderCount: number;
 }
 
 export interface ParameterInputDiagnosticsApi {
@@ -105,7 +115,8 @@ export function summarizeParameterInputSamples(
     visibleLatencyMaxMs: roundMilliseconds(Math.max(...latencies)),
     parentCommitCount: sum(samples, (sample) => sample.parentCommitCount),
     candidateRequestCount: sum(samples, (sample) => sample.candidateRequestCount),
-    autosaveIpcCount: sum(samples, (sample) => sample.autosaveIpcCount)
+    autosaveIpcCount: sum(samples, (sample) => sample.autosaveIpcCount),
+    parameterAreaRenderCount: sum(samples, (sample) => sample.parameterAreaRenderCount)
   };
 }
 
@@ -126,7 +137,8 @@ export function isParameterInputPerformanceSummary(
     'visibleLatencyMaxMs',
     'parentCommitCount',
     'candidateRequestCount',
-    'autosaveIpcCount'
+    'autosaveIpcCount',
+    'parameterAreaRenderCount'
   ]);
   if (Object.keys(value).length !== allowedKeys.size) return false;
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
@@ -143,7 +155,8 @@ export function isParameterInputPerformanceSummary(
   for (const key of [
     'parentCommitCount',
     'candidateRequestCount',
-    'autosaveIpcCount'
+    'autosaveIpcCount',
+    'parameterAreaRenderCount'
   ] as const) {
     if (!isBoundedCount(value[key], Number.MAX_SAFE_INTEGER)) return false;
   }
@@ -158,7 +171,8 @@ export function isValidSample(value: unknown): value is ParameterInputSample {
     'visibleLatencyMs',
     'parentCommitCount',
     'candidateRequestCount',
-    'autosaveIpcCount'
+    'autosaveIpcCount',
+    'parameterAreaRenderCount'
   ]);
   if (Object.keys(value).length !== allowedKeys.size) return false;
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
@@ -168,7 +182,8 @@ export function isValidSample(value: unknown): value is ParameterInputSample {
   return (
     isBoundedCount(value.parentCommitCount, Number.MAX_SAFE_INTEGER) &&
     isBoundedCount(value.candidateRequestCount, Number.MAX_SAFE_INTEGER) &&
-    isBoundedCount(value.autosaveIpcCount, Number.MAX_SAFE_INTEGER)
+    isBoundedCount(value.autosaveIpcCount, Number.MAX_SAFE_INTEGER) &&
+    isBoundedCount(value.parameterAreaRenderCount, Number.MAX_SAFE_INTEGER)
   );
 }
 

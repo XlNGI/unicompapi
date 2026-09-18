@@ -6,8 +6,11 @@ import {
   DynamicParameterForm,
   toDynamicParameterFields,
   validateDynamicParameterValues,
+  type DynamicParameterBufferFlush,
+  type DynamicParameterFormHandle,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
+import { reportParameterInputCandidateRequest } from '../../../ui/parameter-input-performance-probe';
 import {
   isVisibleModelUnavailableReason,
   ModelSelect
@@ -154,9 +157,15 @@ export function VideoFeatureSubmissionPanel({
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
   const onMessageRef = useRef(onMessage);
+  const parameterFormRef = useRef<DynamicParameterFormHandle>(null);
+  // The parameter form commits a stable value through a callback that may run
+  // in the same tick as the next commit, so the effective feature selection is
+  // read from a ref instead of a render closure.
+  const featureSelectionRef = useRef(featureSelection);
   busyRef.current = busy;
   draftRef.current = draft;
   onMessageRef.current = onMessage;
+  featureSelectionRef.current = featureSelection;
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
@@ -170,10 +179,12 @@ export function VideoFeatureSubmissionPanel({
   );
   const parameterForm = (
     <DynamicParameterForm
+      ref={parameterFormRef}
       disabled={busy}
       emptyHint="当前表面没有需要用户填写的参数。"
       fields={dynamicParameterFields}
       errors={parameterValidation.errors}
+      surface="video_generation"
       onInputErrorChange={(fieldId, error) => {
         setParameterInputErrors((current) => {
           const next = { ...current };
@@ -288,6 +299,7 @@ export function VideoFeatureSubmissionPanel({
         const draftId = draft.draftId;
         const draftUpdatedAt = draft.updatedAt;
         if (busyRef.current) return;
+        reportParameterInputCandidateRequest();
         const result = await api.listCandidates(draftId, draftUpdatedAt);
         if (!active || busyRef.current) return;
         if (!result.ok) {
@@ -322,26 +334,28 @@ export function VideoFeatureSubmissionPanel({
 
   function changeCandidate(candidateId: string) {
     const candidate = candidates.find((item) => item.candidateId === candidateId);
+    const snapshot = draftRef.current;
+    const selection = featureSelectionRef.current;
     const sameSchema = candidate &&
-      featureSelection.parameterSchemaId === candidate.parameterSchema.schemaId &&
-      featureSelection.parameterSchemaRevision === candidate.parameterSchema.revision;
+      selection.parameterSchemaId === candidate.parameterSchema.schemaId &&
+      selection.parameterSchemaRevision === candidate.parameterSchema.revision;
     const allowedFields = new Set(
       (candidate?.parameterSchema.fields ?? []).map((field) => field.fieldId)
     );
     const keptValues = sameSchema
       ? Object.fromEntries(
-          Object.entries(featureSelection.parameterValues ?? {}).filter(([key]) =>
+          Object.entries(selection.parameterValues ?? {}).filter(([key]) =>
             allowedFields.has(key)
           )
         )
       : {};
     setParameterInputErrors({});
-    onDraftChange({
-      ...draft,
+    const next: VideoWorkspaceDraftDto = {
+      ...snapshot,
       state: 'editing',
       generation: resetGeneration(),
       featureSelection: {
-        productFeature: featureSelection.productFeature,
+        productFeature: selection.productFeature,
         ...(candidate
           ? {
               candidateId: candidate.candidateId,
@@ -351,7 +365,9 @@ export function VideoFeatureSubmissionPanel({
           : {}),
         parameterValues: keptValues
       }
-    });
+    };
+    draftRef.current = next;
+    onDraftChange(next);
   }
 
   function changeParameter(
@@ -364,18 +380,36 @@ export function VideoFeatureSubmissionPanel({
       delete next[fieldId];
       return next;
     });
-    const parameterValues = { ...featureSelection.parameterValues } as Record<
+    // Compose from the latest snapshot rather than the render closure: the
+    // parameter form may commit two fields in the same tick (flush before
+    // submit), and both changes must survive.
+    const snapshot = draftRef.current;
+    const selection = featureSelectionRef.current;
+    const parameterValues = { ...selection.parameterValues } as Record<
       string,
       VideoWorkspaceParameterValueDto
     >;
     if (value === undefined) delete parameterValues[fieldId];
     else parameterValues[fieldId] = value;
-    onDraftChange({
-      ...draft,
+    const next: VideoWorkspaceDraftDto = {
+      ...snapshot,
       state: 'editing',
       generation: resetGeneration(),
-      featureSelection: { ...featureSelection, parameterValues }
-    });
+      featureSelection: { ...selection, parameterValues }
+    };
+    draftRef.current = next;
+    onDraftChange(next);
+  }
+
+  /**
+   * Commits whatever the user has typed but not yet blurred. Called before
+   * every save/submit so a focused control can never be left behind, and so an
+   * invalid intermediate value blocks the request instead of being dispatched.
+   */
+  function commitPendingParameterEdits(): DynamicParameterBufferFlush {
+    const handle = parameterFormRef.current;
+    if (!handle) return { values: {}, committedFieldIds: [], errors: {}, valid: true };
+    return handle.flush();
   }
 
   async function ensureSavedDraft(): Promise<VideoWorkspaceDraftDto | undefined> {
@@ -410,8 +444,18 @@ export function VideoFeatureSubmissionPanel({
       showSubmissionError(requiredInputError);
       return;
     }
-    if (!parameterValidation.valid) {
-      showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
+    // Commit the control the user is still typing in, then run the full schema
+    // validation on the merged values. An invalid intermediate state never
+    // leaves this function.
+    const pendingEdits = commitPendingParameterEdits();
+    const submittedValidation = validateDynamicParameterValues(
+      dynamicParameterFields,
+      pendingEdits.values as Readonly<Record<string, DynamicParameterValue | undefined>>,
+      pendingEdits.errors
+    );
+    if (!submittedValidation.valid) {
+      setParameterInputErrors(pendingEdits.errors);
+      showSubmissionError(submittedValidation.firstError ?? '请先修正动态参数。');
       return;
     }
     setBusy(true);
