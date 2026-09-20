@@ -17,6 +17,8 @@ import {
 import type { VideoFeatureSubmissionDto } from '../../shared/video-feature-ipc';
 import type { VideoFeatureRecoveryDto } from '../../shared/video-feature-ipc';
 import {
+  MINIMAX_H3_VIDEO_ADAPTER_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
   NEWAPI_VIDEO_ADAPTER_ID,
   ProviderAsyncOperationCoordinator,
   ProviderExecutionLifecycleService,
@@ -96,6 +98,16 @@ export interface VideoFeatureRuntimeOptions {
     readonly providerOperationId: string;
     readonly invocationAttemptId: string;
   }) => Promise<void>;
+  readonly attachMinimaxVideoOperation?: (input: {
+    readonly routeSnapshot: unknown;
+    readonly providerOperationId: string;
+    readonly invocationAttemptId: string;
+  }) => Promise<void>;
+  readonly attachUnicompapiStudioH3VideoOperation?: (input: {
+    readonly routeSnapshot: unknown;
+    readonly providerOperationId: string;
+    readonly invocationAttemptId: string;
+  }) => Promise<void>;
   readonly resultReceiver?: {
     receive(executionId: string): Promise<{
       readonly ok: true;
@@ -169,7 +181,9 @@ export function createVideoFeatureControllerRuntime(
   const recoveryResultReceiver = options.resultReceiver;
   const recoveryRemember = options.rememberVideoOperation;
   const recoveryAttachNewApi = options.attachNewApiVideoOperation;
-  if (recoveryResultReceiver && (recoveryRemember || recoveryAttachNewApi)) {
+  const recoveryAttachMinimax = options.attachMinimaxVideoOperation;
+  const recoveryAttachStudioH3 = options.attachUnicompapiStudioH3VideoOperation;
+  if (recoveryResultReceiver && (recoveryRemember || recoveryAttachNewApi || recoveryAttachMinimax || recoveryAttachStudioH3)) {
     runtime.recoverResult = async (taskId): Promise<VideoFeatureRecoveryDto> => {
       const task = await tasks.get(toTaskId(taskId));
       if (!task || task.projectId !== options.session.projectId) {
@@ -204,7 +218,9 @@ export function createVideoFeatureControllerRuntime(
         invocationAttemptId: attempt.id,
         providerRegistry: options.providerRegistry,
         remember: recoveryRemember,
-        attachNewApi: recoveryAttachNewApi
+        attachNewApi: recoveryAttachNewApi,
+        attachMinimax: recoveryAttachMinimax,
+        attachStudioH3: recoveryAttachStudioH3
       });
       if (!attached) {
         throw new Error('The original video route cannot be restored');
@@ -379,7 +395,9 @@ export function createVideoFeatureControllerRuntime(
             invocationAttemptId: acceptance.invocationAttempt.id,
             providerRegistry: options.providerRegistry,
             remember: options.rememberVideoOperation,
-            attachNewApi: options.attachNewApiVideoOperation
+            attachNewApi: options.attachNewApiVideoOperation,
+            attachMinimax: options.attachMinimaxVideoOperation,
+            attachStudioH3: options.attachUnicompapiStudioH3VideoOperation
           });
           const coordinator = new ProviderAsyncOperationCoordinator(
             executions,
@@ -541,10 +559,30 @@ async function attachVideoOperationContext(input: {
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly remember?: VideoFeatureRuntimeOptions['rememberVideoOperation'];
   readonly attachNewApi?: VideoFeatureRuntimeOptions['attachNewApiVideoOperation'];
+  readonly attachMinimax?: VideoFeatureRuntimeOptions['attachMinimaxVideoOperation'];
+  readonly attachStudioH3?: VideoFeatureRuntimeOptions['attachUnicompapiStudioH3VideoOperation'];
 }): Promise<boolean> {
   if (input.routeSnapshot.adapterKey === NEWAPI_VIDEO_ADAPTER_ID) {
     if (!input.attachNewApi) return false;
     await input.attachNewApi({
+      routeSnapshot: input.routeSnapshot,
+      providerOperationId: input.providerOperationId,
+      invocationAttemptId: input.invocationAttemptId
+    });
+    return true;
+  }
+  if (input.routeSnapshot.adapterKey === MINIMAX_H3_VIDEO_ADAPTER_ID) {
+    if (!input.attachMinimax) return false;
+    await input.attachMinimax({
+      routeSnapshot: input.routeSnapshot,
+      providerOperationId: input.providerOperationId,
+      invocationAttemptId: input.invocationAttemptId
+    });
+    return true;
+  }
+  if (input.routeSnapshot.adapterKey === UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID) {
+    if (!input.attachStudioH3) return false;
+    await input.attachStudioH3({
       routeSnapshot: input.routeSnapshot,
       providerOperationId: input.providerOperationId,
       invocationAttemptId: input.invocationAttemptId
@@ -638,6 +676,74 @@ function userFacingSubmissionFeedback(
       return '请求发送前失败：参考图无法读取或格式不受支持，请更换图片';
     case 'newapi.material_too_large':
       return '请求发送前失败：参考图过大，请更换较小的图片';
+    case 'minimax.invalid_request':
+    case 'minimax.invalid_parameters':
+    case 'minimax.h3-video.invalid_parameters':
+      return '远端反馈：请求参数被拒绝，请检查模型与参数后重试';
+    case 'minimax.authentication_failed':
+    case 'minimax.credential_unavailable':
+    case 'minimax.h3-video.authentication_failed':
+    case 'minimax.h3-video.credential_unavailable':
+      return '远端反馈：鉴权失败，请检查服务商连接凭证';
+    case 'minimax.permission_denied':
+    case 'minimax.h3-video.permission_denied':
+      return '远端反馈：当前凭证无权执行该操作';
+    case 'minimax.rate_limited':
+    case 'minimax.h3-video.rate_limited':
+      return '远端反馈：请求过于频繁，请稍后再试';
+    case 'minimax.provider_unavailable':
+    case 'minimax.h3-video.provider_unavailable':
+      return '远端反馈：服务暂时不可用，请稍后重试';
+    case 'minimax.timeout':
+    case 'minimax.h3-video.timeout':
+      return '远端反馈：请求超时，结果未知，禁止自动重试';
+    case 'minimax.network_error':
+    case 'minimax.h3-video.network_error':
+      return '远端反馈：网络请求失败，结果未知，禁止自动重试';
+    case 'minimax.invalid_response':
+    case 'minimax.h3-video.invalid_response':
+      return '远端反馈：响应无法解析，禁止自动重试';
+    case 'minimax.route_mismatch':
+    case 'minimax.protocol_mismatch':
+    case 'minimax.h3-video.protocol_mismatch':
+      return '远端反馈：协议绑定与请求不匹配';
+    case 'minimax.invalid_image':
+      return '请求发送前失败：参考图无法读取或格式不受支持，请更换图片';
+    case 'unicompapi.studio-h3.invalid_request':
+    case 'unicompapi.studio-h3-video.invalid_request':
+    case 'unicompapi.studio-h3-video.invalid_parameters':
+      return '远端反馈：请求参数被拒绝，请检查模型与参数后重试';
+    case 'unicompapi.studio-h3.authentication_failed':
+    case 'unicompapi.studio-h3.credential_unavailable':
+    case 'unicompapi.studio-h3-video.authentication_failed':
+    case 'unicompapi.studio-h3-video.credential_unavailable':
+      return '远端反馈：鉴权失败，请检查服务商连接凭证';
+    case 'unicompapi.studio-h3.permission_denied':
+    case 'unicompapi.studio-h3-video.permission_denied':
+      return '远端反馈：当前凭证无权执行该操作';
+    case 'unicompapi.studio-h3.rate_limited':
+    case 'unicompapi.studio-h3-video.rate_limited':
+      return '远端反馈：请求过于频繁，请稍后再试';
+    case 'unicompapi.studio-h3.provider_unavailable':
+    case 'unicompapi.studio-h3-video.provider_unavailable':
+      return '远端反馈：服务暂时不可用，请稍后重试';
+    case 'unicompapi.studio-h3.content_moderation_pending':
+    case 'unicompapi.studio-h3-video.content_moderation_pending':
+    case 'content_moderation_pending':
+      return '远端反馈：内容审核尚未完成，请稍后用同一请求重试';
+    case 'unicompapi.studio-h3.timeout':
+    case 'unicompapi.studio-h3-video.timeout':
+      return '远端反馈：请求超时，结果未知，禁止自动重试';
+    case 'unicompapi.studio-h3.network_error':
+    case 'unicompapi.studio-h3-video.network_error':
+      return '远端反馈：网络请求失败，结果未知，禁止自动重试';
+    case 'unicompapi.studio-h3.invalid_response':
+    case 'unicompapi.studio-h3-video.invalid_response':
+      return '远端反馈：响应无法解析，禁止自动重试';
+    case 'unicompapi.studio-h3.route_mismatch':
+    case 'unicompapi.studio-h3.protocol_mismatch':
+    case 'unicompapi.studio-h3-video.protocol_mismatch':
+      return '远端反馈：协议绑定与请求不匹配';
     case 'adapter.submission_outcome_unknown':
     case 'adapter.failed_before_submission':
       return phase === 'before_request'

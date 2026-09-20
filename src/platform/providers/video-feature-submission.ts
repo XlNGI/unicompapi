@@ -34,6 +34,34 @@ import {
   UNICOMPAPI_PROVIDER_PACKAGE_ID,
   UNICOMPAPI_PROVIDER_PACKAGE_VERSION
 } from './newapi/unicompapi-contracts';
+import {
+  MINIMAX_H3_PROVIDER_PACKAGE_ID,
+  MINIMAX_H3_PROVIDER_PACKAGE_VERSION,
+  MINIMAX_H3_VIDEO_ADAPTER_ID,
+  MINIMAX_H3_VIDEO_ADAPTER_VERSION,
+  MINIMAX_H3_VIDEO_PROTOCOL_ID,
+  MINIMAX_H3_VIDEO_PROTOCOL_VERSION,
+  MiniMaxVideoAdapter,
+  type MiniMaxSharedRuntime,
+  type MiniMaxVideoConnectionResolverPort,
+  type MiniMaxVideoCredentialResolverPort,
+  type MiniMaxVideoParameterSchemaResolverPort,
+  type MiniMaxVideoUsageObservationSinkPort
+} from './minimax';
+import {
+  UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_VERSION,
+  UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_VERSION,
+  UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_VERSION,
+  UnicompapiStudioH3VideoAdapter,
+  type UnicompapiStudioH3SharedRuntime,
+  type UnicompapiStudioH3VideoConnectionResolverPort,
+  type UnicompapiStudioH3VideoCredentialResolverPort,
+  type UnicompapiStudioH3VideoParameterSchemaResolverPort,
+  type UnicompapiStudioH3VideoUsageObservationSinkPort
+} from './unicompapi-studio-h3';
 import { createVideoProviderFeatureContracts } from './project-video-feature';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type { ProviderPackageRegistry } from './provider-package-registry';
@@ -73,7 +101,14 @@ export interface VideoFeatureSubmissionRuntimes {
   readonly providerRegistry: JsonProviderRegistryStore;
   readonly providerPackages: ProviderPackageRegistry;
   readonly materials: ControlledImageMaterialPort;
-  readonly usage: NewApiVideoUsageObservationSinkPort & ViduUsageObservationSinkPort;
+  readonly usage: NewApiVideoUsageObservationSinkPort
+    & ViduUsageObservationSinkPort
+    & MiniMaxVideoUsageObservationSinkPort
+    & UnicompapiStudioH3VideoUsageObservationSinkPort;
+  readonly minimaxRuntime?: MiniMaxSharedRuntime;
+  readonly minimaxVideoAdapter?: MiniMaxVideoAdapter;
+  readonly unicompapiStudioH3Runtime?: UnicompapiStudioH3SharedRuntime;
+  readonly unicompapiStudioH3VideoAdapter?: UnicompapiStudioH3VideoAdapter;
 }
 
 export function createVideoFeatureSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
@@ -137,6 +172,49 @@ export function createVideoFeatureDispatchBridge(
           newApiRuntime
         })
       : undefined);
+  const minimaxRuntime = options.minimaxRuntime;
+  const minimaxAdapter = options.minimaxVideoAdapter
+    ?? (minimaxRuntime
+      ? createMiniMaxVideoAdapterFromRuntimes({
+          ...options,
+          minimaxRuntime
+        })
+      : undefined);
+  if (minimaxAdapter) {
+    adapters.push(
+      wrapVideoAdapter({
+        packageId: MINIMAX_H3_PROVIDER_PACKAGE_ID,
+        packageVersion: MINIMAX_H3_PROVIDER_PACKAGE_VERSION,
+        adapterKey: MINIMAX_H3_VIDEO_ADAPTER_ID,
+        adapterVersion: MINIMAX_H3_VIDEO_ADAPTER_VERSION,
+        protocolId: MINIMAX_H3_VIDEO_PROTOCOL_ID,
+        protocolVersion: MINIMAX_H3_VIDEO_PROTOCOL_VERSION,
+        submit: (input) => minimaxAdapter.submit(input)
+      })
+    );
+  }
+  const unicompapiStudioH3Runtime = options.unicompapiStudioH3Runtime;
+  const unicompapiStudioH3Adapter = options.unicompapiStudioH3VideoAdapter
+    ?? (unicompapiStudioH3Runtime
+      ? createUnicompapiStudioH3VideoAdapterFromRuntimes({
+          ...options,
+          unicompapiStudioH3Runtime
+        })
+      : undefined);
+  if (unicompapiStudioH3Adapter) {
+    adapters.push(
+      wrapVideoAdapter({
+        packageId: UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID,
+        packageVersion: UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_VERSION,
+        adapterKey: UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
+        adapterVersion: UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_VERSION,
+        protocolId: UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_ID,
+        protocolVersion: UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_VERSION,
+        submit: (input) => unicompapiStudioH3Adapter.submit(input)
+      })
+    );
+  }
+
   if (newApiAdapter) {
     adapters.push(
       wrapVideoAdapter({
@@ -156,6 +234,66 @@ export function createVideoFeatureDispatchBridge(
   }
 
   return new ProviderSubmissionDispatchBridge(options.providerPackages, adapters);
+}
+
+export function createUnicompapiStudioH3VideoAdapterFromRuntimes(
+  options: Pick<
+    VideoFeatureSubmissionRuntimes,
+    'unicompapiStudioH3Runtime' | 'credentialVault' | 'providerRegistry' | 'usage'
+  > & {
+    readonly unicompapiStudioH3Runtime: UnicompapiStudioH3SharedRuntime;
+  }
+): UnicompapiStudioH3VideoAdapter {
+  const credentials = createRegistryCredentialResolver(
+    options.providerRegistry,
+    options.credentialVault
+  ) as UnicompapiStudioH3VideoCredentialResolverPort;
+  const connections = createRegistryConnectionResolver(
+    options.providerRegistry
+  ) as UnicompapiStudioH3VideoConnectionResolverPort;
+  const parameterSchemas = createVideoParameterSchemaResolver() as UnicompapiStudioH3VideoParameterSchemaResolverPort;
+  return new UnicompapiStudioH3VideoAdapter(
+    options.unicompapiStudioH3Runtime,
+    connections,
+    credentials,
+    parameterSchemas,
+    options.usage,
+    {
+      nextProviderUsageObservationId: () =>
+        toProviderUsageObservationId(`usage-${randomUUID()}`)
+    }
+  );
+}
+
+export function createMiniMaxVideoAdapterFromRuntimes(
+  options: Pick<
+    VideoFeatureSubmissionRuntimes,
+    'minimaxRuntime' | 'credentialVault' | 'providerRegistry' | 'materials' | 'usage'
+  > & {
+    readonly minimaxRuntime: MiniMaxSharedRuntime;
+  }
+): MiniMaxVideoAdapter {
+  const credentials = createRegistryCredentialResolver(
+    options.providerRegistry,
+    options.credentialVault
+  ) as MiniMaxVideoCredentialResolverPort;
+  const connections = createRegistryConnectionResolver(
+    options.providerRegistry
+  ) as MiniMaxVideoConnectionResolverPort;
+  const parameterSchemas = createVideoParameterSchemaResolver() as MiniMaxVideoParameterSchemaResolverPort;
+  const images = createControlledNewApiImagePort(options.materials);
+  return new MiniMaxVideoAdapter(
+    options.minimaxRuntime,
+    connections,
+    credentials,
+    parameterSchemas,
+    images,
+    options.usage,
+    {
+      nextProviderUsageObservationId: () =>
+        toProviderUsageObservationId(`usage-${randomUUID()}`)
+    }
+  );
 }
 
 export function createNewApiVideoAdapterFromRuntimes(

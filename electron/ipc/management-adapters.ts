@@ -6,6 +6,12 @@ import {
   KlingManagementAdapter,
   KlingSharedRuntime,
   KlingTransportFailure,
+  MiniMaxManagementAdapter,
+  MiniMaxSharedRuntime,
+  MiniMaxTransportFailure,
+  UnicompapiStudioH3ManagementAdapter,
+  UnicompapiStudioH3SharedRuntime,
+  UnicompapiStudioH3TransportFailure,
   NewApiManagementAdapter,
   NewApiSharedRuntime,
   NewApiTransportFailure,
@@ -23,6 +29,12 @@ import {
   type KlingHttpTransport,
   type KlingHttpTransportRequest,
   type KlingHttpTransportResponse,
+  type MiniMaxHttpTransport,
+  type MiniMaxHttpTransportRequest,
+  type MiniMaxHttpTransportResponse,
+  type UnicompapiStudioH3HttpTransport,
+  type UnicompapiStudioH3HttpTransportRequest,
+  type UnicompapiStudioH3HttpTransportResponse,
   type NewApiHttpTransport,
   type NewApiHttpTransportRequest,
   type NewApiHttpTransportResponse,
@@ -71,6 +83,14 @@ export function createLiveProviderManagementComposition(options: {
     transport: new ElectronKlingHttpTransport(),
     proxy: () => activeProxy
   });
+  const minimaxRuntime = new MiniMaxSharedRuntime({
+    transport: new ElectronMiniMaxHttpTransport(),
+    proxy: () => activeProxy
+  });
+  const unicompapiStudioH3Runtime = new UnicompapiStudioH3SharedRuntime({
+    transport: new ElectronUnicompapiStudioH3HttpTransport(),
+    proxy: () => activeProxy
+  });
   const volcengineRuntime = new VolcengineSharedRuntime({
     transport: new ElectronVolcengineHttpTransport(),
     proxy: () => activeProxy
@@ -93,6 +113,8 @@ export function createLiveProviderManagementComposition(options: {
         packageId: KIMI_PROVIDER_PACKAGE_ID
       }),
       new KlingManagementAdapter(klingRuntime),
+      new MiniMaxManagementAdapter(minimaxRuntime),
+      new UnicompapiStudioH3ManagementAdapter(unicompapiStudioH3Runtime),
       new VolcengineManagementAdapter(volcengineRuntime),
       new ViduManagementAdapter(viduRuntime)
     ]
@@ -242,6 +264,68 @@ class ElectronKlingHttpTransport implements KlingHttpTransport {
       }
       if (error instanceof KlingTransportFailure) throw error;
       throw new KlingTransportFailure('network');
+    }
+  }
+}
+
+class ElectronMiniMaxHttpTransport implements MiniMaxHttpTransport {
+  async send(request: MiniMaxHttpTransportRequest): Promise<MiniMaxHttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body.byteLength > 0 ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(
+        response,
+        request.maxResponseBytes,
+        () => new MiniMaxTransportFailure('response_too_large')
+      );
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new MiniMaxTransportFailure('cancelled');
+      }
+      if (error instanceof MiniMaxTransportFailure) throw error;
+      throw new MiniMaxTransportFailure('network');
+    }
+  }
+}
+
+class ElectronUnicompapiStudioH3HttpTransport implements UnicompapiStudioH3HttpTransport {
+  async send(
+    request: UnicompapiStudioH3HttpTransportRequest
+  ): Promise<UnicompapiStudioH3HttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body.byteLength > 0 ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(
+        response,
+        request.maxResponseBytes,
+        () => new UnicompapiStudioH3TransportFailure('response_too_large')
+      );
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new UnicompapiStudioH3TransportFailure('cancelled');
+      }
+      if (error instanceof UnicompapiStudioH3TransportFailure) throw error;
+      throw new UnicompapiStudioH3TransportFailure('network');
     }
   }
 }

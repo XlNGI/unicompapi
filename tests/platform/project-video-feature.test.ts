@@ -166,6 +166,15 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
     expect(contracts.some((contract) =>
       contract.parameterSchema.schemaId === UNICOMPAPI_VIDUQ3_PRO_TEXT_TO_VIDEO_PARAMETER_SCHEMA_ID
     )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId.startsWith('parameters.minimax-h3.text_to_video.')
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId.startsWith('parameters.minimax-h3.image_to_video.')
+    )).toBe(true);
+    expect(contracts.some((contract) =>
+      contract.parameterSchema.schemaId.startsWith('parameters.unicompapi-studio-h3.text_to_video.')
+    )).toBe(true);
     const registry = new ProviderFeatureContractRegistry(contracts);
     expect(registry.resolve({
       productFeature: 'text_to_video',
