@@ -50,6 +50,7 @@ import {
 } from '../../src/platform';
 import { VIDU_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/vidu/vidu-contracts';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from '../../src/platform/providers/newapi';
+import { storageCallBillingReasonCodes } from '../../src/shared/storage-ipc';
 
 const roots: string[] = [];
 const t0 = toIsoTimestamp('2026-08-03T10:00:00.000Z');
@@ -235,6 +236,110 @@ describe('provider invocation read model controller', () => {
     });
   });
 
+  it('explains a missing amount without inventing one and without leaking station detail', async () => {
+    // A connection that publishes no billing protocol can never produce a bill,
+    // so the record must say so instead of showing a bare "无法估算".
+    const protocolFree = await controllerFixture();
+    const protocolFreeDetails = await protocolFree.controller.getCallDetails({
+      projectId: protocolFree.mediaProjectId,
+      invocationAttemptId: 'attempt-media-call'
+    });
+    expect(protocolFreeDetails).toMatchObject({
+      ok: true,
+      value: {
+        billing: {
+          state: 'unestimated',
+          currencyCode: 'CNY',
+          reasonCode: 'station_protocol_unsupported'
+        }
+      }
+    });
+    const protocolFreeBilling = (protocolFreeDetails as {
+      ok: true;
+      value: { billing?: { amount?: string; reasonCode?: string } };
+    }).value.billing;
+    // No amount may ever be fabricated for an unsupported protocol.
+    expect(protocolFreeBilling?.amount).toBeUndefined();
+
+    // A station connection that does publish the protocol, but whose log cannot
+    // be reached and whose call carries no correlation id.
+    const root = await makeRoot('unicomp-billing-explanation-');
+    const projectId = toProjectId('project-billing-explanation');
+    await createNewApiBillingCall(root, projectId, undefined);
+    await createNewApiBillingCall(root, projectId, 'req-billing-explanation');
+    const catalog = new ProjectCatalogService(
+      new InMemoryProjectCatalogStore(),
+      () => t9
+    );
+    await catalog.remember({
+      projectId,
+      projectName: 'Billing project',
+      rootDirectory: root
+    });
+    const controller = new ProviderInvocationReadModelController(
+      catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]),
+      undefined,
+      () => new Date('2026-08-05T12:00:00.000Z'),
+      {
+        async reconcile() {
+          return new Map();
+        },
+        async estimate() {
+          return undefined;
+        },
+        async diagnose() {
+          return ['logs_rate_limited' as const];
+        },
+        invalidate() {}
+      }
+    );
+
+    const uncorrelated = await controller.getCallDetails({
+      projectId,
+      invocationAttemptId: 'attempt-billing-call-uncorrelated'
+    });
+    // The missing id blocks every later step, so it outranks the station symptom.
+    expect(uncorrelated).toMatchObject({
+      ok: true,
+      value: {
+        billing: {
+          state: 'unestimated',
+          reasonCode: 'request_id_unavailable'
+        }
+      }
+    });
+
+    const correlated = await controller.getCallDetails({
+      projectId,
+      invocationAttemptId: 'attempt-billing-call-correlated'
+    });
+    // With a correlation id the bill is still expected, so the state stays
+    // "waiting for reconciliation" and only the reason explains the delay.
+    expect(correlated).toMatchObject({
+      ok: true,
+      value: {
+        billing: {
+          state: 'pending_reconciliation',
+          reasonCode: 'logs_rate_limited'
+        }
+      }
+    });
+    // Only the bounded vocabulary crosses the IPC boundary, and the explanation
+    // itself carries no upstream URL, credential or raw error text.
+    const billingText = JSON.stringify([
+      (uncorrelated as { value: { billing: unknown } }).value.billing,
+      (correlated as { value: { billing: unknown } }).value.billing
+    ]);
+    expect(billingText).not.toMatch(/https?:|\/api\/|Bearer|sk-|Authorization|token=/i);
+    const reasonCodes = [...billingText.matchAll(/"reasonCode":"([a-z0-9_]+)"/g)]
+      .map((match) => match[1]);
+    expect(reasonCodes).toEqual(['request_id_unavailable', 'logs_rate_limited']);
+    for (const reasonCode of reasonCodes) {
+      expect(storageCallBillingReasonCodes).toContain(reasonCode);
+    }
+  });
+
   it('returns one project-scoped task timeline query with one read per fact file', async () => {
     const fixture = await controllerFixture();
     const reads = new Map<string, number>();
@@ -416,6 +521,9 @@ describe('provider invocation read model controller', () => {
       },
       async estimate() {
         return undefined;
+      },
+      async diagnose() {
+        return [];
       },
       invalidate() {}
     };
@@ -782,6 +890,57 @@ async function createRefundedNewApiVideoCall(root: string, projectId: ProjectId)
       updatedAt: t7
     })
   );
+}
+
+/**
+ * A completed call on a billing-capable station connection, optionally carrying
+ * the correlation id that would let a bill be matched.
+ */
+async function createNewApiBillingCall(
+  root: string,
+  projectId: ProjectId,
+  providerRequestId: string | undefined
+): Promise<void> {
+  const context = callContext(root, projectId);
+  const suffix = providerRequestId ? 'billing-call-correlated' : 'billing-call-uncorrelated';
+  const route = {
+    ...routeSnapshot(projectId, suffix, 'text_to_video', t6, {
+      providerDisplayName: 'UniCompAPI',
+      connectionDisplayName: 'Station connection',
+      modelDisplayName: 'Station model'
+    }),
+    packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID,
+    providerModelKey: 'station-model'
+  };
+  await context.routes.save(route);
+  const attempt = createProviderInvocationAttempt({
+    id: toProviderInvocationAttemptId(`attempt-${suffix}`),
+    projectId,
+    subject: {
+      kind: 'media',
+      taskId: toTaskId(`task-${suffix}`),
+      executionId: toExecutionId(`execution-${suffix}`)
+    },
+    routeSnapshotId: route.id,
+    createdAt: t6
+  });
+  await context.invocations.create(attempt, invocationEvent(attempt.id, 1, 'submission_started', t6));
+  await context.invocations.appendEvent(invocationEvent(attempt.id, 2, 'provider_accepted', t7));
+  await context.invocations.appendEvent(invocationEvent(attempt.id, 3, 'result_received', t8));
+  await context.invocations.appendEvent(invocationEvent(attempt.id, 4, 'completed', t9));
+  await context.usage.append(createProviderUsageObservation({
+    id: toProviderUsageObservationId(`usage-${suffix}`),
+    invocationAttemptId: attempt.id,
+    usageSchemaId: usageSchema.id,
+    usageSchemaRevision: usageSchema.revision,
+    sourceEventKey: `usage-${suffix}`,
+    sequence: 1,
+    status: 'not_reported',
+    sourceStage: 'poll',
+    facts: [],
+    ...(providerRequestId ? { providerRequestId } : {}),
+    observedAt: t8
+  }, usageSchema), usageSchema);
 }
 
 function routeSnapshot(

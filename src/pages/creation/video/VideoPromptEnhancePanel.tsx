@@ -38,9 +38,6 @@ export function VideoPromptEnhancePanel({
         dirty,
         async ensureSaved() {
           if (!videoWorkspaces) return undefined;
-          if (!dirty && draft.state === 'saved') {
-            return { subjectId: draft.draftId, subjectRevision: draft.updatedAt };
-          }
           if (onFlushDraft) {
             if (!(await onFlushDraft())) return undefined;
             const refreshed = await videoWorkspaces.get(draft.draftId);
@@ -52,6 +49,9 @@ export function VideoPromptEnhancePanel({
               subjectId: refreshed.value.draftId,
               subjectRevision: refreshed.value.updatedAt
             };
+          }
+          if (!dirty && draft.state === 'saved') {
+            return { subjectId: draft.draftId, subjectRevision: draft.updatedAt };
           }
           const result = await persistVideoWorkspaceDraft(
             videoWorkspaces,

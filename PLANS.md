@@ -1,5 +1,40 @@
 # UniComp 开发计划
 
+### 模型能力优化分支合并检查（2026-09-20）
+
+负责人授权检查并提交当前未提交修复，一并合并 `feature/model-capability-billing-parameter-optimization` 至本地 `develop`，不推送远端，保留功能分支。合并前 develop 为 `5b9e2cc`，功能分支已提交基线为 `135aff8`；两者与远端一致，develop 为功能分支祖先，模拟合并无内容冲突。提交范围排除 `.workbuddy/`、本地报告、用户资料与凭证。
+
+本轮新鲜验证：定向 Vitest 104/104、UI 契约 338/338、类型检查、全仓 lint、生产构建、平台审计及 diff 检查通过。新增工作台脚本的平台字段改用现有验收脚本的 `os.platform()`；点击前增加有界的按钮可用状态等待，保留原业务断言。Electron 最终 14 项检查通过，108 次输入整页渲染 0、p95 约 16.9 ms、渲染器错误 0。首轮出现 1 次额外整页渲染，次轮数字纠正后生成超时；不能因最终通过而宣称性能时序完全稳定，首轮原因未确认。本轮未重跑全量 Vitest，未验证真实服务调用、OS 中文输入法或 macOS；真实业务人工验收边界沿用下方记录。
+
+### 模型列表缺失与图生视频输入回归修复（2026-09-20）
+
+负责人已授权修复两处并补完整工作台回归，随后自行人工验收。根因与证据更新在[原方案的最新维护节](docs/current/MODEL_CAPABILITY_BILLING_PARAMETER_OPTIMIZATION_PLAN.md)：可信视频映射与旧能力记录版本冲突导致整个列表读取失败；此前局部表单优化遗漏图生视频两个提示词框。保留历史并递增版本，区分读取失败与空列表、支持重试；本地输入缓冲接入生成/增强/新建/卸载/关闭前保存，同时修复回归检出的未完成可选数字被提交为旧值的问题。
+
+当前真实注册表内存副本两次查询均恢复 Seedance 2.0，生图模型仍被排除，原文件未改变。H3 的历史 profile 对应服务包未在当前主程序注册，仍不可用，不伪造适配支持。完整图生视频 Electron 回归使用真实组件、主题、十条历史和本地可播放视频，IPC 为隔离夹具；108 次原生字符输入整页渲染由 108 次降至 0，修复 p95 16.6 ms（至下一次渲染机会）。此前 4-7 ms 仅为单独表单结果，不能代表工作台或用户现场。
+
+定向 Vitest 79/79、UI 契约 338/338，类型/lint/生产构建/diff 检查与原参数表单 Electron 验证通过；工作台回归报告与截图位于 `outputs/video-workbench-regression/`。Sliver 阶段模板结构检查返回缺少 stage schema，未宣称该文档门禁通过。本次不改计费、不调用付费服务、不提交/推送/合并。真实项目输入手感、真实中文输入法、正常关闭重开、模型选择及真实服务调用由负责人最终人工验收；不声称 macOS 或整个应用全流程已通过。
+
+### 模型能力、计费与参数输入优化 P0–P4 完成（2026-09-18）
+
+按 [模型能力、计费与参数输入优化方案](docs/current/MODEL_CAPABILITY_BILLING_PARAMETER_OPTIMIZATION_PLAN.md) 分五阶段实施完毕，修复三个原始问题：视频页出现生图模型、`weq / gpt-image-2.5` 显示「无法估算费用」、填写模型参数卡顿。提交链：P0 基线 `3dfe26b`（证据与性能基线）→ P1 `6fc4ad4`（模型能力真源与旧 profile 门禁）→ P2 `434fd4d`（计费关联与可解释失败状态）→ P3 `f6ff84f`（解除参数即时输入耦合）→ P4 `f0ca17b`（组合回归、构建与 Electron 验收）。
+
+方案 P4 的自动化 GREEN 全部通过：定向 Vitest 30/30；全量 Vitest 1740/1741；Node/UI 契约 381/382；`tsconfig.app.json` / `tsconfig.test.json` / `tsc -b` 类型检查通过；`npx eslint .` 全仓无 error；生产构建通过；`git diff --check` 干净；diff 中无 secret/token。上述数字均在清除沙箱注入的 `NODE_OPTIONS`（`genie-safe-delete.cjs`）后取得，否则会出现大量伪失败。
+
+方案 P4 的四条 Electron GREEN 均已由真实 Electron 验收脚本覆盖，不是仅靠源码契约：
+
+1. 视频页不出现未确认生图模型 —— `scripts/verify-p4-capability-billing-electron.cjs` 走真实 `RegistryFeatureCandidateSource` / `ProviderFeatureCandidateService`，候选 0 条且失效报告含 `router_synthesized_evidence` 与 `gateVersion`；补上 `user_confirmed` 证据后正常进入 1 条，证明门禁是「按能力证据」而非「一律屏蔽」。
+2. 计费状态与失败原因文案 —— 同一脚本用脱敏 fixture 覆盖 `request_id_unavailable` / `logs_unavailable_404` / `logs_rate_limited` / `usage_not_reported` / `pricing_model_missing` 五类，各给不同原因文案，已结算项只显示金额；上游地址、`sk-` 前缀等诱饵串断言不出现在文案中。
+3. 参数连续输入不卡死、失焦/提交后重开为最新值 —— `scripts/verify-parameter-input-electron.cjs` 挂载真实表单控件并派发真实 `input`/`focusout`/`click`，连续 6 次全绿（可见延迟 p50 约 4.1–4.6 ms、p95 4.8–7.2 ms，上限 100 ms）。
+4. 候选不因输入字符刷新 —— 同脚本按单次按键结算计数，窗口期中间态（`-`、`+`、`.`、数字数组尾随逗号）不触发父级提交与候选请求。
+
+复现命令：`env -u ELECTRON_RUN_AS_NODE NODE_OPTIONS= npx electron scripts/verify-parameter-input-electron.cjs` 与 `... scripts/verify-p4-capability-billing-electron.cjs`，或 `pnpm verify:parameter-input` / `pnpm verify:capability-billing`。
+
+诚实标注的未通过/未验证项：`handoff/` 校验清单（`manifests/SHA256SUMS.txt`）不在工作树，为历史既有失败，本次不恢复、不标记通过；Windows 下 `.tools` 的回收站删除不可用，相关 Node 契约用 `finally` 清理时抛错，其自身两条断言均通过；`presentation-revision-save.test.ts` 在全量满载下偶发 5 s 超时（单独运行 13/13 通过，邻居用例 2.1–3.6 s，属负载诱发），不修改其超时阈值掩盖。
+
+本轮实现过程另修正三个真实缺陷：`DynamicParameterForm.tsx` 在 rsuite 选择器关闭时读 `overlay` 抛错、性能探针四个计数器缺 `pendingStart` 窗口守卫导致空闲边界工作被归给前一次按键、P1 提交遗留未使用导入使 lint 失败。另修正一处平台审计违规：验收脚本曾硬编码 `platform: "win32"` 字面量，改为不写该字段而非扩大审计白名单。
+
+自动化只覆盖到「参数表单 + 平台模块」层，工作台级接线由源码契约 `tests/ui/parameter-input-decoupling.test.mjs` 保证。待人工实机验收：真实视频页模型列表、真实图片/视频工作台内的计费状态与原因文案、真实工作台中的连续输入手感。
+
 ### 开发服务器避开 Windows 文件锁（2026-09-17）
 
 `npm run dev` 在 Windows 上会被 Vite 监视 `outputs/video-controls-repro/chrome-profile` 的 Cookies 文件锁打断，报 `EBUSY` 后整组退出。产品 `vite.config.ts` 已排除 `outputs/`、`.cache/`、`.tools/`、临时目录和 Chrome profile 路径的文件监视；`outputs/` 同步加入 `.gitignore`。这不影响从开发服务器读取这些静态文件。未启动完整 Electron 人工验收。

@@ -38,7 +38,10 @@ test('image and video validate visible dynamic parameters before submission', ()
   for (const source of [imagePanel, videoPanel]) {
     assert.match(source, /validateDynamicParameterValues\(/);
     assert.match(source, /const parameterValidation = validateDynamicParameterValues\(/);
-    assert.match(source, /if \(!parameterValidation\.valid\) \{[\s\S]*?showSubmissionError\(/);
+    // P3: the submission gate runs on the values that would actually be saved,
+    // after the pending editing buffer has been flushed.
+    assert.match(source, /commitPendingParameterEdits\(\)/);
+    assert.match(source, /if \(!submittedValidation\.valid\) \{[\s\S]*?showSubmissionError\(/);
     assert.match(source, /!parameterValidation\.valid/);
     assert.match(source, /errors=\{parameterValidation\.errors\}/);
     assert.match(source, /onInputErrorChange=\{\(fieldId, error\) =>/);

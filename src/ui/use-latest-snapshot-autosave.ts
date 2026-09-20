@@ -6,7 +6,8 @@ import {
   type AutosaveResult,
   type AutosaveState
 } from '../application';
-import { registerAutosaveFlush } from './autosave-flush-registry';
+import { commitPendingEditors, registerAutosaveFlush } from './autosave-flush-registry';
+import { reportParameterInputAutosaveIpc } from './parameter-input-performance-probe';
 
 const initialState: AutosaveState = {
   phase: 'saved',
@@ -69,7 +70,13 @@ export function useLatestSnapshotAutosave<
     coordinatorRef.current = new LatestSnapshotAutosave({
       debounceMs: options.debounceMs ?? 1_000,
       retryDelaysMs: options.retryDelaysMs ?? [1_000, 2_000, 4_000, 8_000, 8_000],
-      save: (snapshot) => optionsRef.current.save(snapshot),
+      save: (snapshot) => {
+        // One persist attempt = one autosave IPC. The parameter input probe
+        // counts it only while a keystroke is still pending, which is exactly
+        // the cost P3 removed from the typing path.
+        reportParameterInputAutosaveIpc();
+        return optionsRef.current.save(snapshot);
+      },
       rebase: (pending, persisted) => optionsRef.current.rebase(pending, persisted),
       classifyError: (error) => optionsRef.current.classifyError(error),
       onPersisted: (persisted, pending) => {
@@ -95,6 +102,7 @@ export function useLatestSnapshotAutosave<
   }, []);
 
   const flush = useCallback(async (deadlineMs = 3_000) => {
+    commitPendingEditors();
     const coordinator = coordinatorRef.current;
     if (!coordinator) return true;
     const deadline = new Promise<false>((resolve) => {
@@ -136,6 +144,7 @@ export function useLatestSnapshotAutosave<
     let allowClose = false;
     let closePending = false;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      commitPendingEditors();
       const coordinator = coordinatorRef.current;
       if (allowClose || !coordinator?.hasUnsavedChanges()) return;
       event.preventDefault();

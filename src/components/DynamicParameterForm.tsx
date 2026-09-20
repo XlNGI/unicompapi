@@ -1,5 +1,15 @@
 import { SelectPicker } from './Pickers';
-import { useEffect, useId, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import type { ReactNode } from 'react';
 import { LuInfo } from 'react-icons/lu';
 import { Input, InputNumber, Toggle, Tooltip, Whisper } from 'rsuite';
@@ -7,13 +17,38 @@ import type {
   DynamicParameterField,
   DynamicParameterValue
 } from './dynamic-parameter-validation';
-import { validateDynamicParameterValue } from './dynamic-parameter-validation';
+import {
+  applyParameterFieldInput,
+  createParameterFieldBuffer,
+  flushParameterFieldBuffers,
+  hasPendingParameterBuffer,
+  isBufferedParameterValueType,
+  serializeParameterFieldValue,
+  type DynamicParameterBufferFlush,
+  type DynamicParameterFieldBuffer
+} from './dynamic-parameter-buffer';
+import {
+  createParameterInputProbe,
+  emitParameterInputSummary,
+  setActiveParameterInputProbe,
+  type ParameterInputControlKind,
+  type ParameterInputSurface
+} from '../ui/parameter-input-performance-probe';
 
 export type {
   DynamicParameterField,
   DynamicParameterValue
 } from './dynamic-parameter-validation';
 export { validateDynamicParameterValues } from './dynamic-parameter-validation';
+export type { DynamicParameterBufferFlush } from './dynamic-parameter-buffer';
+
+/**
+ * Idle delay after the last keystroke before the stable value is handed to the
+ * parent. It replaces "every keystroke replaces the whole draft": the user
+ * stops typing, the value is committed, and only then does the draft become
+ * dirty, queue an autosave and allow a candidate refresh.
+ */
+const PARAMETER_COMMIT_IDLE_MS = 600;
 
 const parameterLabels: Readonly<Record<string, string>> = {
   aspectRatio: '画面比例',
@@ -174,17 +209,249 @@ export interface DynamicParameterFormProps {
   readonly errors?: Readonly<Record<string, string | undefined>>;
   readonly onInputErrorChange?: (fieldId: string, error?: string) => void;
   readonly onChange: (fieldId: string, value: DynamicParameterValue | undefined) => void;
+  /** Diagnostic surface; only used by the development-time probe. */
+  readonly surface?: ParameterInputSurface;
 }
 
-export function DynamicParameterForm({
+/**
+ * Imperative handle. The parent calls `flush()` before it saves or submits, so
+ * the value the user just typed is committed even when the control still has
+ * focus. It is deliberately synchronous: the submit path needs the stable
+ * values in the same tick, not after another render.
+ */
+export interface DynamicParameterFormHandle {
+  flush(): DynamicParameterBufferFlush;
+}
+
+function controlKindForValueType(valueType: string): ParameterInputControlKind {
+  switch (valueType) {
+    case 'number':
+      return 'number';
+    case 'integer':
+      return 'integer';
+    case 'string_array':
+    case 'number_array':
+      return 'array';
+    case 'object':
+      return 'json';
+    case 'boolean':
+      return 'boolean';
+    case 'enum':
+      return 'enum';
+    case 'media_slot':
+      return 'media_slot';
+    default:
+      return 'text';
+  }
+}
+
+export const DynamicParameterForm = forwardRef<
+  DynamicParameterFormHandle,
+  DynamicParameterFormProps
+>(function DynamicParameterForm({
   fields,
   values,
   disabled = false,
   emptyHint = '本次不需要用户参数，采用服务商默认值。',
   errors = {},
+  surface = 'video_generation',
   onInputErrorChange,
   onChange
-}: DynamicParameterFormProps) {
+}, ref) {
+  const [buffers, setBuffers] = useState<
+    Readonly<Record<string, DynamicParameterFieldBuffer | undefined>>
+  >({});
+  // Every ref below exists so the callbacks and the imperative handle never read
+  // a stale render closure: a commit triggered by blur, idle or submit must use
+  // the newest text and the newest parent value.
+  const buffersRef = useRef(buffers);
+  const valuesRef = useRef(values);
+  const fieldsRef = useRef(fields);
+  const onChangeRef = useRef(onChange);
+  const onInputErrorChangeRef = useRef(onInputErrorChange);
+  const reportedErrorsRef = useRef<Record<string, string | undefined>>({});
+  const idleTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const pendingSettleRef = useRef(false);
+  buffersRef.current = buffers;
+  valuesRef.current = values;
+  fieldsRef.current = fields;
+  onChangeRef.current = onChange;
+  onInputErrorChangeRef.current = onInputErrorChange;
+
+  const probe = useMemo(
+    () => createParameterInputProbe({ surface, emit: emitParameterInputSummary }),
+    [surface]
+  );
+
+  useEffect(() => {
+    setActiveParameterInputProbe(probe);
+    return () => setActiveParameterInputProbe(undefined);
+  }, [probe]);
+
+  // Keep each buffer aligned with the parent value unless the user is editing
+  // it. A model switch that keeps the schema keeps the user's text; a switch
+  // that changes the schema resyncs to the (cleared) draft value.
+  useEffect(() => {
+    setBuffers((current) => {
+      let changed = false;
+      const next: Record<string, DynamicParameterFieldBuffer | undefined> = {};
+      for (const field of fields) {
+        if (!isBufferedParameterValueType(field.valueType)) continue;
+        const existing = current[field.fieldId];
+        const parentValue = values[field.fieldId];
+        if (!existing || !existing.edited) {
+          const fresh = createParameterFieldBuffer(field, parentValue);
+          if (!existing || existing.text !== fresh.text) changed = true;
+          next[field.fieldId] = fresh;
+          continue;
+        }
+        const edited = existing.text !== serializeParameterFieldValue(field, parentValue);
+        if (edited !== existing.edited) changed = true;
+        next[field.fieldId] = edited === existing.edited ? existing : { ...existing, edited };
+      }
+      if (!changed && Object.keys(current).length === Object.keys(next).length) {
+        return current;
+      }
+      return next;
+    });
+  }, [fields, values]);
+
+  // Local errors are the only thing a keystroke may report upward, and only
+  // when the message actually changes.
+  useEffect(() => {
+    const reported = reportedErrorsRef.current;
+    const changed: Array<{ fieldId: string; error?: string }> = [];
+    for (const field of fields) {
+      if (!isBufferedParameterValueType(field.valueType)) continue;
+      const next = buffers[field.fieldId]?.error;
+      const previous = reported[field.fieldId];
+      if (previous === next) continue;
+      if (next === undefined) delete reported[field.fieldId];
+      else reported[field.fieldId] = next;
+      changed.push({ fieldId: field.fieldId, ...(next === undefined ? {} : { error: next }) });
+    }
+    for (const item of changed) onInputErrorChangeRef.current?.(item.fieldId, item.error);
+  }, [buffers, fields]);
+
+  // The rendered text is the measurement point: this layout effect runs after
+  // the DOM has the new text, so `settle()` records input → visible.
+  useLayoutEffect(() => {
+    if (!pendingSettleRef.current) return;
+    pendingSettleRef.current = false;
+    probe.settle();
+  });
+
+  const clearIdleTimer = useCallback((fieldId: string) => {
+    const timer = idleTimersRef.current.get(fieldId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    idleTimersRef.current.delete(fieldId);
+  }, []);
+
+  /**
+   * After a commit the buffer is re-serialized from the committed value, so
+   * "1." becomes "1" and the field is no longer considered edited. Only
+   * committed fields are touched: invalid text must stay exactly as typed.
+   */
+  const normalizeCommittedBuffers = useCallback((
+    fieldIds: readonly string[],
+    committed: Readonly<Record<string, DynamicParameterValue | undefined>>
+  ) => {
+    if (fieldIds.length === 0) return;
+    setBuffers((current) => {
+      let changed = false;
+      const next: Record<string, DynamicParameterFieldBuffer | undefined> = { ...current };
+      for (const fieldId of fieldIds) {
+        const field = fieldsRef.current.find((item) => item.fieldId === fieldId);
+        const existing = current[fieldId];
+        if (!field || !existing) continue;
+        const normalized = createParameterFieldBuffer(field, committed[fieldId]);
+        if (existing.text === normalized.text && !existing.edited) continue;
+        next[fieldId] = normalized;
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, []);
+
+  const commitField = useCallback((fieldId: string) => {
+    clearIdleTimer(fieldId);
+    const field = fieldsRef.current.find((item) => item.fieldId === fieldId);
+    const buffer = buffersRef.current[fieldId];
+    if (!field || !buffer || !buffer.edited) return;
+    // An invalid intermediate keeps its text and its message; it must not
+    // overwrite a good value in the draft.
+    if (buffer.blocked || buffer.error) return;
+    probe.parentCommit();
+    normalizeCommittedBuffers([fieldId], { [fieldId]: buffer.pending });
+    onChangeRef.current(fieldId, buffer.pending);
+  }, [clearIdleTimer, normalizeCommittedBuffers, probe]);
+
+  // Navigation and model switches happen long before the idle boundary on a
+  // fast click, so the last stable value is committed on unmount too.
+  useEffect(() => () => {
+    for (const timer of idleTimersRef.current.values()) clearTimeout(timer);
+    idleTimersRef.current.clear();
+    const pending = buffersRef.current;
+    if (!hasPendingParameterBuffer(pending)) return;
+    const flushed = flushParameterFieldBuffers(fieldsRef.current, pending, valuesRef.current);
+    for (const fieldId of flushed.committedFieldIds) {
+      onChangeRef.current(fieldId, flushed.values[fieldId]);
+    }
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    flush(): DynamicParameterBufferFlush {
+      for (const timer of idleTimersRef.current.values()) clearTimeout(timer);
+      idleTimersRef.current.clear();
+      const flushed = flushParameterFieldBuffers(
+        fieldsRef.current,
+        buffersRef.current,
+        valuesRef.current
+      );
+      normalizeCommittedBuffers(flushed.committedFieldIds, flushed.values);
+      for (const fieldId of flushed.committedFieldIds) {
+        probe.parentCommit();
+        onChangeRef.current(fieldId, flushed.values[fieldId]);
+      }
+      return flushed;
+    }
+  }), [normalizeCommittedBuffers, probe]);
+
+  const handleBufferedInput = useCallback((fieldId: string, text: string) => {
+    const field = fieldsRef.current.find((item) => item.fieldId === fieldId);
+    if (!field) return;
+    probe.begin(controlKindForValueType(field.valueType));
+    pendingSettleRef.current = true;
+    setBuffers((current) => {
+      const existing = current[fieldId];
+      if (existing && existing.text === text) return current;
+      return {
+        ...current,
+        [fieldId]: applyParameterFieldInput(field, valuesRef.current[fieldId], text)
+      };
+    });
+    clearIdleTimer(fieldId);
+    const timer = setTimeout(() => {
+      idleTimersRef.current.delete(fieldId);
+      commitField(fieldId);
+    }, PARAMETER_COMMIT_IDLE_MS);
+    idleTimersRef.current.set(fieldId, timer);
+  }, [clearIdleTimer, commitField, probe]);
+
+  const handleDiscreteChange = useCallback((
+    field: DynamicParameterField,
+    value: DynamicParameterValue | undefined
+  ) => {
+    probe.begin(controlKindForValueType(field.valueType));
+    pendingSettleRef.current = true;
+    probe.parentCommit();
+    onChangeRef.current(field.fieldId, value);
+  }, [probe]);
+
+  // Counts parameter-area renders for the pending keystroke only.
+  probe.parameterAreaRender();
+
   if (fields.length === 0) {
     return <p className="uc-model-select__hint" role="status">{emptyHint}</p>;
   }
@@ -193,19 +460,21 @@ export function DynamicParameterForm({
       <div className="uc-dynamic-parameters" aria-label="模型参数">
         {fields.map((field) => (
           <ParameterField
+            buffer={buffers[field.fieldId]}
             disabled={disabled}
             error={errors[field.fieldId]}
             field={field}
             key={field.fieldId}
-            onChange={(value) => onChange(field.fieldId, value)}
-            onInputErrorChange={(error) => onInputErrorChange?.(field.fieldId, error)}
+            onCommit={() => commitField(field.fieldId)}
+            onDiscreteChange={(value) => handleDiscreteChange(field, value)}
+            onInput={(text) => handleBufferedInput(field.fieldId, text)}
             value={values[field.fieldId]}
           />
         ))}
       </div>
     </div>
   );
-}
+});
 
 export function toDynamicParameterFields(
   fields: readonly {
@@ -344,29 +613,48 @@ function ParameterShell({
 function ParameterField({
   field,
   value,
+  buffer,
   disabled,
   error,
-  onInputErrorChange,
-  onChange
+  onInput,
+  onCommit,
+  onDiscreteChange
 }: {
   readonly field: DynamicParameterField;
   readonly value: DynamicParameterValue | undefined;
+  readonly buffer?: DynamicParameterFieldBuffer;
   readonly disabled: boolean;
   readonly error?: string;
-  readonly onInputErrorChange: (error?: string) => void;
-  readonly onChange: (value: DynamicParameterValue | undefined) => void;
+  readonly onInput: (text: string) => void;
+  readonly onCommit: () => void;
+  readonly onDiscreteChange: (value: DynamicParameterValue | undefined) => void;
 }) {
   const pickerRef = useRef<React.ElementRef<typeof SelectPicker>>(null);
   useEffect(() => {
     // Dismiss on workspace scrolling, but allow the option list itself to scroll.
     const closePicker = (event: Event) => {
       const picker = pickerRef.current;
-      if (event.target instanceof Node && picker?.overlay?.contains(event.target)) return;
-      picker?.close?.();
+      if (!picker) return;
+      // rsuite throws when `overlay` is read while the picker is closed, so the
+      // containment check must not assume an open picker.
+      let overlay: Node | null = null;
+      try {
+        overlay = picker.overlay ?? null;
+      } catch {
+        overlay = null;
+      }
+      if (event.target instanceof Node && overlay?.contains(event.target)) return;
+      picker.close?.();
     };
     window.addEventListener('scroll', closePicker, true);
     return () => window.removeEventListener('scroll', closePicker, true);
   }, []);
+  const text = buffer ? buffer.text : serializeParameterFieldValue(field, value);
+  const commitOnEnter = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    onCommit();
+  };
   if (field.valueType === 'boolean') {
     return (
       <ParameterShell error={error} field={field}>
@@ -376,10 +664,7 @@ function ParameterField({
           checkedChildren="开启"
           disabled={disabled}
           aria-label={displayParameterKey(field.fieldId || field.labelId)}
-          onChange={(next) => {
-            onInputErrorChange(undefined);
-            onChange(next);
-          }}
+          onChange={(next) => onDiscreteChange(next)}
           unCheckedChildren="关闭"
         />
       </ParameterShell>
@@ -402,8 +687,7 @@ function ParameterField({
           disabled={disabled}
           onChange={(next) => {
             const option = field.options?.find((item) => String(item) === next);
-            onInputErrorChange(undefined);
-            onChange(option);
+            onDiscreteChange(option);
           }}
           placeholder={field.required ? '请选择（必填）' : '请选择'}
           searchable={false}
@@ -425,15 +709,12 @@ function ParameterField({
           disabled={disabled}
           max={field.maximum}
           min={field.minimum}
-          onChange={(next) => {
-            const parsed = next === null || next === '' ? undefined : Number(next);
-            const validation = validateDynamicParameterValue(field, parsed);
-            onInputErrorChange(validation);
-            onChange(parsed);
-          }}
+          onBlur={onCommit}
+          onChange={(next) => onInput(next === null ? '' : String(next))}
+          onKeyDown={commitOnEnter}
           required={field.required}
           step={field.valueType === 'integer' ? 1 : field.step}
-          value={typeof value === 'number' ? value : ''}
+          value={text}
         />
       </ParameterShell>
     );
@@ -443,9 +724,9 @@ function ParameterField({
       disabled={disabled}
       error={error}
       field={field}
-      onChange={onChange}
-      onInputErrorChange={onInputErrorChange}
-      value={value}
+      onCommit={onCommit}
+      onInput={onInput}
+      text={text}
     />;
   }
   if (field.valueType === 'object') {
@@ -453,9 +734,9 @@ function ParameterField({
       disabled={disabled}
       error={error}
       field={field}
-      onChange={onChange}
-      onInputErrorChange={onInputErrorChange}
-      value={value}
+      onCommit={onCommit}
+      onInput={onInput}
+      text={text}
     />;
   }
   if (field.valueType === 'media_slot') {
@@ -476,13 +757,12 @@ function ParameterField({
         aria-label={displayParameterKey(field.fieldId || field.labelId)}
         aria-invalid={Boolean(error)}
         disabled={disabled}
-        onChange={(next) => {
-          onInputErrorChange(undefined);
-          onChange(next || undefined);
-        }}
+        onBlur={onCommit}
+        onChange={(next) => onInput(next)}
+        onKeyDown={commitOnEnter}
         placeholder={field.required ? '请输入（必填）' : '可留空'}
         required={field.required}
-        value={typeof value === 'string' ? value : ''}
+        value={text}
       />
     </ParameterShell>
   );
@@ -490,30 +770,19 @@ function ParameterField({
 
 function ObjectParameterField({
   field,
-  value,
+  text,
   disabled,
   error,
-  onInputErrorChange,
-  onChange
+  onInput,
+  onCommit
 }: {
   readonly field: DynamicParameterField;
-  readonly value: DynamicParameterValue | undefined;
+  readonly text: string;
   readonly disabled: boolean;
   readonly error?: string;
-  readonly onInputErrorChange: (error?: string) => void;
-  readonly onChange: (value: DynamicParameterValue | undefined) => void;
+  readonly onInput: (text: string) => void;
+  readonly onCommit: () => void;
 }) {
-  const [text, setText] = useState(value === undefined ? '' : JSON.stringify(value));
-  useEffect(() => {
-    const serialized = value === undefined ? '' : JSON.stringify(value);
-    try {
-      if (text.trim() && JSON.stringify(JSON.parse(text)) === serialized) return;
-    } catch {
-      // Keep the invalid local text until the user fixes it.
-      return;
-    }
-    setText(serialized);
-  }, [value]);
   return (
     <ParameterShell error={error} field={field}>
       <Input
@@ -521,24 +790,8 @@ function ObjectParameterField({
         aria-invalid={Boolean(error)}
         as="textarea"
         disabled={disabled}
-        onChange={(next) => {
-          setText(next);
-          if (!next.trim()) {
-            onInputErrorChange(undefined);
-            onChange(undefined);
-            return;
-          }
-          try {
-            const parsed = JSON.parse(next) as unknown;
-            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-              throw new TypeError('object required');
-            }
-            onInputErrorChange(undefined);
-            onChange(parsed as Readonly<Record<string, unknown>>);
-          } catch {
-            onInputErrorChange('请输入有效的 JSON 对象。');
-          }
-        }}
+        onBlur={onCommit}
+        onChange={(next) => onInput(next)}
         placeholder={field.required ? '{ "key": "value" }（必填）' : '{ "key": "value" }'}
         rows={3}
         value={text}
@@ -549,65 +802,27 @@ function ObjectParameterField({
 
 function ArrayParameterField({
   field,
-  value,
+  text,
   disabled,
   error,
-  onInputErrorChange,
-  onChange
+  onInput,
+  onCommit
 }: {
   readonly field: DynamicParameterField;
-  readonly value: DynamicParameterValue | undefined;
+  readonly text: string;
   readonly disabled: boolean;
   readonly error?: string;
-  readonly onInputErrorChange: (error?: string) => void;
-  readonly onChange: (value: DynamicParameterValue | undefined) => void;
+  readonly onInput: (text: string) => void;
+  readonly onCommit: () => void;
 }) {
-  const [text, setText] = useState(Array.isArray(value) ? value.join(', ') : '');
-  useEffect(() => {
-    const serialized = Array.isArray(value) ? value.join(', ') : '';
-    if (field.valueType === 'number_array' && text.trim()) {
-      const items = text.split(',').map((item) => item.trim());
-      const parsed = items.map(Number);
-      if (
-        items.every(Boolean) &&
-        parsed.every(Number.isFinite) &&
-        parsed.join(', ') === serialized
-      ) return;
-    }
-    if (field.valueType === 'string_array') {
-      const parsed = text.split(',').map((item) => item.trim()).filter(Boolean);
-      if (parsed.join(', ') === serialized) return;
-    }
-    setText(serialized);
-  }, [field.valueType, value]);
   return (
     <ParameterShell error={error} field={field}>
       <Input
         aria-label={displayParameterKey(field.fieldId || field.labelId)}
         aria-invalid={Boolean(error)}
         disabled={disabled}
-        onChange={(next) => {
-          setText(next);
-          if (!next.trim()) {
-            onInputErrorChange(undefined);
-            onChange(undefined);
-            return;
-          }
-          const items = next.split(',').map((item) => item.trim());
-          if (field.valueType === 'number_array') {
-            const numbers = items.map(Number);
-            if (items.some((item) => !item) || numbers.some((item) => !Number.isFinite(item))) {
-              onInputErrorChange('请输入以逗号分隔的有效数字。');
-              return;
-            }
-            onInputErrorChange(undefined);
-            onChange(numbers);
-            return;
-          }
-          onInputErrorChange(undefined);
-          const strings = items.filter(Boolean);
-          onChange(strings.length === 0 ? undefined : strings);
-        }}
+        onBlur={onCommit}
+        onChange={(next) => onInput(next)}
         placeholder={field.required ? '请输入（必填）' : '可留空'}
         required={field.required}
         value={text}

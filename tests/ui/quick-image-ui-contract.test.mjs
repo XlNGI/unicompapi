@@ -82,7 +82,9 @@ test('quick image synchronously blocks duplicate one-shot submissions', () => {
   const end = featurePanelSource.indexOf('\n  return (', start);
   const oneShot = featurePanelSource.slice(start, end);
   assert.match(oneShot, /if \(busyRef\.current\) return/);
-  assert.match(oneShot, /if \(!parameterValidation\.valid\) \{[\s\S]*?showGenerationError\(/);
+  // P3: pending parameter edits are committed and re-validated first.
+  assert.match(oneShot, /commitPendingParameterEdits\(\)/);
+  assert.match(oneShot, /if \(!submittedValidation\.valid\) \{[\s\S]*?showGenerationError\(/);
   assert.match(oneShot, /busyRef\.current = true;[\s\S]*api\.generateQuickImage\(/);
   assert.match(oneShot, /finally \{[\s\S]*busyRef\.current = false;/);
 });

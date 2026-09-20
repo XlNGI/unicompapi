@@ -21,7 +21,7 @@ test('dynamic parameter labels use Chinese display names without changing field 
   assert.match(source, /response_format: '返回格式'/);
   assert.match(source, /size: '输出尺寸'/);
   assert.match(source, /输出宽×高/);
-  assert.match(source, /onChange\(field\.fieldId, value\)/);
+  assert.match(source, /onChangeRef\.current\(field\.fieldId, value\)/);
   assert.doesNotMatch(
     source,
     /\$\{field\.labelId\}\$\{field\.required \? '（必填）' : ''\}/

@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LuSend } from 'react-icons/lu';
+import { LuRefreshCw, LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
   toDynamicParameterFields,
   validateDynamicParameterValues,
+  type DynamicParameterBufferFlush,
+  type DynamicParameterFormHandle,
   type DynamicParameterValue
 } from '../../../components/DynamicParameterForm';
+import { reportParameterInputCandidateRequest } from '../../../ui/parameter-input-performance-probe';
 import {
   isVisibleModelUnavailableReason,
   ModelSelect
@@ -137,7 +140,8 @@ export function VideoFeatureSubmissionPanel({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
   const [busy, setBusy] = useState(false);
-  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
+  const [candidateRetry, setCandidateRetry] = useState(0);
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
   const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
@@ -154,9 +158,15 @@ export function VideoFeatureSubmissionPanel({
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
   const onMessageRef = useRef(onMessage);
+  const parameterFormRef = useRef<DynamicParameterFormHandle>(null);
+  // The parameter form commits a stable value through a callback that may run
+  // in the same tick as the next commit, so the effective feature selection is
+  // read from a ref instead of a render closure.
+  const featureSelectionRef = useRef(featureSelection);
   busyRef.current = busy;
   draftRef.current = draft;
   onMessageRef.current = onMessage;
+  featureSelectionRef.current = featureSelection;
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
@@ -170,10 +180,12 @@ export function VideoFeatureSubmissionPanel({
   );
   const parameterForm = (
     <DynamicParameterForm
+      ref={parameterFormRef}
       disabled={busy}
       emptyHint="当前表面没有需要用户填写的参数。"
       fields={dynamicParameterFields}
       errors={parameterValidation.errors}
+      surface="video_generation"
       onInputErrorChange={(fieldId, error) => {
         setParameterInputErrors((current) => {
           const next = { ...current };
@@ -288,11 +300,12 @@ export function VideoFeatureSubmissionPanel({
         const draftId = draft.draftId;
         const draftUpdatedAt = draft.updatedAt;
         if (busyRef.current) return;
+        reportParameterInputCandidateRequest();
         const result = await api.listCandidates(draftId, draftUpdatedAt);
         if (!active || busyRef.current) return;
         if (!result.ok) {
           setCandidates([]);
-          setLoadState('loaded');
+          setLoadState('failed');
           onMessageRef.current(describeVideoFeatureError(result.error));
           return;
         }
@@ -301,7 +314,7 @@ export function VideoFeatureSubmissionPanel({
       })().catch(() => {
         if (!active || busyRef.current) return;
         setCandidates([]);
-        setLoadState('loaded');
+        setLoadState('failed');
         onMessageRef.current('读取视频服务候选失败，请重试。');
       });
     }, 0);
@@ -311,6 +324,7 @@ export function VideoFeatureSubmissionPanel({
     };
   }, [
     api,
+    candidateRetry,
     blockedReason,
     dirty,
     draft.draftId,
@@ -322,26 +336,28 @@ export function VideoFeatureSubmissionPanel({
 
   function changeCandidate(candidateId: string) {
     const candidate = candidates.find((item) => item.candidateId === candidateId);
+    const snapshot = draftRef.current;
+    const selection = featureSelectionRef.current;
     const sameSchema = candidate &&
-      featureSelection.parameterSchemaId === candidate.parameterSchema.schemaId &&
-      featureSelection.parameterSchemaRevision === candidate.parameterSchema.revision;
+      selection.parameterSchemaId === candidate.parameterSchema.schemaId &&
+      selection.parameterSchemaRevision === candidate.parameterSchema.revision;
     const allowedFields = new Set(
       (candidate?.parameterSchema.fields ?? []).map((field) => field.fieldId)
     );
     const keptValues = sameSchema
       ? Object.fromEntries(
-          Object.entries(featureSelection.parameterValues ?? {}).filter(([key]) =>
+          Object.entries(selection.parameterValues ?? {}).filter(([key]) =>
             allowedFields.has(key)
           )
         )
       : {};
     setParameterInputErrors({});
-    onDraftChange({
-      ...draft,
+    const next: VideoWorkspaceDraftDto = {
+      ...snapshot,
       state: 'editing',
       generation: resetGeneration(),
       featureSelection: {
-        productFeature: featureSelection.productFeature,
+        productFeature: selection.productFeature,
         ...(candidate
           ? {
               candidateId: candidate.candidateId,
@@ -351,7 +367,9 @@ export function VideoFeatureSubmissionPanel({
           : {}),
         parameterValues: keptValues
       }
-    });
+    };
+    draftRef.current = next;
+    onDraftChange(next);
   }
 
   function changeParameter(
@@ -364,24 +382,41 @@ export function VideoFeatureSubmissionPanel({
       delete next[fieldId];
       return next;
     });
-    const parameterValues = { ...featureSelection.parameterValues } as Record<
+    // Compose from the latest snapshot rather than the render closure: the
+    // parameter form may commit two fields in the same tick (flush before
+    // submit), and both changes must survive.
+    const snapshot = draftRef.current;
+    const selection = featureSelectionRef.current;
+    const parameterValues = { ...selection.parameterValues } as Record<
       string,
       VideoWorkspaceParameterValueDto
     >;
     if (value === undefined) delete parameterValues[fieldId];
     else parameterValues[fieldId] = value;
-    onDraftChange({
-      ...draft,
+    const next: VideoWorkspaceDraftDto = {
+      ...snapshot,
       state: 'editing',
       generation: resetGeneration(),
-      featureSelection: { ...featureSelection, parameterValues }
-    });
+      featureSelection: { ...selection, parameterValues }
+    };
+    draftRef.current = next;
+    onDraftChange(next);
+  }
+
+  /**
+   * Commits whatever the user has typed but not yet blurred. Called before
+   * every save/submit so a focused control can never be left behind, and so an
+   * invalid intermediate value blocks the request instead of being dispatched.
+   */
+  function commitPendingParameterEdits(): DynamicParameterBufferFlush {
+    const handle = parameterFormRef.current;
+    if (!handle) return { values: {}, committedFieldIds: [], errors: {}, valid: true };
+    return handle.flush();
   }
 
   async function ensureSavedDraft(): Promise<VideoWorkspaceDraftDto | undefined> {
     if (!videoWorkspaces) return undefined;
     const snapshot = draftRef.current;
-    if (!dirty && snapshot.state === 'saved') return snapshot;
     if (onFlushDraft) {
       if (!(await onFlushDraft())) return undefined;
       const refreshed = await videoWorkspaces.get(snapshot.draftId);
@@ -391,6 +426,7 @@ export function VideoFeatureSubmissionPanel({
       }
       return refreshed.value;
     }
+    if (!dirty && snapshot.state === 'saved') return snapshot;
     const result = await persistVideoWorkspaceDraft(
       videoWorkspaces,
       snapshot,
@@ -406,12 +442,18 @@ export function VideoFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
-    if (requiredInputError) {
-      showSubmissionError(requiredInputError);
-      return;
-    }
-    if (!parameterValidation.valid) {
-      showSubmissionError(parameterValidation.firstError ?? '请先修正动态参数。');
+    // Commit the control the user is still typing in, then run the full schema
+    // validation on the merged values. An invalid intermediate state never
+    // leaves this function.
+    const pendingEdits = commitPendingParameterEdits();
+    const submittedValidation = validateDynamicParameterValues(
+      dynamicParameterFields,
+      pendingEdits.values as Readonly<Record<string, DynamicParameterValue | undefined>>,
+      pendingEdits.errors
+    );
+    if (!submittedValidation.valid) {
+      setParameterInputErrors(pendingEdits.errors);
+      showSubmissionError(submittedValidation.firstError ?? '请先修正动态参数。');
       return;
     }
     setBusy(true);
@@ -424,6 +466,16 @@ export function VideoFeatureSubmissionPanel({
     try {
       let saved = await ensureSavedDraft();
       if (!saved) {
+        if (trackProgress) setProgressPhase('submission_failed');
+        return;
+      }
+      const savedInputError = saved.prompt.finalPrompt.trim().length === 0
+        ? '提示词为必填项。'
+        : saved.mode === 'image_to_video' && !saved.imageToVideo.source
+          ? '首帧图片为必填项。'
+          : undefined;
+      if (savedInputError) {
+        showSubmissionError(savedInputError);
         if (trackProgress) setProgressPhase('submission_failed');
         return;
       }
@@ -543,9 +595,11 @@ export function VideoFeatureSubmissionPanel({
         emptyDescription={
           loadState === 'loading'
             ? '正在读取安全候选。'
+            : loadState === 'failed'
+              ? '读取模型失败，请重试；这不代表没有可用模型。'
             : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
         }
-        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
+        emptyTitle={loadState === 'loading' ? '正在读取' : loadState === 'failed' ? '模型读取失败' : '没有可选模型'}
         hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
         onChange={changeCandidate}
         options={candidates.map((candidate) => ({
@@ -560,6 +614,11 @@ export function VideoFeatureSubmissionPanel({
         reasonLabels={unavailableReasonLabels}
         value={featureSelection.candidateId ?? ''}
       />
+      {loadState === 'failed' ? (
+        <Button variant="secondary" onClick={() => setCandidateRetry((value) => value + 1)}>
+          <LuRefreshCw aria-hidden="true" />重试读取模型
+        </Button>
+      ) : null}
 
       {selectedCandidate ? (
         <>

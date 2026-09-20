@@ -55,6 +55,10 @@ import {
   type AutosaveDiagnosticsApi
 } from '../src/shared/autosave-diagnostics-ipc';
 import {
+  parameterInputDiagnosticsIpcChannel,
+  type ParameterInputDiagnosticsApi
+} from '../src/shared/parameter-input-performance';
+import {
   documentAttachmentIpcChannels,
   type DocumentAttachmentApi
 } from '../src/shared/document-attachment-ipc';
@@ -65,6 +69,10 @@ import {
 
 const autosaveDiagnostics: AutosaveDiagnosticsApi = {
   record: (event) => ipcRenderer.send(autosaveDiagnosticsIpcChannel, event)
+};
+
+const parameterInputDiagnostics: ParameterInputDiagnosticsApi = {
+  record: (summary) => ipcRenderer.send(parameterInputDiagnosticsIpcChannel, summary)
 };
 
 const getPathForFile = (file: File) => webUtils.getPathForFile(file);
@@ -980,6 +988,7 @@ const chatContexts: ChatContextApi = {
 
 contextBridge.exposeInMainWorld('unicomp', {
   autosaveDiagnostics,
+  parameterInputDiagnostics,
   chatContexts,
   documentAttachments,
   webResearch,
