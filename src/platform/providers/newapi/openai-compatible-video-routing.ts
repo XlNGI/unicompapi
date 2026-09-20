@@ -26,7 +26,6 @@ import {
   type OpenAiCompatibleVideoGateReason
 } from './openai-compatible-video-capability';
 import {
-  isKnownUniCompApiModel,
   isUniCompApiDeepSeekModel,
   isUniCompApiPackage,
   uniCompApiVideoParameterSchema,

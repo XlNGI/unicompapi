@@ -634,8 +634,17 @@ function ParameterField({
     // Dismiss on workspace scrolling, but allow the option list itself to scroll.
     const closePicker = (event: Event) => {
       const picker = pickerRef.current;
-      if (event.target instanceof Node && picker?.overlay?.contains(event.target)) return;
-      picker?.close?.();
+      if (!picker) return;
+      // rsuite throws when `overlay` is read while the picker is closed, so the
+      // containment check must not assume an open picker.
+      let overlay: Node | null = null;
+      try {
+        overlay = picker.overlay ?? null;
+      } catch {
+        overlay = null;
+      }
+      if (event.target instanceof Node && overlay?.contains(event.target)) return;
+      picker.close?.();
     };
     window.addEventListener('scroll', closePicker, true);
     return () => window.removeEventListener('scroll', closePicker, true);

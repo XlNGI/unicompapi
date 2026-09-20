@@ -115,13 +115,21 @@ export function createParameterInputProbe(
       pendingAutosaveIpcs = 0;
       pendingRenders = 0;
     },
+    // Every counter is bounded by the same window as the latency it is
+    // attributed to: between begin() and settle(). P3 deliberately moves the
+    // commit, the candidate read and the autosave *after* the keystroke, so
+    // counting them into the preceding sample would recreate the very coupling
+    // this stage removed.
     parentCommit() {
+      if (pendingStart === undefined) return;
       pendingParentCommits += 1;
     },
     candidateRequest() {
+      if (pendingStart === undefined) return;
       pendingCandidateRequests += 1;
     },
     autosaveIpc() {
+      if (pendingStart === undefined) return;
       pendingAutosaveIpcs += 1;
     },
     parameterAreaRender() {
