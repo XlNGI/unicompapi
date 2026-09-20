@@ -6,7 +6,7 @@ import {
   type AutosaveResult,
   type AutosaveState
 } from '../application';
-import { registerAutosaveFlush } from './autosave-flush-registry';
+import { commitPendingEditors, registerAutosaveFlush } from './autosave-flush-registry';
 import { reportParameterInputAutosaveIpc } from './parameter-input-performance-probe';
 
 const initialState: AutosaveState = {
@@ -102,6 +102,7 @@ export function useLatestSnapshotAutosave<
   }, []);
 
   const flush = useCallback(async (deadlineMs = 3_000) => {
+    commitPendingEditors();
     const coordinator = coordinatorRef.current;
     if (!coordinator) return true;
     const deadline = new Promise<false>((resolve) => {
@@ -143,6 +144,7 @@ export function useLatestSnapshotAutosave<
     let allowClose = false;
     let closePending = false;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      commitPendingEditors();
       const coordinator = coordinatorRef.current;
       if (allowClose || !coordinator?.hasUnsavedChanges()) return;
       event.preventDefault();

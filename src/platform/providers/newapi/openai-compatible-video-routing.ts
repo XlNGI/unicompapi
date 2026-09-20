@@ -346,10 +346,16 @@ function ensureAuthorisedVideoCapabilityEvidence(
   if (current) {
     return { snapshot, evidence: current };
   }
+  const previous = snapshot.capabilities
+    .filter((item) => item.modelId === model.id &&
+      item.capability === 'video_generation' && item.source === 'provider_declared')
+    .reduce<ModelCapabilityEvidence | undefined>((latest, item) =>
+      !latest || item.revision > latest.revision ? item : latest, undefined);
   const evidence = createModelCapabilityEvidence({
     id,
     modelId: model.id,
-    revision: 1,
+    revision: (previous?.revision ?? 0) + 1,
+    ...(previous ? { supersedesEvidenceId: previous.id } : {}),
     capability: 'video_generation',
     state: 'declared_supported',
     source: 'provider_declared',

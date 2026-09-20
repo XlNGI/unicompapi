@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   createModelCapabilityEvidence,
   createProvider,
@@ -21,6 +24,7 @@ import {
   NEWAPI_PROVIDER_PACKAGE_VERSION,
   OPENAI_COMPATIBLE_VIDEO_PROFILE_GATE_VERSION,
   ProviderPackageRegistry,
+  JsonProviderRegistryStore,
   describeInvalidatedOpenAiCompatibleVideoProfiles,
   newApiProviderPackageDescriptor,
   routeOpenAiCompatibleVideoProfile,
@@ -42,6 +46,44 @@ import type { ProviderRegistrySnapshot } from '../../src/platform';
 const now = toIsoTimestamp('2026-08-07T08:00:00.000Z');
 
 describe('openai-compatible video soft routing', () => {
+  it('appends a mapping revision after legacy synthetic evidence without rewriting history', async () => {
+    const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
+    const base = baseSnapshot('doubao-seedance-2-0-260128');
+    const model = base.models[0]!;
+    const legacy = createModelCapabilityEvidence({
+      id: toCapabilityEvidenceId(`capability-${model.id}-video_generation-declared-v1`),
+      modelId: model.id,
+      revision: 3,
+      capability: 'video_generation',
+      source: 'provider_declared',
+      state: 'declared_supported',
+      recordedAt: now
+    });
+    const snapshot = { ...base,
+      providers: base.providers.map((provider) => ({ ...provider,
+        packageId: UNICOMPAPI_PROVIDER_PACKAGE_ID, packageVersion: UNICOMPAPI_PROVIDER_PACKAGE_VERSION })),
+      capabilities: [...base.capabilities, legacy] };
+    const first = routeOpenAiCompatibleVideoProfile(snapshot, packages, model, now);
+    const projection = first.snapshot.capabilities.find((item) =>
+      item.id.endsWith('-package-mapping-v1'));
+    expect(projection).toMatchObject({ revision: 4, supersedesEvidenceId: legacy.id });
+    expect(first.snapshot.capabilities.find((item) => item.id === legacy.id)).toEqual(legacy);
+    const second = routeOpenAiCompatibleVideoProfile(first.snapshot, packages, first.model, now);
+    expect(second.snapshot.capabilities).toEqual(first.snapshot.capabilities);
+    const root = await mkdtemp(path.join(os.tmpdir(), 'video-mapping-history-'));
+    try {
+      const store = new JsonProviderRegistryStore(path.join(root, 'registry.json'));
+      await store.save(snapshot);
+      await store.mutate((current) => ({
+        snapshot: routeOpenAiCompatibleVideoProfile(current, packages, current.models[0]!, now).snapshot,
+        result: undefined
+      }));
+      expect((await store.load()).capabilities).toEqual(first.snapshot.capabilities);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('attaches newapi.video text_to_video and image_to_video when package publishes video', () => {
     const packages = new ProviderPackageRegistry([unicompapiProviderPackageDescriptor]);
     const snapshot = baseSnapshot();

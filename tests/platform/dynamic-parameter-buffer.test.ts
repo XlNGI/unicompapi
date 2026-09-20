@@ -133,6 +133,16 @@ describe('P3 parameter input buffer', () => {
     expect(type(metadata, undefined, '[1, 2]').error).toContain('JSON 对象');
   });
 
+  it('blocks explicit submission of an unfinished optional number while preserving the previous value', () => {
+    const duration = field('number');
+    const buffer = type(duration, 12, '-');
+    expect(buffer.error).toBeUndefined();
+    const flushed = flushParameterFieldBuffers([duration], { [duration.fieldId]: buffer }, { [duration.fieldId]: 12 });
+    expect(flushed.valid).toBe(false);
+    expect(flushed.errors[duration.fieldId]).toBeTruthy();
+    expect(flushed.values[duration.fieldId]).toBe(12);
+  });
+
   it('commits only edited, valid fields and leaves blocked ones alone', () => {
     const promptField = field('string');
     const brokenField = field('object');

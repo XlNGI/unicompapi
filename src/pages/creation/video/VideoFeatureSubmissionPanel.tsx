@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LuSend } from 'react-icons/lu';
+import { LuRefreshCw, LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -140,7 +140,8 @@ export function VideoFeatureSubmissionPanel({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
   const [busy, setBusy] = useState(false);
-  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
+  const [candidateRetry, setCandidateRetry] = useState(0);
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
   const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
@@ -304,7 +305,7 @@ export function VideoFeatureSubmissionPanel({
         if (!active || busyRef.current) return;
         if (!result.ok) {
           setCandidates([]);
-          setLoadState('loaded');
+          setLoadState('failed');
           onMessageRef.current(describeVideoFeatureError(result.error));
           return;
         }
@@ -313,7 +314,7 @@ export function VideoFeatureSubmissionPanel({
       })().catch(() => {
         if (!active || busyRef.current) return;
         setCandidates([]);
-        setLoadState('loaded');
+        setLoadState('failed');
         onMessageRef.current('读取视频服务候选失败，请重试。');
       });
     }, 0);
@@ -323,6 +324,7 @@ export function VideoFeatureSubmissionPanel({
     };
   }, [
     api,
+    candidateRetry,
     blockedReason,
     dirty,
     draft.draftId,
@@ -415,7 +417,6 @@ export function VideoFeatureSubmissionPanel({
   async function ensureSavedDraft(): Promise<VideoWorkspaceDraftDto | undefined> {
     if (!videoWorkspaces) return undefined;
     const snapshot = draftRef.current;
-    if (!dirty && snapshot.state === 'saved') return snapshot;
     if (onFlushDraft) {
       if (!(await onFlushDraft())) return undefined;
       const refreshed = await videoWorkspaces.get(snapshot.draftId);
@@ -425,6 +426,7 @@ export function VideoFeatureSubmissionPanel({
       }
       return refreshed.value;
     }
+    if (!dirty && snapshot.state === 'saved') return snapshot;
     const result = await persistVideoWorkspaceDraft(
       videoWorkspaces,
       snapshot,
@@ -440,10 +442,6 @@ export function VideoFeatureSubmissionPanel({
 
   async function prepare() {
     if (!api || !selectedCandidate || busy || blockedReason) return;
-    if (requiredInputError) {
-      showSubmissionError(requiredInputError);
-      return;
-    }
     // Commit the control the user is still typing in, then run the full schema
     // validation on the merged values. An invalid intermediate state never
     // leaves this function.
@@ -468,6 +466,16 @@ export function VideoFeatureSubmissionPanel({
     try {
       let saved = await ensureSavedDraft();
       if (!saved) {
+        if (trackProgress) setProgressPhase('submission_failed');
+        return;
+      }
+      const savedInputError = saved.prompt.finalPrompt.trim().length === 0
+        ? '提示词为必填项。'
+        : saved.mode === 'image_to_video' && !saved.imageToVideo.source
+          ? '首帧图片为必填项。'
+          : undefined;
+      if (savedInputError) {
+        showSubmissionError(savedInputError);
         if (trackProgress) setProgressPhase('submission_failed');
         return;
       }
@@ -587,9 +595,11 @@ export function VideoFeatureSubmissionPanel({
         emptyDescription={
           loadState === 'loading'
             ? '正在读取安全候选。'
+            : loadState === 'failed'
+              ? '读取模型失败，请重试；这不代表没有可用模型。'
             : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
         }
-        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
+        emptyTitle={loadState === 'loading' ? '正在读取' : loadState === 'failed' ? '模型读取失败' : '没有可选模型'}
         hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
         onChange={changeCandidate}
         options={candidates.map((candidate) => ({
@@ -604,6 +614,11 @@ export function VideoFeatureSubmissionPanel({
         reasonLabels={unavailableReasonLabels}
         value={featureSelection.candidateId ?? ''}
       />
+      {loadState === 'failed' ? (
+        <Button variant="secondary" onClick={() => setCandidateRetry((value) => value + 1)}>
+          <LuRefreshCw aria-hidden="true" />重试读取模型
+        </Button>
+      ) : null}
 
       {selectedCandidate ? (
         <>

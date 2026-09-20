@@ -151,6 +151,7 @@ export function flushParameterFieldBuffers(
     const buffer = buffers[field.fieldId];
     if (!buffer) continue;
     if (buffer.error) errors[field.fieldId] = buffer.error;
+    else if (buffer.edited && buffer.blocked) errors[field.fieldId] = '请补全参数后再提交。';
     if (!buffer.edited || buffer.blocked || buffer.error) continue;
     if (!sameParameterValue(buffer.pending, values[field.fieldId])) {
       committedFieldIds.push(field.fieldId);

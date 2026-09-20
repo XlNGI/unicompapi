@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuPlus, LuRotateCcw, LuTrash2 } from 'react-icons/lu';
-import { Input } from 'rsuite';
+import { BufferedPromptInput } from '../../../components/BufferedPromptInput';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { ControlledImageDropZone } from '../../../components/ControlledImageDropZone';
@@ -69,6 +69,8 @@ export function VideoImageWorkspace({
   onMessage
 }: VideoImageWorkspaceProps) {
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [material, setMaterial] = useState<VideoWorkspaceMaterialAssetDto>();
   const [preview, setPreview] = useState<VideoWorkspaceMaterialPreviewDto>();
   const [busy, setBusy] = useState(false);
@@ -183,6 +185,7 @@ export function VideoImageWorkspace({
   ]);
 
   function changeDraft(next: ImageVideoDraftDto) {
+    draftRef.current = next;
     onDraftChange({
       ...next,
       state: 'editing',
@@ -204,6 +207,7 @@ export function VideoImageWorkspace({
   }, [draft.draftId, draft.featureSelection]);
 
   function changePrompt(field: 'originalInput' | 'finalPrompt', value: string) {
+    const draft = draftRef.current;
     const prompt = field === 'originalInput' && draft.prompt.systemSupplements.length === 0
       ? { ...draft.prompt, originalInput: value, finalPrompt: value }
       : { ...draft.prompt, [field]: value };
@@ -212,7 +216,6 @@ export function VideoImageWorkspace({
 
   async function ensureSavedDraft(): Promise<ImageVideoDraftDto | undefined> {
     if (!videoWorkspaces) return undefined;
-    if (!dirty && draft.state === 'saved') return draft;
     if (onFlushDraft) {
       if (!(await onFlushDraft())) return undefined;
       const refreshed = await videoWorkspaces.get(draft.draftId);
@@ -222,6 +225,7 @@ export function VideoImageWorkspace({
       }
       return refreshed.value as ImageVideoDraftDto;
     }
+    if (!dirty && draft.state === 'saved') return draft;
     const result = await persistVideoWorkspaceDraft(
       videoWorkspaces,
       draft,
@@ -400,7 +404,8 @@ export function VideoImageWorkspace({
           <div className="uc-image-quick__field">
             <span>原始创作需求 <span className="uc-dynamic-parameters__required">必填</span></span>
             <div className="uc-image-professional__prompt-input has-reference">
-              <Input
+              <BufferedPromptInput
+                key={`${draft.draftId}:originalInput`}
                 aria-label="原始创作需求"
                 as="textarea"
                 className="uc-image-professional__prompt-textarea"
@@ -528,7 +533,8 @@ export function VideoImageWorkspace({
           >
           <label className="uc-image-quick__field">
             <span>最终提交提示词 <span className="uc-dynamic-parameters__required">必填</span></span>
-            <Input
+            <BufferedPromptInput
+              key={`${draft.draftId}:finalPrompt`}
               as="textarea"
               maxLength={5000}
               onChange={(value) => changePrompt('finalPrompt', value)}
