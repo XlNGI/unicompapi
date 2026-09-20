@@ -64,9 +64,11 @@ test('provider cards and connections use local brand icons with a safe fallback'
     'provider-package-deepseek',
     'provider-package-volcengine',
     'provider-package-kling',
+    'provider-package-minimax-h3',
     'provider-package-kimi',
     'provider-package-newapi',
     'provider-package-unicompapi',
+    'provider-package-unicompapi-studio-h3',
     'provider-package-vidu-v1'
   ]) assert.match(brandIcon, new RegExp(packageId));
   assert.match(brandIcon, /label\.slice\(0, 1\)/);

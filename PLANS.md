@@ -1,5 +1,29 @@
 # UniComp 开发计划
 
+### UniCompAPI Studio H3 文生视频未发出请求（2026-09-20）
+
+负责人用测试连接 `hailuo` 提交文生视频后，界面报请求未发出。现场验收记录为 `failed_before_request` / `adapter.failed_before_submission`，远端 HTTP 0。根因是工作台 dispatch 会带 `taskId` / `executionId`，Studio H3 测试适配按精确字段拒绝了整单，官方 MiniMax 适配也有同样缺口。现已把这两个身份字段列为可忽略可选字段，未知字段仍拒绝。密钥未写入仓库。
+
+### UniCompAPI Studio H3 临时测试适配（2026-09-20）
+
+在独立目录落地可删除的 Studio H3 测试包 `provider-package-unicompapi-studio-h3`，不并入官方 MiniMax H3，不写入 UniCompAPI `/v1` 能力表。只接 `https://unicompapi.com/studio/h3/v1` 的 `minimax-h3` 文生视频，变体冻结 `fl2va`，参数为 `generation_mode` / `duration` / `aspect_ratio`。添加/同步连接时安装打包目录，工作台提交/轮询共用长生命周期适配器。密钥未写入代码、环境文件、日志或 Git。
+
+本轮新鲜验证：Studio H3 定向 Vitest 11/11，官方 MiniMax 14/14，相关探测/分发/视频合同 13/13，合计 38/38；`tests/ui/providers-page-contract.test.mjs` 16/16；`tsconfig.app.json`、`electron/tsconfig.json`、`tsconfig.test.json` 与 `tsc -b` 通过；变更文件 ESLint 0 error；`git diff --check` 通过。测试全部使用合成 HTTP，真实 Studio H3 / MiniMax 调用 0。未跑全量 Vitest、生产构建或 Electron 人工验收。抽检阶段为确认 422 字段误创建过 prompt 为 `x` 的任务；其中两条已取消，一条当时仍为 running。测试适配不再用真实令牌发 HTTP，也不把该次创建记为成功生成。实现边界见 [UniCompAPI Studio H3 临时测试适配](docs/current/UNICOMPAPI_STUDIO_H3_TEST_ADAPTER.md)。
+
+### UniCompAPI Studio H3 真实连通抽检（2026-09-20）
+
+负责人提供的是 UniCompAPI Studio H3 网关与 `sk-acp-` 令牌，不是官方 MiniMax 源站 Key。抽检只发 GET，不创建视频，不把令牌写入代码、环境文件、日志或 Git。
+
+结果：`https://unicompapi.com/studio/h3/v1/models` 200，目录为 `minimax-h3` 两个变体 `fl2va` / `ref2va`；`/videos` 200，可列出既有任务。同一令牌访问官方 MiniMax `api.minimaxi.com` / `api.minimax.io` 的免费探测返回业务码 1004（非 MiniMax 官方 Key）；访问 `https://unicompapi.com/v1/models` 返回 401 Invalid token。Studio H3 不是 MiniMax V2 `/video_generation`，当前官方 MiniMax 适配器与 UniCompAPI 固定 `/v1` 模板都不能直接吃这条地址。令牌未保存。
+
+### 官方 MiniMax H3 视频适配（2026-09-20）
+
+在独立分支 `feature/minimax-h3-adapter` 落地官方 MiniMax H3 视频适配，不改 UniCompAPI 能力表，不启动 S1/S2/S3 精简。包 ID 固定为 `provider-package-minimax-h3`，只接 `MiniMax-H3` / `MiniMax-H3-Max` 的文生视频和单张受控首帧图生视频；图生视频先上传本地受控资产，再创建任务，不发送任意用户 URL。连通探测走免费 `GET /v1/files/retrieve?file_id=0`，添加/同步连接时安装打包目录，行为对齐 Vidu。实现与接线未提交。
+
+本轮新鲜验证：MiniMax 定向 Vitest 14/14，相关探测/分发/视频合同 13/13，合计 27/27；`tests/ui/providers-page-contract.test.mjs` 16/16；`tsconfig.app.json`、`electron/tsconfig.json`、`tsconfig.test.json` 与 `tsc -b` 通过；`npx eslint .` 全仓 0 error；`git diff --check` 通过。测试全部使用合成 HTTP，真实 MiniMax 调用 0。未跑全量 Vitest、生产构建或 Electron 人工验收；未验证 macOS、真实密钥、计费或尾帧/R2V。下一步由负责人决定是否提交/合并，以及是否做真实官方连通抽检。
+
+实现与合同边界见 [MiniMax H3 官方适配](docs/current/MINIMAX_H3_ADAPTER.md)。
+
 ### 模型能力优化分支合并检查（2026-09-20）
 
 负责人授权检查并提交当前未提交修复，一并合并 `feature/model-capability-billing-parameter-optimization` 至本地 `develop`，不推送远端，保留功能分支。合并前 develop 为 `5b9e2cc`，功能分支已提交基线为 `135aff8`；两者与远端一致，develop 为功能分支祖先，模拟合并无内容冲突。提交范围排除 `.workbuddy/`、本地报告、用户资料与凭证。

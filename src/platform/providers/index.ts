@@ -40,5 +40,7 @@ export * from './vidu';
 export * from './deepseek';
 export * from './volcengine';
 export * from './kling';
+export * from './minimax';
+export * from './unicompapi-studio-h3';
 export * from './kimi';
 export * from './newapi';

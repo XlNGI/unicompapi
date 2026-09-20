@@ -17,11 +17,25 @@ import {
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
   createNewApiVideoAdapterFromRuntimes,
+  createMiniMaxVideoAdapterFromRuntimes,
+  MiniMaxSharedRuntime,
+  MiniMaxTransportFailure,
+  createUnicompapiStudioH3VideoAdapterFromRuntimes,
+  UnicompapiStudioH3SharedRuntime,
+  UnicompapiStudioH3TransportFailure,
   controlledImageResultDownloaderFromRuntime,
   type ImageOperationPorts,
   type ControlledImmediateImageResultDownloader,
   type ImageSubmissionControllerDependencies,
   type NewApiSharedRuntime,
+  type MiniMaxVideoAdapter,
+  type MiniMaxHttpTransport,
+  type MiniMaxHttpTransportRequest,
+  type MiniMaxHttpTransportResponse,
+  type UnicompapiStudioH3VideoAdapter,
+  type UnicompapiStudioH3HttpTransport,
+  type UnicompapiStudioH3HttpTransportRequest,
+  type UnicompapiStudioH3HttpTransportResponse,
   type NewApiVideoAdapter,
   type ProviderAsyncOperationPort,
   type StorageProjectSession,
@@ -49,6 +63,10 @@ export class ElectronViduComposition {
   readonly providerPackage: ViduProviderPackage;
   private readonly imageResultReceiptLogger: JsonLineImageResultReceiptLogger;
   private newApiVideoAdapter: NewApiVideoAdapter | undefined;
+  private minimaxRuntime: MiniMaxSharedRuntime;
+  private minimaxVideoAdapter: MiniMaxVideoAdapter | undefined;
+  private unicompapiStudioH3Runtime: UnicompapiStudioH3SharedRuntime;
+  private unicompapiStudioH3VideoAdapter: UnicompapiStudioH3VideoAdapter | undefined;
 
   constructor(options: ElectronViduCompositionOptions) {
     const userDataPath = app.getPath('userData');
@@ -70,6 +88,14 @@ export class ElectronViduComposition {
     this.providerPackage = new ViduProviderPackage({
       credentialVault: this.credentialVault,
       transport: new ElectronViduHttpTransport(),
+      proxy: () => activeProxy
+    });
+    this.minimaxRuntime = new MiniMaxSharedRuntime({
+      transport: new ElectronMiniMaxHttpTransport(),
+      proxy: () => activeProxy
+    });
+    this.unicompapiStudioH3Runtime = new UnicompapiStudioH3SharedRuntime({
+      transport: new ElectronUnicompapiStudioH3HttpTransport(),
       proxy: () => activeProxy
     });
     void options.getProxyMode().then((proxy) => {
@@ -99,6 +125,18 @@ export class ElectronViduComposition {
       readonly invocationAttemptId: string;
     }) => Promise<void>;
     readonly newApiVideoAdapter?: NewApiVideoAdapter;
+    readonly attachMinimaxVideoOperation?: (input: {
+      readonly routeSnapshot: unknown;
+      readonly providerOperationId: string;
+      readonly invocationAttemptId: string;
+    }) => Promise<void>;
+    readonly minimaxVideoAdapter?: MiniMaxVideoAdapter;
+    readonly attachUnicompapiStudioH3VideoOperation?: (input: {
+      readonly routeSnapshot: unknown;
+      readonly providerOperationId: string;
+      readonly invocationAttemptId: string;
+    }) => Promise<void>;
+    readonly unicompapiStudioH3VideoAdapter?: UnicompapiStudioH3VideoAdapter;
     readonly videoResultReceiver: {
       receive(
         executionId: string
@@ -144,8 +182,32 @@ export class ElectronViduComposition {
         usage: currentSessionUsageSink(options.getSession)
       });
     }
+    if (!this.minimaxVideoAdapter) {
+      this.minimaxVideoAdapter = createMiniMaxVideoAdapterFromRuntimes({
+        minimaxRuntime: this.minimaxRuntime,
+        credentialVault: this.credentialVault,
+        providerRegistry: this.registry,
+        materials,
+        usage: currentSessionUsageSink(options.getSession)
+      });
+    }
+    if (!this.unicompapiStudioH3VideoAdapter) {
+      this.unicompapiStudioH3VideoAdapter = createUnicompapiStudioH3VideoAdapterFromRuntimes({
+        unicompapiStudioH3Runtime: this.unicompapiStudioH3Runtime,
+        credentialVault: this.credentialVault,
+        providerRegistry: this.registry,
+        usage: currentSessionUsageSink(options.getSession)
+      });
+    }
     const newApiVideo = this.newApiVideoAdapter;
-    const videoPort = createCompositeVideoPort(newApiVideo, viduVideoPort);
+    const minimaxVideo = this.minimaxVideoAdapter;
+    const unicompapiStudioH3Video = this.unicompapiStudioH3VideoAdapter;
+    const videoPort = createCompositeVideoPort(
+      unicompapiStudioH3Video,
+      minimaxVideo,
+      newApiVideo,
+      viduVideoPort
+    );
     const imageRouter = new ImageOperationRouter(this.registry, {
       vidu_image_v1: images.imageV1,
       vidu_gemini_image_v2: images.geminiImageV2
@@ -225,6 +287,38 @@ export class ElectronViduComposition {
             newApiVideoAdapter: newApiVideo
           }
         : {}),
+      ...(minimaxVideo
+        ? {
+            attachMinimaxVideoOperation: async (input: {
+              readonly routeSnapshot: unknown;
+              readonly providerOperationId: string;
+              readonly invocationAttemptId: string;
+            }) => {
+              await minimaxVideo.attachOperation({
+                routeSnapshot: input.routeSnapshot,
+                providerOperationId: input.providerOperationId,
+                invocationAttemptId: input.invocationAttemptId as never
+              });
+            },
+            minimaxVideoAdapter: minimaxVideo
+          }
+        : {}),
+      ...(unicompapiStudioH3Video
+        ? {
+            attachUnicompapiStudioH3VideoOperation: async (input: {
+              readonly routeSnapshot: unknown;
+              readonly providerOperationId: string;
+              readonly invocationAttemptId: string;
+            }) => {
+              await unicompapiStudioH3Video.attachOperation({
+                routeSnapshot: input.routeSnapshot,
+                providerOperationId: input.providerOperationId,
+                invocationAttemptId: input.invocationAttemptId as never
+              });
+            },
+            unicompapiStudioH3VideoAdapter: unicompapiStudioH3Video
+          }
+        : {}),
       videoResultReceiver: {
         receive: (executionId) => videoReceiver.receive(executionId)
       }
@@ -286,10 +380,18 @@ function currentSessionUsageSink(
 }
 
 function createCompositeVideoPort(
+  unicompapiStudioH3Video: UnicompapiStudioH3VideoAdapter | undefined,
+  minimaxVideo: MiniMaxVideoAdapter | undefined,
   newApiVideo: NewApiVideoAdapter | undefined,
   viduVideo: ProviderAsyncOperationPort & VideoResultPort
 ): ProviderAsyncOperationPort & VideoResultPort {
   const select = async (providerOperationId: string) => {
+    if (unicompapiStudioH3Video?.knowsOperation(providerOperationId)) {
+      return unicompapiStudioH3Video;
+    }
+    if (minimaxVideo?.knowsOperation(providerOperationId)) {
+      return minimaxVideo;
+    }
     if (newApiVideo?.knowsOperation(providerOperationId)) {
       return newApiVideo;
     }
@@ -346,6 +448,66 @@ function createCompositeViduVideoPort(
         remoteResultId
       )
   };
+}
+
+class ElectronMiniMaxHttpTransport implements MiniMaxHttpTransport {
+  async send(request: MiniMaxHttpTransportRequest): Promise<MiniMaxHttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body.byteLength > 0 ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(response, request.maxResponseBytes);
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new MiniMaxTransportFailure('cancelled');
+      }
+      if (error instanceof MiniMaxTransportFailure) throw error;
+      if (error instanceof ViduTransportFailure && error.kind === 'response_too_large') {
+        throw new MiniMaxTransportFailure('response_too_large');
+      }
+      throw new MiniMaxTransportFailure('network');
+    }
+  }
+}
+
+class ElectronUnicompapiStudioH3HttpTransport implements UnicompapiStudioH3HttpTransport {
+  async send(
+    request: UnicompapiStudioH3HttpTransportRequest
+  ): Promise<UnicompapiStudioH3HttpTransportResponse> {
+    try {
+      const response = await net.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body.byteLength > 0 ? Buffer.from(request.body) : undefined,
+        signal: request.signal,
+        redirect: request.redirect
+      });
+      const body = await readBoundedResponse(response, request.maxResponseBytes);
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body
+      };
+    } catch (error) {
+      if (request.signal.aborted || isAbortError(error)) {
+        throw new UnicompapiStudioH3TransportFailure('cancelled');
+      }
+      if (error instanceof UnicompapiStudioH3TransportFailure) throw error;
+      if (error instanceof ViduTransportFailure && error.kind === 'response_too_large') {
+        throw new UnicompapiStudioH3TransportFailure('response_too_large');
+      }
+      throw new UnicompapiStudioH3TransportFailure('network');
+    }
+  }
 }
 
 class ElectronViduHttpTransport implements ViduHttpTransport {
