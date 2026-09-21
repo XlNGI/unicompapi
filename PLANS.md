@@ -1,5 +1,9 @@
 # UniComp 开发计划
 
+### develop 同步到当前功能分支（2026-09-21）
+
+负责人批准解决冲突并上传。本次合并方向为 `origin/develop`（`4d070c1`）进入 `feature/model-selection-text-video-parameters`（合并前 `adf5763`），不更新 develop。唯一内容冲突是本文顶部双方新增记录，完整保留两边记录；`storage-ipc.ts` 自动合并保留消费事件逻辑并加入 H3 接线。类型检查、lint、生产构建、定向 Vitest 27/27、UI 契约 65/65 通过。未重跑全量测试、Electron 人工验收或真实服务调用。远端原有 MiniMax 文档尾空行及构建 CJS/大包警告保留。上传后以远端功能分支提交号核对，原功能分支和 develop 均保留。
+
 ### 任务中心消费统计按调用事实更新（2026-09-21，待人工验收）
 
 负责人授权在当前 `feature/model-selection-text-video-parameters` 按方案实施，保留其他任务未提交工作。此记录覆盖下方 9 月 20 日方案的“30 秒刷新”部分：取消消费图表定时轮询，renderer 生命周期缓存跨切页保留；`storage:consumption-changed` 只由调用/用量/远端任务/结果/作品事实或项目集合变化触发，普通草稿和全局状态通知不触发消费读取。60 秒健康检查保留给原有状态功能，消费侧只检查本地文件元数据是否真的变化，不无条件对账。首次读取、后台更新、失败保留旧值、真实零消费及滚轮主动折叠继续沿用已验证的稳定布局。显示更新不创建模型请求或新增费用。
@@ -45,6 +49,29 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 完整 AppLayout 工作台文生 19 项、图生 14 项通过；实际生产 main/preload/IPC/磁盘验收通过，100 次前台数字输入 p95 13.5ms、派发 p95 27.2ms、长任务 0，两个本地中转站同模型 ID 正确隔离。类型、lint、构建、平台审计、diff 检查通过。最终全量 Vitest 1807/1808（唯一临时目录 ENOTEMPTY 清理失败，相关文件独跑 10/10）；Node/UI 既有 handoff SHA256 清单缺失仍失败。性能初轮异常和窗口失焦证据保留在方案，不将重跑通过解释为全场景保证。
 
 待人工审核：真实服务商 Schema/Key 和付费调用、现有项目交互、中文输入法、macOS。普通 e-video 与 Seedance 2.5 真实可执行合同资料仍不足，不能声称截图型号全部可用。新增 predictions 公共结果下载暂不支持实际代理链路。未更改计费、界面结构或用户 AppData；测试临时目录清理遭自动审批拒绝，保留且不纳入产品提交。
+### UniCompAPI Studio H3 文生视频未发出请求（2026-09-20）
+
+负责人用测试连接 `hailuo` 提交文生视频后，界面报请求未发出。现场验收记录为 `failed_before_request` / `adapter.failed_before_submission`，远端 HTTP 0。根因是工作台 dispatch 会带 `taskId` / `executionId`，Studio H3 测试适配按精确字段拒绝了整单，官方 MiniMax 适配也有同样缺口。现已把这两个身份字段列为可忽略可选字段，未知字段仍拒绝。密钥未写入仓库。
+
+### UniCompAPI Studio H3 临时测试适配（2026-09-20）
+
+在独立目录落地可删除的 Studio H3 测试包 `provider-package-unicompapi-studio-h3`，不并入官方 MiniMax H3，不写入 UniCompAPI `/v1` 能力表。只接 `https://unicompapi.com/studio/h3/v1` 的 `minimax-h3` 文生视频，变体冻结 `fl2va`，参数为 `generation_mode` / `duration` / `aspect_ratio`。添加/同步连接时安装打包目录，工作台提交/轮询共用长生命周期适配器。密钥未写入代码、环境文件、日志或 Git。
+
+本轮新鲜验证：Studio H3 定向 Vitest 11/11，官方 MiniMax 14/14，相关探测/分发/视频合同 13/13，合计 38/38；`tests/ui/providers-page-contract.test.mjs` 16/16；`tsconfig.app.json`、`electron/tsconfig.json`、`tsconfig.test.json` 与 `tsc -b` 通过；变更文件 ESLint 0 error；`git diff --check` 通过。测试全部使用合成 HTTP，真实 Studio H3 / MiniMax 调用 0。未跑全量 Vitest、生产构建或 Electron 人工验收。抽检阶段为确认 422 字段误创建过 prompt 为 `x` 的任务；其中两条已取消，一条当时仍为 running。测试适配不再用真实令牌发 HTTP，也不把该次创建记为成功生成。实现边界见 [UniCompAPI Studio H3 临时测试适配](docs/current/UNICOMPAPI_STUDIO_H3_TEST_ADAPTER.md)。
+
+### UniCompAPI Studio H3 真实连通抽检（2026-09-20）
+
+负责人提供的是 UniCompAPI Studio H3 网关与 `sk-acp-` 令牌，不是官方 MiniMax 源站 Key。抽检只发 GET，不创建视频，不把令牌写入代码、环境文件、日志或 Git。
+
+结果：`https://unicompapi.com/studio/h3/v1/models` 200，目录为 `minimax-h3` 两个变体 `fl2va` / `ref2va`；`/videos` 200，可列出既有任务。同一令牌访问官方 MiniMax `api.minimaxi.com` / `api.minimax.io` 的免费探测返回业务码 1004（非 MiniMax 官方 Key）；访问 `https://unicompapi.com/v1/models` 返回 401 Invalid token。Studio H3 不是 MiniMax V2 `/video_generation`，当前官方 MiniMax 适配器与 UniCompAPI 固定 `/v1` 模板都不能直接吃这条地址。令牌未保存。
+
+### 官方 MiniMax H3 视频适配（2026-09-20）
+
+在独立分支 `feature/minimax-h3-adapter` 落地官方 MiniMax H3 视频适配，不改 UniCompAPI 能力表，不启动 S1/S2/S3 精简。包 ID 固定为 `provider-package-minimax-h3`，只接 `MiniMax-H3` / `MiniMax-H3-Max` 的文生视频和单张受控首帧图生视频；图生视频先上传本地受控资产，再创建任务，不发送任意用户 URL。连通探测走免费 `GET /v1/files/retrieve?file_id=0`，添加/同步连接时安装打包目录，行为对齐 Vidu。实现与接线未提交。
+
+本轮新鲜验证：MiniMax 定向 Vitest 14/14，相关探测/分发/视频合同 13/13，合计 27/27；`tests/ui/providers-page-contract.test.mjs` 16/16；`tsconfig.app.json`、`electron/tsconfig.json`、`tsconfig.test.json` 与 `tsc -b` 通过；`npx eslint .` 全仓 0 error；`git diff --check` 通过。测试全部使用合成 HTTP，真实 MiniMax 调用 0。未跑全量 Vitest、生产构建或 Electron 人工验收；未验证 macOS、真实密钥、计费或尾帧/R2V。下一步由负责人决定是否提交/合并，以及是否做真实官方连通抽检。
+
+实现与合同边界见 [MiniMax H3 官方适配](docs/current/MINIMAX_H3_ADAPTER.md)。
 
 ### 模型能力优化分支合并检查（2026-09-20）
 

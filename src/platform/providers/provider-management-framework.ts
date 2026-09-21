@@ -52,6 +52,10 @@ import {
   KIMI_K3_TEXT_CHAT_PARAMETER_SCHEMA_ID,
   KIMI_K3_TEXT_REASONING_PARAMETER_SCHEMA_ID
 } from './kimi/kimi-contracts';
+import { MINIMAX_H3_PROVIDER_PACKAGE_ID } from './minimax/minimax-contracts';
+import { installPackagedMiniMaxH3Catalog } from './minimax/minimax-packaged-catalog-install';
+import { UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID } from './unicompapi-studio-h3/unicompapi-studio-h3-contracts';
+import { installPackagedUnicompapiStudioH3Catalog } from './unicompapi-studio-h3/unicompapi-studio-h3-packaged-catalog-install';
 import { VIDU_PROVIDER_PACKAGE_ID } from './vidu/vidu-contracts';
 import { installPackagedViduCatalog } from './vidu/vidu-packaged-catalog-install';
 import {
@@ -473,7 +477,7 @@ export class ProviderManagementFramework {
           : validationInstalled
             ? 'available'
             : 'requires_live_api_approval',
-        modelDiscoveryAction: template.packageId === VIDU_PROVIDER_PACKAGE_ID
+        modelDiscoveryAction: usesPackagedOfficialCatalog(template.packageId)
           ? 'catalog_available'
           : template.modelDiscoveryKind === 'manual_exact'
             ? 'manual_exact'
@@ -569,10 +573,11 @@ export class ProviderManagementFramework {
       let catalog: 'synced' | 'skipped' | 'failed' = 'skipped';
       let catalogCount: number | undefined;
       let catalogWarning: string | undefined;
-      if (parsed.state === 'available' && request.packageId === VIDU_PROVIDER_PACKAGE_ID) {
+      if (parsed.state === 'available' && usesPackagedOfficialCatalog(request.packageId)) {
         progress?.('syncing');
         try {
-          const installed = await installPackagedViduCatalog(this.registry, {
+          const installed = await installPackagedOfficialCatalog(this.registry, {
+            packageId: request.packageId,
             providerId: saved.value.providerId,
             connectionId: saved.value.connectionId,
             now: this.now()
@@ -904,12 +909,13 @@ export class ProviderManagementFramework {
       const resolved = resolveOwnedConnection(snapshot, this.packages, connectionId);
       requireAvailableConnection(resolved.connection);
 
-      // Packaged Vidu catalog remount (official reference2image dual-track).
+      // Packaged official catalog remount (Vidu, MiniMax H3, UniCompAPI Studio H3 test).
       // Templates stay manual_exact for ad-hoc keys, but Sync must refresh
       // frozen packaged models, bindings, and profiles.
-      if (resolved.connection.packageId === VIDU_PROVIDER_PACKAGE_ID) {
+      if (usesPackagedOfficialCatalog(resolved.connection.packageId)) {
         const observedAt = this.now();
-        const installed = await installPackagedViduCatalog(this.registry, {
+        const installed = await installPackagedOfficialCatalog(this.registry, {
+          packageId: resolved.connection.packageId,
           providerId: resolved.connection.providerId,
           connectionId: resolved.connection.id,
           now: observedAt
@@ -2550,4 +2556,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error &&
     (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function usesPackagedOfficialCatalog(
+  packageId: string | undefined
+): packageId is typeof VIDU_PROVIDER_PACKAGE_ID | typeof MINIMAX_H3_PROVIDER_PACKAGE_ID | typeof UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID {
+  return (
+    packageId === VIDU_PROVIDER_PACKAGE_ID ||
+    packageId === MINIMAX_H3_PROVIDER_PACKAGE_ID ||
+    packageId === UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID
+  );
+}
+
+async function installPackagedOfficialCatalog(
+  registry: JsonProviderRegistryStore,
+  input: {
+    readonly packageId: string;
+    readonly providerId: string;
+    readonly connectionId: string;
+    readonly now: IsoTimestamp;
+  }
+): Promise<{ readonly count: number }> {
+  if (input.packageId === MINIMAX_H3_PROVIDER_PACKAGE_ID) {
+    return installPackagedMiniMaxH3Catalog(registry, input);
+  }
+  if (input.packageId === UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID) {
+    return installPackagedUnicompapiStudioH3Catalog(registry, input);
+  }
+  return installPackagedViduCatalog(registry, input);
 }

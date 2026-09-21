@@ -8,6 +8,8 @@ import {
   JsonProviderManagementAuditStore,
   JsonProviderRegistryStore,
   klingProviderPackageDescriptor,
+  minimaxH3ProviderPackageDescriptor,
+  unicompapiStudioH3ProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   ProviderManagementAdapterRegistry,
   ProviderManagementFramework,
@@ -15,6 +17,16 @@ import {
   SecureCredentialVault,
   UNICOMPAPI_OFFICIAL_BASE_URL,
   unicompapiProviderPackageDescriptor,
+  MINIMAX_H3_PROVIDER_PACKAGE_ID,
+  MINIMAX_H3_VIDEO_ADAPTER_ID,
+  MINIMAX_H3_VIDEO_ADAPTER_VERSION,
+  MINIMAX_H3_VIDEO_PROTOCOL_ID,
+  MINIMAX_H3_VIDEO_PROTOCOL_VERSION,
+  UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_VERSION,
+  UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_VERSION,
   frozenViduModelKeys,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
@@ -44,6 +56,18 @@ describe('provider probe decisions (PR3 contract)', () => {
       modelDiscoveryAction: 'manual_exact'
     });
     expect(byTemplate.get('vidu-official')).toMatchObject({
+      validationAction: 'available',
+      modelDiscoveryAction: 'catalog_available'
+    });
+    expect(byTemplate.get('minimax-h3-official-cn')).toMatchObject({
+      validationAction: 'available',
+      modelDiscoveryAction: 'catalog_available'
+    });
+    expect(byTemplate.get('minimax-h3-official-global')).toMatchObject({
+      validationAction: 'available',
+      modelDiscoveryAction: 'catalog_available'
+    });
+    expect(byTemplate.get('unicompapi-studio-h3-test')).toMatchObject({
       validationAction: 'available',
       modelDiscoveryAction: 'catalog_available'
     });
@@ -173,6 +197,8 @@ async function decisionsFixture() {
     deepSeekProviderPackageDescriptor,
     volcengineProviderPackageDescriptor,
     klingProviderPackageDescriptor,
+    minimaxH3ProviderPackageDescriptor,
+    unicompapiStudioH3ProviderPackageDescriptor,
     newApiProviderPackageDescriptor,
     unicompapiProviderPackageDescriptor,
     viduProviderPackageDescriptor
@@ -181,6 +207,8 @@ async function decisionsFixture() {
     klingValidationCalls: 0,
     volcengineValidationCalls: 0,
     viduValidationCalls: 0,
+    minimaxValidationCalls: 0,
+    studioH3ValidationCalls: 0,
     unicompapiValidationCalls: 0,
     unicompapiCatalogCalls: 0,
     unicompapiLastEndpoint: undefined as string | undefined
@@ -240,6 +268,42 @@ async function decisionsFixture() {
       };
     }
   };
+  const minimaxProbe: ProviderManagementAdapterPort = {
+    identity: {
+      packageId: MINIMAX_H3_PROVIDER_PACKAGE_ID,
+      adapterId: MINIMAX_H3_VIDEO_ADAPTER_ID,
+      adapterVersion: MINIMAX_H3_VIDEO_ADAPTER_VERSION,
+      protocolId: MINIMAX_H3_VIDEO_PROTOCOL_ID,
+      protocolVersion: MINIMAX_H3_VIDEO_PROTOCOL_VERSION
+    },
+    async validateConnection() {
+      state.minimaxValidationCalls += 1;
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: t1
+      };
+    }
+  };
+  const studioH3Probe: ProviderManagementAdapterPort = {
+    identity: {
+      packageId: UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID,
+      adapterId: UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
+      adapterVersion: UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_VERSION,
+      protocolId: UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_ID,
+      protocolVersion: UNICOMPAPI_STUDIO_H3_VIDEO_PROTOCOL_VERSION
+    },
+    async validateConnection() {
+      state.studioH3ValidationCalls += 1;
+      return {
+        state: 'available',
+        identityState: 'verified',
+        credentialState: 'valid',
+        observedAt: t1
+      };
+    }
+  };
   const unicompapiProbe: ProviderManagementAdapterPort = {
     identity: {
       packageId: 'provider-package-unicompapi',
@@ -270,6 +334,8 @@ async function decisionsFixture() {
     get klingValidationCalls() { return state.klingValidationCalls; },
     get volcengineValidationCalls() { return state.volcengineValidationCalls; },
     get viduValidationCalls() { return state.viduValidationCalls; },
+    get minimaxValidationCalls() { return state.minimaxValidationCalls; },
+    get studioH3ValidationCalls() { return state.studioH3ValidationCalls; },
     get unicompapiValidationCalls() { return state.unicompapiValidationCalls; },
     get unicompapiCatalogCalls() { return state.unicompapiCatalogCalls; },
     get unicompapiLastEndpoint() { return state.unicompapiLastEndpoint; },
@@ -282,6 +348,8 @@ async function decisionsFixture() {
         klingProbe,
         volcengineProbe,
         viduProbe,
+        minimaxProbe,
+        studioH3Probe,
         unicompapiProbe
       ]),
       new JsonProviderManagementAuditStore(path.join(root, 'audit.json')),

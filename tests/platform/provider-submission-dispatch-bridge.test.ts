@@ -18,6 +18,10 @@ import {
   DOUBAO_VISION_ADAPTER_ID,
   KLING_PROVIDER_PACKAGE_ID,
   KLING_VIDEO_ADAPTER_ID,
+  MINIMAX_H3_PROVIDER_PACKAGE_ID,
+  MINIMAX_H3_VIDEO_ADAPTER_ID,
+  UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID,
+  UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
   NEWAPI_CHAT_ADAPTER_ID,
   NEWAPI_IMAGE_ADAPTER_ID,
   NEWAPI_PROVIDER_PACKAGE_ID,
@@ -34,6 +38,8 @@ import {
   VOLCENGINE_PROVIDER_PACKAGE_ID,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
+  minimaxH3ProviderPackageDescriptor,
+  unicompapiStudioH3ProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   normalizeProviderSubmitOutcome,
   unicompapiProviderPackageDescriptor,
@@ -46,6 +52,8 @@ const packages = [
   deepSeekProviderPackageDescriptor,
   volcengineProviderPackageDescriptor,
   klingProviderPackageDescriptor,
+  minimaxH3ProviderPackageDescriptor,
+  unicompapiStudioH3ProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   viduProviderPackageDescriptor
 ] as const;
@@ -255,6 +263,8 @@ function providerOutcome(adapterId: string): ProviderSubmitOutcome {
     VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
     VIDU_TEXT_VIDEO_V2_ADAPTER_ID,
     KLING_VIDEO_ADAPTER_ID,
+    MINIMAX_H3_VIDEO_ADAPTER_ID,
+    UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID,
     NEWAPI_VIDEO_ADAPTER_ID
   ]);
   if (asyncAdapters.has(adapterId)) {
@@ -326,6 +336,8 @@ function productFeature(adapterId: string): ProductFeature {
   if (
     adapterId === SEEDANCE_VIDEO_ADAPTER_ID ||
     adapterId === KLING_VIDEO_ADAPTER_ID ||
+    adapterId === MINIMAX_H3_VIDEO_ADAPTER_ID ||
+    adapterId === UNICOMPAPI_STUDIO_H3_VIDEO_ADAPTER_ID ||
     adapterId === VIDU_TEXT_VIDEO_V2_ADAPTER_ID
   ) {
     return 'text_to_video';
@@ -358,6 +370,12 @@ function packageSuffix(packageId: string): string {
   }
   if (packageId === KLING_PROVIDER_PACKAGE_ID) {
     return 'kling';
+  }
+  if (packageId === MINIMAX_H3_PROVIDER_PACKAGE_ID) {
+    return 'minimax';
+  }
+  if (packageId === UNICOMPAPI_STUDIO_H3_PROVIDER_PACKAGE_ID) {
+    return 'unicompapi-studio-h3';
   }
   if (packageId === NEWAPI_PROVIDER_PACKAGE_ID) {
     return 'newapi';

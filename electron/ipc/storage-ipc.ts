@@ -59,6 +59,8 @@ import {
   type SecureCredentialVault,
   deepSeekProviderPackageDescriptor,
   klingProviderPackageDescriptor,
+  minimaxH3ProviderPackageDescriptor,
+  unicompapiStudioH3ProviderPackageDescriptor,
   newApiProviderPackageDescriptor,
   viduProviderPackageDescriptor,
   volcengineProviderPackageDescriptor
@@ -127,6 +129,8 @@ export function registerStorageIpcHandlers(options: {
     deepSeekProviderPackageDescriptor,
     volcengineProviderPackageDescriptor,
     klingProviderPackageDescriptor,
+    minimaxH3ProviderPackageDescriptor,
+    unicompapiStudioH3ProviderPackageDescriptor,
     newApiProviderPackageDescriptor,
     viduProviderPackageDescriptor
   ]);
@@ -333,11 +337,19 @@ export function registerStorageIpcHandlers(options: {
                       ? { newApiVideoAdapter: providerOperations.newApiVideoAdapter }
                       : {})
                   }
+                : {}),
+              ...(providerOperations?.minimaxVideoAdapter
+                ? { minimaxVideoAdapter: providerOperations.minimaxVideoAdapter }
+                : {}),
+              ...(providerOperations?.unicompapiStudioH3VideoAdapter
+                ? { unicompapiStudioH3VideoAdapter: providerOperations.unicompapiStudioH3VideoAdapter }
                 : {})
             },
             asyncOperationPort: providerOperations?.videoAsync,
             rememberVideoOperation: providerOperations?.rememberVideoOperation,
             attachNewApiVideoOperation: providerOperations?.attachNewApiVideoOperation,
+            attachMinimaxVideoOperation: providerOperations?.attachMinimaxVideoOperation,
+            attachUnicompapiStudioH3VideoOperation: providerOperations?.attachUnicompapiStudioH3VideoOperation,
             resultReceiver: providerOperations?.videoResultReceiver
           }
         : {}),

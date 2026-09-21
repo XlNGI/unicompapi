@@ -44,6 +44,14 @@ import {
   viduPackagedModelContracts,
   viduUsageSchema
 } from './vidu/vidu-contracts';
+import {
+  minimaxH3PackagedModelContracts,
+  minimaxH3VideoUsageSchema
+} from './minimax/minimax-contracts';
+import {
+  unicompapiStudioH3PackagedModelContracts,
+  unicompapiStudioH3VideoUsageSchema
+} from './unicompapi-studio-h3/unicompapi-studio-h3-contracts';
 
 export class ProjectVideoFeatureSubjectResolver
   implements FeatureSubjectResolverPort {
@@ -255,8 +263,61 @@ export function createVideoProviderFeatureContracts(): readonly ProviderFeatureC
       }];
     });
   });
+  const minimaxContracts = minimaxH3PackagedModelContracts.flatMap((modelContract) => {
+    const features = modelContract.definition.profileTemplates.flatMap(
+      (template) => template.features
+    );
+    return modelContract.parameterSchemas.flatMap((parameterSchema) => {
+      if (
+        parameterSchema.productFeature !== 'image_to_video' &&
+        parameterSchema.productFeature !== 'text_to_video'
+      ) {
+        return [];
+      }
+      const feature = features.find(
+        (item) => item.parameterSchemaId === parameterSchema.schemaId
+      );
+      if (!feature) throw new TypeError('MiniMax video feature contract is incomplete');
+      return [{
+        parameterSchema,
+        resultSchemaId: feature.resultSchemaId,
+        resultSchemaRevision: 1,
+        usageSchema: minimaxH3VideoUsageSchema,
+        constraintSetId: feature.constraintSetId,
+        constraintSetRevision: 1,
+        featureMappingVersion: 1
+      }];
+    });
+  });
+  const unicompapiStudioH3Contracts = unicompapiStudioH3PackagedModelContracts.flatMap((modelContract) => {
+    const features = modelContract.definition.profileTemplates.flatMap(
+      (template) => template.features
+    );
+    return modelContract.parameterSchemas.flatMap((parameterSchema) => {
+      if (parameterSchema.productFeature !== 'text_to_video') {
+        return [];
+      }
+      const feature = features.find(
+        (item) => item.parameterSchemaId === parameterSchema.schemaId
+      );
+      if (!feature) {
+        throw new TypeError('UniCompAPI Studio H3 video feature contract is incomplete');
+      }
+      return [{
+        parameterSchema,
+        resultSchemaId: feature.resultSchemaId,
+        resultSchemaRevision: 1,
+        usageSchema: unicompapiStudioH3VideoUsageSchema,
+        constraintSetId: feature.constraintSetId,
+        constraintSetRevision: 1,
+        featureMappingVersion: 1
+      }];
+    });
+  });
   return [
     ...viduContracts,
+    ...minimaxContracts,
+    ...unicompapiStudioH3Contracts,
     {
       parameterSchema: newApiDefaultTextToVideoParameterSchema,
       resultSchemaId: NEWAPI_VIDEO_RESULT_SCHEMA_ID,
