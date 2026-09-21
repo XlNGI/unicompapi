@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LuRefreshCw, LuSend } from 'react-icons/lu';
+import { LuSend } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -37,6 +37,7 @@ import {
   isUnconfirmedGenerationOutcome
 } from '../../../ui/notifications/generation-failure-reasons';
 import { CreationAdvancedSection } from '../CreationAdvancedSection';
+import { registerPendingEditor } from '../../../ui/autosave-flush-registry';
 
 interface VideoFeatureSubmissionPanelProps {
   readonly className?: string;
@@ -140,8 +141,7 @@ export function VideoFeatureSubmissionPanel({
   const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [candidates, setCandidates] = useState<readonly VideoFeatureCandidateDto[]>([]);
   const [busy, setBusy] = useState(false);
-  const [candidateRetry, setCandidateRetry] = useState(0);
-  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
   const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
@@ -167,6 +167,15 @@ export function VideoFeatureSubmissionPanel({
   draftRef.current = draft;
   onMessageRef.current = onMessage;
   featureSelectionRef.current = featureSelection;
+  useLayoutEffect(() => {
+    const commit = () => { parameterFormRef.current?.flush(); };
+    const unregister = registerPendingEditor(commit);
+    return () => {
+      unregister();
+      // Queue the last valid parameters before the workbench's passive save cleanup.
+      commit();
+    };
+  }, []);
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
   ) ?? [];
@@ -305,7 +314,7 @@ export function VideoFeatureSubmissionPanel({
         if (!active || busyRef.current) return;
         if (!result.ok) {
           setCandidates([]);
-          setLoadState('failed');
+          setLoadState('loaded');
           onMessageRef.current(describeVideoFeatureError(result.error));
           return;
         }
@@ -314,7 +323,7 @@ export function VideoFeatureSubmissionPanel({
       })().catch(() => {
         if (!active || busyRef.current) return;
         setCandidates([]);
-        setLoadState('failed');
+        setLoadState('loaded');
         onMessageRef.current('读取视频服务候选失败，请重试。');
       });
     }, 0);
@@ -324,7 +333,6 @@ export function VideoFeatureSubmissionPanel({
     };
   }, [
     api,
-    candidateRetry,
     blockedReason,
     dirty,
     draft.draftId,
@@ -335,9 +343,10 @@ export function VideoFeatureSubmissionPanel({
   ]);
 
   function changeCandidate(candidateId: string) {
+    commitPendingParameterEdits();
     const candidate = candidates.find((item) => item.candidateId === candidateId);
     const snapshot = draftRef.current;
-    const selection = featureSelectionRef.current;
+    const selection = snapshot.featureSelection ?? featureSelectionRef.current;
     const sameSchema = candidate &&
       selection.parameterSchemaId === candidate.parameterSchema.schemaId &&
       selection.parameterSchemaRevision === candidate.parameterSchema.revision;
@@ -386,7 +395,7 @@ export function VideoFeatureSubmissionPanel({
     // parameter form may commit two fields in the same tick (flush before
     // submit), and both changes must survive.
     const snapshot = draftRef.current;
-    const selection = featureSelectionRef.current;
+    const selection = snapshot.featureSelection ?? featureSelectionRef.current;
     const parameterValues = { ...selection.parameterValues } as Record<
       string,
       VideoWorkspaceParameterValueDto
@@ -595,11 +604,9 @@ export function VideoFeatureSubmissionPanel({
         emptyDescription={
           loadState === 'loading'
             ? '正在读取安全候选。'
-            : loadState === 'failed'
-              ? '读取模型失败，请重试；这不代表没有可用模型。'
             : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
         }
-        emptyTitle={loadState === 'loading' ? '正在读取' : loadState === 'failed' ? '模型读取失败' : '没有可选模型'}
+        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
         hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
         onChange={changeCandidate}
         options={candidates.map((candidate) => ({
@@ -614,11 +621,6 @@ export function VideoFeatureSubmissionPanel({
         reasonLabels={unavailableReasonLabels}
         value={featureSelection.candidateId ?? ''}
       />
-      {loadState === 'failed' ? (
-        <Button variant="secondary" onClick={() => setCandidateRetry((value) => value + 1)}>
-          <LuRefreshCw aria-hidden="true" />重试读取模型
-        </Button>
-      ) : null}
 
       {selectedCandidate ? (
         <>

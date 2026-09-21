@@ -5,10 +5,13 @@ import { VideoWorkbenchPage } from '../../src/pages/creation/video/VideoWorkbenc
 import { videoCreationModes } from '../../src/pages/creation/creationModes';
 import { flushRegisteredAutosaves } from '../../src/ui/autosave-flush-registry';
 import { ProjectStatusProvider } from '../../src/ui/status/ProjectStatusContext';
+import { AppLayout } from '../../src/ui/layout/AppLayout';
 import { ThemeProvider } from '../../src/theme/ThemeProvider';
 import { RSuiteThemeBridge } from '../../src/theme/RSuiteThemeBridge';
 import type { VideoWorkspaceDraftDto } from '../../src/shared/video-workspace-ipc';
 import type { VideoFeatureCandidateDto } from '../../src/shared/video-feature-ipc';
+import { newApiDefaultTextToVideoParameterSchema } from '../../src/platform/providers/newapi/newapi-contracts';
+import { uniCompApiSeedance2TextToVideoParameterSchema } from '../../src/platform/providers/newapi/unicompapi-model-capabilities';
 import 'rsuite/dist/rsuite-no-reset.min.css';
 import '../../src/styles.css';
 import '../../src/styles/tokens.css';
@@ -23,10 +26,13 @@ let failSaves = false;
 let preparedPrompt = '';
 let revision = 0;
 const drafts = new Map<string, VideoWorkspaceDraftDto>();
+const textVideo = new URLSearchParams(location.search).has('parameters');
 const candidates: VideoFeatureCandidateDto[] = ['H3 fixture', 'Seedance fixture'].map((modelName, i) => ({
   schemaVersion: 1, candidateId: `candidate-${i}`, providerName: 'Isolated fixture',
   connectionName: 'Local only', modelName, available: true, unavailableReasons: [],
-  parameterSchema: { schemaVersion: 2, schemaId: 'schema', revision: 1,
+  parameterSchema: textVideo
+    ? (i === 0 ? newApiDefaultTextToVideoParameterSchema : uniCompApiSeedance2TextToVideoParameterSchema)
+    : { schemaVersion: 2, schemaId: 'schema', revision: 1,
     productFeature: 'image_to_video', fields: [{ fieldId: 'duration', labelId: 'duration',
       order: 1, valueType: 'number', exposure: 'user', defaultPolicy: 'optional', required: false,
       minimum: 1, maximum: 60 }] },
@@ -36,15 +42,19 @@ const candidates: VideoFeatureCandidateDto[] = ['H3 fixture', 'Seedance fixture'
 function makeDraft(id: string): VideoWorkspaceDraftDto {
   return {
     schemaVersion: 1, draftId: id, projectId: 'fixture-project', state: 'saved',
-    mode: 'image_to_video', origin: { kind: 'new' }, createdAt: timestamp, updatedAt: timestamp,
-    prompt: { originalInput: '', finalPrompt: '', systemSupplements: [] },
-    contextReferences: [], featureSelection: { productFeature: 'image_to_video',
-      candidateId: 'candidate-0', parameterSchemaId: 'schema', parameterSchemaRevision: 1,
+    origin: { kind: 'new' }, createdAt: timestamp, updatedAt: timestamp,
+    prompt: { originalInput: textVideo ? 'Local video prompt' : '', finalPrompt: textVideo ? 'Local video prompt' : '', systemSupplements: [] },
+    contextReferences: [], featureSelection: { productFeature: textVideo ? 'text_to_video' : 'image_to_video',
+      candidateId: 'candidate-0', parameterSchemaId: candidates[0].parameterSchema.schemaId,
+      parameterSchemaRevision: candidates[0].parameterSchema.revision,
       parameterValues: {} },
     generation: { enhancement: { state: 'not_created', staleReasons: [] },
       preflight: { state: 'not_created', staleReasons: [] } },
-    imageToVideo: { source: { assetId: 'fixture-image', mediaKind: 'image', role: 'source', selectedAt: timestamp },
-      mustKeep: [], allowedChanges: [], prohibited: [], subjectAction: '', cameraMovement: '', pace: '', depthOfField: '' }
+    ...(textVideo ? { mode: 'text_to_video' as const, textToVideo: { sourceKind: 'short_idea' as const, shots: [],
+      storyboard: { state: 'not_created' as const, staleReasons: [], frameAssetIds: [] } } }
+      : { mode: 'image_to_video' as const,
+        imageToVideo: { source: { assetId: 'fixture-image', mediaKind: 'image' as const, role: 'source', selectedAt: timestamp },
+          mustKeep: [], allowedChanges: [], prohibited: [], subjectAction: '', cameraMovement: '', pace: '', depthOfField: '' } })
   };
 }
 
@@ -63,6 +73,7 @@ let videoUrl = '';
 const api = {
   storage: {
     getProjectSession: async () => ok({ projectId: 'fixture-project', projectName: 'Workbench regression' }),
+    listTasks: async () => ok({ items: [], issues: [] }),
     listGenerationHistory: async () => {
       counters.history++;
       return ok({ items: Array.from({ length: 10 }, (_, i) => ({ kind: 'work', workId: `work-${i}`,
@@ -95,7 +106,7 @@ const api = {
   videoFeatures: {
     listCandidates: async () => {
       counters.candidates++;
-      return failCandidates ? { ok: false, error: { code: 'storage_error', message: 'fixture failure' } } : ok(candidates);
+      return failCandidates ? { ok: false, error: { code: 'storage_error', message: 'fixture failure' } } : ok(structuredClone(candidates));
     },
     prepareSubmission: async (id: string) => {
       counters.prepares++;
@@ -112,11 +123,15 @@ window.unicomp = api as unknown as NonNullable<typeof window.unicomp>;
 const root = createRoot(document.getElementById('root')!);
 let mountKey = 0;
 function mount(id = 'draft-1') {
-  flushSync(() => root.render(<ThemeProvider><RSuiteThemeBridge><ProjectStatusProvider><VideoWorkbenchPage key={++mountKey} mode={videoCreationModes[2]} preferredDraftId={id} /></ProjectStatusProvider></RSuiteThemeBridge></ThemeProvider>));
+  flushSync(() => root.render(<ThemeProvider><RSuiteThemeBridge><ProjectStatusProvider>
+    <AppLayout activeItemId="video-creation" activeSubItemId={textVideo ? 'text-to-video' : 'image-to-video'} onNavigate={() => {}} onSecondaryNavigate={() => {}}>
+      <VideoWorkbenchPage key={++mountKey} mode={videoCreationModes[textVideo ? 1 : 2]} preferredDraftId={id} />
+    </AppLayout>
+  </ProjectStatusProvider></RSuiteThemeBridge></ThemeProvider>));
 }
 
 const harness = {
-  ready: false, counters, samples: [] as number[],
+  ready: false, counters, samples: [] as number[], longTasks: [] as number[],
   state: () => ({ counters, preparedPrompt, drafts: [...drafts.values()], samples: harness.samples }),
   flush: () => flushRegisteredAutosaves(1000),
   remount: mount,
@@ -131,6 +146,9 @@ const harness = {
   }
 };
 Object.assign(window, { workbenchHarness: harness, workbenchRenders: 0 });
+new PerformanceObserver((list) => {
+  harness.longTasks.push(...list.getEntries().map((entry) => entry.duration));
+}).observe({ type: 'longtask', buffered: true });
 document.addEventListener('input', () => {
   const start = performance.now();
   // A rendering opportunity after React commits, not an OS display measurement.

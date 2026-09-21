@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, stat } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import {
@@ -434,13 +434,18 @@ export function registerStorageIpcHandlers(options: {
     catalog,
     () => {
       readModels.invalidate();
-      callReadModels.invalidate();
     },
     () => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.webContents.isDestroyed()) {
           window.webContents.send(storageIpcChannels.localStorageChanged);
         }
+      }
+    },
+    () => {
+      callReadModels.invalidate();
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.webContents.isDestroyed()) window.webContents.send(storageIpcChannels.consumptionChanged);
       }
     }
   );
@@ -498,9 +503,13 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.openRecentProject, (_event, request: unknown) =>
     projectController.openRecentProject(request)
   );
-  ipcMain.handle(storageIpcChannels.createProject, (_event, request: unknown) =>
-    projectController.createProject(request)
-  );
+  ipcMain.handle(storageIpcChannels.createProject, async (_event, request: unknown) => {
+    const result = await projectController.createProject(request);
+    // Creation registers the catalog entry after its session-change callback.
+    // Install its watcher now, rather than first discovering it at the 60s fallback.
+    await projectStorageMonitor.sync();
+    return result;
+  });
   ipcMain.handle(storageIpcChannels.listProjects, () =>
     projectController.listProjects()
   );
@@ -805,7 +814,14 @@ export function registerStorageIpcHandlers(options: {
   };
 }
 
+const consumptionFactFiles = [
+  'project.json', 'entities/provider-invocations.json', 'entities/provider-usage-observations.json',
+  'entities/provider-operations.json', 'entities/provider-execution-route-snapshots.json',
+  'entities/local-result-observations.json', 'entities/works.json'
+];
+
 class ProjectStorageChangeMonitor {
+  private consumptionSignature?: string;
   private readonly watchers = new Map<
     string,
     { readonly rootDirectory: string; readonly watcher: FSWatcher }
@@ -814,11 +830,13 @@ class ProjectStorageChangeMonitor {
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private syncOperation: Promise<void> | undefined;
   private disposed = false;
+  private consumptionDirty = false;
 
   constructor(
     private readonly catalog: ProjectCatalogService,
     private readonly invalidate: () => void,
-    private readonly notify: () => void
+    private readonly notify: () => void,
+    private readonly notifyConsumption: () => void
   ) {}
 
   start(): void {
@@ -826,7 +844,7 @@ class ProjectStorageChangeMonitor {
     void this.sync();
     this.refreshTimer = setInterval(() => {
       void this.sync();
-      this.publishNow();
+      this.publishNow(false);
     }, 60_000);
     this.refreshTimer.unref?.();
   }
@@ -842,10 +860,11 @@ class ProjectStorageChangeMonitor {
     return this.syncOperation;
   }
 
-  publishNow(): void {
+  publishNow(consumptionChanged = true): void {
     if (this.disposed) return;
     this.invalidate();
     this.notify();
+    if (consumptionChanged) this.notifyConsumption();
   }
 
   dispose(): void {
@@ -859,20 +878,39 @@ class ProjectStorageChangeMonitor {
   private async syncWatchers(): Promise<void> {
     const entries = await this.catalog.getEntries();
     if (this.disposed) return;
+    // The health fallback checks local metadata only; unchanged files never
+    // notify billing or make an upstream request, including on unsupported watchers.
+    const signatures = await Promise.all(entries.map(async entry => [entry.projectId, entry.rootDirectory,
+      ...await Promise.all(consumptionFactFiles.map(async relative => {
+        try {
+          const info = await stat(path.join(entry.rootDirectory, relative));
+          return [relative, info.mtimeMs, info.size];
+        } catch { return [relative, 'unavailable']; }
+      }))
+    ]));
+    if (this.disposed) return;
+    const signature = JSON.stringify(signatures);
+    if (this.consumptionSignature !== undefined && signature !== this.consumptionSignature) this.scheduleChange(true);
+    this.consumptionSignature = signature;
     const activeIds = new Set<string>(entries.map((entry) => entry.projectId));
     for (const [projectId, item] of this.watchers) {
       const entry = entries.find((candidate) => candidate.projectId === projectId);
       if (!activeIds.has(projectId) || entry?.rootDirectory !== item.rootDirectory) {
         item.watcher.close();
         this.watchers.delete(projectId);
+        this.scheduleChange(true);
       }
     }
     for (const entry of entries) {
       if (this.disposed) return;
       if (this.watchers.has(entry.projectId)) continue;
       try {
-        const watcher = watch(entry.rootDirectory, { recursive: true }, () => {
-          this.scheduleChange();
+        const watcher = watch(entry.rootDirectory, { recursive: true }, (_event, filename) => {
+          const relative = filename?.toString().replace(/\\/g, '/');
+          // Advance the same metadata baseline used by the health fallback, so
+          // an already observed write cannot notify consumption again at 60s.
+          if (!relative || consumptionFactFiles.includes(relative)) void this.sync();
+          this.scheduleChange(false);
         });
         watcher.on('error', () => {
           const current = this.watchers.get(entry.projectId);
@@ -880,23 +918,27 @@ class ProjectStorageChangeMonitor {
             watcher.close();
             this.watchers.delete(entry.projectId);
           }
-          this.scheduleChange();
+          this.scheduleChange(true);
         });
         this.watchers.set(entry.projectId, {
           rootDirectory: entry.rootDirectory,
           watcher
         });
+        this.scheduleChange(true);
       } catch {
         // The periodic refresh still covers unavailable or unsupported directories.
       }
     }
   }
 
-  private scheduleChange(): void {
+  private scheduleChange(consumptionChanged: boolean): void {
+    this.consumptionDirty ||= consumptionChanged;
     if (this.changeTimer) clearTimeout(this.changeTimer);
     this.changeTimer = setTimeout(() => {
       this.changeTimer = undefined;
-      this.publishNow();
+      const consumptionChanged = this.consumptionDirty;
+      this.consumptionDirty = false;
+      this.publishNow(consumptionChanged);
     }, 750);
     this.changeTimer.unref?.();
   }

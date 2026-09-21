@@ -97,6 +97,6 @@ test('candidate reads and autosave IPC are attributed to a pending keystroke', (
   assert.match(probe, /export function reportParameterInputCandidateRequest/);
   assert.match(probe, /export function reportParameterInputAutosaveIpc/);
   // Counters belong to one keystroke.
-  assert.match(probe, /pendingRenders = 0;\n      scheduleIdleFlush\(\);/);
+  assert.match(probe, /pendingRenders = 0;\r?\n      scheduleIdleFlush\(\);/);
   assert.match(probe, /parameterAreaRenderCount: pendingRenders/);
 });

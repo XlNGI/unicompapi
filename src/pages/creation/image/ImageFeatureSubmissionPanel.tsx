@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LuSend } from 'react-icons/lu';
+import { LuSend, LuRefreshCw } from 'react-icons/lu';
 import { Button } from '../../../components/Button';
 import {
   DynamicParameterForm,
@@ -50,8 +50,6 @@ interface ImageFeatureSubmissionPanelProps {
   readonly requireExplicitFeature?: boolean;
   /** Professional image: omit the redundant candidate contract summary card. */
   readonly showCandidateFacts?: boolean;
-  /** Professional image can route blocked-generation copy to the workspace status bar. */
-  readonly showBlockedReason?: boolean;
   /** Professional image: show in-page 准备 → 提交中 → 生成中 → 完成 progress. */
   readonly showProgressSteps?: boolean;
   /** Professional image: tuck optional model parameters behind an on-demand section. */
@@ -65,6 +63,7 @@ interface ImageFeatureSubmissionPanelProps {
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
+  readonly onNavigateToProviders?: () => void;
   readonly onMessage: (message: string) => void;
   readonly onSubmissionComplete?: (submission: ImageFeatureSubmissionDto) => void;
 }
@@ -109,13 +108,13 @@ export function ImageFeatureSubmissionPanel({
   oneShot = false,
   requireExplicitFeature = false,
   showCandidateFacts = true,
-  showBlockedReason = true,
   showProgressSteps = false,
   collapseParameters = false,
   actionHost,
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
+  onNavigateToProviders,
   onMessage,
   onProgressChange,
   onSubmissionComplete
@@ -123,8 +122,13 @@ export function ImageFeatureSubmissionPanel({
   const api = window.unicomp?.imageFeatures;
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
   const [candidates, setCandidates] = useState<readonly ImageFeatureCandidateDto[]>([]);
+  const [candidateScope, setCandidateScope] = useState('');
+  const [loadedRevision, setLoadedRevision] = useState('');
+  const [requestKey, setRequestKey] = useState('');
+  const [retry, setRetry] = useState(0);
+  const [navigationError, setNavigationError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded'>('idle');
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
   const [progressPhase, setProgressPhase] = useState<SubmissionProgressPhase>('idle');
   const [progressFailure, setProgressFailure] = useState<string>();
   const [parameterInputErrors, setParameterInputErrors] = useState<Readonly<Record<string, string>>>({});
@@ -149,12 +153,21 @@ export function ImageFeatureSubmissionPanel({
               : 'text_to_image' as const,
             parameterValues: {}
           };
-  const selectedCandidate = candidates.find(
+  const scope = `${draft.draftId}:${featureSelection.productFeature}`;
+  const currentCandidates = candidateScope === scope ? candidates : [];
+  const missingPrompt = !draft.prompt.finalPrompt.trim();
+  const missingImage = featureSelection.productFeature === 'reference_to_image' && !draft.input;
+  const inputRequired = missingPrompt && missingImage
+    ? '请输入提示词，并添加一张参考图。'
+    : missingPrompt ? '请输入提示词。' : missingImage ? '请添加一张参考图。' : undefined;
+  const needsSave = dirty || draft.state !== 'saved';
+  const candidatesReady = candidateScope === scope && loadedRevision === draft.updatedAt &&
+    loadState === 'loaded' && !needsSave && !inputRequired && !blockedReason && Boolean(api);
+  const selectedCandidate = currentCandidates.find(
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
   const busyRef = useRef(false);
   const draftRef = useRef(draft);
-  const onMessageRef = useRef(onMessage);
   const parameterFormRef = useRef<DynamicParameterFormHandle>(null);
   // Commits are composed from refs, never from a render closure: the form can
   // commit two fields in one tick (flush before submit), and the effective
@@ -162,7 +175,6 @@ export function ImageFeatureSubmissionPanel({
   const featureSelectionRef = useRef(featureSelection);
   busyRef.current = busy;
   draftRef.current = draft;
-  onMessageRef.current = onMessage;
   featureSelectionRef.current = featureSelection;
   const selectedUnavailableReasons = selectedCandidate?.unavailableReasons.filter(
     isVisibleModelUnavailableReason
@@ -277,23 +289,23 @@ export function ImageFeatureSubmissionPanel({
       setLoadState('idle');
       return;
     }
-    if (!api) return;
-    if (blockedReason) {
-      setCandidates([]);
+    setNavigationError('');
+    if (!api) {
+      setLoadState('failed');
+      return;
+    }
+    if (blockedReason || inputRequired) {
       setLoadState('idle');
       return;
     }
     // Avoid racing prepare/submit: autosave + listCandidates must not run mid-flight.
     if (busyRef.current) return;
-    const needsSave = dirty || draft.state !== 'saved';
     if (needsSave) {
-      // Keep an already resolved contract interactive while autosave persists
-      // a local selection or parameter edit. A fresh candidate read still
-      // waits for the saved revision, but users can switch among the current
-      // candidates instead of being locked out by the debounce window.
+      // Retain the visible selection while waiting for the saved revision.
       return;
     }
     setLoadState('loading');
+    setRequestKey(`${scope}:${draft.updatedAt}`);
     const timer = window.setTimeout(() => {
       void (async () => {
         if (busyRef.current) return;
@@ -305,20 +317,16 @@ export function ImageFeatureSubmissionPanel({
         const result = await api.listCandidates(draftId, draftUpdatedAt);
         if (!active || busyRef.current) return;
         if (!result.ok) {
-          setCandidates([]);
-          setLoadState('loaded');
-          onMessageRef.current(
-            errorMessages[result.error.code] ?? '读取图片服务候选失败，请重试。'
-          );
+          setLoadState('failed');
           return;
         }
         setCandidates(result.value);
+        setCandidateScope(scope);
+        setLoadedRevision(draftUpdatedAt);
         setLoadState('loaded');
       })().catch(() => {
         if (!active || busyRef.current) return;
-        setCandidates([]);
-        setLoadState('loaded');
-        onMessageRef.current('读取图片服务候选失败，请重试。');
+        setLoadState('failed');
       });
     }, 0);
     return () => {
@@ -328,6 +336,11 @@ export function ImageFeatureSubmissionPanel({
   }, [
     api,
     awaitingFeatureChoice,
+    inputRequired,
+    scope,
+    retry,
+    busy,
+    needsSave,
     blockedReason,
     dirty,
     draft.draftId,
@@ -343,7 +356,7 @@ export function ImageFeatureSubmissionPanel({
   // Quick image hides the parameter form; defaults are applied only at submit time.
 
   function changeCandidate(candidateId: string) {
-    const candidate = candidates.find((item) => item.candidateId === candidateId);
+    const candidate = currentCandidates.find((item) => item.candidateId === candidateId);
     const snapshot = draftRef.current;
     const selection = featureSelectionRef.current;
     const sameSchema = candidate &&
@@ -457,7 +470,7 @@ export function ImageFeatureSubmissionPanel({
   }
 
   async function prepare() {
-    if (!api || !selectedCandidate || busy || blockedReason) return;
+    if (!api || !selectedCandidate || busy || !candidatesReady) return;
     // Commit the control the user is still typing in, then run the full schema
     // validation on the merged values. An invalid intermediate state never
     // leaves this function.
@@ -599,7 +612,7 @@ export function ImageFeatureSubmissionPanel({
   }
 
   async function generateOneShot() {
-    if (busyRef.current) return;
+    if (busyRef.current || !candidatesReady) return;
     const pendingEdits = commitPendingParameterEdits();
     const submittedValidation = validateSubmittedParameters(pendingEdits);
     if (!submittedValidation.valid) {
@@ -729,11 +742,46 @@ export function ImageFeatureSubmissionPanel({
     }
   }
 
+  async function navigateToProviders() {
+    setNavigationError('');
+    const snapshot = draftRef.current;
+    try {
+      const pending = commitPendingParameterEdits();
+      if (!pending.valid || (onFlushDraft && !(await onFlushDraft()))) {
+        setNavigationError('草稿尚未保存，请稍后重试。');
+        return;
+      }
+      if (draftRef.current.draftId !== snapshot.draftId) return;
+      onNavigateToProviders?.();
+    } catch {
+      setNavigationError('保存草稿失败，请重试。');
+    }
+  }
+
+  const featureName = featureSelection.productFeature === 'reference_to_image' ? '图生图' : '文生图';
+  const feedback: { title: string; description?: string; warning: boolean; action?: 'retry' | 'providers' } | undefined =
+    inputRequired ? { title: '请补全生成内容', description: inputRequired, warning: true }
+    : blockedReason ? { title: '当前不能生成', description: blockedReason, warning: true }
+    : busy ? { title: '正在提交生成请求…', warning: false }
+    : needsSave ? { title: '正在保存草稿，保存后读取模型。', warning: false }
+    : !api ? { title: '模型读取失败', description: '当前运行环境未连接桌面图片功能。', warning: true }
+    : loadState === 'failed' && requestKey === `${scope}:${draft.updatedAt}` ? { title: '模型读取失败', description: '未能读取当前功能的模型，请重试。', warning: true, action: 'retry' }
+    : !candidatesReady ? { title: '正在读取模型…', warning: false }
+    : currentCandidates.length === 0 ? {
+        title: `暂无可用的${featureName}模型`,
+        description: `当前没有可供本项目选择的${featureName}模型，请到模型与服务商检查连接及模型配置。`,
+        warning: true, action: 'providers'
+      }
+    : !selectedCandidate ? { title: '请选择模型', warning: false }
+    : !selectedCandidate.available ? { title: '所选模型当前不可用', description: selectedUnavailableReasons.map((reason) => unavailableReasonLabels[reason] ?? '其他不可用原因').join('、') || '请检查模型与连接状态。', warning: true }
+    : !parameterValidation.valid ? { title: '请修正模型参数', description: parameterValidation.firstError, warning: true }
+    : undefined;
+
   const primaryAction = (
     <Button
       className="uc-image-feature-panel__primary"
       disabled={
-        Boolean(blockedReason) ||
+        !candidatesReady ||
         busy ||
         !parameterValidation.valid ||
         !selectedCandidate?.available
@@ -756,16 +804,10 @@ export function ImageFeatureSubmissionPanel({
       ) : (
         <>
       <ModelSelect
-        disabled={!api || loadState !== 'loaded'}
-        emptyDescription={
-          loadState === 'loading'
-            ? '正在读取安全候选。'
-            : '先在“模型与服务商”添加并启用图像模型，再回到这里选择。'
-        }
-        emptyTitle={loadState === 'loading' ? '正在读取模型' : '尚未配置可用模型'}
-        hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
+        disabled={!candidatesReady || currentCandidates.length === 0 || busy}
+        showEmptyState={false}
         onChange={changeCandidate}
-        options={candidates.map((candidate) => ({
+        options={currentCandidates.map((candidate) => ({
           id: candidate.candidateId,
           label: candidate.modelName,
           providerName: candidate.providerName,
@@ -794,14 +836,6 @@ export function ImageFeatureSubmissionPanel({
               </StatusPill>
             </div>
           ) : null}
-          {!selectedCandidate.available && selectedUnavailableReasons.length > 0 ? (
-            <div className="uc-image-quick__preflight" role="status">
-              <strong>不可用原因</strong>
-              {selectedUnavailableReasons.map((reason) => (
-                <span key={reason}>• {unavailableReasonLabels[reason] ?? '其他不可用原因'}</span>
-              ))}
-            </div>
-          ) : null}
           {oneShot && dynamicParameterFields.length === 0 ? (
             <p className="uc-image-feature-panel__action-hint" role="status">
               快速生图使用服务默认参数（含默认输出尺寸），无需填写动态参数。
@@ -820,10 +854,16 @@ export function ImageFeatureSubmissionPanel({
         </>
       ) : null}
 
-      {showBlockedReason && blockedReason ? (
-        <div className="uc-image-quick__preflight" role="status">
-          <strong>当前不能生成</strong>
-          <span>{blockedReason}</span>
+      {feedback ? (
+        <div className={feedback.warning ? 'uc-image-quick__preflight' : 'uc-image-feature-panel__action-hint'} role="status">
+          <strong>{feedback.title}</strong>
+          {feedback.description ? <span>{feedback.description}</span> : null}
+          {feedback.action === 'retry' ? (
+            <Button variant="secondary" onClick={() => setRetry((value) => value + 1)}><LuRefreshCw aria-hidden="true" />重试读取</Button>
+          ) : feedback.action === 'providers' && onNavigateToProviders ? (
+            <Button variant="secondary" onClick={() => void navigateToProviders()}>模型与服务商</Button>
+          ) : null}
+          {navigationError ? <span>{navigationError}</span> : null}
         </div>
       ) : null}
 
@@ -835,19 +875,6 @@ export function ImageFeatureSubmissionPanel({
       ) : null}
 
       {actionHost ? createPortal(primaryAction, actionHost) : primaryAction}
-      {oneShot ? (
-        <p className="uc-image-feature-panel__action-hint" role="status">
-          {!selectedCandidate
-            ? '下一步：在上方选择可用模型。'
-            : !selectedCandidate.available
-              ? '所选模型当前不可用，请换一个或到「模型与服务商」检查连接授权。'
-              : draft.prompt.finalPrompt.trim().length === 0
-                ? '下一步：填写左侧提示词。'
-                : busy
-                  ? '正在向主进程提交…'
-                  : '就绪：点击「生成」发起请求。'}
-        </p>
-      ) : null}
         </>
       )}
     </div>

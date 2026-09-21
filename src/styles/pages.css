@@ -4851,6 +4851,12 @@ button.uc-project-center__project-card:disabled {
   line-height: var(--uc-line-height-caption);
 }
 
+.uc-task-center__chart-heading .uc-task-center__consumption-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .uc-task-center__bar-chart {
   display: grid;
   gap: var(--uc-space-2);
@@ -7202,6 +7208,26 @@ button.uc-project-center__project-card:disabled {
   .uc-dynamic-parameters__field:nth-child(2) {
     border-top: 0;
   }
+}
+
+/* Size containment causes expensive intrinsic Grid layout in this workbench.
+   Let the parameter grid wrap at its own 620px width without an outer query. */
+.uc-video-text__workspace .uc-dynamic-parameters-container {
+  container-type: normal;
+}
+
+.uc-video-text__workspace .uc-dynamic-parameters {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(
+    calc(310px - var(--uc-space-4) / 2),
+    calc((100% - var(--uc-space-4)) / 2)
+  )), 1fr));
+  column-gap: var(--uc-space-4);
+  border-bottom: 0;
+}
+
+.uc-video-text__workspace .uc-dynamic-parameters__field {
+  border-top: 0;
+  border-bottom: 1px solid var(--uc-color-border-subtle);
 }
 
 .uc-rsuite-field {

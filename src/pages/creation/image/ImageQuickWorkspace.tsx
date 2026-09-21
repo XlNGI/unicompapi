@@ -17,6 +17,7 @@ interface ImageQuickWorkspaceProps {
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted?: (draft: GenerationImageDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
+  readonly onNavigateToProviders?: () => void;
   readonly onMessage: (message: string) => void;
   readonly onNavigateToProfessional?: () => void;
 }
@@ -28,6 +29,7 @@ export function ImageQuickWorkspace({
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
+  onNavigateToProviders,
   onMessage,
   onNavigateToProfessional
 }: ImageQuickWorkspaceProps) {
@@ -71,6 +73,9 @@ export function ImageQuickWorkspace({
         finalPrompt: value
       },
       featureSelection: {
+        ...(draft.featureSelection?.productFeature === 'text_to_image'
+          ? draft.featureSelection
+          : {}),
         productFeature: 'text_to_image',
         parameterValues:
           draft.featureSelection?.productFeature === 'text_to_image'
@@ -196,6 +201,7 @@ export function ImageQuickWorkspace({
             onDraftChange={onDraftChange}
             onDraftPersisted={onDraftPersisted}
             onFlushDraft={onFlushDraft}
+            onNavigateToProviders={onNavigateToProviders}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
