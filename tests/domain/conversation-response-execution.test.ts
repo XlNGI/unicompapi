@@ -172,6 +172,24 @@ describe('conversation response execution contract', () => {
     })).toThrow('requires text_reasoning');
   });
 
+  it('persists task progress without changing the response state', () => {
+    const events = [
+      event(1, 'execution_created', t0),
+      event(2, 'stream_started', t1),
+      event(3, 'task_progress', t1, {
+        stage: 'design', progressStatus: 'running', taskRevision: 2,
+        pageId: 'page-3', pageRevision: 1
+      }),
+      event(4, 'content_delta', t2, { contentDelta: '已完成第 3 页草稿' }),
+      event(5, 'stream_completed', t3)
+    ];
+    const projected = projectConversationResponseExecution({ execution: execution('completed'), events });
+    expect(projected.state).toBe('completed');
+    expect(toControlledConversationResponseStreamEventDto({ execution: execution('completed'), event: events[2] })).toMatchObject({
+      type: 'task_progress', stage: 'design', progressStatus: 'running', taskRevision: 2, pageId: 'page-3'
+    });
+  });
+
   it('rejects media features, hidden provider fields and invalid stream transitions', () => {
     const valid = execution();
     expect(() => parseConversationResponseExecution({

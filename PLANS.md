@@ -1,5 +1,13 @@
 # UniComp 开发计划
 
+### 会话 Agent 与自主设计 PPT 方案优化（2026-09-21）
+
+负责人要求优化 `docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md`，目标是改善会话业务逻辑和实际使用体验：废除本地正则作为业务意图路由，让同一个 Conversation Agent 直接理解复合请求、必要时追问或调用受控工具；默认在已授权范围内自主读取资料、分析、制作和修正，减少用户逐项确认；PPT Designer 可以提出自由组合的页面场景、坐标和视觉设计，由 Application 做权限、版本、预算和状态校验，由 Platform 做真实 PPTX 渲染、诊断、原子发布和 Work 登记。
+
+本轮只重写规划文档，不修改业务代码，不调用真实模型、联网或付费服务，不代表方案已经实施。输入安全、取消、授权、费用、版本和作品门禁仍由程序确定性保证；模型失败时不退回正则执行业务。计划新增 P0—P5 的复现、影子评测、Agent 主路由、事件恢复、自主 PPT 设计和集成验收路线，强调不必要追问、首个可用页面耗时、局部修改正确性、真实渲染和 Windows Office 证据。现行对话式逐页 PPT 与联网计划的来源、授权、恢复和发布边界继续有效；如交互决策发生冲突，以负责人最新确认和本条为准。
+
+文档入口：[会话 Agent 与自主设计 PPT 优化方案](docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md)。
+
 ### UniCompAPI Studio H3 文生视频未发出请求（2026-09-20）
 
 负责人用测试连接 `hailuo` 提交文生视频后，界面报请求未发出。现场验收记录为 `failed_before_request` / `adapter.failed_before_submission`，远端 HTTP 0。根因是工作台 dispatch 会带 `taskId` / `executionId`，Studio H3 测试适配按精确字段拒绝了整单，官方 MiniMax 适配也有同样缺口。现已把这两个身份字段列为可忽略可选字段，未知字段仍拒绝。密钥未写入仓库。

@@ -397,4 +397,46 @@ describe('Conversation intent orchestrator', () => {
       assessment: { readiness: 'ready' }
     });
   });
+
+  it('uses the semantic classifier for clear business requests in agent-first mode', async () => {
+    let calls = 0;
+    const orchestrator = new ConversationIntentOrchestrator({
+      routingMode: 'agent_first',
+      classifier: {
+        async classify() {
+          calls += 1;
+          return {
+            schemaVersion: 1,
+            kind: 'document',
+            action: 'create',
+            documentKind: 'ppt',
+            parameters: { requirements: '分析销售表并做管理层汇报' },
+            sourcePolicy: 'internal',
+            missing: [],
+            ambiguities: [],
+            confidence: 'high',
+            needsConfirmation: false
+          };
+        }
+      }
+    });
+    const result = await orchestrator.analyze({
+      rawText: '分析销售表并做管理层汇报 PPT',
+      context: { requestedIntentKind: 'document', requestedDocumentKind: 'ppt' }
+    });
+    expect(result.route).toBe('classifier');
+    expect(result.plan).toMatchObject({ kind: 'document', action: 'create', documentKind: 'ppt' });
+    expect(calls).toBe(1);
+  });
+
+  it('fails closed when production agent-first routing has no classifier', async () => {
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first' }).analyze({
+      rawText: '分析销售表并做管理层汇报 PPT'
+    });
+    expect(result).toMatchObject({
+      route: 'fallback',
+      failureCode: 'classification_unavailable',
+      plan: { kind: 'unknown' }
+    });
+  });
 });

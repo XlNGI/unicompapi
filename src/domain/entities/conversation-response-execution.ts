@@ -61,7 +61,8 @@ export const conversationResponseStreamEventTypes = [
   'stream_failed',
   'stream_cancelled',
   'stream_interrupted',
-  'stream_resumed'
+  'stream_resumed',
+  'task_progress'
 ] as const;
 export type ConversationResponseStreamEventType =
   (typeof conversationResponseStreamEventTypes)[number];
@@ -125,8 +126,20 @@ export interface ConversationResponseStreamEventV1 {
   readonly contentDelta?: string;
   readonly safeCode?: string;
   readonly interruptionReason?: ConversationResponseInterruptionReason;
+  readonly stage?: ConversationTaskProgressStage;
+  readonly progressStatus?: ConversationTaskProgressStatus;
+  readonly taskRevision?: number;
+  readonly pageId?: string;
+  readonly pageRevision?: number;
   readonly occurredAt: IsoTimestamp;
 }
+
+export const conversationTaskProgressStages = [
+  'planning', 'retrieval', 'analysis', 'design', 'rendering', 'checking', 'publishing', 'completed'
+] as const;
+export type ConversationTaskProgressStage = (typeof conversationTaskProgressStages)[number];
+export const conversationTaskProgressStatuses = ['started', 'running', 'completed', 'failed', 'cancelled', 'paused'] as const;
+export type ConversationTaskProgressStatus = (typeof conversationTaskProgressStatuses)[number];
 
 export interface ConversationResponseExecutionReadModelV1 {
   readonly schemaVersion: 1;
@@ -388,7 +401,8 @@ export function parseConversationResponseStreamEvent(
     stream_failed: ['safeCode'],
     stream_cancelled: [],
     stream_interrupted: ['interruptionReason'],
-    stream_resumed: []
+    stream_resumed: [],
+    task_progress: ['stage', 'progressStatus', 'taskRevision']
   };
   const item = exactRecord(
     loose,
@@ -401,7 +415,7 @@ export function parseConversationResponseStreamEvent(
       ...typeFields[type],
       'occurredAt'
     ],
-    [],
+    type === 'task_progress' ? ['pageId', 'pageRevision', 'safeCode'] : [],
     'conversation response stream event'
   );
   if (item.schemaVersion !== 1) {
@@ -431,6 +445,16 @@ export function parseConversationResponseStreamEvent(
             conversationResponseInterruptionReasons,
             'event.interruptionReason'
           )
+        }
+      : {}),
+    ...(type === 'task_progress'
+      ? {
+          stage: oneOf(item.stage, conversationTaskProgressStages, 'event.stage'),
+          progressStatus: oneOf(item.progressStatus, conversationTaskProgressStatuses, 'event.progressStatus'),
+          taskRevision: nonNegativeInteger(item.taskRevision, 'event.taskRevision'),
+          ...(item.pageId !== undefined ? { pageId: boundedText(item.pageId, 'event.pageId', 128) } : {}),
+          ...(item.pageRevision !== undefined ? { pageRevision: positiveInteger(item.pageRevision, 'event.pageRevision') } : {}),
+          ...(item.safeCode !== undefined ? { safeCode: safeCode(item.safeCode) } : {})
         }
       : {}),
     occurredAt: toIsoTimestamp(String(item.occurredAt))
@@ -555,6 +579,13 @@ function projectConversationResponseTimeline(
       }
       continue;
     }
+    if (event.type === 'task_progress') {
+      if (state !== 'pending' && state !== 'streaming') invalidTransition(state, event.type);
+      if (event.pageRevision !== undefined && event.pageId === undefined) {
+        throw new InvariantViolationError('task progress pageRevision requires pageId');
+      }
+      continue;
+    }
     if (event.type === 'stream_completed') {
       if (state !== 'streaming') invalidTransition(state, event.type);
       if (content.trim().length === 0) {
@@ -616,6 +647,11 @@ export function toControlledConversationResponseStreamEventDto(input: {
     ...(event.interruptionReason !== undefined
       ? { interruptionReason: event.interruptionReason }
       : {}),
+    ...(event.stage !== undefined ? { stage: event.stage } : {}),
+    ...(event.progressStatus !== undefined ? { progressStatus: event.progressStatus } : {}),
+    ...(event.taskRevision !== undefined ? { taskRevision: event.taskRevision } : {}),
+    ...(event.pageId !== undefined ? { pageId: event.pageId } : {}),
+    ...(event.pageRevision !== undefined ? { pageRevision: event.pageRevision } : {}),
     occurredAt: event.occurredAt
   };
 }

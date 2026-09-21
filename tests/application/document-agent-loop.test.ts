@@ -94,4 +94,18 @@ describe('bounded document agent loop', () => {
     });
     expect(result.state).toBe('timeout');
   });
+
+  it('caps a child loop by the parent budget and emits safe ordered progress', async () => {
+    const events: { sequence: number; stage: string; status: string; safeCode?: string }[] = [];
+    const result = await runDocumentAgentLoop({
+      budgetUnits: 8,
+      parentBudgetUnits: 1,
+      execute: async () => ({}),
+      onEvent: (event) => { events.push(event); },
+      nextDecision: async () => ({ kind: 'tool', request: { ...request, toolId: 'apply_document_patch' } })
+    });
+    expect(result.state).toBe('budget_exceeded');
+    expect(events.at(-1)).toMatchObject({ stage: 'completed', status: 'failed', safeCode: 'agent.budget_exceeded' });
+    expect(events.map((event) => event.sequence)).toEqual(events.map((_, index) => index + 1));
+  });
 });

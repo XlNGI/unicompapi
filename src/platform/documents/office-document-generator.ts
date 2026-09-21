@@ -772,6 +772,7 @@ interface ExpandedPresentationPage {
   readonly units: readonly PresentationUnit[];
   readonly image?: PresentationImage;
   readonly continuationIndex: number;
+  readonly scene?: import('../../domain/entities/presentation-plan').PresentationPageScene;
 }
 
 type UncomposedPresentationPage = Omit<
@@ -1283,6 +1284,63 @@ function renderPresentationCover(
   }
 }
 
+function renderScenePage(
+  slide: PptxGenJS.Slide,
+  scene: import('../../domain/entities/presentation-plan').PresentationPageScene,
+  template: PresentationTemplate
+): void {
+  const slideW = 13.333;
+  const slideH = 7.5;
+  const sorted = [...scene.elements].sort((a, b) => a.zIndex - b.zIndex);
+
+  for (const elem of sorted) {
+    const x = Math.max(0, Math.min(1, elem.geometry.x)) * slideW;
+    const y = Math.max(0, Math.min(1, elem.geometry.y)) * slideH;
+    const w = Math.max(0.01, Math.min(1 - elem.geometry.x, elem.geometry.width)) * slideW;
+    const h = Math.max(0.01, Math.min(1 - elem.geometry.y, elem.geometry.height)) * slideH;
+    const style = elem.style || {};
+
+    if (elem.type === 'shape') {
+      // Autonomous Card / Container Component with custom corner radius and fills
+      const hasFill = style.fill !== undefined && style.fill !== 'none';
+      const hasStroke = style.stroke !== undefined && style.stroke !== 'none';
+      // Model-defined corner radius: e.g. 0.05 (subtle), 0.15 (modern card), 0 (sharp/formal)
+      const rectRadius = style.radius !== undefined ? Math.min(0.5, Math.max(0, style.radius / 100)) : 0.08;
+
+      slide.addShape('roundRect' as any, {
+        x, y, w, h,
+        fill: hasFill ? { color: style.fill } : { color: template.tokens.surface },
+        line: hasStroke ? { color: style.stroke, width: 1.5 } : { color: template.tokens.surface, width: 0 },
+        rectRadius
+      });
+    } else if (elem.type === 'line') {
+      slide.addShape('line' as any, {
+        x, y, w, h,
+        line: { color: style.stroke || template.tokens.secondaryAccent, width: 2 }
+      });
+    } else if (elem.type === 'image' && elem.assetRef) {
+      slide.addImage({
+        path: elem.assetRef,
+        x, y, w, h,
+        sizing: { type: 'contain', w, h }
+      });
+    } else if (elem.type === 'text' && elem.content) {
+      const isHeader = (style.fontSize || 14) >= 20;
+      const isMetric = (style.fontSize || 14) >= 32;
+      slide.addText(elem.content, {
+        x, y, w, h,
+        fontSize: style.fontSize || 14,
+        fontFace: style.fontFamily || 'Microsoft YaHei',
+        color: style.textColor || (isMetric ? template.tokens.accent : template.tokens.text),
+        bold: isHeader || isMetric || (style.fontSize || 14) >= 16,
+        margin: 4,
+        wrap: true,
+        valign: isMetric ? 'bottom' : 'top'
+      });
+    }
+  }
+}
+
 function renderPresentationPage(
   pptx: PptxGenJS,
   page: ExpandedPresentationPage,
@@ -1291,6 +1349,21 @@ function renderPresentationPage(
 ): void {
   const slide = pptx.addSlide();
   addPresentationFrame(slide, template, 'content');
+  if (page.scene && page.scene.elements && page.scene.elements.length > 0) {
+    renderScenePage(slide, page.scene, template);
+    slide.addText(String(pageNumber), {
+      objectName: 'UniComp Page Number',
+      x: 12.25,
+      y: 7.04,
+      w: 0.45,
+      h: 0.2,
+      fontSize: 10,
+      color: template.tokens.muted,
+      align: 'right',
+      margin: 0
+    });
+    return;
+  }
   const hasData = page.units.some(
     (unit) => unit.type === 'table' || unit.type === 'chart'
   );

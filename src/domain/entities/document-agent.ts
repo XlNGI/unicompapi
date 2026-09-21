@@ -56,6 +56,21 @@ export interface DocumentAgentResult {
   readonly summary?: string;
 }
 
+export const documentAgentProgressStages = ['planning', 'tool', 'completed'] as const;
+export type DocumentAgentProgressStage = (typeof documentAgentProgressStages)[number];
+export type DocumentAgentProgressStatus = 'started' | 'completed' | 'failed' | 'cancelled';
+
+/** Safe progress projection for the assistant message and IPC stream. */
+export interface DocumentAgentProgressEvent {
+  readonly sequence: number;
+  readonly step: number;
+  readonly stage: DocumentAgentProgressStage;
+  readonly status: DocumentAgentProgressStatus;
+  readonly toolId?: DocumentToolId;
+  readonly safeCode?: string;
+  readonly occurredAt: string;
+}
+
 export function parseDocumentToolRequest(value: unknown): DocumentToolRequest {
   const record = requireRecord(value, 'DocumentToolRequest');
   requireExactKeys(record, ['toolId', 'input', 'reason']);

@@ -5,7 +5,8 @@ import {
   type DocumentToolDefinition,
   type DocumentToolId,
   type DocumentToolObservation,
-  type DocumentToolRequest
+  type DocumentToolRequest,
+  type DocumentAgentProgressEvent
 } from '../domain';
 
 export interface DocumentAgentDecisionComplete {
@@ -44,6 +45,10 @@ export interface DocumentAgentLoopOptions {
   readonly signal?: AbortSignal;
   readonly allowedTools?: readonly DocumentToolId[];
   readonly repeatedDiagnosticLimit?: number;
+  /** Remaining parent-task budget. Child loops cannot extend it. */
+  readonly parentBudgetUnits?: number;
+  readonly onEvent?: (event: DocumentAgentProgressEvent) => void | Promise<void>;
+  readonly now?: () => string;
 }
 
 export async function runDocumentAgentLoop(
@@ -51,7 +56,11 @@ export async function runDocumentAgentLoop(
 ): Promise<DocumentAgentResult> {
   const registry = options.registry ?? createDocumentToolRegistry();
   const maxSteps = boundedInteger(options.maxSteps ?? 8, 1, 32);
-  const budgetUnits = boundedInteger(options.budgetUnits ?? 16, 1, 10_000);
+  const requestedBudgetUnits = boundedInteger(options.budgetUnits ?? 16, 1, 10_000);
+  const parentBudgetUnits = options.parentBudgetUnits === undefined
+    ? requestedBudgetUnits
+    : boundedInteger(options.parentBudgetUnits, 1, 10_000);
+  const budgetUnits = Math.min(requestedBudgetUnits, parentBudgetUnits);
   const timeoutMs = boundedInteger(options.timeoutMs ?? 120_000, 1, 900_000);
   const repeatedDiagnosticLimit = boundedInteger(
     options.repeatedDiagnosticLimit ?? 2,
@@ -64,14 +73,43 @@ export async function runDocumentAgentLoop(
   let costUnits = 0;
   let previousDiagnostic: string | undefined;
   let repeatedDiagnostics = 0;
+  let eventSequence = 0;
+  const emit = async (event: Omit<DocumentAgentProgressEvent, 'sequence' | 'occurredAt'>): Promise<void> => {
+    if (!options.onEvent) return;
+    try {
+      await options.onEvent({
+        ...event,
+        sequence: ++eventSequence,
+        occurredAt: (options.now ?? (() => new Date().toISOString()))()
+      });
+    } catch {
+      // Progress projection is observational and cannot change task truth.
+    }
+  };
+  const finish = async (
+    state: DocumentAgentResult['state'],
+    summary?: string
+  ): Promise<DocumentAgentResult> => {
+    await emit({
+      step: observations.length,
+      stage: 'completed',
+      status: state === 'cancelled' ? 'cancelled' : state === 'completed' || state === 'completed_unvalidated' ? 'completed' : 'failed',
+      ...(state === 'timeout' ? { safeCode: 'agent.timeout' } : {}),
+      ...(state === 'budget_exceeded' ? { safeCode: 'agent.budget_exceeded' } : {}),
+      ...(state === 'max_steps_exceeded' ? { safeCode: 'agent.max_steps_exceeded' } : {}),
+      ...(state === 'repeated_diagnosis' ? { safeCode: 'agent.repeated_diagnosis' } : {})
+    });
+    return result(state, observations, costUnits, summary);
+  };
 
   for (let step = 1; step <= maxSteps; step += 1) {
     if (isAborted(options.signal)) {
-      return result('cancelled', observations, costUnits);
+      return finish('cancelled');
     }
     if (Date.now() - startedAt >= timeoutMs) {
-      return result('timeout', observations, costUnits);
+      return finish('timeout');
     }
+    await emit({ step, stage: 'planning', status: 'started' });
     let decision: DocumentAgentDecision;
     try {
       const decisionResult = await awaitWithin(
@@ -79,30 +117,31 @@ export async function runDocumentAgentLoop(
         Math.max(1, timeoutMs - (Date.now() - startedAt)),
         options.signal
       );
-      if (decisionResult.cancelled) return result('cancelled', observations, costUnits);
-      if (decisionResult.timedOut) return result('timeout', observations, costUnits);
+      if (decisionResult.cancelled) return finish('cancelled');
+      if (decisionResult.timedOut) return finish('timeout');
       decision = decisionResult.value;
     } catch (error) {
-      return result('failed', observations, costUnits, safeError(error));
+      return finish('failed', safeError(error));
     }
     if (decision.kind === 'complete') {
-      return result('completed', observations, costUnits, decision.summary);
+      return finish('completed', decision.summary);
     }
 
     let request: DocumentToolRequest;
     try {
       request = parseDocumentToolRequest(decision.request);
     } catch (error) {
-      return result('failed', observations, costUnits, safeError(error));
+      return finish('failed', safeError(error));
     }
     const definition = registry.get(request.toolId);
     if (!definition || !allowedTools.has(request.toolId)) {
-      return result('failed', observations, costUnits, 'tool_not_allowed');
+      return finish('failed', 'tool_not_allowed');
     }
     if (costUnits + definition.maxCostUnits > budgetUnits) {
-      return result('budget_exceeded', observations, costUnits);
+      return finish('budget_exceeded');
     }
     costUnits += definition.maxCostUnits;
+    await emit({ step, stage: 'tool', status: 'started', toolId: request.toolId });
     try {
       const executionResult = await awaitWithin(
         options.execute(request, {
@@ -112,26 +151,28 @@ export async function runDocumentAgentLoop(
         Math.max(1, timeoutMs - (Date.now() - startedAt)),
         options.signal
       );
-      if (executionResult.cancelled) return result('cancelled', observations, costUnits);
-      if (executionResult.timedOut) return result('timeout', observations, costUnits);
+      if (executionResult.cancelled) return finish('cancelled');
+      if (executionResult.timedOut) return finish('timeout');
       const data = executionResult.value;
       const observation = makeObservation(step, request.toolId, true, data);
       observations.push(observation);
+      await emit({ step, stage: 'tool', status: 'completed', toolId: request.toolId });
       previousDiagnostic = undefined;
       repeatedDiagnostics = 0;
     } catch (error) {
       const diagnostic = safeError(error);
       const observation = makeObservation(step, request.toolId, false, {}, diagnostic);
       observations.push(observation);
+      await emit({ step, stage: 'tool', status: 'failed', toolId: request.toolId, safeCode: safeProgressCode(diagnostic) });
       if (diagnostic === previousDiagnostic) repeatedDiagnostics += 1;
       else repeatedDiagnostics = 1;
       previousDiagnostic = diagnostic;
       if (repeatedDiagnostics >= repeatedDiagnosticLimit) {
-        return result('repeated_diagnosis', observations, costUnits);
+        return finish('repeated_diagnosis');
       }
     }
   }
-  return result('max_steps_exceeded', observations, costUnits);
+  return finish('max_steps_exceeded');
 }
 
 function makeObservation(
@@ -215,6 +256,13 @@ function boundedInteger(value: number, min: number, max: number): number {
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/\s+/g, ' ').slice(0, 300);
+}
+
+function safeProgressCode(value: string): string {
+  const normalized = value.replace(/\s+/g, ' ').slice(0, 120);
+  return /(?:[a-z]:[\\/]|\\\\|\/|https?:\/\/|token|secret|password|credential|api[_-]?key)/iu.test(normalized)
+    ? 'agent.tool_failed'
+    : normalized;
 }
 
 async function awaitWithin<T>(

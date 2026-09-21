@@ -52,9 +52,17 @@ export interface ConversationIntentClassifierPort {
   }): Promise<unknown>;
 }
 
+/**
+ * Agent-first is the production conversation route. local_compat is retained
+ * for old document IPC callers and offline migration fixtures until their
+ * callers provide a semantic classifier as well.
+ */
+export type ConversationIntentRoutingMode = 'agent_first' | 'local_compat';
+
 export interface ConversationIntentOrchestratorOptions {
   readonly classifier?: ConversationIntentClassifierPort;
   readonly classifierTimeoutMs?: number;
+  readonly routingMode?: ConversationIntentRoutingMode;
 }
 
 export class ConversationIntentOrchestrator {
@@ -68,13 +76,24 @@ export class ConversationIntentOrchestrator {
   }): Promise<ConversationIntentDecision> {
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const context = input.context ?? {};
-    const local = analyzeLocalConversationIntent({
-      rawText: input.rawText,
-      context,
-      workflow: input.workflow
-    });
-    if (local.cancelled || local.plan.kind !== 'unknown' || !this.options.classifier ||
-      local.plan.ambiguities.some((item) => ['single_copy_per_kind', 'single_revision_target'].includes(item))) return local;
+    const agentFirst = this.options.routingMode === 'agent_first';
+    const local = agentFirst
+      ? analyzeLocalSafetyIntent(input.rawText)
+      : analyzeLocalConversationIntent({
+          rawText: input.rawText,
+          context,
+          workflow: input.workflow
+        });
+    if (local.cancelled || (!agentFirst && (local.plan.kind !== 'unknown' || !this.options.classifier ||
+      local.plan.ambiguities.some((item) => ['single_copy_per_kind', 'single_revision_target'].includes(item))))) return local;
+    const classifier = this.options.classifier;
+    if (!classifier) {
+      return {
+        ...local,
+        route: 'fallback',
+        failureCode: 'classification_unavailable'
+      };
+    }
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -95,7 +114,7 @@ export class ConversationIntentOrchestrator {
     try {
       let candidate: unknown;
       try {
-        candidate = await Promise.race([this.options.classifier.classify({
+        candidate = await Promise.race([classifier.classify({
           rawText: input.rawText,
           context,
           signal: controller.signal
@@ -154,6 +173,15 @@ export class ConversationIntentOrchestrator {
       input.signal?.removeEventListener('abort', abort);
     }
   }
+}
+
+function analyzeLocalSafetyIntent(rawText: string): ConversationIntentDecision {
+  const text = rawText.trim();
+  if (!text) return decision(unknownPlan('empty_input'), 'local');
+  if (isConversationCancellation(text)) {
+    return { ...decision(unknownPlan('已取消当前请求'), 'local'), cancelled: true };
+  }
+  return decision(unknownPlan('agent_semantic_plan_required'), 'local');
 }
 
 export function analyzeLocalConversationIntent(input: {
