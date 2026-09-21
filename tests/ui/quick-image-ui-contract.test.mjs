@@ -81,7 +81,7 @@ test('quick image synchronously blocks duplicate one-shot submissions', () => {
   const start = featurePanelSource.indexOf('async function generateOneShot()');
   const end = featurePanelSource.indexOf('\n  return (', start);
   const oneShot = featurePanelSource.slice(start, end);
-  assert.match(oneShot, /if \(busyRef\.current\) return/);
+  assert.match(oneShot, /if \(busyRef\.current \|\| !candidatesReady\) return/);
   // P3: pending parameter edits are committed and re-validated first.
   assert.match(oneShot, /commitPendingParameterEdits\(\)/);
   assert.match(oneShot, /if \(!submittedValidation\.valid\) \{[\s\S]*?showGenerationError\(/);
@@ -89,13 +89,8 @@ test('quick image synchronously blocks duplicate one-shot submissions', () => {
   assert.match(oneShot, /finally \{[\s\S]*busyRef\.current = false;/);
 });
 
-test('quick image loads model candidates before prompt entry', () => {
-  assert.doesNotMatch(
-    featurePanelSource,
-    /if \(oneShot && draft\.prompt\.finalPrompt\.trim\(\)\.length === 0\) \{[\s\S]*setCandidates\(\[\]\)/
-  );
-  assert.match(featurePanelSource, /api\.listCandidates\(draftId, draftUpdatedAt\)/);
-  assert.match(featurePanelSource, /if \(prompt\.length === 0\) \{[\s\S]*showGenerationError/);
+test('quick image checks required input before reading candidates', () => {
+  assert.match(featurePanelSource, /if \(blockedReason \|\| inputRequired\)/);
 });
 
 test('quick image autosave coalesces edits behind one in-flight save', () => {
@@ -172,8 +167,9 @@ test('quick image copy follows prompt, model, then generate workflow', () => {
   assert.match(quickSource, /输入提示词，选择模型，然后点击生成。/);
   assert.match(quickSource, /生成结果将在这里显示/);
   assert.doesNotMatch(quickSource, />3<\/span>/);
-  assert.match(featurePanelSource, /尚未配置可用模型/);
-  assert.match(featurePanelSource, /添加并启用图像模型/);
+  assert.doesNotMatch(featurePanelSource, /尚未配置可用模型/);
+  assert.match(featurePanelSource, /模型读取失败/);
+  assert.match(featurePanelSource, /暂无可用的/);
   assert.match(featurePanelSource, /当前输入不适用于所选模型/);
 });
 

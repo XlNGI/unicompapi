@@ -5,6 +5,7 @@ import test from 'node:test';
 const source = await readFile('src/pages/tasks/TasksPage.tsx', 'utf8');
 const feeSource = await readFile('src/pages/tasks/call-fees.ts', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
+const consumptionStore = await readFile('src/ui/consumption-read-store.ts', 'utf8');
 
 test('task center consumes controlled global task read models', () => {
   assert.match(source, /useTaskReadStore\(\)/);
@@ -64,8 +65,10 @@ test('task center shows successful-call fee charts from official pricing rules',
   assert.match(source, /EmptyDonutChart/);
   assert.match(source, /消费柱状图/);
   assert.match(source, /供应商消费占比/);
-  assert.match(source, /storage\.getConsumptionSummary\(\)/);
-  assert.match(source, /storage\?\.onLocalStorageChanged/);
+  assert.match(source, /useConsumptionReadStore\(\)/);
+  assert.match(consumptionStore, /storage\.getConsumptionSummary\(\)/);
+  assert.match(consumptionStore, /storage\.onConsumptionChanged/);
+  assert.doesNotMatch(consumptionStore, /setInterval/);
   assert.doesNotMatch(source, /storage\.listCallRecords\(\{ limit: 200 \}\)/);
   assert.match(source, /formatRenminbiAmount/);
   assert.match(source, /pendingConversionCallCount/);
@@ -74,7 +77,7 @@ test('task center shows successful-call fee charts from official pricing rules',
   assert.match(source, /donutGradient\(providerSlices\)/);
   assert.match(source, /暂无可计算费用的消费柱状图/);
   assert.match(source, /暂无可计算费用的供应商消费占比环形图/);
-  assert.match(source, /!loading && message/);
+  assert.match(source, /更新失败，显示上次结果/);
   assert.doesNotMatch(source, /部分项目无法纳入消费统计/);
   assert.doesNotMatch(source, /缺官方价格规则/);
   assert.doesNotMatch(source, /缺响应体计费用量/);

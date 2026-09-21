@@ -62,6 +62,7 @@ interface ImageWorkbenchPageProps {
   mode: ImageCreationMode;
   preferredDraftId?: string;
   onNavigateToProfessional?: () => void;
+  onNavigateToProviders?: () => void;
   onVideoDraftCreated?: (draftId: string) => void;
   onNavigateToImageMode?: (
     mode: ImageWorkspaceDtoMode
@@ -78,6 +79,7 @@ export function ImageWorkbenchPage({
   preferredDraftId,
   onNavigateToProfessional,
   onVideoDraftCreated,
+  onNavigateToProviders,
   onNavigateToImageMode
 }: ImageWorkbenchPageProps) {
   const storage = window.unicomp?.storage;
@@ -482,6 +484,7 @@ export function ImageWorkbenchPage({
 
       {currentDraft?.mode === 'quick_image' ? (
         <ImageQuickWorkspace
+          onNavigateToProviders={onNavigateToProviders}
           dirty={dirty}
           draft={currentDraft}
           onClearUi={() => void clearUiAfterGeneration()}
@@ -493,6 +496,7 @@ export function ImageWorkbenchPage({
         />
       ) : currentDraft?.mode === 'professional_image' ? (
         <ImageProfessionalWorkspace
+          onNavigateToProviders={onNavigateToProviders}
           dirty={dirty}
           draft={currentDraft}
           onDraftChange={(draft) => replaceCurrentDraft(draft, true)}

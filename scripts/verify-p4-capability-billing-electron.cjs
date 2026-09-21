@@ -372,41 +372,15 @@ async function run() {
   await app.whenReady();
 
   const modules = await loadProductionModules(buildDirectory);
-  const { platform, callFees } = modules;
+  const { callFees } = modules;
   const scenarios = [];
   const record = (name, passed, detail) => scenarios.push({ name, passed, detail });
 
-  // --- A. The video candidate list never shows an unconfirmed image model ----
+  // The user restored the original compatible-model selection behavior.
   const unconfirmed = await relayFixture(modules, { trustedEvidence: false });
-  const unconfirmedCandidates = await unconfirmed.service.listFeatureCandidates(
-    unconfirmed.draftSubject
-  );
-  record(
-    'the video candidate list excludes a model whose video capability is unconfirmed',
-    unconfirmedCandidates.length === 0,
-    `candidates: ${unconfirmedCandidates.length}`
-  );
-  record(
-    'the image-only model name is absent from the video candidate list',
-    !unconfirmedCandidates.some((candidate) => candidate.modelName === unconfirmed.providerModelKey),
-    `model ${unconfirmed.providerModelKey} present: ${unconfirmedCandidates.some(
-      (candidate) => candidate.modelName === unconfirmed.providerModelKey
-    )}`
-  );
-  const invalidated = platform.describeInvalidatedOpenAiCompatibleVideoProfiles(
-    await unconfirmed.registry.load(),
-    (productFeature) => productFeature === 'text_to_video'
-  );
-  record(
-    'the excluded profile is reported with a reason and the gate version',
-    invalidated.length === 1 &&
-      invalidated[0].reason === 'router_synthesized_evidence' &&
-      invalidated[0].gateVersion === platform.OPENAI_COMPATIBLE_VIDEO_PROFILE_GATE_VERSION,
-    `report: ${JSON.stringify(invalidated)}`
-  );
-
-  // The gate must not be a blanket block: the same model becomes eligible once a
-  // trustworthy per-model fact exists.
+  const unconfirmedCandidates = await unconfirmed.service.listFeatureCandidates(unconfirmed.draftSubject);
+  record('original compatible-model selection permits existing video profiles',
+    unconfirmedCandidates.length === 1, `candidates: ${unconfirmedCandidates.length}`);
   const confirmed = await relayFixture(modules, { trustedEvidence: true });
   const confirmedCandidates = await confirmed.service.listFeatureCandidates(
     confirmed.draftSubject
@@ -519,7 +493,7 @@ async function run() {
     candidateGate: {
       unconfirmedCandidates: unconfirmedCandidates.length,
       confirmedCandidates: confirmedCandidates.length,
-      invalidatedReport: invalidated
+      behavior: 'original selection restored by user request'
     },
     billing: { copies },
     scenarios

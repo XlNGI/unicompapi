@@ -4,9 +4,11 @@ import { ImageWorkbenchPage } from './ImageWorkbenchPage';
 export function ImageQuickPage({
   onNavigateToProfessional,
   onVideoDraftCreated,
+  onNavigateToProviders,
   preferredDraftId
 }: {
   readonly onNavigateToProfessional?: () => void;
+  readonly onNavigateToProviders?: () => void;
   readonly onVideoDraftCreated?: (draftId: string) => void;
   readonly preferredDraftId?: string;
 }) {
@@ -14,6 +16,7 @@ export function ImageQuickPage({
   return (
     <ImageWorkbenchPage
       mode={mode}
+      onNavigateToProviders={onNavigateToProviders}
       onNavigateToProfessional={onNavigateToProfessional}
       onVideoDraftCreated={onVideoDraftCreated}
       preferredDraftId={preferredDraftId}

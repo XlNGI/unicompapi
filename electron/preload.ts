@@ -139,6 +139,11 @@ const storage: StorageApi = {
       ipcRenderer.removeListener(storageIpcChannels.localStorageChanged, wrapped);
     };
   },
+  onConsumptionChanged: (listener) => {
+    const wrapped = () => listener();
+    ipcRenderer.on(storageIpcChannels.consumptionChanged, wrapped);
+    return () => ipcRenderer.removeListener(storageIpcChannels.consumptionChanged, wrapped);
+  },
   listTasks: () => ipcRenderer.invoke(storageIpcChannels.listTasks),
   getTaskDetails: (taskId) =>
     ipcRenderer.invoke(storageIpcChannels.getTaskDetails, { taskId }),

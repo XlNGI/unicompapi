@@ -164,6 +164,7 @@ export function App() {
         <LibraryPage onNavigate={handleNavigate} />
       ) : activeSubItemId === 'quick-image' ? (
         <ImageQuickPage
+          onNavigateToProviders={() => handleNavigate('providers')}
           onVideoDraftCreated={handleVideoDraftCreated}
           preferredDraftId={openedImageDraftId}
           onNavigateToProfessional={() =>
@@ -172,6 +173,7 @@ export function App() {
         />
       ) : activeSubItemId === 'professional-image' ? (
         <ImageProfessionalPage
+          onNavigateToProviders={() => handleNavigate('providers')}
           onVideoDraftCreated={handleVideoDraftCreated}
           preferredDraftId={openedImageDraftId}
         />

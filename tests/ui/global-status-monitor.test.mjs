@@ -26,7 +26,8 @@ test('global shell monitor reads real storage and task projections', () => {
 
 test('project storage monitoring is event-driven with a periodic fallback', () => {
   assert.match(storageIpc, /watch\(entry\.rootDirectory, \{ recursive: true \}/);
-  assert.match(storageIpc, /this\.scheduleChange\(\)/);
+  assert.match(storageIpc, /this\.scheduleChange\(true\)/);
+  assert.match(storageIpc, /this\.publishNow\(false\)/);
   assert.match(storageIpc, /}, 750\)/);
   assert.match(storageIpc, /}, 60_000\)/);
   assert.match(storageIpc, /projectStorageMonitor\.dispose\(\)/);

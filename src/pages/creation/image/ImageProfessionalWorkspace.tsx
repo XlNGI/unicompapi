@@ -27,6 +27,7 @@ interface ImageProfessionalWorkspaceProps {
   readonly onDraftChange: (draft: GenerationImageDraftDto) => void;
   readonly onDraftPersisted: (draft: GenerationImageDraftDto) => void;
   readonly onFlushDraft?: () => Promise<boolean>;
+  readonly onNavigateToProviders?: () => void;
   readonly onMessage: (message: string) => void;
   readonly onBlockingReasonChange?: (reason?: string) => void;
 }
@@ -37,6 +38,7 @@ export function ImageProfessionalWorkspace({
   onDraftChange,
   onDraftPersisted,
   onFlushDraft,
+  onNavigateToProviders,
   onMessage,
   onBlockingReasonChange
 }: ImageProfessionalWorkspaceProps) {
@@ -555,6 +557,7 @@ export function ImageProfessionalWorkspace({
             onDraftChange={onDraftChange}
             onDraftPersisted={onDraftPersisted}
             onFlushDraft={onFlushDraft}
+            onNavigateToProviders={onNavigateToProviders}
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
@@ -569,7 +572,6 @@ export function ImageProfessionalWorkspace({
             }}
             requireExplicitFeature
             showCandidateFacts={false}
-            showBlockedReason={false}
           />
         </Card>
           </div>
