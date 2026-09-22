@@ -49,7 +49,8 @@ test('global status dock aggregates concurrent production tasks without fake per
   assert.match(taskStatusDockSource, /需处理 \{summary\.attention\}/);
   assert.match(taskStatusDockSource, /接收并校验/);
   assert.match(taskStatusDockSource, /已下载、校验并保存到本地作品库/);
-  assert.match(taskStatusDockSource, /onNavigate\('tasks'\)/);
+  assert.match(taskStatusDockSource, /navigateFromDock\('tasks'\)/);
+  assert.match(taskStatusDockSource, /onNavigate\('tasks', task\.taskId\)/);
   assert.match(taskStatusDockSource, /onNavigate\('library'\)/);
   assert.match(taskStatusDockSource, /taskPriority/);
   assert.doesNotMatch(taskStatusDockSource, /Math\.round|percent|百分比|\d+%/);

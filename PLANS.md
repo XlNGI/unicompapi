@@ -1,5 +1,29 @@
 # UniComp 开发计划
 
+### 基础编辑播放、菜单与时间线修复（2026-09-22，待真实项目人工验收）
+
+负责人已授权按批准方案实施。根因证据来自隔离真实页面：播放按钮此前只依据播放意图，媒体一次 `pause()` 后仍显示暂停并需两次点击；菜单浮层改变文档高度；时间线约有 9px 纵向溢出且标尺与工具栏间有约 8px 空隙；抽帧整批提交造成缩略图延迟。当前修复仅涉及 `VideoEditingPage.tsx`、编辑器 `pages.css`、隔离诊断脚本和维护文档：播放状态改由媒体事件校正，保留旧帧并对预览请求/播放 promise/定位设置代际和 15 秒有界超时，预取一个后继片段，菜单按视口固定定位，时间线取消纵向滚动并逐帧发布缩略图。未改播放键 DOM 位置、媒体 IPC、导出合同、用户数据或外部系统。
+
+证据：`verify-editing-interaction-electron.cjs` 6/6 通过；`verify-editing-preview-electron.cjs` 19/19 通过；`pnpm typecheck`、`pnpm lint`、`pnpm build`、`git diff --check` 通过。旧 UI 契约套件仍有 5 项失败，均为源码字符串或旧布局断言，与本次已批准的逐帧刷新、时间线无纵向溢出和工具栏对齐目标冲突，未据此回退产品行为。隔离验证不替代真实项目素材、Windows 可见窗口人工验收或 macOS 验收。当前未提交、未推送、未合并。
+
+### 基础编辑主预览播放状态与属性布局（2026-09-22，待人工验收）
+
+按负责人批准的 V2 方案在当前 `feature/basic-editing-mp4-export` 实施：主预览按钮改由实际媒体 `playing/pause/waiting/error` 事件校正，播放准备、缓冲和失败提供可见状态；切片切换中的内部暂停保留续播意图，预览请求失败停止并提示重试。编辑器网格调整为素材 280px / 舞台剩余 / 属性面板 400–560px，属性面板贯通上下两排，时间轴只占素材与舞台列；中等容器和窄屏继续使用现有收窄/单列规则。未改媒体 IPC、导出合同、服务商或用户数据。
+
+验证：`pnpm typecheck`、`pnpm lint`、`pnpm build`、定向 `video-scrub-decoder` 2/2 通过，`git diff --check` 通过。UI 契约套件 43/44 通过，唯一失败是仓库缺失既有 handoff `manifests/SHA256SUMS.txt`，与本次改动无关。上一轮编辑器 Electron 缩略图/导出预览 19/19 证据仍有效；本次主时间线需用户在实际项目中人工验收播放卡住恢复、跨片段、缓冲及四类窗口布局。当前未提交、未推送、未合并。
+
+### 基础编辑帧图与导出预览维护（2026-09-21，隔离验收通过）
+
+负责人确认方案后，在当前 `feature/basic-editing-mp4-export` 保留既有未提交 MP4 改动，修复时间轴缩略图句柄丢失到期信息、图片失败无恢复及空槽遮挡；导出成功按钮采用紧凑同行布局，放大预览约束视口尺寸并完整等比显示。修复前真实 Electron 复现：失效后请求保持 3→3，按钮 y=414/458，竖屏视频高2133 px超出785 px视口；修复后重取3→6、按钮同行、三种比例均适配。用户原截图的确切缺帧触发条件未直接取证，不一概归因于五分钟到期。
+
+最终 Electron 19/19、相关 Vitest 37/37、编辑器 UI 契约34/34，类型/lint/生产构建/平台审计/diff检查通过。验证使用真实页面、主题与合成媒体、隔离 IPC/profile，未动真实项目，未调用服务商；未重启已有应用，用户项目和 macOS 人工验收待进行，未跑全应用全量测试。记录、命令及证据见 [基础编辑预览修复](docs/current/BASIC_EDITING_PREVIEW_FIX.md)，截图与报告位于 `outputs/editing-preview-fix/`。未提交、推送或合并。
+
+### 基础剪辑导出 MP4（2026-09-21，Windows 开发路径已验证）
+
+在 `feature/basic-editing-mp4-export` 将基础剪辑新导出固定为软件 MP4/H.264/AAC，保留历史 WebM 计划可读性与旧文件，不改布局、不调用服务商、不迁移用户数据。导出前置能力检查、冻结计划、文件名、FFmpeg 单源/组合参数和 IPC 合同已同步；本地探针在原子发布前检查 MP4 容器及 H.264/AAC 流，控制器在 Work 登记前再次检查容器、尺寸和时长。旧 WebM 不自动转换，重新导出草稿生成 MP4。
+
+证据：相关 Vitest 30/30、媒体工具 Node 8/8、`pnpm typecheck`、`pnpm lint`、`pnpm build` 和 `git diff --check` 通过；真实控制器生成 `outputs/editing-mp4/controller-export.mp4`，FFmpeg 全解码通过。Electron 隔离验证中，MP4 在 MIME 省略和显式 `video/mp4` 两种响应下均加载、播放、定位、播放到结束并重新打开成功，报告为 `outputs/editing-mp4/after.json`。未验证 macOS、原生系统播放器、正式打包和人工点击作品库页面；这些不影响本地导出合同，但不能据此宣称跨平台或发布验收完成。未提交、推送或合并。
+
 ### develop 同步到当前功能分支（2026-09-21）
 
 负责人批准解决冲突并上传。本次合并方向为 `origin/develop`（`4d070c1`）进入 `feature/model-selection-text-video-parameters`（合并前 `adf5763`），不更新 develop。唯一内容冲突是本文顶部双方新增记录，完整保留两边记录；`storage-ipc.ts` 自动合并保留消费事件逻辑并加入 H3 接线。类型检查、lint、生产构建、定向 Vitest 27/27、UI 契约 65/65 通过。未重跑全量测试、Electron 人工验收或真实服务调用。远端原有 MiniMax 文档尾空行及构建 CJS/大包警告保留。上传后以远端功能分支提交号核对，原功能分支和 develop 均保留。

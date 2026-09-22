@@ -9,6 +9,7 @@ import {
   resolveTimelineDropIndex,
   resolveBackgroundMusicPlayback,
   resolveTimelineEdgeAutoScroll,
+  resolveTimelinePlaybackScrollLeft,
   resolveTimelineHorizontalWheelDelta,
   resolveTimelinePositionUs,
   resolveTimelineSegmentAt,
@@ -159,6 +160,15 @@ describe('video editor timeline view', () => {
       clientX: 1_200,
       scrollLeft: 1_395
     })).toBe(1_400);
+  });
+
+  it('pages the timeline when the playing playhead reaches an edge', () => {
+    const base = { scrollLeft: 400, viewportWidth: 1_000, scrollWidth: 2_400 };
+    expect(resolveTimelinePlaybackScrollLeft({ ...base, playheadPx: 800 })).toBe(400);
+    expect(resolveTimelinePlaybackScrollLeft({ ...base, playheadPx: 1_300 })).toBe(400);
+    expect(resolveTimelinePlaybackScrollLeft({ ...base, playheadPx: 350 })).toBe(250);
+    expect(resolveTimelinePlaybackScrollLeft({ ...base, playheadPx: 1_500 })).toBe(1_400);
+    expect(resolveTimelinePlaybackScrollLeft({ ...base, playheadPx: 2_400 })).toBe(1_400);
   });
 
   it('zooms around the pointer while allowing short clips to leave empty space', () => {

@@ -84,13 +84,15 @@ export function App() {
   const [openedImageDraftId, setOpenedImageDraftId] = useState<string>();
   const [selectedChatConversationId, setSelectedChatConversationId] = useState<string>();
   const [selectedChatCandidateId, setSelectedChatCandidateId] = useState<string>();
+  const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
 
-  function handleNavigate(itemId: NavigationItemId) {
+  function handleNavigate(itemId: NavigationItemId, taskId?: string) {
     setOpenedVideoDraftId(undefined);
     setOpenedImageDraftId(undefined);
+    setSelectedTaskId(itemId === 'tasks' ? taskId : undefined);
     setActiveItemId(itemId);
     setActiveSubItemId(getSecondaryNavigationItems(itemId)[0]?.id);
   }
@@ -159,6 +161,7 @@ export function App() {
         <TasksPage
           onNavigate={handleNavigate}
           onReuseParameters={handleReuseParameters}
+          initialTaskId={selectedTaskId}
         />
       ) : activeItemId === 'library' && !activeSubItemId ? (
         <LibraryPage onNavigate={handleNavigate} />

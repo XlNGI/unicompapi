@@ -284,7 +284,7 @@ describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () =>
     expect((await readdir(root)).some((name) => name.includes('.part-'))).toBe(false);
   }, 120_000);
 
-  it('renders a real multi-clip composition with speed and a transition', async () => {
+  it.each(['webm', 'mp4'] as const)('renders a real %s multi-clip composition with speed and a transition', async (container) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-media-composition-'));
     roots.push(root);
     const sources = [path.join(root, 'red.webm'), path.join(root, 'blue.webm')];
@@ -296,7 +296,7 @@ describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () =>
         '-t', '1.2', '-c:v', 'libvpx-vp9', '-c:a', 'libopus', source
       ]);
     }
-    const outputPath = path.join(root, 'composition.webm');
+    const outputPath = path.join(root, `composition.${container}`);
     const adapter = new FfmpegMediaEngineAdapter({ ffmpegPath, ffprobePath });
     const transform = {
       scalePermille: 1000,
@@ -368,8 +368,9 @@ describe.skipIf(!hasProjectFfmpeg)('real FFmpeg media engine integration', () =>
           durationUs: 1_000_000
         }
       },
-      videoCodec: 'libvpx-vp9',
-      audioCodec: 'libopus'
+      videoCodec: container === 'mp4' ? 'libopenh264' : 'libvpx-vp9',
+      audioCodec: container === 'mp4' ? 'aac' : 'libopus',
+      videoBitrate: container === 'mp4' ? 8_000_000 : undefined
     });
 
     if (result.status === 'failed') throw new Error(result.message);

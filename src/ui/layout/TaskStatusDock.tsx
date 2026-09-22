@@ -52,7 +52,7 @@ export type TaskDisplayGroup =
 
 interface TaskStatusDockProps {
   readonly fallbackStatus: ProjectStatusSnapshot;
-  readonly onNavigate: (itemId: NavigationItemId) => void;
+  readonly onNavigate: (itemId: NavigationItemId, taskId?: string) => void;
 }
 
 export interface TaskStatusSummary {
@@ -102,9 +102,9 @@ export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockPro
     toggleRef.current?.focus();
   }
 
-  function navigateFromDock(itemId: NavigationItemId) {
+  function navigateFromDock(itemId: NavigationItemId, taskId?: string) {
     setExpanded(false);
-    onNavigate(itemId);
+    onNavigate(itemId, taskId);
   }
 
   useEffect(() => {
@@ -245,7 +245,7 @@ export function TaskStatusDock({ fallbackStatus, onNavigate }: TaskStatusDockPro
 
 function TaskStatusRow({ task, onNavigate }: {
   readonly task: StorageTaskSummaryDto;
-  readonly onNavigate: (itemId: NavigationItemId) => void;
+  readonly onNavigate: (itemId: NavigationItemId, taskId?: string) => void;
 }) {
   const group = taskDisplayGroup(task.latestExecutionState);
   const presentation = taskPresentation(group, task.latestExecutionState);
@@ -272,7 +272,7 @@ function TaskStatusRow({ task, onNavigate }: {
         {group === 'completed' ? (
           <button onClick={() => onNavigate('library')} type="button">打开作品库<LuArrowUpRight aria-hidden="true" /></button>
         ) : (
-          <button onClick={() => onNavigate('tasks')} type="button">打开任务中心<LuArrowUpRight aria-hidden="true" /></button>
+          <button onClick={() => onNavigate('tasks', task.taskId)} type="button">打开任务中心<LuArrowUpRight aria-hidden="true" /></button>
         )}
       </div>
     </article>

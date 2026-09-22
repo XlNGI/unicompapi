@@ -60,9 +60,9 @@ export interface VideoEditorExportPreflightDto {
   readonly ready: boolean;
   readonly reasons: readonly string[];
   readonly output: {
-    readonly container: 'webm';
-    readonly videoCodec: 'libvpx-vp9';
-    readonly audioCodec: 'libopus';
+    readonly container: 'mp4';
+    readonly videoCodec: 'libopenh264';
+    readonly audioCodec: 'aac';
     readonly hardwareAcceleration: 'software_only';
   };
   readonly estimatedOutputBytes: number;

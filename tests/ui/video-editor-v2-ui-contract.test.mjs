@@ -46,7 +46,7 @@ test('V2-S15 bounds dynamic timeline extraction and drops stale zoom work', () =
   assert.match(editorSource, /requestVideoFrameCallback/);
   assert.match(editorSource, /const orderedRequests = \[\.\.\.requests\]\.sort\(/);
   assert.match(editorSource, /onFrames: \(frames: readonly ExtractedTimelineFrame\[\]\) => void/);
-  assert.match(editorSource, /onFrames\(extractedFrames\)/);
+  assert.match(editorSource, /onFrames\(extractedFrames\.slice\(-1\)\)/);
   assert.match(
     editorSource,
     /const contactSheetUrl = contactSheets\[segment\.clipId\]/
@@ -273,15 +273,15 @@ test('V2-S7 aligns the timeline scale and wires drag reorder to move_clip', () =
   assert.match(editorSource, /onDragOver=/);
   assert.match(editorSource, /onDrop=/);
   assert.match(editorSource, /dataTransfer\.setData\('text\/plain', segment\.clipId\)/);
-  assert.match(editorSource, /dragPreviewRef = useRef<HTMLElement \| null>\(null\)/);
-  assert.match(editorSource, /classList\.add\('uc-video-editor__drag-preview'\)/);
+  assert.match(editorSource, /dragStateRef = useRef<TimelineDragState>\(\)/);
+  assert.match(editorSource, /className="uc-video-editor__drag-ghost"/);
+  assert.match(editorSource, /className="uc-video-editor__drag-marker"/);
   assert.match(editorSource, /onDrag=\{\(event\) => updateDragPreviewPosition/);
   assert.match(editorSource, /onDragEnd=\{clearDragPreview\}/);
-  assert.match(editorSource, /dragPreview\.style\.top = `\$\{clientY \+ 12\}px`/);
-  assert.match(editorSource, /dragPreview\.style\.left = `\$\{clientX \+ 12\}px`/);
+  assert.match(editorSource, /const insideLane = clientY >= rect\.top && clientY <= rect\.bottom/);
+  assert.doesNotMatch(editorSource, /dragPreview\.style\.(?:top|left)/);
   assert.doesNotMatch(editorSource, /setTimeout\(\(\) => dragPreview\.remove\(\), 0\)/);
-  assert.doesNotMatch(stylesSource, /\.uc-video-editor__drag-preview \{[^}]*-10000px/);
-  assert.match(stylesSource, /\.uc-video-editor__drag-preview \{[^}]*position: fixed;[^}]*overflow: hidden;/);
+  assert.doesNotMatch(stylesSource, /\.uc-video-editor__drag-preview/);
   assert.match(editorSource, /kind: 'move_clip',[\s\S]{0,120}?clipId,[\s\S]{0,120}?toIndex/);
 });
 
@@ -329,8 +329,8 @@ test('V2-S8 switches preview ownership when a timeline seek crosses clips', () =
 
 test('V2-S9 keeps timeline seeks authoritative until the target frame is rendered', () => {
   assert.match(editorSource, /pendingPreviewSeekRef/);
-  assert.match(editorSource, /onSeeked=\{completePreviewSeek\}/);
-  assert.match(editorSource, /aria-busy=\{previewSeeking\}/);
+  assert.match(editorSource, /onSeeked=\{isCurrent \? completePreviewSeek : undefined\}/);
+  assert.match(editorSource, /aria-busy=\{isCurrent \? previewSeeking : undefined\}/);
   assert.doesNotMatch(editorSource, /style=\{\{ visibility: previewSeeking \? 'hidden' : 'visible' \}\}/);
   assert.match(
     editorSource,
@@ -381,7 +381,7 @@ test('V2-S10 plays the timeline continuously with source audio, music and text o
     editorSource,
     /function advanceTimelinePlayback\(\)[\s\S]{0,260}?previewHandleRef\.current\?\.clipId/
   );
-  assert.match(editorSource, /onEnded=\{advanceTimelinePlayback\}/);
+  assert.match(editorSource, /onEnded=\{isCurrent \? handlePreviewEnded : undefined\}/);
   assert.match(editorSource, /timelinePlayingRef/);
   assert.match(editorSource, /createBackgroundMusicPreview\(/);
   assert.match(editorSource, /<audio/);
