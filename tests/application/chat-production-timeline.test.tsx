@@ -64,6 +64,32 @@ describe('production timeline projection', () => {
     expect(result.timelineByMessage.get('answer2')).toEqual([second]);
   });
 
+  it('orders and deduplicates interleaved clarification and original-source events on the same assistant', () => {
+    const saved = conversation([message('user', 'user', '制作报告'), message('question', 'assistant', '请补充主题'),
+      message('clarification', 'user', '年度经营'), message('answer', 'assistant')]);
+    const initial = event(1, { code: 'request_received', status: 'completed' });
+    const clarification = event(2, { sourceMessageId: 'clarification', traceId: 'trace2', code: 'request_received', status: 'completed' });
+    const content = event(3, { assistantMessageId: 'answer', code: 'model_response', status: 'completed', facts: { purpose: 'content' } });
+    const local = event(4, { sourceMessageId: 'clarification', traceId: 'trace2', assistantMessageId: 'answer', code: 'document_compile' });
+    const projected = projectProductionMessages(saved, [initial, clarification, content, local, content, local]);
+    expect(projected.timelineByMessage.get('answer')?.map((item) => item.sequence)).toEqual([1, 2, 3, 4]);
+    expect(projected.requestBySource.get('user')).toBe('制作报告');
+    expect(projected.requestBySource.get('clarification')).toBe('年度经营');
+    expect(projected.requestBySource.has('question')).toBe(false);
+    const html = renderToStaticMarkup(<DocumentProgress detail="生成中" events={projected.timelineByMessage.get('answer')}
+      requestBySource={projected.requestBySource} />);
+    expect(html.indexOf('制作报告')).toBeLessThan(html.indexOf('年度经营'));
+    expect(html.match(/制作报告/g)).toHaveLength(1);
+    expect(html.match(/年度经营/g)).toHaveLength(1);
+  });
+
+  it('does not substitute another request when an event source message is missing', () => {
+    const html = renderToStaticMarkup(<DocumentProgress detail="生成中" request="另一个请求"
+      requestBySource={new Map([['other', '另一个请求']])}
+      events={[event(1, { code: 'request_received', status: 'completed' })]} />);
+    expect(html).not.toContain('另一个请求');
+  });
+
   it('renders all real statuses without hiding failures or fabricating pending stages', () => {
     const html = renderToStaticMarkup(<DocumentProgress detail="legacy terminal" events={[
       event(1, { code: 'request_received', status: 'completed' }), event(2),

@@ -39,14 +39,16 @@ export function projectProductionMessages(conversation: ConversationDto | undefi
     const following = sourceIndex >= 0 ? messages[sourceIndex + 1] : undefined;
     const assistant = explicit || (!explicitAssistantId && following?.role === 'assistant' ? following : undefined);
     if (assistant) {
-      timelineByMessage.set(assistant.messageId, [...(timelineByMessage.get(assistant.messageId) ?? []), ...group]);
+      timelineByMessage.set(assistant.messageId, mergeProductionEvents(timelineByMessage.get(assistant.messageId) ?? [], group));
       continue;
     }
     const virtual: MessageDto = { messageId: `production-${sourceMessageId}`, conversationId: latest.conversationId,
       revision: 0, role: 'assistant', state: 'pending', content: '', attachments: [],
       createdAt: group[0].occurredAt, updatedAt: latest.occurredAt };
     messages.splice(sourceIndex < 0 ? messages.length : sourceIndex + 1, 0, virtual);
-    timelineByMessage.set(virtual.messageId, group);
+    timelineByMessage.set(virtual.messageId, mergeProductionEvents([], group));
   }
-  return { messages, timelineByMessage };
+  const requestBySource = new Map(messages.filter((message) => message.role === 'user')
+    .map((message) => [message.messageId, message.content]));
+  return { messages, timelineByMessage, requestBySource };
 }

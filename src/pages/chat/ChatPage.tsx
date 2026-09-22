@@ -3156,8 +3156,6 @@ export function ChatPage({
                   const taskProgress = isCurrentAssistant ? responseExecution?.taskProgress : undefined;
                   const traceEvents = productionProjection.timelineByMessage.get(item.messageId) ?? [];
                   const isVirtualProductionMessage = item.messageId.startsWith('production-') && traceEvents.length > 0;
-                  const traceRequest = selected?.messages.find((message) => message.role === 'user' && message.messageId === traceEvents[0]?.sourceMessageId)?.content ??
-                    (pendingProduction && pendingProduction.sourceMessageId === traceEvents[0]?.sourceMessageId ? pendingProduction.content : undefined);
                   const showProductionProgress = isDocumentDraftMessage || hideDocumentDraftContent || Boolean(taskProgress?.length) || traceEvents.length > 0;
                   const isGeneratingFile = documentGenerationActive &&
                     activeDocumentGenerationRef.current?.messageId === item.messageId;
@@ -3212,7 +3210,7 @@ export function ChatPage({
                               detail={progressDetail}
                               taskProgress={taskProgress}
                               events={traceEvents}
-                              request={traceRequest}
+                              requestBySource={productionProjection.requestBySource}
                               incomplete={productionIssues.includes(item.conversationId)}
                               bodyContent={(isDocumentDraftMessage || hideDocumentDraftContent)
                                 ? item.documentResult?.validatedContent ?? item.content

@@ -12,6 +12,7 @@ export interface DocumentProgressProps {
   readonly preferDetail?: boolean;
   readonly events?: readonly ProductionTraceEventDto[];
   readonly request?: string;
+  readonly requestBySource?: ReadonlyMap<string, string>;
   readonly incomplete?: boolean;
   /** A persisted document result/terminal status survives an incomplete historical trace. */
   readonly terminalDetail?: string;
@@ -85,7 +86,7 @@ function eventDetails(event: ProductionTraceEventDto): string[] {
   return details;
 }
 
-export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, incomplete, terminalDetail, bodyContent, bodyStreaming = false }: DocumentProgressProps) {
+export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, bodyContent, bodyStreaming = false }: DocumentProgressProps) {
   const latest = taskProgress.reduce<ConversationTaskProgressSnapshot | undefined>(
     (previous, event) => !previous || event.sequence > previous.sequence ? event : previous,
     undefined
@@ -113,7 +114,9 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
       {incomplete ? <p className="uc-chat-production-trace__issue" role="status">生产记录不完整，以下仅展示已保存的执行事实。</p> : null}
       {events.length > 0 ? (
         <ol className="uc-chat-production-trace" aria-label="完整生产链路">
-          {events.map((event) => (
+          {events.map((event) => {
+            const eventRequest = requestBySource ? requestBySource.get(event.sourceMessageId) : request;
+            return (
             <li key={`${event.conversationId}:${event.sequence}`} data-status={event.status} data-event-code={event.code}>
               <div className="uc-chat-production-trace__heading">
                 <span className="uc-chat-production-trace__direction">{eventDirection(event)}</span>
@@ -121,11 +124,12 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
                 <span className="uc-chat-production-trace__status">{statusLabels[event.status]}</span>
                 <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>
               </div>
-              {event.code === 'request_received' && request ? <p className="uc-chat-production-trace__request">{request}</p> : null}
+              {event.code === 'request_received' && eventRequest ? <p className="uc-chat-production-trace__request">{eventRequest}</p> : null}
               {eventDetails(event).length ? <p>{eventDetails(event).join(' · ')}</p> : null}
               {event === bodyEvent ? bodyPreview : null}
             </li>
-          ))}
+            );
+          })}
         </ol>
       ) : completedSteps.length > 0 ? (
         <details className="uc-chat-document-progress__details">
