@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import {
+  productionTraceIpcChannels, parseProductionTraceEvent,
+  type ProductionTraceApi, type ProductionTraceIssueDto
+} from '../src/shared/conversation-production-ipc';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   storageIpcChannels,
@@ -112,6 +116,45 @@ const webResearch: WebResearchApi = {
   authorize: (request) => ipcRenderer.invoke(webResearchIpcChannels.authorize, request),
   cancel: (request) => ipcRenderer.invoke(webResearchIpcChannels.cancel, request),
   getStatus: (request) => ipcRenderer.invoke(webResearchIpcChannels.getStatus, request)
+};
+
+function subscribeProductionTrace(
+  filter: { conversationId?: string; clientCommandId?: string; afterSequence?: number },
+  onEvent: Parameters<ProductionTraceApi['subscribe']>[2],
+  onIssue?: (issue: ProductionTraceIssueDto) => void
+): () => void {
+  const subscriberId = `production-${randomUUID()}`;
+  let active = true;
+  let latestSequence = filter.afterSequence ?? 0;
+  const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+    if (!active || !payload || typeof payload !== 'object') return;
+    const item = payload as { subscriberId?: unknown; event?: unknown; issue?: ProductionTraceIssueDto };
+    if (item.subscriberId !== subscriberId) return;
+    if (item.issue) { onIssue?.(item.issue); return; }
+    let event;
+    try { event = parseProductionTraceEvent(item.event); } catch { return; }
+    if (event.sequence <= latestSequence || (filter.conversationId && event.conversationId !== filter.conversationId) ||
+      (filter.clientCommandId && event.clientCommandId !== filter.clientCommandId)) return;
+    latestSequence = event.sequence;
+    onEvent(event);
+  };
+  ipcRenderer.on(productionTraceIpcChannels.event, listener);
+  const dispose = () => {
+    if (!active) return;
+    active = false;
+    ipcRenderer.removeListener(productionTraceIpcChannels.event, listener);
+    ipcRenderer.send(productionTraceIpcChannels.unsubscribe, { subscriberId });
+  };
+  void ipcRenderer.invoke(productionTraceIpcChannels.subscribe, { subscriberId, ...filter }).then((result) => {
+    if (!active) ipcRenderer.send(productionTraceIpcChannels.unsubscribe, { subscriberId });
+    else if (!result?.ok) dispose();
+  }).catch(dispose);
+  return dispose;
+}
+const productionTrace: ProductionTraceApi = {
+  list: (conversationId) => ipcRenderer.invoke(productionTraceIpcChannels.list, { conversationId }),
+  subscribe: (conversationId, afterSequence, onEvent, onIssue) => subscribeProductionTrace({ conversationId, afterSequence }, onEvent, onIssue),
+  subscribeCommand: (clientCommandId, onEvent, onIssue) => subscribeProductionTrace({ clientCommandId }, onEvent, onIssue)
 };
 
 const storage: StorageApi = {
@@ -992,6 +1035,7 @@ contextBridge.exposeInMainWorld('unicomp', {
   chatContexts,
   documentAttachments,
   webResearch,
+  productionTrace,
   documentGeneration,
   getPathForFile,
   imageSubmissions,

@@ -14,6 +14,7 @@ import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
 import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
 import { registerDocumentGenerationIpcHandlers } from './ipc/document-generation-ipc';
+import { registerConversationProductionIpcHandlers } from './ipc/conversation-production-ipc';
 import {
   deepSeekProviderPackageDescriptor,
   JsonProviderManagementAuditStore,
@@ -178,6 +179,7 @@ const providerManagement = new ProviderManagementFramework(
   { runtimeAuthorization: runtimeAuthorizationSync }
 );
 const projectSessionRegistry = new StorageProjectSessionRegistry();
+const productionTraceLifecycle = registerConversationProductionIpcHandlers({ getSession: () => projectSessionRegistry.get() });
 const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get(),
   providerRegistry: viduComposition.registry,
@@ -197,6 +199,7 @@ const storageLifecycle = registerStorageIpcHandlers({
   sessionRegistry: projectSessionRegistry,
   providerPackages,
   additionalSessionChangeGuards: [
+    productionTraceLifecycle.clearSubscriptions,
     chatContextLifecycle.waitForMutations,
     documentLifecycle.waitForOperations
   ],

@@ -4,9 +4,7 @@ import {
   LuArchiveRestore,
   LuArrowDown,
   LuArrowUp,
-  LuBrainCircuit,
   LuCheck,
-  LuChevronDown,
   LuCopy,
   LuFileText,
   LuMessageSquarePlus,
@@ -23,10 +21,12 @@ import { ActionMenu } from '../../components/ActionMenu';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
-import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { StreamingMarkdown } from './StreamingMarkdown';
 import { ChatAttachment } from './ChatAttachment';
 import { DocumentProgress } from './DocumentProgress';
+import { mergeProductionEvents, projectProductionMessages, type PendingProductionInput } from './productionTimeline';
+import type { ProductionTraceEventDto } from '../../shared/conversation-production-ipc';
+import { projectTaskProgress } from '../../shared/conversation-task-progress';
 import { ModelSelect } from '../../components/ModelSelect';
 import { StatusPill } from '../../components/StatusPill';
 import type {
@@ -53,7 +53,6 @@ import {
   documentResponseParameterValues,
   documentKindInstruction,
   extractSectionHeadings,
-  inferDocumentKind,
   resolvePresentationTemplate
 } from './documentDrafting';
 import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
@@ -67,6 +66,7 @@ import { documentPresentationPreferences } from '../../application/document-pres
 import '../../styles/pages.css';
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
+  model_selection_required: '本次请求尚未发出，请先选择一个可用模型。',
   invalid_request: '当前操作数据无效，请刷新后重试。',
   project_not_open: '请先打开目标项目。',
   project_scope_mismatch: '当前内容不属于已打开的项目。',
@@ -304,11 +304,17 @@ type DeleteTarget =
   | { readonly kind: 'conversation'; readonly value: ConversationDto }
   | { readonly kind: 'context'; readonly value: ProjectContextCandidateDto };
 
+export interface ChatModelSelection {
+  readonly projectId: string;
+  readonly candidateId: string;
+  readonly productFeature: 'text_chat' | 'text_reasoning';
+}
+
 interface ChatPageProps {
   readonly initialConversationId?: string;
   readonly onConversationChange?: (conversationId?: string) => void;
-  readonly initialCandidateId?: string;
-  readonly onCandidateChange?: (candidateId?: string) => void;
+  readonly initialModelSelection?: ChatModelSelection;
+  readonly onModelSelectionChange?: (selection?: ChatModelSelection) => void;
   readonly onOpenLibrary?: () => void;
 }
 
@@ -351,20 +357,20 @@ function describeDocumentError(error: {
 function documentGenerationMessage(
   status: MessageDto['documentGenerationStatus']
 ): string {
-  if (!status) return '正在生成 Office 文档…';
+  if (!status) return '正在准备文档任务…';
   if (status.state === 'cancelled') return '本次文档任务已取消，已有作品保留。';
   if (status.state === 'interrupted') {
     return '文档任务已中断，请恢复任务以核对保存结果。';
   }
-  if (status.state === 'generating_content') return '正在生成文档内容，完成后会自动检查结构并排版。';
+  if (status.state === 'generating_content') return '正在生成文档内容…';
   if (status.state === 'validating_outline') return '正在检查内容结构和格式…';
-  if (status.state === 'generating_file') return '正在排版、校验并保存本地文件…';
+  if (status.state === 'generating_file') return '正在生成本地文档文件…';
   if (status.state === 'completed') return '文档已生成并保存。';
   switch (status.errorCode) {
     case 'response_failed':
-      return 'AI 内容生成未完成，文档未生成。';
+      return '文档内容生成未完成，文档未生成。';
     case 'invalid_outline':
-      return 'AI 内容格式异常，文档未生成，请重试或切换模型。';
+      return '文档内容格式异常，文档未生成，请重试或切换模型。';
     case 'revision_scope_violation':
       return '没有安全定位到要修改的范围，原文件未改变。请写明具体页、章节或表格。';
     case 'revision_patch_failed':
@@ -393,7 +399,7 @@ function isMachineReadableDocumentOutline(content: string): boolean {
   if (!text.startsWith('{')) return false;
   // Match partial streaming payloads too; the first chunk may only contain
   // `kind` before `sections` arrives.
-  return /["'](?:kind|sections|title)\s*:/u.test(text);
+  return /["'](?:kind|sections|title)["']\s*:/u.test(text);
 }
 
 function workflowQuestion(workflow: ConversationWorkflowDto): string {
@@ -474,11 +480,12 @@ interface ReadyDocumentWorkflowExecution {
 export function ChatPage({
   initialConversationId,
   onConversationChange,
-  initialCandidateId,
-  onCandidateChange,
+  initialModelSelection,
+  onModelSelectionChange,
   onOpenLibrary
 }: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
+  const productionTrace = window.unicomp?.productionTrace;
   const webResearch = window.unicomp?.webResearch;
   const documentGeneration = window.unicomp?.documentGeneration;
   const documentAttachments = window.unicomp?.documentAttachments;
@@ -493,17 +500,16 @@ export function ChatPage({
   const [input, setInput] = useState('');
   const [documentGenerationActive, setDocumentGenerationActive] =
     useState(false);
-  // Document requests stream a machine-readable outline internally. Keep that
-  // payload out of the visible chat and show only the controlled progress copy.
+  // Document requests stream a machine-readable outline. Project its body into
+  // the production timeline instead of displaying the raw payload as chat text.
   const [documentResponseActive, setDocumentResponseActive] = useState(false);
   const [documentCancelRequested, setDocumentCancelRequested] =
     useState(false);
   const [attachments, setAttachments] = useState<readonly AttachmentDraft[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>('text_chat');
+  const [responseFeature, setResponseFeature] = useState<'text_chat' | 'text_reasoning'>(initialModelSelection?.productFeature ?? 'text_chat');
   const [responseCandidates, setResponseCandidates] = useState<readonly ConversationResponseCandidateDto[]>([]);
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | undefined>(initialCandidateId);
-  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [modelSelection, setModelSelection] = useState<ChatModelSelection | undefined>(initialModelSelection);
   const [responseExecution, setResponseExecution] = useState<ConversationResponseExecutionDto>();
   const [responseStarting, setResponseStarting] = useState(false);
   const [activeWorkflow, setActiveWorkflow] = useState<ConversationWorkflowDto>();
@@ -527,6 +533,10 @@ export function ChatPage({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [planningActive, setPlanningActive] = useState(false);
+  const [productionEvents, setProductionEvents] = useState<readonly ProductionTraceEventDto[]>([]);
+  const [productionIssues, setProductionIssues] = useState<readonly string[]>([]);
+  const [pendingProduction, setPendingProduction] = useState<PendingProductionInput>();
+  const subscribedProductionConversation = useRef<string>();
   const [planningCancelRequested, setPlanningCancelRequested] = useState(false);
   const [notice, setNotice] = useState('');
   const [candidatesLoading, setCandidatesLoading] = useState(false);
@@ -540,6 +550,7 @@ export function ChatPage({
   const inputValueRef = useRef('');
   const workflowSubmissionInFlightRef = useRef(false);
   const planningCommandRef = useRef<{ readonly clientCommandId: string; cancelled: boolean }>();
+  const productionCommandSubscriptions = useRef(new Map<string, () => void>());
   const workflowExecutionInFlightRef = useRef(false);
   const workflowResearchReferencesRef = useRef<{
     readonly workflowId: string;
@@ -572,9 +583,11 @@ export function ChatPage({
   const renamingConversation = conversations.find(
     (conversation) => conversation.conversationId === renamingConversationId
   );
-  const selectedCandidate = responseCandidates.find(
-    (candidate) => candidate.candidateId === selectedCandidateId
-  );
+  const selectedCandidate = modelSelection?.projectId === session?.projectId && modelSelection?.productFeature === responseFeature
+    ? responseCandidates.find((candidate) => candidate.candidateId === modelSelection.candidateId &&
+      candidate.parameterSchema.productFeature === responseFeature)
+    : undefined;
+  const selectedCandidateId = selectedCandidate?.candidateId;
   const editableCancelledUserMessage = useMemo(
     () => findEditableCancelledUserMessage(selected),
     [selected]
@@ -586,9 +599,11 @@ export function ChatPage({
   const completedMessages = selected?.messages.filter(
     (message) => message.state === 'completed'
   ) ?? [];
+  const visibleProductionEvents = productionEvents.filter((event) => event.projectId === session?.projectId &&
+    event.conversationId === (selected?.conversationId ?? pendingProduction?.conversationId));
+  const productionProjection = projectProductionMessages(selected, visibleProductionEvents, pendingProduction);
   const displayMessages = useMemo(() => {
-    if (!selected) return [];
-    return selected.messages.map((message) => {
+    return productionProjection.messages.map((message) => {
       if (!responseExecution || message.messageId !== responseExecution.assistantMessageId) {
         return message;
       }
@@ -600,7 +615,7 @@ export function ChatPage({
         content: responseExecution.content || message.content
       };
     });
-  }, [selected, responseExecution]);
+  }, [productionProjection.messages, responseExecution]);
   const lastDisplayMessage = displayMessages[displayMessages.length - 1];
   const duplicateIncludedContexts = useMemo(() => {
     const included = registeredContexts.filter((context) =>
@@ -655,6 +670,12 @@ export function ChatPage({
         if (sessionResult.ok) {
           if (sessionProjectIdRef.current !== sessionResult.value?.projectId) {
             sessionProjectIdRef.current = sessionResult.value?.projectId;
+            setModelSelection((current) => sessionResult.value && current?.projectId === sessionResult.value.projectId
+              ? current
+              : undefined);
+            setResponseCandidates([]);
+            setProductionEvents([]);
+            setProductionIssues([]);
             resetComposerScope();
             updateInput('');
             setActiveWorkflow(undefined);
@@ -761,8 +782,43 @@ export function ChatPage({
   }, []);
 
   useEffect(() => {
-    onCandidateChange?.(selectedCandidateId);
-  }, [onCandidateChange, selectedCandidateId]);
+    onModelSelectionChange?.(modelSelection);
+  }, [onModelSelectionChange, modelSelection]);
+
+  useEffect(() => {
+    if (!productionTrace || !session || !selectedId) return;
+    let active = true;
+    const receive = (event: ProductionTraceEventDto) => {
+      if (active && event.projectId === session.projectId && event.conversationId === selectedId) {
+        setProductionEvents((current) => mergeProductionEvents(current, [event]));
+      }
+    };
+    const issue = () => {
+      if (active) setProductionIssues((current) => [...new Set([...current, selectedId])]);
+    };
+    // Subscribe before reading history, then merge by the durable conversation sequence.
+    const unsubscribe = productionTrace.subscribe(selectedId, 0, receive, issue);
+    subscribedProductionConversation.current = selectedId;
+    void productionTrace.list(selectedId).then((result) => {
+      if (!active) return;
+      if (result.ok) setProductionEvents((current) => mergeProductionEvents(current,
+        result.value.filter((event) => event.projectId === session.projectId && event.conversationId === selectedId)));
+      else issue();
+    }).catch(issue);
+    return () => { active = false; subscribedProductionConversation.current = undefined; unsubscribe(); };
+  }, [productionTrace, session, selectedId]);
+
+  useEffect(() => {
+    if (!pendingProduction?.sourceMessageId || pendingProduction.conversationId !== subscribedProductionConversation.current) return;
+    // Conversation subscription is already active; its replay covers the command-to-conversation handoff.
+    productionCommandSubscriptions.current.get(pendingProduction.clientCommandId)?.();
+    productionCommandSubscriptions.current.delete(pendingProduction.clientCommandId);
+  }, [selectedId, pendingProduction]);
+
+  useEffect(() => () => {
+    for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
+    productionCommandSubscriptions.current.clear();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -863,11 +919,12 @@ export function ChatPage({
         });
         const distinctCandidates = [...candidatesById.values()];
         setResponseCandidates(distinctCandidates);
-        setSelectedCandidateId((current) => {
-          const candidate = current
-            ? distinctCandidates.find((item) => item.candidateId === current)
+        setModelSelection((current) => {
+          const candidate = current?.projectId === session.projectId
+            ? distinctCandidates.find((item) => item.candidateId === current.candidateId &&
+              item.parameterSchema.productFeature === current.productFeature)
             : undefined;
-          return candidate?.available ? candidate.candidateId : undefined;
+          return candidate?.available ? current : undefined;
         });
       } catch {
         if (active) {
@@ -925,6 +982,7 @@ export function ChatPage({
             ...next,
             state,
             streamSequence: event.sequence,
+            taskProgress: projectTaskProgress(next.taskProgress, event),
             reasoningContent: `${next.reasoningContent}${event.reasoningDelta ?? ''}`,
             content: `${next.content}${event.contentDelta ?? ''}`,
             updatedAt: event.occurredAt
@@ -1050,7 +1108,8 @@ export function ChatPage({
     setShowScrollToBottom(false);
   }, [
     lastDisplayMessage?.content,
-    lastDisplayMessage?.reasoningContent,
+    responseExecution?.taskProgress,
+    productionEvents,
     lastDisplayMessage?.state,
     selectedId
   ]);
@@ -1103,7 +1162,10 @@ export function ChatPage({
   }
 
   function changeCandidate(next: string) {
-    setSelectedCandidateId(next || undefined);
+    const candidate = featureCandidates.find((item) => item.candidateId === next && item.available);
+    setModelSelection(candidate && session
+      ? { projectId: session.projectId, candidateId: candidate.candidateId, productFeature: responseFeature }
+      : undefined);
   }
 
   function changeResponseFeature(next: 'text_chat' | 'text_reasoning') {
@@ -1118,7 +1180,9 @@ export function ChatPage({
       )
       : undefined;
     setResponseFeature(next);
-    setSelectedCandidateId(matchingCandidate?.candidateId);
+    setModelSelection(matchingCandidate && session
+      ? { projectId: session.projectId, candidateId: matchingCandidate.candidateId, productFeature: next }
+      : undefined);
   }
 
   function confirmLeaveUnsentInput(): boolean {
@@ -1128,6 +1192,9 @@ export function ChatPage({
 
   function resetComposerScope() {
     composerScopeRef.current += 1;
+    setPendingProduction(undefined);
+    for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
+    productionCommandSubscriptions.current.clear();
     documentResponseUserIdsRef.current.clear();
     setAttachments([]);
     attachmentSelectionChangedRef.current = false;
@@ -1253,6 +1320,10 @@ export function ChatPage({
   async function submitWorkflowInput() {
     if (workflowSubmissionInFlightRef.current) return;
     if (!chat || !session || !input.trim() || busy || responseInProgress) return;
+    if (!selectedCandidateId || !selectedCandidate?.available) {
+      setNotice(errorMessages.model_selection_required);
+      return;
+    }
     if (activeWorkflow?.status === 'ready' && selected && selectedCandidateId && webResearch?.answerNative &&
         /^允许本(?:次|会话)联网[。！!]?$/u.test(input.trim()) && !attachmentSelectionChangedRef.current) {
       workflowSubmissionInFlightRef.current = true;
@@ -1280,12 +1351,40 @@ export function ChatPage({
     setPlanningCancelRequested(false);
     const content = input.trim();
     const inputScope = composerScopeRef.current;
+    setPendingProduction({ clientCommandId: planningCommand.clientCommandId, content,
+      ...(selected ? { conversationId: selected.conversationId } : {}) });
+    if (productionTrace) {
+      for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
+      productionCommandSubscriptions.current.clear();
+      let boundConversationId: string | undefined;
+      const unsubscribe = productionTrace.subscribeCommand(planningCommand.clientCommandId, (event) => {
+        if (inputScope !== composerScopeRef.current || event.projectId !== session.projectId) return;
+        setProductionEvents((current) => mergeProductionEvents(current, [event]));
+        setPendingProduction((current) => current?.clientCommandId === planningCommand.clientCommandId
+          ? { ...current, conversationId: event.conversationId, sourceMessageId: event.sourceMessageId }
+          : current);
+        setNotice('');
+        if (boundConversationId !== event.conversationId) {
+          boundConversationId = event.conversationId;
+          void chat.getConversation(event.conversationId).then((current) => {
+            if (inputScope !== composerScopeRef.current || !current.ok) return;
+            replaceConversation(current.value);
+            setSelectedId(current.value.conversationId);
+          });
+        }
+      }, (issue) => {
+        if (inputScope !== composerScopeRef.current || issue.projectId !== session.projectId) return;
+        setProductionIssues((current) => [...new Set([...current, issue.conversationId])]);
+        setPendingProduction((current) => current?.clientCommandId === planningCommand.clientCommandId
+          ? { ...current, conversationId: issue.conversationId, sourceMessageId: issue.sourceMessageId }
+          : current);
+      });
+      productionCommandSubscriptions.current.set(planningCommand.clientCommandId, unsubscribe);
+    }
     const attachmentSelection = attachmentSelectionChangedRef.current
       ? { attachmentFileIds: attachments.map((attachment) => attachment.fileId) }
       : {};
-    const semanticSelection = selectedCandidateId && selectedCandidate?.available
-      ? { semanticCandidate: { candidateId: selectedCandidateId, productFeature: responseFeature } }
-      : {};
+    const semanticSelection = { semanticCandidate: { candidateId: selectedCandidateId, productFeature: responseFeature } };
     setWebResearchSession(undefined);
     setBusy(true);
     const answerCurrentWorkflow = activeWorkflow && selected &&
@@ -1364,6 +1463,10 @@ export function ChatPage({
       setActiveWorkflow(result.value.workflow);
       attachmentSelectionChangedRef.current = false;
       updateInput('');
+      if (result.value.workflow.status === 'failed' && result.value.workflow.planningFailureCode) {
+        setNotice('');
+        return;
+      }
       if (result.value.workflow.status === 'cancelled') {
         setActiveWorkflow(undefined);
         setWebResearchSession(undefined);
@@ -1567,9 +1670,11 @@ export function ChatPage({
     const sourceContent = source?.content ?? '';
     workflowResearchReferencesRef.current = { workflowId: workflow.workflowId, references: researchReferences };
     if (workflow.plan.kind === 'document') {
-      const kind = workflow.plan.documentKind && workflow.plan.documentKind !== 'auto'
-        ? workflow.plan.documentKind
-        : inferDocumentKind(sourceContent);
+      if (!workflow.plan.documentKind || workflow.plan.documentKind === 'auto') {
+        setNotice('任务计划缺少文档类型，请补充需求后继续。');
+        return;
+      }
+      const kind = workflow.plan.documentKind;
 
 
       const targetMessageId = workflow.resolvedTarget?.artifactRef ??
@@ -1809,7 +1914,7 @@ export function ChatPage({
       activeDocumentGenerationRef.current = generationContext;
       setDocumentGenerationActive(true);
       setDocumentCancelRequested(false);
-      setNotice('正在用已完成的内容重试本地文档生成…');
+      setNotice('');
       // The main process restores the persisted original template/images/options.
       const generated = await documentGeneration.generateFromMessage({ ...generationContext, kind: delivery.kind });
       if (executionScope !== composerScopeRef.current) return;
@@ -1930,7 +2035,6 @@ export function ChatPage({
       setAttachments([]);
       attachmentSelectionChangedRef.current = false;
 
-      setActivityExpanded(responseFeature === 'text_reasoning');
       updateInput('');
       setEditingMessageId(undefined);
       setNotice('');
@@ -2149,11 +2253,7 @@ export function ChatPage({
     setDocumentCancelRequested(false);
     responseFailureSafeCodeRef.current = undefined;
     setBusy(true);
-    setNotice(
-      useDeterministicLocalRevision
-        ? '正在本地校验并修改文档…'
-        : 'AI 正在撰写文档内容…'
-    );
+    setNotice('');
     rendererTrace('sendDocumentMessage:start', JSON.stringify({
       selectedId: executionConversation.conversationId,
       documentKind: kind,
@@ -2326,6 +2426,7 @@ export function ChatPage({
       replaceConversation(started.value.conversation);
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
+      setNotice('');
       if (execution.workflow.deliveries && execution.workflow.deliveries.length > 1) {
         const executing = await chat.getWorkflow(execution.workflow.workflowId);
         if (executing.ok) setActiveWorkflow(executing.value);
@@ -2406,7 +2507,7 @@ export function ChatPage({
           | undefined;
         setNotice(
           terminal === 'cancelled'
-            ? 'AI 内容生成已取消，文档未生成。'
+            ? '文档内容生成已取消，文档未生成。'
             : ['unknown', 'pending', 'streaming', 'interrupted'].includes(terminal)
               ? '模型调用结果尚未确认，文档未交付；请先核对调用状态和费用，避免重复发送。'
             : failedMessage
@@ -2417,7 +2518,7 @@ export function ChatPage({
                   ? failureSafeCode.safeCode
                   : undefined
               )
-              : 'AI 内容生成失败，文档未生成。'
+              : '文档内容生成失败，文档未生成。'
         );
         return;
       }
@@ -2425,7 +2526,7 @@ export function ChatPage({
         setNotice('已停止后续文档步骤；已发生的模型调用请以调用记录为准。');
         return;
       }
-      setNotice('正在生成本地 Office 文档…');
+      setNotice('');
       const aiImages = await generateAiSlideImages(
         completion.content,
         documentImageAttachments.length,
@@ -2617,7 +2718,7 @@ export function ChatPage({
       setNotice('已请求停止后续步骤，正在等待当前调用返回；已发生的调用和费用以记录为准。');
       return;
     }
-    setNotice('已发出文档停止请求，正在清理临时文件…');
+    setNotice('');
     try {
       const result = await documentGeneration.cancelGeneration(active);
       if (!result.ok) {
@@ -3018,7 +3119,7 @@ export function ChatPage({
           ref={messagesRef}
         >
           <div className="uc-chat-page__messages-inner">
-            {!selected ? (
+            {!selected && displayMessages.length === 0 ? (
               <div className="uc-chat-page__empty">
                 <LuMessagesSquare aria-hidden="true" />
                 <strong>开始新的对话</strong>
@@ -3038,10 +3139,6 @@ export function ChatPage({
                   const executionDuration = responseExecution
                     ? formatExecutionDuration(responseExecution.createdAt, responseExecution.updatedAt)
                     : '';
-                  const reasoningMode = responseExecution?.productFeature === 'text_reasoning';
-                  const reasoningContent = item.role === 'assistant'
-                    ? item.reasoningContent
-                    : undefined;
                   const canEditCancelledMessage = item.role === 'user' &&
                     item.messageId === editableCancelledUserMessage?.messageId &&
                     !responseInProgress &&
@@ -3056,86 +3153,85 @@ export function ChatPage({
                       Boolean(item.documentGenerationStatus) ||
                       (documentResponseActive && ['pending', 'streaming'].includes(item.state))) &&
                     isMachineReadableDocumentOutline(item.content);
-                  const activityLabel = (documentResponseActive || hideDocumentDraftContent)
-                    ? documentGenerationMessage(item.documentGenerationStatus)
-                    : cancelRequested
-                      ? '正在停止'
-                      : responseExecution?.state === 'pending'
-                        ? reasoningMode ? '正在推理' : '正在处理'
-                        : responseExecution?.state === 'streaming'
-                          ? reasoningContent && !item.content ? '正在思考' : '正在回答'
-                          : responseExecution?.state === 'completed'
-                            ? `已处理${executionDuration ? ` ${executionDuration}` : ''}`
-                            : responseExecution?.state === 'cancelled'
-                              ? '已停止'
-                              : item.content ? '回答已中断' : '处理失败';
+                  const taskProgress = isCurrentAssistant ? responseExecution?.taskProgress : undefined;
+                  const traceEvents = productionProjection.timelineByMessage.get(item.messageId) ?? [];
+                  const isVirtualProductionMessage = item.messageId.startsWith('production-') && traceEvents.length > 0;
+                  const traceRequest = selected?.messages.find((message) => message.role === 'user' && message.messageId === traceEvents[0]?.sourceMessageId)?.content ??
+                    (pendingProduction && pendingProduction.sourceMessageId === traceEvents[0]?.sourceMessageId ? pendingProduction.content : undefined);
+                  const showProductionProgress = isDocumentDraftMessage || hideDocumentDraftContent || Boolean(taskProgress?.length) || traceEvents.length > 0;
+                  const isGeneratingFile = documentGenerationActive &&
+                    activeDocumentGenerationRef.current?.messageId === item.messageId;
+                  const isDocumentStopping = (isCurrentAssistant && (cancelRequested ||
+                    (documentResponseActive && documentCancelRequested))) || (isGeneratingFile && documentCancelRequested);
+                  const generationTerminal = item.documentGenerationStatus &&
+                    ['completed', 'failed', 'cancelled', 'interrupted'].includes(item.documentGenerationStatus.state);
+                  const progressDetail = item.documentResult
+                    ? '文档已生成并保存。'
+                    : isDocumentStopping
+                      ? '已请求停止，正在确认任务状态…'
+                      : isGeneratingFile
+                        ? '正在生成本地文档文件…'
+                        : generationTerminal
+                          ? documentGenerationMessage(item.documentGenerationStatus)
+                          : isCurrentAssistant && responseExecution?.state === 'completed'
+                            ? isDocumentDraftMessage || hideDocumentDraftContent
+                              ? '文档内容已接收，正在准备本地生成…' : '任务执行已结束，请查看回复结果。'
+                            : isCurrentAssistant && responseExecution?.state === 'pending'
+                              ? '正在准备文档内容…'
+                              : isCurrentAssistant && responseExecution && ['failed', 'cancelled', 'interrupted'].includes(responseExecution.state)
+                                ? responseExecution.state === 'cancelled' ? '文档内容生成已停止。' : '文档内容生成未完成。'
+                                : documentGenerationMessage(item.documentGenerationStatus);
+                  const responseLabel = cancelRequested
+                    ? '正在停止回复…'
+                    : responseExecution?.state === 'pending'
+                      ? '正在准备回复…'
+                      : responseExecution?.state === 'streaming'
+                        ? '正在接收回复…'
+                        : responseExecution?.state === 'completed'
+                          ? `回复已完成${executionDuration ? `，用时 ${executionDuration}` : ''}`
+                          : responseExecution?.state === 'cancelled'
+                            ? '回复已停止'
+                            : item.content ? '回复已中断' : '回复未完成';
                   return (
                     <li className={`uc-chat-page__message-item uc-chat-page__message-item--${item.role}`} key={item.messageId}>
-                      {isCurrentAssistant ? (
-                        <section className="uc-chat-page__activity" aria-label="AI 工作过程">
-                          <button
-                            aria-expanded={activityExpanded}
-                            onClick={() => setActivityExpanded((expanded) => !expanded)}
-                            type="button"
-                          >
-                            <LuBrainCircuit aria-hidden="true" />
-                            <span>{activityLabel}</span>
-                            <LuChevronDown aria-hidden="true" />
-                          </button>
-                          {activityExpanded ? (
-                            <div className="uc-chat-page__activity-detail">
-                              <span>
-                                {reasoningContent
-                                  ? '模型返回的思考内容'
-                                  : reasoningMode ? '推理模式' : '普通对话'}
-                              </span>
-                              {reasoningContent ? (
-                                <MarkdownMessage content={reasoningContent} />
-                              ) : (
-                                <p>
-                                  {cancelRequested
-                                    ? '停止请求已发送，正在确认并保留已经接收的内容。'
-                                    : reasoningMode
-                                      ? '正在等待模型接口返回可展示的思考内容。'
-                                      : responseInProgress
-                                        ? '模型正在生成回答，可点击输入框右侧按钮立即停止。'
-                                        : '回答处理已经结束。'}
-                                </p>
-                              )}
-                            </div>
-                          ) : null}
-                        </section>
+                      {isCurrentAssistant && !showProductionProgress ? (
+                        <p className="uc-chat-page__response-status" aria-label="回复状态" role="status">
+                          {responseLabel}
+                        </p>
                       ) : null}
-                      {item.state !== 'completed' && !isCurrentAssistant ? (
+                      {item.state !== 'completed' && !isCurrentAssistant && !isVirtualProductionMessage ? (
                         <div className="uc-chat-page__message-heading">
                           <strong>{item.role === 'user' ? '你' : '助手'}</strong>
                           <StatusPill tone={messageStatusTone(item)}>{messageStatusLabel(item)}</StatusPill>
                         </div>
                       ) : null}
-                      {item.role === 'assistant' && reasoningContent && !isCurrentAssistant ? (
-                        <details className="uc-chat-page__reasoning">
-                          <summary>
-                            <LuBrainCircuit aria-hidden="true" />
-                            <span>模型返回的思考内容</span>
-                          </summary>
-                          <div className="uc-chat-page__reasoning-content">
-                            <MarkdownMessage content={reasoningContent} />
-                          </div>
-                        </details>
-                      ) : null}
                       {item.role === 'assistant' ? (
                         <div className="uc-chat-page__message-content">
-                          {isDocumentDraftMessage || hideDocumentDraftContent ? (
+                          {showProductionProgress ? (
                             <DocumentProgress
-                              state={item.documentResult ? 'completed' : item.documentGenerationStatus?.state}
-                              detail={item.documentResult ? '文档已生成并保存。' : documentGenerationMessage(item.documentGenerationStatus)}
+                              detail={progressDetail}
+                              taskProgress={taskProgress}
+                              events={traceEvents}
+                              request={traceRequest}
+                              incomplete={productionIssues.includes(item.conversationId)}
+                              bodyContent={(isDocumentDraftMessage || hideDocumentDraftContent)
+                                ? item.documentResult?.validatedContent ?? item.content
+                                : undefined}
+                              bodyStreaming={item.state === 'streaming' &&
+                                (isDocumentDraftMessage || hideDocumentDraftContent)}
+                              terminalDetail={item.documentResult ? '文档已生成并保存。'
+                                : generationTerminal ? documentGenerationMessage(item.documentGenerationStatus) : undefined}
+                              preferDetail={Boolean(item.documentResult || generationTerminal || isGeneratingFile || isDocumentStopping ||
+                                (isCurrentAssistant && responseExecution &&
+                                  ['completed', 'failed', 'cancelled', 'interrupted'].includes(responseExecution.state)))}
                             />
-                          ) : (
+                          ) : null}
+                          {!isDocumentDraftMessage && !hideDocumentDraftContent && (item.content || !showProductionProgress) ? (
                             <StreamingMarkdown
                               streaming={item.state === 'streaming' && Boolean(item.content)}
                               content={item.content || (item.state === 'failed' ? '' : item.state === 'streaming' || item.state === 'pending' ? '正在接收…' : '尚无内容')}
                             />
-                          )}
+                          ) : null}
                           {item.state === 'failed' ? (
                             <p aria-label="回复失败原因">
                               {failedResponseNotice(item, isCurrentAssistant &&
@@ -3143,7 +3239,7 @@ export function ChatPage({
                                 ? responseFailureSafeCodeRef.current?.safeCode : undefined)}
                             </p>
                           ) : null}
-                          {item.state === 'streaming' ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
+                          {item.state === 'streaming' && !showProductionProgress ? <span className="uc-chat-page__caret" aria-hidden="true">▌</span> : null}
                         </div>
                       ) : (
                         <div className="uc-chat-page__message-bubble">
@@ -3215,7 +3311,7 @@ export function ChatPage({
               </ol>
             )}
             <div className="uc-chat-page__message-item uc-chat-page__message-item--assistant" aria-label="助手任务回复">
-          {activeWorkflow && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
+          {activeWorkflow && !activeWorkflow.planningFailureCode && !selected?.messages.at(-1)?.workflowReply?.workflowId.startsWith('native-') && !['needs_clarification', 'needs_confirmation'].includes(activeWorkflow.status) ? (
             <div className="uc-chat-page__workflow-status" role="status">
               <div className="uc-chat-page__workflow-copy">
                 <span>
@@ -3308,6 +3404,9 @@ export function ChatPage({
             <p className="uc-chat-page__message" aria-live="polite" role="status">
               {notice}
             </p>
+          ) : null}
+          {productionIssues.includes(selectedId ?? pendingProduction?.conversationId ?? '') && visibleProductionEvents.length === 0 ? (
+            <p className="uc-chat-page__message" role="status">生产记录不完整，当前无法还原完整执行链路。</p>
           ) : null}
           {selected && !canCompose && session ? <p className="uc-chat-page__message" role="status">当前对话不可写，请从对话列表选择其他记录。</p> : null}
           {canCompose && candidateLoadFailed && !candidatesLoading ? (
@@ -3491,6 +3590,7 @@ export function ChatPage({
                       ? cancelRequested
                       : !chat ||
                         !canCompose ||
+                        !selectedCandidate?.available ||
                         !input.trim() ||
                         busy ||
                         cancelRequested}
@@ -3509,7 +3609,7 @@ export function ChatPage({
                     ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
                     : responseInProgress
                       ? cancelRequested ? '正在停止' : '停止生成'
-                      : '发送'}
+                      : !selectedCandidate?.available ? '请先选择一个可用模型' : '发送'}
                   type="button"
                 >
                   {planningActive || responseInProgress || documentGenerationActive || documentResponseActive

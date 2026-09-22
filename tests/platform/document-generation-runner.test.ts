@@ -26,6 +26,7 @@ import {
   projectStoragePaths
 } from '../../src/platform';
 import { toExecutionId, toFileReferenceId, toProjectId, toTaskId, toWorkId } from '../../src/domain';
+import type { DocumentGenerationProgressEvent } from '../../src/application/document-generation-service';
 
 const temporaryRoots: string[] = [];
 
@@ -146,6 +147,90 @@ const employeeSalaryOutline = parseDocumentOutline(
 );
 
 describe('document generation runner', () => {
+  it('records the real file, render, checks, publication and Work registration in order', async () => {
+    const rootDirectory = await createProjectRoot();
+    const events: DocumentGenerationProgressEvent[] = [];
+    const observed: string[] = [];
+    const runner = new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId('doc-progress-order'),
+      generateTemporaryFile: async input => {
+        observed.push('file-write');
+        return generateTemporaryDocumentFile(input);
+      },
+      renderPreview: async temporaryPath => {
+        expect(await pathExists(temporaryPath)).toBe(true);
+        observed.push('renderer');
+        return { previewCount: 1, diagnostics: [] };
+      },
+      publishFile: async (temporaryPath, finalPath) => {
+        observed.push('rename');
+        await rename(temporaryPath, finalPath);
+      }
+    });
+    const result = await runner.run({ kind: 'word', title: outline.title, contentFingerprint: 'a'.repeat(64),
+      draftRevision: 1, sourceDraftId: 'message-progress-order', outline,
+      onProgress: async event => { events.push(event); observed.push(`${event.operationId}:${event.status}`); } });
+    expect(events.map(event => `${event.operationId}:${event.status}`)).toEqual([
+      'document-file-write:started', 'document-file-write:completed',
+      'document-output-structure:started', 'document-output-structure:completed',
+      'document-preview-render:started', 'document-preview-render:completed',
+      'document-render-diagnostics:started', 'document-render-diagnostics:completed',
+      'document-temporary-hash:started', 'document-temporary-hash:completed',
+      'document-atomic-publish:started', 'document-atomic-publish:completed',
+      'document-published-hash:started', 'document-published-hash:completed',
+      'document-work-register:started', 'document-work-register:completed'
+    ]);
+    for (const [action, stage] of [['file-write', 'document-file-write'], ['renderer', 'document-preview-render'], ['rename', 'document-atomic-publish']]) {
+      expect(observed.indexOf(`${stage}:started`)).toBeLessThan(observed.indexOf(action));
+      expect(observed.indexOf(action)).toBeLessThan(observed.indexOf(`${stage}:completed`));
+    }
+    expect(result.execution.state).toBe('completed');
+    expect(JSON.stringify(events)).not.toContain(rootDirectory);
+    expect(JSON.stringify(events)).not.toContain(outline.title);
+  });
+
+  it.each(['render', 'diagnostics', 'publish', 'published_hash', 'register'] as const)(
+    'records a failed %s operation without recording its completion or later steps', async failure => {
+      const rootDirectory = await createProjectRoot();
+      const events: DocumentGenerationProgressEvent[] = [];
+      const failedOperations = { render: 'document-preview-render', diagnostics: 'document-render-diagnostics',
+        publish: 'document-atomic-publish', published_hash: 'document-published-hash', register: 'document-work-register' };
+      const saveWork = failure === 'register' ? vi.spyOn(JsonWorkRepository.prototype, 'save').mockRejectedValue(new Error('simulated registration failure')) : undefined;
+      try {
+        const runner = new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId(`doc-progress-${failure}`),
+          renderPreview: async () => {
+            if (failure === 'render') throw new Error('simulated render failure');
+            return { previewCount: 1, diagnostics: failure === 'diagnostics'
+              ? [{ code: 'text_overflow' as const, severity: 'error' as const, scope: 'page', message: 'synthetic overflow' }] : [] };
+          },
+          publishFile: async (temporaryPath, finalPath) => {
+            if (failure === 'publish') throw new Error('simulated publish failure');
+            await rename(temporaryPath, finalPath);
+            if (failure === 'published_hash') await writeFile(finalPath, 'tampered after publish');
+          }
+        });
+        await expect(runner.run({ kind: 'word', title: outline.title, contentFingerprint: 'b'.repeat(64),
+          draftRevision: 1, sourceDraftId: `message-progress-${failure}`, outline,
+          onProgress: async event => { events.push(event); } })).rejects.toThrow();
+      } finally { saveWork?.mockRestore(); }
+      expect(events.at(-1)).toMatchObject({ operationId: failedOperations[failure], status: 'failed' });
+      expect(events).not.toContainEqual(expect.objectContaining({ operationId: failedOperations[failure], status: 'completed' }));
+      const works = new JsonWorkRepository(new NodeProjectStorage(rootDirectory), toProjectId(`doc-progress-${failure}`));
+      expect(await works.list(toProjectId(`doc-progress-${failure}`))).toHaveLength(0);
+    });
+
+  it('does not invent rendering and keeps registered output when progress recording fails', async () => {
+    const rootDirectory = await createProjectRoot();
+    const events: DocumentGenerationProgressEvent[] = [];
+    const result = await new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId('doc-progress-unavailable') })
+      .run({ kind: 'word', title: outline.title, contentFingerprint: 'c'.repeat(64), draftRevision: 1,
+        sourceDraftId: 'message-progress-unavailable', outline,
+        onProgress: async event => { events.push(event); throw new Error('progress storage unavailable'); } });
+    expect(result.execution.state).toBe('completed');
+    expect(events.some(event => event.code === 'document_render')).toBe(false);
+    expect(events.some(event => event.operationId === 'document-render-diagnostics')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ code: 'document_register', status: 'completed' });
+  });
+
   it('settles an already registered Work after the final execution write fails without generating it again', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-registration-recovery');

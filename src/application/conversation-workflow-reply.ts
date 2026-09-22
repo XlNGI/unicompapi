@@ -2,6 +2,15 @@ import type { Conversation, ConversationWorkflowV1 } from '../domain';
 
 /** Only persisted workflow facts can produce these replies; no model prose is trusted as progress. */
 export function conversationWorkflowReply(workflow: ConversationWorkflowV1, conversation: Conversation): string | undefined {
+  if (workflow.status === 'failed' && workflow.planningFailureCode) {
+    const explanations = {
+      classification_timeout: '这次理解需求的请求超时了。',
+      classification_unavailable: '未能启动模型调用或确认调用状态，请检查所选模型和连接是否可用。',
+      classification_invalid_response: '请求已发出，但模型服务的响应不完整或格式无法使用，未能完成需求理解。',
+      invalid_intent_plan: '请求已发出，模型已返回内容，但任务计划不符合约定，无法继续执行。'
+    };
+    return explanations[workflow.planningFailureCode] + '本轮尚未开始后续执行。你可以重新发送需求再试，或切换可用模型；也可以在调用记录中查看详情。';
+  }
   if (workflow.status === 'needs_clarification') {
     return workflow.pendingQuestions.slice(0, 2).map((item) => item.question).join('\n\n') ||
       '你希望我帮你完成什么？可以直接描述主题和用途，也可以添加参考资料。';

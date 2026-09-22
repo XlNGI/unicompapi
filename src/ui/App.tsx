@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ComponentType } from 'react';
-import { ChatPage } from '../pages/chat/ChatPage';
+import { ChatPage, type ChatModelSelection } from '../pages/chat/ChatPage';
 import { ImageEditingPage } from '../pages/creation/image/ImageEditingPage';
 import { ImageProfessionalPage } from '../pages/creation/image/ImageProfessionalPage';
 import { ImageQuickPage } from '../pages/creation/image/ImageQuickPage';
@@ -83,7 +83,7 @@ export function App() {
   const [openedVideoDraftId, setOpenedVideoDraftId] = useState<string>();
   const [openedImageDraftId, setOpenedImageDraftId] = useState<string>();
   const [selectedChatConversationId, setSelectedChatConversationId] = useState<string>();
-  const [selectedChatCandidateId, setSelectedChatCandidateId] = useState<string>();
+  const [chatModelSelection, setChatModelSelection] = useState<ChatModelSelection>();
   const ActivePage = activeSubItemId
     ? pagesBySecondaryNavigationItem[activeSubItemId]
     : pagesByNavigationItem[activeItemId];
@@ -148,9 +148,9 @@ export function App() {
       {activeItemId === 'chat' && !activeSubItemId ? (
         <ChatPage
           initialConversationId={selectedChatConversationId}
-          initialCandidateId={selectedChatCandidateId}
+          initialModelSelection={chatModelSelection}
           onConversationChange={setSelectedChatConversationId}
-          onCandidateChange={setSelectedChatCandidateId}
+          onModelSelectionChange={setChatModelSelection}
           onOpenLibrary={() => handleNavigate('library')}
         />
       ) : activeItemId === 'projects' && !activeSubItemId ? (

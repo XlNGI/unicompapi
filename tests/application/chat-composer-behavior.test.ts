@@ -36,8 +36,9 @@ vi.mock('react', async (original) => ({
   }
 }));
 
-import { ChatPage } from '../../src/pages/chat/ChatPage';
+import { ChatPage, type ChatModelSelection } from '../../src/pages/chat/ChatPage';
 import { ChatAttachment } from '../../src/pages/chat/ChatAttachment';
+import { PROJECT_SESSION_CHANGED_EVENT } from '../../src/ui/project-session-events';
 
 type Element = ReactElement<Record<string, unknown>>;
 function find(node: ReactNode, predicate: (element: Element) => boolean): Element | undefined {
@@ -65,11 +66,14 @@ describe('chat composer event behavior', () => {
     pendingQuestions: [{ field: 'topic', question: '需要讲什么？', required: true }]
   };
   let initialConversationId: string | undefined;
+  let initialModelSelection: ChatModelSelection | undefined;
+  let currentSession = session;
+  const onModelSelectionChange = vi.fn();
   let candidateEnabled = false;
   async function settle(rounds = 8) {
     for (let turn = 0; turn < rounds; turn += 1) {
       hooks.cursor = 0;
-      tree = ChatPage({ initialConversationId, initialCandidateId: 'candidate-1' });
+      tree = ChatPage({ initialConversationId, initialModelSelection, onModelSelectionChange });
       hooks.effects.splice(0).forEach((effect) => effect());
       await Promise.resolve();
     }
@@ -78,6 +82,15 @@ describe('chat composer event behavior', () => {
     const found = find(tree, (item) => item.props['aria-label'] === label);
     if (!found) throw new Error(`Missing ${label}`);
     return found;
+  }
+  function modelPicker() {
+    return find(tree, (item) => item.props.ariaLabel === '模型设置')!;
+  }
+  function unmount() {
+    for (const slot of hooks.slots) {
+      if (slot && typeof slot === 'object' && 'cleanup' in slot && typeof slot.cleanup === 'function') slot.cleanup();
+    }
+    hooks.slots = []; hooks.cursor = 0; hooks.effects = [];
   }
   async function type(content: string) {
     (element('对话输入').props.onChange as (event: unknown) => void)({ currentTarget: { value: content } });
@@ -97,7 +110,11 @@ describe('chat composer event behavior', () => {
   beforeEach(() => {
     hooks.slots = []; hooks.cursor = 0; hooks.effects = [];
     initialConversationId = undefined;
-    candidateEnabled = false;
+    initialModelSelection = { projectId: session.projectId, candidateId: 'candidate-1', productFeature: 'text_chat' };
+    currentSession = session;
+    // Production chat requires an explicit selected model before planning;
+    // these composer behavior fixtures represent that selected state.
+    candidateEnabled = true;
     vi.clearAllMocks();
     getPendingWorkflow.mockResolvedValue({ ok: true, value: null });
     startWorkflow.mockResolvedValue({ ok: true, value: { conversation, workflow } });
@@ -112,14 +129,15 @@ describe('chat composer event behavior', () => {
         chatContexts: {
           listConversations: vi.fn(async () => ({ ok: true, value: initialConversationId ? [conversation] : [] })),
           listProjectContextCandidates: vi.fn(async () => ({ ok: true, value: [] })),
-          listTextCandidates: vi.fn(async () => ({ ok: true, value: candidateEnabled ? [{
-            candidateId: 'candidate-1', available: true, providerName: 'Test', modelName: 'Test',
-            parameterSchema: { productFeature: 'text_chat', fields: [] }
+          listTextCandidates: vi.fn(async (productFeature: 'text_chat' | 'text_reasoning') => ({ ok: true, value: candidateEnabled ? [{
+            candidateId: productFeature === 'text_chat' ? 'candidate-1' : 'candidate-reasoning',
+            available: true, providerName: 'Test', connectionName: 'Test', modelName: 'Test',
+            parameterSchema: { productFeature, fields: [] }
           }] : [] })),
           getPendingWorkflow, startWorkflow, answerWorkflow, startResponse,
           getConversation: vi.fn(async () => ({ ok: true, value: conversation }))
         },
-        storage: { getProjectSession: vi.fn(async () => ({ ok: true, value: session })) },
+        storage: { getProjectSession: vi.fn(async () => ({ ok: true, value: currentSession })) },
         getPathForFile: () => '/selected/report.pdf',
         documentAttachments: { importAttachment: vi.fn(async () => ({ ok: true, value: {
           fileId: 'file-1', fileName: 'report.pdf', sizeBytes: 20,
@@ -130,6 +148,85 @@ describe('chat composer event behavior', () => {
     vi.spyOn(console, 'info').mockImplementation(() => {});
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it.each(['enter', 'button'] as const)('%s keeps an unsubmitted draft when no model is selected', async (method) => {
+    initialModelSelection = undefined;
+    await settle();
+    await type('我想制作一个ppt');
+    expect(element('发送消息').props.disabled).toBe(true);
+    // Exercise the handler too: Enter and stale click callbacks must be guarded.
+    await send(method);
+    expect(element('对话输入').props.value).toBe('我想制作一个ppt');
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(answerWorkflow).not.toHaveBeenCalled();
+    expect(startResponse).not.toHaveBeenCalled();
+  });
+
+  it('does not plan with a selected model that is no longer available', async () => {
+    candidateEnabled = false;
+    await settle();
+    await type('产品介绍 PPT');
+    await send('enter');
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('产品介绍 PPT');
+  });
+
+  it('restores the selected reasoning model and feature together after leaving and reopening chat', async () => {
+    await settle();
+    const reasoning = find(modelPicker().props.listboxHeader as ReactNode, (item) =>
+      item.props.role === 'radio' && item.props['aria-checked'] === false)!;
+    (reasoning.props.onClick as () => void)();
+    await settle();
+    const saved = onModelSelectionChange.mock.calls.at(-1)?.[0] as ChatModelSelection;
+    expect(saved).toEqual({ projectId: session.projectId, candidateId: 'candidate-reasoning', productFeature: 'text_reasoning' });
+    unmount();
+    initialModelSelection = saved;
+    await settle();
+    expect(modelPicker().props.value).toBe('candidate-reasoning');
+    expect(modelPicker().props.options).toEqual([expect.objectContaining({ id: 'candidate-reasoning' })]);
+    await type('帮我生成一个ppt');
+    expect(element('发送消息').props.disabled).toBe(false);
+    await send('button');
+    expect(startWorkflow).toHaveBeenCalledWith(expect.objectContaining({
+      semanticCandidate: { candidateId: 'candidate-reasoning', productFeature: 'text_reasoning' }
+    }));
+  });
+
+  it('does not send a restored candidate under a different product feature', async () => {
+    initialModelSelection = { projectId: session.projectId, candidateId: 'candidate-reasoning', productFeature: 'text_chat' };
+    await settle();
+    expect(modelPicker().props.value).toBe('');
+    await type('帮我生成一个ppt');
+    expect(element('发送消息').props.disabled).toBe(true);
+    await send('enter');
+    expect(startWorkflow).not.toHaveBeenCalled();
+    expect(onModelSelectionChange).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('clears a restored selection when the project changed while chat was hidden', async () => {
+    currentSession = { ...session, projectId: 'project-2' };
+    await settle();
+    expect(modelPicker().props.value).toBe('');
+    expect(onModelSelectionChange).toHaveBeenLastCalledWith(undefined);
+    await type('产品介绍 PPT');
+    await send('enter');
+    expect(startWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('clears the active model selection when the project changes without choosing a replacement', async () => {
+    await settle();
+    expect(modelPicker().props.value).toBe('candidate-1');
+    currentSession = { ...session, projectId: 'project-2' };
+    const refresh = vi.mocked(window.addEventListener).mock.calls.find(([event]) => event === PROJECT_SESSION_CHANGED_EVENT)?.[1];
+    expect(refresh).toBeTypeOf('function');
+    (refresh as () => void)();
+    await settle();
+    expect(modelPicker().props.value).toBe('');
+    expect(onModelSelectionChange).toHaveBeenLastCalledWith(undefined);
+    await type('产品介绍 PPT');
+    await send('enter');
+    expect(startWorkflow).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['request_rejected', '', '参数'],

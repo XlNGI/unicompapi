@@ -1,3 +1,5 @@
+import type { ConversationTaskProgressSnapshot } from './conversation-task-progress';
+
 export const chatContextIpcChannels = {
   createConversation: 'chat-context:create-conversation',
   getConversation: 'chat-context:get-conversation',
@@ -50,6 +52,7 @@ export const chatContextIpcChannels = {
 
 export type ChatContextIpcErrorCode =
   | 'native_search_authorization_required'
+  | 'model_selection_required'
   | 'invalid_request'
   | 'project_not_open'
   | 'project_scope_mismatch'
@@ -389,6 +392,7 @@ export interface ConversationResponseExecutionDto {
   readonly streamSequence: number;
   readonly reasoningContent: string;
   readonly content: string;
+  readonly taskProgress?: readonly ConversationTaskProgressSnapshot[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -430,6 +434,7 @@ export interface ConversationIntentPlanDto {
 }
 
 export interface ConversationWorkflowDto {
+  readonly planningFailureCode?: 'classification_timeout' | 'classification_unavailable' | 'classification_invalid_response' | 'invalid_intent_plan';
   readonly workflowId: string;
   readonly projectId: string;
   readonly conversationId: string;

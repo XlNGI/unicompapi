@@ -439,4 +439,50 @@ describe('Conversation intent orchestrator', () => {
       plan: { kind: 'unknown' }
     });
   });
+
+  it('keeps model-inferred topic and source requirements without keyword overrides', async () => {
+    const plan = { schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
+      parameters: { topic: '附件中的季度经营分析', pageCount: 8 }, sourcePolicy: 'internal',
+      missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false };
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first',
+      classifier: { classify: async () => plan } }).analyze({ rawText: '就按刚才讨论的来' });
+    expect(result.plan).toMatchObject({ parameters: plan.parameters, sourcePolicy: 'internal', missing: [] });
+    expect(result.assessment.readiness).toBe('ready');
+  });
+
+  it('keeps exact cancellation local but sends semantic corrections to the model', async () => {
+    let calls = 0;
+    const orchestrator = new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: {
+      classify: async () => { calls++; return { schemaVersion: 1, kind: 'chat', parameters: {}, sourcePolicy: 'none',
+        missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }; }
+    } });
+    expect((await orchestrator.analyze({ rawText: '取消当前任务' })).cancelled).toBe(true);
+    expect(calls).toBe(0);
+    expect((await orchestrator.analyze({ rawText: '不要做 PPT，改为解释这份材料' })).cancelled).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
+  it('resolves only the model-selected document and preserves its page hint', async () => {
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: {
+      classify: async () => ({ schemaVersion: 1, kind: 'document', action: 'revise', documentKind: 'ppt',
+        parameters: {}, targetHint: { unit: 'page', ordinal: 4 }, sourcePolicy: 'none',
+        missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false })
+    } }).analyze({ rawText: '第二页改成我们刚才讨论的范围', context: {
+      documents: [{ messageId: 'ppt-target', kind: 'ppt', fileName: '季度.pptx' }]
+    } });
+    expect(result.plan.targetHint).toEqual({ unit: 'page', ordinal: 4 });
+    expect(result.resolvedTarget?.messageId).toBe('ppt-target');
+  });
+
+  it('does not choose the latest document by regex when the model target is ambiguous', async () => {
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: {
+      classify: async () => ({ schemaVersion: 1, kind: 'document', action: 'revise', documentKind: 'ppt',
+        parameters: {}, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false })
+    } }).analyze({ rawText: '修改最新的 PPT', context: {
+      documents: [{ messageId: 'first', kind: 'ppt', fileName: '甲.pptx' }, { messageId: 'last', kind: 'ppt', fileName: '乙.pptx' }]
+    } });
+    expect(result.resolvedTarget).toBeUndefined();
+    expect(result.plan.missing).toContain('document_target');
+    expect(result.assessment.readiness).toBe('needs_clarification');
+  });
 });

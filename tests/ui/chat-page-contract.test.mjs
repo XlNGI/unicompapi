@@ -86,13 +86,13 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(appSource, /setNewChatRequest|newConversationRequest/);
   assert.match(appSource, /initialConversationId=\{selectedChatConversationId\}/);
   assert.match(appSource, /onConversationChange=\{setSelectedChatConversationId\}/);
-  assert.match(appSource, /initialCandidateId=\{selectedChatCandidateId\}/);
-  assert.match(appSource, /onCandidateChange=\{setSelectedChatCandidateId\}/);
+  assert.match(appSource, /initialModelSelection=\{chatModelSelection\}/);
+  assert.match(appSource, /onModelSelectionChange=\{setChatModelSelection\}/);
   assert.match(source, /onConversationChange\?\.\(selectedId\)/);
-  assert.match(source, /onCandidateChange\?\.\(selectedCandidateId\)/);
-  assert.match(source, /initialCandidateId\?: string/);
-  assert.match(source, /onCandidateChange\?: \(candidateId\?: string\) => void/);
-  assert.match(source, /candidate\?\.available \? candidate\.candidateId : undefined/);
+  assert.match(source, /onModelSelectionChange\?\.\(modelSelection\)/);
+  assert.match(source, /initialModelSelection\?: ChatModelSelection/);
+  assert.match(source, /onModelSelectionChange\?: \(selection\?: ChatModelSelection\) => void/);
+  assert.match(source, /candidate\?\.available \? current : undefined/);
   assert.match(source, /speaker=\{<Tooltip>新对话<\/Tooltip>\}[\s\S]*aria-label="新建对话"[\s\S]*onClick=\{startNewConversation\}/);
   assert.match(source, /speaker=\{<Tooltip>对话列表<\/Tooltip>\}/);
   assert.match(source, /speaker=\{<Tooltip>项目上下文<\/Tooltip>\}/);
@@ -118,7 +118,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(styles, /\.uc-chat-page__model-tool \.rs-picker-toggle:hover/);
   assert.match(source, /responseInProgress/);
   assert.match(source, /displayMessages/);
-  assert.match(source, /<MarkdownMessage/);
+  assert.match(source, /<StreamingMarkdown/);
   assert.match(source, /className="uc-chat-page__message-bubble"/);
   assert.match(styles, /\.uc-chat-page__message-item--user > \.uc-chat-page__message-bubble \{[\s\S]*padding: 8px 12px;[\s\S]*background: var\(--uc-color-surface-subtle\);/);
   assert.match(styles, /\.uc-chat-page__composer \{[\s\S]*background: var\(--uc-color-surface-raised\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
@@ -204,11 +204,12 @@ test('project context uses a single explicit registration action and separates u
 });
 
 test('chat transparency only reports observable execution state', () => {
-  assert.match(source, /正在推理/);
-  assert.match(source, /已处理/);
-  assert.match(source, /模型返回的思考内容/);
-  assert.match(source, /reasoningContent/);
-  assert.match(source, /<MarkdownMessage content=\{reasoningContent\}/);
+  assert.match(source, /aria-label="回复状态"/);
+  assert.match(source, /正在接收回复/);
+  assert.match(source, /回复已完成/);
+  assert.match(source, /isCurrentAssistant && !showProductionProgress/);
+  assert.doesNotMatch(source, /AI 工作过程|模型返回的思考内容|activityExpanded|setActivityExpanded/);
+  assert.doesNotMatch(source, /<(?:MarkdownMessage|StreamingMarkdown)[^>]*content=\{(?:item\.)?reasoningContent\}/);
   assert.doesNotMatch(source, /已创建回复请求/);
   assert.doesNotMatch(source, /完整思考过程|模型内心|模拟思考|伪造思考/);
   assert.doesNotMatch(source, /编辑并重新生成|重新生成/);

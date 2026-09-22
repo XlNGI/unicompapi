@@ -121,6 +121,24 @@ function ids() {
 }
 
 describe('conversation response execution repository', () => {
+  it('restores progress from persisted events after reopening the repository', async () => {
+    const { storage, repository } = await fixture();
+    const item = execution();
+    await repository.create(item, createdEvent(item.id));
+    const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids(), undefined, () => t1);
+    await lifecycle.taskProgress(item.id, { stage: 'planning', status: 'completed', revision: 1 });
+    const restored = new ConversationResponseExecutionLifecycle(
+      new JsonConversationResponseExecutionRepository(storage, projectId), ids(), undefined, () => t2
+    );
+    const model = await restored.readModel(item.id);
+    expect(model.taskProgress).toEqual([{
+      sequence: 2, stage: 'planning', progressStatus: 'completed', taskRevision: 1, occurredAt: t1
+    }]);
+    expect(await restored.replayControlledEvents(item.id, 1)).toMatchObject([{
+      type: 'task_progress', stage: 'planning', progressStatus: 'completed', taskRevision: 1
+    }]);
+  });
+
   it('persists a contiguous stream and updates the recoverable execution state', async () => {
     const { repository } = await fixture();
     const item = execution();

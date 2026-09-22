@@ -44,6 +44,7 @@ import { createDocumentWorkflowSettlement } from '../../src/platform/documents/c
 import { createPresentationWorkflowScope, RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
 import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
 import { JsonConversationResponseExecutionRepository } from '../../src/platform/repositories/json-conversation-response-execution-repository';
+import { emitProductionEvent } from '../../src/platform/conversation-production-trace';
 
 export function registerDocumentGenerationIpcHandlers(options: {
   readonly sessionRegistry: StorageProjectSessionRegistry;
@@ -85,6 +86,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
         renderPreview: createConfiguredOfficeRenderAdapter()
       });
       const application = new DocumentGenerationApplicationService({
+        onProgress: async (event) => { await emitProductionEvent(event); },
         projectId: session.projectId,
         resolvePresentationMap: async (workId, outline) => {
           const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(workId, outline);

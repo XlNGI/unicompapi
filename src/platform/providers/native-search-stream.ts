@@ -166,8 +166,9 @@ async function readNativeStream(
         calls.set(Number(delta.index), c);
       }
     }
-    if (choice.finish_reason != null) {
-      if (finish || !['stop', 'length', 'tool_calls'].includes(String(choice.finish_reason))) throw invalid();
+    if (choice.finish_reason !== undefined && choice.finish_reason !== null && choice.finish_reason !== '') {
+      if (finish || typeof choice.finish_reason !== 'string' ||
+          !['stop', 'length', 'tool_calls'].includes(choice.finish_reason)) throw invalid();
       finish = choice.finish_reason as 'stop' | 'length' | 'tool_calls';
     }
     return eventSources;

@@ -1,5 +1,14 @@
 import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../../src/platform/providers/conversation-native-search';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+const traceRoots: string[] = [];
+afterEach(async () => {
+  await Promise.all(traceRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 import {
   addUserMessage,
   addCompletedAssistantMessage,
@@ -56,6 +65,8 @@ function execution(
 }
 
 function fixture(documentPages?: ConversationResponseControllerRuntime['documentPages'], userContent = 'hello', userDisplayContent?: string) {
+  const traceRoot = mkdtempSync(path.join(os.tmpdir(), 'unicomp-response-controller-'));
+  traceRoots.push(traceRoot);
   const base = createConversation({
     id: toConversationId('conversation-controller'),
     title: 'Controller test',
@@ -161,7 +172,7 @@ function fixture(documentPages?: ConversationResponseControllerRuntime['document
     getSession: () => ({
       projectId,
       projectName: 'Controller test',
-      rootDirectory: 'C:\\unicomp-controller-test'
+      rootDirectory: traceRoot
     }),
     getRuntime: () => runtime,
     nextResponseDraftId: () => 'response-draft-controller',
@@ -195,6 +206,19 @@ function startRequest(clientCommandId = 'client-command-controller') {
 }
 
 describe('ConversationResponseController', () => {
+  it('includes replayed task progress in the execution IPC snapshot', async () => {
+    const value = fixture();
+    const taskProgress = [{
+      sequence: 2, stage: 'planning' as const, progressStatus: 'completed' as const,
+      taskRevision: 1, occurredAt: createdAt
+    }];
+    vi.mocked(value.runtime.executions.readModel).mockResolvedValue({
+      ...execution(), streamSequence: 2, taskProgress
+    });
+    expect(await value.controller.getExecution({ responseExecutionId: 'response-execution-controller' }))
+      .toMatchObject({ ok: true, value: { taskProgress } });
+  });
+
   it('lists text candidates after startup recovery fails while response writes stay blocked', async () => {
     const value = fixture();
     const error = new Error('legacy recovery record is unsupported');

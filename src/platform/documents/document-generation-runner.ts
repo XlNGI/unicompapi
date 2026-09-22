@@ -55,6 +55,8 @@ import {
 import type { DocumentStructureSnapshot } from './structured-document-tools';
 import type { DocumentRenderResult } from './temporary-document-workflow';
 import { readPptxDocument, readPptxSlideOrder } from './pptx-page-reader';
+import { emitProductionEvent } from '../conversation-production-trace';
+import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../application/document-generation-service';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -95,6 +97,7 @@ export interface DocumentGenerationPlanInput {
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal?: AbortSignal;
   readonly onCancellationClosed?: () => void | Promise<void>;
+  readonly onProgress?: DocumentGenerationProgressCallback;
   readonly images?: readonly {
     readonly fileId?: string;
     readonly workId?: string;
@@ -207,7 +210,8 @@ export class DocumentGenerationRunner {
               displayName: path.basename(revisionSource.revisionSourcePath)
             })
           : undefined;
-      const generated = await generateTemporaryFile({
+      const generated = await this.observe(input, 'document_compile', 'document-file-write', async () => generateTemporaryFile({
+        onProgress: event => this.reportProgress(input, event),
         kind: input.kind,
         outline: input.outline,
         outputDirectory,
@@ -220,26 +224,28 @@ export class DocumentGenerationRunner {
         ...(input.images !== undefined && input.images.length > 0
           ? { images: await this.resolveImages(context, input.images) }
           : {})
-      });
+      }), { tool: 'write_document' });
       temporaryPath = generated.temporaryPath;
       finalPath = generated.finalPath;
       this.assertNotCancelled(input.signal);
       execution = await this.move(context, execution, 'verifying_file');
-      await this.assertTemporaryOutput(
+      await this.observe(input, 'document_structure_check', 'document-output-structure', () => this.assertTemporaryOutput(
         generated,
         input.kind,
         input.outline,
         input.requestedTotalPages
-      );
+      ), { tool: 'check' });
       if (this.options.renderPreview) {
         try {
-          const renderResult = await this.options.renderPreview(generated.temporaryPath, {
+          const renderResult = await this.observe(input, 'document_render', 'document-preview-render', () => this.options.renderPreview!(generated.temporaryPath, {
             kind: input.kind,
             signal: input.signal ?? new AbortController().signal
-          });
-          if ((renderResult.diagnostics ?? []).some((diagnostic) => diagnostic.severity === 'error')) {
-            throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
-          }
+          }), { tool: 'render' });
+          await this.observe(input, 'document_check', 'document-render-diagnostics', async () => {
+            if ((renderResult.diagnostics ?? []).some((diagnostic) => diagnostic.severity === 'error')) {
+              throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
+            }
+          }, { tool: 'check', count: renderResult.diagnostics?.length ?? 0 });
         } catch (error) {
           throw new DocumentGenerationError(
             'verification_failed',
@@ -248,37 +254,34 @@ export class DocumentGenerationRunner {
         }
       }
       if (sourceStructure && (input.revisionPatch || input.revisionPatches)) {
-        await this.assertRevisionScope(
-          sourceStructure,
-          generated,
-          input.kind,
-          input.revisionPatches ?? [input.revisionPatch!]
-        );
-        if (input.kind === 'ppt') await this.assertUntouchedPptParts(
-          revisionSource.revisionSourceBuffer!, generated, input.revisionPatches ?? [input.revisionPatch!], sourceStructure
-        );
+        await this.observe(input, 'document_structure_check', 'document-revision-scope', async () => {
+          await this.assertRevisionScope(sourceStructure, generated, input.kind, input.revisionPatches ?? [input.revisionPatch!]);
+          if (input.kind === 'ppt') await this.assertUntouchedPptParts(
+            revisionSource.revisionSourceBuffer!, generated, input.revisionPatches ?? [input.revisionPatch!], sourceStructure
+          );
+        }, { tool: 'check' });
       }
-      const temporaryVerification = await this.verifyTemporaryOutput(
-        execution,
+      const verifyingExecution = execution;
+      const temporaryVerification = await this.observe(input, 'document_hash_check', 'document-temporary-hash', () => this.verifyTemporaryOutput(
+        verifyingExecution,
         generated,
         input.signal
-      );
+      ), { tool: 'check', bytes: generated.sizeBytes });
       this.assertNotCancelled(input.signal);
       const validatedOutline = input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
         ? await this.readRevisedOutline(input, generated.temporaryPath) : undefined;
-      await syncFile(generated.temporaryPath);
-      await (this.options.publishFile ?? rename)(
-        generated.temporaryPath,
-        generated.finalPath
-      );
+      await this.observe(input, 'document_publish', 'document-atomic-publish', async () => {
+        await syncFile(generated.temporaryPath);
+        await (this.options.publishFile ?? rename)(generated.temporaryPath, generated.finalPath);
+      }, { tool: 'publish', bytes: generated.sizeBytes });
       temporaryPath = undefined;
-      file = await this.registerVerifiedOutput(
+      file = await this.observe(input, 'document_hash_check', 'document-published-hash', () => this.registerVerifiedOutput(
         context,
-        execution,
+        verifyingExecution,
         generated.fileName,
         temporaryVerification.checksumSha256,
         input.signal
-      );
+      ), { tool: 'check', bytes: generated.sizeBytes });
       await this.options.afterFileRegistered?.();
       this.assertNotCancelled(input.signal);
       await input.onCancellationClosed?.();
@@ -288,18 +291,23 @@ export class DocumentGenerationRunner {
         outputFileId: file.id,
         workId
       });
-      const work = registerWork({
-        id: workId,
-        task: await this.requireTask(context, execution.taskId),
-        execution,
-        file,
-        mediaKind: 'document',
-        name: generated.fileName,
-        parentWorkId: input.parentWorkId,
-        createdAt: toIsoTimestamp(now())
-      });
-      await context.works.save(work);
-      workRegistered = true;
+      const registeringExecution = execution;
+      const registeredFile = file;
+      const work = await this.observe(input, 'document_register', 'document-work-register', async () => {
+        const registered = registerWork({
+          id: workId,
+          task: await this.requireTask(context, registeringExecution.taskId),
+          execution: registeringExecution,
+          file: registeredFile,
+          mediaKind: 'document',
+          name: generated.fileName,
+          parentWorkId: input.parentWorkId,
+          createdAt: toIsoTimestamp(now())
+        });
+        await context.works.save(registered);
+        workRegistered = true;
+        return registered;
+      }, { tool: 'publish' });
       execution = transitionExecution(execution, 'completed', toIsoTimestamp(now()), {
         outputFileId: file.id,
         workId
@@ -364,6 +372,32 @@ export class DocumentGenerationRunner {
         await rm(finalPath, { force: true });
       }
     }
+  }
+
+  private async observe<T>(input: DocumentGenerationPlanInput, code: DocumentGenerationProgressEvent['code'],
+    operationId: string, action: () => Promise<T>, facts?: DocumentGenerationProgressEvent['facts']): Promise<T> {
+    const report = async (status: DocumentGenerationProgressEvent['status']) => {
+      const event: DocumentGenerationProgressEvent = { code, status, operationId,
+        facts: { documentKind: input.kind, ...facts } };
+      await this.reportProgress(input, event);
+    };
+    await report('started');
+    try {
+      const result = await action();
+      await report('completed');
+      return result;
+    } catch (error) {
+      await report(input.signal?.aborted || (error instanceof Error && error.name === 'AbortError') ||
+        (error instanceof DocumentGenerationError && error.code === 'cancelled') ? 'cancelled' : 'failed');
+      throw error;
+    }
+  }
+
+  private async reportProgress(input: DocumentGenerationPlanInput, event: DocumentGenerationProgressEvent): Promise<void> {
+    try {
+      if (input.onProgress) await input.onProgress(event);
+      else await emitProductionEvent(event);
+    } catch { /* Progress recording never changes the document transaction outcome. */ }
   }
 
   /**

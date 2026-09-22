@@ -20,6 +20,7 @@ import {
   type UsageSchemaV1
 } from '../../src/domain';
 import {
+  createDocumentToolCallingBridge,
   DEEPSEEK_CHAT_ADAPTER_ID,
   DEEPSEEK_CHAT_ADAPTER_VERSION,
   DEEPSEEK_CHAT_PARAMETER_SCHEMA_ID,
@@ -219,6 +220,36 @@ describe('DeepSeek management adapter', () => {
 });
 
 describe('DeepSeek chat adapter', () => {
+  it('preserves assistant calls and bounded document observations on the next request', async () => {
+    const fixture = chatFixture();
+    const wireCall = { id: 'read-1', type: 'function', function: { name: 'read_document_structure', arguments: '{}' } };
+    fixture.transport.responses.push(
+      streamResponse([chunk({ delta: { tool_calls: [{ index: 0, ...wireCall }] }, finishReason: 'tool_calls' }), '[DONE]']),
+      streamResponse([chunk({ delta: { content: 'Reviewed' }, finishReason: 'stop' }), '[DONE]'])
+    );
+    const execute = vi.fn(async () => ({ revision: 3 }));
+    const bridge = createDocumentToolCallingBridge({
+      bindings: [{ id: 'read_document_structure', fields: {}, authorize: async () => true, execute }],
+      budgetUnits: 4, maxCalls: 2, timeoutMs: 1_000
+    });
+    const handle = await fixture.adapter.submit({
+      routeSnapshot: routeSnapshot('text_chat'),
+      request: { ...dispatchRequest({}), tools: bridge.tools },
+      toolBridge: bridge.bridge
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(fixture.transport.requests).toHaveLength(2);
+    expect(bodyOf(fixture.transport.requests[1]).messages).toEqual([
+      { role: 'user', content: 'Synthetic user message' },
+      { role: 'assistant', content: '', tool_calls: [wireCall] },
+      { role: 'tool', tool_call_id: 'read-1', name: 'read_document_structure', content: JSON.stringify({
+        ok: true, callId: 'read-1', toolId: 'read_document_structure', toolVersion: '1.0',
+        costUnits: 1, outcomeUnknown: false, result: { revision: 3 }
+      }) }
+    ]);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it('maps text_chat to strict SSE, persists final usage and emits only answer content', async () => {
     const fixture = chatFixture();
     fixture.transport.responses.push(streamResponse([

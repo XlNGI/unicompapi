@@ -60,6 +60,9 @@ export const projectStoragePaths = {
     ),
     providerExecutionRouteSnapshots: toProjectRelativePath(
       'entities/provider-execution-route-snapshots.json'
+    ),
+    documentTaskRuntimes: toProjectRelativePath(
+      'entities/document-task-runtimes.json'
     )
   },
   journals: {

@@ -7,6 +7,7 @@ import type { JsonProviderRegistryStore } from './provider-registry';
 import { toProjectRelativePath, type ProjectStorageAdapter } from '../storage';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
 import { KIMI_PROVIDER_PACKAGE_ID } from './kimi/kimi-contracts';
+import { emitProductionEvent } from '../conversation-production-trace';
 
 const file = toProjectRelativePath('entities/conversation-native-search.json');
 interface SearchSession {
@@ -179,6 +180,12 @@ export class ConversationNativeSearch {
     if (terminal) return;
     const hasSources = evidence.sources.length > 0;
     const hasToolCalls = typeof evidence.toolCalls === 'number' && evidence.toolCalls > 0;
+    if (hasSources || hasToolCalls || evidence.status === 'failed' || evidence.status === 'cancelled') {
+      await emitProductionEvent({ code: evidence.status === 'started' ? 'tool_call' : 'tool_result',
+        status: evidence.status === 'started' ? 'started' : evidence.status === 'cancelled' ? 'cancelled'
+          : evidence.status === 'failed' ? 'failed' : 'completed',
+        operationId: grantId, facts: { tool: 'search', count: evidence.sources.length } });
+    }
     if (evidence.status === 'started') {
       if (hasSources || hasToolCalls) await this.reply(session.conversationId as Conversation['id'], `${session.id}-started`, hasSources
         ? `已收到服务商返回的 ${evidence.sources.length} 条结构化搜索来源，正在整理资料。`

@@ -32,6 +32,20 @@ import {
 } from './project-context-selection';
 import type { ConversationResponseProductFeature } from './conversation-response';
 import { parseProductFeature } from './product-feature';
+import {
+  conversationTaskProgressStages,
+  conversationTaskProgressStatuses,
+  projectTaskProgress,
+  type ConversationTaskProgressSnapshot,
+  type ConversationTaskProgressStage,
+  type ConversationTaskProgressStatus
+} from './conversation-task-progress';
+export {
+  conversationTaskProgressStages,
+  conversationTaskProgressStatuses,
+  type ConversationTaskProgressStage,
+  type ConversationTaskProgressStatus
+} from './conversation-task-progress';
 
 export const conversationResponseRuntimeSources = [
   'official_direct',
@@ -134,13 +148,6 @@ export interface ConversationResponseStreamEventV1 {
   readonly occurredAt: IsoTimestamp;
 }
 
-export const conversationTaskProgressStages = [
-  'planning', 'retrieval', 'analysis', 'design', 'rendering', 'checking', 'publishing', 'completed'
-] as const;
-export type ConversationTaskProgressStage = (typeof conversationTaskProgressStages)[number];
-export const conversationTaskProgressStatuses = ['started', 'running', 'completed', 'failed', 'cancelled', 'paused'] as const;
-export type ConversationTaskProgressStatus = (typeof conversationTaskProgressStatuses)[number];
-
 export interface ConversationResponseExecutionReadModelV1 {
   readonly schemaVersion: 1;
   readonly responseExecutionId: ConversationResponseExecutionId;
@@ -158,6 +165,7 @@ export interface ConversationResponseExecutionReadModelV1 {
   readonly streamSequence: number;
   readonly reasoningContent: string;
   readonly content: string;
+  readonly taskProgress?: readonly ConversationTaskProgressSnapshot[];
   readonly createdAt: IsoTimestamp;
   readonly updatedAt: IsoTimestamp;
 }
@@ -173,6 +181,11 @@ export interface ControlledConversationResponseStreamEventDtoV1 {
   readonly contentDelta?: string;
   readonly safeCode?: string;
   readonly interruptionReason?: ConversationResponseInterruptionReason;
+  readonly stage?: ConversationTaskProgressStage;
+  readonly progressStatus?: ConversationTaskProgressStatus;
+  readonly taskRevision?: number;
+  readonly pageId?: string;
+  readonly pageRevision?: number;
   readonly occurredAt: string;
 }
 
@@ -490,6 +503,7 @@ export function projectConversationResponseExecution(input: {
     streamSequence: projected.streamSequence,
     reasoningContent: projected.reasoningContent,
     content: projected.content,
+    ...(projected.taskProgress.length ? { taskProgress: projected.taskProgress } : {}),
     createdAt: execution.createdAt,
     updatedAt: projected.updatedAt
   };
@@ -513,6 +527,7 @@ function projectConversationResponseTimeline(
   readonly streamSequence: number;
   readonly reasoningContent: string;
   readonly content: string;
+  readonly taskProgress: readonly ConversationTaskProgressSnapshot[];
   readonly updatedAt: IsoTimestamp;
 } {
   const events = inputEvents.map(parseConversationResponseStreamEvent);
@@ -525,6 +540,7 @@ function projectConversationResponseTimeline(
   let state: ConversationResponseExecutionState = 'pending';
   let reasoningContent = '';
   let content = '';
+  let taskProgress: readonly ConversationTaskProgressSnapshot[] = [];
   let previousAt = execution.createdAt;
   const eventIds = new Set<string>();
   for (const [index, event] of events.entries()) {
@@ -584,6 +600,7 @@ function projectConversationResponseTimeline(
       if (event.pageRevision !== undefined && event.pageId === undefined) {
         throw new InvariantViolationError('task progress pageRevision requires pageId');
       }
+      taskProgress = projectTaskProgress(taskProgress, event);
       continue;
     }
     if (event.type === 'stream_completed') {
@@ -621,6 +638,7 @@ function projectConversationResponseTimeline(
     streamSequence: events.length,
     reasoningContent,
     content,
+    taskProgress,
     updatedAt: events[events.length - 1].occurredAt
   };
 }

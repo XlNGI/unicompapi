@@ -48,6 +48,16 @@ export interface DocumentAgentLoopOptions {
   /** Remaining parent-task budget. Child loops cannot extend it. */
   readonly parentBudgetUnits?: number;
   readonly onEvent?: (event: DocumentAgentProgressEvent) => void | Promise<void>;
+  /** Durable hooks are gates, unlike best-effort UI progress. */
+  readonly onBeforeTool?: (
+    request: DocumentToolRequest,
+    context: { readonly step: number; readonly costUnits: number }
+  ) => void | Promise<void>;
+  readonly initialObservations?: readonly DocumentToolObservation[];
+  readonly onObservation?: (
+    observation: DocumentToolObservation,
+    context: { readonly step: number; readonly costUnits: number }
+  ) => void | Promise<void>;
   readonly now?: () => string;
 }
 
@@ -68,11 +78,29 @@ export async function runDocumentAgentLoop(
     8
   );
   const allowedTools = new Set(options.allowedTools ?? [...registry.keys()]);
-  const observations: DocumentToolObservation[] = [];
+  const observations: DocumentToolObservation[] = structuredClone([...(options.initialObservations ?? [])]);
+  if (observations.length > maxSteps || observations.some((observation, index) =>
+    observation.step !== index + 1 || !registry.has(observation.toolId))) {
+    throw new TypeError('agent resume observations are invalid');
+  }
   const startedAt = Date.now();
-  let costUnits = 0;
+  let costUnits = observations.reduce((sum, observation) => sum + registry.get(observation.toolId)!.maxCostUnits, 0);
+  if (costUnits > budgetUnits) throw new TypeError('agent resume budget is invalid');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) abort();
   let previousDiagnostic: string | undefined;
   let repeatedDiagnostics = 0;
+  for (const observation of observations) {
+    if (observation.ok) {
+      previousDiagnostic = undefined;
+      repeatedDiagnostics = 0;
+    } else {
+      repeatedDiagnostics = previousDiagnostic === observation.diagnostic ? repeatedDiagnostics + 1 : 1;
+      previousDiagnostic = observation.diagnostic;
+    }
+  }
   let eventSequence = 0;
   const emit = async (event: Omit<DocumentAgentProgressEvent, 'sequence' | 'occurredAt'>): Promise<void> => {
     if (!options.onEvent) return;
@@ -90,6 +118,8 @@ export async function runDocumentAgentLoop(
     state: DocumentAgentResult['state'],
     summary?: string
   ): Promise<DocumentAgentResult> => {
+    controller.abort();
+    options.signal?.removeEventListener('abort', abort);
     await emit({
       step: observations.length,
       stage: 'completed',
@@ -102,7 +132,8 @@ export async function runDocumentAgentLoop(
     return result(state, observations, costUnits, summary);
   };
 
-  for (let step = 1; step <= maxSteps; step += 1) {
+  for (let step = observations.length + 1; step <= maxSteps; step += 1) {
+    if (repeatedDiagnostics >= repeatedDiagnosticLimit) return finish('repeated_diagnosis');
     if (isAborted(options.signal)) {
       return finish('cancelled');
     }
@@ -141,12 +172,20 @@ export async function runDocumentAgentLoop(
       return finish('budget_exceeded');
     }
     costUnits += definition.maxCostUnits;
+    try {
+      await options.onBeforeTool?.(request, { step, costUnits });
+    } catch {
+      return finish('failed', 'agent.checkpoint_failed');
+    }
+    if (isAborted(options.signal)) return finish('cancelled');
+    if (Date.now() - startedAt >= timeoutMs) return finish('timeout');
     await emit({ step, stage: 'tool', status: 'started', toolId: request.toolId });
+    let observation: DocumentToolObservation;
     try {
       const executionResult = await awaitWithin(
         options.execute(request, {
           step,
-          signal: options.signal ?? new AbortController().signal
+          signal: controller.signal
         }),
         Math.max(1, timeoutMs - (Date.now() - startedAt)),
         options.signal
@@ -154,23 +193,25 @@ export async function runDocumentAgentLoop(
       if (executionResult.cancelled) return finish('cancelled');
       if (executionResult.timedOut) return finish('timeout');
       const data = executionResult.value;
-      const observation = makeObservation(step, request.toolId, true, data);
-      observations.push(observation);
-      await emit({ step, stage: 'tool', status: 'completed', toolId: request.toolId });
+      observation = makeObservation(step, request.toolId, true, data);
       previousDiagnostic = undefined;
       repeatedDiagnostics = 0;
     } catch (error) {
       const diagnostic = safeError(error);
-      const observation = makeObservation(step, request.toolId, false, {}, diagnostic);
-      observations.push(observation);
-      await emit({ step, stage: 'tool', status: 'failed', toolId: request.toolId, safeCode: safeProgressCode(diagnostic) });
+      observation = makeObservation(step, request.toolId, false, {}, diagnostic);
       if (diagnostic === previousDiagnostic) repeatedDiagnostics += 1;
       else repeatedDiagnostics = 1;
       previousDiagnostic = diagnostic;
-      if (repeatedDiagnostics >= repeatedDiagnosticLimit) {
-        return finish('repeated_diagnosis');
-      }
     }
+    try {
+      await options.onObservation?.(observation, { step, costUnits });
+    } catch {
+      return finish('failed', 'agent.checkpoint_failed');
+    }
+    observations.push(observation);
+    await emit({ step, stage: 'tool', status: observation.ok ? 'completed' : 'failed', toolId: request.toolId,
+      ...(!observation.ok ? { safeCode: safeProgressCode(observation.diagnostic ?? 'agent.tool_failed') } : {}) });
+    if (repeatedDiagnostics >= repeatedDiagnosticLimit) return finish('repeated_diagnosis');
   }
   return finish('max_steps_exceeded');
 }
@@ -274,6 +315,11 @@ async function awaitWithin<T>(
   | { readonly timedOut: false; readonly cancelled: true }
   | { readonly timedOut: false; readonly cancelled: false; readonly value: T }
 > {
+  if (signal?.aborted) {
+    // The operation may abort synchronously before our listener is installed.
+    void promise.catch(() => undefined);
+    return { timedOut: false, cancelled: true };
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   const timeout = new Promise<{

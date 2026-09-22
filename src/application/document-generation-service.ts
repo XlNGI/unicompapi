@@ -142,6 +142,24 @@ export interface DocumentGenerationWorkflowPort {
   }): Promise<void>;
 }
 
+/** Observable execution facts only; no model text, paths or private document data. */
+export interface DocumentGenerationProgressEvent {
+  readonly code: 'plan_validation' | 'tool_call' | 'tool_result' | 'document_compile' | 'document_render' |
+    'document_check' | 'document_structure_check' | 'document_hash_check' | 'document_publish' | 'document_register';
+  readonly status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
+  readonly operationId?: string;
+  readonly facts?: {
+    readonly purpose?: 'planning' | 'content' | 'repair' | 'tool';
+    readonly documentKind?: DocumentWorkspaceKind;
+    readonly count?: number;
+    readonly totalPages?: number;
+    readonly bytes?: number;
+    readonly tool?: 'read_sources' | 'search' | 'analyze' | 'write_document' | 'render' | 'check' | 'publish' | 'patch';
+  };
+}
+
+export type DocumentGenerationProgressCallback = (event: DocumentGenerationProgressEvent) => void | Promise<void>;
+
 export interface DocumentGenerationExecutionInput {
   readonly kind: DocumentWorkspaceKind;
   readonly title: string;
@@ -160,6 +178,7 @@ export interface DocumentGenerationExecutionInput {
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal: AbortSignal;
   readonly onCancellationClosed: () => void | Promise<void>;
+  readonly onProgress?: DocumentGenerationProgressCallback;
   readonly images: readonly {
     readonly fileId?: string;
     readonly workId?: string;
@@ -285,6 +304,7 @@ export class DocumentGenerationApplicationService {
       };
       readonly compiler: DocumentDraftCompilerPort;
       readonly generator: DocumentGenerationExecutorPort;
+      readonly onProgress?: DocumentGenerationProgressCallback;
       readonly resolvePresentationMap?: (workId: WorkId, outline: DocumentOutline) => Promise<PresentationRevisionMap>;
       readonly validatePresentationSelection?: (input: GenerateDocumentFromMessageInput, map: PresentationRevisionMap, target: { unit: 'page' | 'section'; ordinal: number }) => Promise<void>;
       readonly canRetryMessage?: (conversationId: ConversationId, messageId: MessageId) => Promise<boolean>;
@@ -688,6 +708,8 @@ export class DocumentGenerationApplicationService {
     input: GenerateDocumentFromMessageInput,
     abortController: AbortController
   ): Promise<GenerateDocumentFromMessageResult> {
+    let validatingOutline = false;
+    let revisingDocument = false;
     try {
     const conversation = await this.waitForCompletedMessage(
       input.conversationId,
@@ -734,6 +756,9 @@ export class DocumentGenerationApplicationService {
       );
     }
 
+      validatingOutline = true;
+      await this.reportProgress({ code: 'plan_validation', status: 'started', operationId: 'document-outline',
+        facts: { purpose: 'content', documentKind: input.kind } });
       await this.persistStatus(input, {
         state: 'validating_outline',
         kind: input.kind
@@ -819,6 +844,9 @@ export class DocumentGenerationApplicationService {
               );
             }
             let revision;
+            revisingDocument = true;
+            await this.reportProgress({ code: 'tool_call', status: 'started', operationId: 'document-revision',
+              facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
             try {
               revision = await this.dependencies.revisionAgent({
                 baseWorkId: input.parentWorkId,
@@ -867,6 +895,9 @@ export class DocumentGenerationApplicationService {
               );
             }
             validateRevisionScope(previousOutline, revision, presentationMap);
+            revisingDocument = false;
+            await this.reportProgress({ code: 'tool_result', status: 'completed', operationId: 'document-revision',
+              facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
             outline = revision.outline;
             revisionPatch = revision.patch;
             revisionPatches = revision.patches;
@@ -905,6 +936,9 @@ export class DocumentGenerationApplicationService {
           'Document generation was cancelled before file creation'
         );
       }
+      validatingOutline = false;
+      await this.reportProgress({ code: 'plan_validation', status: 'completed', operationId: 'document-outline',
+        facts: { purpose: 'content', documentKind: input.kind, count: outline.sections.length } });
       await this.persistStatus(input, {
         state: 'generating_file',
         kind: input.kind
@@ -942,6 +976,7 @@ export class DocumentGenerationApplicationService {
       signal: abortController.signal,
       onCancellationClosed: () =>
         this.closeCancellationWindow(key, abortController),
+      ...(this.dependencies.onProgress ? { onProgress: this.dependencies.onProgress } : {}),
       images: input.images
       });
 
@@ -960,9 +995,20 @@ export class DocumentGenerationApplicationService {
         ...generated
       };
     } catch (error) {
+      const status = abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError') ||
+        (error instanceof DocumentGenerationApplicationError && error.code === 'cancelled') ? 'cancelled' : 'failed';
+      if (revisingDocument) await this.reportProgress({ code: 'tool_result', status, operationId: 'document-revision',
+        facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
+      if (validatingOutline) await this.reportProgress({ code: 'plan_validation', status, operationId: 'document-outline',
+        facts: { purpose: 'content', documentKind: input.kind } });
       await this.persistTerminalFailure(input, error);
       throw error;
     }
+  }
+
+  private async reportProgress(event: DocumentGenerationProgressEvent): Promise<void> {
+    // A progress projection must never undo a completed file or Work write.
+    try { await this.dependencies.onProgress?.(event); } catch { /* best effort */ }
   }
 
   private compileDraft(

@@ -32,6 +32,22 @@ function gatedSession(first: string, remaining: string) {
   return { ...session({}), stream, paused, resume };
 }
 describe('native search protocol, not model prose', () => {
+  it('accepts empty gateway finish reasons until the explicit search terminal event', async () => {
+    const sse = event({ content: '' }, '') + event({ reasoning_content: 'reasoning' }, '') +
+      event({ content: '回答' }, '') + event({}, 'stop', { usage }) + 'data: [DONE]\n\n';
+    const result = await runNativeSearch(input({ ...session({}), stream: (async function* () {
+      yield new TextEncoder().encode(sse);
+    })() }));
+    expect(result).toMatchObject({ finishReason: 'stop', content: '回答' });
+  });
+
+  it('does not treat an empty search finish reason as completion', async () => {
+    const sse = event({ content: 'partial' }, '') + 'data: [DONE]\n\n';
+    await expect(runNativeSearch(input({ ...session({}), stream: (async function* () {
+      yield new TextEncoder().encode(sse);
+    })() }))).rejects.toThrow();
+  });
+
   it('serializes independent native tools without extending document tool whitelist', () => {
     expect(nativeSearchTools(request)).toEqual([{ type: 'builtin_function', function: { name: '$web_search' } }]);
     expect(nativeSearchTools({ ...request, protocol: 'glm_web_search' })).toEqual([{ type: 'web_search', web_search: { enable: true, search_engine: 'search_std', search_result: true } }]);

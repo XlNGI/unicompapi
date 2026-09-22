@@ -3,7 +3,7 @@ import { ConversationApplicationService, ConversationContextBuilder } from '../.
 import { analyzeLocalConversationIntent } from '../../src/application/conversation-intent-orchestrator';
 import { conversationWorkflowReply } from '../../src/application/conversation-workflow-reply';
 import {
-  addUserMessage, createConversation, createConversationWorkflow, parseConversation,
+  addUserMessage, createConversation, createConversationWorkflow, parseConversation, parseConversationWorkflow,
   toConversationId, toConversationWorkflowId, toIsoTimestamp, toMessageId, toProjectId,
   type Conversation, type ConversationRepository
 } from '../../src/domain';
@@ -38,6 +38,18 @@ function fixture() {
 }
 
 describe('Persisted assistant workflow replies', () => {
+  it('restores a missing planning-failure reply once and rejects execution with a failure marker', async () => {
+    const { service, workflow } = fixture();
+    const failed = parseConversationWorkflow({ ...workflow, status: 'failed',
+      planningFailureCode: 'classification_unavailable', pendingQuestions: [] });
+    const first = await service().ensureWorkflowReply(failed);
+    expect(first.messages.at(-1)?.content).toContain('未能启动模型调用或确认调用状态');
+    expect(first.messages.at(-1)?.content).not.toContain('请求已发出');
+    expect(await service().ensureWorkflowReply(failed)).toEqual(first);
+    expect(() => parseConversationWorkflow({ ...failed, status: 'ready' })).toThrow();
+    expect(() => parseConversationWorkflow({ ...failed, planningFailureCode: 'unrecognized' })).toThrow();
+    expect(() => parseConversationWorkflow({ ...failed, pendingQuestions: workflow.pendingQuestions })).toThrow();
+  });
   it('replays a saved workflow after a missing projection and is idempotent across service restarts', async () => {
     const { service, workflow } = fixture();
     const first = await service().ensureWorkflowReply(workflow);

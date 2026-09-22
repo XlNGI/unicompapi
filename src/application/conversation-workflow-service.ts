@@ -69,6 +69,17 @@ export class ConversationWorkflowService {
     const decision = await this.orchestrator.analyze({ rawText: input.rawText, context: input.context, signal: input.signal });
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const createdAt = toIsoTimestamp(this.now());
+    if (decision.failureCode) {
+      const failed = parseConversationWorkflow({
+        ...createConversationWorkflow({
+          id: this.nextId(), projectId: input.projectId, conversationId: input.conversationId,
+          sourceMessageId: input.sourceMessageId, plan: decision.plan, pendingQuestions: [], createdAt
+        }),
+        status: 'failed', planningFailureCode: decision.failureCode
+      });
+      await this.repository.createSupersedingPending(failed);
+      return failed;
+    }
     const presentation = !decision.cancelled && decision.resolvedTarget && this.documentScope
       ? await this.documentScope.resolve(input.conversationId, decision.resolvedTarget.messageId, decision.plan) : undefined;
     const plan = presentation ? parseConversationIntentPlan({ ...decision.plan, needsConfirmation: true }) : decision.plan;
@@ -133,6 +144,13 @@ export class ConversationWorkflowService {
     });
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const updatedAt = toIsoTimestamp(this.now());
+    if (decision.failureCode) {
+      const failed = updateConversationWorkflow({
+        ...current, confirmationId: undefined, planHash: undefined, confirmationExpiresAt: undefined
+      }, { status: 'failed', planningFailureCode: decision.failureCode, pendingQuestions: [], updatedAt });
+      await this.repository.save(failed, input.expectedRevision);
+      return failed;
+    }
     const deliveries = synchronizeDeliveries(current, decision.plan, decision.cancelled);
     const nextDelivery = deliveries?.find((item) => item.status === 'pending');
     const resolvedArtifact = decision.resolvedTarget?.messageId ?? (decision.plan.action === 'revise' ? current.resolvedTarget?.artifactRef : undefined);
@@ -244,7 +262,7 @@ export class ConversationWorkflowService {
   async getPending(conversationId: ConversationId): Promise<ConversationWorkflowV1 | undefined> {
     return (await this.repository.list(conversationId)).find((workflow) =>
       ['needs_clarification', 'needs_confirmation', 'ready'].includes(workflow.status) ||
-      (workflow.status === 'failed' && workflow.deliveries?.some((item) => item.status === 'failed'))
+      (workflow.status === 'failed' && (workflow.planningFailureCode || workflow.deliveries?.some((item) => item.status === 'failed')))
     );
   }
 

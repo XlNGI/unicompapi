@@ -8,6 +8,56 @@ const request = {
 };
 
 describe('bounded document agent loop', () => {
+  it('fails closed when a failed-tool observation cannot be persisted', async () => {
+    let calls = 0;
+    let commits = 0;
+    const result = await runDocumentAgentLoop({
+      execute: async () => { calls++; throw new Error('read_failed'); },
+      onObservation: async () => { commits++; throw new Error('disk_failed'); },
+      nextDecision: async () => ({ kind: 'tool', request })
+    });
+    expect(result).toMatchObject({ state: 'failed', summary: 'agent.checkpoint_failed' });
+    expect(calls).toBe(1);
+    expect(commits).toBe(1);
+    expect(result.observations).toHaveLength(0);
+  });
+
+  it('signals execution cancellation on timeout even without an external signal', async () => {
+    let toolSignal: AbortSignal | undefined;
+    const result = await runDocumentAgentLoop({
+      timeoutMs: 10,
+      execute: async (_request, context) => {
+        toolSignal = context.signal;
+        return new Promise(() => undefined);
+      },
+      nextDecision: async () => ({ kind: 'tool', request })
+    });
+    expect(result.state).toBe('timeout');
+    expect(toolSignal?.aborted).toBe(true);
+  });
+
+  it('honours synchronous cancellation inside an executor', async () => {
+    const controller = new AbortController();
+    const result = await runDocumentAgentLoop({
+      signal: controller.signal,
+      execute: async () => { controller.abort(); return new Promise(() => undefined); },
+      nextDecision: async () => ({ kind: 'tool', request })
+    });
+    expect(result.state).toBe('cancelled');
+  });
+
+  it('keeps prior observations and budget when continuing the next step', async () => {
+    let calls = 0;
+    const result = await runDocumentAgentLoop({
+      budgetUnits: 1,
+      initialObservations: [{ step: 1, toolId: 'read_document_structure', ok: true, data: {} }],
+      execute: async () => { calls++; return {}; },
+      nextDecision: async () => ({ kind: 'tool', request })
+    });
+    expect(result).toMatchObject({ state: 'budget_exceeded', costUnits: 1, steps: 1 });
+    expect(calls).toBe(0);
+  });
+
   it('executes at most one registered tool per round and returns sanitized observations', async () => {
     let calls = 0;
     const result = await runDocumentAgentLoop({

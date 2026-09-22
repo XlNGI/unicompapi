@@ -2,9 +2,10 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { StreamingTextBuffer } from './streamingText';
 
-export const StreamingMarkdown = memo(function StreamingMarkdown({ content, streaming }: {
+export const StreamingMarkdown = memo(function StreamingMarkdown({ content, streaming, allowImages = true }: {
   readonly content: string;
   readonly streaming: boolean;
+  readonly allowImages?: boolean;
 }) {
   const buffer = useRef(new StreamingTextBuffer());
   const [display, setDisplay] = useState(streaming ? '' : content);
@@ -24,5 +25,5 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({ content, stre
     frame = requestAnimationFrame(paint);
     return () => cancelAnimationFrame(frame);
   }, [content, streaming]);
-  return <MarkdownMessage content={streaming ? display : content} />;
+  return <MarkdownMessage content={streaming ? display : content} allowImages={allowImages} />;
 });

@@ -38,6 +38,11 @@ export const conversationWorkflowStatuses = [
 ] as const;
 export type ConversationWorkflowStatus = (typeof conversationWorkflowStatuses)[number];
 
+export const conversationPlanningFailureCodes = [
+  'classification_timeout', 'classification_unavailable', 'classification_invalid_response', 'invalid_intent_plan'
+] as const;
+export type ConversationPlanningFailureCode = (typeof conversationPlanningFailureCodes)[number];
+
 export interface ConversationWorkflowQuestion {
   readonly field: string;
   readonly question: string;
@@ -52,6 +57,7 @@ export interface ConversationWorkflowV1 {
   readonly sourceMessageId: MessageId;
   readonly revision: number;
   readonly status: ConversationWorkflowStatus;
+  readonly planningFailureCode?: ConversationPlanningFailureCode;
   readonly plan: ConversationIntentPlan;
   readonly deliveries?: readonly ConversationWorkflowDelivery[];
   readonly pendingQuestions: readonly ConversationWorkflowQuestion[];
@@ -135,6 +141,7 @@ export function updateConversationWorkflow(
       readonly presentation?: PresentationRevisionSelection;
     };
     readonly status?: ConversationWorkflowStatus;
+    readonly planningFailureCode?: ConversationPlanningFailureCode;
     readonly confirmationId?: string;
     readonly planHash?: string;
     readonly confirmationExpiresAt?: IsoTimestamp;
@@ -153,6 +160,7 @@ export function updateConversationWorkflow(
     ...workflow,
     revision: workflow.revision + 1,
     status,
+    ...(input.planningFailureCode !== undefined ? { planningFailureCode: input.planningFailureCode } : {}),
     plan,
     ...(deliveries !== undefined ? { deliveries } : {}),
     pendingQuestions: input.pendingQuestions ?? workflow.pendingQuestions,
@@ -172,7 +180,7 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
   const allowed = new Set([
     'schemaVersion', 'id', 'projectId', 'conversationId', 'sourceMessageId',
     'revision', 'status', 'plan', 'deliveries', 'pendingQuestions', 'resolvedTarget', 'confirmationId',
-    'planHash', 'confirmationExpiresAt', 'executionId', 'documentCommand', 'createdAt', 'updatedAt'
+    'planHash', 'confirmationExpiresAt', 'executionId', 'documentCommand', 'createdAt', 'updatedAt', 'planningFailureCode'
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key)) || value.schemaVersion !== 1) {
     throw new TypeError('Conversation workflow contains unsupported fields');
@@ -181,6 +189,12 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
   if (typeof value.status !== 'string' || !conversationWorkflowStatuses.includes(value.status as ConversationWorkflowStatus)) throw new TypeError('Conversation workflow status is invalid');
   if (!Array.isArray(value.pendingQuestions) || value.pendingQuestions.length > 16) throw new TypeError('Conversation workflow questions are invalid');
   const pendingQuestions = value.pendingQuestions.map(parseQuestion);
+  if (value.planningFailureCode !== undefined &&
+      (!conversationPlanningFailureCodes.includes(value.planningFailureCode as ConversationPlanningFailureCode) ||
+       !['failed', 'cancelled'].includes(String(value.status)) || pendingQuestions.length > 0 ||
+       value.confirmationId !== undefined || value.planHash !== undefined || value.confirmationExpiresAt !== undefined)) {
+    throw new TypeError('Conversation planning failure state is invalid');
+  }
   const resolvedTarget = value.resolvedTarget === undefined
     ? undefined
     : parseResolvedTarget(value.resolvedTarget);
@@ -209,6 +223,7 @@ export function parseConversationWorkflow(value: unknown): ConversationWorkflowV
     conversationId: toConversationId(nonBlank(value.conversationId, 'workflow.conversationId')),
     sourceMessageId: toMessageId(nonBlank(value.sourceMessageId, 'workflow.sourceMessageId')),
     revision: Number(value.revision),
+    ...(value.planningFailureCode !== undefined ? { planningFailureCode: value.planningFailureCode as ConversationPlanningFailureCode } : {}),
     // The retired selector is not an executable chat plan. Keep its request for
     // history, but require a fresh workflow before any action can be taken.
     status: documentCommand ? 'cancelled' : value.status as ConversationWorkflowStatus,
@@ -261,9 +276,9 @@ function assertWorkflowTransition(from: ConversationWorkflowStatus, to: Conversa
   if (from === to) return;
   const allowed: Readonly<Record<ConversationWorkflowStatus, readonly ConversationWorkflowStatus[]>> = {
     draft: ['needs_clarification', 'needs_confirmation', 'ready', 'cancelled'],
-    needs_clarification: ['needs_clarification', 'needs_confirmation', 'ready', 'cancelled'],
-    needs_confirmation: ['ready', 'cancelled', 'needs_clarification'],
-    ready: ['executing', 'needs_clarification', 'needs_confirmation', 'cancelled'],
+    needs_clarification: ['needs_clarification', 'needs_confirmation', 'ready', 'cancelled', 'failed'],
+    needs_confirmation: ['ready', 'cancelled', 'needs_clarification', 'failed'],
+    ready: ['executing', 'needs_clarification', 'needs_confirmation', 'cancelled', 'failed'],
     executing: ['completed', 'failed', 'cancelled', 'ready'],
     completed: [],
     failed: ['ready', 'executing', 'cancelled'],

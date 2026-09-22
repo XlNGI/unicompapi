@@ -57,6 +57,10 @@ describe('controlled provider tool calling', () => {
       bridge: { execute: async ({ call }) => ({ ok: true, operation: call.name }) }
     });
     expect(result.content).toBe('done');
+    expect(result.messages.at(-2)).toMatchObject({
+      role: 'assistant',
+      toolCalls: [{ id: 'call-1', name: 'inspect_layout' }]
+    });
     expect(result.messages.at(-1)?.role).toBe('tool');
   });
 });

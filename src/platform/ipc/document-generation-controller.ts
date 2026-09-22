@@ -26,10 +26,12 @@ import { documentGenerationRequestParsers } from '../../shared/document-generati
 import { resolveFileReferencePathSafely } from '../files';
 import {
   JsonFileReferenceRepository,
+  JsonProjectConversationRepository,
   JsonWorkRepository
 } from '../repositories';
 import { NodeProjectStorage } from '../storage';
 import type { StorageProjectSession } from './storage-ipc-controller';
+import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
 
 export interface DocumentGenerationControllerDependencies {
   getSession(): StorageProjectSession | undefined;
@@ -111,26 +113,43 @@ export class DocumentGenerationController {
     return this.execute(async () => {
       const input = documentGenerationRequestParsers.generateFromMessage(request);
       const session = this.requireSession();
-      const result = await this.dependencies
-        .getApplication(session)
-        .generateFromMessage(
-          toDocumentGenerationApplicationInput({
-            ...input,
-            images: input.images ?? []
-          })
-        );
-      return {
-        ok: true,
-        value: {
-          conversationId: result.conversationId,
-          messageId: result.messageId,
-          taskId: result.taskId,
-          executionId: result.executionId,
-          workId: result.workId,
-          fileName: result.fileName,
-          sizeBytes: result.sizeBytes
+      const conversation = await new JsonProjectConversationRepository(
+        new NodeProjectStorage(session.rootDirectory), session.projectId
+      ).get(toConversationId(input.conversationId));
+      const assistantIndex = conversation?.messages.findIndex((message) => message.id === input.messageId) ?? -1;
+      const assistant = assistantIndex >= 0 ? conversation!.messages[assistantIndex] : undefined;
+      const source = assistant?.role === 'assistant'
+        ? conversation!.messages.slice(0, assistantIndex).reverse().find((message) => message.role === 'user')
+        : undefined;
+      const generate = async (): Promise<DocumentGenerationIpcResult<DocumentGenerationFromConversationDto>> => {
+        try {
+          const result = await this.dependencies.getApplication(session).generateFromMessage(
+            toDocumentGenerationApplicationInput({ ...input, images: input.images ?? [] })
+          );
+          await emitProductionEvent({ code: 'task_complete', status: 'completed',
+            operationId: result.executionId, facts: { documentKind: input.kind, bytes: result.sizeBytes } });
+          return {
+            ok: true,
+            value: {
+              conversationId: result.conversationId,
+              messageId: result.messageId,
+              taskId: result.taskId,
+              executionId: result.executionId,
+              workId: result.workId,
+              fileName: result.fileName,
+              sizeBytes: result.sizeBytes
+            }
+          };
+        } catch (error) {
+          await emitProductionEvent({ code: 'task_complete', status:
+            error instanceof DocumentGenerationApplicationError && error.code === 'cancelled' ? 'cancelled' : 'failed',
+            facts: { documentKind: input.kind } });
+          throw error;
         }
       };
+      return source ? withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
+        conversationId: input.conversationId, sourceMessageId: source.id, traceId: source.id,
+        assistantMessageId: input.messageId }, generate) : generate();
     });
   }
 

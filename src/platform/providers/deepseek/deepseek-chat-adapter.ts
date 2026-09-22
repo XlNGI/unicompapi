@@ -44,10 +44,12 @@ import {
   sanitizeControlledToolResult,
   parseControlledProviderTools,
   parseControlledToolCallDeltas,
+  toControlledProviderAssistantToolCalls,
   type ControlledProviderToolDefinition,
   type ControlledProviderToolBridge,
   type ControlledProviderToolCallDelta,
-  type ControlledProviderToolCall
+  type ControlledProviderToolCall,
+  type ControlledProviderAssistantToolCall
 } from '../provider-tool-calling';
 import {
   DeepSeekRuntimeError,
@@ -131,6 +133,7 @@ export interface DeepSeekChatMessageV1 {
   readonly content: string;
   readonly toolCallId?: string;
   readonly name?: string;
+  readonly toolCalls?: readonly ControlledProviderAssistantToolCall[];
 }
 
 export interface DeepSeekChatDispatchRequestV1 {
@@ -409,7 +412,11 @@ export class DeepSeekChatAdapter {
         if (!operation.toolBridge || !stream.toolCalls || ++rounds > operation.maxToolRounds) {
           throw new DeepSeekChatAdapterError('deepseek.tool_loop_limit', 'Tool calling loop limit exceeded');
         }
-        operation.messages.push({ role: 'assistant', content: stream.content ?? '' });
+        operation.messages.push({
+          role: 'assistant',
+          content: stream.content ?? '',
+          toolCalls: toControlledProviderAssistantToolCalls(stream.toolCalls)
+        });
         for (const call of stream.toolCalls) {
           const result = await operation.toolBridge.execute({ call, signal: operation.signal });
           operation.messages.push({ role: 'tool', content: JSON.stringify(sanitizeControlledToolResult(result)), toolCallId: call.id, name: call.name });
@@ -966,7 +973,8 @@ function serializeRequest(
       role: message.role,
       content: message.content,
       ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
-      ...(message.name !== undefined ? { name: message.name } : {})
+      ...(message.name !== undefined ? { name: message.name } : {}),
+      ...(message.toolCalls !== undefined ? { tool_calls: message.toolCalls } : {})
     })),
     stream: true,
     stream_options: { include_usage: true },

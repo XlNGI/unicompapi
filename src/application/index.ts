@@ -11,3 +11,4 @@ export * from './conversation-context-builder';
 export * from './conversation-web-research-service';
 export * from './latest-snapshot-autosave';
 export * from './presentation-page-count';
+export * from './document-task-runtime-service';

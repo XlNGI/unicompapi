@@ -34,6 +34,7 @@ export interface ConversationIntentDecision {
   readonly failureCode?:
     | 'classification_timeout'
     | 'classification_unavailable'
+    | 'classification_invalid_response'
     | 'invalid_intent_plan';
 }
 
@@ -50,6 +51,22 @@ export interface ConversationIntentClassifierPort {
     readonly context: ConversationSemanticContext;
     readonly signal: AbortSignal;
   }): Promise<unknown>;
+}
+
+/** Provider adapters use this without passing model output into UI or diagnostics. */
+export class ConversationSemanticPlanError extends Error {
+  constructor(readonly reason: 'json_invalid' | 'schema_invalid' = 'schema_invalid') {
+    super('invalid_intent_plan');
+    this.name = 'ConversationSemanticPlanError';
+  }
+}
+
+/** A provider response was received but could not supply a complete usable answer. */
+export class ConversationSemanticResponseError extends Error {
+  constructor() {
+    super('classification_invalid_response');
+    this.name = 'ConversationSemanticResponseError';
+  }
 }
 
 /**
@@ -121,7 +138,7 @@ export class ConversationIntentOrchestrator {
         }), aborted]);
         if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
         if (controller.signal.aborted) throw new Error('Intent classification timed out');
-      } catch {
+      } catch (error) {
         if (input.signal?.aborted) {
           throw new ConversationIntentOrchestrationError('cancelled');
         }
@@ -130,7 +147,8 @@ export class ConversationIntentOrchestrator {
           route: 'fallback',
           failureCode: controller.signal.aborted
             ? 'classification_timeout'
-            : 'classification_unavailable'
+            : error instanceof ConversationSemanticPlanError ? 'invalid_intent_plan'
+              : error instanceof ConversationSemanticResponseError ? 'classification_invalid_response' : 'classification_unavailable'
         };
       }
       let classified: ConversationIntentPlan;
@@ -142,6 +160,7 @@ export class ConversationIntentOrchestrator {
       const trustedRequirements = input.workflow && context.recentUserMessages?.length
         ? context.recentUserMessages.join('\n')
         : input.rawText;
+      if (agentFirst) return validateAgentDecision(classified, context, trustedRequirements);
       const sourcePolicy = inferSourcePolicy(trustedRequirements);
       if (classified.kind === 'document' && classified.action !== 'create' && classified.action !== 'revise') {
         return { ...local, route: 'fallback', failureCode: 'invalid_intent_plan' };
@@ -175,10 +194,47 @@ export class ConversationIntentOrchestrator {
   }
 }
 
+function validateAgentDecision(
+  classified: ConversationIntentPlan,
+  context: ConversationSemanticContext,
+  requirements: string
+): ConversationIntentDecision {
+  const missing = new Set(classified.missing.map(conversationClarificationKey));
+  if (classified.kind === 'document' && (!classified.documentKind || classified.documentKind === 'auto')) missing.add('document_kind');
+  let target: OfficeDocumentContext | undefined;
+  if (classified.kind === 'document' && classified.action === 'revise') {
+    const candidates = (context.documents ?? []).filter((document) =>
+      classified.documentKind === 'auto' || document.kind === classified.documentKind);
+    const hint = classified.targetHint;
+    const matching = hint?.unit === 'document' && hint.name
+      ? candidates.filter((document) => document.fileName === hint.name)
+      : candidates;
+    if (matching.length === 1) target = matching[0];
+    else missing.add('document_target');
+  }
+  // Validate the structured field, not whether the user's prose contains a
+  // keyword. A topic inferred by the model from authorized context is valid.
+  if (classified.kind === 'document' && classified.action === 'create' && classified.documentKind === 'ppt' &&
+      (typeof classified.parameters.topic !== 'string' || !classified.parameters.topic.trim())) {
+    missing.add('document_topic');
+  }
+  const plan = parseConversationIntentPlan({
+    ...classified,
+    ...(target ? { documentKind: target.kind } : {}),
+    ...(classified.kind === 'document' ? { parameters: { ...classified.parameters, requirements } } : {}),
+    missing: [...missing],
+    confidence: missing.size ? 'low' : classified.confidence,
+    needsConfirmation: classified.needsConfirmation || (classified.kind === 'document' && isDestructiveRevision(requirements))
+  });
+  // sourcePolicy expresses requested capability; the research service still
+  // requires a separate scoped authorization before any network operation.
+  return { plan, assessment: assessConversationIntentPlan(plan), route: 'classifier', ...(target ? { resolvedTarget: target } : {}) };
+}
+
 function analyzeLocalSafetyIntent(rawText: string): ConversationIntentDecision {
   const text = rawText.trim();
   if (!text) return decision(unknownPlan('empty_input'), 'local');
-  if (isConversationCancellation(text)) {
+  if (/^(?:请)?(?:取消|停止|撤销)(?:当前|本次|这个)?(?:任务|生成|执行)?[。！!\s]*$/u.test(text)) {
     return { ...decision(unknownPlan('已取消当前请求'), 'local'), cancelled: true };
   }
   return decision(unknownPlan('agent_semantic_plan_required'), 'local');

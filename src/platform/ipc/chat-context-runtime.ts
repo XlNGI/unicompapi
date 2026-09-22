@@ -285,7 +285,13 @@ export function createChatContextRuntime(
     });
     const workflowService = new ConversationWorkflowService(
       new JsonConversationWorkflowRepository(storage, session.projectId, now),
-      new ConversationIntentOrchestrator({ classifier, classifierTimeoutMs: conversationSemanticLimits.timeoutMs }),
+      new ConversationIntentOrchestrator({
+        classifier,
+        classifierTimeoutMs: conversationSemanticLimits.timeoutMs,
+        // Provider availability must never switch new production tasks back to
+        // legacy business routing. Saved workflows remain readable offline.
+        routingMode: 'agent_first'
+      }),
       now, undefined, undefined, createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId })
     );
     const retrieval = new RagRetrievalService({
