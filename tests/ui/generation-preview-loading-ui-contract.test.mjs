@@ -11,8 +11,8 @@ test('image and video workspaces show real submit stages in the shared preview',
   for (const path of paths) {
     const source = await readFile(path, 'utf8');
     assert.match(source, /onProgressChange=\{handleProgressChange\}/);
-    assert.match(source, /loading=\{generationInFlight\}/);
-    assert.match(source, /loadingTitle=\{generationPreviewCopy\.title\}/);
+    assert.match(source, /<GenerationHistory/);
+    assert.match(source, /submissionProgress=\{submissionProgress\}/);
   }
 });
 

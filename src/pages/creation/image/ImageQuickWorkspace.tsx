@@ -1,10 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LuArrowRight, LuFolderOpen, LuSparkles } from 'react-icons/lu';
 import { Input } from 'rsuite';
 import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
-import { GenerationOutputPanel } from '../../../components/GenerationOutputPanel';
-import { GenerationResultPreview } from '../../../components/GenerationResultPreview';
+import { GenerationHistory } from '../../../components/GenerationHistory';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import { useGlobalNotifications } from '../../../ui/notifications/GlobalNotificationProvider';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
@@ -38,22 +37,39 @@ export function ImageQuickWorkspace({
   const notifications = useGlobalNotifications();
   const [busy, setBusy] = useState(false);
   const [revealing, setRevealing] = useState(false);
-  const [resultUrls, setResultUrls] = useState<readonly string[]>([]);
-  const [workId, setWorkId] = useState<string>();
-  const [submissionProgress, setSubmissionProgress] = useState<SubmissionProgressPhase>('idle');
-  const handleProgressChange = useCallback((phase: SubmissionProgressPhase) => {
-    if (phase === 'preparing' || phase === 'requesting') {
-      setResultUrls([]);
-      setWorkId(undefined);
-    }
-    setSubmissionProgress(phase);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [expectedWorkId, setExpectedWorkId] = useState<string>();
+  const [selectedWorkId, setSelectedWorkId] = useState<string>();
+  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
+  const [submissionProgress, setSubmissionProgress] = useState<{
+    readonly phase: SubmissionProgressPhase;
+    readonly failureMessage?: string;
+  }>({ phase: 'idle' });
+  const userTookOverRef = useRef(false);
+  const handleProgressChange = useCallback((phase: SubmissionProgressPhase, failureMessage?: string) => {
+    if (phase === 'preparing') userTookOverRef.current = false;
+    setSubmissionProgress({ phase, failureMessage });
   }, []);
-  const generationInFlight = ['preparing', 'requesting', 'waiting'].includes(submissionProgress);
-  const generationPreviewCopy = submissionProgress === 'requesting'
-    ? { title: '正在提交生成请求', description: '请求正在安全提交，请保持应用运行。' }
-    : submissionProgress === 'waiting'
-      ? { title: '正在生成图片', description: '服务商正在处理，完成后将校验并登记到本地。' }
-      : { title: '正在准备图片生成', description: '正在锁定本次参数与提交事实。' };
+  useEffect(() => {
+    setHistoryRefreshKey(0);
+    setExpectedWorkId(undefined);
+    setSelectedWorkId(undefined);
+    setSubmissionProgress({ phase: 'idle' });
+  }, [draft.draftId]);
+  useEffect(() => {
+    let active = true;
+    if (!imageWorkspaces) {
+      setSiblingDraftIds([]);
+      return;
+    }
+    void imageWorkspaces.list().then((result) => {
+      if (!active || !result.ok) return;
+      setSiblingDraftIds(result.value.filter((item) => item.mode === 'quick_image').map((item) => item.draftId));
+    }).catch(() => {
+      if (active) setSiblingDraftIds([]);
+    });
+    return () => { active = false; };
+  }, [imageWorkspaces, historyRefreshKey]);
   const legacyReason = draft.input
     ? '此旧草稿含图片输入，快速生图不能提交；请迁移到专业生图。'
     : draft.contextReferences.length > 0
@@ -61,8 +77,6 @@ export function ImageQuickWorkspace({
       : undefined;
 
   function changePrompt(value: string) {
-    setResultUrls([]);
-    setWorkId(undefined);
     onMessage('');
     onDraftChange({
       ...draft,
@@ -109,26 +123,26 @@ export function ImageQuickWorkspace({
   }
 
   async function revealResult() {
-    if (!storage || !workId || revealing) return;
+    if (!storage || !selectedWorkId || revealing) return;
     setRevealing(true);
     try {
-      const result = await storage.revealWorkFile(workId);
+      const result = await storage.revealWorkFile(selectedWorkId);
       notifications.show(result.ok
         ? {
-            id: `image-result-reveal:${draft.draftId}`,
+            id: `image-result-reveal:${selectedWorkId}`,
             kind: 'success',
             title: '已打开图片位置',
             description: '图片已在系统文件管理器中定位。'
           }
         : {
-            id: `image-result-reveal:${draft.draftId}`,
+            id: `image-result-reveal:${selectedWorkId}`,
             kind: 'error',
             title: '打开图片位置失败',
             description: '本地作品文件当前无法定位，请前往作品库检查文件状态。'
           });
     } catch {
       notifications.show({
-        id: `image-result-reveal:${draft.draftId}`,
+        id: `image-result-reveal:${selectedWorkId}`,
         kind: 'error',
         title: '打开图片位置失败',
         description: '本地作品文件当前无法定位，请前往作品库检查文件状态。'
@@ -205,40 +219,33 @@ export function ImageQuickWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
-              setResultUrls(submission.resultImageUrls ?? []);
-              setWorkId(submission.workId);
-              if (submission.status === 'completed') {
-                onClearUi?.();
-              }
+              setExpectedWorkId(submission.status === 'completed' ? submission.workId : undefined);
+              setHistoryRefreshKey((key) => key + 1);
+              if (submission.status === 'completed') onClearUi?.();
             }}
             oneShot
           />
         </Card>
         </section>
 
-        <GenerationOutputPanel aria-label="图片生成内容" className="uc-generation-two-pane__result">
-        <Card className="uc-image-workbench__panel uc-image-workbench__canvas uc-image-quick__stage">
-          <header className="uc-image-workbench__panel-heading">
-            <div>
-              <h2>生成结果</h2>
-            </div>
-          </header>
-          <GenerationResultPreview
-            emptyDescription="输入提示词，选择模型，然后点击生成。"
-            emptyTitle="生成结果将在这里显示"
-            loading={generationInFlight}
-            loadingDescription={generationPreviewCopy.description}
-            loadingTitle={generationPreviewCopy.title}
+        <Card aria-label="图片生成内容与历史" className="uc-generation-two-pane__result">
+          <GenerationHistory
+            draftId={draft.draftId}
+            extraDraftIds={siblingDraftIds}
+            key={draft.draftId}
             mediaKind="image"
-            compact
-            remoteUrls={resultUrls}
-            workId={workId}
+            projectId={draft.projectId}
+            refreshKey={historyRefreshKey}
+            expectedWorkId={expectedWorkId}
+            onWorkSelectionChange={setSelectedWorkId}
+            userTookOverRef={userTookOverRef}
+            submissionProgress={submissionProgress}
           />
           <div className="uc-image-quick__result-actions">
             <Button
-              disabled={!storage || !workId || revealing}
+              disabled={!storage || !selectedWorkId || revealing}
               onClick={() => void revealResult()}
-              title={workId ? '在系统文件管理器中定位已保存图片' : '图片完成本地保存后可用'}
+              title={selectedWorkId ? '在系统文件管理器中定位已保存图片' : '选择已完成图片后可用'}
               variant="secondary"
             >
               <LuFolderOpen aria-hidden="true" />
@@ -254,7 +261,6 @@ export function ImageQuickWorkspace({
             </Button>
           </div>
         </Card>
-        </GenerationOutputPanel>
       </div>
 
     </>

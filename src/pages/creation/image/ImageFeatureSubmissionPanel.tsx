@@ -774,7 +774,6 @@ export function ImageFeatureSubmissionPanel({
       }
     : !selectedCandidate ? { title: '请选择模型', warning: false }
     : !selectedCandidate.available ? { title: '所选模型当前不可用', description: selectedUnavailableReasons.map((reason) => unavailableReasonLabels[reason] ?? '其他不可用原因').join('、') || '请检查模型与连接状态。', warning: true }
-    : !parameterValidation.valid ? { title: '请修正模型参数', description: parameterValidation.firstError, warning: true }
     : undefined;
 
   const primaryAction = (

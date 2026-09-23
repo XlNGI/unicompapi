@@ -42,8 +42,9 @@ test('quick video hides dynamic parameters and uses provider defaults', () => {
 });
 
 test('quick video keeps the shared result surface without a call-record notice', () => {
-  assert.match(quick, /GenerationResultPreview/);
-  assert.match(quick, /尚无生成结果/);
+  assert.match(quick, /GenerationHistory/);
+  assert.match(quick, /生成内容与历史/);
+  assert.match(quick, /submissionProgress=\{submissionProgress\}/);
   assert.doesNotMatch(quick, /调用记录|快速\/文生\/图生视频共用同一提交/);
   assert.doesNotMatch(quick, /<StatusPill/);
   assert.match(panel, /runtime_not_allowed/);

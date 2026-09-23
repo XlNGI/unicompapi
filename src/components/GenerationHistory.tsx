@@ -21,6 +21,7 @@ interface GenerationHistoryProps {
   readonly refreshKey: number;
   readonly expectedWorkId?: string;
   readonly userTookOverRef: MutableRefObject<boolean>;
+  readonly onWorkSelectionChange?: (workId?: string) => void;
   readonly submissionProgress: {
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -118,7 +119,8 @@ export function GenerationHistory({
   refreshKey,
   expectedWorkId,
   userTookOverRef,
-  submissionProgress
+  submissionProgress,
+  onWorkSelectionChange
 }: GenerationHistoryProps) {
   const storage = window.unicomp?.storage;
   const [works, setWorks] = useState<readonly HistoryWork[]>([]);
@@ -135,6 +137,10 @@ export function GenerationHistory({
   const retryTimerRef = useRef<number>();
   const deadlineTimerRef = useRef<number>();
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    onWorkSelectionChange?.(selectedWorkId);
+  }, [onWorkSelectionChange, selectedWorkId]);
 
   // 当前模式下所有草稿ID（当前草稿 + 同模式兄弟草稿），用于按模式过滤历史
   const modeDraftIds = useMemo(

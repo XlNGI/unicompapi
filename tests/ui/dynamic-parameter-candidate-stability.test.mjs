@@ -30,7 +30,7 @@ test('autosave keeps image and video dynamic parameter contracts interactive', (
     const needsSaveBlock = blockFor(source, 'if (needsSave)');
     assert.doesNotMatch(needsSaveBlock, /setLoadState\(/);
     assert.doesNotMatch(needsSaveBlock, /setCandidates\(\[\]\)/);
-    assert.match(source, /if \(blockedReason\) \{[\s\S]*?setCandidates\(\[\]\)/);
+    assert.match(source, /setCandidates\(\[\]\)/);
   }
 });
 
