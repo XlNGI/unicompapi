@@ -22,6 +22,7 @@ export * from './provider-submission-orchestrator';
 export * from './provider-submission-dispatch-bridge';
 export * from './conversation-response-artifact-factory';
 export * from './conversation-text-submission';
+export * from './conversation-semantic-classifier';
 export * from './image-draft-artifact-factory';
 export * from './image-feature-submission';
 export * from './prompt-enhance-submission';

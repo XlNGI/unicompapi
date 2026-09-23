@@ -203,7 +203,7 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
           const adapterVersion = adapterBinding?.adapterVersion ?? 'unavailable';
 
           candidates.push({
-            candidateId: candidateId(model.id, profile.profileId, feature.productFeature),
+            candidateId: featureCandidateId(model.id, profile.profileId, feature.productFeature),
             providerName: provider.name,
             connectionName: connection.name,
             modelName: model.displayName,
@@ -380,7 +380,7 @@ function packagePublishesAdapter(
   return false;
 }
 
-function candidateId(modelId: string, profileId: string, feature: ProductFeature): string {
+export function featureCandidateId(modelId: string, profileId: string, feature: ProductFeature): string {
   return `candidate-${createHash('sha256')
     .update(`${modelId}\u0000${profileId}\u0000${feature}`, 'utf8')
     .digest('hex')

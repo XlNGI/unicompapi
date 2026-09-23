@@ -2,6 +2,8 @@
 
 版本：V2.3
 
+> 2026-09-23 QA 修正接线补充：PPT QA 发现硬错误后，Application 通过当前对话响应的已授权 Provider route 调用 LLM repair planner。Planner 只接收冻结脱敏的 `DocumentOutline`、结构化诊断、revision 和 attempt，返回受限 `RepairPlan`；Runner 负责全部安全校验、布局 Patch、重生成、重渲染和发布门禁。没有 route、planner 或安全计划时停止并保留候选，绝不使用单机确定性修正。
+
 更新日期：2026-09-23
 
 状态：负责人已明确架构方向；2026-09-22 已完成“Conversation Agent + Task Runtime + Document IR + 受控渲染与发布门禁”的计划对齐，并补充“LLM 自主判断 + 本地原子工具执行”主原则。P0—P5 分批实施已获当前任务授权。生产已固定 `agent_first` 并在无模型选择时阻止提交；2026-09-23 已将持久 Task Runtime 接入文档 IPC、真实本地生成事件和 Work 登记门禁，并将正式 PPT 生成改为必须经过实际渲染 QA。2026-09-23 又完成 Runner 级最小有限修正闭环：QA 失败后最多 2 次受控布局 Patch，每次重新生成并重新渲染，最终通过后才发布；聊天主链路仍采用“先分类、后回答/生成”的过渡链路。统一 Agent 一次响应直接回答或请求工具、Provider 工具目录在聊天主链路的完整接入、动态文档生成、自由 Scene IR、逐页预览、完整 Visual QA 和全量验收均未完成，不能将路由开关、运行时接线或本次基础渲染/修正门禁视为 P2/P1 全部完成。
@@ -561,4 +563,4 @@ Windows 为当前必需实机目标；代码保持 Windows/macOS 平台边界，
 
 验证：新增 `tests/platform/document-generation-repair-loop.test.ts` 5/5 通过，覆盖 LLM planner 返回计划后的重新生成/重新渲染、重复诊断停止、正文修改拦截、两次修正上限和规划器超时；repair workflow 另有“无 LLM planner 不修改并返回 needs_user”回归。主工程、测试工程和 Electron TypeScript，变更文件 ESLint 及 `git diff --check` 均通过；未调用真实模型、联网或付费服务。
 
-该闭环仍以 `DocumentOutline` 作为过渡写入目标，不代表统一 Document IR、LLM 自主工具主循环或完整 Visual QA 已完成。当前 Electron/聊天生产入口尚未将真实 LLM repair planner 注入 `DocumentGenerationExecutionInput`，所以生产 QA 失败仍会停止，不会回退为单机修正。取消和过期 revision 的独立 Runner fixture 尚未单独增加；真实 Office/PDF/PNG fixture、PPTX 文本框内部裁切、字体回退、非文本元素重叠以及表格/图表可读性仍需后续证据。
+该闭环仍以 `DocumentOutline` 作为过渡写入目标，不代表统一 Document IR、LLM 自主工具主循环或完整 Visual QA 已完成。当前 Electron 文档生产入口已将真实 LLM repair planner 注入 `DocumentGenerationExecutionInput`：它从当前对话响应执行记录恢复已授权 route，通过现有 Provider 候选、凭证、授权、审计和超时链路发起 RepairPlan 请求；没有可用 route 或 planner 时仍停止并保留候选，绝不回退为单机修正。Planner 只收到脱敏且有界的 Outline、结构化诊断、revision 和 attempt；没有渲染图时只能进行结构诊断修正，不能声称完成视觉判断。取消和过期 revision 的独立 Runner fixture 尚未单独增加；真实 Office/PDF/PNG fixture、PPTX 文本框内部裁切、字体回退、非文本元素重叠以及表格/图表可读性仍需后续证据。

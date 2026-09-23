@@ -7,7 +7,8 @@ import {
   ConversationStreamingService,
   ConversationWorkflowService,
   DocumentGenerationApplicationService,
-  DocumentTaskRuntimeService
+  DocumentTaskRuntimeService,
+  type DocumentLlmRepairPlannerRequest
 } from '../../src/application';
 import { DocumentGenerationRuntimeBridge } from '../../src/application/document-generation-runtime-bridge';
 import { runLocalDocumentRevisionAgent } from '../../src/application';
@@ -33,8 +34,15 @@ import {
   RagRetrievalService,
   resolveFileReferencePathSafely,
   createConfiguredOfficeRenderAdapter,
+  ConversationSemanticClassifier,
+  featureCandidateId,
   type StorageProjectSession,
-  type StorageProjectSessionRegistry
+  type StorageProjectSessionRegistry,
+  type ConversationTextSubmissionRuntimes,
+  type JsonProviderRegistryStore,
+  type ProviderCandidateRuntimeAuthorizationPort,
+  type RuntimeAuthorizationOrchestrationPort,
+  type ProviderPackageRegistry
 } from '../../src/platform';
 import {
   documentAttachmentIpcChannels,
@@ -48,10 +56,17 @@ import { createDocumentWorkflowSettlement } from '../../src/platform/documents/c
 import { createPresentationWorkflowScope, RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
 import { ConversationDocumentInputStore } from '../../src/platform/documents/conversation-document-inputs';
 import { JsonConversationResponseExecutionRepository } from '../../src/platform/repositories/json-conversation-response-execution-repository';
+import { JsonProviderExecutionRouteSnapshotRepository } from '../../src/platform/repositories/json-provider-execution-route-snapshot-repository';
+import { JsonProviderInvocationRepository } from '../../src/platform/repositories/json-provider-invocation-repository';
+import { JsonProviderUsageObservationRepository } from '../../src/platform/repositories/json-provider-usage-repository';
 import { emitProductionEvent } from '../../src/platform/conversation-production-trace';
 
 export function registerDocumentGenerationIpcHandlers(options: {
   readonly sessionRegistry: StorageProjectSessionRegistry;
+  readonly providerRegistry?: JsonProviderRegistryStore;
+  readonly providerPackages?: ProviderPackageRegistry;
+  readonly runtimeAuthorization?: ProviderCandidateRuntimeAuthorizationPort & RuntimeAuthorizationOrchestrationPort;
+  readonly textSubmission?: Omit<ConversationTextSubmissionRuntimes, 'providerRegistry' | 'providerPackages' | 'usage'>;
 }): { waitForOperations(): Promise<void> } {
   const now = () => new Date().toISOString();
   const ids = {
@@ -74,6 +89,24 @@ export function registerDocumentGenerationIpcHandlers(options: {
       const taskRuntimeRepository = new JsonDocumentTaskRuntimeRepository(storage, session.projectId, now);
       const runtimeFiles = new JsonFileReferenceRepository(storage, session.projectId);
       const runtimeWorks = new JsonWorkRepository(storage, session.projectId);
+      const invocationRoutes = new JsonProviderExecutionRouteSnapshotRepository(storage, session.projectId);
+      const invocations = new JsonProviderInvocationRepository(storage, session.projectId);
+      const usage = new JsonProviderUsageObservationRepository(storage);
+      const repairClassifier = options.providerRegistry && options.providerPackages &&
+        options.runtimeAuthorization && options.textSubmission
+        ? new ConversationSemanticClassifier({
+            projectId: session.projectId,
+            runtimes: {
+              ...options.textSubmission,
+              providerRegistry: options.providerRegistry,
+              providerPackages: options.providerPackages,
+              usage
+            },
+            authorization: options.runtimeAuthorization,
+            audit: { routes: invocationRoutes, invocations, usage },
+            now
+          })
+        : undefined;
       const taskRuntimeService = new DocumentTaskRuntimeService(taskRuntimeRepository, {
         now,
         validateBindings: async (runtime) => {
@@ -178,6 +211,25 @@ export function registerDocumentGenerationIpcHandlers(options: {
         },
         compiler: new PlatformDocumentDraftCompiler(),
         generator: new PlatformDocumentGenerationExecutor(runner),
+        ...(repairClassifier ? { llmRepairPlanner: async (request: DocumentLlmRepairPlannerRequest) => {
+          const execution = (await new JsonConversationResponseExecutionRepository(storage, session.projectId)
+            .list(request.conversationId))
+            .find((item) => item.snapshot.assistantMessageId === request.messageId);
+          if (!execution) throw new Error('llm_repair_route_unavailable');
+          const route = await invocationRoutes.get(execution.snapshot.routeSnapshotId);
+          if (!route || (route.productFeature !== 'text_chat' && route.productFeature !== 'text_reasoning')) {
+            throw new Error('llm_repair_route_unavailable');
+          }
+          return repairClassifier.planDocumentRepair({
+            candidateId: featureCandidateId(route.modelId, route.profileId, route.productFeature),
+            productFeature: route.productFeature,
+            outline: request.outline,
+            diagnostics: request.diagnostics,
+            expectedRevision: request.expectedRevision,
+            attempt: request.attempt,
+            signal: request.signal
+          });
+        } } : {}),
         revisionAgent: (input) =>
           runLocalDocumentRevisionAgent(input, {
             readStructure: (outline) => readStructuredDocument(outline),
