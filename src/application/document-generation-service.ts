@@ -160,6 +160,27 @@ export interface DocumentGenerationProgressEvent {
 
 export type DocumentGenerationProgressCallback = (event: DocumentGenerationProgressEvent) => void | Promise<void>;
 
+/**
+ * The Application layer only forwards bounded QA evidence to the model port.
+ * Platform owns the concrete diagnostic implementation and all validation.
+ */
+export interface DocumentLlmRepairDiagnostic {
+  readonly code: string;
+  readonly severity: 'error' | 'warning';
+  readonly scope: string;
+  readonly message: string;
+}
+
+export interface DocumentLlmRepairPlannerRequest {
+  readonly conversationId: ConversationId;
+  readonly messageId: MessageId;
+  readonly outline: DocumentOutline;
+  readonly diagnostics: readonly DocumentLlmRepairDiagnostic[];
+  readonly expectedRevision: number;
+  readonly attempt: number;
+  readonly signal: AbortSignal;
+}
+
 /** Durable lifecycle hooks for a local document generation execution. */
 export interface DocumentGenerationRuntimeSession {
   readonly executionId: string;
@@ -191,6 +212,18 @@ export interface DocumentGenerationExecutionInput {
   readonly requestedTotalPages?: number;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
+  /**
+   * Optional LLM/Designer repair planner. A missing planner deliberately
+   * disables automatic repair; no local fallback is permitted.
+   */
+  readonly requestLlmRepair?: (request: {
+    readonly outline: DocumentOutline;
+    readonly diagnostics: readonly DocumentLlmRepairDiagnostic[];
+    readonly expectedRevision: number;
+    readonly attempt: number;
+    readonly signal: AbortSignal;
+  }) => Promise<unknown>;
+  readonly repairTimeoutMs?: number;
   readonly signal: AbortSignal;
   readonly onCancellationClosed: () => void | Promise<void>;
   readonly onProgress?: DocumentGenerationProgressCallback;
@@ -337,6 +370,10 @@ export class DocumentGenerationApplicationService {
           readonly signal: AbortSignal;
         }
       ) => Promise<DocumentRevisionAgentResult>;
+      /** LLM is the only source of QA repair decisions. */
+      readonly llmRepairPlanner?: (
+        input: DocumentLlmRepairPlannerRequest
+      ) => Promise<unknown>;
       readonly fingerprint: (content: string) => string;
       readonly nextLocalExecutionId?: () => string;
       readonly wait?: (milliseconds: number) => Promise<void>;
@@ -997,8 +1034,26 @@ export class DocumentGenerationApplicationService {
       ...(revisionPatches !== undefined ? { revisionPatches } : {}),
       ...(requestedTotalPages !== undefined ? { requestedTotalPages } : {}),
       ...(input.theme !== undefined ? { theme: input.theme } : {}),
-      ...(input.presentationTemplate !== undefined
+       ...(input.presentationTemplate !== undefined
         ? { presentationTemplate: input.presentationTemplate }
+        : {}),
+      ...(this.dependencies.llmRepairPlanner !== undefined
+        ? {
+            requestLlmRepair: (request: {
+              readonly outline: DocumentOutline;
+              readonly diagnostics: readonly DocumentLlmRepairDiagnostic[];
+              readonly expectedRevision: number;
+              readonly attempt: number;
+              readonly signal: AbortSignal;
+            }) => this.dependencies.llmRepairPlanner!({
+              conversationId: input.conversationId,
+              messageId: input.messageId,
+              ...request
+            })
+          }
+        : {}),
+      ...(this.dependencies.llmRepairPlanner !== undefined
+        ? { repairTimeoutMs: 30_000 }
         : {}),
       signal: abortController.signal,
       ...(runtimeSession ? { strictProgress: true } : {}),

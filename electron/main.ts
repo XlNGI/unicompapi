@@ -192,7 +192,15 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
   }
 });
 const documentLifecycle = registerDocumentGenerationIpcHandlers({
-  sessionRegistry: projectSessionRegistry
+  sessionRegistry: projectSessionRegistry,
+  providerRegistry: viduComposition.registry,
+  providerPackages,
+  runtimeAuthorization: runtimeAuthorizationLedger,
+  textSubmission: {
+    credentialVault: viduComposition.credentialVault,
+    deepSeekRuntime: liveProviders.deepSeekRuntime,
+    newApiRuntime: liveProviders.newApiRuntime
+  }
 });
 const storageLifecycle = registerStorageIpcHandlers({
   getMediaEngine: () => mediaEngine,

@@ -1,12 +1,16 @@
 # UniComp 开发计划
 
+### 2026-09-23 QA 修正接线补充
+
+PPT QA 修正由 LLM 发起：Electron 文档生产入口已将 `requestLlmRepair` 接到 `ConversationSemanticClassifier.planDocumentRepair`，从当前对话响应执行记录恢复已授权 route，经过现有 Provider 候选、凭证、授权、审计和超时链路发起 RepairPlan 请求。Runner 仍独占诊断、Schema、诊断码、revision、目标范围、布局操作白名单、重新生成、重新渲染、Hash、原子发布和 Work 登记；没有 route、planner 或安全计划时保留候选并失败，不执行单机试修。测试环境没有 Provider 依赖时不注入 planner，仅验证离线门禁。
+
 ### P1 PPT 真实渲染后的有限修正（2026-09-23，已实现最小闭环）
 
 继续完成“实际生成 → 渲染诊断 → 有限布局修正 → 重新生成和渲染 → 全部复验 → 发布登记”的最小闭环。本批从 `develop` 创建 `feature/ppt-qa-repair-loop`，修改范围为文档 Runner、受控修正合同、必要的生产事件/Task Runtime 接线及定向回归；不扩展到真实模型、联网或付费调用。
 
 计划合同见 `docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md` 第 6.4 节：每请求最多修正 2 次，仅接受当前 revision 的受控布局 Patch，每轮重新生成临时 PPTX 并重新渲染，重复诊断、无有效变更、取消、超时及不可用渲染器均停止。最后一轮完整 QA 通过后才进入 Hash、原子发布与 Work 登记。当前仍以 `DocumentOutline` 为过渡写入目标，不把这批登记为统一 Document IR、LLM 自主工具循环或完整 Visual QA 完成。
 
-实际实现：`DocumentGenerationRunner` 提供请求级 `requestLlmRepair` 端口，修正计划必须由已授权的 LLM/Designer planner 返回；Runner 不提供确定性修正规则。最多接受 2 次受控修正；每次只允许当前 outline 的 `replace_page_layout`，拒绝正文/数据修改和物理页码猜测。每次通过校验的 Patch 都会重新生成临时 PPTX、重新执行结构检查和渲染诊断；重复诊断、无变化、非法诊断/目标、规划器超时、取消或渲染失败均停止，只有最终诊断无错误的临时文件才进入 Hash、原子发布和 Work 登记。规划请求收到的是克隆且冻结的 Outline 与诊断，带 expected revision、attempt 和 AbortSignal；修正阶段事件使用独立 operationId，继续进入生产 Trace/Task Runtime 进度链。当前 Electron/聊天生产入口尚未注入该 LLM planner，因此真实生产不会静默执行本地修正，QA 失败会直接停止并保留候选。
+实际实现：`DocumentGenerationRunner` 提供请求级 `requestLlmRepair` 端口，修正计划必须由已授权的 LLM/Designer planner 返回；Runner 不提供确定性修正规则。最多接受 2 次受控修正；每次只允许当前 outline 的 `replace_page_layout`，拒绝正文/数据修改和物理页码猜测。每次通过校验的 Patch 都会重新生成临时 PPTX、重新执行结构检查和渲染诊断；重复诊断、无变化、非法诊断/目标、规划器超时、取消或渲染失败均停止，只有最终诊断无错误的临时文件才进入 Hash、原子发布和 Work 登记。规划请求收到的是克隆且冻结的 Outline 与诊断，带 expected revision、attempt 和 AbortSignal；修正阶段事件使用独立 operationId，继续进入生产 Trace/Task Runtime 进度链。Electron 文档生产入口已将该端口接到 `ConversationSemanticClassifier.planDocumentRepair`，复用当前对话已授权 route 和 Provider 适配器；route 不存在或 planner 不可用时明确失败并保留候选，不静默选择硬编码模型或本地修正。
 
 验证：`document-generation-repair-loop.test.ts` 5/5 通过，覆盖重新生成/渲染后只登记一个 Work、重复诊断停止、正文修改白名单拦截、两次修正上限和规划器超时；Runner 与既有 repair workflow 定向集合 6 个文件、105 项通过；主工程/测试工程/Electron TypeScript、变更文件 ESLint、`git diff --check` 通过。未调用真实模型、联网或付费服务。取消和过期 revision 的独立 Runner 夹具尚未新增，当前由 AbortSignal、expectedRevision 校验和既有取消门禁共同保护。
 
