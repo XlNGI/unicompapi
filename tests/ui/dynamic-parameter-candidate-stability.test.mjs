@@ -30,8 +30,16 @@ test('autosave keeps image and video dynamic parameter contracts interactive', (
     const needsSaveBlock = blockFor(source, 'if (needsSave)');
     assert.doesNotMatch(needsSaveBlock, /setLoadState\(/);
     assert.doesNotMatch(needsSaveBlock, /setCandidates\(\[\]\)/);
-    assert.match(source, /if \(blockedReason\) \{[\s\S]*?setCandidates\(\[\]\)/);
   }
+  assert.match(videoPanel, /if \(blockedReason\) \{[\s\S]*?setCandidates\(\[\]\)/);
+  // Image candidates remain visible, but every submission path must reject
+  // contracts from another draft/feature or a revision that has not been saved.
+  assert.match(imagePanel, /const currentCandidates = candidateScope === scope \? candidates : \[\];/);
+  assert.match(imagePanel, /const candidatesReady = candidateScope === scope && loadedRevision === draft\.updatedAt &&\s*loadState === 'loaded' && !needsSave && !inputRequired && !blockedReason && Boolean\(api\);/);
+  assert.match(blockFor(imagePanel, 'async function prepare()'), /^\s*if \(!api \|\| !selectedCandidate \|\| busy \|\| !candidatesReady\) return;/);
+  assert.match(blockFor(imagePanel, 'async function generateOneShot()'), /^\s*if \(busyRef\.current \|\| !candidatesReady\) return;/);
+  assert.match(imagePanel, /className="uc-image-feature-panel__primary"\s+disabled=\{\s*!candidatesReady \|\|/);
+  assert.match(imagePanel, /<ModelSelect\s+disabled=\{!candidatesReady \|\| currentCandidates\.length === 0 \|\| busy\}/);
 });
 
 test('image and video validate visible dynamic parameters before submission', () => {

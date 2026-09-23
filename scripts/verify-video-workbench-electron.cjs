@@ -7,6 +7,7 @@ const { app, BrowserWindow } = require('electron');
 // Full production React workbench with isolated IPC fixtures, no user profile or provider requests.
 const workspace = path.resolve(__dirname, '..');
 const baseline = process.argv.includes('--baseline');
+const parameters = process.argv.includes('--parameters');
 const output = path.join(workspace, 'outputs', 'video-workbench-regression');
 app.setPath('userData', path.join(os.tmpdir(), `unicomp-workbench-${process.pid}`));
 app.disableHardwareAcceleration();
@@ -18,6 +19,17 @@ let temporary;
 let window;
 const checks = [];
 const errors = [];
+async function loadContract(relative, exportName) {
+  const Module = require('node:module');
+  const result = await require(require.resolve('esbuild', { paths: [require.resolve('vite')] })).build({
+    entryPoints: [path.join(workspace, relative)], bundle: true, write: false, platform: 'node', format: 'cjs'
+  });
+  const loaded = new Module(path.join(workspace, 'workbench-contract.cjs'));
+  loaded.filename = path.join(workspace, 'workbench-contract.cjs');
+  loaded.paths = module.paths;
+  loaded._compile(result.outputFiles[0].text, loaded.filename);
+  return loaded.exports[exportName];
+}
 const js = (source) => window.webContents.executeJavaScript(source);
 async function until(source) {
   for (let i = 0; i < 100; i++) {
@@ -47,9 +59,17 @@ async function run() {
   await mkdir(output, { recursive: true });
   await app.whenReady();
   const vite = require('vite');
+  const genericSchema = await loadContract('src/platform/providers/newapi/newapi-contracts.ts', 'newApiDefaultTextToVideoParameterSchema');
+  const seedanceSchema = await loadContract('src/platform/providers/newapi/unicompapi-model-capabilities.ts', 'uniCompApiSeedance2TextToVideoParameterSchema');
   await vite.build({ configFile: false, root: workspace, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'workbench-observation', enforce: 'pre', transform(code, id) {
+      if (id.endsWith('/video-workbench-harness.tsx')) {
+        return code.replace(/import \{ newApiDefaultTextToVideoParameterSchema \} from [^;]+;/,
+          `const newApiDefaultTextToVideoParameterSchema = ${JSON.stringify(genericSchema)};`)
+          .replace(/import \{ uniCompApiSeedance2TextToVideoParameterSchema \} from [^;]+;/,
+            `const uniCompApiSeedance2TextToVideoParameterSchema = ${JSON.stringify(seedanceSchema)};`);
+      }
       if (id.endsWith('/VideoWorkbenchPage.tsx')) {
         return code.replace('  const storage =', '  window.workbenchRenders = (window.workbenchRenders || 0) + 1;\n  const storage =');
       }
@@ -61,12 +81,13 @@ async function run() {
       rollupOptions: { onwarn(warning, warn) { if (warning.code !== 'MODULE_LEVEL_DIRECTIVE') warn(warning); } },
       lib: { entry: path.join(workspace, 'tests/harness/video-workbench-harness.tsx'), formats: ['iife'], name: 'WorkbenchHarness', fileName: () => 'harness.js' } }
   });
-  await writeFile(path.join(temporary, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root" class="workspace"></div><script src="harness.js"></script></body></html>');
+  await writeFile(path.join(temporary, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="harness.js"></script></body></html>');
   window = new BrowserWindow({ show: true, width: 1440, height: 1000,
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, spellcheck: false } });
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true }));
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
-  await window.loadFile(path.join(temporary, 'index.html'));
+  await window.loadFile(path.join(temporary, 'index.html'), { query: parameters ? { parameters: '1' } : {} });
+  if (parameters) return runParameterChecks();
   await until('window.workbenchHarness?.ready && document.querySelector("textarea") && document.body.textContent.includes("H3 fixture")');
   await until('Array.from(document.images).some(i => i.naturalWidth === 320) && Array.from(document.querySelectorAll("video")).some(v => v.readyState >= 2)');
   await js(`(() => { const v = document.querySelector('.uc-generation-result-preview video'); v.loop = true; v.muted = true; return v.play(); })()`);
@@ -94,6 +115,8 @@ async function run() {
   const samples = (await state()).samples.slice(0, 108).sort((a, b) => a - b);
   const metrics = { samples: samples.length, p50Ms: samples[Math.floor(samples.length * .5)],
     p95Ms: samples[Math.floor(samples.length * .95)], maxMs: samples.at(-1), renderDelta, boundaryCalls: counts };
+  await writeFile(path.join(output, 'image-input-observation.json'), JSON.stringify({ metrics,
+    renderer: await js('({visibility:document.visibilityState, focused:document.hasFocus(), longTasks:workbenchHarness.longTasks})') }, null, 2));
   if (!baseline) {
     assert.equal(samples.length, 108);
     assert.ok(metrics.p95Ms <= 50, `input-to-rendering-opportunity p95 ${metrics.p95Ms} > 50ms`);
@@ -157,11 +180,11 @@ async function run() {
     checks.push('route unmount persists pending input');
 
     await js('workbenchHarness.failCandidates(true); workbenchHarness.remount("draft-2")');
-    await until('document.body.textContent.includes("模型读取失败")');
+    await until('document.body.textContent.includes("没有可选模型")');
     await js('workbenchHarness.failCandidates(false)');
-    await click('重试读取模型');
+    await js('workbenchHarness.remount("draft-2")');
     await until('document.body.textContent.includes("H3 fixture")');
-    checks.push('candidate read failure distinguished from empty; retry restores list');
+    checks.push('original empty-model display restored; remount reloads candidates');
 
     await js(`document.querySelector('[role="combobox"]').click()`);
     await until(`Array.from(document.querySelectorAll('[role="option"]')).some(e => e.textContent.includes('Seedance fixture'))`);
@@ -204,9 +227,138 @@ async function run() {
   await writeFile(path.join(output, baseline ? 'baseline.json' : 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
+async function runParameterChecks() {
+  const failures = [];
+  const metrics = [];
+  function check(condition, label) {
+    (condition ? checks : failures).push(label);
+  }
+  async function openParameters() {
+    await until('document.querySelector(".uc-dynamic-parameters")');
+    await js(`Array.from(document.querySelectorAll('details')).find(e => e.querySelector('summary')?.textContent.includes('模型参数')).open = true`);
+    await delay(100);
+  }
+  async function setField(label, value) {
+    await js(`(() => { const e = document.querySelector('input[aria-label="${label}"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('input', {bubbles:true})); })()`);
+  }
+  async function values() { return (await state()).drafts[0].featureSelection.parameterValues; }
+  await until('window.workbenchHarness?.ready && document.body.textContent.includes("H3 fixture")');
+  await openParameters();
+  for (const [index, name] of ['generic12', 'seedance9'].entries()) {
+    if (index) {
+      await setField('帧数', '31');
+      await setField('随机种子', '77');
+      await js(`document.querySelector('[role="combobox"]').click()`);
+      await until(`Array.from(document.querySelectorAll('[role="option"]')).some(e => e.textContent.includes('Seedance fixture'))`);
+      await js(`Array.from(document.querySelectorAll('[role="option"]')).find(e => e.textContent.includes('Seedance fixture')).click()`);
+      await until('document.querySelectorAll(".uc-dynamic-parameters__field").length === 9');
+      await openParameters();
+      await delay(1800);
+      check(Object.keys(await values()).length === 0, 'switching schema discards pending old-model parameters');
+    }
+    await delay(2200);
+    await js('workbenchHarness.samples.length = 0; workbenchHarness.longTasks.length = 0');
+    const dispatchMs = [];
+    // Include pauses across both the 600ms field commit and 1000ms autosave.
+    for (let n = 0; n < (baseline ? 12 : 100); n++) {
+      await js(`(() => { const e = document.querySelector('input[aria-label="随机种子"]'); e.focus(); e.select(); })()`);
+      const start = performance.now();
+      window.webContents.sendInputEvent({ type: 'char', keyCode: String(n % 10) });
+      await js('new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))');
+      dispatchMs.push(performance.now() - start);
+      await delay(n % 20 === 0 ? 1800 : 8);
+    }
+    if (!index && !baseline) {
+      await js(`document.querySelector('input[aria-label="分辨率"]').focus()`);
+      await type('a'.repeat(100));
+      await window.webContents.insertText('中文粘贴');
+    }
+    if (index && !baseline) {
+      for (let n = 0; n < 100; n++) {
+        await js(`document.querySelector('.uc-dynamic-parameters [role="combobox"]').click()`);
+        await until(`Array.from(document.querySelectorAll('[role="option"]')).some(e => e.textContent.trim() === '${n % 2 ? '720p' : '480p'}')`);
+        await js(`Array.from(document.querySelectorAll('[role="option"]')).find(e => e.textContent.trim() === '${n % 2 ? '720p' : '480p'}').click()`);
+      }
+    }
+    await delay(2400);
+    const samples = (await state()).samples.sort((a,b) => a-b);
+    const longTasks = await js('workbenchHarness.longTasks');
+    dispatchMs.sort((a,b) => a-b);
+    const row = { name, samples: samples.length, p95Ms: samples[Math.floor(samples.length * .95)],
+      dispatchP95Ms: dispatchMs[Math.floor(dispatchMs.length * .95)], dispatchMaxMs: dispatchMs.at(-1),
+      maxLongTaskMs: Math.max(0, ...longTasks), longTasks };
+    metrics.push(row);
+    check(row.p95Ms <= 50 && row.dispatchP95Ms <= 50 && row.maxLongTaskMs < 100, `${name}: edit/commit/save window meets 50ms p95 and no 100ms long task`);
+    await writeFile(path.join(output, `parameters-${name}.png`), (await window.webContents.capturePage()).toPNG());
+  }
+  await setField('帧数', '25');
+  await setField('随机种子', '42');
+  await click('生成');
+  await until('workbenchHarness.counters.prepares > 0');
+  check((await values()).frames === 25 && (await values()).seed === 42, 'two pending fields survive immediate generate without blur');
+  await setField('帧数', '26');
+  await setField('随机种子', '43');
+  await js('workbenchHarness.flush()');
+  check((await values()).frames === 26 && (await values()).seed === 43, 'global flush includes pending parameters');
+  if (!baseline) {
+    const prepares = (await state()).counters.prepares;
+    await setField('随机种子', '-');
+    await click('生成');
+    await delay(100);
+    check((await state()).counters.prepares === prepares, 'invalid intermediate blocks generation');
+    check(await js(`document.querySelector('input[aria-label="随机种子"]').value === '-'`), 'invalid input remains visible');
+    await setField('随机种子', '44');
+    await setField('帧数', '');
+    await js('workbenchHarness.flush()');
+    check((await values()).seed === 44 && !('frames' in await values()), 'correction and clearing preserve independent values');
+    await setField('帧数', '27');
+    await click('新建本地草稿');
+    await until('workbenchHarness.state().drafts.length === 2');
+    check((await values()).frames === 27, 'new draft preserves previous pending parameter');
+    await js('workbenchHarness.remount()');
+    await openParameters();
+    await setField('随机种子', '45');
+    await js('workbenchHarness.unmount()');
+    await delay(250);
+    check((await values()).seed === 45, 'route unmount persists pending parameter');
+    await js('workbenchHarness.remount()');
+    await openParameters();
+    await setField('随机种子', '46');
+    await js('workbenchHarness.failSaves(true)');
+    check(await js('workbenchHarness.flush()') === false, 'save failure blocks successful flush');
+    check(await js(`document.querySelector('input[aria-label="随机种子"]').value === '46'`), 'save failure preserves visible input');
+    await js('workbenchHarness.failSaves(false)');
+    check(await js('workbenchHarness.flush()') === true && (await values()).seed === 46, 'recovery saves retained input');
+    await setField('随机种子', '47');
+    await js('window.dispatchEvent(new Event("beforeunload", {cancelable:true}))');
+    await delay(100);
+    check((await values()).seed === 47 && (await state()).counters.closes === 1, 'close boundary saves pending parameter');
+    for (const width of [1024, 1920]) {
+      window.setSize(width, 1000);
+      await delay(200);
+      await writeFile(path.join(output, `parameters-${width}.png`), (await window.webContents.capturePage()).toPNG());
+    }
+    // Verify the form's own available width, independent of viewport and outer containers.
+    for (const width of [400, 619, 620, 800]) {
+      await js(`document.querySelector('.uc-dynamic-parameters-container').style.width = '${width}px'`);
+      const columns = await js(`getComputedStyle(document.querySelector('.uc-dynamic-parameters')).gridTemplateColumns.split(' ').length`);
+      check(columns === (width < 620 ? 1 : 2), `parameter width ${width}px has correct columns`);
+    }
+  }
+  check(errors.length === 0, 'no renderer errors');
+  const report = { mode: baseline ? 'parameter-baseline' : 'parameter-fixed',
+    scope: 'Real AppLayout, text-video workbench and schemas; isolated IPC fixtures, production preload integration verified separately',
+    environment: { electron: process.versions.electron, chromium: process.versions.chrome, gpu: 'disabled' },
+    measurement: 'Native digit dispatch through rendering opportunity plus whole edit/idle/autosave long-task observation; synthetic string/enum/lifecycle operations',
+    metrics, checks, failures, errors };
+  await writeFile(path.join(output, baseline ? 'parameter-baseline.json' : 'parameter-report.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
+  if (baseline) assert.ok(failures.length > 0, 'baseline must reproduce a regression');
+  else assert.deepEqual(failures, [], 'parameter regressions');
+}
 run().then(() => finish(0), async (error) => {
   console.error(error, errors);
-  if (window) console.error(await js('({text:document.body.innerText,ready:window.workbenchHarness?.ready})'));
+  if (window) console.error(await js('({text:document.body.innerText,ready:window.workbenchHarness?.ready,visibility:document.visibilityState,focused:document.hasFocus(),longTasks:window.workbenchHarness?.longTasks})'));
   return finish(1);
 });
 async function finish(code) {

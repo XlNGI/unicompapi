@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import { CallBillingCache } from './call-billing-cache';
 import {
   buildProviderInvocationReadModel,
   parseProductFeature,
@@ -172,6 +173,8 @@ interface ProviderConsumptionTotal extends ConsumptionTotal {
 }
 
 export class ProviderInvocationReadModelController {
+  private readonly callBills = new CallBillingCache();
+  private billingDay = '';
   private readonly consumptionCache = new Map<
     number,
     Promise<StorageIpcResult<StorageConsumptionSummaryDto>>
@@ -191,8 +194,6 @@ export class ProviderInvocationReadModelController {
 
   invalidate(): void {
     this.consumptionCache.clear();
-    this.billingCache.clear();
-    this.billingReconciliation?.invalidate();
   }
 
   async listCallRecords(
@@ -390,15 +391,19 @@ export class ProviderInvocationReadModelController {
       return invalidRequestFailure();
     }
 
-    const cached = this.billingReconciliation
-      ? undefined
-      : this.consumptionCache.get(calendarDays);
-    if (cached) return cached;
+    this.checkBillingDay();
+    const cached = this.consumptionCache.get(calendarDays);
+    if (cached) {
+      const result = await cached;
+      const due = result.ok ? result.value.nextBillingRefreshAt : undefined;
+      if (this.consumptionCache.get(calendarDays) === cached &&
+        (due === undefined || due > this.now().getTime())) return result;
+    }
     const pending = this.buildConsumptionSummary(calendarDays).then((result) => {
-      if (!result.ok) this.consumptionCache.delete(calendarDays);
+      if (!result.ok && this.consumptionCache.get(calendarDays) === pending) this.consumptionCache.delete(calendarDays);
       return result;
     });
-    if (!this.billingReconciliation) this.consumptionCache.set(calendarDays, pending);
+    this.consumptionCache.set(calendarDays, pending);
     return pending;
   }
 
@@ -406,11 +411,9 @@ export class ProviderInvocationReadModelController {
     calendarDays: number
   ): Promise<StorageIpcResult<StorageConsumptionSummaryDto>> {
     try {
-      if (this.billingReconciliation) {
-        this.billingReconciliation.invalidate();
-        this.billingCache.clear();
-      }
       const period = consumptionPeriod(this.now(), calendarDays);
+      const summaryCallIds = new Set<string>();
+      const refreshedConnections = new Set<string>();
       const conversionFacts = parseConversionFacts(
         await this.currencyConversions.listApprovedFacts('CNY')
       );
@@ -449,7 +452,8 @@ export class ProviderInvocationReadModelController {
             if (!period.includes(attempt.createdAt)) continue;
             totalCallCount += 1;
             try {
-              const call = (await this.buildRecord(entry, facts, attempt)).details;
+              summaryCallIds.add(`${entry.rootDirectory}:${attempt.id}`);
+              const call = (await this.buildRecord(entry, facts, attempt, refreshedConnections)).details;
               if (call.state !== 'completed') continue;
               successfulCallCount += 1;
               if (call.billing?.state === 'pending_reconciliation') {
@@ -545,6 +549,7 @@ export class ProviderInvocationReadModelController {
       return {
         ok: true,
         value: {
+          ...(this.callBills.nextRefreshAt(summaryCallIds) === undefined ? {} : { nextBillingRefreshAt: this.callBills.nextRefreshAt(summaryCallIds) }),
           currencyCode: 'CNY',
           currencyLabel: '人民币',
           period: {
@@ -597,7 +602,8 @@ export class ProviderInvocationReadModelController {
   private async buildRecord(
     entry: ProjectCatalogEntry,
     facts: ProjectCallFacts,
-    attempt: ProviderInvocationAttemptV1
+    attempt: ProviderInvocationAttemptV1,
+    refreshedConnections = new Set<string>()
   ): Promise<BuiltCallRecord> {
     const route = facts.routesById.get(attempt.routeSnapshotId);
     if (
@@ -638,7 +644,8 @@ export class ProviderInvocationReadModelController {
       facts.worksByExecution
     );
     const officialPricingRule = resolveOfficialPricingRule(route);
-    const billing = await this.resolveBilling(
+    this.checkBillingDay();
+    const billingArguments = [
       route.connectionId,
       route.providerModelKey ?? route.modelDisplayName ?? route.modelId,
       [NEWAPI_PROVIDER_PACKAGE_ID, UNICOMPAPI_PROVIDER_PACKAGE_ID, KIMI_PROVIDER_PACKAGE_ID]
@@ -649,6 +656,17 @@ export class ProviderInvocationReadModelController {
       readModel.usage.facts,
       billableUnits(readModel.localResults),
       officialPricingRule
+    ] as const;
+    const billing = await this.callBills.read(
+      `${entry.rootDirectory}:${attempt.id}`, JSON.stringify([billingArguments, events, observations]), this.now().getTime(),
+      () => {
+        if (!refreshedConnections.has(route.connectionId)) {
+          refreshedConnections.add(route.connectionId);
+          this.billingCache.delete(route.connectionId);
+          this.billingReconciliation?.invalidate(route.connectionId);
+        }
+        return this.resolveBilling(...billingArguments);
+      }
     );
     const updatedAt = readModel.timeline.at(-1)?.occurredAt ?? readModel.createdAt;
     const providerName = route.providerDisplayName;
@@ -715,6 +733,16 @@ export class ProviderInvocationReadModelController {
         resultRegistration: registration
       }
     };
+  }
+
+  private checkBillingDay(): void {
+    const day = shanghaiDateKey(this.now().toISOString());
+    if (day === this.billingDay) return;
+    this.billingDay = day;
+    this.callBills.clear();
+    this.consumptionCache.clear();
+    this.billingCache.clear();
+    this.billingReconciliation?.invalidate();
   }
 
   private async resolveBilling(

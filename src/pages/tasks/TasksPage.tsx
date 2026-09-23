@@ -19,12 +19,12 @@ import type { StatusTone } from '../../components/StatusPill';
 import type {
   StorageCallDetailsDto,
   StorageConsumptionProviderSliceDto,
-  StorageConsumptionSummaryDto,
   StorageReadModelIssueDto,
   StorageTaskDetailsDto
 } from '../../shared/storage-ipc';
 import type { TaskReuseTarget } from '../../shared/task-reuse';
 import { refreshTaskReadStore, useTaskReadStore } from '../../ui/task-read-store';
+import { useConsumptionReadStore } from '../../ui/consumption-read-store';
 import '../../styles/pages.css';
 import {
   callState,
@@ -478,59 +478,7 @@ interface ProviderConsumptionSlice {
 }
 
 function TaskConsumptionCharts() {
-  const storage = window.unicomp?.storage;
-  const [summary, setSummary] = useState<StorageConsumptionSummaryDto>();
-  const [refreshRevision, setRefreshRevision] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
-
-  useEffect(() => storage?.onLocalStorageChanged(() => {
-    setRefreshRevision((current) => current + 1);
-  }), [storage]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setRefreshRevision((current) => current + 1);
-    }, 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    setMessage('');
-    setLoading(true);
-
-    if (!storage) {
-      setMessage('当前运行环境未连接桌面调用记录能力');
-      setLoading(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    const timer = window.setTimeout(() => {
-      void storage.getConsumptionSummary()
-        .then((result) => {
-          if (!active) return;
-          if (!result.ok) {
-            setMessage('读取消费统计失败，请重试');
-            return;
-          }
-          setSummary(result.value);
-        })
-        .catch(() => {
-          if (active) setMessage('读取消费统计失败，请重试');
-        })
-        .finally(() => {
-          if (active) setLoading(false);
-        });
-    }, 150);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [refreshRevision, storage]);
+  const { summary, message } = useConsumptionReadStore();
 
   const providerSlices = summary ? consumptionProviderSlices(summary.providerSlices) : [];
   const maximumBucketAmount = Math.max(
@@ -540,7 +488,12 @@ function TaskConsumptionCharts() {
   const hasRenminbiAmount = Number(summary?.totalAmount ?? '0') > 0;
   const chartSummary = summary
     ? `近 ${summary.period.calendarDays} 日 · 调用 ${summary.totalCallCount} 次 · 成功 ${summary.successfulCallCount} 次 · 人民币计入 ${summary.includedCallCount} 次`
-    : '尚未读取消费摘要';
+    : '--';
+  const summaryLabel = message
+    ? (summary ? '更新失败，显示上次结果' : message)
+    : summary && !hasRenminbiAmount
+      ? `${chartSummary} · 暂无可纳入的人民币账单或估算；无法确认的费用不会显示为 0 元。`
+      : chartSummary;
 
   return (
     <Card className="uc-task-center__charts-mask">
@@ -549,16 +502,14 @@ function TaskConsumptionCharts() {
           <div className="uc-task-center__chart-heading">
             <div>
               <h2>人民币消费柱状图</h2>
-              <p>{loading ? '正在读取成功调用费用' : chartSummary}</p>
+              <p className="uc-task-center__consumption-status" role="status" title={summaryLabel}>{summaryLabel}</p>
             </div>
             <StatusPill tone={hasRenminbiAmount ? 'success' : 'neutral'}>
-              {formatRenminbiAmount(summary?.totalAmount ?? '0')}
+              {summary ? formatRenminbiAmount(summary.totalAmount) : '--'}
             </StatusPill>
           </div>
-          {loading ? (
-            <p className="uc-task-center__muted" role="status">正在汇总消费数据…</p>
-          ) : !summary || !hasRenminbiAmount ? (
-            <EmptyBarChart dates={summary?.timeBuckets.map((bucket) => bucket.date)} />
+          {!summary || !hasRenminbiAmount ? (
+            <EmptyBarChart pending={!summary} dates={summary?.timeBuckets.map((bucket) => bucket.date)} />
           ) : (
             <div className="uc-task-center__bar-chart" aria-label="按时间汇总的消费柱状图">
               {summary.timeBuckets.map((bucket) => (
@@ -578,14 +529,12 @@ function TaskConsumptionCharts() {
           <div className="uc-task-center__chart-heading">
             <div>
               <h2>今日供应商人民币消费占比</h2>
-              <p>{loading ? '正在读取消费账单' : '优先显示中转站实际账单；未确认记录按价格估算，前 5 个供应商外归入“其他”'}</p>
+              <p>优先显示中转站实际账单；未确认记录按价格估算，前 5 个供应商外归入“其他”</p>
             </div>
-            <StatusPill>{providerSlices.length} 个分组</StatusPill>
+            <StatusPill>{summary ? providerSlices.length : '--'} 个分组</StatusPill>
           </div>
-          {loading ? (
-            <p className="uc-task-center__muted" role="status">正在计算供应商占比…</p>
-          ) : providerSlices.length === 0 ? (
-            <EmptyDonutChart />
+          {providerSlices.length === 0 ? (
+            <EmptyDonutChart pending={!summary} />
           ) : (
             <div className="uc-task-center__donut-layout">
               <div
@@ -612,12 +561,7 @@ function TaskConsumptionCharts() {
           )}
         </article>
 
-        {!loading && message ? (
-          <p className="uc-task-center__chart-note" role="status">
-            {message}
-          </p>
-        ) : null}
-        {!loading && summary && summary.pendingConversionCallCount > 0 ? (
+        {summary && summary.pendingConversionCallCount > 0 ? (
           <p className="uc-task-center__chart-note" role="status">
             {summary.pendingConversionCallCount} 次非人民币费用待换算，未混入人民币总额；另有 {summary.pendingReconciliationCallCount} 次中转站账单待确认
             {summary.pendingCurrencies.length > 0
@@ -625,7 +569,7 @@ function TaskConsumptionCharts() {
               : ''}。
           </p>
         ) : null}
-        {!loading && summary?.conversionSources.map((source) => (
+        {summary?.conversionSources.map((source) => (
           <p className="uc-task-center__chart-note" key={source.sourceCurrencyCode} role="status">
             {source.sourceCurrencyCode} → 人民币换算来源：{source.sourceTitle}（核对于 {source.sourceCheckedAt}）。
           </p>
@@ -635,40 +579,42 @@ function TaskConsumptionCharts() {
   );
 }
 
-function EmptyBarChart({ dates }: { readonly dates?: readonly string[] }) {
+function EmptyBarChart({ dates, pending }: {
+  readonly dates?: readonly string[];
+  readonly pending: boolean;
+}) {
   const labels = dates?.map(dailyBucketLabel) ?? emptyBarLabels();
   return (
-    <div className="uc-task-center__bar-chart uc-task-center__bar-chart--empty" aria-label="暂无可计算费用的消费柱状图">
+    <div className="uc-task-center__bar-chart uc-task-center__bar-chart--empty" aria-label={pending ? '消费柱状图尚未读取' : '暂无可计算费用的消费柱状图'}>
       {labels.map((label, index) => (
         <div className="uc-task-center__bar-row" key={label}>
           <span>{label}</span>
           <div>
-            <i style={{ width: `${[18, 32, 24, 42, 28, 36, 22][index]}%` }} />
+            <i style={{ width: `${pending ? 0 : [18, 32, 24, 42, 28, 36, 22][index]}%` }} />
           </div>
-          <strong>暂无</strong>
+          <strong>{pending ? '--' : '暂无'}</strong>
         </div>
       ))}
-      <p className="uc-task-center__muted">暂无可纳入的人民币账单或估算；无法确认的费用不会显示为 0 元。</p>
     </div>
   );
 }
 
-function EmptyDonutChart() {
+function EmptyDonutChart({ pending }: { readonly pending: boolean }) {
   return (
     <div className="uc-task-center__donut-layout uc-task-center__donut-layout--empty">
       <div
-        aria-label="暂无可计算费用的供应商消费占比环形图"
+        aria-label={pending ? '供应商消费占比尚未读取' : '暂无可计算费用的供应商消费占比环形图'}
         className="uc-task-center__donut uc-task-center__donut--empty"
         role="img"
       >
-        <strong>0</strong>
+        <strong>{pending ? '--' : 0}</strong>
         <span>供应商</span>
       </div>
       <div className="uc-task-center__donut-legend">
         <div>
           <i />
-          <span>暂无可计算费用</span>
-          <strong>0%</strong>
+          <span>{pending ? '--' : '暂无可计算费用'}</span>
+          <strong>{pending ? '--' : '0%'}</strong>
         </div>
       </div>
     </div>

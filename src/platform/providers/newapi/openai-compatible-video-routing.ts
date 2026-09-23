@@ -21,37 +21,18 @@ import {
 } from './newapi-contracts';
 import { isOpenAiCompatiblePackageId } from './openai-compatible-identity';
 import {
-  evaluateOpenAiCompatibleVideoGate,
-  isTrustedVideoCapabilityEvidence,
-  type OpenAiCompatibleVideoGateReason
-} from './openai-compatible-video-capability';
-import {
+  isKnownUniCompApiModel,
   isUniCompApiDeepSeekModel,
   isUniCompApiPackage,
   uniCompApiVideoParameterSchema,
   uniCompApiVideoFeatures
 } from './unicompapi-model-capabilities';
 
-export type OpenAiCompatibleVideoRouteSkipReason =
-  | OpenAiCompatibleVideoGateReason
-  | 'not_openai_compatible'
-  | 'package_template_unavailable';
-
 /**
  * Soft video routing for OpenAI-compatible packages (NewAPI / UniCompAPI).
- *
- * Publishing a video adapter proves only that the connection has a video call
- * channel. It does NOT prove that each model behind the connection supports
- * video. A profile is therefore attached only when the capability gate finds a
- * trustworthy per-model fact:
- *
- *   - the package owns an exact model mapping (UniCompAPI capability table), or
- *   - an exact mapping entry exists for this concrete model, or
- *   - the user explicitly confirmed this model, or
- *   - non-synthetic capability evidence declares video support.
- *
- * Unknown-capability models are skipped. The router never writes the evidence
- * that authorises its own decision.
+ * Does not guess model names; only attaches the package-approved default
+ * video profile when the package publishes a video adapter
+ * (POST /v1/videos).
  */
 export function routeOpenAiCompatibleVideoProfile(
   snapshot: ProviderRegistrySnapshot,
@@ -63,10 +44,9 @@ export function routeOpenAiCompatibleVideoProfile(
   readonly model: ProviderModel;
   readonly profileId?: string;
   readonly state: 'attached' | 'already_attached' | 'skipped';
-  readonly reason?: OpenAiCompatibleVideoRouteSkipReason;
 } {
   if ((model.catalogState ?? 'present') === 'retired') {
-    return { snapshot, model, state: 'skipped', reason: 'model_retired' };
+    return { snapshot, model, state: 'skipped' };
   }
   const connection = snapshot.connections.find(
     (candidate) => candidate.id === model.connectionId
@@ -79,53 +59,47 @@ export function routeOpenAiCompatibleVideoProfile(
     !connection.templateId ||
     !isOpenAiCompatiblePackageId(connection.packageId)
   ) {
-    return { snapshot, model, state: 'skipped', reason: 'not_openai_compatible' };
+    return { snapshot, model, state: 'skipped' };
+  }
+  const features = isUniCompApiPackage(connection.packageId)
+    ? uniCompApiVideoFeatures(model.providerModelKey)
+    : undefined;
+  if (
+    isUniCompApiPackage(connection.packageId) &&
+    !isKnownUniCompApiModel(model.providerModelKey)
+  ) {
+    // Closed-world UniCompAPI: unknown catalog/manual keys never receive an
+    // inferred video profile until the capability table is extended.
+    return { snapshot, model, state: 'skipped' };
+  }
+  if (
+    isUniCompApiPackage(connection.packageId) &&
+    (!features || features.length === 0)
+  ) {
+    return { snapshot, model, state: 'skipped' };
+  }
+  if (
+    isUniCompApiPackage(connection.packageId) &&
+    isUniCompApiDeepSeekModel(model.providerModelKey)
+  ) {
+    return { snapshot, model, state: 'skipped' };
   }
   if (
     connection.state !== 'available' ||
     connection.identityState !== 'verified' ||
     connection.credentialState !== 'valid'
   ) {
-    return { snapshot, model, state: 'skipped', reason: 'connection_not_ready' };
+    return { snapshot, model, state: 'skipped' };
   }
 
   let template;
   try {
     template = packages.resolveTemplate(connection.packageId, connection.templateId);
   } catch {
-    return { snapshot, model, state: 'skipped', reason: 'package_template_unavailable' };
-  }
-  if (!template.adapters.some((adapter) => adapter.adapterId === NEWAPI_VIDEO_ADAPTER_ID)) {
-    return { snapshot, model, state: 'skipped', reason: 'video_adapter_missing' };
+    return { snapshot, model, state: 'skipped' };
   }
 
-  // The closed-world UniCompAPI capability table is a package-owned exact
-  // mapping. Unknown or unsupported keys yield no mapping and stay skipped.
-  const packageMappingFeatures = isUniCompApiPackage(connection.packageId) &&
-    !isUniCompApiDeepSeekModel(model.providerModelKey)
-    ? uniCompApiVideoFeatures(model.providerModelKey)
-    : undefined;
-  const features = packageMappingFeatures && packageMappingFeatures.length > 0
-    ? packageMappingFeatures
-    : undefined;
-
-  const gate = evaluateOpenAiCompatibleVideoGate({
-    snapshot,
-    model,
-    modelId: model.id,
-    packageId: connection.packageId,
-    providerModelKey: model.providerModelKey,
-    ...(features ? { exactMappingFeatures: features } : {})
-  });
-  if (!gate.allowed) {
-    // Do not synthesise capability evidence, do not migrate, and do not touch
-    // any legacy profile. Query-time invalidation handles persisted mistakes.
-    return { snapshot, model, state: 'skipped', reason: gate.reason };
-  }
-  const trustedEvidence = gate.evidenceIds
-    .map((evidenceId) => snapshot.capabilities.find((item) => item.id === evidenceId))
-    .filter((item): item is NonNullable<typeof item> => Boolean(item))
-    .filter((item) => isTrustedVideoCapabilityEvidence(item));
+  if (!template.adapters.some(adapter => adapter.adapterId === NEWAPI_VIDEO_ADAPTER_ID)) return { snapshot, model, state: 'skipped' };
 
   const existingVideoProfile = (snapshot.modelProfiles ?? []).find((candidate) =>
     candidate.modelId === model.id &&
@@ -156,16 +130,10 @@ export function routeOpenAiCompatibleVideoProfile(
   });
   const profileTemplate = definition.profileTemplates[0];
   if (!profileTemplate) {
-    return { snapshot, model, state: 'skipped', reason: 'package_template_unavailable' };
+    return { snapshot, model, state: 'skipped' };
   }
   if (existingVideoProfile) {
-    const ensured = ensureAuthorisedVideoCapabilityEvidence(
-      snapshot,
-      model,
-      now,
-      gate.reason,
-      trustedEvidence
-    );
+    const ensured = ensureVideoGenerationCapabilityEvidence(snapshot, model, now);
     const nextModel = ensured.snapshot.models.find((candidate) => candidate.id === model.id)
       ?? model;
     const needsMigration = profileTemplate.features.some((desired) =>
@@ -224,20 +192,18 @@ export function routeOpenAiCompatibleVideoProfile(
     (adapter) => adapter.adapterId === NEWAPI_VIDEO_ADAPTER_ID
   );
   if (!videoAdapter) {
-    return { snapshot, model, state: 'skipped', reason: 'video_adapter_missing' };
+    return { snapshot, model, state: 'skipped' };
   }
 
   const binding = ensureVideoCatalogBinding(snapshot, connection, videoAdapter, now);
 
-  const withEvidence = ensureAuthorisedVideoCapabilityEvidence(
+  const withEvidence = ensureVideoGenerationCapabilityEvidence(
     {
       ...snapshot,
       protocolBindings: binding.protocolBindings
     },
     model,
-    now,
-    gate.reason,
-    trustedEvidence
+    now
   );
   const workingSnapshot = withEvidence.snapshot;
   const evidence = withEvidence.evidence;
@@ -313,61 +279,39 @@ export function routeOpenAiCompatibleVideoProfilesForEnabledModels(
   return working;
 }
 
-/**
- * Records the capability fact that the gate authorised.
- *
- * When a trustworthy per-model fact already exists (user confirmation or real
- * provider evidence) it is reused untouched — the platform must never restate
- * the user's or the provider's claim as its own. For package-owned exact
- * mappings the fact is projected once under a deterministic, mapping-scoped ID
- * so repeated routing stays idempotent.
- */
-function ensureAuthorisedVideoCapabilityEvidence(
+function ensureVideoGenerationCapabilityEvidence(
   snapshot: ProviderRegistrySnapshot,
   model: ProviderModel,
-  now: IsoTimestamp,
-  gateReason: OpenAiCompatibleVideoGateReason,
-  trustedEvidence: readonly ModelCapabilityEvidence[]
+  now: IsoTimestamp
 ): {
   readonly snapshot: ProviderRegistrySnapshot;
   readonly evidence: ModelCapabilityEvidence;
 } {
-  const existing = trustedEvidence[0];
+  const existing = snapshot.capabilities.find(
+    (candidate) =>
+      candidate.modelId === model.id &&
+      candidate.capability === 'video_generation'
+  );
   if (existing) {
     return { snapshot, evidence: existing };
   }
-  const projection = gateReason === 'package_closed_world_mapping'
-    ? 'package-mapping-v1'
-    : 'exact-mapping-v1';
-  const id = toCapabilityEvidenceId(
-    `capability-${model.id}-video_generation-${projection}`
-  );
-  const current = snapshot.capabilities.find((candidate) => candidate.id === id);
-  if (current) {
-    return { snapshot, evidence: current };
-  }
-  const previous = snapshot.capabilities
-    .filter((item) => item.modelId === model.id &&
-      item.capability === 'video_generation' && item.source === 'provider_declared')
-    .reduce<ModelCapabilityEvidence | undefined>((latest, item) =>
-      !latest || item.revision > latest.revision ? item : latest, undefined);
   const evidence = createModelCapabilityEvidence({
-    id,
+    id: toCapabilityEvidenceId(
+      `capability-${model.id}-video_generation-declared-v1`
+    ),
     modelId: model.id,
-    revision: (previous?.revision ?? 0) + 1,
-    ...(previous ? { supersedesEvidenceId: previous.id } : {}),
+    revision: 1,
     capability: 'video_generation',
     state: 'declared_supported',
     source: 'provider_declared',
     recordedAt: now
   });
-  const currentModel = snapshot.models.find((candidate) => candidate.id === model.id) ?? model;
-  const updatedModel: ProviderModel = currentModel.capabilityEvidenceId
-    ? currentModel
+  const updatedModel: ProviderModel = model.capabilityEvidenceId
+    ? model
     : {
-        ...currentModel,
+        ...model,
         capabilityEvidenceId: evidence.id,
-        revision: currentModel.revision + 1,
+        revision: model.revision + 1,
         updatedAt: now
       };
   return {

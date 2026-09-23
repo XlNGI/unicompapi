@@ -48,7 +48,7 @@ export interface NewApiBillingReconciliationPort {
     readonly connectionId: string;
     readonly modelName: string;
   }): Promise<readonly StorageCallBillingReasonCode[]>;
-  invalidate(): void;
+  invalidate(connectionId?: string): void;
 }
 
 /** Read-only NewAPI billing adapter. It never submits a model request. */
@@ -105,8 +105,9 @@ export class NewApiBillingReconciler implements NewApiBillingReconciliationPort 
     };
   }
 
-  invalidate(): void {
-    this.cache.clear();
+  invalidate(connectionId?: string): void {
+    if (connectionId) this.cache.delete(connectionId);
+    else this.cache.clear();
   }
 
   /**

@@ -10,6 +10,7 @@ export const storageIpcChannels = {
   listProjects: 'storage:list-projects',
   getLocalStorageSummary: 'storage:get-local-storage-summary',
   localStorageChanged: 'storage:local-storage-changed',
+  consumptionChanged: 'storage:consumption-changed',
   listTasks: 'storage:list-tasks',
   getTaskDetails: 'storage:get-task-details',
   getTaskTimeline: 'storage:get-task-timeline',
@@ -303,6 +304,7 @@ export interface StorageConsumptionConversionSourceDto {
 }
 
 export interface StorageConsumptionSummaryDto {
+  readonly nextBillingRefreshAt?: number;
   readonly currencyCode: 'CNY';
   readonly currencyLabel: '人民币';
   readonly period: {
@@ -494,6 +496,7 @@ export interface StorageApi {
   listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>>;
   getLocalStorageSummary(): Promise<StorageIpcResult<StorageLocalStorageSummaryDto>>;
   onLocalStorageChanged(listener: () => void): () => void;
+  onConsumptionChanged(listener: () => void): () => void;
   listTasks(): Promise<
     StorageIpcResult<StorageReadModelListDto<StorageTaskSummaryDto>>
   >;

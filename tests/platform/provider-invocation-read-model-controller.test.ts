@@ -500,15 +500,49 @@ describe('provider invocation read model controller', () => {
       .resolves.toMatchObject({ ok: false, error: { code: 'read_model_failed' } });
   });
 
+  it('caches reads across navigation, rechecks a delayed bill once due, and recalibrates next day', async () => {
+    const root = await makeRoot('unicomp-billing-refresh-');
+    const projectId = toProjectId('project-billing-refresh');
+    await createNewApiBillingCall(root, projectId, 'req-billing-explanation');
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore(), () => t9);
+    await catalog.remember({ projectId, projectName: 'Refresh fixture', rootDirectory: root });
+    let now = new Date('2026-08-05T12:00:00Z');
+    let settled = false;
+    const reconcile = vi.fn(async () => settled ? new Map([['req-billing-explanation', {
+      requestId: 'req-billing-explanation', quota: 10n, type: 2, createdAt: 1, amountCny: '1.5'
+    }]]) : new Map());
+    const controller = new ProviderInvocationReadModelController(catalog,
+      new ProviderUsageSchemaRegistry([usageSchema]), undefined, () => now,
+      { reconcile, estimate: async () => ({ amountCny: '2', source: 'fixture' }), diagnose: async () => [], invalidate() {} });
+    const first = await controller.getConsumptionSummary();
+    expect(first).toMatchObject({ ok: true, value: { totalAmount: '2', nextBillingRefreshAt: now.getTime() + 5000 } });
+    await controller.getConsumptionSummary();
+    await controller.getCallDetails({ projectId, invocationAttemptId: 'attempt-billing-call-correlated' });
+    controller.invalidate();
+    await controller.getConsumptionSummary();
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    settled = true;
+    now = new Date(now.getTime() + 5000);
+    const updated = await controller.getConsumptionSummary();
+    expect(updated).toMatchObject({ ok: true, value: { totalAmount: '1.5', actualBillAmount: '1.5' } });
+    expect(updated.ok && updated.value.nextBillingRefreshAt).toBeUndefined();
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    now = new Date('2026-08-06T00:00:00Z');
+    expect(await controller.getConsumptionSummary()).toMatchObject({ ok: true, value: { period: { endDate: '2026-08-06' }, totalAmount: '1.5' } });
+    expect(reconcile).toHaveBeenCalledTimes(3);
+  });
+
   it('subtracts an async video task refund from its request charge', async () => {
     const root = await makeRoot('unicomp-consumption-refund-');
     const projectId = toProjectId('project-consumption-refund');
     await createRefundedNewApiVideoCall(root, projectId);
     const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore(), () => t9);
     await catalog.remember({ projectId, projectName: 'Refund project', rootDirectory: root });
+    let now = new Date('2026-08-05T12:00:00.000Z');
+    let refundArrived = false;
     const billing = {
       async reconcile() {
-        return new Map([
+        const logs = new Map([
           ['req-video-consume', {
             requestId: 'req-video-consume', quota: 6_570_000n, consumedQuota: 6_570_000n,
             type: 2, createdAt: 1, amountCny: '13.14'
@@ -518,6 +552,8 @@ describe('provider invocation read model controller', () => {
             type: 6, createdAt: 2, amountCny: '-7.4162', refundAmountCny: '7.4162'
           }]
         ]);
+        if (!refundArrived) logs.delete('task:task_remote_video_1');
+        return logs;
       },
       async estimate() {
         return undefined;
@@ -531,20 +567,24 @@ describe('provider invocation read model controller', () => {
       catalog,
       new ProviderUsageSchemaRegistry([usageSchema]),
       undefined,
-      () => new Date('2026-08-05T12:00:00.000Z'),
+      () => now,
       billing
     );
-    const result = await controller.getConsumptionSummary({ calendarDays: 1 });
+    expect(await controller.getConsumptionSummary()).toMatchObject({ ok: true, value: { totalAmount: '13.14' } });
+    refundArrived = true;
+    now = new Date('2026-08-06T00:00:00.000Z');
+    const result = await controller.getConsumptionSummary();
     expect(result).toMatchObject({
       ok: true,
       value: {
         totalAmount: '5.7238',
         actualBillAmount: '5.7238',
         refundedAmount: '7.4162',
-        timeBuckets: [{ date: '2026-08-05', amount: '5.7238', callCount: 1 }],
-        providerSlices: [expect.objectContaining({ amount: '5.7238', callCount: 1 })]
+        timeBuckets: expect.arrayContaining([{ date: '2026-08-05', amount: '5.7238', callCount: 1 }])
       }
     });
+    controller.invalidate();
+    expect(await controller.getConsumptionSummary()).toMatchObject({ ok: true, value: { totalAmount: '5.7238', refundedAmount: '7.4162' } });
   });
 });
 

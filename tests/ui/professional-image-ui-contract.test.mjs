@@ -368,11 +368,10 @@ test('professional image autosaves drafts without a manual save gate', async () 
   assert.match(autosaveStatusSource, /正在保存/);
   assert.match(autosaveStatusSource, /保存失败，修改已保留/);
   assert.doesNotMatch(featurePanelSource, /if \(needsSave && imageWorkspaces\)/);
-  assert.match(featurePanelSource, /onMessageRef\.current/);
-  assert.match(featurePanelSource, /showBlockedReason = true/);
-  assert.match(featurePanelSource, /showBlockedReason && blockedReason/);
+  assert.match(featurePanelSource, /模型读取失败/);
+  assert.match(featurePanelSource, /showEmptyState=\{false\}/);
   assert.match(professionalSource, /onBlockingReasonChange/);
-  assert.match(professionalSource, /showBlockedReason=\{false\}/);
+  assert.match(professionalSource, /onNavigateToProviders=\{onNavigateToProviders\}/);
   assert.doesNotMatch(professionalSource, /<strong>当前不能生成<\/strong>/);
 });
 
