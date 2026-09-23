@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### P1 PPT 生成后视觉 QA 发布门禁（2026-09-23）
+
+按负责人要求，正式 PPT 生成必须经过实际本地 Office/PDF 渲染和质量检查后才能发布、登记 Work。Electron 文档生成 Runner 现在要求 PPT 注入渲染器；没有配置渲染器时在写文件前以 `verification_failed` 失败，不产生正式 Work。渲染诊断中的文本越界、PPT 文本/元素超出页面、文本重叠、空页、页数不一致和无法完成 PDF 文本检查均阻断正式登记；Word/Excel 保留较宽松的非正式渲染诊断语义。PDF 文本框边界检查同时归一化底部原点坐标，避免把基线误判为页面上边界；PPTX 包在实际渲染前还会检查 slide 尺寸和文本/图片/图形元素的 OOXML 几何边界。
+
+定向验证：Runner、Office Render Adapter、Temporary Document Workflow 9 个文件、117 项通过；应用/测试 TypeScript、变更文件 ESLint、`git diff --check` 通过。当前仍有限制：渲染诊断尚未覆盖完整 PPTX OOXML 文本框内部裁切、非文本元素重叠、字体回退和完整视觉审美判断；真实 Office/PDF/PNG fixture 与渲染后 IR 自动修正闭环仍需后续实现。本节不宣称完整 Visual QA 已收口。
+
 ### P1 Task Runtime 接入真实文档生成（2026-09-23）
 
 继续按 V2.3 执行。将持久 `DocumentTaskRuntime` 接入文档 IPC 与真实本地生成链：打开生成任务时创建项目隔离的运行时并写入会话、助手消息、执行实例、文档类型、附件/作品引用和有限预算；生成前先进入 `running`，每个真实的大纲校验、编译、渲染、结构/Hash 检查、原子发布和 Work 登记事件都先写入运行时调用检查点，再提交脱敏 Observation。运行时检查失败会阻止后续生产并保留对账状态，UI Trace 仍只作观察投影。

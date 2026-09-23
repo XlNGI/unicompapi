@@ -145,6 +145,8 @@ export class DocumentGenerationRunner {
         temporaryPath: string,
         input: { readonly kind: DocumentWorkspaceKind; readonly signal: AbortSignal }
       ) => Promise<DocumentRenderResult>;
+      /** Formal PPT delivery requires actual local render diagnostics. */
+      readonly requireRenderForPpt?: boolean;
       publishFile?(
         temporaryPath: string,
         finalPath: string
@@ -161,6 +163,12 @@ export class DocumentGenerationRunner {
     const context = this.context();
     const existing = await this.findRegisteredResult(context, input);
     if (existing) return existing;
+    if (input.kind === 'ppt' && this.options.requireRenderForPpt && !this.options.renderPreview) {
+      throw new DocumentGenerationError(
+        'verification_failed',
+        'PPT visual QA renderer is unavailable; the file was not published'
+      );
+    }
     let task: Task | undefined;
     let execution: Execution | undefined;
     let temporaryPath: string | undefined;

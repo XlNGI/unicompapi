@@ -115,7 +115,8 @@ export function registerDocumentGenerationIpcHandlers(options: {
         projectId: session.projectId,
         now,
         createId: () => randomUUID(),
-        renderPreview: createConfiguredOfficeRenderAdapter()
+        renderPreview: createConfiguredOfficeRenderAdapter(),
+        requireRenderForPpt: true
       });
       const application = new DocumentGenerationApplicationService({
         onProgress: async (event) => { await emitProductionEvent(event); },

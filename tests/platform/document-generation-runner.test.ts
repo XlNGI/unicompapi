@@ -231,6 +231,58 @@ describe('document generation runner', () => {
     expect(events.at(-1)).toMatchObject({ code: 'document_register', status: 'completed' });
   });
 
+  it('blocks formal PPT publication when a local visual QA renderer is unavailable', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-ppt-qa-renderer-required');
+    const generateTemporaryFile = vi.fn(generateTemporaryDocumentFile);
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      requireRenderForPpt: true,
+      generateTemporaryFile
+    });
+    await expect(runner.run({
+      kind: 'ppt',
+      title: presentationOutline.title,
+      contentFingerprint: 'd'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'message-ppt-qa-renderer-required',
+      outline: presentationOutline
+    })).rejects.toMatchObject({ code: 'verification_failed' });
+    expect(generateTemporaryFile).not.toHaveBeenCalled();
+    const works = new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId);
+    expect(await works.list(projectId)).toHaveLength(0);
+  });
+
+  it('does not publish a PPT when visual QA reports text overflow', async () => {
+    const rootDirectory = await createProjectRoot();
+    const projectId = toProjectId('doc-ppt-qa-overflow');
+    const runner = new DocumentGenerationRunner({
+      rootDirectory,
+      projectId,
+      requireRenderForPpt: true,
+      renderPreview: async () => ({
+        previewCount: 1,
+        diagnostics: [{
+          code: 'text_overflow' as const,
+          severity: 'error' as const,
+          scope: 'page:2',
+          message: 'Text bounding box extends outside the page'
+        }]
+      })
+    });
+    await expect(runner.run({
+      kind: 'ppt',
+      title: presentationOutline.title,
+      contentFingerprint: 'e'.repeat(64),
+      draftRevision: 1,
+      sourceDraftId: 'message-ppt-qa-overflow',
+      outline: presentationOutline
+    })).rejects.toMatchObject({ code: 'verification_failed' });
+    const works = new JsonWorkRepository(new NodeProjectStorage(rootDirectory), projectId);
+    expect(await works.list(projectId)).toHaveLength(0);
+  });
+
   it('settles an already registered Work after the final execution write fails without generating it again', async () => {
     const rootDirectory = await createProjectRoot();
     const projectId = toProjectId('doc-project-registration-recovery');
