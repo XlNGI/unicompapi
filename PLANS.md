@@ -1,5 +1,17 @@
 # UniComp 开发计划
 
+### P1 PPT 真实渲染后的有限修正（2026-09-23，已实现最小闭环）
+
+继续完成“实际生成 → 渲染诊断 → 有限布局修正 → 重新生成和渲染 → 全部复验 → 发布登记”的最小闭环。本批从 `develop` 创建 `feature/ppt-qa-repair-loop`，修改范围为文档 Runner、受控修正合同、必要的生产事件/Task Runtime 接线及定向回归；不扩展到真实模型、联网或付费调用。
+
+计划合同见 `docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md` 第 6.4 节：每请求最多修正 2 次，仅接受当前 revision 的受控布局 Patch，每轮重新生成临时 PPTX 并重新渲染，重复诊断、无有效变更、取消、超时及不可用渲染器均停止。最后一轮完整 QA 通过后才进入 Hash、原子发布与 Work 登记。当前仍以 `DocumentOutline` 为过渡写入目标，不把这批登记为统一 Document IR、LLM 自主工具循环或完整 Visual QA 完成。
+
+实际实现：`DocumentGenerationRunner` 提供请求级 `requestRepair` 端口，最多接受 2 次受控修正；每次只允许当前 outline 的 `replace_page_layout`，拒绝正文/数据修改和物理页码猜测。每次通过校验的 Patch 都会重新生成临时 PPTX、重新执行结构检查和渲染诊断；重复诊断、无变化、非法诊断/目标、规划器超时、取消或渲染失败均停止，只有最终诊断无错误的临时文件才进入 Hash、原子发布和 Work 登记。规划请求收到的是克隆且冻结的 Outline 与诊断，带 expected revision、attempt 和 AbortSignal；修正阶段事件使用独立 operationId，继续进入生产 Trace/Task Runtime 进度链。
+
+验证：`document-generation-repair-loop.test.ts` 5/5 通过，覆盖重新生成/渲染后只登记一个 Work、重复诊断停止、正文修改白名单拦截、两次修正上限和规划器超时；Runner 与既有 repair workflow 定向集合 6 个文件、105 项通过；主工程/测试工程/Electron TypeScript、变更文件 ESLint、`git diff --check` 通过。未调用真实模型、联网或付费服务。取消和过期 revision 的独立 Runner 夹具尚未新增，当前由 AbortSignal、expectedRevision 校验和既有取消门禁共同保护。
+
+合成渲染端口只证明控制流程，不能替代真实 Office/PDF/PNG 视觉验收。真实 fixture、PPTX 文本框内部裁切、字体回退、非文本重叠、表格/图表可读性、统一 Document IR 和聊天主链路的 LLM 自主工具接线仍未完成。
+
 ### P1 PPT 生成后视觉 QA 发布门禁（2026-09-23）
 
 按负责人要求，正式 PPT 生成必须经过实际本地 Office/PDF 渲染和质量检查后才能发布、登记 Work。Electron 文档生成 Runner 现在要求 PPT 注入渲染器；没有配置渲染器时在写文件前以 `verification_failed` 失败，不产生正式 Work。渲染诊断中的文本越界、PPT 文本/元素超出页面、文本重叠、空页、页数不一致和无法完成 PDF 文本检查均阻断正式登记；Word/Excel 保留较宽松的非正式渲染诊断语义。PDF 文本框边界检查同时归一化底部原点坐标，避免把基线误判为页面上边界；PPTX 包在实际渲染前还会检查 slide 尺寸和文本/图片/图形元素的 OOXML 几何边界。
