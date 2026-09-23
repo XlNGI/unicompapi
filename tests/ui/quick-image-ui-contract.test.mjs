@@ -175,7 +175,7 @@ test('quick image copy follows prompt, model, then generate workflow', () => {
 
 test('quick image uses the shared history presentation', () => {
   assert.match(quickSource, /<GenerationHistory[\s\S]*mediaKind="image"/);
-  assert.match(quickSource, /extraDraftIds=\{siblingDraftIds\}/);
+  assert.match(quickSource, /workspaceMode="quick_image"/);
   assert.match(quickSource, /onWorkSelectionChange=\{setSelectedWorkId\}/);
 });
 

@@ -76,7 +76,6 @@ export function VideoImageWorkspace({
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
-  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -93,28 +92,6 @@ export function VideoImageWorkspace({
   useEffect(() => {
     setExpectedWorkId(undefined);
   }, [draft.draftId]);
-
-  // 收集当前项目下所有图生视频草稿ID，使生成历史按模式过滤而非仅当前草稿
-  useEffect(() => {
-    let active = true;
-    if (!videoWorkspaces) {
-      setSiblingDraftIds([]);
-      return;
-    }
-    void videoWorkspaces.list().then((result) => {
-      if (!active || !result.ok) return;
-      setSiblingDraftIds(
-        result.value
-          .filter((item) => item.mode === 'image_to_video')
-          .map((item) => item.draftId)
-      );
-    }).catch(() => {
-      if (active) setSiblingDraftIds([]);
-    });
-    return () => {
-      active = false;
-    };
-  }, [videoWorkspaces, historyRefreshKey]);
 
   const legacySelections = useMemo(
     () => draft.imageToVideo.materials?.slots.flatMap(
@@ -599,9 +576,9 @@ export function VideoImageWorkspace({
         >
           <GenerationHistory
             draftId={draft.draftId}
-            extraDraftIds={siblingDraftIds}
             key={draft.draftId}
             mediaKind="video"
+            workspaceMode="image_to_video"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}

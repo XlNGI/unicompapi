@@ -10,12 +10,15 @@ import {
 import { GenerationResultPreview } from './GenerationResultPreview';
 import { StatusPill } from './StatusPill';
 import type { SubmissionProgressPhase } from './SubmissionProgressSteps';
-import type { StorageGenerationHistoryItemDto } from '../shared/storage-ipc';
+import type {
+  StorageGenerationHistoryItemDto,
+  StorageGenerationWorkspaceMode
+} from '../shared/storage-ipc';
 import { imageWorkDragDataType } from '../shared/image-workspace-ipc';
 
 interface GenerationHistoryProps {
   readonly draftId: string;
-  readonly extraDraftIds?: readonly string[];
+  readonly workspaceMode: StorageGenerationWorkspaceMode;
   readonly mediaKind: 'image' | 'video';
   readonly projectId: string;
   readonly refreshKey: number;
@@ -46,6 +49,7 @@ export type HistoryStatus =
 
 interface HistoryStatusNode {
   readonly id: string;
+  readonly taskId: string;
   readonly kind: HistoryStatus;
   readonly occurredAt: string;
 }
@@ -113,7 +117,7 @@ const liveUncertainPhases = new Set<SubmissionProgressPhase>([
 
 export function GenerationHistory({
   draftId,
-  extraDraftIds,
+  workspaceMode,
   mediaKind,
   projectId,
   refreshKey,
@@ -133,6 +137,7 @@ export function GenerationHistory({
   const [scrollRequest, setScrollRequest] = useState(0);
   const selectedWorkIdRef = useRef<string>();
   const selectedStatusIdRef = useRef<string>();
+  const selectedTaskIdRef = useRef<string>();
   const autoSelectTaskRef = useRef<AutoSelectTask>();
   const retryTimerRef = useRef<number>();
   const deadlineTimerRef = useRef<number>();
@@ -142,19 +147,14 @@ export function GenerationHistory({
     onWorkSelectionChange?.(selectedWorkId);
   }, [onWorkSelectionChange, selectedWorkId]);
 
-  // 当前模式下所有草稿ID（当前草稿 + 同模式兄弟草稿），用于按模式过滤历史
-  const modeDraftIds = useMemo(
-    () => Array.from(new Set([draftId, ...(extraDraftIds ?? [])])),
-    [draftId, extraDraftIds]
-  );
-
   useEffect(() => {
     setLiveStartedAt(undefined);
     selectedWorkIdRef.current = undefined;
     setSelectedWorkId(undefined);
     selectedStatusIdRef.current = undefined;
     setSelectedStatusId(undefined);
-  }, [draftId, mediaKind]);
+    selectedTaskIdRef.current = undefined;
+  }, [draftId, mediaKind, workspaceMode]);
 
   // 当进入生成中阶段（preparing/requesting/waiting）且用户未主动接管选择时，重置选中项为生成中态
   const isPendingGeneration = livePendingPhases.has(submissionProgress.phase);
@@ -198,16 +198,16 @@ export function GenerationHistory({
       return;
     }
 
-    void loadProjectHistory(storage, projectId, mediaKind, modeDraftIds).then((history) => {
+    void loadProjectHistory(storage, projectId, draftId, mediaKind, workspaceMode).then((history) => {
       if (cancelled) return;
       const autoSelectTask = autoSelectTaskRef.current;
-      const hasPendingGeneration = livePendingPhases.has(submissionProgress.phase) ||
-        (submissionProgress.phase === 'completed' && Boolean(expectedWorkId) && Boolean(autoSelectTask));
+      const hasPendingGeneration = livePendingPhases.has(submissionProgress.phase);
 
       const statusNodes = buildHistoryStatusNodes(history.tasks);
       const selection = resolveHistorySelection({
-        autoSelectActive: Boolean(autoSelectTask),
+        autoSelectActive: Boolean(autoSelectTask) && !userTookOverRef.current,
         hasPendingGeneration: hasPendingGeneration && !userTookOverRef.current,
+        selectedTaskId: selectedTaskIdRef.current,
         selectedStatusId: selectedStatusIdRef.current,
         selectedWorkId: selectedWorkIdRef.current,
         statusNodes,
@@ -220,6 +220,7 @@ export function GenerationHistory({
       setSelectedWorkId(selection.selectedWorkId);
       selectedStatusIdRef.current = selection.selectedStatusId;
       setSelectedStatusId(selection.selectedStatusId);
+      selectedTaskIdRef.current = selection.selectedTaskId;
       if (selection.shouldScrollToLatest) {
         setScrollRequest((request) => request + 1);
       }
@@ -238,7 +239,7 @@ export function GenerationHistory({
     return () => {
       cancelled = true;
     };
-  }, [expectedWorkId, mediaKind, modeDraftIds, projectId, refreshKey, retryKey, storage, submissionProgress.phase]);
+  }, [draftId, expectedWorkId, mediaKind, projectId, refreshKey, retryKey, storage, submissionProgress.phase, workspaceMode]);
 
   useEffect(() => {
     if (!storage) return;
@@ -271,9 +272,8 @@ export function GenerationHistory({
     }
   }, [expectedWorkId, submissionProgress.phase]);
 
-  const displayLivePhase = submissionProgress.phase === 'completed' &&
-    expectedWorkId && autoSelectTaskRef.current
-    ? 'waiting'
+  const displayLivePhase = expectedWorkId && works.some((work) => work.workId === expectedWorkId)
+    ? 'idle'
     : submissionProgress.phase;
 
   const nodes = useMemo(
@@ -350,15 +350,19 @@ export function GenerationHistory({
     stopAutoSelectTask();
     selectedWorkIdRef.current = workId;
     setSelectedWorkId(workId);
+    selectedTaskIdRef.current = works.find((work) => work.workId === workId)?.sourceTaskId;
     selectedStatusIdRef.current = undefined;
     setSelectedStatusId(undefined);
   }
 
   function handleStatusSelection(statusId: string) {
+    userTookOverRef.current = true;
+    stopAutoSelectTask();
     selectedWorkIdRef.current = undefined;
     setSelectedWorkId(undefined);
     selectedStatusIdRef.current = statusId;
     setSelectedStatusId(statusId);
+    selectedTaskIdRef.current = statusId.replace(/^task-/, '').replace(/-(?:pending|awaiting-receipt|receiving|failed|uncertain)$/, '');
   }
 
   function scheduleAutoSelectRetry() {
@@ -551,13 +555,15 @@ export function resolveHistorySelection(input: {
   readonly autoSelectActive: boolean;
   readonly hasPendingGeneration?: boolean;
   readonly selectedStatusId?: string;
+  readonly selectedTaskId?: string;
   readonly selectedWorkId?: string;
   readonly targetWorkId?: string;
-  readonly works: readonly { readonly workId: string; readonly createdAt?: string }[];
-  readonly statusNodes?: readonly { readonly id: string; readonly kind: HistoryStatus; readonly occurredAt: string }[];
+  readonly works: readonly { readonly workId: string; readonly sourceTaskId: string; readonly createdAt?: string }[];
+  readonly statusNodes?: readonly { readonly id: string; readonly taskId: string; readonly kind: HistoryStatus; readonly occurredAt: string }[];
 }): {
   readonly matchedTarget: boolean;
   readonly selectedStatusId?: string;
+  readonly selectedTaskId?: string;
   readonly selectedWorkId?: string;
   readonly shouldScrollToLatest: boolean;
 } {
@@ -569,6 +575,7 @@ export function resolveHistorySelection(input: {
     return {
       matchedTarget: true,
       selectedStatusId: undefined,
+      selectedTaskId: input.works.find((work) => work.workId === input.targetWorkId)?.sourceTaskId,
       selectedWorkId: input.targetWorkId,
       shouldScrollToLatest: true
     };
@@ -580,17 +587,28 @@ export function resolveHistorySelection(input: {
     return {
       matchedTarget: false,
       selectedStatusId: undefined,
+      selectedTaskId: input.works.find((work) => work.workId === input.selectedWorkId)?.sourceTaskId,
       selectedWorkId: input.selectedWorkId,
       shouldScrollToLatest: false
     };
   }
-  if (
-    input.selectedStatusId &&
-    input.statusNodes?.some((node) => node.id === input.selectedStatusId)
-  ) {
+  const selectedTaskWork = input.selectedTaskId
+    ? input.works.find((work) => work.sourceTaskId === input.selectedTaskId)
+    : undefined;
+  if (selectedTaskWork) {
+    return {
+      matchedTarget: false,
+      selectedStatusId: undefined,
+      selectedTaskId: input.selectedTaskId,
+      selectedWorkId: selectedTaskWork.workId,
+      shouldScrollToLatest: false
+    };
+  }
+  if (input.selectedStatusId && input.statusNodes?.some((node) => node.id === input.selectedStatusId)) {
     return {
       matchedTarget: false,
       selectedStatusId: input.selectedStatusId,
+      selectedTaskId: input.selectedTaskId,
       selectedWorkId: undefined,
       shouldScrollToLatest: false
     };
@@ -600,6 +618,7 @@ export function resolveHistorySelection(input: {
     return {
       matchedTarget: false,
       selectedStatusId: undefined,
+      selectedTaskId: undefined,
       selectedWorkId: undefined,
       shouldScrollToLatest: true
     };
@@ -618,6 +637,7 @@ export function resolveHistorySelection(input: {
       return {
         matchedTarget: false,
         selectedStatusId: latestStatus.id,
+        selectedTaskId: latestStatus.taskId,
         selectedWorkId: undefined,
         shouldScrollToLatest: true
       };
@@ -627,6 +647,7 @@ export function resolveHistorySelection(input: {
   return {
     matchedTarget: false,
     selectedStatusId: undefined,
+    selectedTaskId: latestWork?.sourceTaskId,
     selectedWorkId: latestWork?.workId,
     shouldScrollToLatest: input.works.length > 0
   };
@@ -675,23 +696,21 @@ export function canRetryAutoSelect(retryCount: number, elapsedMs: number): boole
 async function loadProjectHistory(
   storage: NonNullable<typeof window.unicomp>['storage'],
   projectId: string,
+  draftId: string,
   mediaKind: 'image' | 'video',
-  draftIds: readonly string[]
+  workspaceMode: StorageGenerationWorkspaceMode
 ): Promise<{
   readonly works: readonly HistoryWork[];
   readonly tasks: readonly HistoryTask[];
 }> {
-  // 按当前模式下所有草稿ID查询后端历史，合并去重后取最近10个
-  const responses = await Promise.all(
-    draftIds.map((draftId) =>
-      storage.listGenerationHistory({
-        projectId,
-        draftId,
-        mediaKind,
-        limit: 20
-      })
-    )
-  );
+  // 按项目和当前模式一次查询后端历史，避免按草稿逐个发起 IPC
+  const responses = [await storage.listGenerationHistory({
+    projectId,
+    draftId,
+    mediaKind,
+    workspaceMode,
+    limit: 50
+  })];
 
   const allWorks: HistoryWork[] = [];
   const allTasks: HistoryTask[] = [];
@@ -715,15 +734,15 @@ async function loadProjectHistory(
 
   if (!anyOk && responses.length > 0) throw new Error('history_read_failed');
 
-  // 按 workId 去重，按时间倒序取最近10个，再反转为时间线所需的升序
+  // 按 workId 去重，按时间倒序取最近50个，再反转为时间线所需的升序
   const recentWorks = [...new Map(allWorks.map((w) => [w.workId, w])).values()]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 10);
+    .slice(0, 50);
 
   const works = sortHistoryWorks(recentWorks);
   const tasks = [...new Map(allTasks.map((t) => [t.taskId, t])).values()]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 10);
+    .slice(0, 50);
 
   return { works, tasks };
 }
@@ -743,23 +762,25 @@ function buildHistoryStatusNodes(
     const occurredAt = task.latestExecutionUpdatedAt ?? task.createdAt;
     if (!state) continue;
     if (pendingExecutionStates.has(state)) {
-      nodes.push({ id: `task-${task.taskId}-pending`, kind: 'pending', occurredAt });
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'pending', occurredAt });
     } else if (awaitingReceiptExecutionStates.has(state)) {
       nodes.push({
-        id: `task-${task.taskId}-awaiting-receipt`,
+        id: `task-${task.taskId}`,
+        taskId: task.taskId,
         kind: 'awaiting_receipt',
         occurredAt
       });
     } else if (receivingExecutionStates.has(state)) {
       nodes.push({
-        id: `task-${task.taskId}-receiving`,
+        id: `task-${task.taskId}`,
+        taskId: task.taskId,
         kind: 'receiving',
         occurredAt
       });
     } else if (state === 'failed' || state === 'expired') {
-      nodes.push({ id: `task-${task.taskId}-failed`, kind: 'failed', occurredAt });
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'failed', occurredAt });
     } else if (uncertainExecutionStates.has(state)) {
-      nodes.push({ id: `task-${task.taskId}-uncertain`, kind: 'uncertain', occurredAt });
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'uncertain', occurredAt });
     }
   }
   return nodes;
@@ -785,7 +806,8 @@ function buildHistoryNodes(
         : undefined;
   if (liveStatus && liveStartedAt && !taskStates.has(liveStatus)) {
     nodes.push({
-      id: `live-${liveStatus}`,
+      id: 'live-current',
+      taskId: 'live-current',
       kind: liveStatus,
       occurredAt: liveStartedAt
     });

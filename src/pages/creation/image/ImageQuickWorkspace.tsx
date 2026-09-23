@@ -40,7 +40,6 @@ export function ImageQuickWorkspace({
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
   const [selectedWorkId, setSelectedWorkId] = useState<string>();
-  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -56,20 +55,6 @@ export function ImageQuickWorkspace({
     setSelectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
-  useEffect(() => {
-    let active = true;
-    if (!imageWorkspaces) {
-      setSiblingDraftIds([]);
-      return;
-    }
-    void imageWorkspaces.list().then((result) => {
-      if (!active || !result.ok) return;
-      setSiblingDraftIds(result.value.filter((item) => item.mode === 'quick_image').map((item) => item.draftId));
-    }).catch(() => {
-      if (active) setSiblingDraftIds([]);
-    });
-    return () => { active = false; };
-  }, [imageWorkspaces, historyRefreshKey]);
   const legacyReason = draft.input
     ? '此旧草稿含图片输入，快速生图不能提交；请迁移到专业生图。'
     : draft.contextReferences.length > 0
@@ -231,9 +216,9 @@ export function ImageQuickWorkspace({
         <Card aria-label="图片生成内容与历史" className="uc-generation-two-pane__result">
           <GenerationHistory
             draftId={draft.draftId}
-            extraDraftIds={siblingDraftIds}
             key={draft.draftId}
             mediaKind="image"
+            workspaceMode="quick_image"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}

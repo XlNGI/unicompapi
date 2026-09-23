@@ -270,6 +270,13 @@ export interface StorageGenerationHistoryPageDto {
   readonly issues: readonly StorageReadModelIssueDto[];
 }
 
+export type StorageGenerationWorkspaceMode =
+  | 'quick_image'
+  | 'professional_image'
+  | 'quick_video'
+  | 'text_to_video'
+  | 'image_to_video';
+
 export interface StorageConsumptionSummaryRequestDto {
   readonly calendarDays?: number;
 }
@@ -511,6 +518,7 @@ export interface StorageApi {
     readonly projectId: string;
     readonly draftId: string;
     readonly mediaKind: 'image' | 'video';
+    readonly workspaceMode?: StorageGenerationWorkspaceMode;
     readonly cursor?: string;
     readonly limit?: number;
   }): Promise<StorageIpcResult<StorageGenerationHistoryPageDto>>;

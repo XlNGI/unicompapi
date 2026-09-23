@@ -292,7 +292,25 @@
 }
 
 .uc-generation-two-pane__result {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
   align-content: stretch;
+}
+
+.uc-generation-two-pane__result > .uc-generation-history {
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.uc-generation-two-pane__result > .uc-image-quick__result-actions {
+  min-height: 44px;
+  align-items: center;
+  padding: var(--uc-space-3) var(--uc-space-4);
+  border-top: 1px solid var(--uc-color-border-subtle);
 }
 
 .uc-generation-two-pane__output {

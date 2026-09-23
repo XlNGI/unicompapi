@@ -41,12 +41,13 @@ test('workspace owns the takeover state and shared history keeps no duplicate co
   assert.doesNotMatch(history, /onUserSelection/);
 });
 
-test('shared history accepts only current-draft verified local media works', () => {
+test('shared history accepts mode-scoped verified local media works', () => {
   assert.match(history, /storage\.listGenerationHistory\(\{/);
   assert.match(history, /projectId,/);
   assert.match(history, /draftId,/);
   assert.match(history, /mediaKind,/);
-  assert.match(history, /limit: 20/);
+  assert.match(history, /workspaceMode,/);
+  assert.match(history, /limit: 50/);
   assert.doesNotMatch(history, /storage\.listTasks|storage\.listWorks|storage\.getTaskDetails|storage\.getWorkDetails/);
   assert.doesNotMatch(history, /remoteUrls|fetch\(|localStorage/);
 });

@@ -34,10 +34,8 @@ export function VideoTextWorkspace({
   onFlushDraft,
   onMessage
 }: VideoTextWorkspaceProps) {
-  const videoWorkspaces = window.unicomp?.videoWorkspaces;
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
-  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -54,28 +52,6 @@ export function VideoTextWorkspace({
   useEffect(() => {
     setExpectedWorkId(undefined);
   }, [draft.draftId]);
-
-  // 收集当前项目下所有文生视频草稿ID，使生成历史按模式过滤而非仅当前草稿
-  useEffect(() => {
-    let active = true;
-    if (!videoWorkspaces) {
-      setSiblingDraftIds([]);
-      return;
-    }
-    void videoWorkspaces.list().then((result) => {
-      if (!active || !result.ok) return;
-      setSiblingDraftIds(
-        result.value
-          .filter((item) => item.mode === 'text_to_video')
-          .map((item) => item.draftId)
-      );
-    }).catch(() => {
-      if (active) setSiblingDraftIds([]);
-    });
-    return () => {
-      active = false;
-    };
-  }, [videoWorkspaces, historyRefreshKey]);
 
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
@@ -290,9 +266,9 @@ export function VideoTextWorkspace({
         >
           <GenerationHistory
             draftId={draft.draftId}
-            extraDraftIds={siblingDraftIds}
             key={draft.draftId}
             mediaKind="video"
+            workspaceMode="text_to_video"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}

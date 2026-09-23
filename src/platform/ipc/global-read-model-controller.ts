@@ -15,7 +15,8 @@ import type {
   StorageTaskDetailsDto,
   StorageTaskSummaryDto,
   StorageWorkDetailsDto,
-  StorageWorkSummaryDto
+  StorageWorkSummaryDto,
+  StorageGenerationWorkspaceMode
 } from '../../shared/storage-ipc';
 import {
   JsonExecutionRepository,
@@ -114,8 +115,10 @@ export class GlobalReadModelController {
         ]);
         const executionsByTaskId = groupExecutionsByTaskId(executions);
         const relevantTasks = tasks.filter((task) =>
-          task.sourceDraftId === parsed.draftId &&
-          task.submission.kind === `${parsed.mediaKind}_generation`
+          task.submission.kind === `${parsed.mediaKind}_generation` &&
+          (parsed.workspaceMode
+            ? taskWorkspaceMode(task) === parsed.workspaceMode
+            : task.sourceDraftId === parsed.draftId)
         );
         const relevantTaskIds = new Set(relevantTasks.map((task) => task.id));
         const executionById = new Map(executions.map((execution) => [execution.id, execution]));
@@ -491,6 +494,7 @@ interface ParsedGenerationHistoryRequest {
   readonly projectId: string;
   readonly draftId: string;
   readonly mediaKind: 'image' | 'video';
+  readonly workspaceMode?: StorageGenerationWorkspaceMode;
   readonly cursor?: HistoryCursor;
   readonly limit: number;
 }
@@ -501,13 +505,16 @@ function parseGenerationHistoryRequest(value: unknown): ParsedGenerationHistoryR
   }
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some((key) =>
-    !['projectId', 'draftId', 'mediaKind', 'cursor', 'limit'].includes(key)
+    !['projectId', 'draftId', 'mediaKind', 'workspaceMode', 'cursor', 'limit'].includes(key)
   )) throw new TypeError('Invalid history request');
   const projectId = requiredHistoryId(record.projectId);
   const draftId = requiredHistoryId(record.draftId);
   if (!['image', 'video'].includes(String(record.mediaKind))) {
     throw new TypeError('Invalid history request');
   }
+  const workspaceMode = record.workspaceMode === undefined
+    ? undefined
+    : parseWorkspaceMode(record.workspaceMode);
   const limit = record.limit === undefined ? 20 : Number(record.limit);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
     throw new TypeError('Invalid history request');
@@ -516,9 +523,32 @@ function parseGenerationHistoryRequest(value: unknown): ParsedGenerationHistoryR
     projectId,
     draftId,
     mediaKind: record.mediaKind as 'image' | 'video',
+    ...(workspaceMode ? { workspaceMode } : {}),
     ...(record.cursor === undefined ? {} : { cursor: decodeHistoryCursor(record.cursor) }),
     limit
   };
+}
+
+function parseWorkspaceMode(value: unknown): StorageGenerationWorkspaceMode {
+  if (![
+    'quick_image',
+    'professional_image',
+    'quick_video',
+    'text_to_video',
+    'image_to_video'
+  ].includes(String(value))) {
+    throw new TypeError('Invalid workspace mode');
+  }
+  return value as StorageGenerationWorkspaceMode;
+}
+
+function taskWorkspaceMode(task: Task): StorageGenerationWorkspaceMode | undefined {
+  if (task.submission.kind === 'image_generation') {
+    const mode = task.submission.image?.mode;
+    return mode === 'quick_image' || mode === 'professional_image' ? mode : undefined;
+  }
+  if (task.submission.kind === 'video_generation') return task.submission.video?.mode;
+  return undefined;
 }
 
 function requiredHistoryId(value: unknown): string {

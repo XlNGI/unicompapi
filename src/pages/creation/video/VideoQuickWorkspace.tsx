@@ -58,7 +58,6 @@ export function VideoQuickWorkspace({
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
-  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
@@ -73,20 +72,6 @@ export function VideoQuickWorkspace({
     setExpectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
-  useEffect(() => {
-    let active = true;
-    if (!videoWorkspaces) {
-      setSiblingDraftIds([]);
-      return;
-    }
-    void videoWorkspaces.list().then((result) => {
-      if (!active || !result.ok) return;
-      setSiblingDraftIds(result.value.filter((item) => item.mode === 'quick_video').map((item) => item.draftId));
-    }).catch(() => {
-      if (active) setSiblingDraftIds([]);
-    });
-    return () => { active = false; };
-  }, [videoWorkspaces, historyRefreshKey]);
   const legacyReference = draft.quick.reference;
   const hasLegacyContexts = draft.contextReferences.length > 0;
   const legacyReason = legacyReference?.mediaKind === 'video'
@@ -227,9 +212,9 @@ export function VideoQuickWorkspace({
         <Card aria-label="视频生成内容与历史" className="uc-generation-two-pane__result">
           <GenerationHistory
             draftId={draft.draftId}
-            extraDraftIds={siblingDraftIds}
             key={draft.draftId}
             mediaKind="video"
+            workspaceMode="quick_video"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}
