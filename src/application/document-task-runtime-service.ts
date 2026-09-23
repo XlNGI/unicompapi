@@ -74,7 +74,8 @@ export class DocumentTaskRuntimeService {
   }
 
   async recordObservation(scope: DocumentTaskRuntimeScope, callId: string,
-    observation: DocumentToolObservation): Promise<DocumentTaskRuntime> {
+    observation: DocumentToolObservation,
+    options: { readonly outcomeUnknown?: boolean } = {}): Promise<DocumentTaskRuntime> {
     const runtime = await this.require(scope);
     const call = runtime.toolCalls.find(item => item.id === callId);
     if (!call || call.step !== observation.step || call.toolId !== observation.toolId) throw conflict('observation_call_mismatch');
@@ -86,7 +87,10 @@ export class DocumentTaskRuntimeService {
     if (runtime.status !== 'running' || call.status !== 'started') throw conflict('reconciliation_required');
     await this.assertBindings(runtime);
     // A thrown write may already have changed the candidate: it is not safe to retry.
-    if (!observation.ok && createDocumentToolRegistry().get(call.toolId)!.requiresWrite) {
+    // Callers that know the write never started may explicitly record a settled
+    // validation/authorization failure instead of forcing reconciliation.
+    if (!observation.ok && options.outcomeUnknown !== false &&
+        createDocumentToolRegistry().get(call.toolId)!.requiresWrite) {
       return this.reconcile(runtime);
     }
     return this.save(runtime, {
@@ -108,6 +112,21 @@ export class DocumentTaskRuntimeService {
     return runtime.status === 'running' ? this.save(runtime, { status: 'paused' }) : runtime;
   }
 
+  /** Claim the local generation lifecycle before the first platform side effect. */
+  async start(scope: DocumentTaskRuntimeScope): Promise<DocumentTaskRuntime> {
+    const runtime = await this.require(scope);
+    if (runtime.status === 'running') {
+      await this.assertBindings(runtime);
+      return runtime;
+    }
+    if (runtime.status !== 'planning' && runtime.status !== 'paused') {
+      if (['cancelled', 'failed', 'completed', 'needs_reconciliation'].includes(runtime.status)) return runtime;
+      throw conflict('runtime_not_resumable');
+    }
+    await this.assertBindings(runtime);
+    return this.save(runtime, { status: 'running', checkpoint: runtime.checkpoint });
+  }
+
   /** Formal completion is unavailable until the publication adapter exists. */
   async setStatus(scope: DocumentTaskRuntimeScope,
     status: Extract<DocumentTaskRuntimeStatus, 'waiting_input' | 'paused' | 'cancelled' | 'failed'>
@@ -115,6 +134,26 @@ export class DocumentTaskRuntimeService {
     const runtime = await this.require(scope);
     if (runtime.toolCalls.some(call => call.status === 'started')) return this.reconcile(runtime);
     return this.save(runtime, { status });
+  }
+
+  /** Mark the runtime complete only after the platform has registered a Work. */
+  async complete(scope: DocumentTaskRuntimeScope, workId: string): Promise<DocumentTaskRuntime> {
+    const runtime = await this.require(scope);
+    if (runtime.status === 'completed') {
+      if (runtime.workRef?.kind === 'registered' && runtime.workRef.ref === workId) return runtime;
+      throw conflict('runtime_completion_conflict');
+    }
+    if (runtime.status !== 'running' && runtime.status !== 'paused') throw conflict('runtime_not_completable');
+    if (runtime.toolCalls.some(call => ['started', 'unknown'].includes(call.status))) {
+      return this.reconcile(runtime);
+    }
+    await this.assertBindings(runtime);
+    if (!/^[a-zA-Z0-9_-]+$/.test(workId)) throw conflict('work_id_invalid');
+    return this.save(runtime, {
+      status: 'completed',
+      checkpoint: { ...runtime.checkpoint, stage: 'complete' },
+      workRef: { kind: 'registered', ref: workId }
+    });
   }
 
   canResume(runtime: DocumentTaskRuntime): boolean {

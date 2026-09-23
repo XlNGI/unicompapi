@@ -81,6 +81,9 @@ export class DocumentGenerationError extends Error {
 }
 
 export interface DocumentGenerationPlanInput {
+  readonly executionId?: string;
+  /** Durable Task Runtime progress is a safety gate, not best-effort UI telemetry. */
+  readonly strictProgress?: boolean;
   readonly kind: DocumentWorkspaceKind;
   readonly title: string;
   readonly contentFingerprint: string;
@@ -177,7 +180,7 @@ export class DocumentGenerationRunner {
       });
       await context.tasks.save(task);
       execution = createExecution({
-        id: toExecutionId(`execution-document-${createId()}`),
+        id: toExecutionId(input.executionId ?? `execution-document-${createId()}`),
         taskId: task.id,
         createdAt: toIsoTimestamp(now())
       });
@@ -397,7 +400,10 @@ export class DocumentGenerationRunner {
     try {
       if (input.onProgress) await input.onProgress(event);
       else await emitProductionEvent(event);
-    } catch { /* Progress recording never changes the document transaction outcome. */ }
+    } catch (error) {
+      if (input.strictProgress) throw error;
+      /* Best-effort UI telemetry cannot change the document transaction outcome. */
+    }
   }
 
   /**

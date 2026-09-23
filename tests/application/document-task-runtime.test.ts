@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DocumentTaskRuntimeService } from '../../src/application';
+import { DocumentGenerationRuntimeBridge, DocumentTaskRuntimeService } from '../../src/application';
 import {
   assertDocumentTaskRuntimeUpdate, createDocumentTaskRuntime, parseDocumentTaskRuntime,
   toConversationId, toDocumentTaskRuntimeId, toIsoTimestamp, toMessageId, toProjectId,
@@ -103,6 +103,22 @@ describe('document task runtime lifecycle', () => {
     expect(result.observations).toHaveLength(1);
   });
 
+  it('allows a write validation failure to settle when no side effect started', async () => {
+    const f = await fixture();
+    const writeCall = { ...call, toolId: 'apply_document_patch' as const };
+    await f.service.beginToolCall(f.runtime, writeCall);
+    const result = await f.service.recordObservation(f.runtime, writeCall.callId, {
+      step: 1,
+      toolId: writeCall.toolId,
+      ok: false,
+      data: {},
+      diagnostic: 'authorization_or_revision_invalid'
+    }, { outcomeUnknown: false });
+    expect(result.status).toBe('running');
+    expect(result.observations).toHaveLength(1);
+    expect(result.toolCalls[0]?.status).toBe('failed');
+  });
+
   it.each(['cancelled', 'failed'] as const)('does not revive %s tasks', async status => {
     const f = await fixture();
     await f.service.setStatus(f.runtime, status);
@@ -119,6 +135,61 @@ describe('document task runtime lifecycle', () => {
     await expect(reopened.beginToolCall(f.runtime, { ...call, callId: 'call-2' })).rejects.toThrow('runtime_budget_exceeded');
     f.setTime('2026-09-22T00:00:01.001Z');
     expect((await reopened.recover(f.runtime)).status).toBe('failed');
+  });
+
+  it('promotes a candidate to a registered Work only after all calls settle', async () => {
+    const f = await fixture();
+    await f.service.start(f.runtime);
+    await f.service.beginToolCall(f.runtime, call);
+    await f.service.recordObservation(f.runtime, call.callId, observation);
+    const completed = await f.service.complete(f.runtime, 'work-document-1');
+    expect(completed).toMatchObject({
+      status: 'completed',
+      checkpoint: { stage: 'complete', step: 1 },
+      workRef: { kind: 'registered', ref: 'work-document-1' }
+    });
+    expect(await f.service.complete(f.runtime, 'work-document-1')).toEqual(completed);
+    await expect(f.service.complete(f.runtime, 'work-document-2')).rejects.toThrow('runtime_completion_conflict');
+  });
+
+  it('reconciles a completion attempt while a platform side effect is unsettled', async () => {
+    const f = await fixture();
+    await f.service.start(f.runtime);
+    await f.service.beginToolCall(f.runtime, { ...call, toolId: 'apply_document_patch' });
+    const result = await f.service.complete(f.runtime, 'work-document-1');
+    expect(result.status).toBe('needs_reconciliation');
+    expect(result.toolCalls.at(-1)?.status).toBe('unknown');
+  });
+
+  it('projects deterministic runner progress into safe observations and completes after Work registration', async () => {
+    const f = await fixture();
+    const bridge = new DocumentGenerationRuntimeBridge(f.service, f.runtime, f.runtime.executionId);
+    await bridge.start();
+    const events = [
+      { code: 'document_compile' as const, status: 'started' as const, operationId: 'compile', facts: { documentKind: 'ppt' as const, tool: 'write_document' as const } },
+      { code: 'document_compile' as const, status: 'completed' as const, operationId: 'compile', facts: { documentKind: 'ppt' as const, bytes: 1234 } },
+      { code: 'document_render' as const, status: 'started' as const, operationId: 'render', facts: { documentKind: 'ppt' as const, tool: 'render' as const } },
+      { code: 'document_render' as const, status: 'completed' as const, operationId: 'render', facts: { documentKind: 'ppt' as const, totalPages: 3 } },
+      { code: 'document_register' as const, status: 'started' as const, operationId: 'register', facts: { documentKind: 'ppt' as const, tool: 'publish' as const } },
+      { code: 'document_register' as const, status: 'completed' as const, operationId: 'register', facts: { documentKind: 'ppt' as const } }
+    ];
+    for (const event of events) await bridge.progress(event);
+    await bridge.complete('work-document-2');
+    const runtime = await bridge.runtime();
+    expect(runtime.status).toBe('completed');
+    expect(runtime.observations).toHaveLength(3);
+    expect(runtime.observations[0].data).toEqual(expect.objectContaining({ code: 'document_compile', bytes: 1234 }));
+    expect(runtime.observations[0].data).not.toHaveProperty('path');
+  });
+
+  it('does not complete when a write progress result is cancelled', async () => {
+    const f = await fixture();
+    const bridge = new DocumentGenerationRuntimeBridge(f.service, f.runtime, f.runtime.executionId);
+    await bridge.start();
+    await bridge.progress({ code: 'document_publish', status: 'started', operationId: 'publish', facts: { documentKind: 'ppt' } });
+    await bridge.progress({ code: 'document_publish', status: 'cancelled', operationId: 'publish', facts: { documentKind: 'ppt' } });
+    await bridge.fail('cancelled');
+    expect((await bridge.runtime()).status).toBe('needs_reconciliation');
   });
 });
 

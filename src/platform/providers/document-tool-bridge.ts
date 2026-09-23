@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { createDocumentToolRegistry } from '../../domain/entities/document-agent';
 import { atomicToolSchema, parseAtomicToolArguments, type DocumentAtomicToolBinding } from '../../application/document-atomic-tools';
+import type { DocumentTaskRuntimeScope, DocumentTaskRuntimeService } from '../../application/document-task-runtime-service';
+import type { DocumentToolObservation } from '../../domain/entities/document-agent';
 import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from './provider-tool-calling';
 import { emitProductionEvent } from '../conversation-production-trace';
 import type { ProductionEventFacts } from '../../shared/conversation-production-ipc';
@@ -17,6 +19,13 @@ export interface DocumentToolCallingBridgeOptions {
   readonly budgetUnits: number;
   readonly maxCalls: number;
   readonly timeoutMs: number;
+  /** Optional durable checkpoint. When present, every distinct provider call
+   * is write-ahead persisted and its sanitized Observation is committed before
+   * the result is returned to the model. */
+  readonly runtime?: {
+    readonly service: Pick<DocumentTaskRuntimeService, 'beginToolCall' | 'recordObservation'>;
+    readonly scope: DocumentTaskRuntimeScope;
+  };
 }
 
 /** One instance per task. Units are local scheduling limits, never monetary prices. */
@@ -66,6 +75,31 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
           if (signal.aborted) return fail('cancelled');
           if (uncertain) return fail('reconciliation_required', true);
           if (spent + definition.maxCostUnits > budget) return fail('budget_exceeded');
+          let runtimeStarted = false;
+          let runtimeStep: number | undefined;
+          if (options.runtime) {
+            try {
+              const checkpoint = await options.runtime.service.beginToolCall(options.runtime.scope, {
+                callId: call.id,
+                toolId: definition.id,
+                inputHash: fingerprint
+              });
+              if (!checkpoint.execute) {
+                const previousObservation = checkpoint.runtime.observations.find((observation) =>
+                  observation.step === checkpoint.runtime.toolCalls.find((item) => item.id === call.id)?.step &&
+                  observation.toolId === definition.id
+                );
+                return previousObservation
+                  ? observationResult(call.id, definition.id, definition.version, previousObservation)
+                  : fail('reconciliation_required', true);
+              }
+              runtimeStarted = true;
+              runtimeStep = checkpoint.runtime.checkpoint.step;
+            } catch (error) {
+              const errorCode = runtimeErrorCode(error);
+              return fail(errorCode, errorCode === 'reconciliation_required');
+            }
+          }
           const controller = new AbortController();
           let invoked = false;
           let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -103,6 +137,23 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
               if (invoked && definition.requiresWrite) uncertain = true;
               return fail('tool_failed', invoked && definition.requiresWrite);
             }), stopped]);
+            if (runtimeStarted && options.runtime) {
+              const runtimeObservation: DocumentToolObservation = {
+                step: runtimeStep!,
+                toolId: definition.id,
+                ok: outcome.ok === true,
+                data: outcome.ok === true ? toRuntimeObservation(outcome.result) : {},
+                ...(outcome.ok !== true ? { diagnostic: String(outcome.errorCode ?? 'tool_failed') } : {})
+              };
+              try {
+                await options.runtime.service.recordObservation(options.runtime.scope, call.id, runtimeObservation, {
+                  outcomeUnknown: outcome.outcomeUnknown === true
+                });
+              } catch {
+                uncertain = true;
+                return fail('runtime_checkpoint_failed', true);
+              }
+            }
             await emitProductionEvent({ code: 'tool_result', status: outcome.ok === true ? 'completed'
               : outcome.errorCode === 'cancelled' ? 'cancelled' : 'failed', operationId: call.id,
               facts: { tool: traceTools[definition.id], purpose: 'tool' } });
@@ -118,6 +169,35 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
       }
     }
   };
+}
+
+function observationResult(
+  callId: string,
+  toolId: string,
+  toolVersion: string,
+  observation: DocumentToolObservation
+): Readonly<Record<string, unknown>> {
+  return observation.ok
+    ? { ok: true, callId, toolId, toolVersion, outcomeUnknown: false, result: observation.data }
+    : { ok: false, errorCode: observation.diagnostic ?? 'tool_failed', outcomeUnknown: false };
+}
+
+function toRuntimeObservation(value: unknown): Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const record: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) ||
+        /(?:path|url|token|secret|password|credential|api[_-]?key|content|body|prompt|__proto__|constructor|prototype)/iu.test(key)) continue;
+    if (typeof item === 'string') record[key] = item.slice(0, 500);
+    else if (typeof item === 'number' && Number.isFinite(item)) record[key] = item;
+    else if (typeof item === 'boolean' || item === null) record[key] = item;
+  }
+  return record;
+}
+
+function runtimeErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return /reconciliation/i.test(message) ? 'reconciliation_required' : 'runtime_checkpoint_failed';
 }
 
 function safeObservation(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {

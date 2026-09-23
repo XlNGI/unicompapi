@@ -6,10 +6,12 @@ import {
   ConversationIntentOrchestrator,
   ConversationStreamingService,
   ConversationWorkflowService,
-  DocumentGenerationApplicationService
+  DocumentGenerationApplicationService,
+  DocumentTaskRuntimeService
 } from '../../src/application';
+import { DocumentGenerationRuntimeBridge } from '../../src/application/document-generation-runtime-bridge';
 import { runLocalDocumentRevisionAgent } from '../../src/application';
-import { toConversationId, toFileReferenceId, toMessageId } from '../../src/domain';
+import { toConversationId, toDocumentTaskRuntimeId, toFileReferenceId, toMessageId, toWorkId } from '../../src/domain';
 import {
   AttachmentImportError,
   AttachmentImportService,
@@ -18,8 +20,10 @@ import {
   FileExtractionError,
   FileExtractionService,
   JsonFileReferenceRepository,
+  JsonWorkRepository,
   JsonProjectConversationRepository,
   JsonConversationWorkflowRepository,
+  JsonDocumentTaskRuntimeRepository,
   NodeProjectStorage,
   PlatformDocumentDraftCompiler,
   PlatformDocumentGenerationExecutor,
@@ -67,6 +71,34 @@ export function registerDocumentGenerationIpcHandlers(options: {
         session.projectId,
         now
       );
+      const taskRuntimeRepository = new JsonDocumentTaskRuntimeRepository(storage, session.projectId, now);
+      const runtimeFiles = new JsonFileReferenceRepository(storage, session.projectId);
+      const runtimeWorks = new JsonWorkRepository(storage, session.projectId);
+      const taskRuntimeService = new DocumentTaskRuntimeService(taskRuntimeRepository, {
+        now,
+        validateBindings: async (runtime) => {
+          if (runtime.projectId !== session.projectId) return false;
+          const conversation = await repository.get(runtime.conversationId);
+          const message = conversation?.messages.find((item) => item.id === runtime.sourceMessageId);
+          if (!conversation || conversation.projectId !== session.projectId ||
+              message?.role !== 'assistant' || message.state !== 'completed') return false;
+          if (runtime.workRef) {
+            try {
+              const work = await runtimeWorks.get(toWorkId(runtime.workRef.ref));
+              if (!work || work.projectId !== session.projectId) return false;
+            } catch { return false; }
+          }
+          for (const reference of runtime.attachmentRefs) {
+            let found = false;
+            try { found = Boolean(await runtimeFiles.get(toFileReferenceId(reference))); } catch { /* try Work below */ }
+            if (!found) {
+              try { found = Boolean(await runtimeWorks.get(toWorkId(reference))); } catch { /* invalid reference */ }
+            }
+            if (!found) return false;
+          }
+          return true;
+        }
+      });
       const streaming = new ConversationStreamingService(repository, ids, now);
       const presentationScope = createPresentationWorkflowScope({ rootDirectory: session.rootDirectory, projectId: session.projectId });
       const workflowService = new ConversationWorkflowService(
@@ -87,6 +119,28 @@ export function registerDocumentGenerationIpcHandlers(options: {
       });
       const application = new DocumentGenerationApplicationService({
         onProgress: async (event) => { await emitProductionEvent(event); },
+        runtime: {
+          create: async (input) => {
+            const executionId = `execution-document-${randomUUID()}`;
+            const runtime = await taskRuntimeService.create({
+              id: toDocumentTaskRuntimeId(`runtime-document-${randomUUID()}`),
+              projectId: session.projectId,
+              conversationId: input.conversationId,
+              sourceMessageId: input.messageId,
+              executionId,
+              documentKind: input.kind,
+              attachmentRefs: [...new Set(input.images.flatMap((image) => [image.fileId, image.workId].filter((value): value is string => value !== undefined)))],
+              ...(input.parentWorkId !== undefined ? { workRef: { kind: 'candidate' as const, ref: input.parentWorkId } } : {}),
+              budget: { maxSteps: 32, budgetUnits: 10_000, timeoutMs: 900_000 }
+            });
+            return new DocumentGenerationRuntimeBridge(taskRuntimeService, {
+              id: runtime.id,
+              projectId: runtime.projectId,
+              conversationId: runtime.conversationId,
+              executionId: runtime.executionId
+            }, executionId);
+          }
+        },
         projectId: session.projectId,
         resolvePresentationMap: async (workId, outline) => {
           const source = await new RegisteredPresentationReader({ rootDirectory: session.rootDirectory, projectId: session.projectId }).read(workId, outline);

@@ -209,7 +209,7 @@ export function parseDocumentTaskRuntime(value: unknown): DocumentTaskRuntime {
 
 export function updateDocumentTaskRuntime(
   runtime: DocumentTaskRuntime,
-  input: Partial<Pick<DocumentTaskRuntime, 'status' | 'checkpoint' | 'toolCalls' | 'observations'>> & {
+  input: Partial<Pick<DocumentTaskRuntime, 'status' | 'checkpoint' | 'toolCalls' | 'observations' | 'workRef'>> & {
     readonly updatedAt: IsoTimestamp;
   }
 ): DocumentTaskRuntime {
@@ -226,16 +226,27 @@ export function updateDocumentTaskRuntime(
 /** Repositories enforce this too; object spreads cannot bypass lifecycle checks. */
 export function assertDocumentTaskRuntimeUpdate(previous: DocumentTaskRuntime, next: DocumentTaskRuntime): void {
   for (const field of ['id', 'projectId', 'conversationId', 'sourceMessageId', 'executionId',
-    'documentKind', 'attachmentRefs', 'workRef', 'pageRefs', 'budget', 'createdAt'] as const) {
+    'documentKind', 'attachmentRefs', 'pageRefs', 'budget', 'createdAt'] as const) {
     if (JSON.stringify(previous[field]) !== JSON.stringify(next[field])) throw new TypeError('Runtime binding is immutable');
   }
   const transitions: Readonly<Record<DocumentTaskRuntimeStatus, readonly DocumentTaskRuntimeStatus[]>> = {
     planning: ['planning', 'running', 'waiting_input', 'paused', 'cancelled', 'failed'],
-    running: ['running', 'waiting_input', 'paused', 'cancelled', 'failed', 'needs_reconciliation'],
+    running: ['running', 'waiting_input', 'paused', 'cancelled', 'failed', 'needs_reconciliation', 'completed'],
     waiting_input: ['waiting_input', 'running', 'paused', 'cancelled', 'failed'],
-    paused: ['paused', 'running', 'cancelled', 'failed'],
+    paused: ['paused', 'running', 'cancelled', 'failed', 'completed'],
     failed: [], cancelled: [], completed: [], needs_reconciliation: []
   };
+  const previousWorkRef = previous.workRef;
+  const nextWorkRef = next.workRef;
+  if (JSON.stringify(previousWorkRef) !== JSON.stringify(nextWorkRef)) {
+    // A candidate may be promoted exactly once, after the platform has
+    // registered the immutable Work. No other lifecycle update may mutate
+    // the binding or replace a registered Work.
+    if (next.status !== 'completed' || nextWorkRef?.kind !== 'registered' ||
+        previousWorkRef?.kind === 'registered') {
+      throw new TypeError('Runtime work reference is immutable');
+    }
+  }
   if (!transitions[previous.status].includes(next.status) || next.revision !== previous.revision + 1 ||
       next.updatedAt < previous.updatedAt || next.checkpoint.step < previous.checkpoint.step ||
       next.checkpoint.costUnits < previous.checkpoint.costUnits ||

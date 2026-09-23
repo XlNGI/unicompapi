@@ -4,6 +4,7 @@ import {
   parseControlledProviderTools
 } from '../../src/platform';
 import type { DocumentAtomicToolBinding } from '../../src/application/document-atomic-tools';
+import type { DocumentTaskRuntimeScope } from '../../src/application/document-task-runtime-service';
 
 function binding(
   id: DocumentAtomicToolBinding['id'],
@@ -211,6 +212,62 @@ describe('document tool calling bridge', () => {
   it('rejects oversized observations', async () => {
     const bridge = bridgeWith(binding('read_document_structure', async () => ({ text: 'x'.repeat(8_001) })));
     expect(await invoke(bridge, 'large')).toMatchObject({ ok: false, errorCode: 'tool_failed' });
+  });
+
+  it('writes tool calls to the task runtime before execution and commits a sanitized observation', async () => {
+    const beginToolCall = vi.fn(async () => ({
+      execute: true,
+      runtime: { checkpoint: { step: 1 }, observations: [], toolCalls: [] }
+    }));
+    const recordObservation = vi.fn(async () => undefined);
+    const runtime = {
+      service: { beginToolCall, recordObservation },
+      scope: {} as DocumentTaskRuntimeScope
+    } as unknown as Parameters<typeof createDocumentToolCallingBridge>[0]['runtime'];
+    const execute = vi.fn(async () => ({ revision: 4, content: 'must not persist', sourceId: 'source-1' }));
+    const bridge = createDocumentToolCallingBridge({
+      bindings: [binding('read_document_structure', execute)],
+      budgetUnits: 16,
+      maxCalls: 8,
+      timeoutMs: 1_000,
+      runtime
+    });
+
+    const result = await invoke(bridge, 'durable');
+
+    expect(result).toMatchObject({ ok: true, result: { revision: 4, sourceId: 'source-1' } });
+    expect(beginToolCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      callId: 'durable', toolId: 'read_document_structure', inputHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+    }));
+    expect(recordObservation).toHaveBeenCalledWith(expect.anything(), 'durable', expect.objectContaining({
+      step: 1, toolId: 'read_document_structure', ok: true, data: { revision: 4, sourceId: 'source-1' }
+    }), { outcomeUnknown: false });
+  });
+
+  it('replays a settled runtime observation without repeating the host side effect', async () => {
+    const execute = vi.fn(async () => ({ revision: 4 }));
+    const beginToolCall = vi.fn(async () => ({
+      execute: false,
+      runtime: {
+        checkpoint: { step: 1 },
+        toolCalls: [{ id: 'durable-replay', toolId: 'read_document_structure', step: 1 }],
+        observations: [{ step: 1, toolId: 'read_document_structure', ok: true, data: { revision: 4 } }]
+      }
+    }));
+    const runtime = {
+      service: { beginToolCall, recordObservation: vi.fn() },
+      scope: {} as DocumentTaskRuntimeScope
+    } as unknown as Parameters<typeof createDocumentToolCallingBridge>[0]['runtime'];
+    const bridge = createDocumentToolCallingBridge({
+      bindings: [binding('read_document_structure', execute)],
+      budgetUnits: 16,
+      maxCalls: 8,
+      timeoutMs: 1_000,
+      runtime
+    });
+
+    expect(await invoke(bridge, 'durable-replay')).toMatchObject({ ok: true, result: { revision: 4 } });
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it.each([

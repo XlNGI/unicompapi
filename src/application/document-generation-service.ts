@@ -160,7 +160,22 @@ export interface DocumentGenerationProgressEvent {
 
 export type DocumentGenerationProgressCallback = (event: DocumentGenerationProgressEvent) => void | Promise<void>;
 
+/** Durable lifecycle hooks for a local document generation execution. */
+export interface DocumentGenerationRuntimeSession {
+  readonly executionId: string;
+  start(): Promise<void>;
+  progress(event: DocumentGenerationProgressEvent): Promise<void>;
+  complete(workId: WorkId): Promise<void>;
+  fail(status: 'failed' | 'cancelled'): Promise<void>;
+}
+
+export interface DocumentGenerationRuntimePort {
+  create(input: GenerateDocumentFromMessageInput): Promise<DocumentGenerationRuntimeSession>;
+}
+
 export interface DocumentGenerationExecutionInput {
+  /** Optional durable Task Runtime execution identity supplied by the host. */
+  readonly executionId?: string;
   readonly kind: DocumentWorkspaceKind;
   readonly title: string;
   readonly contentFingerprint: string;
@@ -304,6 +319,7 @@ export class DocumentGenerationApplicationService {
       };
       readonly compiler: DocumentDraftCompilerPort;
       readonly generator: DocumentGenerationExecutorPort;
+      readonly runtime?: DocumentGenerationRuntimePort;
       readonly onProgress?: DocumentGenerationProgressCallback;
       readonly resolvePresentationMap?: (workId: WorkId, outline: DocumentOutline) => Promise<PresentationRevisionMap>;
       readonly validatePresentationSelection?: (input: GenerateDocumentFromMessageInput, map: PresentationRevisionMap, target: { unit: 'page' | 'section'; ordinal: number }) => Promise<void>;
@@ -710,6 +726,7 @@ export class DocumentGenerationApplicationService {
   ): Promise<GenerateDocumentFromMessageResult> {
     let validatingOutline = false;
     let revisingDocument = false;
+    let runtimeSession: DocumentGenerationRuntimeSession | undefined;
     try {
     const conversation = await this.waitForCompletedMessage(
       input.conversationId,
@@ -736,12 +753,21 @@ export class DocumentGenerationApplicationService {
         message.documentGenerationStatus?.state === 'failed' || message.documentGenerationStatus?.state === 'interrupted');
     }
     const content = message.content.trim();
-    if (!content) {
+      if (!content) {
       throw new DocumentGenerationApplicationError(
         'invalid_structure',
         'The assistant response is empty'
       );
-    }
+      }
+      runtimeSession = await this.dependencies.runtime?.create(input);
+      await runtimeSession?.start();
+      const reportGenerationProgress = async (event: DocumentGenerationProgressEvent): Promise<void> => {
+        // Runtime persistence is a safety boundary. If it cannot claim or
+        // settle an operation, the bridge leaves the runtime blocked for
+        // reconciliation; the existing UI trace remains best effort.
+        await runtimeSession?.progress(event);
+        await this.reportProgress(event);
+      };
     if (
       input.parentWorkId !== undefined &&
       !conversation.messages.some(
@@ -757,7 +783,7 @@ export class DocumentGenerationApplicationService {
     }
 
       validatingOutline = true;
-      await this.reportProgress({ code: 'plan_validation', status: 'started', operationId: 'document-outline',
+      await reportGenerationProgress({ code: 'plan_validation', status: 'started', operationId: 'document-outline',
         facts: { purpose: 'content', documentKind: input.kind } });
       await this.persistStatus(input, {
         state: 'validating_outline',
@@ -845,7 +871,7 @@ export class DocumentGenerationApplicationService {
             }
             let revision;
             revisingDocument = true;
-            await this.reportProgress({ code: 'tool_call', status: 'started', operationId: 'document-revision',
+            await reportGenerationProgress({ code: 'tool_call', status: 'started', operationId: 'document-revision',
               facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
             try {
               revision = await this.dependencies.revisionAgent({
@@ -896,7 +922,7 @@ export class DocumentGenerationApplicationService {
             }
             validateRevisionScope(previousOutline, revision, presentationMap);
             revisingDocument = false;
-            await this.reportProgress({ code: 'tool_result', status: 'completed', operationId: 'document-revision',
+            await reportGenerationProgress({ code: 'tool_result', status: 'completed', operationId: 'document-revision',
               facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
             outline = revision.outline;
             revisionPatch = revision.patch;
@@ -937,13 +963,14 @@ export class DocumentGenerationApplicationService {
         );
       }
       validatingOutline = false;
-      await this.reportProgress({ code: 'plan_validation', status: 'completed', operationId: 'document-outline',
+      await reportGenerationProgress({ code: 'plan_validation', status: 'completed', operationId: 'document-outline',
         facts: { purpose: 'content', documentKind: input.kind, count: outline.sections.length } });
       await this.persistStatus(input, {
         state: 'generating_file',
         kind: input.kind
       });
-      const generated = await this.dependencies.generator.run({
+       const generated = await this.dependencies.generator.run({
+       ...(runtimeSession ? { executionId: runtimeSession.executionId } : {}),
       ...(presentationMap ? { sourceChecksumSha256: presentationMap.checksumSha256 } : {}),
       kind: input.kind,
       title: outline.title,
@@ -974,11 +1001,20 @@ export class DocumentGenerationApplicationService {
         ? { presentationTemplate: input.presentationTemplate }
         : {}),
       signal: abortController.signal,
+      ...(runtimeSession ? { strictProgress: true } : {}),
       onCancellationClosed: () =>
         this.closeCancellationWindow(key, abortController),
-      ...(this.dependencies.onProgress ? { onProgress: this.dependencies.onProgress } : {}),
-      images: input.images
-      });
+       ...(runtimeSession
+         ? { onProgress: reportGenerationProgress }
+         : this.dependencies.onProgress
+           ? { onProgress: this.dependencies.onProgress }
+           : {}),
+       images: input.images
+       });
+
+       // DocumentGenerationRunner registers the Work before resolving. Only
+       // now can the Task Runtime enter its formal completed state.
+       await runtimeSession?.complete(generated.workId);
 
       try {
         await this.attachResult(input, generated, generated.validatedOutline ?? outline);
@@ -997,6 +1033,19 @@ export class DocumentGenerationApplicationService {
     } catch (error) {
       const status = abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError') ||
         (error instanceof DocumentGenerationApplicationError && error.code === 'cancelled') ? 'cancelled' : 'failed';
+      if (runtimeSession) {
+        try {
+          if (revisingDocument) await runtimeSession.progress({ code: 'tool_result', status, operationId: 'document-revision',
+            facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
+          if (validatingOutline) await runtimeSession.progress({ code: 'plan_validation', status, operationId: 'document-outline',
+            facts: { purpose: 'content', documentKind: input.kind } });
+          await runtimeSession.fail(status);
+        } catch {
+          // The generation error remains authoritative. A failed runtime
+          // projection is left for explicit reconciliation and never turns a
+          // local file failure into a false success.
+        }
+      }
       if (revisingDocument) await this.reportProgress({ code: 'tool_result', status, operationId: 'document-revision',
         facts: { purpose: 'repair', tool: 'patch', documentKind: input.kind } });
       if (validatingOutline) await this.reportProgress({ code: 'plan_validation', status, operationId: 'document-outline',
