@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConversationIntentOrchestrationError,
   ConversationIntentOrchestrator,
+  ConversationSemanticPlanError,
   analyzeLocalConversationIntent
 } from '../../src/application';
 import { createConversationWorkflow, toConversationId, toConversationWorkflowId, toIsoTimestamp, toMessageId, toProjectId } from '../../src/domain';
@@ -190,6 +191,33 @@ describe('Conversation intent orchestrator', () => {
       classifier: { classify: () => new Promise(() => {}) }
     }).analyze({ rawText: '这个报告出了问题' });
     expect(timedOut).toMatchObject({ route: 'fallback', failureCode: 'classification_timeout' });
+  });
+
+  it('accepts a completed classifier response during the finite timeout grace', async () => {
+    const plan = {
+      schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt', parameters: { topic: '产品介绍' },
+      sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false
+    } as const;
+    const result = await new ConversationIntentOrchestrator({
+      classifierTimeoutMs: 5,
+      classifierTimeoutGraceMs: 50,
+      routingMode: 'agent_first',
+      classifier: { classify: () => new Promise((resolve) => setTimeout(() => resolve(plan), 15)) }
+    }).analyze({ rawText: '做一份产品介绍 PPT' });
+    expect(result.route).toBe('classifier');
+    expect(result.plan.kind).toBe('document');
+    expect(result.plan.documentKind).toBe('ppt');
+    expect(result.failureCode).toBeUndefined();
+  });
+
+  it('keeps a response validation failure distinct when it arrives during the grace', async () => {
+    const result = await new ConversationIntentOrchestrator({
+      classifierTimeoutMs: 5,
+      classifierTimeoutGraceMs: 50,
+      routingMode: 'agent_first',
+      classifier: { classify: () => new Promise((_, reject) => setTimeout(() => reject(new ConversationSemanticPlanError('json_invalid')), 15)) }
+    }).analyze({ rawText: '做一份产品介绍 PPT' });
+    expect(result).toMatchObject({ route: 'fallback', failureCode: 'invalid_intent_plan' });
   });
 
   it('applies real target and user source gates to model plans', async () => {

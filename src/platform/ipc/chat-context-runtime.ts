@@ -288,6 +288,7 @@ export function createChatContextRuntime(
       new ConversationIntentOrchestrator({
         classifier,
         classifierTimeoutMs: conversationSemanticLimits.timeoutMs,
+        classifierTimeoutGraceMs: conversationSemanticLimits.timeoutGraceMs,
         // Provider availability must never switch new production tasks back to
         // legacy business routing. Saved workflows remain readable offline.
         routingMode: 'agent_first'

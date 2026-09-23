@@ -70,6 +70,18 @@ export class ConversationSemanticResponseError extends Error {
 }
 
 /**
+ * A bounded semantic call exceeded its complete response budget. This remains
+ * distinct from a transport failure so the workflow can accurately report a
+ * timeout even when the provider had already accepted the request.
+ */
+export class ConversationSemanticTimeoutError extends Error {
+  constructor() {
+    super('classification_timeout');
+    this.name = 'ConversationSemanticTimeoutError';
+  }
+}
+
+/**
  * Agent-first is the production conversation route. local_compat is retained
  * for old document IPC callers and offline migration fixtures until their
  * callers provide a semantic classifier as well.
@@ -79,6 +91,13 @@ export type ConversationIntentRoutingMode = 'agent_first' | 'local_compat';
 export interface ConversationIntentOrchestratorOptions {
   readonly classifier?: ConversationIntentClassifierPort;
   readonly classifierTimeoutMs?: number;
+  /**
+   * A bounded completion/parse grace after the main classifier budget. The
+   * classifier is not aborted until this window expires, which avoids losing
+   * a response that has already reached result_received while local audit and
+   * schema parsing are still completing.
+   */
+  readonly classifierTimeoutGraceMs?: number;
   readonly routingMode?: ConversationIntentRoutingMode;
 }
 
@@ -116,18 +135,36 @@ export class ConversationIntentOrchestrator {
     const abort = () => controller.abort();
     input.signal?.addEventListener('abort', abort, { once: true });
     const timeoutMs = this.options.classifierTimeoutMs ?? 30_000;
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
       throw new TypeError('classifierTimeoutMs is invalid');
     }
-    const timeout = setTimeout(
-      () => controller.abort(),
-      timeoutMs
-    );
+    const timeoutGraceMs = this.options.classifierTimeoutGraceMs ?? 250;
+    if (!Number.isSafeInteger(timeoutGraceMs) || timeoutGraceMs < 0 || timeoutGraceMs > 10_000) {
+      throw new TypeError('classifierTimeoutGraceMs is invalid');
+    }
+    let timeoutExpired = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let graceTimeout: ReturnType<typeof setTimeout> | undefined;
     let rejectAborted: (() => void) | undefined;
     const aborted = new Promise<never>((_resolve, reject) => {
-      rejectAborted = () => reject(new Error('Intent classification aborted'));
+      rejectAborted = () => reject(new ConversationSemanticTimeoutError());
       controller.signal.addEventListener('abort', rejectAborted, { once: true });
     });
+    timeout = setTimeout(() => {
+      // Keep the provider request alive for a short, explicit completion
+      // window. This is deliberately finite and is never a retry.
+      if (timeoutGraceMs === 0) {
+        timeoutExpired = true;
+        controller.abort();
+        rejectAborted?.();
+        return;
+      }
+      graceTimeout = setTimeout(() => {
+        timeoutExpired = true;
+        controller.abort();
+        rejectAborted?.();
+      }, timeoutGraceMs);
+    }, timeoutMs);
     try {
       let candidate: unknown;
       try {
@@ -137,7 +174,7 @@ export class ConversationIntentOrchestrator {
           signal: controller.signal
         }), aborted]);
         if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
-        if (controller.signal.aborted) throw new Error('Intent classification timed out');
+        if (controller.signal.aborted) throw new ConversationSemanticTimeoutError();
       } catch (error) {
         if (input.signal?.aborted) {
           throw new ConversationIntentOrchestrationError('cancelled');
@@ -145,10 +182,10 @@ export class ConversationIntentOrchestrator {
         return {
           ...local,
           route: 'fallback',
-          failureCode: controller.signal.aborted
-            ? 'classification_timeout'
-            : error instanceof ConversationSemanticPlanError ? 'invalid_intent_plan'
-              : error instanceof ConversationSemanticResponseError ? 'classification_invalid_response' : 'classification_unavailable'
+          failureCode: error instanceof ConversationSemanticPlanError ? 'invalid_intent_plan'
+            : error instanceof ConversationSemanticResponseError ? 'classification_invalid_response'
+              : timeoutExpired || controller.signal.aborted || error instanceof ConversationSemanticTimeoutError
+                ? 'classification_timeout' : 'classification_unavailable'
         };
       }
       let classified: ConversationIntentPlan;
@@ -187,7 +224,8 @@ export class ConversationIntentOrchestrator {
       });
       return { plan, assessment: assessConversationIntentPlan(plan), route: 'classifier', ...(target ? { resolvedTarget: target } : {}) };
     } finally {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
+      if (graceTimeout) clearTimeout(graceTimeout);
       if (rejectAborted) controller.signal.removeEventListener('abort', rejectAborted);
       input.signal?.removeEventListener('abort', abort);
     }

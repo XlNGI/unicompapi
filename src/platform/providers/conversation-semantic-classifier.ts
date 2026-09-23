@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ConversationIntentClassifierPort, ConversationSemanticContext } from '../../application/conversation-intent-orchestrator';
-import { ConversationSemanticPlanError, ConversationSemanticResponseError } from '../../application/conversation-intent-orchestrator';
+import {
+  ConversationSemanticPlanError,
+  ConversationSemanticResponseError,
+  ConversationSemanticTimeoutError
+} from '../../application/conversation-intent-orchestrator';
 import { emitProductionEvent } from '../conversation-production-trace';
 import {
   createProviderExecutionRouteSnapshot, createProviderInvocationAttempt, createProviderInvocationEvent,
@@ -28,7 +32,11 @@ import type { RuntimeAuthorizationOrchestrationPort } from './provider-submissio
 import type { PromptEnhanceAuditRepositories } from './prompt-enhance-submission';
 
 export const conversationSemanticLimits = {
-  timeoutMs: 30_000,
+  // Provider planning can legitimately spend tens of seconds in queue and
+  // streaming. Keep this finite, but leave the orchestrator a short bounded
+  // completion grace so a received result is not lost during local parsing.
+  timeoutMs: 45_000,
+  timeoutGraceMs: 5_000,
   maxInputCharacters: 16_000,
   maxOutputCharacters: 12_000,
   maxOutputTokens: 2_048
@@ -286,7 +294,11 @@ export class ConversationSemanticClassifier implements ConversationIntentClassif
     const abort = () => controller.abort();
     input.signal.addEventListener('abort', abort, { once: true });
     if (input.signal.aborted) controller.abort();
-    const timeout = setTimeout(abort, conversationSemanticLimits.timeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      abort();
+    }, conversationSemanticLimits.timeoutMs + conversationSemanticLimits.timeoutGraceMs);
     let content = '';
     let lastProgressAt = 0;
     const purpose = input.purpose === 'semantic' ? 'planning' as const
@@ -369,6 +381,7 @@ export class ConversationSemanticClassifier implements ConversationIntentClassif
         throw new ConversationControlledTextError(!requestStarted ? 'not_sent' : knownFailure ? 'known_failure' : 'unknown', error);
       }
       if (invalidResponse) throw new ConversationSemanticResponseError();
+      if (timedOut) throw new ConversationSemanticTimeoutError();
       throw error;
     } finally {
       clearTimeout(timeout);

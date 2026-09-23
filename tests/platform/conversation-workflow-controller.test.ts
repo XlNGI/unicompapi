@@ -96,7 +96,7 @@ describe('ConversationWorkflowController', () => {
     ['unavailable', 'classification_unavailable', '未能启动模型调用或确认调用状态'],
     ['invalid_response', 'classification_invalid_response', '响应不完整或格式无法使用'],
     ['invalid', 'invalid_intent_plan', '模型已返回内容，但任务计划不符合约定'],
-    ['timeout', 'classification_timeout', '请求超时']
+    ['timeout', 'classification_timeout', '理解需求在时间预算内未完成']
   ] as const)('persists %s as a failed planning reply, never as a question', async (mode, code, text) => {
     const f = await semanticFixture(mode);
     const result = await f.controller.start({ clientCommandId: 'semantic-start', conversation: null,
