@@ -102,7 +102,7 @@ describe('document generation bounded PPT repair loop', () => {
       draftRevision: 1,
       sourceDraftId: 'draft-ppt-repair-pass',
       outline,
-      requestRepair: planner,
+      requestLlmRepair: planner,
       onProgress: event => { events.push(event); }
     });
 
@@ -137,7 +137,7 @@ describe('document generation bounded PPT repair loop', () => {
 
     await expect(runner.run({
       kind: 'ppt', title: outline.title, contentFingerprint: 'b'.repeat(64), draftRevision: 1,
-      sourceDraftId: 'draft-ppt-repair-repeat', outline, requestRepair: planner
+      sourceDraftId: 'draft-ppt-repair-repeat', outline, requestLlmRepair: planner
     })).rejects.toMatchObject({ code: 'verification_failed' });
     expect(planner).toHaveBeenCalledTimes(1);
     expect(renderCount).toBe(2);
@@ -161,7 +161,7 @@ describe('document generation bounded PPT repair loop', () => {
     await expect(runner.run({
       kind: 'ppt', title: outline.title, contentFingerprint: 'c'.repeat(64), draftRevision: 1,
       sourceDraftId: 'draft-ppt-repair-allowlist', outline,
-      requestRepair: async () => ({
+      requestLlmRepair: async () => ({
         kind: 'repair', diagnosisCodes: ['text_overflow'],
         operations: [{ operation: 'replace_text', target: { sectionIndex: 0, blockIndex: 0 }, value: 'silently changed' }],
         preserve: [], reason: 'shrink text', expectedRevision: 1
@@ -191,7 +191,7 @@ describe('document generation bounded PPT repair loop', () => {
 
     await expect(runner.run({
       kind: 'ppt', title: outline.title, contentFingerprint: 'd'.repeat(64), draftRevision: 4,
-      sourceDraftId: 'draft-ppt-repair-cap', outline, requestRepair: planner
+      sourceDraftId: 'draft-ppt-repair-cap', outline, requestLlmRepair: planner
     })).rejects.toMatchObject({ code: 'verification_failed' });
     expect(planner).toHaveBeenCalledTimes(2);
     expect(renderCount).toBe(3);
@@ -212,7 +212,7 @@ describe('document generation bounded PPT repair loop', () => {
     await expect(runner.run({
       kind: 'ppt', title: outline.title, contentFingerprint: 'e'.repeat(64), draftRevision: 1,
       sourceDraftId: 'draft-ppt-repair-timeout', outline, repairTimeoutMs: 1,
-      requestRepair: () => new Promise(() => undefined)
+      requestLlmRepair: () => new Promise(() => undefined)
     })).rejects.toMatchObject({ code: 'verification_failed' });
     expect(await files(root)).toEqual([]);
     expect(await new JsonWorkRepository(new NodeProjectStorage(root), projectId).list(projectId)).toEqual([]);

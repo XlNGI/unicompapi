@@ -255,7 +255,7 @@ Designer 先形成整套叙事和视觉方向，再输出页面场景。页面�
 
 闭环为“场景 → 实际 PPTX → 页面渲染 → 结构与视觉诊断 → 修正场景 → 再渲染”。Bounding Box 只是其中一项，不能代替字体、截断、层级、密度、图表可读性、来源和整体一致性检查。
 
-先做确定性修复，例如间距和可用字体回退；仍不满足时把限定范围的诊断交给 Designer。具备视觉能力的模型可接收已授权、必要的页面渲染图做视觉修正；不支持图像时只能使用真实结构诊断，不能把模型文字自评记为看过页面。修正超限保留草稿并说明问题，不交付虚假成功。
+本地只负责生成真实诊断、执行安全门禁和应用已批准的 Patch，不得自行改变文档来“试到通过”。修正决策必须交给 LLM/Designer：它根据脱敏的结构化诊断，必要时根据已授权的页面渲染证据，输出受限 `RepairPlan`；不支持图像时只能根据真实结构诊断规划，不能把模型文字自评记为看过页面。修正超限保留草稿并说明问题，不交付虚假成功。
 
 禁止为通过检查静默删除事实、改写数据、无限缩小文字或随意增页。明确要求固定页数时包含封面和结尾；通过内容重组和布局调整满足，确实不能兼顾时才向用户解释取舍。预览来自实际输出或经一致性验证的共享场景，不能用独立 HTML 美化效果冒充导出效果。
 
@@ -276,7 +276,7 @@ pending → drafting → designing → rendering → checking → ready
 
 ### 6.4 本批最小闭环：真实生成、有限布局修正与复验
 
-本批在既有 Runner 上接入请求级修正端口，先使用受控 `DocumentOutline` 布局 Patch 作为过渡写入目标。该接线不等于所有原子工具已经统一写入 Document IR，也不等于聊天主链路已经启用 LLM 自主工具循环。最终实现和验收事实登记于第 12 节及 `PLANS.md` 顶部。
+本批在既有 Runner 上接入请求级 LLM 修正端口，先使用受控 `DocumentOutline` 布局 Patch 作为过渡写入目标。修正计划必须来自已授权的 LLM/Designer planner；Runner 不提供确定性修正规则，也不接受本地规则冒充模型计划。该接线不等于所有原子工具已经统一写入 Document IR，也不等于聊天主链路已经启用 LLM 自主工具循环。最终实现和验收事实登记于第 12 节及 `PLANS.md` 顶部。
 
 执行顺序为“生成临时 PPTX → 文件结构预检 → 实际 Office/PDF 渲染 → 结构化诊断 → 校验并应用布局 Patch → 重新生成 → 重新渲染与全部复验”。修正前后必须使用当前修订号；当前实现只接受稳定的 Outline `sectionIndex`，无法把实际物理页（封面、续页、结尾页）安全映射到 Outline 时直接拒绝，不能把上一轮渲染成功或只对 Outline 的检查当作新文件通过证据。
 
@@ -284,7 +284,7 @@ pending → drafting → designing → rendering → checking → ready
 
 - 每个请求最多修正 2 次，即初次生成加最多 2 次重新生成；继续继承父任务预算、取消状态与受控渲染器超时，修正端口本身也必须有等待上限。
 - 诊断绑定当前 revision，包含真实诊断代码、严重程度和作用范围；页码、元素范围或几何信息只在实际取得时传递，不伪造定位。修正计划必须引用当前诊断，拒绝过期 revision、无效目标和非白名单操作。
-- 本批只自动执行保持事实、数据、来源和非目标内容的布局调整。禁止为了通过 QA 改写正文或数值、删除内容、无限缩小字体、破坏固定页数；没有安全修正时停止并保留明确失败原因。
+- 本批只执行 LLM 输出且经 Application 校验的、保持事实、数据、来源和非目标内容的布局 Patch。禁止本地规则为了通过 QA 改写正文或数值、删除内容、无限缩小字体、破坏固定页数；没有 LLM planner 或没有安全修正时停止并保留明确失败原因。
 - 相同阻断诊断再次出现、没有有效变更、渲染器不可用、取消、超时、预算耗尽或未知副作用时停止；不增加新一轮模型、联网或收费请求来掩盖失败。
 - 每轮修正、重新生成和复验都进入真实生产 Trace 与 Task Runtime 检查点。事件只显示修正次数、检查状态与安全诊断，不展示原始 Prompt、路径或附件全文。
 - 只有最后一轮完整 QA 通过，才能执行该轮产物的 Hash、原子发布与 Work 登记；失败轮次不登记正式作品，不能复用旧轮次的校验结果。
@@ -555,10 +555,10 @@ Windows 为当前必需实机目标；代码保持 Windows/macOS 平台边界，
 
 ### 12.18 2026-09-23 PPT QA 失败后的有限真实修正闭环
 
-在 12.17 的真实渲染门禁上补齐 Runner 级最小闭环。正式流程为“生成临时 PPTX → 结构预检 → 实际渲染 → 结构化诊断 → 请求受控布局 Patch → 重新生成 → 重新渲染和完整复验 → Hash/原子发布/Work 登记”。请求级 `requestRepair` 只接收克隆且冻结的 `DocumentOutline`、当前错误诊断、`expectedRevision`、修正次数和 `AbortSignal`；Runner 负责 RepairPlan 解析、诊断代码匹配、revision、目标范围和操作白名单校验。
+在 12.17 的真实渲染门禁上补齐 Runner 级最小闭环。正式流程为“生成临时 PPTX → 结构预检 → 实际渲染 → 结构化诊断 → LLM/Designer 输出受控布局 Patch → 重新生成 → 重新渲染和完整复验 → Hash/原子发布/Work 登记”。请求级 `requestLlmRepair` 只接收克隆且冻结的 `DocumentOutline`、当前错误诊断、`expectedRevision`、修正次数和 `AbortSignal`；Runner 负责 RepairPlan 解析、诊断代码匹配、revision、目标范围和操作白名单校验，不提供本地确定性修正规则。
 
-本批最多接受 2 次修正，当前自动修正只允许 `replace_page_layout` 且必须以稳定 `sectionIndex` 为目标，拒绝正文/数值/来源改写和物理页码猜测。重复诊断、无变化、非法计划、过期 revision、超时、取消、渲染失败或硬诊断均停止，失败轮次的临时文件被清理；只有最后一次无错误诊断的候选进入发布门禁。修正编译、渲染、检查和规划器调用使用独立 operationId，并沿用生产 Trace/Task Runtime 的脱敏进度事件。
+本批最多接受 2 次 LLM 修正，当前计划只允许 `replace_page_layout` 且必须以稳定 `sectionIndex` 为目标，拒绝正文/数值/来源改写和物理页码猜测。没有 LLM planner 时不自动改写，直接停止并保留候选。重复诊断、无变化、非法计划、过期 revision、超时、取消、渲染失败或硬诊断均停止，失败轮次的临时文件被清理；只有最后一次无错误诊断的候选进入发布门禁。修正编译、渲染、检查和规划器调用使用独立 operationId，并沿用生产 Trace/Task Runtime 的脱敏进度事件。
 
-验证：新增 `tests/platform/document-generation-repair-loop.test.ts` 5/5 通过，覆盖重新生成/重新渲染后只登记一个 Work、重复诊断停止、正文修改拦截、两次修正上限和规划器超时；与 Runner、repair workflow 定向组合为 6 个文件、105 项通过。主工程、测试工程和 Electron TypeScript，变更文件 ESLint 及 `git diff --check` 均通过；未调用真实模型、联网或付费服务。
+验证：新增 `tests/platform/document-generation-repair-loop.test.ts` 5/5 通过，覆盖 LLM planner 返回计划后的重新生成/重新渲染、重复诊断停止、正文修改拦截、两次修正上限和规划器超时；repair workflow 另有“无 LLM planner 不修改并返回 needs_user”回归。主工程、测试工程和 Electron TypeScript，变更文件 ESLint 及 `git diff --check` 均通过；未调用真实模型、联网或付费服务。
 
-该闭环仍以 `DocumentOutline` 作为过渡写入目标，不代表统一 Document IR、LLM 自主工具主循环或完整 Visual QA 已完成。取消和过期 revision 的独立 Runner fixture 尚未单独增加；真实 Office/PDF/PNG fixture、PPTX 文本框内部裁切、字体回退、非文本元素重叠以及表格/图表可读性仍需后续证据。
+该闭环仍以 `DocumentOutline` 作为过渡写入目标，不代表统一 Document IR、LLM 自主工具主循环或完整 Visual QA 已完成。当前 Electron/聊天生产入口尚未将真实 LLM repair planner 注入 `DocumentGenerationExecutionInput`，所以生产 QA 失败仍会停止，不会回退为单机修正。取消和过期 revision 的独立 Runner fixture 尚未单独增加；真实 Office/PDF/PNG fixture、PPTX 文本框内部裁切、字体回退、非文本元素重叠以及表格/图表可读性仍需后续证据。

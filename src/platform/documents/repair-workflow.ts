@@ -20,10 +20,6 @@ export interface RepairWorkflowOptions {
     outline: DocumentOutline,
     attempt: number
   ) => Promise<readonly DocumentQualityDiagnostic[]>;
-  readonly deterministicRepair?: (
-    outline: DocumentOutline,
-    diagnostics: readonly DocumentQualityDiagnostic[]
-  ) => { readonly outline: DocumentOutline; readonly summary?: string };
   readonly nextRepairPlan?: (
     diagnostics: readonly DocumentQualityDiagnostic[],
     attempt: number
@@ -60,15 +56,6 @@ export async function runBoundedRepairWorkflow(
     fingerprints.add(fingerprint);
     if (attempt >= maxAttempts) return finish('max_attempts', outline, diagnostics, attempt, summaries);
 
-    if (options.deterministicRepair) {
-      const deterministic = options.deterministicRepair(outline, diagnostics);
-      if (deterministic.outline !== outline) {
-        outline = deterministic.outline;
-        if (deterministic.summary) summaries.push(deterministic.summary);
-        diagnostics = await diagnose(options, outline, attempt + 1);
-        continue;
-      }
-    }
     if (!options.nextRepairPlan) return finish('needs_user', outline, diagnostics, attempt, summaries);
     let plan: RepairPlan;
     try {

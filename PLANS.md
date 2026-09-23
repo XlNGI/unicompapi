@@ -6,7 +6,7 @@
 
 计划合同见 `docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md` 第 6.4 节：每请求最多修正 2 次，仅接受当前 revision 的受控布局 Patch，每轮重新生成临时 PPTX 并重新渲染，重复诊断、无有效变更、取消、超时及不可用渲染器均停止。最后一轮完整 QA 通过后才进入 Hash、原子发布与 Work 登记。当前仍以 `DocumentOutline` 为过渡写入目标，不把这批登记为统一 Document IR、LLM 自主工具循环或完整 Visual QA 完成。
 
-实际实现：`DocumentGenerationRunner` 提供请求级 `requestRepair` 端口，最多接受 2 次受控修正；每次只允许当前 outline 的 `replace_page_layout`，拒绝正文/数据修改和物理页码猜测。每次通过校验的 Patch 都会重新生成临时 PPTX、重新执行结构检查和渲染诊断；重复诊断、无变化、非法诊断/目标、规划器超时、取消或渲染失败均停止，只有最终诊断无错误的临时文件才进入 Hash、原子发布和 Work 登记。规划请求收到的是克隆且冻结的 Outline 与诊断，带 expected revision、attempt 和 AbortSignal；修正阶段事件使用独立 operationId，继续进入生产 Trace/Task Runtime 进度链。
+实际实现：`DocumentGenerationRunner` 提供请求级 `requestLlmRepair` 端口，修正计划必须由已授权的 LLM/Designer planner 返回；Runner 不提供确定性修正规则。最多接受 2 次受控修正；每次只允许当前 outline 的 `replace_page_layout`，拒绝正文/数据修改和物理页码猜测。每次通过校验的 Patch 都会重新生成临时 PPTX、重新执行结构检查和渲染诊断；重复诊断、无变化、非法诊断/目标、规划器超时、取消或渲染失败均停止，只有最终诊断无错误的临时文件才进入 Hash、原子发布和 Work 登记。规划请求收到的是克隆且冻结的 Outline 与诊断，带 expected revision、attempt 和 AbortSignal；修正阶段事件使用独立 operationId，继续进入生产 Trace/Task Runtime 进度链。当前 Electron/聊天生产入口尚未注入该 LLM planner，因此真实生产不会静默执行本地修正，QA 失败会直接停止并保留候选。
 
 验证：`document-generation-repair-loop.test.ts` 5/5 通过，覆盖重新生成/渲染后只登记一个 Work、重复诊断停止、正文修改白名单拦截、两次修正上限和规划器超时；Runner 与既有 repair workflow 定向集合 6 个文件、105 项通过；主工程/测试工程/Electron TypeScript、变更文件 ESLint、`git diff --check` 通过。未调用真实模型、联网或付费服务。取消和过期 revision 的独立 Runner 夹具尚未新增，当前由 AbortSignal、expectedRevision 校验和既有取消门禁共同保护。
 
@@ -492,7 +492,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 - 后续改稿必须优先采用结构化 `RevisionPlan` 和文档补丁操作。计划至少包含目标文档/基础版本、页面/章节/表格/单元格范围、操作、保留条件、幂等键和可回滚信息；LLM 不得直接返回绝对路径、文件句柄、内部凭证或任意代码。
 - Agent 循环由 Application 层控制，标准顺序为“读取受控结构 → 校验计划 → 调用一个白名单工具 → 追加结构化观察结果 → 判断下一步”；LLM 只能根据脱敏的工具结果继续规划，不能自行发起未注册工具或绕过确认门禁。
 - 每次修改都先写入临时版本并携带 `expectedRevision`，渲染和结构/视觉检查通过后才原子发布并登记新的 Work；原 Work、源文件和失败临时文件不得被覆盖，失败时必须可恢复到旧版本。
-- 质量修正分两层：先执行确定性修复，再允许 LLM 输出受限 `RepairPlan`。修正计划只能针对诊断指出的范围，并受最大工具步数、最大修正次数、超时、费用/资源预算、取消、重复错误熔断和失败隔离约束；具体数值须在 E5 验收时冻结。
+- 质量修正由 LLM/Designer 发起：本地只生成确定性诊断并执行 Schema、范围、revision、预算和发布门禁，不自行改变文档。LLM 输出受限 `RepairPlan`，只能针对诊断指出的范围，并受最大工具步数、最大修正次数、超时、费用/资源预算、取消、重复错误熔断和失败隔离约束；具体数值须在 E5 验收时冻结。
 - 生命周期轮询/冲突重试与 Agent 工具循环必须分别记录、分别验收；取消、超时、权限拒绝、预算耗尽、来源不足或连续相同诊断都必须结束循环并给出可理解状态。
 
 ### 分阶段任务
@@ -502,7 +502,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 3. 受控联网：搜索授权、域名/来源策略、证据 DTO、缓存、预算、脱敏和离线回退。
 4. 文档中间表示：内容大纲、页面结构、视觉布局、数据来源、可修改范围和保留条件分离。
 5. 工具执行与渲染：工具注册表、补丁调度器、图表/素材/PPTX/预览工具白名单、受控 IPC 和真实渲染入口。
-6. 校验与有限修正：结构/视觉诊断、确定性修复、`RepairPlan`、最大修正次数、循环审计、交付说明和失败隔离。
+6. 校验与有限修正：结构/视觉诊断、LLM `RepairPlan`、最大修正次数、循环审计、交付说明和失败隔离。
 
 每项任务必须从最新 `develop` 创建 `feature/*` 分支，按小 PR 实施；真实 Provider、联网搜索、embedding 和收费调用需要独立批准与脱敏验收证据。
 
@@ -536,7 +536,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 
 ### E5.5 实施登记（2026-09-01）
 
-继续在同一功能分支完成 E5.5：新增严格 `RepairPlan` Schema 与 `runBoundedRepairWorkflow`，确定性修复优先，LLM 仅输出受限结构化计划；每轮重新诊断并校验 revision、范围、最大尝试次数、取消和连续相同诊断熔断。新增 5 项定向测试，`typecheck` 与 `lint` 通过。E5.5 尚未连接真实渲染诊断和发布登记；E5.6、E6 仍为 `planned/not_started`。详细记录见 `docs/active/阶段9-E5.5-RepairPlan与有限修正验收记录.md`。
+继续在同一功能分支完成 E5.5：新增严格 `RepairPlan` Schema 与 `runBoundedRepairWorkflow`，本地只做诊断和安全校验，LLM 输出受限结构化计划；每轮重新诊断并校验 revision、范围、最大尝试次数、取消和连续相同诊断熔断。新增 5 项定向测试，`typecheck` 与 `lint` 通过。E5.5 尚未连接真实渲染诊断和发布登记；E5.6、E6 仍为 `planned/not_started`。详细记录见 `docs/active/阶段9-E5.5-RepairPlan与有限修正验收记录.md`。
 
 ### E5.6 实施登记（2026-09-01）
 

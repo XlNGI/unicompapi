@@ -110,12 +110,12 @@ export interface DocumentGenerationPlanInput {
   readonly onCancellationClosed?: () => void | Promise<void>;
   readonly onProgress?: DocumentGenerationProgressCallback;
   /**
-   * Optional host supplied repair planner. The runner remains the authority
-   * for parsing, allowlisting, retries, rendering, and publication. The
-   * callback may be backed by a local rule or a provider, but it only receives
-   * a cloned, redacted document outline and bounded diagnostics.
+   * Optional authorized LLM/Designer repair planner. The runner remains the
+   * authority for parsing, allowlisting, retries, rendering, and publication;
+   * local rules must not synthesize a repair plan. The callback only receives
+   * a cloned, frozen outline and bounded diagnostics.
    */
-  readonly requestRepair?: (request: DocumentRepairRequest) => Promise<unknown>;
+  readonly requestLlmRepair?: (request: DocumentLlmRepairRequest) => Promise<unknown>;
   /** Maximum time for one repair-planner request (bounded to 60 seconds). */
   readonly repairTimeoutMs?: number;
   readonly images?: readonly {
@@ -125,7 +125,7 @@ export interface DocumentGenerationPlanInput {
   }[];
 }
 
-export interface DocumentRepairRequest {
+export interface DocumentLlmRepairRequest {
   readonly outline: DocumentOutline;
   readonly diagnostics: readonly DocumentQualityDiagnostic[];
   readonly expectedRevision: number;
@@ -252,7 +252,7 @@ export class DocumentGenerationRunner {
       execution = await this.move(context, execution, 'verifying_file');
       let currentOutline = input.outline;
       let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
-      const supportsRepair = input.kind === 'ppt' && input.requestRepair !== undefined &&
+      const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
         this.options.renderPreview !== undefined &&
         input.revisionPatch === undefined && input.revisionPatches === undefined;
       const compileAndDiagnose = async (outline: DocumentOutline, attempt: number) => {
@@ -300,7 +300,7 @@ export class DocumentGenerationRunner {
         }
         const diagnostics = (renderResult.diagnostics ?? []) as readonly DocumentQualityDiagnostic[];
         await this.observe(input, 'document_check', `document-render-diagnostics${operationSuffix}`, async () => {
-          if (!supportsRepair && diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+          if (!supportsLlmRepair && diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
             throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
           }
         }, { tool: 'check', count: diagnostics.length, ...(attempt > 0 ? { purpose: 'repair' as const } : {}) });
@@ -309,7 +309,7 @@ export class DocumentGenerationRunner {
       const initial = await compileAndDiagnose(currentOutline, 0);
       generated = initial.candidate;
       repairDiagnostics = initial.diagnostics;
-      if (supportsRepair && repairDiagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+      if (supportsLlmRepair && repairDiagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
         if (repairDiagnostics.some((diagnostic) =>
           diagnostic.severity === 'error' && !repairableDiagnosticCodes.has(diagnostic.code))) {
           throw new DocumentGenerationError(
@@ -331,7 +331,7 @@ export class DocumentGenerationRunner {
           },
           nextRepairPlan: async (diagnostics, attempt) => {
             const expectedRevision = input.draftRevision + attempt - 1;
-            const raw = await this.observe(input, 'tool_call', `document-repair-plan-${attempt}`, () => this.requestRepairWithTimeout(input, {
+            const raw = await this.observe(input, 'tool_call', `document-repair-plan-${attempt}`, () => this.requestLlmRepairWithTimeout(input, {
               outline: freezeRepairValue(cloneRepairValue(repairOutline)),
               diagnostics: freezeRepairValue(cloneRepairValue(diagnostics)),
               expectedRevision,
@@ -339,7 +339,7 @@ export class DocumentGenerationRunner {
               signal: input.signal ?? new AbortController().signal
             }), { tool: 'patch', purpose: 'repair', count: attempt });
             const plan = parseRepairPlan(raw);
-            validateAutomaticRepairPlan(plan, diagnostics, repairOutline);
+            validateLlmRepairPlan(plan, diagnostics, repairOutline);
             return plan;
           },
           expectedRevision: attempt => input.draftRevision + attempt - 1,
@@ -489,12 +489,12 @@ export class DocumentGenerationRunner {
     }
   }
 
-  private async requestRepairWithTimeout(
+  private async requestLlmRepairWithTimeout(
     input: DocumentGenerationPlanInput,
-    request: DocumentRepairRequest
+    request: DocumentLlmRepairRequest
   ): Promise<unknown> {
-    const planner = input.requestRepair;
-    if (!planner) throw new Error('repair_planner_unavailable');
+    const planner = input.requestLlmRepair;
+    if (!planner) throw new Error('llm_repair_planner_unavailable');
     const configured = input.repairTimeoutMs ?? 30_000;
     if (!Number.isFinite(configured) || configured <= 0) throw new Error('repair_timeout_invalid');
     const timeoutMs = Math.min(Math.floor(configured), 60_000);
@@ -1206,7 +1206,7 @@ const repairableDiagnosticCodes = new Set<DocumentQualityDiagnostic['code']>([
   'element_overflow'
 ]);
 
-function validateAutomaticRepairPlan(
+function validateLlmRepairPlan(
   plan: RepairPlan,
   diagnostics: readonly DocumentQualityDiagnostic[],
   outline: DocumentOutline
@@ -1223,7 +1223,7 @@ function validateAutomaticRepairPlan(
     throw new Error('repair_diagnosis_mismatch');
   }
   for (const operation of plan.operations) {
-    // Automatic visual repair is deliberately layout-only. Content edits are
+    // LLM visual repair is deliberately layout-only. Content edits are
     // reserved for an explicit revision request and cannot silently change a
     // user's facts while trying to satisfy a renderer diagnostic.
     if (operation.operation !== 'replace_page_layout') {
