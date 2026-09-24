@@ -64,6 +64,27 @@ function plan(): VideoEditorPreviewPlan {
 }
 
 describe('video editor preview cache boundary', () => {
+  it('builds a silent seekable scrub cache without baking speed or transforms', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-scrub-preview-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.mp4');
+    await execFileAsync(localFfmpegPath, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+      'testsrc2=size=1280x720:rate=30', '-t', '3', '-c:v', 'libopenh264', sourcePath]);
+    const inputPlan = { ...plan(), sourceRange: { inUs: 1_000_000, outUs: 3_000_000 },
+      speed: { numerator: 2, denominator: 1 }, transform: { ...plan().transform, flipX: true, rotationMilliDegrees: 90000 } };
+    const adapter = new FfmpegVideoEditorPreviewAdapter({ ffmpegPath: localFfmpegPath });
+    const result = await adapter.requestArtifact({ plan: inputPlan, kind: 'scrub_video',
+      cache: new NodeVideoEditorPreviewCache(root), sourcePath });
+    expect(result.status).toBe('available');
+    if (result.status !== 'available') throw new Error('No scrub artifact');
+    const { stdout } = await execFileAsync(localFfprobePath, ['-v', 'error', '-show_streams', '-show_frames', '-of', 'json', result.artifact.target]);
+    const probe = JSON.parse(stdout);
+    expect(probe.streams).toHaveLength(1);
+    expect(probe.streams[0]).toMatchObject({ codec_type: 'video', width: 640, height: 360, r_frame_rate: '30/1' });
+    expect(Number(probe.streams[0].duration)).toBeCloseTo(2, 2);
+    expect(probe.frames).toHaveLength(60);
+    expect(probe.frames.every((frame: { key_frame: number }) => frame.key_frame === 1)).toBe(true);
+  });
   it('keys cache artifacts by source, parameters, kind and adapter version', () => {
     const base = createVideoEditorPreviewCacheKey({
       plan: plan(),
@@ -82,6 +103,9 @@ describe('video editor preview cache boundary', () => {
     });
     expect(base).toMatch(/^[a-f0-9]{64}$/);
     expect(new Set([base, nextVersion, waveform]).size).toBe(3);
+    const scrub = (value: VideoEditorPreviewPlan) => createVideoEditorPreviewCacheKey({ plan: value, kind: 'scrub_video', adapter: { adapterId: 'approved-adapter', adapterVersion: '1' } });
+    expect(scrub(plan())).toBe(scrub({ ...plan(), speed: { numerator: 2, denominator: 1 }, transform: { ...plan().transform, flipX: true } }));
+    expect(scrub(plan())).not.toBe(scrub({ ...plan(), sourceRange: { inUs: 1_000_000, outUs: 5_000_000 } }));
   });
 
   it('clears derived cache files without touching project entities', async () => {

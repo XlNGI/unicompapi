@@ -357,6 +357,7 @@ export interface VideoEditorBackgroundMusicPreviewDto {
 }
 
 export type VideoEditorPreviewArtifactKindDto =
+  | 'scrub_video'
   | 'proxy_video'
   | 'proxy_video_clear'
   | 'proxy_video_smooth'
