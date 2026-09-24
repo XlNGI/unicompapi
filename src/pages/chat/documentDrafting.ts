@@ -31,7 +31,7 @@ export function inferPresentationTemplate(
   if (/科技|\bai\b|人工智能|数字化|互联网|未来感|深色/.test(text)) {
     return 'technology';
   }
-  if (/自然|清新|绿色|环保|健康|教育|生活方式/.test(text)) {
+  if (/龙|神话|文化|历史|传统|文物|博物馆|非遗|民俗|节庆|自然|清新|绿色|环保|健康|教育|生活方式/.test(text)) {
     return 'natural_minimal';
   }
   if (/极简|简约|黑白|高端|专业|商务/.test(text)) {
@@ -127,13 +127,17 @@ export function composeDocumentRevisionInput(
     previousContent !== undefined &&
     requestedTotalPages !== undefined &&
     isSupportedPresentationTotalPages(requestedTotalPages);
+  const autonomousPresentationDesign =
+    kind === 'ppt' && /自主设计|重新设计|重做版式|重新排版|摆脱模板|不要模板|视觉重构|版式重构/u.test(requirements)
+      ? '\n\n这是一次 PPT 视觉重构请求：保留事实、数字和语义内容，重新规划每页构图。必须为 coverScene、closingScene 和每个正文 section 输出独立 scene，允许改变页面结构、留白、对齐和视觉层级；不要沿用旧版模板或旧页面骨架。'
+      : '';
   const body =
     previousContent && previousContent.trim().length > 0
       ? isFullPresentationRevision
         ? `上一版文档内容：\n${previousContent}\n\n这是一次用户明确授权的 PPT 整体页数调整：可以重组正文分节以达到总页数要求，但必须保留上一版中有依据的事实、数字和结论，不得编造数据；标题保持不变。输出完整文档大纲，以便生成新版文件。\n\n修改要求：\n${requirements}`
         : `上一版文档内容：\n${previousContent}\n\n这是一次局部修改：只修改用户明确指出的页面、分节、表格、图表或单元格，其他内容、顺序、标题和样式保持不变。输出时仍需返回完整文档大纲，以便生成新版文件。\n\n局部修改的语义验收规则：\n- 如果用户指定了受众（例如“面向非技术管理者”），必须对目标范围做实质性语义改写，而不是只改标题、同义替换或重新排版。\n- 面向非技术管理者时，优先使用业务目标、经营影响、决策依据、风险和下一步行动来表达；首次出现的技术术语要用一句白话解释，删除不影响决策的 API、模型、协议和实现细节。\n- 保留上一版中有依据的事实、数字和结论；不得为了改写而编造数据。目标范围至少应有一处完整句式、解释或行动建议发生变化，且要能看出受众变化。\n- 非目标范围必须逐字保持原内容、顺序、标题、页面类型和数据不变。\n\n修改要求：\n${requirements}`
       : requirements;
-  return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}${pageCountConstraint}`;
+  return `${DOCUMENT_GENERATION_INSTRUCTION}\n\n${body}${pageCountConstraint}${autonomousPresentationDesign}`;
 }
 
 export function extractSectionHeadings(
@@ -166,9 +170,11 @@ export function documentKindInstruction(
       '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。用户明确要求总页数时，必须服从前文的精确页数与单页容量约束。',
       'pageKind 只能使用以下值：cover（封面）、section（章节页）、insight（结论/总结/详情/风险）、comparison（对比）、process（路线图/行动建议）、data（数据）、image_text（图文）、closing（结束页）。不要输出 summary、detail、roadmap、risk、action 等其他值。',
       '封面和结束页由系统统一生成；sections 只填写正文内容。不要把“封面”“谢谢”“谢谢观看”“感谢观看”作为正文 section，也不要把表格或图表挂在致谢页下。用户明确要求页数时，按总页数预算组织内容，避免通过重复页或碎片页凑页数。',
+      '页面的构图、留白、信息层级和视觉节奏由你自主设计，不要套用工作汇报、自然简约、商务卡片或其他固定模板。每个正文 section 必须输出 scene 作为页面设计稿，并同时输出 coverScene 与 closingScene；scene.schemaVersion 固定为 1，scene.elements 最多 30 个；元素只能使用 text、shape、line、group，不能使用 image、assetRef 或任何文件路径。坐标使用 0 到 1 的归一化值，必须完全落在页面范围内。text 元素的 content 必须来自同一页的标题、takeaway、action 或 blocks 原文；用 shape 和 line 组织视觉层级，不要把所有内容排成相同的卡片网格。',
+      'scene 元素格式：{"elementId":"title","type":"text","geometry":{"x":0.08,"y":0.12,"width":0.72,"height":0.12},"zIndex":2,"content":"页面标题","style":{"fontSize":30,"textColor":"20372B"}}。每页至少安排一个标题 text 和一个正文 text；根据内容自行选择不对称构图、主次比例、留白和强调色。不要输出“核心结论”“下一步”这类系统标签，除非它们确实是内容的一部分。',
       '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
-      '{"kind":"ppt","title":"标题","sections":[{"heading":"分节标题","level":1,"pageKind":"insight","takeaway":"明确结论","action":"下一步行动","blocks":[{"type":"bullets","items":["短标题：解释文字"]},{"type":"table","header":["列名"],"rows":[["数据"]]},{"type":"chart","chartKind":"bar","title":"图表标题","data":[{"label":"分类","value":1}]}]}]}。',
-      '只在资料中有足够数据时输出 table 或 chart；需要比较数值时必须同时提供 table 和 chart，chartKind 使用 bar 或 pie，value 必须是数字。没有可靠数据时不要编造。资料不足时写明建议、假设或待确认项，不能虚构业绩、客户、预算或收益。',
+      '{"kind":"ppt","title":"标题","coverScene":{"schemaVersion":1,"elements":[{"elementId":"cover-title","type":"text","geometry":{"x":0.08,"y":0.32,"width":0.84,"height":0.2},"zIndex":2,"content":"标题","style":{"fontSize":42,"textColor":"20372B"}}]},"sections":[{"heading":"分节标题","level":1,"pageKind":"insight","takeaway":"明确结论","action":"下一步行动","scene":{"schemaVersion":1,"elements":[{"elementId":"title","type":"text","geometry":{"x":0.08,"y":0.12,"width":0.72,"height":0.12},"zIndex":2,"content":"分节标题","style":{"fontSize":30,"textColor":"20372B"}},{"elementId":"body","type":"text","geometry":{"x":0.12,"y":0.36,"width":0.68,"height":0.22},"zIndex":2,"content":"短标题：解释文字","style":{"fontSize":18,"textColor":"20372B"}}]},"blocks":[{"type":"bullets","items":["短标题：解释文字"]}]}],"closingScene":{"schemaVersion":1,"elements":[{"elementId":"closing","type":"text","geometry":{"x":0.12,"y":0.42,"width":0.76,"height":0.16},"zIndex":2,"content":"谢谢观看","style":{"fontSize":30,"textColor":"20372B"}}]}}。',
+      '只在资料中有足够数据时输出 table 或 chart；table 使用 {"type":"table","header":["列名"],"rows":[["数据"]]}，chart 使用 {"type":"chart","chartKind":"bar","data":[{"label":"分类","value":1}]}；需要比较数值时必须同时提供 table 和 chart，chartKind 使用 bar 或 pie，value 必须是数字。没有可靠数据时不要编造。资料不足时写明建议、假设或待确认项，不能虚构业绩、客户、预算或收益。',
       '如果无法输出 JSON，才使用 Markdown 标题、带解释的完整要点和标准管线表格。'
     ].join('\n');
   }

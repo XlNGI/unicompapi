@@ -1,4 +1,5 @@
 import { toWorkId, type WorkId } from '../ids';
+import type { PresentationPageScene } from './presentation-plan';
 
 export const documentWorkspaceKinds = ['word', 'excel', 'ppt'] as const;
 export type DocumentWorkspaceKind = (typeof documentWorkspaceKinds)[number];
@@ -48,6 +49,8 @@ export interface PresentationSectionMetadata {
   readonly pageKind?: PresentationPageKind;
   readonly takeaway?: string;
   readonly action?: string;
+  /** Optional LLM-authored, application-validated page composition. */
+  readonly scene?: PresentationPageScene;
 }
 
 export interface DocumentOutlineSection extends PresentationSectionMetadata {
@@ -60,6 +63,8 @@ export interface DocumentOutline {
   readonly kind: DocumentWorkspaceKind;
   readonly title: string;
   readonly sections: readonly DocumentOutlineSection[];
+  readonly coverScene?: PresentationPageScene;
+  readonly closingScene?: PresentationPageScene;
 }
 
 export const presentationDocumentPageLimits = {

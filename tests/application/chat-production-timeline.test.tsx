@@ -134,7 +134,8 @@ describe('production timeline projection', () => {
     expect(html).toContain('收入保持增长。');
     expect(html).not.toContain('PRIVATE');
     expect(html).not.toContain('&quot;sections&quot;');
-    expect(html).toContain('已接收 8 字符');
+    expect(html).toContain('已接收 20 字符');
+    expect(html).not.toContain('已接收 8 字符');
     expect(html.match(/aria-label="生成正文"/g)).toHaveLength(1);
     expect(html.indexOf('aria-label="生成正文"')).toBeGreaterThan(html.indexOf('已接收 20 字符'));
     expect(html.indexOf('aria-label="生成正文"')).toBeLessThan(html.indexOf('data-event-code="document_compile"'));
@@ -166,5 +167,17 @@ describe('production timeline projection', () => {
     expect(html).toContain('data-event-code="document_compile"');
     expect(html).toContain('已开始');
     expect(html).not.toContain('生成文档文件 · 已开始');
+  });
+  it('renders developer mode facts including docId, nodeId and duration when developerMode is enabled', () => {
+    const html = renderToStaticMarkup(<DocumentProgress detail="生成中" developerMode events={[
+      event(1, { code: 'request_received', status: 'completed' }),
+      event(2, { code: 'tool_call', status: 'progress', facts: { tool: 'search' }, occurredAt: '2026-09-22T08:00:01.500Z' })
+    ]} />);
+    expect(html).toContain('查看执行事实 (docId / 工具调用)');
+    expect(html).toContain('docId');
+    expect(html).toContain('conversation');
+    expect(html).toContain('nodeId');
+    expect(html).toContain('search');
+    expect(html).toContain('1.50s');
   });
 });

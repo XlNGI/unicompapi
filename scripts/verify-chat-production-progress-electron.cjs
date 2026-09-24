@@ -68,6 +68,64 @@ async function captureBody(name) {
   assert.ok(bounds.top >= 80 && bounds.bottom < 650, `Body must be visible in screenshot: ${JSON.stringify(bounds)}`);
   await capture(name);
 }
+async function verifyStreamStability() {
+  await js('chatProgressHarness.mount("document")');
+  await until('document.querySelector("textarea[aria-label=对话输入]") && document.body.innerText.includes("合成模型")');
+  await js('document.querySelector("textarea[aria-label=对话输入]").focus()');
+  await window.webContents.insertText('制作一份年度经营报告 PPT');
+  await until('!document.querySelector("button[aria-label=发送消息]").disabled');
+  await js('document.querySelector("button[aria-label=发送消息]").click()');
+  await until('chatProgressHarness.state().planningPending');
+  await js('chatProgressHarness.finishPlanning()');
+  await until('chatProgressHarness.state().subscribed');
+  await js('chatProgressHarness.emitDocumentChunk("paragraph")');
+  await until('document.querySelector("[aria-label=生成正文]")?.textContent.includes("营收增长来自")');
+  await delay(200);
+  const samples = await js(`(async () => {
+    const body = document.querySelector('[aria-label="生成正文"]');
+    const viewport = body.closest('.uc-chat-page__messages');
+    const composer = document.querySelector('.uc-chat-page__composer');
+    viewport.scrollTop = 0;
+    viewport.dispatchEvent(new Event('scroll', {bubbles:true}));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const initial = {height:body.offsetHeight, text:body.textContent, top:body.getBoundingClientRect().top,
+      composerTop:composer.getBoundingClientRect().top, scroll:viewport.scrollTop,
+      rows:document.querySelectorAll('.uc-chat-production-trace > li').length};
+    const samples = [];
+    for (let i = 0; i < 25; i++) {
+      chatProgressHarness.emitTrace('model_response', 'progress', {purpose:'content', contentCharacters:1000+i}, 'assistant');
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const current = document.querySelector('[aria-label="生成正文"]');
+      samples.push({sameNode:current===body, textRetained:current.textContent===initial.text,
+        heightDelta:current.offsetHeight-initial.height, topDelta:current.getBoundingClientRect().top-initial.top,
+        composerDelta:composer.getBoundingClientRect().top-initial.composerTop, scrollDelta:viewport.scrollTop-initial.scroll,
+        addedRows:document.querySelectorAll('.uc-chat-production-trace > li').length-initial.rows});
+    }
+    window.stableBody = body;
+    return samples;
+  })()`);
+  assert.ok(samples.every(s => s.sameNode), 'progress updates must retain the body DOM node');
+  assert.ok(samples.every(s => s.textRetained), 'progress updates must never clear visible body text');
+  assert.ok(samples.every(s => s.heightDelta === 0 && s.topDelta === 0 && s.composerDelta === 0 && s.scrollDelta === 0 && s.addedRows === 0),
+    `progress-only updates must not move the reading position: ${JSON.stringify(samples)}`);
+  await js('chatProgressHarness.emitDocumentChunk("rest")');
+  await until('document.querySelector("[aria-label=生成正文]")?.textContent.includes("客户留存稳定")');
+  assert.equal(await js('window.stableBody === document.querySelector("[aria-label=生成正文]")'), true);
+  await js('chatProgressHarness.finishDocument()');
+  await until('chatProgressHarness.state().localGenerationPending');
+  assert.equal(await js('window.stableBody === document.querySelector("[aria-label=生成正文]")'), true);
+  await js('chatProgressHarness.finishLocalDocument()');
+  await until('document.querySelector("[aria-label=生成正文]")?.textContent.includes("年度经营报告（已校验）")');
+  assert.equal(await js('window.stableBody === document.querySelector("[aria-label=生成正文]")'), true);
+  await assertClean();
+  assert.deepEqual(errors, []);
+  assert.deepEqual(blockedRequests, []);
+  await capture('stream-stability.png');
+  const report = {scope:'Real ChatPage, synthetic IPC, isolated profile; no model or network calls', samples,
+    bodyRetainedThroughContentAndCompletion:true, errors, blockedRequests};
+  await writeFile(path.join(output, 'stream-stability.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report, null, 2));
+}
 async function run() {
   await mkdir(output, { recursive: true });
   await app.whenReady();
@@ -89,6 +147,7 @@ async function run() {
   await window.loadFile(path.join(buildDirectory, 'index.html'));
   await until('window.chatProgressHarness?.ready && document.querySelector("[aria-label=生产进度]")');
   await until('document.body.innerText.includes("合成模型")');
+  if (process.argv.includes('--stream-stability')) return verifyStreamStability();
   let value = await assertClean();
   assert.equal(value.progress, 1);
   assert.equal(value.summaries.length, 1);
@@ -128,8 +187,9 @@ async function run() {
   assert.match(value.text, /这是合成的普通回复正文/);
   assert.equal(value.bodies.length, 0, 'ordinary chat keeps its normal reply without a second generated-body panel');
   assert.equal(value.text.match(/这是合成的普通回复正文/g).length, 1);
-  assert.match(value.text, /模型 → 本地/);
-  assert.match(value.text, /本地工具/);
+  const traceText = value.trace.map((item) => item.text).join('\n');
+  assert.match(traceText, /模型 → 本地/);
+  assert.match(traceText, /本地工具/);
   checks.push('model response: all eight events stay expanded inside the same assistant alongside ordinary content');
   await capture('ordinary-reply.png');
 
@@ -142,7 +202,7 @@ async function run() {
   assert.equal(value.summaries.length, 1);
   assert.equal(value.replyStatus, 0);
   assert.equal(value.assistants, 1);
-  assert.equal(value.trace.length, 12);
+  assert.equal(value.trace.length, 11, 'streaming model-response progress is shown as one stable row');
   assert.deepEqual(value.trace.slice(-3).map(e => e.status), ['started', 'completed', 'failed']);
   assert.match(value.text, /这是合成的普通回复正文/, 'task progress must retain ordinary reply content');
   checks.push('local document events continue after text streaming ends, and a failed event is visibly marked as failure');
@@ -153,7 +213,7 @@ async function run() {
   await js('chatProgressHarness.replay()');
   value = await assertClean();
   assert.equal(value.summaries.length, 1);
-  assert.equal(value.trace.length, 17, 'duplicate and out-of-order replay must not add duplicate events');
+  assert.equal(value.trace.length, 16, 'duplicate and out-of-order replay must not add duplicate events');
   assert.deepEqual(value.trace.slice(-5).map(e => e.code), ['document_structure_check', 'document_hash_check', 'document_publish', 'document_register', 'task_complete']);
   assert.match(value.text, /这是合成的普通回复正文/);
   checks.push('publication: structure, file integrity, publish and registration events remain ordered after duplicate reversed replay');
@@ -161,7 +221,7 @@ async function run() {
   await capture('production-progress-compact.png');
 
   await js('chatProgressHarness.mount("reopen")');
-  await until('document.querySelectorAll(".uc-chat-production-trace > li").length === 17');
+  await until('document.querySelectorAll(".uc-chat-production-trace > li").length === 16');
   value = await assertClean();
   assert.equal(value.assistants, 1);
   assert.equal(value.details, 0);

@@ -153,7 +153,11 @@ async function inspectRenderedOutput(
     }
   }
   try {
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    // TypeScript emits CommonJS for the Electron main process. A direct
+    // `import()` expression is therefore rewritten to `require()` and fails
+    // for pdfjs-dist's ESM-only entry point. Keep this loader native so the
+    // same renderer works in both Node tests and the packaged Electron host.
+    const pdfjs = await importEsm('pdfjs-dist/legacy/build/pdf.mjs');
     const document = await pdfjs.getDocument({ data: new Uint8Array(await readFile(pdfPath)) }).promise;
     if (document.numPages !== pngPaths.length) {
       diagnostics.push({ code: 'page_count_mismatch', severity: 'error', scope: 'document', message: 'PDF page count does not match rendered image count' });
@@ -204,6 +208,13 @@ async function inspectRenderedOutput(
   }
   return diagnostics;
 }
+
+type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+
+const importEsm = new Function(
+  'specifier',
+  'return import(specifier);'
+) as (specifier: string) => Promise<PdfJsModule>;
 
 export async function inspectPptxGeometry(
   filePath: string

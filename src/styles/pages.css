@@ -6594,7 +6594,10 @@ button.uc-project-center__project-card:disabled {
   align-content: start;
   overflow: auto;
   padding: var(--uc-space-3) var(--uc-space-3) var(--uc-space-4);
-  scroll-behavior: smooth;
+  /* Streaming content changes its height many times per second. Smooth
+     programmatic scrolling turns each update into a visible oscillation. */
+  scroll-behavior: auto;
+  overflow-anchor: none;
 }
 
 .uc-chat-page__caret {
@@ -11067,4 +11070,221 @@ button.uc-project-center__project-card:disabled {
 .uc-chat-production-trace__issue {
   margin: 0;
   color: var(--uc-color-text-secondary);
+}
+.uc-chat-production-trace > li[data-status="progress"]::before {
+  background: var(--uc-color-accent-subtle);
+  animation: uc-step-pulse 1.6s infinite ease-in-out;
+}
+
+.uc-chat-production-trace > li[data-status="started"]::before {
+  background: var(--uc-color-accent-subtle);
+  animation: uc-step-pulse 1.8s infinite ease-in-out;
+}
+
+@keyframes uc-step-pulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.6; }
+}
+
+.uc-chat-production-trace__duration {
+  font-size: var(--uc-font-size-caption);
+  color: var(--uc-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  background: var(--uc-color-surface-subtle);
+  padding: 0 4px;
+  border-radius: var(--uc-radius-4);
+}
+
+/* The main conversation keeps the execution stream readable. Transport
+   direction and wall-clock timestamps remain available in developer mode. */
+.uc-chat-document-progress[data-developer-mode='false'] .uc-chat-production-trace__direction,
+.uc-chat-document-progress[data-developer-mode='false'] .uc-chat-production-trace__heading > time {
+  display: none;
+}
+
+.uc-chat-production-trace__status {
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-chat-production-trace > li[data-status='failed'] .uc-chat-production-trace__status {
+  color: var(--uc-color-status-danger);
+}
+
+.uc-chat-document-progress__summary {
+  align-items: center;
+  gap: var(--uc-space-2);
+}
+
+.uc-chat-document-progress__summary::after {
+  content: '执行流';
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: var(--uc-radius-full);
+  padding: 0 var(--uc-space-2);
+  color: var(--uc-color-text-tertiary);
+  background: var(--uc-color-surface-subtle);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.uc-chat-document-progress[data-developer-mode='true'] .uc-chat-document-progress__summary::after {
+  content: '技术细节';
+}
+
+.uc-chat-document-progress[data-developer-mode='false'] .uc-chat-production-trace__request {
+  display: none;
+}
+
+.uc-chat-production-trace {
+  gap: var(--uc-space-2);
+  margin-top: var(--uc-space-1);
+  padding-left: var(--uc-space-4);
+}
+
+.uc-chat-production-trace > li {
+  padding-bottom: var(--uc-space-1);
+}
+
+.uc-chat-production-trace__heading {
+  min-height: 20px;
+  gap: var(--uc-space-1) var(--uc-space-2);
+}
+
+.uc-chat-production-trace__heading > strong {
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-chat-production-trace__details,
+.uc-chat-production-trace__request {
+  margin: 2px 0 0;
+  color: var(--uc-color-text-tertiary);
+  font-size: var(--uc-font-size-caption);
+  line-height: 1.45;
+}
+
+.uc-chat-production-trace__devtools {
+  margin-top: var(--uc-space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--uc-font-size-caption);
+}
+
+.uc-chat-production-trace__devtools > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: var(--uc-radius-6);
+  padding: 0 var(--uc-space-2);
+  color: var(--uc-color-text-secondary);
+  background: var(--uc-color-surface-subtle);
+  cursor: pointer;
+  user-select: none;
+}
+
+.uc-chat-production-trace__devtools > summary:hover {
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-selected);
+}
+
+.uc-chat-production-trace__devtools[open] > summary {
+  color: var(--uc-color-text-accent);
+}
+
+.uc-chat-production-trace__facts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--uc-space-2);
+  margin: var(--uc-space-1) 0 0;
+  border: 1px solid var(--uc-color-border-subtle);
+  border-radius: var(--uc-radius-6);
+  padding: var(--uc-space-2);
+  background: var(--uc-color-surface-subtle);
+}
+
+.uc-chat-production-trace__facts-grid dt {
+  color: var(--uc-color-text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.uc-chat-production-trace__facts-grid dd {
+  margin: 0;
+  color: var(--uc-color-text-primary);
+  font-family: var(--uc-font-mono, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.uc-chat-production-trace__facts-raw {
+  grid-column: 1 / -1;
+}
+
+.uc-chat-production-trace__facts-raw pre,
+.uc-chat-production-trace__facts-raw code {
+  margin: 0;
+  padding: var(--uc-space-1) var(--uc-space-2);
+  background: var(--uc-color-surface-muted, rgba(0, 0, 0, 0.05));
+  border-radius: var(--uc-radius-4);
+  font-family: var(--uc-font-mono, monospace);
+  font-size: 11px;
+  max-height: 180px;
+  overflow: auto;
+  display: block;
+  white-space: pre-wrap;
+}
+
+
+.uc-chat-page__dev-toggle--active {
+  color: var(--uc-color-text-accent) !important;
+  background: var(--uc-color-accent-subtle) !important;
+}
+
+.uc-chat-page__attachment-trigger {
+  display: grid;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--uc-radius-8);
+  color: var(--uc-color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.uc-chat-page__attachment-trigger:hover:not(:disabled) {
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-subtle);
+}
+
+.uc-chat-page__attachment-trigger:focus-visible {
+  outline: 2px solid var(--uc-color-border-focus);
+  outline-offset: 2px;
+}
+
+.uc-chat-page__attachment-trigger:disabled {
+  color: var(--uc-color-text-disabled);
+  cursor: not-allowed;
+}
+
+.uc-chat-page__attachment-trigger > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.uc-chat-page__attachment-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
 }

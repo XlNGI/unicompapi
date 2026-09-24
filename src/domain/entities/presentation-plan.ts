@@ -101,6 +101,8 @@ export interface PresentationPlan {
   readonly pages: readonly PresentationPlanPage[];
   readonly sourceRefs: readonly string[];
   readonly preserve: readonly string[];
+  readonly coverScene?: PresentationPageScene;
+  readonly closingScene?: PresentationPageScene;
   readonly revision?: PresentationPlanRevision;
 }
 
@@ -124,6 +126,8 @@ export function parsePresentationPlan(value: unknown): PresentationPlan {
     'pages',
     'sourceRefs',
     'preserve',
+    'coverScene',
+    'closingScene',
     'revision'
   ]);
   if (record.kind !== 'ppt') {
@@ -150,6 +154,12 @@ export function parsePresentationPlan(value: unknown): PresentationPlan {
     pages: parsedPages,
     sourceRefs: requireUniqueTextList(record.sourceRefs, 'sourceRefs'),
     preserve: requireUniqueTextList(record.preserve, 'preserve'),
+    ...(record.coverScene !== undefined
+      ? { coverScene: parseScene(record.coverScene, 'coverScene') }
+      : {}),
+    ...(record.closingScene !== undefined
+      ? { closingScene: parseScene(record.closingScene, 'closingScene') }
+      : {}),
     ...(record.revision !== undefined
       ? { revision: parseRevision(record.revision, parsedPages.length) }
       : {})
@@ -222,6 +232,10 @@ function parsePage(value: unknown, index: number): PresentationPlanPage {
   };
 }
 
+export function parsePresentationPageScene(value: unknown): PresentationPageScene {
+  return parseScene(value, 'PresentationPageScene');
+}
+
 function parseScene(value: unknown, label: string): PresentationPageScene {
   const record = requireRecord(value, label);
   requireExactKeys(record, ['schemaVersion', 'elements']);
@@ -253,7 +267,7 @@ function parseSceneElement(value: unknown, label: string): PresentationSceneElem
   const record = requireRecord(value, label);
   requireExactKeys(record, ['elementId', 'type', 'geometry', 'zIndex', 'parentId', 'readingOrder', 'content', 'assetRef', 'style']);
   const type = requireEnum(record.type, ['text', 'shape', 'line', 'image', 'table', 'chart', 'group'] as const, `${label}.type`);
-  const geometry = parseGeometry(record.geometry, `${label}.geometry`);
+  const geometry = parseGeometry(record.geometry, `${label}.geometry`, type === 'line');
   const zIndex = requireNonNegativeInteger(record.zIndex, `${label}.zIndex`);
   if (zIndex > 10_000) throw new TypeError(`${label}.zIndex is too large`);
   const content = record.content === undefined ? undefined : requireText(record.content, `${label}.content`);
@@ -273,13 +287,13 @@ function parseSceneElement(value: unknown, label: string): PresentationSceneElem
   };
 }
 
-function parseGeometry(value: unknown, label: string): PresentationSceneGeometry {
+function parseGeometry(value: unknown, label: string, allowLineAxis = false): PresentationSceneGeometry {
   const record = requireRecord(value, label);
   requireExactKeys(record, ['x', 'y', 'width', 'height']);
   const numbers = ['x', 'y', 'width', 'height'].map((key) => record[key]);
   if (numbers.some((item) => typeof item !== 'number' || !Number.isFinite(item))) throw new TypeError(`${label} contains invalid numbers`);
   const [x, y, width, height] = numbers as number[];
-  if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1 || y + height > 1) throw new TypeError(`${label} exceeds page bounds`);
+  if (x < 0 || y < 0 || (allowLineAxis ? width < 0 : width <= 0) || (allowLineAxis ? height < 0 : height <= 0) || (allowLineAxis && width === 0 && height === 0) || x + width > 1 || y + height > 1) throw new TypeError(`${label} exceeds page bounds`);
   return { x, y, width, height };
 }
 
