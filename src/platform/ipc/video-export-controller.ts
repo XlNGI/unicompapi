@@ -388,6 +388,7 @@ export class VideoExportController {
         throw new ExportRunError('retryable', 'Published output failed independent verification');
       }
       if (
+        !independent.container?.split(',').includes(plan.output.container) ||
         independent.width !== renderPlan.composition.canvas.width ||
         independent.height !== renderPlan.composition.canvas.height ||
         Math.abs(independent.durationUs - expectedPlanDurationUs(plan)) > 500_000
@@ -516,14 +517,14 @@ export class VideoExportController {
     } else {
       try {
         capabilities = await adapter.getCapabilities();
-        if (!capabilities.videoEncoders.includes('libvpx-vp9')) {
-          reasons.push('The media engine does not provide libvpx-vp9');
+        if (!capabilities.videoEncoders.includes('libopenh264')) {
+          reasons.push('The media engine does not provide software H.264 (libopenh264)');
         }
-        if (!capabilities.audioEncoders.includes('libopus')) {
-          reasons.push('The media engine does not provide libopus');
+        if (!capabilities.audioEncoders.includes('aac')) {
+          reasons.push('The media engine does not provide AAC');
         }
-        if (!capabilities.containers.includes('webm')) {
-          reasons.push('The media engine does not provide the WebM container');
+        if (!capabilities.containers.includes('mp4')) {
+          reasons.push('The media engine does not provide the MP4 container');
         }
         const requiredFilters = new Set(['concat', 'scale', 'pad', 'atrim', 'amix']);
         if (draft.videoTrack.some((clip) => clip.transitionToNext.kind !== 'none')) {
@@ -555,9 +556,9 @@ export class VideoExportController {
         ready: reasons.length === 0,
         reasons,
         output: {
-          container: 'webm' as const,
-          videoCodec: 'libvpx-vp9' as const,
-          audioCodec: 'libopus' as const,
+          container: 'mp4' as const,
+          videoCodec: 'libopenh264' as const,
+          audioCodec: 'aac' as const,
           hardwareAcceleration: 'software_only' as const
         },
         estimatedOutputBytes
@@ -623,9 +624,9 @@ export class VideoExportController {
 function validateOutputPreferences(draft: VideoEditDraft, reasons: string[]): void {
   const preference = draft.outputPreference;
   const expected = [
-    [preference.container, 'webm', 'container'],
-    [preference.videoCodec, 'libvpx-vp9', 'video codec'],
-    [preference.audioCodec, 'libopus', 'audio codec']
+    [preference.container, 'mp4', 'container'],
+    [preference.videoCodec, 'libopenh264', 'video codec'],
+    [preference.audioCodec, 'aac', 'audio codec']
   ] as const;
   for (const [value, supported, label] of expected) {
     if (value.kind === 'capability' && value.valueId !== supported) {
@@ -889,10 +890,10 @@ function buildFrozenPlan(input: {
   }
   const fileName = safeExportName(
     draft.outputPreference.fileName ?? draft.title
-  ).replace(/\.webm$/i, '') || 'video-export';
+  ).replace(/\.(?:webm|mp4)$/i, '') || 'video-export';
   const relativePath = draft.outputPreference.conflictPolicy === 'fail'
-    ? `files/results/${fileName}.webm`
-    : `files/results/${fileName}-${input.planId.slice(-8)}.webm`;
+    ? `files/results/${fileName}.mp4`
+    : `files/results/${fileName}-${input.planId.slice(-8)}.mp4`;
   const material = {
     id: input.planId,
     projectId: draft.projectId,
@@ -910,23 +911,23 @@ function buildFrozenPlan(input: {
     },
     output: {
       relativePath,
-      fileName: `${fileName}.webm`,
+      fileName: `${fileName}.mp4`,
       conflictPolicy: draft.outputPreference.conflictPolicy,
-      container: 'webm' as const,
-      videoCodec: 'libvpx-vp9' as const,
-      audioCodec: 'libopus' as const,
+      container: 'mp4' as const,
+      videoCodec: 'libopenh264' as const,
+      audioCodec: 'aac' as const,
       resolution: { kind: 'source' as const },
       frameRate: { kind: 'source' as const },
-      quality: { kind: 'crf' as const, value: 32 as const },
+      quality: { kind: 'bitrate' as const, value: 8_000_000 },
       hardwareAcceleration: 'software_only' as const
     },
     engine: {
       adapterId: checked.capabilities.descriptor.adapterId,
       adapterVersion: checked.capabilities.descriptor.adapterVersion,
       engineVersion: checked.capabilities.version,
-      videoEncoder: 'libvpx-vp9' as const,
-      audioEncoder: 'libopus' as const,
-      container: 'webm' as const
+      videoEncoder: 'libopenh264' as const,
+      audioEncoder: 'aac' as const,
+      container: 'mp4' as const
     },
     estimatedOutputBytes: checked.dto.estimatedOutputBytes,
     parentWorkId: draft.sourceIntent.kind === 'from_work'
@@ -994,8 +995,9 @@ function toMediaEnginePlan(
         : undefined,
       cover: toMediaEngineCover(plan, resolved)
     },
-    videoCodec: 'libvpx-vp9',
-    audioCodec: 'libopus'
+    videoCodec: plan.output.videoCodec,
+    audioCodec: plan.output.audioCodec,
+    videoBitrate: plan.output.quality.kind === 'bitrate' ? plan.output.quality.value : undefined
   };
 }
 
