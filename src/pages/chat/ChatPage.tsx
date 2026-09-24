@@ -135,7 +135,7 @@ const documentErrorMessages: Record<string, string> = {
     '单个内容组过长，无法在可读字号下排版，请拆分内容后重试。',
   generation_cancelled: '本次文档任务已取消，已有作品保留。',
   generation_failed: '本次文档未交付，已有作品保留。请查看失败原因。',
-  verification_failed: '本次修改未通过文件校验，原作品已保留。请核对修改范围后重新发起。',
+  verification_failed: '本地文件校验未通过，未登记为正式作品。',
   write_failed: '新版文件写入失败，原作品已保留。请检查磁盘空间与文件占用后重试保存。',
   registration_failed: '新版作品登记失败，原作品已保留。请重试保存。',
   result_sync_pending: '新版文档已保存，结果状态同步未完成。重试同步不会重复生成作品。',
@@ -3498,7 +3498,10 @@ export function ChatPage({
                   disabled={!canCompose || busy || cancelRequested || responseInProgress}
                   label="选择模型"
                   listboxHeader={(
-                    <div className="uc-chat-page__model-picker-header">
+                    <div
+                      className="uc-chat-page__model-picker-header"
+                      onMouseDown={(event) => event.preventDefault()}
+                    >
                       <section className="uc-chat-page__reply-mode-section">
                         <div className="uc-chat-page__model-menu-heading">
                           <span>回复方式</span>
@@ -3510,8 +3513,11 @@ export function ChatPage({
                             role="radio"
                             type="button"
                           >
-                            <strong>普通对话</strong>
-                            <small>响应更快，适合日常问答与创作</small>
+                            <span>
+                              <strong>普通对话</strong>
+                              <small>响应更快，适合日常问答与创作</small>
+                            </span>
+                            {responseFeature === 'text_chat' ? <LuCheck aria-hidden="true" /> : null}
                           </button>
                           <button
                             aria-checked={responseFeature === 'text_reasoning'}
@@ -3519,8 +3525,11 @@ export function ChatPage({
                             role="radio"
                             type="button"
                           >
-                            <strong>深度推理</strong>
-                            <small>适合复杂分析，响应时间可能更长</small>
+                            <span>
+                              <strong>深度推理</strong>
+                              <small>适合复杂分析，响应时间可能更长</small>
+                            </span>
+                            {responseFeature === 'text_reasoning' ? <LuCheck aria-hidden="true" /> : null}
                           </button>
                         </div>
                       </section>
@@ -3555,7 +3564,7 @@ export function ChatPage({
                   placeholder={(
                     <span className="uc-chat-page__model-value">
                       <span>{candidatesLoading ? '加载模型…' : '选择模型'}</span>
-                      <small>{responseFeature === 'text_reasoning' ? '推理' : '普通'}</small>
+                      <small className="uc-chat-page__model-mode">{responseFeature === 'text_reasoning' ? '推理' : '普通'}</small>
                     </span>
                   )}
                   popupClassName="uc-chat-page__model-picker-popup"
@@ -3563,7 +3572,7 @@ export function ChatPage({
                   renderValue={(option) => (
                     <span className="uc-chat-page__model-value">
                       <span>{option.label}</span>
-                      <small>{responseFeature === 'text_reasoning' ? '推理' : '普通'}</small>
+                      <small className="uc-chat-page__model-mode">{responseFeature === 'text_reasoning' ? '推理' : '普通'}</small>
                     </span>
                   )}
                   searchPlaceholder="搜索模型或服务商"
