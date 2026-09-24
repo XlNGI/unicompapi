@@ -121,6 +121,14 @@ interface PreviewMediaHandle {
   readonly mimeType: string;
 }
 
+const previewHandleRenewalWindowMs = 30_000;
+
+function hasFreshPreviewHandle(handle: PreviewMediaHandle | undefined): handle is PreviewMediaHandle {
+  if (!handle) return false;
+  const expiresAtMs = Date.parse(handle.expiresAt);
+  return Number.isFinite(expiresAtMs) && expiresAtMs - Date.now() > previewHandleRenewalWindowMs;
+}
+
 const previewZoomOptions: readonly {
   readonly key: PreviewZoom;
   readonly label: string;
@@ -226,6 +234,13 @@ const timelineThumbnailRenderWidthPx = 320;
 const timelineThumbnailRenderHeightPx = 180;
 const timelineFrameCacheLimit = 256;
 const timelineFrameConcurrency = 2;
+
+// Keep generated frame URLs and contact sheets alive when the editor view is
+// temporarily recreated while switching workspaces. They are still cleared
+// explicitly by the existing "clear preview cache" action.
+const sharedFrameCache = new Map<string, string>();
+const sharedTimelineFrameCache = new Map<string, string>();
+const sharedContactSheetCache = new Map<string, string>();
 const timelineFrameDebounceMs = 60;
 const timelineFramePresentationTimeoutMs = 48;
 const timelineMaximumPixelsPerSecond = 1_000;
@@ -244,6 +259,8 @@ interface PendingPreviewSeek {
   readonly timelineUs: number;
   readonly sourceUs: number;
   readonly resumePlayback: boolean;
+  readonly awaitPreviewReplacement: boolean;
+  readonly previewUrl?: string;
 }
 
 const saveStateLabels: Record<SaveState, string> = {
@@ -302,12 +319,15 @@ export function VideoEditingPage({
   const scrubTargetRef = useRef(0);
   const scrubCache = useMemo(() => videoEditors ? new VideoScrubCache(async (draftId, clipId) => {
     const cached = previewCacheRef.current.get(clipId);
-    if (cached && Date.parse(cached.expiresAt) - Date.now() > 30_000) return cached.url;
+    if (hasFreshPreviewHandle(cached)) return cached.url;
     const result = await videoEditors.createSourcePreview(draftId, clipId);
     if (!result.ok) return undefined;
     previewCacheRef.current.set(clipId, result.value);
     return result.value.url;
-  }, () => setMessage('部分片段预览准备失败，请检查素材状态后重试。')) : undefined, [videoEditors]);
+  }, () => setMessage('部分片段预览准备失败，请检查素材状态后重试。'), async (draftId, clipId) => {
+    const result = await videoEditors.requestPreviewArtifact(draftId, clipId, 'scrub_video');
+    return result.ok ? result.value.url : undefined;
+  }) : undefined, [videoEditors]);
   useEffect(() => () => scrubCache?.clear(), [scrubCache]);
   const [musicPreview, setMusicPreview] =
     useState<VideoEditorBackgroundMusicPreviewDto>();
@@ -349,9 +369,9 @@ export function VideoEditingPage({
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineFrameRefresh, setTimelineFrameRefresh] = useState(0);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
-  const frameCacheRef = useRef<Map<string, string>>(new Map());
-  const timelineFrameCacheRef = useRef<Map<string, string>>(new Map());
-  const contactSheetCacheRef = useRef<Map<string, PreviewMediaHandle>>(new Map());
+  const frameCacheRef = useRef<Map<string, string>>(sharedFrameCache);
+  const timelineFrameCacheRef = useRef<Map<string, string>>(sharedTimelineFrameCache);
+  const contactSheetCacheRef = useRef<Map<string, string>>(sharedContactSheetCache);
   const failedContactSheetsRef = useRef(new Set<string>());
   const timelineFrameRequestRef = useRef(0);
   const previewCacheRef = useRef<Map<string, PreviewMediaHandle>>(new Map());
@@ -370,7 +390,9 @@ export function VideoEditingPage({
     readonly attempt: number;
     readonly video: HTMLVideoElement;
     readonly clipId: string;
+    readonly currentTime: number;
   }>();
+  const previewRecoveryAttemptsRef = useRef(new Set<string>());
 
   useEffect(() => () => {
     window.clearTimeout(previewSeekTimerRef.current);
@@ -392,7 +414,7 @@ export function VideoEditingPage({
     const draftId = currentDraft.draftId;
     void (async () => {
       let handle = previewCacheRef.current.get(nextClip.clipId);
-      if (!handle || Date.parse(handle.expiresAt) - Date.now() <= 30_000) {
+      if (!hasFreshPreviewHandle(handle)) {
         const result = await videoEditors.createSourcePreview(draftId, nextClip.clipId);
         if (cancelled || !result.ok) return;
         handle = result.value;
@@ -428,19 +450,7 @@ export function VideoEditingPage({
 
   useEffect(() => {
     timelineFrameRequestRef.current += 1;
-    revokeFrameUrlMap(frameCacheRef.current);
-    revokeFrameUrlMap(timelineFrameCacheRef.current);
-    setFrameUrls({});
-    setTimelineFrameUrls({});
-    contactSheetCacheRef.current.clear();
     failedContactSheetsRef.current.clear();
-    setContactSheetUrls({});
-    return () => {
-      timelineFrameRequestRef.current += 1;
-      revokeFrameUrlMap(frameCacheRef.current);
-      revokeFrameUrlMap(timelineFrameCacheRef.current);
-      contactSheetCacheRef.current.clear();
-    };
   }, [currentDraft?.draftId]);
 
   useEffect(() => {
@@ -666,8 +676,11 @@ export function VideoEditingPage({
         if (next && JSON.stringify([next.source, next.sourceRange]) ===
           JSON.stringify([previous.source, previous.sourceRange])) continue;
         const id = previous.clipId;
+        scrubCache?.invalidate(currentDraft.draftId, previous);
         previewCacheRef.current.delete(id);
         if (previewHandleRef.current?.clipId === id) previewHandleRef.current = undefined;
+        const sheet = contactSheetCacheRef.current.get(id);
+        if (sheet) URL.revokeObjectURL(sheet);
         contactSheetCacheRef.current.delete(id);
         failedContactSheetsRef.current.delete(id);
         const poster = frameCacheRef.current.get(id);
@@ -1033,7 +1046,7 @@ export function VideoEditingPage({
 
   function setTimelinePlayIntent(next: boolean) {
     timelinePlayingRef.current = next;
-    setTimelinePlaying(next);
+    if (!next) setTimelinePlaying(false);
   }
 
   function commitPlayheadUs(nextUs: number) {
@@ -1055,12 +1068,13 @@ export function VideoEditingPage({
     previewPlaybackGuardRef.current = undefined;
   }
 
-  function armPreviewPlaybackTimer(video: HTMLVideoElement, clipId: string) {
+  function armPreviewPlaybackTimer(video: HTMLVideoElement, clipId: string, timeoutMs = 15_000) {
     clearPreviewPlaybackTimer();
     const guard = {
       attempt: playbackAttemptRef.current,
       video,
-      clipId
+      clipId,
+      currentTime: video.currentTime
     } as const;
     previewPlaybackGuardRef.current = guard;
     previewPlaybackTimerRef.current = window.setTimeout(() => {
@@ -1068,11 +1082,37 @@ export function VideoEditingPage({
         playbackAttemptRef.current !== guard.attempt ||
         !timelinePlayingRef.current ||
         !isCurrentPreviewEvent(guard.video)) return;
+      if (guard.video.currentTime - guard.currentTime > 0.05) {
+        armPreviewPlaybackTimer(guard.video, clipId, 3_000);
+        return;
+      }
       clearPreviewPlaybackTimer();
-      previewActuallyPlayingRef.current = false;
+      recoverPreviewPlayback(guard.video, clipId);
+    }, timeoutMs);
+  }
+
+  function recoverPreviewPlayback(video: HTMLVideoElement, clipId: string) {
+    if (!timelinePlayingRef.current || !isCurrentPreviewEvent(video)) return;
+    clearPreviewPlaybackTimer();
+    const pendingSeek = pendingPreviewSeekRef.current;
+    if (pendingSeek) {
+      previewRequestRef.current += 1;
+      abandonPreviewSeek(pendingSeek.token);
+    }
+    previewActuallyPlayingRef.current = false;
+    if (previewRecoveryAttemptsRef.current.has(clipId)) {
       stopTimelinePlayback();
-      setMessage('当前片段暂时无法继续播放，请重试。');
-    }, 15_000);
+      setMessage('当前片段无法恢复播放，请再次点击播放。');
+      return;
+    }
+    previewRecoveryAttemptsRef.current.add(clipId);
+    void ensurePreview(
+      clipId,
+      true,
+      undefined,
+      Math.min(playheadUsRef.current, Math.max(0, totalDurationUs - 1)),
+      true
+    );
   }
 
   function ensureTimelinePlayheadVisible(nextUs: number) {
@@ -1100,18 +1140,29 @@ export function VideoEditingPage({
     draft: VideoEditorDraftDto,
     clipId: string,
     timelineUs: number,
-    resumePlayback = false
+    resumePlayback = false,
+    awaitPreviewReplacement = false
   ): PendingPreviewSeek {
     const pending = {
       token: ++previewSeekTokenRef.current,
       clipId,
       timelineUs,
-      sourceUs: timelineToSourceUs(draft, clipId, timelineUs),
-      resumePlayback
+      sourceUs: Math.min(
+        (draft.videoTrack.find((clip) => clip.clipId === clipId)?.sourceRange.outUs ?? 1) - 1,
+        timelineToSourceUs(draft, clipId, timelineUs)
+      ),
+      resumePlayback,
+      awaitPreviewReplacement
     };
     window.clearTimeout(previewSeekTimerRef.current);
     previewSeekTimerRef.current = window.setTimeout(() => {
       if (pendingPreviewSeekRef.current?.token !== pending.token) return;
+      const video = videoRef.current;
+      if (pending.resumePlayback && video && isCurrentPreviewEvent(video)) {
+        abandonPreviewSeek(pending.token);
+        recoverPreviewPlayback(video, pending.clipId);
+        return;
+      }
       previewRequestRef.current += 1;
       abandonPreviewSeek(pending.token);
       stopTimelinePlayback();
@@ -1136,6 +1187,10 @@ export function VideoEditingPage({
     if (
       !pending ||
       !videoRef.current ||
+      (pending.awaitPreviewReplacement &&
+        (!pending.previewUrl ||
+          previewHandleRef.current?.preview.url !== pending.previewUrl ||
+          videoRef.current.src !== pending.previewUrl)) ||
       videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
       videoRef.current.seeking ||
       videoRef.current.dataset.previewClipId !== pending.clipId
@@ -1173,9 +1228,13 @@ export function VideoEditingPage({
     if (
       !pending ||
       !videoRef.current ||
+      videoRef.current.seeking ||
+      (pending.awaitPreviewReplacement &&
+        (!pending.previewUrl ||
+          previewHandleRef.current?.preview.url !== pending.previewUrl ||
+          videoRef.current.src !== pending.previewUrl)) ||
       videoRef.current.dataset.previewClipId !== pending.clipId ||
-      videoRef.current.readyState < HTMLMediaElement.HAVE_METADATA ||
-      videoRef.current.seeking
+      videoRef.current.readyState < HTMLMediaElement.HAVE_METADATA
     ) {
       return;
     }
@@ -1207,25 +1266,25 @@ export function VideoEditingPage({
     const clip = draft.videoTrack.find((item) => item.clipId === clipId);
     if (!clip) return false;
     holdStageFrame();
+    const existing = previewHandleRef.current;
+    const cacheKey = clipId;
+    const cached = previewCacheRef.current.get(cacheKey);
+    const reusable = existing?.clipId === clipId ? existing.preview : cached;
+    const awaitPreviewReplacement = force || !hasFreshPreviewHandle(reusable);
     const pendingSeek = beginPreviewSeek(
       draft,
       clipId,
       targetPlayheadUs,
-      resumePlayback
+      resumePlayback,
+      awaitPreviewReplacement
     );
     musicRef.current?.pause();
     playbackAttemptRef.current += 1;
     const requestToken = ++previewRequestRef.current;
-    const existing = previewHandleRef.current;
-    const cacheKey = clipId;
-    const cached = previewCacheRef.current.get(cacheKey);
-    const reusable =
-      existing?.clipId === clipId ? existing.preview : cached;
     if (
       !force &&
       reusable &&
-      Number.isFinite(Date.parse(reusable.expiresAt)) &&
-      Date.parse(reusable.expiresAt) - Date.now() > 30_000
+      hasFreshPreviewHandle(reusable)
     ) {
       setPreviewUnavailable(false);
         previewHandleRef.current = { clipId, preview: reusable };
@@ -1252,6 +1311,10 @@ export function VideoEditingPage({
         expiresAt: result.value.expiresAt,
         mimeType: result.value.mimeType
       };
+      if (pendingSeek.awaitPreviewReplacement &&
+        pendingPreviewSeekRef.current?.token === pendingSeek.token) {
+        pendingPreviewSeekRef.current = { ...pendingSeek, previewUrl: nextPreview.url };
+      }
       previewCacheRef.current.set(cacheKey, nextPreview);
       setPreviewUnavailable(false);
         previewHandleRef.current = { clipId, preview: nextPreview };
@@ -1284,8 +1347,9 @@ export function VideoEditingPage({
       revokeFrameUrlMap(timelineFrameCacheRef.current);
       previewCacheRef.current.clear();
       setFrameUrls({});
+      scrubCache?.clear();
       setTimelineFrameUrls({});
-      contactSheetCacheRef.current.clear();
+      revokeFrameUrlMap(contactSheetCacheRef.current);
       failedContactSheetsRef.current.clear();
       setContactSheetUrls({});
       setTimelineFrameRefresh((value) => value + 1);
@@ -1613,19 +1677,13 @@ export function VideoEditingPage({
     }
     const editorApi = videoEditors;
     const draft = currentDraft;
-    const expiredSheets: string[] = [];
-    for (const [clipId, handle] of contactSheetCacheRef.current) {
-      if (Date.parse(handle.expiresAt) - Date.now() > 30_000) continue;
-      contactSheetCacheRef.current.delete(clipId);
-      expiredSheets.push(clipId);
+    // Static image bytes belong to the session, not to the short-lived source handle.
+    const cachedSheets: Record<string, string> = {};
+    for (const clip of draft.videoTrack) {
+      const url = contactSheetCacheRef.current.get(clip.clipId);
+      if (url) cachedSheets[clip.clipId] = url;
     }
-    if (expiredSheets.length > 0) {
-      setContactSheetUrls((current) => {
-        const next = { ...current };
-        for (const clipId of expiredSheets) delete next[clipId];
-        return next;
-      });
-    }
+    setContactSheetUrls(cachedSheets);
     const groups = new Map<string, TimelineFrameRequest[]>();
     const addRequest = (request: TimelineFrameRequest) => {
       const requests = groups.get(request.clipId) ?? [];
@@ -1702,8 +1760,7 @@ export function VideoEditingPage({
           let handle = previewCacheRef.current.get(clipId);
           if (
             !handle ||
-            !Number.isFinite(Date.parse(handle.expiresAt)) ||
-            Date.parse(handle.expiresAt) - Date.now() <= 30_000
+            !hasFreshPreviewHandle(handle)
           ) {
             const result = await editorApi.createSourcePreview(
               draft.draftId,
@@ -1727,12 +1784,21 @@ export function VideoEditingPage({
                 'thumbnail_strip'
               );
               if (!isCancelled() && artifact.ok) {
-                const usable = await loadUsableContactSheet(artifact.value.url);
-                if (!isCancelled() && usable) {
-                  contactSheetCacheRef.current.set(clipId, artifact.value);
+                const response = await fetch(artifact.value.url, {
+                  signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)])
+                });
+                if (!response.ok) throw new Error('Thumbnail read failed');
+                const imageUrl = URL.createObjectURL(await response.blob());
+                const usable = await loadUsableContactSheet(imageUrl);
+                if (isCancelled() || !usable) {
+                  URL.revokeObjectURL(imageUrl);
+                } else {
+                  const previous = contactSheetCacheRef.current.get(clipId);
+                  if (previous) URL.revokeObjectURL(previous);
+                  contactSheetCacheRef.current.set(clipId, imageUrl);
                   setContactSheetUrls((current) => ({
                     ...current,
-                    [clipId]: artifact.value.url
+                    [clipId]: imageUrl
                   }));
                   contactSheetReady = true;
                 }
@@ -1886,9 +1952,11 @@ export function VideoEditingPage({
       holdStageFrame();
       stopTimelinePlayback();
       scrubContextRef.current = '';
+      scrubTargetRef.current++;
     }
     timelineEndedRef.current = false;
     scrubbingRef.current = true;
+    playheadUsRef.current = nextUs;
     previewRequestRef.current++;
     if (playheadLabelRef.current) playheadLabelRef.current.textContent = formatTime(nextUs);
     const segment = resolveTimelineSegmentAt(segments, Math.min(nextUs, totalDurationUs - 1));
@@ -1902,7 +1970,7 @@ export function VideoEditingPage({
       setSelectedClipId(clip.clipId);
       commitPlayheadUs(nextUs);
     }
-    const token = ++scrubTargetRef.current;
+    const token = scrubTargetRef.current;
     scrubCache.request({
       draftId: currentDraft.draftId, clip,
       sourceUs: timelineToSourceUs(currentDraft, clip.clipId, nextUs),
@@ -1928,9 +1996,9 @@ export function VideoEditingPage({
     commitPlayheadUs(boundedUs);
     if (boundedUs >= totalDurationUs) {
       stopTimelinePlayback();
-      return;
+      timelineEndedRef.current = true;
     }
-    const targetSegment = resolveTimelineSegmentAt(segments, boundedUs);
+    const targetSegment = resolveTimelineSegmentAt(segments, Math.min(boundedUs, totalDurationUs - 1));
     if (!targetSegment) return;
     const resumePlayback = timelinePlayingRef.current;
     playbackSwitchingRef.current = resumePlayback;
@@ -2015,15 +2083,26 @@ export function VideoEditingPage({
     if (!targetSegment) return;
     timelineEndedRef.current = false;
     playbackSwitchingRef.current = false;
+    previewRecoveryAttemptsRef.current.clear();
     setTimelinePlayIntent(true);
     commitPlayheadUs(startUs);
     ensureTimelinePlayheadVisible(startUs);
     setSelectedClipId(targetSegment.clipId);
+    const video = videoRef.current;
+    if (currentDraft && video && isCurrentPreviewEvent(video) &&
+      previewHandleRef.current?.clipId === targetSegment.clipId &&
+      hasFreshPreviewHandle(previewHandleRef.current?.preview) &&
+      !pendingPreviewSeekRef.current && !video.seeking && video.readyState >= 2 &&
+      Math.abs(video.currentTime - timelineToSourceUs(currentDraft, targetSegment.clipId, startUs) / 1_000_000) <= 0.001) {
+      startCurrentPreviewPlayback(targetSegment.clipId);
+      return;
+    }
     void ensurePreview(targetSegment.clipId, false, undefined, startUs, true);
   }
 
   function stopTimelinePlayback() {
     setTimelinePlayIntent(false);
+    previewRequestRef.current += 1;
     previewActuallyPlayingRef.current = false;
     playbackAttemptRef.current += 1;
     playbackSwitchingRef.current = false;
@@ -2051,9 +2130,7 @@ export function VideoEditingPage({
     armPreviewPlaybackTimer(video, clipId);
     void video.play().catch(() => {
       if (attempt !== playbackAttemptRef.current || !isCurrentPreviewEvent(video)) return;
-      clearPreviewPlaybackTimer();
-      stopTimelinePlayback();
-      setMessage('无法开始时间线预览，请再次点击播放。');
+      recoverPreviewPlayback(video, clipId);
     });
   }
 
@@ -2067,6 +2144,12 @@ export function VideoEditingPage({
       previewActuallyPlayingRef.current = false;
       return;
     }
+    armPreviewPlaybackTimer(video, video.dataset.previewClipId ?? '', 3_000);
+    setTimelinePlaying(true);
+    if (!scrubbingRef.current && !pendingPreviewSeekRef.current) {
+      stageHeldRef.current = false;
+      setShowStageFrame(false);
+    }
     syncPlayheadFromPreview();
   }
 
@@ -2074,6 +2157,7 @@ export function VideoEditingPage({
     const video = event.currentTarget;
     if (!isCurrentPreviewEvent(video)) return;
     previewActuallyPlayingRef.current = false;
+    setTimelinePlaying(false);
     musicRef.current?.pause();
     if (playbackSwitchingRef.current || pendingPreviewSeekRef.current || video.ended) return;
     setTimelinePlayIntent(false);
@@ -2099,9 +2183,7 @@ export function VideoEditingPage({
   }
 
   function handlePreviewError(event: SyntheticEvent<HTMLVideoElement>) {
-    if (!isCurrentPreviewEvent(event.currentTarget) || !timelinePlayingRef.current) return;
-    stopTimelinePlayback();
-    setMessage('当前片段预览播放失败，请重试。');
+    recoverPreviewPlayback(event.currentTarget, event.currentTarget.dataset.previewClipId ?? '');
   }
 
   function handlePreviewEnded(event: SyntheticEvent<HTMLVideoElement>) {
@@ -2137,6 +2219,49 @@ export function VideoEditingPage({
     commitPlayheadUs(nextPlayheadUs);
     ensureTimelinePlayheadVisible(nextPlayheadUs);
     setSelectedClipId(nextSegment.clipId);
+
+    // The next clip is normally mounted and seeked in the hidden preview
+    // element before this boundary is reached. Promote that element directly
+    // so a prepared clip does not pass through a pause/prepare/seek gap.
+    if (nextPreview?.clipId === nextSegment.clipId) {
+      const nextVideo = Array.from(
+        document.querySelectorAll<HTMLVideoElement>('video[data-preview-clip-id]')
+      ).find((candidate) => candidate.dataset.previewClipId === nextSegment.clipId);
+      const nextClip = currentDraft?.videoTrack.find(
+        (clip) => clip.clipId === nextSegment.clipId
+      );
+      const expectedSourceUs = nextClip?.sourceRange.inUs ?? nextSegment.sourceInUs;
+      if (
+        hasFreshPreviewHandle(nextPreview.preview) &&
+        nextVideo &&
+        nextClip &&
+        nextVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        !nextVideo.seeking &&
+        Math.abs(nextVideo.currentTime - expectedSourceUs / 1_000_000) <= 0.05
+      ) {
+        videoRef.current?.pause();
+        previewHandleRef.current = { clipId: nextSegment.clipId, preview: nextPreview.preview };
+        setPreview(nextPreview.preview);
+        nextVideo.playbackRate = nextClip.speed.numerator / nextClip.speed.denominator;
+        nextVideo.muted = nextClip.sourceAudio.muted;
+        nextVideo.volume = nextClip.sourceAudio.volumePermille / 1_000;
+        requestAnimationFrame(() => {
+          if (!timelinePlayingRef.current) {
+            playbackSwitchingRef.current = false;
+            return;
+          }
+          videoRef.current = nextVideo;
+          playbackSwitchingRef.current = false;
+          void nextVideo.play().catch(() => {
+            if (timelinePlayingRef.current) {
+              stopTimelinePlayback();
+              setMessage('无法继续播放时间线，请再次点击播放。');
+            }
+          });
+        });
+        return;
+      }
+    }
     void ensurePreview(
       nextSegment.clipId,
       false,
@@ -2469,6 +2594,7 @@ export function VideoEditingPage({
                       onPlaying={isCurrent ? handlePreviewPlaying : undefined}
                       onSeeking={isCurrent ? handlePreviewSeeking : undefined}
                       onSeeked={isCurrent ? completePreviewSeek : undefined}
+                      onStalled={isCurrent ? handlePreviewWaiting : undefined}
                       onTimeUpdate={isCurrent ? syncPlayheadFromPreview : undefined}
                       onWaiting={isCurrent ? handlePreviewWaiting : undefined}
                       playsInline
@@ -2902,7 +3028,8 @@ export function VideoEditingPage({
                   contactSheets={contactSheetUrls}
                   frames={frameUrls}
                   onContactSheetError={(clipId, url) => {
-                    if (contactSheetCacheRef.current.get(clipId)?.url !== url) return;
+                    if (contactSheetCacheRef.current.get(clipId) !== url) return;
+                    URL.revokeObjectURL(url);
                     contactSheetCacheRef.current.delete(clipId);
                     // A failed image falls back once to Canvas, not an endless reload loop.
                     failedContactSheetsRef.current.add(clipId);
@@ -3159,6 +3286,7 @@ export function VideoEditingPage({
               draft={currentDraft}
               key={`${currentDraft.draftId}-${currentDraft.outputPreference.fileName ?? ''}-${currentDraft.outputPreference.conflictPolicy}`}
               media={exportMedia}
+              storage={storage}
               onCancel={() => void cancelExport()}
               onConfirm={setExportConfirmed}
               onNavigate={onNavigate}
@@ -3850,6 +3978,8 @@ function TimelinePlayhead({
             const flushMove = () => {
               animationFrameId = undefined;
               if (!active || !scaleRef.current) return;
+              const scaleRect = scaleRef.current.getBoundingClientRect();
+              let scaleLeft = scaleRect.left;
               const viewport = viewportRef.current;
               if (viewport) {
                 const viewportRect = viewport.getBoundingClientRect();
@@ -3861,13 +3991,13 @@ function TimelinePlayhead({
                   scrollWidth: viewport.scrollWidth
                 });
                 if (nextScrollLeft !== viewport.scrollLeft) {
+                  scaleLeft -= nextScrollLeft - viewport.scrollLeft;
                   viewport.scrollLeft = nextScrollLeft;
                 }
               }
-              const scaleRect = scaleRef.current.getBoundingClientRect();
               const nextPositionUs = resolveTimelinePositionUs(
                 pendingClientX,
-                scaleRect.left,
+                scaleLeft,
                 scaleRect.width,
                 totalDurationUs
               );
@@ -4834,6 +4964,7 @@ function ExportInspector({
   confirmed,
   draft,
   media,
+  storage,
   onCancel,
   onConfirm,
   onNavigate,
@@ -4850,6 +4981,7 @@ function ExportInspector({
   readonly confirmed: boolean;
   readonly draft: VideoEditorDraftDto;
   readonly media?: StorageLocalMediaHandleDto;
+  readonly storage?: StorageApi;
   readonly onCancel: () => void;
   readonly onConfirm: (confirmed: boolean) => void;
   readonly onNavigate?: (itemId: 'tasks' | 'library', taskId?: string) => void;
@@ -4870,6 +5002,8 @@ function ExportInspector({
   );
   const [resultPreviewExpanded, setResultPreviewExpanded] = useState(false);
   const resultPreviewVideoRef = useRef<HTMLVideoElement>(null);
+  const [previewError, setPreviewError] = useState(false);
+  const retryPreviewRef = useRef<() => void>(() => {});
   const state = exportStateDisplay(task?.state);
   const completed = task?.state === 'completed' && Boolean(task.workId);
   const active = Boolean(task && isExportPollingState(task.state));
@@ -4893,9 +5027,124 @@ function ExportInspector({
   }, [completed, resultPreviewExpanded]);
 
   useEffect(() => {
-    if (!media?.url) return;
-    resultPreviewVideoRef.current?.load();
-  }, [media?.url]);
+    const video = resultPreviewVideoRef.current;
+    const workId = task?.workId;
+    if (!video || !media || !storage || !workId) return;
+    let active = true;
+    let handle = media;
+    let wanted = false;
+    let recovering = false;
+    let attempted = false;
+    let loadedReplacement = false;
+    let replacing = false;
+    let generation = 0;
+    let position = 0;
+    let progressTime = video.currentTime;
+    let progressAt = performance.now();
+    let timeout: number | undefined;
+    setPreviewError(false);
+    const clearDeadline = () => window.clearTimeout(timeout);
+    const fail = () => {
+      clearDeadline();
+      generation++;
+      recovering = false;
+      wanted = false;
+      video.pause();
+      setPreviewError(true);
+    };
+    const resume = () => {
+      if (!active || !recovering || !loadedReplacement || video.seeking) return;
+      recovering = false;
+      clearDeadline();
+      progressTime = video.currentTime;
+      progressAt = performance.now();
+      if (wanted) void video.play().catch(() => { if (active) fail(); });
+    };
+    const recover = async () => {
+      if (!active || recovering) return;
+      if (attempted) { fail(); return; }
+      attempted = true;
+      recovering = true;
+      loadedReplacement = false;
+      replacing = false;
+      const request = ++generation;
+      position = Number.isFinite(video.currentTime) ? video.currentTime : position;
+      const rate = video.playbackRate;
+      setPreviewError(false);
+      timeout = window.setTimeout(fail, 12000);
+      try {
+        const result = await storage.createWorkMediaHandle(workId);
+        // A timeout, unmount or Work change invalidates late IPC results.
+        if (!active || !recovering || request !== generation) return;
+        if (!result.ok) { fail(); return; }
+        handle = result.value;
+        replacing = true;
+        video.src = handle.url;
+        video.load();
+        video.playbackRate = rate;
+      } catch {
+        if (active && recovering && request === generation) fail();
+      }
+    };
+    const onMetadata = () => {
+      if (!recovering || !replacing) return;
+      loadedReplacement = true;
+      video.currentTime = Math.min(position, Number.isFinite(video.duration)
+        ? Math.max(0, video.duration - 0.01) : position);
+      resume();
+    };
+    const onPlay = () => {
+      if (!wanted && !recovering) attempted = false;
+      wanted = true;
+      progressTime = video.currentTime;
+      progressAt = performance.now();
+      if (Date.parse(handle.expiresAt) <= Date.now()) void recover();
+    };
+    const onPause = () => {
+      // load() queues a pause while the old decoder is being replaced.
+      if (!recovering || !replacing || loadedReplacement) wanted = false;
+    };
+    const onError = () => {
+      if (recovering) { if (replacing && video.error) fail(); }
+      else void recover();
+    };
+    const onSeek = () => {
+      if (!recovering) {
+        progressTime = video.currentTime;
+        progressAt = performance.now();
+        if (Date.parse(handle.expiresAt) <= Date.now()) void recover();
+      }
+    };
+    retryPreviewRef.current = () => { attempted = false; wanted = true; void recover(); };
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('error', onError);
+    video.addEventListener('seeking', onSeek);
+    video.addEventListener('loadedmetadata', onMetadata);
+    video.addEventListener('seeked', resume);
+    const monitor = window.setInterval(() => {
+      if (!wanted || recovering || video.ended) return;
+      if (Math.abs(video.currentTime - progressTime) > 0.05) {
+        progressTime = video.currentTime;
+        progressAt = performance.now();
+      } else if (performance.now() - progressAt >= 4000) void recover();
+    }, 1000);
+    // Reopening the inspector may mount an already expired handle.
+    if (Date.parse(handle.expiresAt) <= Date.now()) void recover();
+    else video.load();
+    return () => {
+      active = false;
+      clearDeadline();
+      window.clearInterval(monitor);
+      retryPreviewRef.current = () => {};
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+      video.removeEventListener('error', onError);
+      video.removeEventListener('seeking', onSeek);
+      video.removeEventListener('loadedmetadata', onMetadata);
+      video.removeEventListener('seeked', resume);
+    };
+  }, [media, storage, task?.workId]);
 
   function savePreferences(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -5081,7 +5330,6 @@ function ExportInspector({
                 className="uc-video-editor__export-preview-video"
                 controls
                 controlsList="nofullscreen"
-                key={media.url}
                 playsInline
                 preload="auto"
                 ref={resultPreviewVideoRef}
@@ -5102,6 +5350,12 @@ function ExportInspector({
                 )}
               </button>
             </div>
+          ) : null}
+          {previewError ? (
+            <p role="alert" data-export-preview-error>
+              预览暂时无法播放，已导出的文件不受影响。
+              <Button onClick={() => retryPreviewRef.current()} variant="secondary">重试播放</Button>
+            </p>
           ) : null}
           <div className="uc-video-editor__export-actions">
             <Button disabled={busy} onClick={onReveal} variant="secondary">

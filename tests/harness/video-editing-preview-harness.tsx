@@ -10,7 +10,10 @@ import 'rsuite/dist/rsuite-no-reset.min.css';
 import '../../src/styles.css';
 import '../../src/styles/rsuite-bridge.css';
 
-const fixtures = (window as unknown as { editingFixtures: { videos: string[]; sheets: string[] } }).editingFixtures;
+const fixtures = (window as unknown as { editingFixtures: { videos: string[]; sheets: string[]; sheetUrls?: string[]; proxies?: string[]; deferProxies?: boolean } }).editingFixtures;
+let proxiesReleased = !fixtures.deferProxies;
+let proxiesReady = 0;
+const proxyReleases: Array<() => void> = [];
 const ok = <T,>(value: T) => ({ ok: true as const, value });
 const timestamp = '2026-09-21T00:00:00.000Z';
 let timeOffset = 0;
@@ -18,11 +21,18 @@ const realNow = Date.now.bind(Date);
 Date.now = () => realNow() + timeOffset;
 let failSheets = false;
 let failVideos = false;
+let failNextSourcePreview = false;
 let revision = 0;
 const requests: string[] = [];
+const sourceRequests: string[] = [];
+const previewClipByUrl = new Map<string, string>();
 const handles: string[] = [];
 const navigation: string[] = [];
 let writes = 0;
+let workRequests = 0;
+let workMedia: { url: string; expiresAt: string } | undefined;
+let failWorkMedia = false;
+let workDelayMs = 0;
 const sizes = [[180, 320], [320, 180], [240, 240]];
 const draft: VideoEditorDraftDto = {
   schemaVersion: 1, kind: 'video_basic_edit', draftId: 'preview-draft', projectId: 'preview-project',
@@ -47,17 +57,46 @@ const api = {
     listWorks: async () => ok({ items: [] }),
     listTasks: async () => ok({ items: [{ taskId: 'export-task', projectId: draft.projectId, kind: 'video_editing', createdAt: timestamp }] }),
     getTaskDetails: async () => ok({ sourceDraftId: draft.draftId }),
-    createWorkMediaHandle: async () => ok({ url: fixtures.videos[0], mediaKind: 'video', mimeType: 'video/mp4', expiresAt: new Date(Date.now() + 300000).toISOString() }),
+    createWorkMediaHandle: async () => {
+      workRequests++;
+      if (workDelayMs) await new Promise(resolve => setTimeout(resolve, workDelayMs));
+      if (failWorkMedia) return unavailable();
+      if (!workMedia || Date.parse(workMedia.expiresAt) <= Date.now()) {
+        const url = URL.createObjectURL(await (await fetch(fixtures.videos[0])).blob());
+        handles.push(url);
+        workMedia = { url, expiresAt: new Date(Date.now() + 300000).toISOString() };
+      }
+      return ok({ ...workMedia, mediaKind: 'video', mimeType: 'video/mp4' });
+    },
     revealWorkFile: async () => { navigation.push('reveal'); return ok(undefined); }
   },
   videoEditors: {
     list: async () => ok([draft]),
     getSourceStatus: async (_draftId: string, clipId: string) => ok({ clipId, state: 'available', issues: [], relinkRequired: false, referenceKind: 'managed_project_copy' }),
     getExport: async () => ok({ taskId: 'export-task', executionId: 'execution', attempt: 1, state: 'completed', canCancel: false, canRetry: false, workId: 'work', updatedAt: timestamp }),
-    createSourcePreview: async (_draftId: string, clipId: string) => failVideos ? unavailable() : ok({ url: fixtures.videos[indexOf(clipId)], expiresAt: new Date(Date.now() + 300000).toISOString(), mimeType: 'video/mp4', kind: 'original' }),
-    requestPreviewArtifact: async (_draftId: string, clipId: string) => {
+    createSourcePreview: async (_draftId: string, clipId: string) => {
+      sourceRequests.push(clipId);
+      if (failVideos) return unavailable();
+      const blob = failNextSourcePreview
+        ? new Blob(['broken preview'], { type: 'video/mp4' })
+        : await (await fetch(fixtures.videos[indexOf(clipId)])).blob();
+      failNextSourcePreview = false;
+      const url = URL.createObjectURL(blob);
+      previewClipByUrl.set(url, clipId);
+      handles.push(url);
+      return ok({ url, expiresAt: new Date(Date.now() + 300000).toISOString(), mimeType: 'video/mp4', kind: 'original' });
+    },
+    requestPreviewArtifact: async (_draftId: string, clipId: string, kind: string) => {
+      if (kind === 'scrub_video') {
+        if (!proxiesReleased) await new Promise<void>(resolve => proxyReleases.push(resolve));
+        const url = fixtures.proxies?.[indexOf(clipId)];
+        if (url) { proxiesReady++; previewClipByUrl.set(url, clipId); }
+        return url ? ok({ url, expiresAt: new Date(Date.now() + 300000).toISOString(), mimeType: 'video/mp4', kind }) : unavailable();
+      }
       requests.push(clipId);
       if (failSheets) return unavailable();
+      const sheetUrl = fixtures.sheetUrls?.[indexOf(clipId)];
+      if (sheetUrl) return ok({ url: sheetUrl, expiresAt: new Date(Date.now() + 300000).toISOString(), mimeType: 'image/jpeg', kind: 'thumbnail_strip' });
       const bytes = Uint8Array.from(atob(fixtures.sheets[indexOf(clipId)]), c => c.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
       handles.push(url);
@@ -81,8 +120,13 @@ function mount() {
   </main></RSuiteThemeBridge></ThemeProvider>);
 }
 const harness = {
-  state: () => ({ requests: [...requests], writes, navigation: [...navigation], draftUnchanged: JSON.stringify(draft) === originalDraft }),
-  expire: () => { timeOffset += 301000; handles.splice(0).forEach(url => URL.revokeObjectURL(url)); },
+  delayWorkMedia: (ms: number) => { workDelayMs = ms; },
+  failWorkMedia: (value: boolean) => { failWorkMedia = value; },
+  state: () => ({ workRequests, requests: [...requests], sourceRequests: [...sourceRequests], proxiesReady, writes, navigation: [...navigation], draftUnchanged: JSON.stringify(draft) === originalDraft }),
+  clipForVideo: (video: HTMLVideoElement) => previewClipByUrl.get(video.currentSrc || video.src),
+  releaseProxies: () => { proxiesReleased = true; proxyReleases.splice(0).forEach(resolve => resolve()); },
+  breakNextSourcePreview: () => { failNextSourcePreview = true; },
+  expire: (elapsedMs = 301000) => { timeOffset += elapsedMs; handles.splice(0).forEach(url => URL.revokeObjectURL(url)); },
   reset: (sheetsFail = false, videosFail = false) => { failSheets = sheetsFail; failVideos = videosFail; revision++; mount(); },
   theme: (value: 'light' | 'dark') => setTheme?.(value),
   video: (index: number) => fixtures.videos[index]

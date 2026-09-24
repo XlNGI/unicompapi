@@ -170,10 +170,10 @@ test('V2-S6 defines the three-tier responsive system with a collapsed inspector 
     stylesSource.match(/\.uc-video-editor \{[^}]*\}/)?.[0] ?? '',
     /max-width|margin-inline/
   );
-  // W1 基础栅格加宽项目素材列，时间线横跨完整工作区。
+  // 当前维护布局：属性栏贯通两行，时间线占素材与预览列。
   assert.match(
     stylesSource,
-    /\.uc-video-editor__workspace \{[^}]*grid-template-columns: 380px minmax\(0, 1fr\) 320px[^}]*grid-template-rows: minmax\(260px, 1fr\) minmax\(160px, 38%\)/
+    /\.uc-video-editor__workspace \{[^}]*grid-template-columns: 280px minmax\(0, 1fr\) minmax\(400px, 34%\)[^}]*grid-template-rows: minmax\(260px, 1fr\) minmax\(max-content, 38%\)/
   );
   assert.match(
     stylesSource,
@@ -187,7 +187,7 @@ test('V2-S6 defines the three-tier responsive system with a collapsed inspector 
   );
   const w2Block = stylesSource.match(/@media \(max-width: 1412px\) \{[\s\S]*?\n\}/);
   assert.ok(w2Block);
-  assert.match(w2Block[0], /grid-template-columns: 250px minmax\(400px, 1fr\) 280px/);
+  assert.match(w2Block[0], /grid-template-columns: 220px minmax\(0, 1fr\) minmax\(360px, 34%\)/);
   assert.match(w2Block[0], /72px minmax\(0, 1fr\)/);
   // W3 断点 <1024：单列 + 折叠抽屉
   assert.match(stylesSource, /@media \(max-width: 1023px\)/);
@@ -308,15 +308,15 @@ test('V2-S16 keeps the media-bin empty state compact', () => {
 test('V2-S8 switches preview ownership when a timeline seek crosses clips', () => {
   assert.match(
     editorSource,
-    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,500}?resolveTimelineSegmentAt\(segments, boundedUs\)/
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,600}?resolveTimelineSegmentAt\(segments, Math\.min\(boundedUs, totalDurationUs - 1\)\)/
   );
   assert.match(
     editorSource,
-    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,700}?setSelectedClipId\(targetSegment\.clipId\)/
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,1000}?setSelectedClipId\(targetSegment\.clipId\)/
   );
   assert.match(
     editorSource,
-    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,1100}?ensurePreview\([\s\S]{0,120}?targetSegment\.clipId,[\s\S]{0,120}?boundedUs/
+    /function seekTimeline\([^)]*\)[^{]*\{[\s\S]{0,1600}?ensurePreview\([\s\S]{0,120}?targetSegment\.clipId,[\s\S]{0,120}?boundedUs/
   );
   const ensurePreviewSource = editorSource.match(
     /async function ensurePreview\([\s\S]*?\n  }\n\n  async function requestProxy/
@@ -492,10 +492,10 @@ test('V2-S13 implements the approved editor layout and compact-window behavior',
   assert.match(editorSource, /aria-controls="uc-video-editor-timeline-content"/);
   assert.match(editorSource, /aria-expanded=\{!timelineCollapsed\}/);
   assert.match(editorSource, /className="uc-video-editor__timeline-summary"/);
-  assert.match(stylesSource, /\.uc-video-editor__timeline \{[^}]*grid-column: 1 \/ -1/);
+  assert.match(stylesSource, /\.uc-video-editor__timeline \{[^}]*grid-column: 1 \/ 3/);
   assert.match(stylesSource, /\.uc-video-editor__inspector \{[^}]*grid-row: 1/);
 
   const mediumContainer = stylesSource.match(/@container \(max-width: 1180px\)[\s\S]*?@container \(max-width: 944px\)/)?.[0] ?? '';
-  assert.match(mediumContainer, /grid-template-columns: 250px minmax\(400px, 1fr\) 280px/);
+  assert.match(mediumContainer, /grid-template-columns: 200px minmax\(0, 1fr\) 360px/);
   assert.doesNotMatch(mediumContainer, /grid-template-columns: minmax\(0, 1fr\)/);
 });

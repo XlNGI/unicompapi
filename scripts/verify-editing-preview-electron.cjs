@@ -3,12 +3,16 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, protocol } = require('electron');
 const root = path.resolve(__dirname, '..');
 const before = process.argv.includes('--before');
+const staticIdle = process.argv.includes('--static-idle');
+const exportIdle = process.argv.includes('--export-idle');
 const framesOnly = process.argv.includes('--frames-only');
 const label = before ? 'before' : framesOnly ? 'frames' : 'after';
-const output = path.join(root, 'outputs/editing-preview-fix', label);
+const output = path.join(root, staticIdle ? 'outputs/editing-static-idle' : exportIdle ? 'outputs/editing-export-idle' : 'outputs/editing-preview-fix', label);
+if (staticIdle) protocol.registerSchemesAsPrivileged([{scheme:'unicomp-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
+let staticExpired = false;
 const checks = [];
 const report = { checks };
 app.setPath('userData', path.join(os.tmpdir(), `unicomp-editing-preview-${process.pid}`));
@@ -25,6 +29,10 @@ async function until(source, limit = 20000) {
   throw new Error(`Timed out: ${source}`);
 }
 async function screenshot(name) { await fs.writeFile(path.join(output, `${name}.png`), (await window.webContents.capturePage()).toPNG()); }
+async function clearImages() {
+  await js(`document.querySelector('[aria-label="预览缩放"]').click()`);
+  await js(`Array.from(document.querySelectorAll('[role="menuitem"]')).find(e=>e.textContent.trim()==='清除预览缓存').click()`);
+}
 async function click(text) {
   await js(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`);
 }
@@ -50,6 +58,13 @@ async function run() {
     fixtures.sheets.push((await fs.readFile(sheet)).toString('base64'));
   }
   await app.whenReady();
+  if (staticIdle) {
+    fixtures.sheetUrls = fixtures.sheets.map((_,i)=>`unicomp-media://local/sheet-${i}`);
+    protocol.handle('unicomp-media', request => {
+      const i=fixtures.sheetUrls.indexOf(request.url);
+      return staticExpired || i<0 ? new Response('expired',{status:404}) : new Response(Buffer.from(fixtures.sheets[i],'base64'),{headers:{'Content-Type':'image/jpeg'}});
+    });
+  }
   await require('vite').build({ configFile: false, root, logLevel: 'error',
     define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     build: { outDir: temp, emptyOutDir: false, minify: false,
@@ -65,12 +80,34 @@ async function run() {
   await screenshot('timeline');
   report.initialRequests = await js('editingHarness.state()');
   checks.push({ name: 'three clips have visible decoded thumbnail cells', passed: report.initial.every(s => s.slots.length && s.slots.every(t => t.loaded && t.imageHeight > 0 && t.imageWidth > 0)) });
-  await js('editingHarness.expire()');
+  const staticImages = `Array.from(document.querySelectorAll('.uc-video-editor__seg-poster,.uc-video-editor__media-frame img,.uc-video-editor__contact-sheet')).map(i=>({src:i.src,loaded:i.naturalWidth>0}))`;
+  const beforeStatic = await js(staticImages);
+  if (!exportIdle) await js(`editingHarness.expire(${staticIdle ? 1201000 : 301000})`);
+  if (staticIdle) staticExpired = true;
   // A resize changes visible thumbnail slots, as scrolling/zooming does.
   window.setSize(1360, 850);
   await delay(2000);
   report.expired = await js('editingHarness.state()');
-  checks.push({ name: 'expired contact sheets reacquired on viewport change', passed: report.expired.requests.length > report.initialRequests.requests.length });
+  if (!exportIdle) checks.push({ name: 'static sheets do not reload when playback handles expire', passed: report.expired.requests.length === report.initialRequests.requests.length });
+  if (staticIdle) {
+    report.staticBefore = beforeStatic;
+    report.staticAfter = await js(staticImages);
+    checks.push({name:'loaded thumbnails and posters keep their original URLs after 20-minute simulated expiry',passed:report.staticAfter.length>0 && report.staticAfter.every(i=>i.loaded && beforeStatic.some(old=>old.src===i.src))});
+    await js('editingHarness.reset()');
+    await until(`document.querySelectorAll('.uc-video-editor__contact-sheet').length>0 && Array.from(document.querySelectorAll('.uc-video-editor__seg-poster')).length===3`);
+    await delay(500);
+    const remounted=await js(staticImages);
+    checks.push({name:'editor remount reuses loaded sheets and posters without regeneration',passed:remounted.every(i=>i.loaded && beforeStatic.some(old=>old.src===i.src)) && (await js('editingHarness.state()')).requests.length===report.initialRequests.requests.length});
+    staticExpired=false;
+    await clearImages();
+    await until(`editingHarness.state().requests.length>${report.initialRequests.requests.length} && document.querySelectorAll('.uc-video-editor__seg-poster').length===3 && document.querySelectorAll('.uc-video-editor__contact-sheet').length>0`);
+    checks.push({name:'explicit clear regenerates static images',passed:(await js(staticImages)).some(i=>!beforeStatic.some(old=>old.src===i.src))});
+    report.boundary='Synthetic media, actual Chromium image decode, simulated 20-minute handle expiry; no real elapsed 20-minute or sleep validation.';
+    await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));
+    assert.ok(checks.every(c=>c.passed));
+    console.log(JSON.stringify({checks,evidence:output}));
+    return;
+  }
   if (!before) {
     await until(`Array.from(document.querySelectorAll('.uc-video-editor__thumbnail img')).every(i => i.naturalWidth > 0)`);
     await js(`document.querySelector('.uc-video-editor__contact-sheet').src='data:image/jpeg;base64,broken'`);
@@ -86,6 +123,46 @@ async function run() {
     window.setSize(1280, 850);
     await click('导出');
     await until(`!!document.querySelector('.uc-video-editor__export-preview-video')?.videoWidth`);
+    if (exportIdle) {
+      await delay(250);
+      const v = `document.querySelector('.uc-video-editor__export-preview-video')`;
+      await js(`window.exportVideo=${v}; exportVideo.currentTime=1;exportVideo.volume=0.35;exportVideo.playbackRate=0.75`);
+      await until(`!exportVideo.seeking && exportVideo.currentTime>=1`);
+      const oldUrl=await js('exportVideo.src');
+      await js('editingHarness.expire();void exportVideo.play().catch(()=>{})');
+      await until(`exportVideo.src!==${JSON.stringify(oldUrl)} && !exportVideo.paused && exportVideo.currentTime>1.15`, 12000);
+      checks.push({name:'expired export URL replaced and playback resumes at saved position',passed:true});
+      checks.push({name:'volume and speed survive recovery',passed:await js('exportVideo.volume===0.35 && exportVideo.playbackRate===0.75')});
+      await js('exportVideo.pause()');
+      const count=await js('editingHarness.state().workRequests');
+      await js(`exportVideo.currentTime=0.5;window.originalExportPlay=HTMLMediaElement.prototype.play;window.freezeExport=true;HTMLMediaElement.prototype.play=function(){if(this===exportVideo && window.freezeExport){window.freezeExport=false;this.dispatchEvent(new Event('play'));this.dispatchEvent(new Event('playing'));return Promise.resolve()}return window.originalExportPlay.call(this)};void exportVideo.play()`);
+      await until(`editingHarness.state().workRequests===${count+1} && !exportVideo.paused && exportVideo.currentTime>0.7`, 12000);
+      checks.push({name:'playing without progress recovers even when valid Work URL is reused',passed:true});
+      await js('HTMLMediaElement.prototype.play=window.originalExportPlay;exportVideo.pause();editingHarness.failWorkMedia(true);editingHarness.expire();void exportVideo.play().catch(()=>{})');
+      await until(`!!document.querySelector('[role="alert"][data-export-preview-error]')`,15000);
+      const failedCount=await js('editingHarness.state().workRequests');
+      await delay(4500);
+      checks.push({name:'persistent failure stops with visible retry and no request loop',passed:await js(`editingHarness.state().workRequests===${failedCount} && exportVideo.paused`)});
+      await js(`editingHarness.failWorkMedia(false);document.querySelector('[data-export-preview-error] button').click()`);
+      await until('!exportVideo.paused && exportVideo.currentTime>0.9');
+      checks.push({name:'explicit retry restores playback',passed:true});
+      await js('exportVideo.pause();editingHarness.delayWorkMedia(800);editingHarness.expire();void exportVideo.play().catch(()=>{})');
+      await delay(150);
+      await js('exportVideo.pause()');
+      await delay(1300);
+      checks.push({name:'user pause during handle request prevents automatic resume',passed:await js('exportVideo.paused')});
+      await js('editingHarness.delayWorkMedia(0)');
+      await click('画面');
+      await js('editingHarness.expire()');
+      await click('导出');
+      await until(`${v}?.readyState>=2 && !${v}.seeking`);
+      checks.push({name:'opening export inspector with expired URL recovers without autoplay',passed:await js(`${v}.paused`)});
+      report.boundary='Real React/Chromium with synthetic media and simulated expiry; not real Windows 20-minute idle or sleep.';
+      await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));
+      assert.ok(checks.every(c=>c.passed));
+      console.log(JSON.stringify(report));
+      return;
+    }
     await js(`document.querySelector('.uc-video-editor__export-result').scrollIntoView({block:'end'})`);
     report.buttons = await js(`Array.from(document.querySelectorAll('.uc-video-editor__export-result .uc-video-editor__export-actions button')).map(e => { const r=e.getBoundingClientRect(); return {text:e.textContent, x:r.x,y:r.y,width:r.width,height:r.height,scrollWidth:e.scrollWidth,clientWidth:e.clientWidth}; })`);
     checks.push({ name: 'result buttons share one row with complete labels', passed: report.buttons.length === 2 && Math.abs(report.buttons[0].y - report.buttons[1].y) < 2 && report.buttons.every(b => b.scrollWidth <= b.clientWidth) });
@@ -138,6 +215,8 @@ async function run() {
     }
   }
   await js('editingHarness.reset(true, false)');
+  await until(`!!document.querySelector('[aria-label="预览缩放"]')`);
+  await clearImages();
   await until(`document.querySelectorAll('.uc-video-editor__seg-poster').length === 3`);
   await until(`(() => {
     const segments = Array.from(document.querySelectorAll('.uc-video-editor__seg'));
@@ -149,6 +228,8 @@ async function run() {
   report.fallback = await js(frameState);
   checks.push({ name: 'contact sheet unavailable uses decoded video frames', passed: report.fallback.every(s => s.slots.length && s.slots.every(t => t.loaded)) });
   await js('editingHarness.reset(true, true)');
+  await until(`!!document.querySelector('[aria-label="预览缩放"]')`);
+  await clearImages();
   await until(`document.querySelectorAll('.uc-video-editor__seg').length === 3 && document.querySelectorAll('.uc-video-editor__seg-poster').length === 0`);
   await delay(150);
   checks.push({ name: 'missing frames never draw opaque empty thumbnail slots', passed: await js(`document.querySelectorAll('.uc-video-editor__thumbnail').length === 0`) });
