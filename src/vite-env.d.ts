@@ -16,6 +16,7 @@ import type { ParameterInputDiagnosticsApi } from './shared/parameter-input-perf
 import type { DocumentAttachmentApi } from './shared/document-attachment-ipc';
 import type { DocumentGenerationApi } from './shared/document-generation-ipc';
 import type { WebResearchApi } from './shared/web-research-ipc';
+import type { ProductionTraceApi } from './shared/conversation-production-ipc';
 
 declare global {
   interface Window {
@@ -26,6 +27,7 @@ declare global {
       documentAttachments: DocumentAttachmentApi;
       documentGeneration: DocumentGenerationApi;
       webResearch: WebResearchApi;
+      productionTrace?: ProductionTraceApi;
       getPathForFile: (file: File) => string;
       imageFeatures: ImageFeatureApi;
       promptEnhance: PromptEnhanceApi;

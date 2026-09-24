@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 const page = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
+const progress = await readFile('src/pages/chat/DocumentProgress.tsx', 'utf8');
 const failureNoticeSource = await readFile(
   'src/ui/chat-response-failure-notice.ts',
   'utf8'
@@ -70,7 +71,7 @@ test('chat page exposes a document generation entry without making chat the only
   assert.match(page, /实际页码：第/);
   assert.doesNotMatch(page, /文档生成失败，未保存文件/);
   assert.match(page, /awaitDocumentCompletion/);
-  assert.match(page, /AI 正在撰写文档内容/);
+  assert.match(page, /正在准备文档内容/);
   assert.match(page, /handlePageDrop/);
   assert.match(page, /uc-chat-page__drop-overlay/);
   assert.doesNotMatch(page, /if \(!documentMode\) setDocumentMode\(true\)/);
@@ -86,6 +87,14 @@ test('all composer sends use the semantic workflow entry and accept pending task
   assert.doesNotMatch(page, /activeWorkflow && activeWorkflow\.status !== 'needs_clarification'/);
   assert.match(page, /semanticCandidate/);
   assert.match(page, /resetComposerScope/);
+});
+
+test('composer rejects missing models before planning and keeps stop controls independent', () => {
+  const submit = page.slice(page.indexOf('async function submitWorkflowInput()'), page.indexOf('async function executeReadyWorkflow'));
+  assert.match(submit, /if \(!selectedCandidateId \|\| !selectedCandidate\?\.available\) \{\s*setNotice\(errorMessages\.model_selection_required\);\s*return;/);
+  assert.ok(submit.indexOf('model_selection_required') < submit.indexOf('setPlanningActive(true)'));
+  assert.match(page, /: !chat \|\|\s*!canCompose \|\|\s*!selectedCandidate\?\.available/);
+  assert.match(page, /planningActive\s*\? void cancelWorkflowPlanning\(\)/);
 });
 
 test('chat page document card styles exist', () => {
@@ -122,10 +131,41 @@ test('document outline payload is never rendered as ordinary chat markdown', () 
   assert.match(page, /documentResponseActive/);
   assert.match(page, /hideDocumentDraftContent/);
   assert.match(page, /isMachineReadableDocumentOutline/);
-  assert.match(page, /isDocumentDraftMessage \|\| hideDocumentDraftContent/);
+  assert.match(page, /showProductionProgress = isDocumentDraftMessage \|\| hideDocumentDraftContent/);
   assert.match(page, /setDocumentResponseActive\(true\)/);
   assert.match(page, /setDocumentResponseActive\(false\)/);
-  assert.match(page, /documentResponseActive\s*\|\|\s*hideDocumentDraftContent/);
+  assert.match(page, /showProductionProgress \? \(\s*<DocumentProgress/);
+});
+
+test('production trace is expanded by default and legacy task progress stays compatible', () => {
+  assert.equal((page.match(/<DocumentProgress\b/g) ?? []).length, 1);
+  assert.match(page, /taskProgress=\{taskProgress\}/);
+  assert.match(page, /events=\{traceEvents\}/);
+  assert.match(page, /productionTrace\.subscribeCommand/);
+  assert.match(page, /productionTrace\.subscribe\(selectedId/);
+  assert.match(page, /productionTrace\.list\(selectedId\)/);
+  assert.match(progress, /aria-label="生产进度"/);
+  assert.match(progress, /<ol className="uc-chat-production-trace" aria-label="完整生产链路">/);
+  assert.match(progress, /events\.map\(\(event\) =>/);
+  assert.match(progress, /data-status=\{event.status\}/);
+  assert.match(progress, /本地 → 模型/);
+  assert.match(progress, /模型 → 本地/);
+  assert.match(progress, /生产记录不完整/);
+  assert.match(progress, /taskProgress\.filter\(\(event\) => event\.progressStatus === 'completed'\)/);
+  assert.match(progress, /completedSteps\.length > 0/);
+  assert.match(progress, /查看已完成步骤/);
+  assert.doesNotMatch(progress, /生成步骤|步骤\s*\d|stepLabels|progressSteps|生成大纲.*校验.*生成文件/);
+  assert.doesNotMatch(page, /AI 工作过程|模型返回的思考内容/);
+});
+
+test('document production exposes readable body content without rendering the raw outline', () => {
+  assert.match(page, /bodyContent=\{\(isDocumentDraftMessage \|\| hideDocumentDraftContent\)/);
+  assert.match(page, /item\.documentResult\?\.validatedContent \?\? item\.content/);
+  assert.match(page, /bodyStreaming=\{item\.state === 'streaming'/);
+  assert.match(progress, /aria-label="生成正文"/);
+  assert.match(progress, /projectDocumentBody\(bodyContent \?\? ''\)/);
+  assert.match(progress, /<StreamingMarkdown content=\{body\} streaming allowImages=\{false\} \/>/);
+  assert.match(progress, /<MarkdownMessage content=\{body\} allowImages=\{false\} \/>/);
 });
 
 test('document execution consumes the validated workflow plan without re-parsing in React', () => {

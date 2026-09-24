@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { projectTaskProgress, type ConversationTaskProgressSnapshot } from '../../src/shared/conversation-task-progress';
 import {
   createConversationResponseExecution,
   createConversationResponseStreamEvent,
@@ -170,6 +171,69 @@ describe('conversation response execution contract', () => {
         event(5, 'stream_completed', t3)
       ]
     })).toThrow('requires text_reasoning');
+  });
+
+  it('persists task progress without changing the response state', () => {
+    const events = [
+      event(1, 'execution_created', t0),
+      event(2, 'stream_started', t1),
+      event(3, 'task_progress', t1, {
+        stage: 'design', progressStatus: 'running', taskRevision: 2,
+        pageId: 'page-3', pageRevision: 1
+      }),
+      event(4, 'content_delta', t2, { contentDelta: '已完成第 3 页草稿' }),
+      event(5, 'stream_completed', t3)
+    ];
+    const projected = projectConversationResponseExecution({ execution: execution('completed'), events });
+    expect(projected.state).toBe('completed');
+    expect(projected.taskProgress).toEqual([{
+      sequence: 3, stage: 'design', progressStatus: 'running', taskRevision: 2,
+      pageId: 'page-3', pageRevision: 1, occurredAt: t1
+    }]);
+    expect(toControlledConversationResponseStreamEventDto({ execution: execution('completed'), event: events[2] })).toMatchObject({
+      type: 'task_progress', stage: 'design', progressStatus: 'running', taskRevision: 2, pageId: 'page-3'
+    });
+  });
+
+  it('keeps live progress identical to replay while ignoring stale tasks and page revisions', () => {
+    const events = [
+      event(1, 'execution_created', t0),
+      event(2, 'stream_started', t1),
+      event(3, 'task_progress', t1, { stage: 'planning', progressStatus: 'completed', taskRevision: 1 }),
+      event(4, 'task_progress', t1, { stage: 'design', progressStatus: 'completed', taskRevision: 2, pageId: 'page-1', pageRevision: 1 }),
+      event(5, 'task_progress', t1, { stage: 'checking', progressStatus: 'completed', taskRevision: 2, pageId: 'page-1', pageRevision: 1 }),
+      event(6, 'task_progress', t1, { stage: 'design', progressStatus: 'running', taskRevision: 2, pageId: 'page-1', pageRevision: 2 }),
+      event(7, 'task_progress', t1, { stage: 'checking', progressStatus: 'completed', taskRevision: 2, pageId: 'page-1', pageRevision: 1 }),
+      event(8, 'task_progress', t1, { stage: 'planning', progressStatus: 'completed', taskRevision: 1 }),
+      event(9, 'task_progress', t1, { stage: 'design', progressStatus: 'completed', taskRevision: 2, pageId: 'page-1', pageRevision: 2 })
+    ];
+    const replay = projectConversationResponseExecution({ execution: execution('streaming'), events }).taskProgress;
+    const live = events.reduce<readonly ConversationTaskProgressSnapshot[]>((current, item) =>
+      projectTaskProgress(current, toControlledConversationResponseStreamEventDto({ execution: execution('streaming'), event: item })), []);
+    expect(replay).toEqual(live);
+    expect(live).toEqual([{
+      sequence: 9, stage: 'design', progressStatus: 'completed', taskRevision: 2,
+      pageId: 'page-1', pageRevision: 2, occurredAt: t1
+    }]);
+    expect(projectTaskProgress(live, events[8])).toBe(live);
+    expect(projectTaskProgress(live, events[5])).toBe(live);
+  });
+
+  it('bounds progress snapshots without removing persisted history or inventing absent progress', () => {
+    const events = [event(1, 'execution_created', t0), event(2, 'stream_started', t1)];
+    expect(projectConversationResponseExecution({ execution: execution('streaming'), events }).taskProgress).toBeUndefined();
+    for (let index = 0; index < 140; index += 1) {
+      events.push(event(index + 3, 'task_progress', t1, {
+        stage: 'rendering', progressStatus: 'completed', taskRevision: 1,
+        pageId: `page-${index}`, pageRevision: 1
+      }));
+    }
+    const projected = projectConversationResponseExecution({ execution: execution('streaming'), events });
+    expect(projected.taskProgress).toHaveLength(128);
+    expect(projected.taskProgress?.[0].pageId).toBe('page-12');
+    expect(projected.taskProgress?.at(-1)?.pageId).toBe('page-139');
+    expect(events).toHaveLength(142);
+    expect(projected.streamSequence).toBe(142);
   });
 
   it('rejects media features, hidden provider fields and invalid stream transitions', () => {

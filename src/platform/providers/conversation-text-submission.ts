@@ -70,6 +70,8 @@ import {
 } from './conversation-stream-delta-batcher';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
 import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from './provider-tool-calling';
+import { bindProductionTraceAssistant, emitProductionEvent, getProductionTraceScope,
+  withProductionTrace, type ProductionTraceScope } from '../conversation-production-trace';
 
 export interface ConversationTextSubmissionRuntimes {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -222,7 +224,11 @@ function wrapChatAdapter(input: {
         const handle = await input.submit({
           routeSnapshot: dispatchRequest.routeSnapshot,
           request: adapterRequest,
-          beforeRequestStarted: dispatchRequest.beforeRequestStarted,
+          beforeRequestStarted: async () => {
+            await dispatchRequest.beforeRequestStarted();
+            await emitProductionEvent({ code: 'model_request', status: 'started',
+              operationId: responseExecutionIdFromDispatchRequest(adapterRequest), facts: { purpose: 'content' } });
+          },
           ...(input.toolCalling ? {
             toolBridge: input.toolCalling.bridge,
             maxToolRounds: input.toolCalling.maxRounds
@@ -246,6 +252,7 @@ function wrapChatAdapter(input: {
           providerOperationId: handle.providerOperationId
         };
       } catch (error) {
+        await emitProductionEvent({ code: 'model_request', status: 'failed', facts: { purpose: 'content' } });
         return {
           kind: 'failed_before_submission',
           safeCode: dispatchFailureSafeCode(input.adapterKey, error)
@@ -357,6 +364,15 @@ export function createConversationLinkedLifecycle(
     timer?: ReturnType<typeof setTimeout>;
     tail: Promise<void>;
   }>();
+  const production = new Map<string, { scope?: ProductionTraceScope; characters: number; lastAt: number }>();
+  async function traceResponse(executionId: ConversationResponseExecutionId,
+    status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled') {
+    const state = production.get(executionId);
+    const emit = () => emitProductionEvent({ code: 'model_response', status, operationId: executionId,
+      facts: { purpose: 'content', contentCharacters: state?.characters ?? 0 } });
+    if (state?.scope) await withProductionTrace(state.scope, emit);
+    else await emit();
+  }
 
   function enqueue<T>(executionId: ConversationResponseExecutionId, operation: () => Promise<T>): Promise<T> {
     const previous = queues.get(executionId) ?? Promise.resolve();
@@ -472,9 +488,16 @@ export function createConversationLinkedLifecycle(
     await lifecycle.appendDeltas(executionId, segments);
     for (const segment of segments) {
       if (segment.kind === 'content') {
+        const state = production.get(executionId);
+        if (state) state.characters += segment.delta.length;
         projectionState(executionId).pendingContent += segment.delta;
         scheduleFlush(executionId);
       }
+    }
+    const state = production.get(executionId);
+    if (state && state.characters > 0 && Date.now() - state.lastAt >= 1000) {
+      state.lastAt = Date.now();
+      await traceResponse(executionId, 'progress');
     }
   }
 
@@ -494,6 +517,12 @@ export function createConversationLinkedLifecycle(
   return {
     start: (executionId) => enqueue(executionId, async () => {
       await lifecycle.start(executionId);
+      const execution = await lifecycle.readModel(executionId);
+      bindProductionTraceAssistant(execution.assistantMessageId);
+      production.set(executionId, { scope: getProductionTraceScope(), characters: 0, lastAt: 0 });
+      await emitProductionEvent({ code: 'model_request', status: 'completed', operationId: executionId,
+        facts: { purpose: 'content' } });
+      await traceResponse(executionId, 'started');
       await queueProjection(executionId, (conversation, assistantMessageId) =>
         startAssistantMessageStreaming(
           conversation,
@@ -518,6 +547,8 @@ export function createConversationLinkedLifecycle(
         ));
         // Completion (including replay) must expose the saved conversation revision.
         await lifecycle.complete(executionId);
+        await traceResponse(executionId, 'completed');
+        production.delete(executionId);
         releaseProjection(executionId);
       });
     },
@@ -533,6 +564,8 @@ export function createConversationLinkedLifecycle(
       await enqueue(executionId, async () => {
         await flushPending(executionId);
         const event = await lifecycle.confirmCancelledDeferredPublish(executionId);
+        await traceResponse(executionId, 'cancelled');
+        production.delete(executionId);
         try {
           await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => cancelAssistantMessage(
             conversation,
@@ -551,6 +584,8 @@ export function createConversationLinkedLifecycle(
       await enqueue(executionId, async () => {
         await flushPending(executionId);
         const event = await lifecycle.failDeferredPublish(executionId, safeCode);
+        await traceResponse(executionId, 'failed');
+        production.delete(executionId);
         try {
           await queueProjection(executionId, (conversation, assistantMessageId, reasoningContent) => failAssistantMessage(
             conversation,
@@ -570,6 +605,8 @@ export function createConversationLinkedLifecycle(
       await enqueue(executionId, async () => {
         await flushPending(executionId);
         await lifecycle.interrupt(executionId, reason);
+        await traceResponse(executionId, 'failed');
+        production.delete(executionId);
         releaseProjection(executionId);
       });
     }

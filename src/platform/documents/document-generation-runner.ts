@@ -15,6 +15,7 @@ import {
   toTaskId,
   toWorkId,
   transitionExecution,
+  parseRepairPlan,
   type DocumentWorkspaceKind,
   type Execution,
   type FileReference,
@@ -23,6 +24,7 @@ import {
   type Work,
   type WorkId
 } from '../../domain';
+import type { RepairPlan } from '../../domain';
 import { resolveFileReferencePathSafely } from '../files';
 import type { DocumentThemeId } from './document-theme';
 import type { PresentationTemplateId } from './presentation-template';
@@ -53,8 +55,16 @@ import {
   readOfficeDocumentStructureFromBuffer
 } from './office-document-tool-executor';
 import type { DocumentStructureSnapshot } from './structured-document-tools';
-import type { DocumentRenderResult } from './temporary-document-workflow';
+import type {
+  DocumentQualityDiagnostic,
+  DocumentRenderResult
+} from './temporary-document-workflow';
+import {
+  runBoundedRepairWorkflow
+} from './repair-workflow';
 import { readPptxDocument, readPptxSlideOrder } from './pptx-page-reader';
+import { emitProductionEvent } from '../conversation-production-trace';
+import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../application/document-generation-service';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -79,6 +89,9 @@ export class DocumentGenerationError extends Error {
 }
 
 export interface DocumentGenerationPlanInput {
+  readonly executionId?: string;
+  /** Durable Task Runtime progress is a safety gate, not best-effort UI telemetry. */
+  readonly strictProgress?: boolean;
   readonly kind: DocumentWorkspaceKind;
   readonly title: string;
   readonly contentFingerprint: string;
@@ -95,11 +108,29 @@ export interface DocumentGenerationPlanInput {
   readonly presentationTemplate?: PresentationTemplateId;
   readonly signal?: AbortSignal;
   readonly onCancellationClosed?: () => void | Promise<void>;
+  readonly onProgress?: DocumentGenerationProgressCallback;
+  /**
+   * Optional authorized LLM/Designer repair planner. The runner remains the
+   * authority for parsing, allowlisting, retries, rendering, and publication;
+   * local rules must not synthesize a repair plan. The callback only receives
+   * a cloned, frozen outline and bounded diagnostics.
+   */
+  readonly requestLlmRepair?: (request: DocumentLlmRepairRequest) => Promise<unknown>;
+  /** Maximum time for one repair-planner request (bounded to 60 seconds). */
+  readonly repairTimeoutMs?: number;
   readonly images?: readonly {
     readonly fileId?: string;
     readonly workId?: string;
     readonly caption?: string;
   }[];
+}
+
+export interface DocumentLlmRepairRequest {
+  readonly outline: DocumentOutline;
+  readonly diagnostics: readonly DocumentQualityDiagnostic[];
+  readonly expectedRevision: number;
+  readonly attempt: number;
+  readonly signal: AbortSignal;
 }
 
 export interface DocumentGenerationResult {
@@ -139,6 +170,8 @@ export class DocumentGenerationRunner {
         temporaryPath: string,
         input: { readonly kind: DocumentWorkspaceKind; readonly signal: AbortSignal }
       ) => Promise<DocumentRenderResult>;
+      /** Formal PPT delivery requires actual local render diagnostics. */
+      readonly requireRenderForPpt?: boolean;
       publishFile?(
         temporaryPath: string,
         finalPath: string
@@ -155,10 +188,17 @@ export class DocumentGenerationRunner {
     const context = this.context();
     const existing = await this.findRegisteredResult(context, input);
     if (existing) return existing;
+    if (input.kind === 'ppt' && this.options.requireRenderForPpt && !this.options.renderPreview) {
+      throw new DocumentGenerationError(
+        'verification_failed',
+        'PPT visual QA renderer is unavailable; the file was not published'
+      );
+    }
     let task: Task | undefined;
     let execution: Execution | undefined;
     let temporaryPath: string | undefined;
     let finalPath: string | undefined;
+    let generated: GeneratedTemporaryDocumentFile | undefined;
     let file: FileReference | undefined;
     let workRegistered = false;
     try {
@@ -174,7 +214,7 @@ export class DocumentGenerationRunner {
       });
       await context.tasks.save(task);
       execution = createExecution({
-        id: toExecutionId(`execution-document-${createId()}`),
+        id: toExecutionId(input.executionId ?? `execution-document-${createId()}`),
         taskId: task.id,
         createdAt: toIsoTimestamp(now())
       });
@@ -207,78 +247,156 @@ export class DocumentGenerationRunner {
               displayName: path.basename(revisionSource.revisionSourcePath)
             })
           : undefined;
-      const generated = await generateTemporaryFile({
-        kind: input.kind,
-        outline: input.outline,
-        outputDirectory,
-        now: now(),
-        ...(input.theme !== undefined ? { theme: input.theme } : {}),
-        ...(input.presentationTemplate !== undefined
-          ? { presentationTemplate: input.presentationTemplate }
-          : {}),
-        ...revisionSource,
-        ...(input.images !== undefined && input.images.length > 0
-          ? { images: await this.resolveImages(context, input.images) }
-          : {})
-      });
-      temporaryPath = generated.temporaryPath;
-      finalPath = generated.finalPath;
-      this.assertNotCancelled(input.signal);
+      // Structural and rendered QA failures are recorded against the durable
+      // verification stage, including failures during a repair candidate.
       execution = await this.move(context, execution, 'verifying_file');
-      await this.assertTemporaryOutput(
-        generated,
-        input.kind,
-        input.outline,
-        input.requestedTotalPages
-      );
-      if (this.options.renderPreview) {
+      let currentOutline = input.outline;
+      let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
+      const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
+        this.options.renderPreview !== undefined &&
+        input.revisionPatch === undefined && input.revisionPatches === undefined;
+      const compileAndDiagnose = async (outline: DocumentOutline, attempt: number) => {
+        const operationSuffix = attempt === 0 ? '' : `:repair-${attempt}`;
+        const candidate = await this.observe(input, 'document_compile', `document-file-write${operationSuffix}`, async () => generateTemporaryFile({
+          onProgress: event => this.reportProgress(input, event),
+          kind: input.kind,
+          outline,
+          outputDirectory,
+          now: now(),
+          ...(input.theme !== undefined ? { theme: input.theme } : {}),
+          ...(input.presentationTemplate !== undefined
+            ? { presentationTemplate: input.presentationTemplate }
+            : {}),
+          ...revisionSource,
+          ...(input.images !== undefined && input.images.length > 0
+            ? { images: await this.resolveImages(context, input.images) }
+            : {})
+        }), { tool: 'write_document', ...(attempt > 0 ? { count: attempt, purpose: 'repair' as const } : {}) });
+        const previousTemporaryPath = temporaryPath;
+        temporaryPath = candidate.temporaryPath;
+        finalPath = candidate.finalPath;
+        if (previousTemporaryPath && previousTemporaryPath !== candidate.temporaryPath) {
+          await rm(previousTemporaryPath, { force: true });
+        }
+        this.assertNotCancelled(input.signal);
+        await this.observe(input, 'document_structure_check', `document-output-structure${operationSuffix}`, () => this.assertTemporaryOutput(
+          candidate,
+          input.kind,
+          outline,
+          input.requestedTotalPages
+        ), { tool: 'check', ...(attempt > 0 ? { count: attempt, purpose: 'repair' as const } : {}) });
+        if (!this.options.renderPreview) return { candidate, diagnostics: [] as readonly DocumentQualityDiagnostic[] };
+        let renderResult: DocumentRenderResult;
         try {
-          const renderResult = await this.options.renderPreview(generated.temporaryPath, {
+          renderResult = await this.observe(input, 'document_render', `document-preview-render${operationSuffix}`, () => this.options.renderPreview!(candidate.temporaryPath, {
             kind: input.kind,
             signal: input.signal ?? new AbortController().signal
-          });
-          if ((renderResult.diagnostics ?? []).some((diagnostic) => diagnostic.severity === 'error')) {
-            throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
-          }
+          }), { tool: 'render', ...(attempt > 0 ? { count: attempt, purpose: 'repair' as const } : {}) });
         } catch (error) {
           throw new DocumentGenerationError(
             'verification_failed',
             error instanceof Error ? error.message : 'Document preview rendering failed'
           );
         }
+        const diagnostics = (renderResult.diagnostics ?? []) as readonly DocumentQualityDiagnostic[];
+        await this.observe(input, 'document_check', `document-render-diagnostics${operationSuffix}`, async () => {
+          if (!supportsLlmRepair && diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+            throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
+          }
+        }, { tool: 'check', count: diagnostics.length, ...(attempt > 0 ? { purpose: 'repair' as const } : {}) });
+        return { candidate, diagnostics };
+      };
+      const initial = await compileAndDiagnose(currentOutline, 0);
+      generated = initial.candidate;
+      repairDiagnostics = initial.diagnostics;
+      if (supportsLlmRepair && repairDiagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+        if (repairDiagnostics.some((diagnostic) =>
+          diagnostic.severity === 'error' && !repairableDiagnosticCodes.has(diagnostic.code))) {
+          throw new DocumentGenerationError(
+            'verification_failed',
+            'Rendered document reported a diagnostic that cannot be repaired automatically'
+          );
+        }
+        let repairOutline = currentOutline;
+        const repaired = await runBoundedRepairWorkflow({
+          outline: currentOutline,
+          diagnostics: repairDiagnostics,
+          diagnose: () => repairDiagnostics,
+          diagnoseAsync: async (outline, attempt) => {
+            repairOutline = outline;
+            const next = await compileAndDiagnose(outline, attempt);
+            generated = next.candidate;
+            repairDiagnostics = next.diagnostics;
+            return next.diagnostics;
+          },
+          nextRepairPlan: async (diagnostics, attempt) => {
+            const expectedRevision = input.draftRevision + attempt - 1;
+            const raw = await this.observe(input, 'tool_call', `document-repair-plan-${attempt}`, () => this.requestLlmRepairWithTimeout(input, {
+              outline: freezeRepairValue(cloneRepairValue(repairOutline)),
+              diagnostics: freezeRepairValue(cloneRepairValue(diagnostics)),
+              expectedRevision,
+              attempt,
+              signal: input.signal ?? new AbortController().signal
+            }), { tool: 'patch', purpose: 'repair', count: attempt });
+            const plan = parseRepairPlan(raw);
+            validateLlmRepairPlan(plan, diagnostics, repairOutline);
+            return plan;
+          },
+          expectedRevision: attempt => input.draftRevision + attempt - 1,
+          maxAttempts: 2,
+          signal: input.signal
+        });
+        if (repaired.status === 'cancelled') {
+          throw new DocumentGenerationError('cancelled', 'Document repair was cancelled');
+        }
+        if (repaired.status !== 'passed' || !generated) {
+          throw new DocumentGenerationError(
+            'verification_failed',
+            `Rendered document failed visual diagnostics (${repaired.status})`
+          );
+        }
+        currentOutline = repaired.outline;
+      }
+      if (!generated) {
+        throw new DocumentGenerationError('verification_failed', 'Document generation produced no candidate');
+      }
+      this.assertNotCancelled(input.signal);
+      const verifiedGenerated = generated;
+      // The final candidate has already passed render QA when a repair loop
+      // ran. For a normal run this remains an empty check after the initial
+      // compile/diagnose operation above.
+      if (repairDiagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
+        throw new DocumentGenerationError('verification_failed', 'Rendered document failed visual diagnostics');
       }
       if (sourceStructure && (input.revisionPatch || input.revisionPatches)) {
-        await this.assertRevisionScope(
-          sourceStructure,
-          generated,
-          input.kind,
-          input.revisionPatches ?? [input.revisionPatch!]
-        );
-        if (input.kind === 'ppt') await this.assertUntouchedPptParts(
-          revisionSource.revisionSourceBuffer!, generated, input.revisionPatches ?? [input.revisionPatch!], sourceStructure
-        );
+        await this.observe(input, 'document_structure_check', 'document-revision-scope', async () => {
+          await this.assertRevisionScope(sourceStructure, verifiedGenerated, input.kind, input.revisionPatches ?? [input.revisionPatch!]);
+          if (input.kind === 'ppt') await this.assertUntouchedPptParts(
+            revisionSource.revisionSourceBuffer!, verifiedGenerated, input.revisionPatches ?? [input.revisionPatch!], sourceStructure
+          );
+        }, { tool: 'check' });
       }
-      const temporaryVerification = await this.verifyTemporaryOutput(
-        execution,
-        generated,
+      const verifyingExecution = execution;
+      const temporaryVerification = await this.observe(input, 'document_hash_check', 'document-temporary-hash', () => this.verifyTemporaryOutput(
+        verifyingExecution,
+        verifiedGenerated,
         input.signal
-      );
+      ), { tool: 'check', bytes: verifiedGenerated.sizeBytes });
       this.assertNotCancelled(input.signal);
       const validatedOutline = input.kind === 'ppt' && (input.revisionPatch || input.revisionPatches)
-        ? await this.readRevisedOutline(input, generated.temporaryPath) : undefined;
-      await syncFile(generated.temporaryPath);
-      await (this.options.publishFile ?? rename)(
-        generated.temporaryPath,
-        generated.finalPath
-      );
+         ? await this.readRevisedOutline(input, verifiedGenerated.temporaryPath) : undefined;
+      await this.observe(input, 'document_publish', 'document-atomic-publish', async () => {
+        await syncFile(verifiedGenerated.temporaryPath);
+        await (this.options.publishFile ?? rename)(verifiedGenerated.temporaryPath, verifiedGenerated.finalPath);
+      }, { tool: 'publish', bytes: verifiedGenerated.sizeBytes });
       temporaryPath = undefined;
-      file = await this.registerVerifiedOutput(
+      file = await this.observe(input, 'document_hash_check', 'document-published-hash', () => this.registerVerifiedOutput(
         context,
-        execution,
-        generated.fileName,
+        verifyingExecution,
+        verifiedGenerated.fileName,
         temporaryVerification.checksumSha256,
         input.signal
-      );
+      ), { tool: 'check', bytes: verifiedGenerated.sizeBytes });
       await this.options.afterFileRegistered?.();
       this.assertNotCancelled(input.signal);
       await input.onCancellationClosed?.();
@@ -288,18 +406,23 @@ export class DocumentGenerationRunner {
         outputFileId: file.id,
         workId
       });
-      const work = registerWork({
-        id: workId,
-        task: await this.requireTask(context, execution.taskId),
-        execution,
-        file,
-        mediaKind: 'document',
-        name: generated.fileName,
-        parentWorkId: input.parentWorkId,
-        createdAt: toIsoTimestamp(now())
-      });
-      await context.works.save(work);
-      workRegistered = true;
+      const registeringExecution = execution;
+      const registeredFile = file;
+      const work = await this.observe(input, 'document_register', 'document-work-register', async () => {
+        const registered = registerWork({
+          id: workId,
+          task: await this.requireTask(context, registeringExecution.taskId),
+          execution: registeringExecution,
+          file: registeredFile,
+          mediaKind: 'document',
+          name: verifiedGenerated.fileName,
+          parentWorkId: input.parentWorkId,
+          createdAt: toIsoTimestamp(now())
+        });
+        await context.works.save(registered);
+        workRegistered = true;
+        return registered;
+      }, { tool: 'publish' });
       execution = transitionExecution(execution, 'completed', toIsoTimestamp(now()), {
         outputFileId: file.id,
         workId
@@ -363,6 +486,75 @@ export class DocumentGenerationRunner {
       if (finalPath && !workRegistered) {
         await rm(finalPath, { force: true });
       }
+    }
+  }
+
+  private async requestLlmRepairWithTimeout(
+    input: DocumentGenerationPlanInput,
+    request: DocumentLlmRepairRequest
+  ): Promise<unknown> {
+    const planner = input.requestLlmRepair;
+    if (!planner) throw new Error('llm_repair_planner_unavailable');
+    const configured = input.repairTimeoutMs ?? 30_000;
+    if (!Number.isFinite(configured) || configured <= 0) throw new Error('repair_timeout_invalid');
+    const timeoutMs = Math.min(Math.floor(configured), 60_000);
+    const controller = new AbortController();
+    let rejectAbort: ((reason?: unknown) => void) | undefined;
+    const onAbort = () => {
+      controller.abort();
+      rejectAbort?.();
+    };
+    if (input.signal?.aborted) controller.abort();
+    input.signal?.addEventListener('abort', onAbort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('repair_planner_timeout'));
+        }, timeoutMs);
+      });
+      const aborted = new Promise<never>((_, reject) => {
+        rejectAbort = () => reject(new Error('repair_planner_cancelled'));
+      });
+      return await Promise.race([
+        planner({ ...request, signal: controller.signal }),
+        timeout,
+        aborted
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      rejectAbort = undefined;
+      input.signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  private async observe<T>(input: DocumentGenerationPlanInput, code: DocumentGenerationProgressEvent['code'],
+    operationId: string, action: () => Promise<T>, facts?: DocumentGenerationProgressEvent['facts']): Promise<T> {
+    const report = async (status: DocumentGenerationProgressEvent['status']) => {
+      const event: DocumentGenerationProgressEvent = { code, status, operationId,
+        facts: { documentKind: input.kind, ...facts } };
+      await this.reportProgress(input, event);
+    };
+    await report('started');
+    try {
+      const result = await action();
+      await report('completed');
+      return result;
+    } catch (error) {
+      await report(input.signal?.aborted || (error instanceof Error && error.name === 'AbortError') ||
+        (error instanceof DocumentGenerationError && error.code === 'cancelled') ? 'cancelled' : 'failed');
+      throw error;
+    }
+  }
+
+  private async reportProgress(input: DocumentGenerationPlanInput, event: DocumentGenerationProgressEvent): Promise<void> {
+    try {
+      if (input.onProgress) await input.onProgress(event);
+      else await emitProductionEvent(event);
+    } catch (error) {
+      if (input.strictProgress) throw error;
+      /* Best-effort UI telemetry cannot change the document transaction outcome. */
     }
   }
 
@@ -1004,6 +1196,60 @@ async function assertExpectedDocumentContent(
       'Generated document is missing required document content'
     );
   }
+}
+
+const repairableDiagnosticCodes = new Set<DocumentQualityDiagnostic['code']>([
+  'capacity_exceeded',
+  'table_too_wide',
+  'text_overflow',
+  'overlap',
+  'element_overflow'
+]);
+
+function validateLlmRepairPlan(
+  plan: RepairPlan,
+  diagnostics: readonly DocumentQualityDiagnostic[],
+  outline: DocumentOutline
+): void {
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
+  if (errors.some((diagnostic) => !repairableDiagnosticCodes.has(diagnostic.code))) {
+    throw new Error('repair_diagnostic_not_supported');
+  }
+  const codes = new Set(plan.diagnosisCodes);
+  if (errors.some((diagnostic) => !codes.has(diagnostic.code))) {
+    throw new Error('repair_diagnosis_mismatch');
+  }
+  if (plan.diagnosisCodes.some((code) => !errors.some((diagnostic) => diagnostic.code === code))) {
+    throw new Error('repair_diagnosis_mismatch');
+  }
+  for (const operation of plan.operations) {
+    // LLM visual repair is deliberately layout-only. Content edits are
+    // reserved for an explicit revision request and cannot silently change a
+    // user's facts while trying to satisfy a renderer diagnostic.
+    if (operation.operation !== 'replace_page_layout') {
+      throw new Error('repair_operation_not_allowed');
+    }
+    if (operation.target.sectionIndex === undefined ||
+      operation.target.sectionIndex < 0 ||
+      operation.target.sectionIndex >= outline.sections.length) {
+      throw new Error('repair_target_not_allowed');
+    }
+    if (operation.target.pageNumber !== undefined) {
+      throw new Error('repair_physical_page_target_not_allowed');
+    }
+  }
+}
+
+function cloneRepairValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function freezeRepairValue<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    freezeRepairValue(child);
+  }
+  return Object.freeze(value);
 }
 
 function normalizeOfficeText(value: string): string {

@@ -29,6 +29,8 @@ import {
 } from './document-theme';
 import type { ExtractedThemeColors } from './pptx-theme-extractor';
 import type { DocumentRevisionPatch } from '../../application/document-revision-agent';
+import type { DocumentGenerationProgressCallback } from '../../application/document-generation-service';
+import type { PresentationPageScene } from '../../domain/entities/presentation-plan';
 import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
 import {
   presentationOutlineLimits,
@@ -60,6 +62,7 @@ export interface GeneratedTemporaryDocumentFile {
 }
 
 export interface GenerateDocumentFileInput {
+  readonly onProgress?: DocumentGenerationProgressCallback;
   readonly kind: DocumentWorkspaceKind;
   readonly outline: DocumentOutline;
   readonly outputDirectory: string;
@@ -128,7 +131,8 @@ async function buildDocumentOutput(
               input.presentationTemplate ??
                 (input.theme === 'financing' ? 'financing' : 'work_report')
             ),
-            input.images ?? []
+            input.images ?? [],
+            input.onProgress
         );
   const revisedBuffer =
     (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
@@ -772,6 +776,7 @@ interface ExpandedPresentationPage {
   readonly units: readonly PresentationUnit[];
   readonly image?: PresentationImage;
   readonly continuationIndex: number;
+  readonly scene?: PresentationPageScene;
 }
 
 type UncomposedPresentationPage = Omit<
@@ -791,7 +796,8 @@ export class PresentationLayoutError extends Error {
 async function buildPptBuffer(
   outline: DocumentOutline,
   template: PresentationTemplate,
-  images: readonly PresentationImage[]
+  images: readonly PresentationImage[],
+  onProgress?: DocumentGenerationProgressCallback
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -802,15 +808,23 @@ async function buildPptBuffer(
   // creates duplicate covers and can spill trailing tables into fake thank-you
   // pages. Keep the original outline for validation, but render only semantic
   // content sections here.
-  const renderOutline = normalizePresentationOutline(outline);
-  const pages = expandPresentationSections(renderOutline, template, images);
-  const totalPages =
-    1 + pages.length + (renderOutline.sections.length > 0 ? 1 : 0);
-  if (totalPages > presentationOutlineLimits.maxEstimatedPages) {
-    throw new PresentationLayoutError(
-      `PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`
-    );
-  }
+  const reportLayout = async (status: 'started' | 'completed' | 'failed', totalPages?: number) => {
+    try { await onProgress?.({ code: 'document_check', status, operationId: 'document-layout',
+      facts: { documentKind: 'ppt', tool: 'check', ...(totalPages === undefined ? {} : { totalPages }) } });
+    } catch { /* Progress recording cannot affect document generation. */ }
+  };
+  await reportLayout('started');
+  let renderOutline: DocumentOutline;
+  let pages: ReturnType<typeof expandPresentationSections>;
+  try {
+    renderOutline = normalizePresentationOutline(outline);
+    pages = expandPresentationSections(renderOutline, template, images);
+    const totalPages = 1 + pages.length + (renderOutline.sections.length > 0 ? 1 : 0);
+    if (totalPages > presentationOutlineLimits.maxEstimatedPages) {
+      throw new PresentationLayoutError(`PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`);
+    }
+    await reportLayout('completed', totalPages);
+  } catch (error) { await reportLayout('failed'); throw error; }
 
   renderPresentationCover(pptx, outline, template);
   pages.forEach((page, index) => {
@@ -1283,6 +1297,63 @@ function renderPresentationCover(
   }
 }
 
+function renderScenePage(
+  slide: PptxGenJS.Slide,
+  scene: PresentationPageScene,
+  template: PresentationTemplate
+): void {
+  const slideW = 13.333;
+  const slideH = 7.5;
+  const sorted = [...scene.elements].sort((a, b) => a.zIndex - b.zIndex);
+
+  for (const elem of sorted) {
+    const x = Math.max(0, Math.min(1, elem.geometry.x)) * slideW;
+    const y = Math.max(0, Math.min(1, elem.geometry.y)) * slideH;
+    const w = Math.max(0.01, Math.min(1 - elem.geometry.x, elem.geometry.width)) * slideW;
+    const h = Math.max(0.01, Math.min(1 - elem.geometry.y, elem.geometry.height)) * slideH;
+    const style = elem.style || {};
+
+    if (elem.type === 'shape') {
+      // Autonomous Card / Container Component with custom corner radius and fills
+      const hasFill = style.fill !== undefined && style.fill !== 'none';
+      const hasStroke = style.stroke !== undefined && style.stroke !== 'none';
+      // Model-defined corner radius: e.g. 0.05 (subtle), 0.15 (modern card), 0 (sharp/formal)
+      const rectRadius = style.radius !== undefined ? Math.min(0.5, Math.max(0, style.radius / 100)) : 0.08;
+
+      slide.addShape('roundRect', {
+        x, y, w, h,
+        fill: hasFill ? { color: style.fill } : { color: template.tokens.surface },
+        line: hasStroke ? { color: style.stroke, width: 1.5 } : { color: template.tokens.surface, width: 0 },
+        rectRadius
+      });
+    } else if (elem.type === 'line') {
+      slide.addShape('line', {
+        x, y, w, h,
+        line: { color: style.stroke || template.tokens.secondaryAccent, width: 2 }
+      });
+    } else if (elem.type === 'image' && elem.assetRef) {
+      slide.addImage({
+        path: elem.assetRef,
+        x, y, w, h,
+        sizing: { type: 'contain', w, h }
+      });
+    } else if (elem.type === 'text' && elem.content) {
+      const isHeader = (style.fontSize || 14) >= 20;
+      const isMetric = (style.fontSize || 14) >= 32;
+      slide.addText(elem.content, {
+        x, y, w, h,
+        fontSize: style.fontSize || 14,
+        fontFace: style.fontFamily || 'Microsoft YaHei',
+        color: style.textColor || (isMetric ? template.tokens.accent : template.tokens.text),
+        bold: isHeader || isMetric || (style.fontSize || 14) >= 16,
+        margin: 4,
+        wrap: true,
+        valign: isMetric ? 'bottom' : 'top'
+      });
+    }
+  }
+}
+
 function renderPresentationPage(
   pptx: PptxGenJS,
   page: ExpandedPresentationPage,
@@ -1291,6 +1362,21 @@ function renderPresentationPage(
 ): void {
   const slide = pptx.addSlide();
   addPresentationFrame(slide, template, 'content');
+  if (page.scene && page.scene.elements && page.scene.elements.length > 0) {
+    renderScenePage(slide, page.scene, template);
+    slide.addText(String(pageNumber), {
+      objectName: 'UniComp Page Number',
+      x: 12.25,
+      y: 7.04,
+      w: 0.45,
+      h: 0.2,
+      fontSize: 10,
+      color: template.tokens.muted,
+      align: 'right',
+      margin: 0
+    });
+    return;
+  }
   const hasData = page.units.some(
     (unit) => unit.type === 'table' || unit.type === 'chart'
   );

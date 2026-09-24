@@ -280,7 +280,14 @@ export function applyStructuredDocumentPatch(
     }
     case 'replace_page_layout': {
       if (document.kind !== 'ppt') throw new StructuredDocumentToolError('kind_mismatch', 'Page layout is only available for PPT');
-      const sectionIndex = requirePageIndex(patch.target, sections.length);
+      // A rendered PPT page is not the same thing as an outline section: the
+      // generator may add a cover, continuation, or closing page. Repair
+      // plans therefore prefer the stable sectionIndex. Keep pageNumber as a
+      // compatibility fallback for callers that operate on section-shaped
+      // outlines.
+      const sectionIndex = patch.target.sectionIndex !== undefined
+        ? requireSectionIndex(patch.target, sections.length)
+        : requirePageIndex(patch.target, sections.length);
       const pageKind = requirePageKind(requirePatchValue(patch));
       sections[sectionIndex] = { ...sections[sectionIndex], pageKind };
       mark(sectionIndex);

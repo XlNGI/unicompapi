@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { getProductionTraceStore, withProductionTrace } from '../../src/platform/conversation-production-trace';
+
+const traceRoots: string[] = [];
+afterEach(async () => { await Promise.all(traceRoots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 import {
   addUserMessage,
   beginAssistantMessage,
@@ -45,7 +52,12 @@ describe('createConversationLinkedLifecycle', () => {
       }
     } as unknown as ProjectConversationRepository;
     const linked = createConversationLinkedLifecycle(lifecycle, repository, () => createdAt);
-    await linked.start(executionId);
+    const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-linked-trace-'));
+    traceRoots.push(rootDirectory);
+    const scope = { rootDirectory, projectId: 'project-completion', conversationId: conversation.id,
+      sourceMessageId: 'user-completion', traceId: 'user-completion' };
+    await withProductionTrace(scope, () => linked.start(executionId));
+    // Later callbacks may run outside the request's ALS context (cancel IPC, queued flushes).
     await linked.appendContent(executionId, '这是一张大熊猫图片。');
     if (failSave) {
       await expect(linked.complete(executionId)).rejects.toThrow('disk unavailable');
@@ -60,6 +72,11 @@ describe('createConversationLinkedLifecycle', () => {
       await repository.save(next, rendererSnapshot!.revision);
       expect(conversation.messages.at(-1)?.content).toBe('生成提示词');
     }
+    const events = await getProductionTraceStore(scope).list({ conversationId: conversation.id });
+    expect(events.filter((event) => event.code === 'model_response').map((event) => event.status))
+      .toEqual(failSave ? ['started', 'progress'] : ['started', 'progress', 'completed']);
+    expect(events.every((event) => event.assistantMessageId === assistantMessageId)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('这是一张大熊猫图片');
   });
 
   it('projects a confirmed cancellation onto the linked assistant message', async () => {

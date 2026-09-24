@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { conversationClarificationLabel } from '../../src/application/conversation-clarification-fields';
 import { analyzeLocalConversationIntent, ConversationIntentOrchestrator } from '../../src/application/conversation-intent-orchestrator';
 import { createConversationWorkflow, toConversationWorkflowId, toConversationId, toMessageId, toProjectId, toIsoTimestamp } from '../../src/domain';
 
 describe('PPT request completeness', () => {
+  it('does not turn unknown internal field codes into user-facing questions', () => {
+    expect(conversationClarificationLabel('agent_semantic_plan_required')).toBe('需要补充的具体要求');
+    expect(conversationClarificationLabel('future_internal_code')).toBe('需要补充的具体要求');
+    expect(conversationClarificationLabel('page_count')).toBe('页数');
+  });
   it('does not accept a topic invented by the semantic classifier', async () => {
     const orchestrator = new ConversationIntentOrchestrator({ classifier: { classify: async () => ({
       schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',

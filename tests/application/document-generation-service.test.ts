@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../src/application/document-generation-service';
 import {
   ConversationApplicationError,
   collectRevisionRequestText,
@@ -156,7 +157,7 @@ function recoveredOutline() {
   };
 }
 
-function environment(content = '{"kind":"ppt" "title":"缺少逗号"}') {
+function environment(content = '{"kind":"ppt" "title":"缺少逗号"}', onProgress?: DocumentGenerationProgressCallback) {
   const conversation = completedConversation(content);
   const attachDocumentResult = vi.fn(async () => undefined);
   const compile = vi.fn(() => {
@@ -188,6 +189,7 @@ function environment(content = '{"kind":"ppt" "title":"缺少逗号"}') {
     },
     compiler: { compile, recover },
     generator: { run },
+    onProgress,
     fingerprint: () => 'content-sha256',
     wait: async () => undefined
   });
@@ -203,7 +205,35 @@ function environment(content = '{"kind":"ppt" "title":"缺少逗号"}') {
 }
 
 describe('document generation application service', () => {
+  it('reports actual outline validation and passes progress to the executor', async () => {
+    const events: DocumentGenerationProgressEvent[] = [];
+    const onProgress = vi.fn(async (event: DocumentGenerationProgressEvent) => { events.push(event); });
+    const f = environment(undefined, onProgress);
+    await f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision, messageId,
+      kind: 'ppt', images: [] });
+    expect(events.map(event => `${event.code}:${event.status}`)).toEqual(['plan_validation:started', 'plan_validation:completed']);
+    expect(f.run).toHaveBeenCalledWith(expect.objectContaining({ onProgress }));
+  });
+
+  it('records failed outline validation without claiming success or starting file generation', async () => {
+    const events: DocumentGenerationProgressEvent[] = [];
+    const f = environment(undefined, async event => { events.push(event); });
+    f.recover.mockImplementation(() => { throw new DocumentDraftCompilationError('invalid_structure', 'invalid outline'); });
+    await expect(f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision, messageId,
+      kind: 'ppt', images: [] })).rejects.toThrow('invalid outline');
+    expect(events.map(event => `${event.code}:${event.status}`)).toEqual(['plan_validation:started', 'plan_validation:failed']);
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('does not fail successful generation when progress recording is unavailable', async () => {
+    const f = environment(undefined, async () => { throw new Error('trace unavailable'); });
+    await expect(f.service.generateFromMessage({ conversationId, expectedRevision: f.conversation.revision, messageId,
+      kind: 'ppt', images: [] })).resolves.toMatchObject({ workId: 'work-document-application' });
+    expect(f.attachDocumentResult).toHaveBeenCalledTimes(1);
+  });
+
   it('prepares and completes an explicit clear revision without provider output', async () => {
+    const progress: DocumentGenerationProgressEvent[] = [];
     const parentMessageId = toMessageId('document-local-clear-parent');
     const sourceMessageId = toMessageId('document-local-clear-source');
     const parentWorkId = toWorkId('document-local-clear-work');
@@ -343,6 +373,7 @@ describe('document generation application service', () => {
         recover: ({ content }) => JSON.parse(content)
       },
       generator: { run },
+      onProgress: async event => { progress.push(event); },
       revisionAgent: async (input) => ({
         outline: {
           ...input.outline,
@@ -390,6 +421,8 @@ describe('document generation application service', () => {
     });
 
     expect(result.workId).toBe(toWorkId('work-local-clear-result'));
+    expect(progress.filter(event => event.operationId === 'document-revision').map(event => [event.code, event.status]))
+      .toEqual([['tool_call', 'started'], ['tool_result', 'completed']]);
     expect(createCompletedLocalAssistantMessage).toHaveBeenCalledOnce();
     expect(beginExecution).toHaveBeenCalledOnce();
     expect(finishExecution).toHaveBeenLastCalledWith(

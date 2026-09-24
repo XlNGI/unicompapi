@@ -51,10 +51,12 @@ import {
   sanitizeControlledToolResult,
   parseControlledProviderTools,
   parseControlledToolCallDeltas,
+  toControlledProviderAssistantToolCalls,
   type ControlledProviderToolDefinition,
   type ControlledProviderToolBridge,
   type ControlledProviderToolCallDelta,
-  type ControlledProviderToolCall
+  type ControlledProviderToolCall,
+  type ControlledProviderAssistantToolCall
 } from '../provider-tool-calling';
 import {
   NewApiRuntimeError,
@@ -146,6 +148,7 @@ export interface NewApiChatMessageV1 extends NativeSearchMessage {
   readonly content: string;
   readonly toolCallId?: string;
   readonly name?: string;
+  readonly toolCalls?: readonly ControlledProviderAssistantToolCall[];
 }
 
 export interface NewApiChatDispatchRequestV1 {
@@ -485,7 +488,11 @@ export class NewApiChatAdapter {
         if (!operation.toolBridge || !stream.toolCalls || ++rounds > operation.maxToolRounds) {
           throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
         }
-        operation.messages.push({ role: 'assistant', content: stream.content ?? '' });
+        operation.messages.push({
+          role: 'assistant',
+          content: stream.content ?? '',
+          toolCalls: toControlledProviderAssistantToolCalls(stream.toolCalls)
+        });
         for (const call of stream.toolCalls) {
           const result = await operation.toolBridge.execute({ call, signal: operation.signal });
           operation.messages.push({ role: 'tool', content: JSON.stringify(sanitizeControlledToolResult(result)), toolCallId: call.id, name: call.name });
@@ -896,7 +903,8 @@ function parseStreamChunk(data: string): {
   if (item.choices.length !== 1) {
     throw invalidStream('NewApi stream choices are ambiguous', 'choices_invalid');
   }
-  // Intermediate gateway chunks often omit finish_reason entirely (not null).
+  // Gateway deltas can leave finish_reason absent, null, or an empty string.
+  // All three mean "not finished"; only a later explicit reason is terminal.
   const choice = requireRecord(
     item.choices[0],
     ['delta', 'index'],
@@ -908,7 +916,7 @@ function parseStreamChunk(data: string): {
   ) {
     throw invalidStream('NewApi stream choice is unsupported', 'choices_invalid');
   }
-  const finishReason = choice.finish_reason === undefined || choice.finish_reason === null
+  const finishReason = choice.finish_reason === undefined || choice.finish_reason === null || choice.finish_reason === ''
     ? undefined
     : parseFinishReason(choice.finish_reason);
   const delta = requireRecord(choice.delta, [], 'NewApi stream delta');
@@ -1069,6 +1077,7 @@ function serializeRequest(
       ...(message.toolCallId !== undefined ? { tool_call_id: message.toolCallId } : {}),
       ...(message.name !== undefined ? { name: message.name } : {}),
       ...(message.nativeToolCalls ? { tool_calls: message.nativeToolCalls } : {}),
+      ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
       ...(message.reasoningContent ? { reasoning_content: message.reasoningContent } : {})
     })),
     // Product chat path always streams; do not expose stream as a user field.
@@ -1215,8 +1224,9 @@ function normalizeNewlines(value: string, final = false): string {
 
 function parseFinishReason(value: unknown): NewApiFinishReason {
   if (
+    typeof value !== 'string' ||
     !['stop', 'length', 'content_filter', 'tool_calls', 'insufficient_system_resource']
-      .includes(String(value))
+      .includes(value)
   ) {
     throw invalidStream('NewApi finish reason is invalid', 'finish_reason_invalid');
   }
@@ -1246,14 +1256,16 @@ class NewApiChatAdapterError extends Error {
   }
 }
 
-type NewApiInvalidResponseReason =
-  | 'payload_invalid' | 'encoding_invalid' | 'json_invalid'
-  | 'sse_fields_invalid' | 'sse_data_invalid' | 'chunk_metadata_invalid'
-  | 'identity_invalid' | 'identity_changed' | 'choices_invalid' | 'delta_invalid'
-  | 'tool_calls_invalid' | 'usage_invalid' | 'usage_inconsistent' | 'usage_repeated'
-  | 'finish_reason_invalid' | 'finish_reason_repeated' | 'finish_reason_missing'
-  | 'terminal_marker_missing' | 'data_after_terminal' | 'empty_content'
-  | 'content_limit_exceeded';
+export const newApiInvalidResponseReasons = [
+  'payload_invalid', 'encoding_invalid', 'json_invalid',
+  'sse_fields_invalid', 'sse_data_invalid', 'chunk_metadata_invalid',
+  'identity_invalid', 'identity_changed', 'choices_invalid', 'delta_invalid',
+  'tool_calls_invalid', 'usage_invalid', 'usage_inconsistent', 'usage_repeated',
+  'finish_reason_invalid', 'finish_reason_repeated', 'finish_reason_missing',
+  'terminal_marker_missing', 'data_after_terminal', 'empty_content',
+  'content_limit_exceeded'
+] as const;
+type NewApiInvalidResponseReason = (typeof newApiInvalidResponseReasons)[number];
 
 function invalidStream(
   message: string,

@@ -66,6 +66,211 @@
 
 证据：相关 Vitest 30/30、媒体工具 Node 8/8、`pnpm typecheck`、`pnpm lint`、`pnpm build` 和 `git diff --check` 通过；真实控制器生成 `outputs/editing-mp4/controller-export.mp4`，FFmpeg 全解码通过。Electron 隔离验证中，MP4 在 MIME 省略和显式 `video/mp4` 两种响应下均加载、播放、定位、播放到结束并重新打开成功，报告为 `outputs/editing-mp4/after.json`。未验证 macOS、原生系统播放器、正式打包和人工点击作品库页面；这些不影响本地导出合同，但不能据此宣称跨平台或发布验收完成。未提交、推送或合并。
 
+### 2026-09-24 PPT 视觉 QA 把装饰线误判为越界
+
+正式 PPT 已能完成 LibreOffice/Poppler 渲染，但 `inspectPptxGeometry` 要求形状宽高都大于 0。工作汇报模板的卡片/时间线装饰线是合法的零宽或零高连接线，被记成 `element_overflow`。该诊断无法通过改大纲修好，于是校验失败、未登记作品。现改为：在幻灯片内的单向连接线视为合法几何，真实越出页面的形状仍失败。失败日志对视觉诊断记录 `visual_diagnostics`，不写路径或原文。新建失败提示不再说原作品已保留。
+
+### 2026-09-24 PPT 结构检查被 Task Runtime step 错位误报
+
+渲染器补读用户环境后，正式 PPT 已能写出临时文件。随后 `document_check` 嵌套在 `document_compile` 进行中，beginToolCall 因已有未完成写操作被拒绝，但 bridge 仍先增加了 sequence。结构检查因此用 step 4 去对 runtime step 3，`observation_call_mismatch` 被 IPC 压成 `storage_error`，生产 Trace 停在 structure_check started。
+
+现改为：只有 beginToolCall 成功后才占用 sequence，并以 runtime 记录的 step 作为 observation step。嵌套 layout check 仍可失败关闭，但不再污染后续结构检查。
+
+### 2026-09-24 PPT 渲染器环境未注入
+
+本机已安装 LibreOffice / Poppler，并写入用户环境变量，但 `pnpm dev` 从旧终端拉起，Electron 进程环境里没有 `UNICOMP_OFFICE_RENDERER` / `UNICOMP_PDF_RENDERER`。正式 PPT 在大纲校验后立刻 `verification_failed`，没有 compile/render 事件。
+
+现改为：未显式传入环境时，主进程补充读取 Windows 用户/系统环境变量；文档失败日志对“渲染器不可用”记录安全 reason，不写路径。提示改为“本地文件校验未通过，未登记为正式作品”。
+
+### 2026-09-24 诊断日志通道补齐
+
+设置页「日志与诊断」已有本地分类、级别、滚动、脱敏和诊断包，但业务几乎不写入。本轮不新增日志产品、不上云采集，只补结构化事件门面并接通高价值来源。
+
+新增 `writeEvent`：白名单 code + 标量 facts。主进程未捕获异常写入 `crash.log`；NewAPI 安全日志改为结构化事件，失败进 `network.log`，开始/完成进 `application.log`；对话发送前门禁（候选不可用、运行授权拒绝、附件门禁）写入 `chat.request_blocked`。未知字段、Prompt、路径、Token 和错误原文不落盘；写日志失败不影响主流程。调用记录与生产 Trace 仍是业务事实，不改成日志。
+
+验证：诊断事件定向测试与既有 B4 诊断服务测试；主/测试 TypeScript、变更文件 ESLint 与 `git diff --check`。未调用真实模型、联网或付费服务。
+
+### 2026-09-23 对话输入框模型选择面板 UI 优化
+
+对话页输入框的模型选择弹出层原先把搜索框放在回复方式上方，RSuite 分组标题带折叠箭头，看起来像下拉套下拉；同时全局 picker 半屏高度限制与列表自身滚动叠加，面板出现双滚动条，模型列表几乎只能露出一条。
+
+现将弹出层改为网格布局：回复方式固定顶部，搜索紧挨“选择模型”标题，只有模型列表滚动；去掉分组折叠箭头与额外缩进，回复方式选中态补勾选，触发器模式改为胶囊标签。选择、搜索、回复方式切换的数据合同未改，不写死服务商或模型。
+
+验证：对话页与 RSuite 控件合同测试、主/测试 TypeScript、变更文件 ESLint 与 git diff --check。未调用真实模型、联网或付费服务。
+
+### 2026-09-23 语义规划超时竞态修复
+
+现场调用记录显示，本次语义请求已在 `08:11:53Z` 创建、`08:12:14Z` 被服务商接受，并在 `08:12:22Z` 收到结果；原实现的内外层 30 秒计时在本地收尾/计划解析前同时触发，错误地把已发出的请求映射成 `classification_timeout`。现将语义规划主预算设为 45 秒，并增加 5 秒有界完成宽限；宽限内已收到的结果继续完成解析，宽限结束才中止请求。分类器内部使用同一 50 秒硬上限，超时错误单独映射为 `classification_timeout`，不重试、不静默切换模型。
+
+失败回复改为“理解需求在时间预算内未完成；后续文档执行未开始”，不再声称本轮请求从未开始。生产 Trace 继续展示实际的模型请求、服务商接受、响应接收和计划校验阶段，调用记录中的服务商状态优先于摘要文案。
+
+验证：语义编排器、分类器、工作流控制器和失败回复定向测试 117 项通过；主/测试 TypeScript、变更文件 ESLint 与 `git diff --check` 通过。真实调用记录仅用于诊断本次竞态，未再次发起模型或付费请求。
+
+### 2026-09-23 QA 修正接线补充
+
+PPT QA 修正由 LLM 发起：Electron 文档生产入口已将 `requestLlmRepair` 接到 `ConversationSemanticClassifier.planDocumentRepair`，从当前对话响应执行记录恢复已授权 route，经过现有 Provider 候选、凭证、授权、审计和超时链路发起 RepairPlan 请求。Runner 仍独占诊断、Schema、诊断码、revision、目标范围、布局操作白名单、重新生成、重新渲染、Hash、原子发布和 Work 登记；没有 route、planner 或安全计划时保留候选并失败，不执行单机试修。测试环境没有 Provider 依赖时不注入 planner，仅验证离线门禁。
+
+### P1 PPT 真实渲染后的有限修正（2026-09-23，已实现最小闭环）
+
+继续完成“实际生成 → 渲染诊断 → 有限布局修正 → 重新生成和渲染 → 全部复验 → 发布登记”的最小闭环。本批从 `develop` 创建 `feature/ppt-qa-repair-loop`，修改范围为文档 Runner、受控修正合同、必要的生产事件/Task Runtime 接线及定向回归；不扩展到真实模型、联网或付费调用。
+
+计划合同见 `docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md` 第 6.4 节：每请求最多修正 2 次，仅接受当前 revision 的受控布局 Patch，每轮重新生成临时 PPTX 并重新渲染，重复诊断、无有效变更、取消、超时及不可用渲染器均停止。最后一轮完整 QA 通过后才进入 Hash、原子发布与 Work 登记。当前仍以 `DocumentOutline` 为过渡写入目标，不把这批登记为统一 Document IR、LLM 自主工具循环或完整 Visual QA 完成。
+
+实际实现：`DocumentGenerationRunner` 提供请求级 `requestLlmRepair` 端口，修正计划必须由已授权的 LLM/Designer planner 返回；Runner 不提供确定性修正规则。最多接受 2 次受控修正；每次只允许当前 outline 的 `replace_page_layout`，拒绝正文/数据修改和物理页码猜测。每次通过校验的 Patch 都会重新生成临时 PPTX、重新执行结构检查和渲染诊断；重复诊断、无变化、非法诊断/目标、规划器超时、取消或渲染失败均停止，只有最终诊断无错误的临时文件才进入 Hash、原子发布和 Work 登记。规划请求收到的是克隆且冻结的 Outline 与诊断，带 expected revision、attempt 和 AbortSignal；修正阶段事件使用独立 operationId，继续进入生产 Trace/Task Runtime 进度链。Electron 文档生产入口已将该端口接到 `ConversationSemanticClassifier.planDocumentRepair`，复用当前对话已授权 route 和 Provider 适配器；route 不存在或 planner 不可用时明确失败并保留候选，不静默选择硬编码模型或本地修正。
+
+验证：`document-generation-repair-loop.test.ts` 5/5 通过，覆盖重新生成/渲染后只登记一个 Work、重复诊断停止、正文修改白名单拦截、两次修正上限和规划器超时；Runner 与既有 repair workflow 定向集合 6 个文件、105 项通过；主工程/测试工程/Electron TypeScript、变更文件 ESLint、`git diff --check` 通过。未调用真实模型、联网或付费服务。取消和过期 revision 的独立 Runner 夹具尚未新增，当前由 AbortSignal、expectedRevision 校验和既有取消门禁共同保护。
+
+合成渲染端口只证明控制流程，不能替代真实 Office/PDF/PNG 视觉验收。真实 fixture、PPTX 文本框内部裁切、字体回退、非文本重叠、表格/图表可读性、统一 Document IR 和聊天主链路的 LLM 自主工具接线仍未完成。
+
+### P1 PPT 生成后视觉 QA 发布门禁（2026-09-23）
+
+按负责人要求，正式 PPT 生成必须经过实际本地 Office/PDF 渲染和质量检查后才能发布、登记 Work。Electron 文档生成 Runner 现在要求 PPT 注入渲染器；没有配置渲染器时在写文件前以 `verification_failed` 失败，不产生正式 Work。渲染诊断中的文本越界、PPT 文本/元素超出页面、文本重叠、空页、页数不一致和无法完成 PDF 文本检查均阻断正式登记；Word/Excel 保留较宽松的非正式渲染诊断语义。PDF 文本框边界检查同时归一化底部原点坐标，避免把基线误判为页面上边界；PPTX 包在实际渲染前还会检查 slide 尺寸和文本/图片/图形元素的 OOXML 几何边界。
+
+定向验证：Runner、Office Render Adapter、Temporary Document Workflow 9 个文件、117 项通过；应用/测试 TypeScript、变更文件 ESLint、`git diff --check` 通过。当前仍有限制：渲染诊断尚未覆盖完整 PPTX OOXML 文本框内部裁切、非文本元素重叠、字体回退和完整视觉审美判断；真实 Office/PDF/PNG fixture 与渲染后 IR 自动修正闭环仍需后续实现。本节不宣称完整 Visual QA 已收口。
+
+### P1 Task Runtime 接入真实文档生成（2026-09-23）
+
+继续按 V2.3 执行。将持久 `DocumentTaskRuntime` 接入文档 IPC 与真实本地生成链：打开生成任务时创建项目隔离的运行时并写入会话、助手消息、执行实例、文档类型、附件/作品引用和有限预算；生成前先进入 `running`，每个真实的大纲校验、编译、渲染、结构/Hash 检查、原子发布和 Work 登记事件都先写入运行时调用检查点，再提交脱敏 Observation。运行时检查失败会阻止后续生产并保留对账状态，UI Trace 仍只作观察投影。
+
+运行时完成只能发生在本地文件校验、发布和 Work 登记成功之后；失败、取消、未确定写入和重启中的调用不会自动重放。宿主每次重查会话消息、项目、附件/作品引用和 revision；恢复使用原执行实例和剩余预算。为保持旧 UI 进度的最佳努力语义，只有 Task Runtime 进度启用时才将进度回调升级为失败即停的安全门。
+
+验证：DocumentTaskRuntime/桥接/文档生成/Runner/Trace 定向源码测试 9 个文件、156 项通过；同一命令包含仓库现有 `tmp/**` 夹具副本时共 17 个文件、324 项通过。主工程与测试工程 TypeScript、变更文件 ESLint、`git diff --check` 通过。未调用真实模型、联网或付费服务，未重启用户当前 Electron。当前仍未完成统一自主 Agent 工具主循环、Provider 工具目录在聊天主链路的生产接入、自由 Scene IR、逐页预览、完整 Visual QA 与自动修正；本节不宣称 P1 或 V2.3 全部收口。
+
+完整 `pnpm test` 在 Node/UI 合同阶段为 385 项，384 通过、1 项失败；失败仍是工作树缺失冻结交接原件 `handoff/.../manifests/SHA256SUMS.txt`，没有恢复或伪造该文件，因此命令按脚本短路，未把这次结果记为全量通过。
+
+### 生成正文流式展示（2026-09-22）
+
+负责人要求看到模型正在生成的正文。已复用真实 `content_delta` 与持久消息内容，在最新的正文模型响应节点下展示一份可读正文；没有 Trace 的历史文档也可显示。支持未闭合 JSON 中的标题、章节和正文字符串逐步出现，以及段落、引用、列表、表格、图表数据和 Markdown 正文。正式作品已有 `validatedContent` 时优先显示实际用于生成文件的内容；取消、流终态和历史重开保留已接收内容，后续本地生产事件继续追加，普通回复不重复显示。
+
+正文采用规范字段路径的显示投影，不用于业务意图判断或放宽文档校验；未知结构字段与 reasoning 不展示。正文图片链接不自动加载，预览达到输入、输出、节点或深度上限时明确提示截断。正文预览不代表文件已通过校验或已交付，也不等于页面排版预览。
+
+验证：正文投影、时间线、聊天行为与流显示缓冲定向 Vitest 4 文件 53 项、Node UI 合同 24 项、Windows 隔离 Electron 15 项旅程通过；应用/测试/Electron 类型检查、相关 ESLint、生产构建和差异检查通过。Electron 使用真实 ChatPage 与合成 IPC，覆盖增量标题/段落、正文终态后本地事件、已校验内容优先、历史恢复、取消片段保留与 Markdown 回退，外部网络尝试和渲染错误均为 0。初次 UI 验证对空正文等待面板及固定分片长度的夹具假设已修正；最终截图与报告位于 `outputs/chat-production-progress/`，正文示例为 `document-body-streaming.png`。
+
+未调用真实模型或付费服务，未重启用户当前应用。加载本轮构建后可使用正文展示；自主工具主循环、逐页产物预览、完整模型视觉 QA 和自动修正仍按下方未完成边界继续，不能把正文显示称为这些能力验收完成。构建保留既有 Vite CJS 弃用与包体积提示。
+
+### 本地与模型交互的流式生产链路（2026-09-22，覆盖仅摘要展示）
+
+负责人明确要求“看到怎么生产、看到本地与 LLM 交互完整链路”，此前默认一句摘要与折叠完成步骤不足以满足目标。本轮已改为助手消息内默认展开的真实执行时间线：请求提交、模型响应接收进度、计划校验与决策、资料读取、工具授权/调用/结果、大纲检查、文档编译、PPT 布局检查、真实预览渲染（配置可用时）、结构/Hash 校验、原子发布、作品登记和交付结果分别展示。只显示实际执行事实，模型返回过程中更新累计字符数，校验后的决策显示格式、动作、来源策略和缺项数；不显示原始系统 Prompt、思考内容或完整附件。
+
+新增独立持久 Trace、AsyncLocalStorage 任务范围、项目/会话/消息绑定和 Electron 订阅。规划未返回即可通过本轮 command 接收事件，随后无缝归入同一助手消息；正文流完成后继续接收本地步骤。写后广播，回放与订阅衔接，序列去重；单 trace 2048 条、单项目 32768 条，截断或记录失败明确显示记录不完整。记录失败不改写已经成功的业务副作用。历史重开可恢复，正式文档终态优先于残缺记录的最后 started 状态。
+
+验证：定向 Vitest 294 项、Node 合同 24 项、Windows 隔离 Electron 9 项旅程通过；应用、测试与 Electron 类型检查、相关 ESLint、生产构建、平台审计（482 文件、0 违规）和差异检查通过。模型协议使用本地合成响应，覆盖真实分类器→流式事件；本地集成测试实际生成 PPTX 并验证落盘、发布和登记顺序；Electron 使用真实 ChatPage 与合成 IPC，覆盖规划返回前可见、正文终态后继续更新、乱序去重和历史恢复，外部网络尝试与渲染错误均为 0。截图与报告位于 `outputs/chat-production-progress/`；未发起真实模型或付费请求，不代表全量测试或真实服务端验收。构建保留既有 Vite CJS 弃用与包体积提示。
+
+未完成与下一步：统一自主工具主循环、自由页面 IR、逐页产物预览、完整模型视觉 QA 和自动修正尚未全部接通；现有链路事件可视化不等同于完整自主文档架构已完成。当前应用需重启才能加载新主进程与 preload，本轮未主动重启用户正在使用的应用。
+
+### 消息内生产进度 UI 纠偏（2026-09-22）
+
+负责人截图暴露的是源码实施遗漏：当前页面仍有「AI 工作过程」、固定四阶段卡和重复的生成提示，不只是旧构建未刷新。已移除旧卡片、思考原文、文档生成时的流光标和重复起始提示；文档助手消息只显示一处「生产进度」事实摘要，普通聊天显示简洁回复状态。文档文件生成开始后依据实际本地调用显示生成状态，正式文件仍以原有结果卡交付。
+
+已接通真实 `task_progress` 的 Domain 重放、Execution DTO、IPC 与 UI 投影；去重、任务版本、页面版本保护及最多 128 条当前快照共用同一函数。仅完成事件进入折叠步骤，没有完成证据时不显示假步骤；不展示原始页面 ID、思维链或模型 JSON。
+
+实施边界：当前生产没有调用 `taskProgress()`；旧导出发生在文本流终态之后，不能向已结束的响应流强塞文档事件。当前没有逐页预览 IPC，本轮不制造预览或宣称完整 P2/P4 已完成。下一步需绑定独立 Task Runtime 的生产事件与真实页面产物，再接入恢复、预览和发布闭环。
+
+验证：定向进度重放/仓储/IPC 43 项、当前聊天行为 28 项、UI 合同 21 项通过；TypeScript 主/测试工程、相关 ESLint、生产构建和差异检查通过。Windows 隔离 Electron 5 项旅程通过，覆盖无事件时单摘要、普通回复、完成事件展开、实时更新、重开历史消息；真实组件使用合成 IPC，外部网络尝试与渲染错误均为 0。截图与报告位于 `outputs/chat-production-progress/`，不作为真实模型或逐页生产验收。首次脚本检查正文过早及 Windows 临时 profile 文件锁已在验证脚本修正；离屏绘制避免隐藏窗口截图旧帧。四个隔离 profile 目录的退出后清理被自动执行策略拒绝，未提供具体原因，仍保留于系统临时区。未调用真实模型或付费服务，未重启用户当前应用或改写项目数据；当前应用需重新启动才能加载新生产构建。
+
+### 真实调用证据与模型选择状态纠偏（2026-09-22）
+
+负责人质疑请求在本地被拦截。本轮按提交时间核对脱敏网络日志和项目调用记录：北京时间 15:13 的请求收到 HTTP 200 后报 `newapi.invalid_response.finish_reason_invalid`；15:21 和 15:28 的请求均有 `chat_stream POST request_started`、HTTP 200、Provider request ID 和 `provider_accepted`，随后报 `semantic.invalid_plan`。这些记录证明对应请求已到达远端服务、失败发生于响应处理；不能用它们断言其他未留下调用记录的操作也已发出，亦不推断网关背后的实际模型身份和最终计费。
+
+另查出确定的发送前缺陷：App 只保存候选 ID，ChatPage 重进时却恢复为 `text_chat`；从 `text_reasoning` 恢复的候选在下拉列表中不可见，但旧校验仍从全目录认定其可用，提交到分类器后因能力不匹配而在 HTTP 和调用记录创建前被拒绝。修复已绑定候选与能力、使显示和提交使用同一选择，并校验项目边界；该门禁现在明确提示“本次请求尚未发出”。不自动选择首个服务商，不把“无需切换 Agent”解释为“可静默换模型”。
+
+已同步修正当前过渡规划器的合同冲突：去掉它无法接收的页面场景/几何输出要求，补齐可选字段省略、chat 限制、步骤结构及合法示例。收到完整结果后先记录 `result_received`，再解析计划；失败安全码区分 `semantic.invalid_plan.json_invalid` 与 `semantic.invalid_plan.schema_invalid`，不保存原文。失败回复区分请求已发出、内容已返回和调用状态未确认。旧记录没有模型正文，不能认定当次非法计划一定由提示词冲突引起。
+
+验证：语义分类器、编排器、失败回复、工作流 IPC 与聊天组件定向回归 5 文件 140 项通过；UI 合同 20 项通过；TypeScript 主工程/测试工程检查、相关 ESLint 和生产 `pnpm build` 通过；`git diff --check` 通过。构建只保留既有 Vite CJS 弃用与包体积提示。本轮不改写用户历史聊天和项目数据、不发起新的付费模型请求。真实 Electron 进程仍需退出并重启后加载新构建，再复验用户入口。
+
+### Kimi 流式 finish_reason 占位值兼容（2026-09-22）
+
+负责人最新截图对应的新请求已能保存具体安全码：`newapi.invalid_response.finish_reason_invalid`。项目网络记录只证明 `chat_stream` 收到 HTTP 200，未保存原始 SSE 字段；因此不能断言当次字段一定是空字符串，但当前解析器确实只允许字段缺失或 `null`，会把网关常见的 `finish_reason: ""` 中间分片误判为非法。
+
+已修正 `newapi.chat` 与内置联网搜索流解析：`undefined`、`null` 和空字符串只表示“尚未结束”；普通聊天只有白名单终态 `stop`、`length`、`content_filter`、`tool_calls` 或 `insufficient_system_resource` 才会结束，联网搜索仍只允许 `stop`、`length`、`tool_calls`，且两者都必须收到 `[DONE]`。不接受空白、大小写变体、`end_turn`、数组、数字或布尔值，不把占位分片当作成功，不放宽内容、身份和终态门禁。
+
+验证：NewAPI 合同回归 110 项、语义分类器回归 27 项、内置联网搜索回归 20 项通过；覆盖逐字节分块、空 finish_reason 后的合法终态、缺终态、仅占位无 `[DONE]`、未知值拒绝，以及真实分类器接线后继续完成 PPT 主题追问。未调用真实模型、联网或付费服务。
+
+未完成与下一步：这项修复针对已确认的安全码和最小协议兼容假设；旧记录没有原始 SSE，无法证明本次失败就是空字符串。加载新构建后再复验同一请求；若安全码仍为 `finish_reason_invalid`，继续只依据新的受控诊断细分，不接受任意未知终态。
+
+### 生产主入口移除无模型与正则业务回退（2026-09-22）
+
+负责人指出截图中的“选择模型”空状态与方案不一致。复核确认上一轮只接通了 `agent_first` 名义路由：发送端在没有候选模型时仍可提交空 `semanticCandidate`，运行时无分类器还会使用 `local_compat`，Agent-first 成功后又用旧的本地正则重写主题、来源和目标。这些确实是旧代码遗留，不能称为严格按 V2.3 方案实施。
+
+本轮已修正：聊天 UI 与 workflow IPC 在需求规划前都要求可用且明确选择的模型；缺失时返回 `model_selection_required`，不创建会话、不落盘工作流、不调用分类器。生产运行时固定 `agent_first`，无分类器只保存 `classification_unavailable` 失败，不回退业务正则。Agent-first 只对模型结构化计划做 Schema、字段、项目实体和安全状态校验；保留明确取消这一项本地安全边界，不再通过用户文本关键词猜主题、来源、文档类型或修订目标。文档执行不再从源文本推断 `auto` 类型。
+
+同步修正测试夹具，使正常发送测试明确提供已选模型；新增无模型 UI/IPC 拦截、无分类器不回退、模型主题/来源保留、目标歧义追问和取消边界回归。
+
+验证：本轮定向覆盖集合 11 文件、204 项与聊天 UI/IPC 合同 23 项通过；类型检查、变更文件 ESLint、生产构建通过。完整 Vitest 检查曾得到 232 文件通过、1 文件失败（1859 通过、5 失败），失败集中在取消测试未携带模型选择的旧夹具；补齐选择后该文件 6/6 与真实 JSX 事件处理器的 24/24 定向复验通过，未再次重跑全量。完整 `pnpm test` 的 Node 部分另有冻结交接包 SHA256SUMS.txt 缺失、参数探针断言不兼容 CRLF 两项未解决失败，均位于本轮未改动文件；不能宣称全量门禁通过。
+
+未完成与下一步：旧的 `local_compat` 和完整本地意图解析器仍存在，生产聊天新请求已不能进入，旧测试仍有显式或默认的兼容路径覆盖；后续应明确隔离兼容构造入口并删除退役业务路由。生产当前仍为“先语义分类、后调用回答/文档生成”的过渡链路，不满足计划的同一 Agent 一次响应直接回答或请求工具。接下来完成该主链路、Task Runtime、Document IR、渲染/双层 QA/原子发布接线。当前尚未完成完整自主文档闭环，也未进行真实模型或 Electron/Office 人工验收，未重启用户运行中的应用。
+
+### 语义规划无效响应的诊断保留（2026-09-22）
+
+继续核实负责人第二张截图：当次 kimi-k3 请求收到 HTTP 200，但项目用量记录为 invalid_response；原调用事件只有 semantic.outcome_unknown。现场路由是 UniCompAPI / newapi.chat / text_chat，参数合同为 parameters.unicompapi.text_chat.official，而非 Kimi 官方专用合同。旧记录没有保存响应校验的细分码，不能据此断言空正文、SSE 终态、模型身份或参数不兼容中的任何一项是根因。
+
+已修复语义规划入口丢弃适配器失败码的问题：枚举白名单内的安全码进入调用审计，已发出请求的无效响应与截断响应映射为 classification_invalid_response，保存 failed 工作流并显示“响应不完整或格式无法使用”。合法响应中的无效语义计划继续使用 invalid_intent_plan；未发出请求、断连、取消和超时保留原边界，不自动重试、不放宽流校验、不改写旧聊天或项目数据。failed 表示本地规划失败，不推断远端费用已结清。
+
+验证：定向 Vitest 10 文件、264 项及 IPC/UI 白名单合同 3 项通过；随后补齐现场 UniCompAPI 与 Kimi 官方合同差异的合成请求断言，分类器文件 26/26 通过（覆盖集合共 265 项，不重复累计）。测试工程类型检查、变更文件 ESLint、生产构建通过。合成测试覆盖空正文、仅 reasoning、缺终端标记/finish_reason、身份不匹配、无效 JSON、length 截断、完整语义计划、流打开失败、审计白名单与工作流重开后禁止执行。仅证明本地请求序列与处理逻辑，不证明真实网关接受参数。保留既有 Vite 弃用与包体积提示。
+
+未完成与下一步：真实 kimi-k3 当次细分失败原因仍未确认；本轮未发真实模型或付费请求、未重启运行中的 Electron。下一次在加载新构建后复验同一入口，按新增安全码修复具体协议或配置问题；不通过增加预算、静默换模型或假定模型别名来掩盖失败。P1 生产接线与完整文档闭环边界见下方维护记录。
+
+### 会话语义规划失败被误作追问的修复（2026-09-22）
+
+根据负责人截图复现应用层问题：Agent-first 在语义规划不可用、超时或返回无效计划时保留内部 unknown 占位，而 ConversationWorkflowService 丢弃 failureCode，把 agent_semantic_plan_required 拼接成用户追问。现保留规划失败类型并落盘 failed 工作流，pendingQuestions 为空，助手保存可恢复、幂等的中文失败说明，禁止该工作流进入文档执行；新请求可重新规划。模型解析失败保留 invalid_intent_plan，不再误记成服务不可用。成功识别 PPT 且缺主题时仍询问主题；未知机器字段不直接用作追问文案。对话页不把规划失败展示为“文档已部分交付”的进度卡。
+
+验证：相关 Vitest 10 文件、145 项及 IPC/UI 白名单合同 3 项通过；测试工程 TypeScript、全部变更 TS 文件 ESLint、生产构建和差异检查通过。回归覆盖截图原文、超时/不可用/无效计划、新请求恢复、追问后的服务失败、仓储重开、失败回复幂等与禁止执行。未调用真实模型或读取用户凭证，不能仅凭截图确定 kimi-k3 当次调用失败的底层原因；该问题需结合实际调用记录核实。本轮未重启用户正在运行的 Electron，未改写已有错误聊天消息；新构建须在应用重启后加载。下一步继续运行时生产接线，同时复验真实模型规划入口。
+
+### P1 任务运行时持久化基础（2026-09-22）
+
+按 V2.3 继续实施维护优化，新增严格解析的 DocumentTaskRuntime、项目级 JSON 仓储及应用服务，保存会话/来源消息/执行实例、附件引用、候选或已有作品引用、页面 revision、预算、调用指纹与 Observation。绑定快照不可变，仓储以 revision CAS 原子保存；实际实体归属、授权及当前版本通过必需的宿主校验接口复核，生产仓储解析器尚待接线。
+
+新增离线可用的持久化 Agent loop 组合入口：工具调用先登记并扣减调度预算，再执行，再保存 Observation；保存失败立即停步。重新打开仓储后保留步骤序号、历史 Observation、已耗预算及原始期限；同调用 ID/参数不重复执行，参数冲突、跨项目/会话/执行实例被拒绝。未确定结果的调用（包含写操作失败、取消、落盘失败和重启中断）进入 needs_reconciliation，不自动重放。备份可能早于副作用，因此只报告需对账，不拿旧快照恢复执行。模型结束仅保存 paused 候选检查点，未提供正式 completed/Work 登记入口。
+
+验证：当前源码定向 Vitest 9 文件、213 项通过，覆盖 Agent loop/修订、运行时与真实本地 JSON 仓储、已有原子桥接和 Provider 续轮协议；包含重开后续跑、并发 CAS、故障注入、页面版本失效、迟到结果与脱敏/限额拒绝。TypeScript 测试工程检查、全部变更 TS 文件 ESLint、生产构建和平台审计通过（475 文件、零违规）；差异检查通过。构建仍有既有 Vite CJS API 弃用与包体积提示。未调用真实模型、联网或付费服务，未进行 Electron/Office 人工验收。
+
+未完成与下一步：本轮完成独立运行时及离线组合测试，尚未接入聊天 IPC/项目级 Provider 工具工厂；实际附件/作品/页面解析器、独占执行所有权、对账结果确认与解除阻断、跨副作用存储的原子提交、正式发布适配器和持久进度 outbox 仍需实施。接下来将运行时与原子桥接及真实实体解析接通，再验证真实生成→渲染→QA→发布旅程。P1 整体及完整 V2.3 方案尚未收口。
+
+### 总体架构图与计划文档对齐（2026-09-22）
+
+已将用户提供的架构图对齐到 [会话 Agent 与自主设计 PPT 优化方案](docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md) V2.3：`Chat / Research / Document` 统一为同一 Conversation Agent 下的能力与交付形式；新增 `TaskSpec`、Task Runtime、Observation 回路、Document IR 和格式适配器边界；PPT/Word/Excel 不再解释为三个独立权限 Agent；Local Safety Guard 贯穿每次工具调用和发布；确定性 QA 拆为结构预检与产物校验，Visual QA 使用实际渲染结果；修正必须重新渲染并完整复验，Artifact Registry 只能位于原子发布门禁之后。
+
+文档关系：总体方案是会话 Agent、任务运行时、QA 和发布顺序的主文档；[模型联网搜索与对话式逐页 PPT 制作实施计划](docs/current/CONVERSATIONAL_PPT_AND_MODEL_WEB_SEARCH_PLAN.md) 仅维护搜索协议、PPT 页面身份、逐页预览和格式特定实施细节。此次仅对齐计划，不代表新增代码能力、真实模型验收或完整文档生成闭环已完成。
+
+旧计划的 P0—P7 现在解释为搜索/PPT 子计划映射，不是第二套总阶段；V2.3 的统一资源快照、Task Runtime、Observation 持久化、格式适配器、双层 QA 和原子发布顺序优先。
+
+### 启用有模型时的 Agent-first 主入口（2026-09-22）
+
+本轮已执行最小主入口切换：`createChatContextRuntime` 在存在可用语义模型时使用 `ConversationIntentOrchestrator` 的 `agent_first` 路由，让 LLM 负责需求判断；没有语义模型时保留 `local_compat`，保证离线与迁移工作流仍可追问和恢复。已有 Agent 循环、受控 Provider 工具协议和 PPT Scene 能力继续复用。
+
+验证：会话工作流、Agent 循环、Provider 工具协议、意图编排定向回归通过；应用 TypeScript 检查通过。未调用真实模型、联网或付费服务，未宣称完整动态文档生成已完成。
+
+下一步：按 V2.3 方案完成任务实体绑定、Observation 持久化和一条离线可重放的“资料分析→页面设计→渲染检查→交付门禁”闭环，再进行获授权的真实模型验收。
+
+### P1 原子工具桥接基础（2026-09-22）
+
+已新增 Application 原子工具字段合同和本地 `DocumentToolCallingBridge`，从现有八类白名单中只发布任务显式绑定的工具。字段合同统一生成 Schema 与校验实参；`authorize`/`execute` 分离，具体实体归属与版本校验等待任务绑定。桥接提供有限预算/调用数/超时、取消、同 ID 幂等与参数冲突拒绝、写入结果未知后的对账阻断、Observation 脱敏与大小限制。同步修复 NewAPI/DeepSeek 工具续轮缺失 assistant `tool_calls` 的协议问题。
+
+验证：排除 `tmp/**` 旧副本后，当前源码重点回归 5 个测试文件、157 项全部通过（桥接 19 项，Provider 工具循环 3 项，DeepSeek 17 项，NewAPI 100 项，原生搜索流 18 项）；包含两个 Provider 的实际第二轮请求序列断言。`tsc --noEmit -p tsconfig.test.json`、变更文件 ESLint、`pnpm build` 和 `git diff --check` 通过。初次验证中的旧 `host` 接口测试与 `Object.hasOwn` 目标库不兼容已修复；原先含临时副本的 389 项不计为当前源码独立验收。构建仅有 Vite CJS API 弃用和块体积提示。未调用真实模型、联网或付费服务。
+
+边界与下一步：当前桥接的幂等、预算和对账阻断只作用于单个任务实例；尚未绑定具体会话的附件、作品、页面版本和文档生成任务。下一步实现任务绑定、调用与 Observation 持久化及重启对账，再接入项目级 Provider 工具工厂和文档生成/渲染/发布门禁闭环。P1 整体及 P0—P5 全量验收尚未收口。
+
+### 原子工具驱动的自主文档方案补充（2026-09-22）
+
+负责人进一步明确目标：LLM 根据需求自主判断下一步，本地 Application 提供受控原子工具，Platform 执行并返回结构化 Observation，LLM 根据结果继续规划、修正或结束，最终由本地文件、内容、布局、Hash、原子发布和 Work 登记门禁判定正式完成。已将该原则、工具合同、组合工具边界、动态调用顺序、依赖校验和验收指标写入 [会话 Agent 与自主设计 PPT 优化方案](docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md) 第 3、5、9、10、12.3 节，版本更新为 V2.2。
+
+方案补充阶段只修改文档，不调用真实模型、联网或付费服务；随后已按当前任务授权执行最小 `agent_first` 主入口切换，完整 P0—P5 仍未收口。
+
+### 会话确认写入 Agent 与自主 PPT 方案（2026-09-22）
+
+本次会话确认：同一个 Conversation Agent 在一次响应里直接回答、追问或行动，用户不必显式切换 Agent；用户可见层称为「生产进度」而不是「制作过程」；向用户展示真实执行链路，不展示 Prompt、思维链、工具 JSON、路径或凭证；根据已授权上下文和按需联网设计 PPT；本地安全门禁、有界执行和作品登记仍由程序保证。已将上述口径写入 [会话 Agent 与自主设计 PPT 优化方案](docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md) 第 1.3 节，版本更新为 V2.1。
+
+本轮只更新方案与本记录，不修改业务代码，不调用真实模型、联网或付费服务，不代表已经授权实施 P0—P5。当前对话页仍使用「AI 工作过程」和四阶段「生成步骤」卡，尚未替换为「生产进度」。
+
+### 会话 Agent 与自主设计 PPT 方案优化（2026-09-21）
+
+负责人要求优化 `docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md`，目标是改善会话业务逻辑和实际使用体验：废除本地正则作为业务意图路由，让同一个 Conversation Agent 直接理解复合请求、必要时追问或调用受控工具；默认在已授权范围内自主读取资料、分析、制作和修正，减少用户逐项确认；PPT Designer 可以提出自由组合的页面场景、坐标和视觉设计，由 Application 做权限、版本、预算和状态校验，由 Platform 做真实 PPTX 渲染、诊断、原子发布和 Work 登记。
+
+本轮只重写规划文档，不修改业务代码，不调用真实模型、联网或付费服务，不代表方案已经实施。输入安全、取消、授权、费用、版本和作品门禁仍由程序确定性保证；模型失败时不退回正则执行业务。计划新增 P0—P5 的复现、影子评测、Agent 主路由、事件恢复、自主 PPT 设计和集成验收路线，强调不必要追问、首个可用页面耗时、局部修改正确性、真实渲染和 Windows Office 证据。现行对话式逐页 PPT 与联网计划的来源、授权、恢复和发布边界继续有效；如交互决策发生冲突，以负责人最新确认和本条为准。
+
+文档入口：[会话 Agent 与自主设计 PPT 优化方案](docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md)。
+
+
 ### develop 同步到当前功能分支（2026-09-21）
 
 负责人批准解决冲突并上传。本次合并方向为 `origin/develop`（`4d070c1`）进入 `feature/model-selection-text-video-parameters`（合并前 `adf5763`），不更新 develop。唯一内容冲突是本文顶部双方新增记录，完整保留两边记录；`storage-ipc.ts` 自动合并保留消费事件逻辑并加入 H3 接线。类型检查、lint、生产构建、定向 Vitest 27/27、UI 契约 65/65 通过。未重跑全量测试、Electron 人工验收或真实服务调用。远端原有 MiniMax 文档尾空行及构建 CJS/大包警告保留。上传后以远端功能分支提交号核对，原功能分支和 develop 均保留。
@@ -115,6 +320,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 完整 AppLayout 工作台文生 19 项、图生 14 项通过；实际生产 main/preload/IPC/磁盘验收通过，100 次前台数字输入 p95 13.5ms、派发 p95 27.2ms、长任务 0，两个本地中转站同模型 ID 正确隔离。类型、lint、构建、平台审计、diff 检查通过。最终全量 Vitest 1807/1808（唯一临时目录 ENOTEMPTY 清理失败，相关文件独跑 10/10）；Node/UI 既有 handoff SHA256 清单缺失仍失败。性能初轮异常和窗口失焦证据保留在方案，不将重跑通过解释为全场景保证。
 
 待人工审核：真实服务商 Schema/Key 和付费调用、现有项目交互、中文输入法、macOS。普通 e-video 与 Seedance 2.5 真实可执行合同资料仍不足，不能声称截图型号全部可用。新增 predictions 公共结果下载暂不支持实际代理链路。未更改计费、界面结构或用户 AppData；测试临时目录清理遭自动审批拒绝，保留且不纳入产品提交。
+
 ### UniCompAPI Studio H3 文生视频未发出请求（2026-09-20）
 
 负责人用测试连接 `hailuo` 提交文生视频后，界面报请求未发出。现场验收记录为 `failed_before_request` / `adapter.failed_before_submission`，远端 HTTP 0。根因是工作台 dispatch 会带 `taskId` / `executionId`，Studio H3 测试适配按精确字段拒绝了整单，官方 MiniMax 适配也有同样缺口。现已把这两个身份字段列为可忽略可选字段，未知字段仍拒绝。密钥未写入仓库。
@@ -397,7 +603,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 - 后续改稿必须优先采用结构化 `RevisionPlan` 和文档补丁操作。计划至少包含目标文档/基础版本、页面/章节/表格/单元格范围、操作、保留条件、幂等键和可回滚信息；LLM 不得直接返回绝对路径、文件句柄、内部凭证或任意代码。
 - Agent 循环由 Application 层控制，标准顺序为“读取受控结构 → 校验计划 → 调用一个白名单工具 → 追加结构化观察结果 → 判断下一步”；LLM 只能根据脱敏的工具结果继续规划，不能自行发起未注册工具或绕过确认门禁。
 - 每次修改都先写入临时版本并携带 `expectedRevision`，渲染和结构/视觉检查通过后才原子发布并登记新的 Work；原 Work、源文件和失败临时文件不得被覆盖，失败时必须可恢复到旧版本。
-- 质量修正分两层：先执行确定性修复，再允许 LLM 输出受限 `RepairPlan`。修正计划只能针对诊断指出的范围，并受最大工具步数、最大修正次数、超时、费用/资源预算、取消、重复错误熔断和失败隔离约束；具体数值须在 E5 验收时冻结。
+- 质量修正由 LLM/Designer 发起：本地只生成确定性诊断并执行 Schema、范围、revision、预算和发布门禁，不自行改变文档。LLM 输出受限 `RepairPlan`，只能针对诊断指出的范围，并受最大工具步数、最大修正次数、超时、费用/资源预算、取消、重复错误熔断和失败隔离约束；具体数值须在 E5 验收时冻结。
 - 生命周期轮询/冲突重试与 Agent 工具循环必须分别记录、分别验收；取消、超时、权限拒绝、预算耗尽、来源不足或连续相同诊断都必须结束循环并给出可理解状态。
 
 ### 分阶段任务
@@ -407,7 +613,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 3. 受控联网：搜索授权、域名/来源策略、证据 DTO、缓存、预算、脱敏和离线回退。
 4. 文档中间表示：内容大纲、页面结构、视觉布局、数据来源、可修改范围和保留条件分离。
 5. 工具执行与渲染：工具注册表、补丁调度器、图表/素材/PPTX/预览工具白名单、受控 IPC 和真实渲染入口。
-6. 校验与有限修正：结构/视觉诊断、确定性修复、`RepairPlan`、最大修正次数、循环审计、交付说明和失败隔离。
+6. 校验与有限修正：结构/视觉诊断、LLM `RepairPlan`、最大修正次数、循环审计、交付说明和失败隔离。
 
 每项任务必须从最新 `develop` 创建 `feature/*` 分支，按小 PR 实施；真实 Provider、联网搜索、embedding 和收费调用需要独立批准与脱敏验收证据。
 
@@ -441,7 +647,7 @@ Electron 初轮空闲 60 秒失败已保留在 `outputs/task-consumption-events/
 
 ### E5.5 实施登记（2026-09-01）
 
-继续在同一功能分支完成 E5.5：新增严格 `RepairPlan` Schema 与 `runBoundedRepairWorkflow`，确定性修复优先，LLM 仅输出受限结构化计划；每轮重新诊断并校验 revision、范围、最大尝试次数、取消和连续相同诊断熔断。新增 5 项定向测试，`typecheck` 与 `lint` 通过。E5.5 尚未连接真实渲染诊断和发布登记；E5.6、E6 仍为 `planned/not_started`。详细记录见 `docs/active/阶段9-E5.5-RepairPlan与有限修正验收记录.md`。
+继续在同一功能分支完成 E5.5：新增严格 `RepairPlan` Schema 与 `runBoundedRepairWorkflow`，本地只做诊断和安全校验，LLM 输出受限结构化计划；每轮重新诊断并校验 revision、范围、最大尝试次数、取消和连续相同诊断熔断。新增 5 项定向测试，`typecheck` 与 `lint` 通过。E5.5 尚未连接真实渲染诊断和发布登记；E5.6、E6 仍为 `planned/not_started`。详细记录见 `docs/active/阶段9-E5.5-RepairPlan与有限修正验收记录.md`。
 
 ### E5.6 实施登记（2026-09-01）
 

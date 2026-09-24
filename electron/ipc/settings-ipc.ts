@@ -15,7 +15,8 @@ import {
   SecureCredentialVault,
   ShortcutService,
   SettingsController,
-  UpdatesService
+  UpdatesService,
+  type DiagnosticLogInput
 } from '../../src/platform';
 import type { MediaEngineAdapter } from '../../src/platform/videos/media-engine-adapter';
 import { createRuntimeMediaEngine } from './runtime-media-engine';
@@ -46,6 +47,7 @@ export interface SettingsIpcLifecycle {
     level: 'debug' | 'info' | 'warn' | 'error',
     message: string
   ): Promise<void>;
+  writeDiagnosticEvent(input: DiagnosticLogInput): Promise<void>;
   dispose(): void;
 }
 
@@ -230,6 +232,9 @@ export function registerSettingsIpcHandlers(options: {
     },
     writeDiagnosticsLog(level, message) {
       return controller.writeDiagnosticsLog(level, message);
+    },
+    writeDiagnosticEvent(input) {
+      return controller.writeDiagnosticEvent(input);
     },
     dispose() {
       shortcuts.release();

@@ -34,7 +34,8 @@ export interface DocumentQualityDiagnostic {
     | 'invalid_image'
     | 'page_count_mismatch'
     | 'text_overflow'
-    | 'overlap';
+    | 'overlap'
+    | 'element_overflow';
   readonly severity: DocumentDiagnosticSeverity;
   readonly scope: string;
   readonly message: string;
@@ -44,7 +45,7 @@ export interface DocumentRenderResult {
   readonly previewCount: number;
   readonly warnings?: readonly string[];
   readonly diagnostics?: readonly {
-    readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap';
+    readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap' | 'element_overflow';
     readonly severity: DocumentDiagnosticSeverity;
     readonly scope: string;
     readonly message: string;

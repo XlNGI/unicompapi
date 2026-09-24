@@ -14,6 +14,7 @@ import { registerProviderIpcHandlers } from './ipc/provider-ipc';
 import { registerSettingsIpcHandlers } from './ipc/settings-ipc';
 import { registerChatContextIpcHandlers } from './ipc/chat-context-ipc';
 import { registerDocumentGenerationIpcHandlers } from './ipc/document-generation-ipc';
+import { registerConversationProductionIpcHandlers } from './ipc/conversation-production-ipc';
 import {
   deepSeekProviderPackageDescriptor,
   JsonProviderManagementAuditStore,
@@ -42,7 +43,10 @@ import {
   newApiImageUsageSchema,
   newApiVideoUsageSchema,
   seedanceVideoUsageSchema,
-  viduUsageSchema
+  viduUsageSchema,
+  diagnosticErrorName,
+  toChatBlockedDiagnostic,
+  toProviderDiagnostic
 } from '../src/platform';
 import { ElectronViduComposition } from './ipc/vidu-composition';
 import { createLiveProviderManagementComposition } from './ipc/management-adapters';
@@ -158,11 +162,26 @@ const runtimeAuthorizationSync = new LedgerRuntimeAuthorizationSync(
 const liveProviders = createLiveProviderManagementComposition({
   getProxyMode: () => settingsLifecycle.getProxyMode(),
   logger: (event) => {
-    void settingsLifecycle.writeDiagnosticsLog(
-      event.event === 'request_failed' ? 'error' : 'info',
-      JSON.stringify(event)
-    );
+    const diagnostic = toProviderDiagnostic(event);
+    if (diagnostic) void settingsLifecycle.writeDiagnosticEvent(diagnostic);
   }
+});
+
+function recordProcessDiagnostic(
+  code: 'process.uncaught_exception' | 'process.unhandled_rejection',
+  reason: unknown
+): void {
+  void settingsLifecycle.writeDiagnosticEvent({
+    code,
+    facts: { name: diagnosticErrorName(reason) }
+  });
+}
+
+process.on('uncaughtException', (error) => {
+  recordProcessDiagnostic('process.uncaught_exception', error);
+});
+process.on('unhandledRejection', (reason) => {
+  recordProcessDiagnostic('process.unhandled_rejection', reason);
 });
 const providerManagement = new ProviderManagementFramework(
   providerPackages,
@@ -178,6 +197,7 @@ const providerManagement = new ProviderManagementFramework(
   { runtimeAuthorization: runtimeAuthorizationSync }
 );
 const projectSessionRegistry = new StorageProjectSessionRegistry();
+const productionTraceLifecycle = registerConversationProductionIpcHandlers({ getSession: () => projectSessionRegistry.get() });
 const chatContextLifecycle = registerChatContextIpcHandlers({
   getSession: () => projectSessionRegistry.get(),
   providerRegistry: viduComposition.registry,
@@ -187,16 +207,29 @@ const chatContextLifecycle = registerChatContextIpcHandlers({
     credentialVault: viduComposition.credentialVault,
     deepSeekRuntime: liveProviders.deepSeekRuntime,
     newApiRuntime: liveProviders.newApiRuntime
+  },
+  onError: (error) => {
+    const diagnostic = toChatBlockedDiagnostic(error);
+    if (diagnostic) void settingsLifecycle.writeDiagnosticEvent(diagnostic);
   }
 });
 const documentLifecycle = registerDocumentGenerationIpcHandlers({
-  sessionRegistry: projectSessionRegistry
+  sessionRegistry: projectSessionRegistry,
+  providerRegistry: viduComposition.registry,
+  providerPackages,
+  runtimeAuthorization: runtimeAuthorizationLedger,
+  textSubmission: {
+    credentialVault: viduComposition.credentialVault,
+    deepSeekRuntime: liveProviders.deepSeekRuntime,
+    newApiRuntime: liveProviders.newApiRuntime
+  }
 });
 const storageLifecycle = registerStorageIpcHandlers({
   getMediaEngine: () => mediaEngine,
   sessionRegistry: projectSessionRegistry,
   providerPackages,
   additionalSessionChangeGuards: [
+    productionTraceLifecycle.clearSubscriptions,
     chatContextLifecycle.waitForMutations,
     documentLifecycle.waitForOperations
   ],

@@ -15,6 +15,7 @@ type DocumentGenerationLogCode = (typeof documentGenerationLogCodes)[number];
 export interface DocumentGenerationLogError {
   readonly category: 'document_generation';
   readonly code?: DocumentGenerationLogCode;
+  readonly reason?: 'renderer_unavailable' | 'visual_diagnostics';
 }
 
 export function toDocumentGenerationLogError(
@@ -24,12 +25,21 @@ export function toDocumentGenerationLogError(
     typeof error === 'object' && error !== null && 'code' in error
       ? (error as { code?: unknown }).code
       : undefined;
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error
+      ? String((error as { message?: unknown }).message ?? '')
+      : '';
   return {
     category: 'document_generation',
     ...(typeof code === 'string' && documentGenerationLogCodes.includes(
       code as DocumentGenerationLogCode
     )
       ? { code: code as DocumentGenerationLogCode }
-      : {})
+      : {}),
+    ...(code === 'verification_failed' && /renderer is unavailable/i.test(message)
+      ? { reason: 'renderer_unavailable' as const }
+      : code === 'verification_failed' && /visual diagnostics/i.test(message)
+        ? { reason: 'visual_diagnostics' as const }
+        : {})
   };
 }

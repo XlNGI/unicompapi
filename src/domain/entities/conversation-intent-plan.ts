@@ -38,6 +38,24 @@ export type ConversationIntentReadiness =
 
 export type ConversationIntentParameter = string | number | boolean;
 
+/**
+ * An ordered semantic sub-goal inside one user request.  It is deliberately
+ * still a data contract: the model may describe intent and dependencies, but
+ * it cannot choose paths, providers, credentials, permissions or commands.
+ */
+export interface ConversationIntentStep {
+  readonly stepId: string;
+  readonly kind: 'chat' | 'document';
+  readonly action: ConversationIntentAction;
+  readonly documentKind?: DocumentWorkspaceKind | 'auto';
+  readonly dependsOn: readonly string[];
+  readonly parameters: Readonly<Record<string, ConversationIntentParameter>>;
+  readonly sourcePolicy: ConversationIntentSourcePolicy;
+  readonly missing: readonly string[];
+  readonly confidence: ConversationIntentConfidence;
+  readonly needsConfirmation: boolean;
+}
+
 export interface ConversationIntentTargetHint {
   readonly unit:
     | 'document'
@@ -57,6 +75,8 @@ export interface ConversationIntentPlan {
   readonly action?: ConversationIntentAction;
   readonly documentKind?: DocumentWorkspaceKind | 'auto';
   readonly deliverables?: readonly DocumentWorkspaceKind[];
+  /** Ordered sub-goals for compound requests; omitted for a single goal. */
+  readonly steps?: readonly ConversationIntentStep[];
   readonly targetHint?: ConversationIntentTargetHint;
   readonly parameters: Readonly<Record<string, ConversationIntentParameter>>;
   readonly sourcePolicy: ConversationIntentSourcePolicy;
@@ -84,6 +104,7 @@ export function parseConversationIntentPlan(
     'action',
     'documentKind',
     'deliverables',
+    'steps',
     'targetHint',
     'parameters',
     'sourcePolicy',
@@ -102,6 +123,7 @@ export function parseConversationIntentPlan(
     : requireEnum(value.documentKind, ['auto', 'word', 'excel', 'ppt'] as const, 'documentKind');
   const parameters = parseParameters(value.parameters);
   const deliverables = value.deliverables === undefined ? undefined : parseDeliverables(value.deliverables);
+  const steps = value.steps === undefined ? undefined : parseSteps(value.steps);
   const missing = parseTextList(value.missing, 'missing');
   const ambiguities = parseTextList(value.ambiguities, 'ambiguities');
   const confidence = requireEnum(
@@ -112,7 +134,7 @@ export function parseConversationIntentPlan(
   if (typeof value.needsConfirmation !== 'boolean') {
     throw new TypeError('Conversation intent plan needsConfirmation is invalid');
   }
-  if (kind === 'chat' && (action !== undefined || documentKind !== undefined || deliverables !== undefined || value.targetHint !== undefined)) {
+  if (kind === 'chat' && (action !== undefined || documentKind !== undefined || deliverables !== undefined || steps !== undefined || value.targetHint !== undefined)) {
     throw new TypeError('chat intent cannot contain document execution fields');
   }
   if (kind === 'document' && action === undefined) {
@@ -124,12 +146,14 @@ export function parseConversationIntentPlan(
   if (deliverables && (kind !== 'document' || action !== 'create' || !documentKind || documentKind === 'auto' || !deliverables.includes(documentKind))) {
     throw new TypeError('Document deliverables require a creation plan with an active output kind');
   }
+  if (steps && kind !== 'document') throw new TypeError('Conversation steps require a document plan');
   return {
     schemaVersion: 1,
     kind,
     ...(action !== undefined ? { action } : {}),
     ...(documentKind !== undefined ? { documentKind } : {}),
     ...(deliverables ? { deliverables } : {}),
+    ...(steps ? { steps } : {}),
     ...(value.targetHint !== undefined
       ? { targetHint: parseTargetHint(value.targetHint) }
       : {}),
@@ -144,6 +168,71 @@ export function parseConversationIntentPlan(
     confidence,
     needsConfirmation: value.needsConfirmation
   };
+}
+
+function parseSteps(value: unknown): readonly ConversationIntentStep[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) {
+    throw new TypeError('Conversation intent steps are invalid');
+  }
+  const ids = new Set<string>();
+  const steps = value.map((item, index) => {
+    const label = `steps[${index}]`;
+    if (!isRecord(item)) throw new TypeError(`Conversation intent ${label} is invalid`);
+    requireExactKeys(item, [
+      'stepId', 'kind', 'action', 'documentKind', 'dependsOn', 'parameters',
+      'sourcePolicy', 'missing', 'confidence', 'needsConfirmation'
+    ]);
+    const stepId = requireIdentifier(item.stepId, `${label}.stepId`);
+    if (ids.has(stepId)) throw new TypeError('Conversation intent step IDs must be unique');
+    ids.add(stepId);
+    const kind = requireEnum(item.kind, ['chat', 'document'] as const, `${label}.kind`);
+    const action = requireEnum(item.action, conversationIntentActions, `${label}.action`);
+    const documentKind = item.documentKind === undefined
+      ? undefined
+      : requireEnum(item.documentKind, ['auto', 'word', 'excel', 'ppt'] as const, `${label}.documentKind`);
+    if (kind === 'chat' && documentKind !== undefined) throw new TypeError('Chat intent step cannot contain documentKind');
+    if (kind === 'document' && documentKind === undefined) throw new TypeError('Document intent step requires documentKind');
+    if (!Array.isArray(item.dependsOn) || item.dependsOn.length > 8 || item.dependsOn.some((dep) => typeof dep !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(dep))) {
+      throw new TypeError(`${label}.dependsOn is invalid`);
+    }
+    const dependsOn = [...new Set(item.dependsOn as string[])];
+    const parameters = parseParameters(item.parameters);
+    const sourcePolicy = requireEnum(item.sourcePolicy, conversationIntentSourcePolicies, `${label}.sourcePolicy`);
+    const missing = parseTextList(item.missing, `${label}.missing`);
+    const confidence = requireEnum(item.confidence, conversationIntentConfidenceLevels, `${label}.confidence`);
+    if (typeof item.needsConfirmation !== 'boolean') throw new TypeError(`${label}.needsConfirmation is invalid`);
+    return {
+      stepId,
+      kind,
+      action,
+      ...(documentKind !== undefined ? { documentKind } : {}),
+      dependsOn,
+      parameters,
+      sourcePolicy,
+      missing,
+      confidence,
+      needsConfirmation: item.needsConfirmation
+    };
+  });
+  const known = new Set(steps.map((step) => step.stepId));
+  for (const step of steps) {
+    if (step.dependsOn.includes(step.stepId) || step.dependsOn.some((dependency) => !known.has(dependency))) {
+      throw new TypeError('Conversation intent step dependency is invalid');
+    }
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const byId = new Map(steps.map((step) => [step.stepId, step]));
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) throw new TypeError('Conversation intent step dependencies contain a cycle');
+    visiting.add(id);
+    for (const dependency of byId.get(id)!.dependsOn) visit(dependency);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  steps.forEach((step) => visit(step.stepId));
+  return steps;
 }
 
 function parseDeliverables(value: unknown): readonly DocumentWorkspaceKind[] {
@@ -223,6 +312,13 @@ function requireEnum<T extends string>(value: unknown, values: readonly T[], lab
 
 function requireText(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > maxText) throw new TypeError(`Conversation intent ${label} is invalid`);
+  return value;
+}
+
+function requireIdentifier(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(value)) {
+    throw new TypeError(`${label} is invalid`);
+  }
   return value;
 }
 

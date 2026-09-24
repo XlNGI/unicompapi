@@ -1198,6 +1198,7 @@ describe('office document generator', () => {
 
   it('rejects tables whose row and column continuations exceed the PPT page budget', async () => {
     const outputDirectory = await createOutputDirectory();
+    const layoutStatuses: string[] = [];
     const header = Array.from({ length: 20 }, (_, index) => `列${index + 1}`);
     const rows = Array.from({ length: 80 }, () =>
       Array.from({ length: 20 }, () => '值')
@@ -1223,9 +1224,11 @@ describe('office document generator', () => {
         outline,
         outputDirectory,
         now: '2026-08-26T10:00:00.000Z',
-        presentationTemplate: 'work_report'
+        presentationTemplate: 'work_report',
+        onProgress: async event => { if (event.operationId === 'document-layout') layoutStatuses.push(event.status); }
       })
     ).rejects.toMatchObject({ code: 'document_layout_overflow' });
+    expect(layoutStatuses).toEqual(['started', 'failed']);
   });
 
   it('renders section and closing page kinds with their own presentation semantics', async () => {

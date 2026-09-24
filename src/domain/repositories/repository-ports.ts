@@ -16,6 +16,9 @@ import type { VideoExportPlan } from '../entities/video-export-plan';
 import type { VideoWorkspaceDraft } from '../entities/video-workspace';
 import type { Work } from '../entities/work';
 import type {
+  DocumentTaskRuntime
+} from '../entities/document-task-runtime';
+import type {
   Conversation,
   ConversationStatus
 } from '../entities/conversation';
@@ -74,6 +77,7 @@ import type {
   VideoExportPlanId,
   WorkId
 } from '../ids';
+import type { DocumentTaskRuntimeId } from '../ids';
 import type { ConversationId } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
 
@@ -262,6 +266,14 @@ export interface WorkRepository {
   get(id: WorkId): Promise<Work | undefined>;
   list(projectId: ProjectId): Promise<readonly Work[]>;
   save(work: Work): Promise<void>;
+}
+
+export interface DocumentTaskRuntimeRepository {
+  readonly projectId: ProjectId;
+  get(id: DocumentTaskRuntimeId): Promise<DocumentTaskRuntime | undefined>;
+  list(conversationId?: ConversationId): Promise<readonly DocumentTaskRuntime[]>;
+  create(runtime: DocumentTaskRuntime): Promise<void>;
+  save(runtime: DocumentTaskRuntime, expectedRevision: number): Promise<void>;
 }
 
 export interface ProviderRepository {

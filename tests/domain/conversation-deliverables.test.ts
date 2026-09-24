@@ -28,3 +28,46 @@ describe('Office conversation deliverables contract', () => {
     expect(() => parseConversationWorkflow({ ...workflow, deliveries: [{ kind: 'word', status: 'pending', outputPath: 'arbitrary' }] })).toThrow('unsupported');
   });
 });
+
+describe('compound conversation steps contract', () => {
+  const base = {
+    schemaVersion: 1,
+    kind: 'document' as const,
+    action: 'create' as const,
+    documentKind: 'ppt' as const,
+    parameters: { topic: '销售分析' },
+    sourcePolicy: 'internal' as const,
+    missing: [],
+    ambiguities: [],
+    confidence: 'high' as const,
+    needsConfirmation: false
+  };
+
+  it('accepts ordered steps and preserves dependencies', () => {
+    const plan = parseConversationIntentPlan({
+      ...base,
+      steps: [
+        { stepId: 'retrieve', kind: 'document', action: 'analyze', documentKind: 'auto', dependsOn: [], parameters: { topic: '销售表' }, sourcePolicy: 'internal', missing: [], confidence: 'high', needsConfirmation: false },
+        { stepId: 'deck', kind: 'document', action: 'create', documentKind: 'ppt', dependsOn: ['retrieve'], parameters: { audience: '管理层' }, sourcePolicy: 'internal', missing: [], confidence: 'high', needsConfirmation: false }
+      ]
+    });
+    expect(plan.steps?.map((step) => [step.stepId, step.dependsOn])).toEqual([
+      ['retrieve', []],
+      ['deck', ['retrieve']]
+    ]);
+  });
+
+  it('rejects unknown dependencies and cycles', () => {
+    expect(() => parseConversationIntentPlan({
+      ...base,
+      steps: [{ stepId: 'deck', kind: 'document', action: 'create', documentKind: 'ppt', dependsOn: ['missing'], parameters: {}, sourcePolicy: 'none', missing: [], confidence: 'high', needsConfirmation: false }]
+    })).toThrow();
+    expect(() => parseConversationIntentPlan({
+      ...base,
+      steps: [
+        { stepId: 'a', kind: 'document', action: 'analyze', documentKind: 'auto', dependsOn: ['b'], parameters: {}, sourcePolicy: 'none', missing: [], confidence: 'high', needsConfirmation: false },
+        { stepId: 'b', kind: 'document', action: 'create', documentKind: 'ppt', dependsOn: ['a'], parameters: {}, sourcePolicy: 'none', missing: [], confidence: 'high', needsConfirmation: false }
+      ]
+    })).toThrow();
+  });
+});

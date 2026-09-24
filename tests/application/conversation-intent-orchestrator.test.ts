@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConversationIntentOrchestrationError,
   ConversationIntentOrchestrator,
+  ConversationSemanticPlanError,
   analyzeLocalConversationIntent
 } from '../../src/application';
 import { createConversationWorkflow, toConversationId, toConversationWorkflowId, toIsoTimestamp, toMessageId, toProjectId } from '../../src/domain';
@@ -190,6 +191,33 @@ describe('Conversation intent orchestrator', () => {
       classifier: { classify: () => new Promise(() => {}) }
     }).analyze({ rawText: '这个报告出了问题' });
     expect(timedOut).toMatchObject({ route: 'fallback', failureCode: 'classification_timeout' });
+  });
+
+  it('accepts a completed classifier response during the finite timeout grace', async () => {
+    const plan = {
+      schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt', parameters: { topic: '产品介绍' },
+      sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false
+    } as const;
+    const result = await new ConversationIntentOrchestrator({
+      classifierTimeoutMs: 5,
+      classifierTimeoutGraceMs: 50,
+      routingMode: 'agent_first',
+      classifier: { classify: () => new Promise((resolve) => setTimeout(() => resolve(plan), 15)) }
+    }).analyze({ rawText: '做一份产品介绍 PPT' });
+    expect(result.route).toBe('classifier');
+    expect(result.plan.kind).toBe('document');
+    expect(result.plan.documentKind).toBe('ppt');
+    expect(result.failureCode).toBeUndefined();
+  });
+
+  it('keeps a response validation failure distinct when it arrives during the grace', async () => {
+    const result = await new ConversationIntentOrchestrator({
+      classifierTimeoutMs: 5,
+      classifierTimeoutGraceMs: 50,
+      routingMode: 'agent_first',
+      classifier: { classify: () => new Promise((_, reject) => setTimeout(() => reject(new ConversationSemanticPlanError('json_invalid')), 15)) }
+    }).analyze({ rawText: '做一份产品介绍 PPT' });
+    expect(result).toMatchObject({ route: 'fallback', failureCode: 'invalid_intent_plan' });
   });
 
   it('applies real target and user source gates to model plans', async () => {
@@ -396,5 +424,93 @@ describe('Conversation intent orchestrator', () => {
       },
       assessment: { readiness: 'ready' }
     });
+  });
+
+  it('uses the semantic classifier for clear business requests in agent-first mode', async () => {
+    let calls = 0;
+    const orchestrator = new ConversationIntentOrchestrator({
+      routingMode: 'agent_first',
+      classifier: {
+        async classify() {
+          calls += 1;
+          return {
+            schemaVersion: 1,
+            kind: 'document',
+            action: 'create',
+            documentKind: 'ppt',
+            parameters: { requirements: '分析销售表并做管理层汇报' },
+            sourcePolicy: 'internal',
+            missing: [],
+            ambiguities: [],
+            confidence: 'high',
+            needsConfirmation: false
+          };
+        }
+      }
+    });
+    const result = await orchestrator.analyze({
+      rawText: '分析销售表并做管理层汇报 PPT',
+      context: { requestedIntentKind: 'document', requestedDocumentKind: 'ppt' }
+    });
+    expect(result.route).toBe('classifier');
+    expect(result.plan).toMatchObject({ kind: 'document', action: 'create', documentKind: 'ppt' });
+    expect(calls).toBe(1);
+  });
+
+  it('fails closed when production agent-first routing has no classifier', async () => {
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first' }).analyze({
+      rawText: '分析销售表并做管理层汇报 PPT'
+    });
+    expect(result).toMatchObject({
+      route: 'fallback',
+      failureCode: 'classification_unavailable',
+      plan: { kind: 'unknown' }
+    });
+  });
+
+  it('keeps model-inferred topic and source requirements without keyword overrides', async () => {
+    const plan = { schemaVersion: 1, kind: 'document', action: 'create', documentKind: 'ppt',
+      parameters: { topic: '附件中的季度经营分析', pageCount: 8 }, sourcePolicy: 'internal',
+      missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false };
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first',
+      classifier: { classify: async () => plan } }).analyze({ rawText: '就按刚才讨论的来' });
+    expect(result.plan).toMatchObject({ parameters: plan.parameters, sourcePolicy: 'internal', missing: [] });
+    expect(result.assessment.readiness).toBe('ready');
+  });
+
+  it('keeps exact cancellation local but sends semantic corrections to the model', async () => {
+    let calls = 0;
+    const orchestrator = new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: {
+      classify: async () => { calls++; return { schemaVersion: 1, kind: 'chat', parameters: {}, sourcePolicy: 'none',
+        missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false }; }
+    } });
+    expect((await orchestrator.analyze({ rawText: '取消当前任务' })).cancelled).toBe(true);
+    expect(calls).toBe(0);
+    expect((await orchestrator.analyze({ rawText: '不要做 PPT，改为解释这份材料' })).cancelled).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
+  it('resolves only the model-selected document and preserves its page hint', async () => {
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: {
+      classify: async () => ({ schemaVersion: 1, kind: 'document', action: 'revise', documentKind: 'ppt',
+        parameters: {}, targetHint: { unit: 'page', ordinal: 4 }, sourcePolicy: 'none',
+        missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false })
+    } }).analyze({ rawText: '第二页改成我们刚才讨论的范围', context: {
+      documents: [{ messageId: 'ppt-target', kind: 'ppt', fileName: '季度.pptx' }]
+    } });
+    expect(result.plan.targetHint).toEqual({ unit: 'page', ordinal: 4 });
+    expect(result.resolvedTarget?.messageId).toBe('ppt-target');
+  });
+
+  it('does not choose the latest document by regex when the model target is ambiguous', async () => {
+    const result = await new ConversationIntentOrchestrator({ routingMode: 'agent_first', classifier: {
+      classify: async () => ({ schemaVersion: 1, kind: 'document', action: 'revise', documentKind: 'ppt',
+        parameters: {}, sourcePolicy: 'none', missing: [], ambiguities: [], confidence: 'high', needsConfirmation: false })
+    } }).analyze({ rawText: '修改最新的 PPT', context: {
+      documents: [{ messageId: 'first', kind: 'ppt', fileName: '甲.pptx' }, { messageId: 'last', kind: 'ppt', fileName: '乙.pptx' }]
+    } });
+    expect(result.resolvedTarget).toBeUndefined();
+    expect(result.plan.missing).toContain('document_target');
+    expect(result.assessment.readiness).toBe('needs_clarification');
   });
 });

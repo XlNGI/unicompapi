@@ -7,6 +7,7 @@ import '../styles/components.css';
 export interface MarkdownMessageProps {
   readonly content: string;
   readonly className?: string;
+  readonly allowImages?: boolean;
 }
 
 const markdownComponents: Components = {
@@ -16,16 +17,21 @@ const markdownComponents: Components = {
 };
 
 const markdownRemarkPlugins = [remarkGfm];
+const textImageComponents: Components = {
+  ...markdownComponents,
+  img({ alt }) { return <span>{alt || '图片'}</span>; }
+};
 
 export const MarkdownMessage = memo(function MarkdownMessage({
   content,
-  className = ''
+  className = '',
+  allowImages = true
 }: MarkdownMessageProps) {
   const classes = ['uc-markdown-message', className].filter(Boolean).join(' ');
 
   return (
     <div className={classes}>
-      <ReactMarkdown components={markdownComponents} remarkPlugins={markdownRemarkPlugins}>
+      <ReactMarkdown components={allowImages ? markdownComponents : textImageComponents} remarkPlugins={markdownRemarkPlugins}>
         {content}
       </ReactMarkdown>
     </div>
