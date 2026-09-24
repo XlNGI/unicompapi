@@ -59,7 +59,14 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /<ActionMenu/);
   assert.match(source, /uc-chat-page__composer-toolbar/);
   assert.match(source, /uc-chat-page__model-picker-header/);
+  assert.match(source, /uc-chat-page__model-mode/);
+  assert.match(source, /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/);
   assert.match(styles, /uc-chat-page__model-picker-popup/);
+  assert.match(styles, /\.uc-chat-page__model-picker-popup[\s\S]*display: grid/);
+  assert.match(styles, /\.uc-chat-page__model-picker-popup \.uc-model-select__listbox-composite \{[\s\S]*display: contents;/);
+  assert.match(styles, /\.uc-chat-page__model-picker-popup \.rs-search-box/);
+  assert.match(styles, /\.uc-chat-page__model-picker-popup \.rs-picker-menu-group-caret \{[\s\S]*display: none;/);
+  assert.match(styles, /\.uc-picker-layer \.rs-picker-popup\.uc-chat-page__model-picker-popup/);
   assert.match(source, /<Drawer/);
   assert.match(source, /<Drawer\.Title>对话列表<\/Drawer\.Title>/);
   assert.match(source, /<Drawer\.Title>项目上下文<\/Drawer\.Title>/);
