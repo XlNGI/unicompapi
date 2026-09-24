@@ -39,12 +39,13 @@ export interface ResolvedVideoExportOutput {
   readonly relativePath: string;
   readonly fileName: string;
   readonly conflictPolicy: 'fail' | 'create_unique_name';
-  readonly container: 'webm';
-  readonly videoCodec: 'libvpx-vp9';
-  readonly audioCodec: 'libopus';
+  readonly container: 'webm' | 'mp4';
+  readonly videoCodec: 'libvpx-vp9' | 'libopenh264';
+  readonly audioCodec: 'libopus' | 'aac';
   readonly resolution: { readonly kind: 'source' };
   readonly frameRate: { readonly kind: 'source' };
-  readonly quality: { readonly kind: 'crf'; readonly value: 32 };
+  readonly quality: { readonly kind: 'crf'; readonly value: 32 } |
+    { readonly kind: 'bitrate'; readonly value: number };
   readonly hardwareAcceleration: 'software_only';
 }
 
@@ -52,9 +53,9 @@ export interface VideoExportEngineSnapshot {
   readonly adapterId: string;
   readonly adapterVersion: string;
   readonly engineVersion: string;
-  readonly videoEncoder: 'libvpx-vp9';
-  readonly audioEncoder: 'libopus';
-  readonly container: 'webm';
+  readonly videoEncoder: 'libvpx-vp9' | 'libopenh264';
+  readonly audioEncoder: 'libopus' | 'aac';
+  readonly container: 'webm' | 'mp4';
 }
 
 export interface VideoExportPlan {
@@ -155,11 +156,17 @@ export function isVideoExportPlan(value: unknown): value is VideoExportPlan {
     isRecord(value.output) &&
     isNonBlank(value.output.relativePath) &&
     isNonBlank(value.output.fileName) &&
-    value.output.container === 'webm' &&
-    value.output.videoCodec === 'libvpx-vp9' &&
-    value.output.audioCodec === 'libopus' &&
+    ((value.output.container === 'webm' &&
+      value.output.videoCodec === 'libvpx-vp9' && value.output.audioCodec === 'libopus') ||
+     (value.output.container === 'mp4' &&
+      value.output.videoCodec === 'libopenh264' && value.output.audioCodec === 'aac' &&
+      isRecord(value.output.quality) && value.output.quality.kind === 'bitrate' &&
+      Number.isSafeInteger(value.output.quality.value) && Number(value.output.quality.value) > 0)) &&
     value.output.hardwareAcceleration === 'software_only' &&
     isRecord(value.engine) &&
+    value.engine.container === value.output.container &&
+    value.engine.videoEncoder === value.output.videoCodec &&
+    value.engine.audioEncoder === value.output.audioCodec &&
     value.engine.adapterId === 'ffmpeg' &&
     isNonBlank(value.engine.adapterVersion) &&
     isNonBlank(value.engine.engineVersion) &&

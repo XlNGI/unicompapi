@@ -1,3 +1,4 @@
+import { readPreviewImage } from './read-preview-image';
 import { SelectPicker } from '../../../components/Pickers';
 import {
   useEffect,
@@ -5,7 +6,9 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent
+  type CSSProperties,
+  type FormEvent,
+  type SyntheticEvent
 } from 'react';
 import {
   LuCheck,
@@ -119,6 +122,14 @@ interface PreviewMediaHandle {
   readonly mimeType: string;
 }
 
+const previewHandleRenewalWindowMs = 30_000;
+
+function hasFreshPreviewHandle(handle: PreviewMediaHandle | undefined): handle is PreviewMediaHandle {
+  if (!handle) return false;
+  const expiresAtMs = Date.parse(handle.expiresAt);
+  return Number.isFinite(expiresAtMs) && expiresAtMs - Date.now() > previewHandleRenewalWindowMs;
+}
+
 const previewZoomOptions: readonly {
   readonly key: PreviewZoom;
   readonly label: string;
@@ -134,7 +145,7 @@ const previewZoomOptions: readonly {
 
 interface VideoEditingPageProps {
   readonly active?: boolean;
-  readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
+  readonly onNavigate?: (itemId: 'tasks' | 'library', taskId?: string) => void;
   readonly preferredDraftId?: string;
 }
 
@@ -174,6 +185,14 @@ interface TimelineFrameRequest {
   readonly sourceUs: number;
 }
 
+interface TimelineDragState {
+  readonly clipId: string;
+  readonly left: number;
+  readonly width: number;
+  readonly targetIndex?: number;
+  readonly placeAfter?: boolean;
+}
+
 interface ExtractedTimelineFrame {
   readonly request: TimelineFrameRequest;
   readonly frameUrl: string;
@@ -204,11 +223,25 @@ interface TimelineEdgeAutoScrollInput {
   readonly scrollWidth: number;
 }
 
+interface TimelinePlaybackScrollInput {
+  readonly playheadPx: number;
+  readonly scrollLeft: number;
+  readonly viewportWidth: number;
+  readonly scrollWidth: number;
+}
+
 const timelineThumbnailWidthPx = 56;
 const timelineThumbnailRenderWidthPx = 320;
 const timelineThumbnailRenderHeightPx = 180;
 const timelineFrameCacheLimit = 256;
 const timelineFrameConcurrency = 2;
+
+// Keep generated frame URLs and contact sheets alive when the editor view is
+// temporarily recreated while switching workspaces. They are still cleared
+// explicitly by the existing "clear preview cache" action.
+const sharedFrameCache = new Map<string, string>();
+const sharedTimelineFrameCache = new Map<string, string>();
+const sharedContactSheetCache = new Map<string, string>();
 const timelineFrameDebounceMs = 60;
 const timelineFramePresentationTimeoutMs = 48;
 const timelineMaximumPixelsPerSecond = 1_000;
@@ -227,6 +260,8 @@ interface PendingPreviewSeek {
   readonly timelineUs: number;
   readonly sourceUs: number;
   readonly resumePlayback: boolean;
+  readonly awaitPreviewReplacement: boolean;
+  readonly previewUrl?: string;
 }
 
 const saveStateLabels: Record<SaveState, string> = {
@@ -252,10 +287,13 @@ export function VideoEditingPage({
 }: VideoEditingPageProps) {
   const storage = window.unicomp?.storage;
   const videoEditors = window.unicomp?.videoEditors;
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewSeekTimerRef = useRef<number>();
+  const playbackAttemptRef = useRef(0);
   const musicRef = useRef<HTMLAudioElement>(null);
   const timelineViewportRef = useRef<HTMLDivElement>(null);
   const timelineScrollFrameRef = useRef<number>();
+  const timelinePlaybackScrollFrameRef = useRef<number>();
   const timelinePendingScrollLeftRef = useRef(0);
   const timelineZoomScrollLeftRef = useRef<number>();
   const [session, setSession] = useState<StorageProjectSessionDto>();
@@ -270,6 +308,11 @@ export function VideoEditingPage({
     Readonly<Record<string, VideoEditorSourceStatusDto>>
   >({});
   const [preview, setPreview] = useState<PreviewMediaHandle>();
+  const [nextPreview, setNextPreview] = useState<{
+    clipId: string;
+    preview: PreviewMediaHandle;
+    sourceUs: number;
+  }>();
   const stageCanvasRef = useRef<HTMLCanvasElement>(null);
   const [showStageFrame, setShowStageFrame] = useState(false);
   const stageHeldRef = useRef(false);
@@ -277,16 +320,20 @@ export function VideoEditingPage({
   const scrubTargetRef = useRef(0);
   const scrubCache = useMemo(() => videoEditors ? new VideoScrubCache(async (draftId, clipId) => {
     const cached = previewCacheRef.current.get(clipId);
-    if (cached && Date.parse(cached.expiresAt) - Date.now() > 30_000) return cached.url;
+    if (hasFreshPreviewHandle(cached)) return cached.url;
     const result = await videoEditors.createSourcePreview(draftId, clipId);
     if (!result.ok) return undefined;
     previewCacheRef.current.set(clipId, result.value);
     return result.value.url;
-  }, () => setMessage('部分片段预览准备失败，请检查素材状态后重试。')) : undefined, [videoEditors]);
+  }, () => setMessage('部分片段预览准备失败，请检查素材状态后重试。'), async (draftId, clipId) => {
+    const result = await videoEditors.requestPreviewArtifact(draftId, clipId, 'scrub_video');
+    return result.ok ? result.value.url : undefined;
+  }) : undefined, [videoEditors]);
   useEffect(() => () => scrubCache?.clear(), [scrubCache]);
   const [musicPreview, setMusicPreview] =
     useState<VideoEditorBackgroundMusicPreviewDto>();
   const [playheadUs, setPlayheadUs] = useState(0);
+  const playheadUsRef = useRef(0);
   const playheadLabelRef = useRef<HTMLElement>(null);
   const scrubContextRef = useRef('');
   const [timelinePlaying, setTimelinePlaying] = useState(false);
@@ -313,6 +360,9 @@ export function VideoEditingPage({
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const [previewSeeking, setPreviewSeeking] = useState(false);
   const [previewZoom, setPreviewZoom] = useState<PreviewZoom>('fit');
+  const zoomMenuRef = useRef<HTMLDivElement>(null);
+  const ratioMenuRef = useRef<HTMLDivElement>(null);
+  const [previewMenuStyle, setPreviewMenuStyle] = useState<CSSProperties>({ position: 'fixed' });
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
@@ -320,9 +370,10 @@ export function VideoEditingPage({
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0);
   const [timelineFrameRefresh, setTimelineFrameRefresh] = useState(0);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
-  const frameCacheRef = useRef<Map<string, string>>(new Map());
-  const timelineFrameCacheRef = useRef<Map<string, string>>(new Map());
-  const contactSheetCacheRef = useRef<Map<string, string>>(new Map());
+  const frameCacheRef = useRef<Map<string, string>>(sharedFrameCache);
+  const timelineFrameCacheRef = useRef<Map<string, string>>(sharedTimelineFrameCache);
+  const contactSheetCacheRef = useRef<Map<string, string>>(sharedContactSheetCache);
+  const failedContactSheetsRef = useRef(new Set<string>());
   const timelineFrameRequestRef = useRef(0);
   const previewCacheRef = useRef<Map<string, PreviewMediaHandle>>(new Map());
   const previewRequestRef = useRef(0);
@@ -332,7 +383,50 @@ export function VideoEditingPage({
     { readonly clipId: string; readonly preview: PreviewMediaHandle } | undefined
   >(undefined);
   const timelinePlayingRef = useRef(false);
+  const previewActuallyPlayingRef = useRef(false);
+  const timelineEndedRef = useRef(false);
   const playbackSwitchingRef = useRef(false);
+  const previewPlaybackTimerRef = useRef<number>();
+  const previewPlaybackGuardRef = useRef<{
+    readonly attempt: number;
+    readonly video: HTMLVideoElement;
+    readonly clipId: string;
+    readonly currentTime: number;
+  }>();
+  const previewRecoveryAttemptsRef = useRef(new Set<string>());
+
+  useEffect(() => () => {
+    window.clearTimeout(previewSeekTimerRef.current);
+    window.clearTimeout(previewPlaybackTimerRef.current);
+    previewRequestRef.current += 1;
+    playbackAttemptRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    const index = currentDraft?.videoTrack.findIndex(
+      (clip) => clip.clipId === previewHandleRef.current?.clipId
+    ) ?? -1;
+    const nextClip = index >= 0 ? currentDraft?.videoTrack[index + 1] : undefined;
+    if (!active || !currentDraft || !nextClip || !videoEditors) {
+      setNextPreview(undefined);
+      return;
+    }
+    let cancelled = false;
+    const draftId = currentDraft.draftId;
+    void (async () => {
+      let handle = previewCacheRef.current.get(nextClip.clipId);
+      if (!hasFreshPreviewHandle(handle)) {
+        const result = await videoEditors.createSourcePreview(draftId, nextClip.clipId);
+        if (cancelled || !result.ok) return;
+        handle = result.value;
+        previewCacheRef.current.set(nextClip.clipId, handle);
+      }
+      if (!cancelled) setNextPreview({
+        clipId: nextClip.clipId, preview: handle, sourceUs: nextClip.sourceRange.inUs
+      });
+    })().catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [active, currentDraft, preview, videoEditors]);
 
   useEffect(() => {
     if (!active) {
@@ -357,18 +451,7 @@ export function VideoEditingPage({
 
   useEffect(() => {
     timelineFrameRequestRef.current += 1;
-    revokeFrameUrlMap(frameCacheRef.current);
-    revokeFrameUrlMap(timelineFrameCacheRef.current);
-    setFrameUrls({});
-    setTimelineFrameUrls({});
-    contactSheetCacheRef.current.clear();
-    setContactSheetUrls({});
-    return () => {
-      timelineFrameRequestRef.current += 1;
-      revokeFrameUrlMap(frameCacheRef.current);
-      revokeFrameUrlMap(timelineFrameCacheRef.current);
-      contactSheetCacheRef.current.clear();
-    };
+    failedContactSheetsRef.current.clear();
   }, [currentDraft?.draftId]);
 
   useEffect(() => {
@@ -563,6 +646,10 @@ export function VideoEditingPage({
     preferredPlayheadUs?: number
   ) {
     timelinePlayingRef.current = false;
+    previewActuallyPlayingRef.current = false;
+    timelineEndedRef.current = false;
+    window.clearTimeout(previewPlaybackTimerRef.current);
+    previewPlaybackGuardRef.current = undefined;
     setTimelinePlaying(false);
     videoRef.current?.pause();
     musicRef.current?.pause();
@@ -590,9 +677,13 @@ export function VideoEditingPage({
         if (next && JSON.stringify([next.source, next.sourceRange]) ===
           JSON.stringify([previous.source, previous.sourceRange])) continue;
         const id = previous.clipId;
+        scrubCache?.invalidate(currentDraft.draftId, previous);
         previewCacheRef.current.delete(id);
         if (previewHandleRef.current?.clipId === id) previewHandleRef.current = undefined;
+        const sheet = contactSheetCacheRef.current.get(id);
+        if (sheet) URL.revokeObjectURL(sheet);
         contactSheetCacheRef.current.delete(id);
+        failedContactSheetsRef.current.delete(id);
         const poster = frameCacheRef.current.get(id);
         if (poster) URL.revokeObjectURL(poster);
         frameCacheRef.current.delete(id);
@@ -613,6 +704,7 @@ export function VideoEditingPage({
       }
     }
     setPreviewUnavailable(false);
+    window.clearTimeout(previewSeekTimerRef.current);
     pendingPreviewSeekRef.current = undefined;
     playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
@@ -642,6 +734,7 @@ export function VideoEditingPage({
     setSelectedTextId((textId) =>
       draft?.textTrack.some((text) => text.textId === textId) ? textId : ''
     );
+    playheadUsRef.current = nextPlayheadUs;
     setPlayheadUs(nextPlayheadUs);
     if (nextClipId) {
       void ensurePreview(nextClipId, false, draft, nextPlayheadUs);
@@ -952,19 +1045,130 @@ export function VideoEditingPage({
     }
   }
 
+  function setTimelinePlayIntent(next: boolean) {
+    timelinePlayingRef.current = next;
+    if (!next) setTimelinePlaying(false);
+  }
+
+  function commitPlayheadUs(nextUs: number) {
+    const bounded = Math.min(totalDurationUs, Math.max(0, nextUs));
+    playheadUsRef.current = bounded;
+    setPlayheadUs(bounded);
+    if (playheadLabelRef.current) playheadLabelRef.current.textContent = formatTime(bounded);
+    return bounded;
+  }
+
+  function isCurrentPreviewEvent(video: HTMLVideoElement) {
+    return video === videoRef.current &&
+      video.dataset.previewClipId === previewHandleRef.current?.clipId;
+  }
+
+  function clearPreviewPlaybackTimer() {
+    window.clearTimeout(previewPlaybackTimerRef.current);
+    previewPlaybackTimerRef.current = undefined;
+    previewPlaybackGuardRef.current = undefined;
+  }
+
+  function armPreviewPlaybackTimer(video: HTMLVideoElement, clipId: string, timeoutMs = 15_000) {
+    clearPreviewPlaybackTimer();
+    const guard = {
+      attempt: playbackAttemptRef.current,
+      video,
+      clipId,
+      currentTime: video.currentTime
+    } as const;
+    previewPlaybackGuardRef.current = guard;
+    previewPlaybackTimerRef.current = window.setTimeout(() => {
+      if (previewPlaybackGuardRef.current !== guard ||
+        playbackAttemptRef.current !== guard.attempt ||
+        !timelinePlayingRef.current ||
+        !isCurrentPreviewEvent(guard.video)) return;
+      if (guard.video.currentTime - guard.currentTime > 0.05) {
+        armPreviewPlaybackTimer(guard.video, clipId, 3_000);
+        return;
+      }
+      clearPreviewPlaybackTimer();
+      recoverPreviewPlayback(guard.video, clipId);
+    }, timeoutMs);
+  }
+
+  function recoverPreviewPlayback(video: HTMLVideoElement, clipId: string) {
+    if (!timelinePlayingRef.current || !isCurrentPreviewEvent(video)) return;
+    clearPreviewPlaybackTimer();
+    const pendingSeek = pendingPreviewSeekRef.current;
+    if (pendingSeek) {
+      previewRequestRef.current += 1;
+      abandonPreviewSeek(pendingSeek.token);
+    }
+    previewActuallyPlayingRef.current = false;
+    if (previewRecoveryAttemptsRef.current.has(clipId)) {
+      stopTimelinePlayback();
+      setMessage('当前片段无法恢复播放，请再次点击播放。');
+      return;
+    }
+    previewRecoveryAttemptsRef.current.add(clipId);
+    void ensurePreview(
+      clipId,
+      true,
+      undefined,
+      Math.min(playheadUsRef.current, Math.max(0, totalDurationUs - 1)),
+      true
+    );
+  }
+
+  function ensureTimelinePlayheadVisible(nextUs: number) {
+    const viewport = timelineViewportRef.current;
+    if (!viewport || timelineCollapsed || effectiveTimelinePixelsPerSecond <= 0) return;
+    const target = resolveTimelinePlaybackScrollLeft({
+      playheadPx: nextUs / 1_000_000 * effectiveTimelinePixelsPerSecond,
+      scrollLeft: viewport.scrollLeft,
+      viewportWidth: viewport.clientWidth,
+      scrollWidth: viewport.scrollWidth
+    });
+    if (target === viewport.scrollLeft) return;
+    timelinePendingScrollLeftRef.current = target;
+    if (timelinePlaybackScrollFrameRef.current !== undefined) return;
+    timelinePlaybackScrollFrameRef.current = window.requestAnimationFrame(() => {
+      timelinePlaybackScrollFrameRef.current = undefined;
+      const current = timelineViewportRef.current;
+      if (!current) return;
+      current.scrollLeft = timelinePendingScrollLeftRef.current;
+      setTimelineScrollLeft(current.scrollLeft);
+    });
+  }
+
   function beginPreviewSeek(
     draft: VideoEditorDraftDto,
     clipId: string,
     timelineUs: number,
-    resumePlayback = false
+    resumePlayback = false,
+    awaitPreviewReplacement = false
   ): PendingPreviewSeek {
     const pending = {
       token: ++previewSeekTokenRef.current,
       clipId,
       timelineUs,
-      sourceUs: timelineToSourceUs(draft, clipId, timelineUs),
-      resumePlayback
+      sourceUs: Math.min(
+        (draft.videoTrack.find((clip) => clip.clipId === clipId)?.sourceRange.outUs ?? 1) - 1,
+        timelineToSourceUs(draft, clipId, timelineUs)
+      ),
+      resumePlayback,
+      awaitPreviewReplacement
     };
+    window.clearTimeout(previewSeekTimerRef.current);
+    previewSeekTimerRef.current = window.setTimeout(() => {
+      if (pendingPreviewSeekRef.current?.token !== pending.token) return;
+      const video = videoRef.current;
+      if (pending.resumePlayback && video && isCurrentPreviewEvent(video)) {
+        abandonPreviewSeek(pending.token);
+        recoverPreviewPlayback(video, pending.clipId);
+        return;
+      }
+      previewRequestRef.current += 1;
+      abandonPreviewSeek(pending.token);
+      stopTimelinePlayback();
+      setMessage('当前片段暂时无法播放，请重试。');
+    }, 15_000);
     pendingPreviewSeekRef.current = pending;
     setPreviewSeeking(true);
     return pending;
@@ -972,6 +1176,7 @@ export function VideoEditingPage({
 
   function abandonPreviewSeek(token: number) {
     if (pendingPreviewSeekRef.current?.token !== token) return;
+    window.clearTimeout(previewSeekTimerRef.current);
     pendingPreviewSeekRef.current = undefined;
     playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
@@ -983,6 +1188,10 @@ export function VideoEditingPage({
     if (
       !pending ||
       !videoRef.current ||
+      (pending.awaitPreviewReplacement &&
+        (!pending.previewUrl ||
+          previewHandleRef.current?.preview.url !== pending.previewUrl ||
+          videoRef.current.src !== pending.previewUrl)) ||
       videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
       videoRef.current.seeking ||
       videoRef.current.dataset.previewClipId !== pending.clipId
@@ -1003,12 +1212,13 @@ export function VideoEditingPage({
     // seeked/loadeddata already establishes a decoded paused frame. Waiting for
     // a subsequent video-frame callback can wait forever at time zero.
     window.requestAnimationFrame(reveal);
+    window.clearTimeout(previewSeekTimerRef.current);
     pendingPreviewSeekRef.current = undefined;
     playbackSwitchingRef.current = false;
     setPreviewSeeking(false);
-    setPlayheadUs(pending.timelineUs);
+    commitPlayheadUs(pending.timelineUs);
     if (pending.resumePlayback && timelinePlayingRef.current) {
-      startCurrentPreviewPlayback(pending.clipId, pending.timelineUs);
+      startCurrentPreviewPlayback(pending.clipId);
     } else {
       syncBackgroundMusic(pending.timelineUs, false);
     }
@@ -1019,9 +1229,13 @@ export function VideoEditingPage({
     if (
       !pending ||
       !videoRef.current ||
+      videoRef.current.seeking ||
+      (pending.awaitPreviewReplacement &&
+        (!pending.previewUrl ||
+          previewHandleRef.current?.preview.url !== pending.previewUrl ||
+          videoRef.current.src !== pending.previewUrl)) ||
       videoRef.current.dataset.previewClipId !== pending.clipId ||
-      videoRef.current.readyState < HTMLMediaElement.HAVE_METADATA ||
-      videoRef.current.seeking
+      videoRef.current.readyState < HTMLMediaElement.HAVE_METADATA
     ) {
       return;
     }
@@ -1053,23 +1267,25 @@ export function VideoEditingPage({
     const clip = draft.videoTrack.find((item) => item.clipId === clipId);
     if (!clip) return false;
     holdStageFrame();
+    const existing = previewHandleRef.current;
+    const cacheKey = clipId;
+    const cached = previewCacheRef.current.get(cacheKey);
+    const reusable = existing?.clipId === clipId ? existing.preview : cached;
+    const awaitPreviewReplacement = force || !hasFreshPreviewHandle(reusable);
     const pendingSeek = beginPreviewSeek(
       draft,
       clipId,
       targetPlayheadUs,
-      resumePlayback
+      resumePlayback,
+      awaitPreviewReplacement
     );
+    musicRef.current?.pause();
+    playbackAttemptRef.current += 1;
     const requestToken = ++previewRequestRef.current;
-    const existing = previewHandleRef.current;
-    const cacheKey = clipId;
-    const cached = previewCacheRef.current.get(cacheKey);
-    const reusable =
-      existing?.clipId === clipId ? existing.preview : cached;
     if (
       !force &&
       reusable &&
-      Number.isFinite(Date.parse(reusable.expiresAt)) &&
-      Date.parse(reusable.expiresAt) - Date.now() > 30_000
+      hasFreshPreviewHandle(reusable)
     ) {
       setPreviewUnavailable(false);
         previewHandleRef.current = { clipId, preview: reusable };
@@ -1081,11 +1297,13 @@ export function VideoEditingPage({
     }
     try {
       const result = await videoEditors.createSourcePreview(draft.draftId, clipId);
-      if (requestToken !== previewRequestRef.current) return false;
+      if (requestToken !== previewRequestRef.current || pendingPreviewSeekRef.current?.token !== pendingSeek.token) return false;
       if (!result.ok) {
         abandonPreviewSeek(pendingSeek.token);
         setPreviewUnavailable(!existing);
-        if (resumePlayback) stopTimelinePlayback();
+        if (resumePlayback) {
+          stopTimelinePlayback();
+        }
         setMessage(errorMessage(result.error.code, '当前片段预览暂不可用。'));
         return false;
       }
@@ -1094,6 +1312,10 @@ export function VideoEditingPage({
         expiresAt: result.value.expiresAt,
         mimeType: result.value.mimeType
       };
+      if (pendingSeek.awaitPreviewReplacement &&
+        pendingPreviewSeekRef.current?.token === pendingSeek.token) {
+        pendingPreviewSeekRef.current = { ...pendingSeek, previewUrl: nextPreview.url };
+      }
       previewCacheRef.current.set(cacheKey, nextPreview);
       setPreviewUnavailable(false);
         previewHandleRef.current = { clipId, preview: nextPreview };
@@ -1102,7 +1324,9 @@ export function VideoEditingPage({
     } catch {
       if (requestToken === previewRequestRef.current) {
         abandonPreviewSeek(pendingSeek.token);
-        if (resumePlayback) stopTimelinePlayback();
+        if (resumePlayback) {
+          stopTimelinePlayback();
+        }
         setMessage('加载片段预览失败，请重试。');
       }
       return false;
@@ -1124,8 +1348,10 @@ export function VideoEditingPage({
       revokeFrameUrlMap(timelineFrameCacheRef.current);
       previewCacheRef.current.clear();
       setFrameUrls({});
+      scrubCache?.clear();
       setTimelineFrameUrls({});
-      contactSheetCacheRef.current.clear();
+      revokeFrameUrlMap(contactSheetCacheRef.current);
+      failedContactSheetsRef.current.clear();
       setContactSheetUrls({});
       setTimelineFrameRefresh((value) => value + 1);
       setMessage('可重建的预览缓存已清除，草稿和源文件没有改变。');
@@ -1436,6 +1662,9 @@ export function VideoEditingPage({
       if (timelineScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(timelineScrollFrameRef.current);
       }
+      if (timelinePlaybackScrollFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(timelinePlaybackScrollFrameRef.current);
+      }
     },
     []
   );
@@ -1449,6 +1678,13 @@ export function VideoEditingPage({
     }
     const editorApi = videoEditors;
     const draft = currentDraft;
+    // Static image bytes belong to the session, not to the short-lived source handle.
+    const cachedSheets: Record<string, string> = {};
+    for (const clip of draft.videoTrack) {
+      const url = contactSheetCacheRef.current.get(clip.clipId);
+      if (url) cachedSheets[clip.clipId] = url;
+    }
+    setContactSheetUrls(cachedSheets);
     const groups = new Map<string, TimelineFrameRequest[]>();
     const addRequest = (request: TimelineFrameRequest) => {
       const requests = groups.get(request.clipId) ?? [];
@@ -1507,7 +1743,9 @@ export function VideoEditingPage({
     if (Object.keys(cachedPosterFrames).length > 0) {
       setFrameUrls((previous) => ({ ...previous, ...cachedPosterFrames }));
     }
-    const groupedRequests = [...groups.entries()];
+    const groupedRequests = [...groups.entries()].sort(([left], [right]) =>
+      Number(right === selectedClipId) - Number(left === selectedClipId)
+    );
     if (groupedRequests.length === 0) return;
 
     const controller = new AbortController();
@@ -1523,8 +1761,7 @@ export function VideoEditingPage({
           let handle = previewCacheRef.current.get(clipId);
           if (
             !handle ||
-            !Number.isFinite(Date.parse(handle.expiresAt)) ||
-            Date.parse(handle.expiresAt) - Date.now() <= 30_000
+            !hasFreshPreviewHandle(handle)
           ) {
             const result = await editorApi.createSourcePreview(
               draft.draftId,
@@ -1539,7 +1776,8 @@ export function VideoEditingPage({
             previewCacheRef.current.set(clipId, handle);
           }
           let contactSheetReady = contactSheetCacheRef.current.has(clipId);
-          if (!contactSheetReady && requests.some((request) => request.kind === 'timeline')) {
+          if (!contactSheetReady && !failedContactSheetsRef.current.has(clipId) &&
+            requests.some((request) => request.kind === 'timeline')) {
             try {
               const artifact = await editorApi.requestPreviewArtifact(
                 draft.draftId,
@@ -1547,12 +1785,19 @@ export function VideoEditingPage({
                 'thumbnail_strip'
               );
               if (!isCancelled() && artifact.ok) {
-                const usable = await loadUsableContactSheet(artifact.value.url);
-                if (!isCancelled() && usable) {
-                  contactSheetCacheRef.current.set(clipId, artifact.value.url);
+                const imageUrl = URL.createObjectURL(
+                  await readPreviewImage(artifact.value.url, controller.signal)
+                );
+                const usable = await loadUsableContactSheet(imageUrl);
+                if (isCancelled() || !usable) {
+                  URL.revokeObjectURL(imageUrl);
+                } else {
+                  const previous = contactSheetCacheRef.current.get(clipId);
+                  if (previous) URL.revokeObjectURL(previous);
+                  contactSheetCacheRef.current.set(clipId, imageUrl);
                   setContactSheetUrls((current) => ({
                     ...current,
-                    [clipId]: artifact.value.url
+                    [clipId]: imageUrl
                   }));
                   contactSheetReady = true;
                 }
@@ -1628,6 +1873,7 @@ export function VideoEditingPage({
   }, [
     currentDraft,
     timelineFrameRefresh,
+    selectedClipId,
     timelineThumbnailSlots,
     timelineScrollLeft,
     timelineViewportWidth,
@@ -1638,16 +1884,45 @@ export function VideoEditingPage({
       (text) => playheadUs >= text.range.startUs && playheadUs < text.range.endUs
     ) ?? [];
 
+  const playbackTickRef = useRef(syncPlayheadFromPreview);
+  playbackTickRef.current = syncPlayheadFromPreview;
+  useEffect(() => {
+    if (!timelinePlaying) return;
+    let frame: number;
+    const tick = () => {
+      playbackTickRef.current();
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [timelinePlaying, preview]);
+
+  function placePreviewMenu(element: HTMLDivElement | null, width: number, height: number) {
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const above = Math.max(0, rect.top - 8);
+    const below = Math.max(0, window.innerHeight - rect.bottom - 8);
+    const opensAbove = above >= Math.min(height, below);
+    const maxHeight = Math.min(height, opensAbove ? above : below);
+    setPreviewMenuStyle({
+      position: 'fixed', left: Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)),
+      right: 'auto', top: opensAbove ? 'auto' : rect.bottom,
+      bottom: opensAbove ? window.innerHeight - rect.top : 'auto',
+      width, maxHeight, overflowY: 'auto', margin: 0
+    });
+  }
+
   function selectClip(clipId: string) {
     scrubbingRef.current = false;
+    timelineEndedRef.current = false;
     const resumePlayback = timelinePlayingRef.current;
-    playbackSwitchingRef.current = false;
+    playbackSwitchingRef.current = resumePlayback;
     videoRef.current?.pause();
     musicRef.current?.pause();
     setSelectedClipId(clipId);
     const nextPlayheadUs =
       segments.find((segment) => segment.clipId === clipId)?.startUs ?? 0;
-    setPlayheadUs(nextPlayheadUs);
+    commitPlayheadUs(nextPlayheadUs);
     setInspectorTab('clip');
     void ensurePreview(
       clipId,
@@ -1676,8 +1951,11 @@ export function VideoEditingPage({
       holdStageFrame();
       stopTimelinePlayback();
       scrubContextRef.current = '';
+      scrubTargetRef.current++;
     }
+    timelineEndedRef.current = false;
     scrubbingRef.current = true;
+    playheadUsRef.current = nextUs;
     previewRequestRef.current++;
     if (playheadLabelRef.current) playheadLabelRef.current.textContent = formatTime(nextUs);
     const segment = resolveTimelineSegmentAt(segments, Math.min(nextUs, totalDurationUs - 1));
@@ -1689,9 +1967,9 @@ export function VideoEditingPage({
     if (context !== scrubContextRef.current) {
       scrubContextRef.current = context;
       setSelectedClipId(clip.clipId);
-      setPlayheadUs(nextUs);
+      commitPlayheadUs(nextUs);
     }
-    const token = ++scrubTargetRef.current;
+    const token = scrubTargetRef.current;
     scrubCache.request({
       draftId: currentDraft.draftId, clip,
       sourceUs: timelineToSourceUs(currentDraft, clip.clipId, nextUs),
@@ -1712,16 +1990,17 @@ export function VideoEditingPage({
 
   function seekTimeline(nextUs: number) {
     scrubbingRef.current = false;
+    timelineEndedRef.current = false;
     const boundedUs = Math.min(totalDurationUs, Math.max(0, nextUs));
-    setPlayheadUs(boundedUs);
+    commitPlayheadUs(boundedUs);
     if (boundedUs >= totalDurationUs) {
       stopTimelinePlayback();
-      return;
+      timelineEndedRef.current = true;
     }
-    const targetSegment = resolveTimelineSegmentAt(segments, boundedUs);
+    const targetSegment = resolveTimelineSegmentAt(segments, Math.min(boundedUs, totalDurationUs - 1));
     if (!targetSegment) return;
     const resumePlayback = timelinePlayingRef.current;
-    playbackSwitchingRef.current = false;
+    playbackSwitchingRef.current = resumePlayback;
     videoRef.current?.pause();
     musicRef.current?.pause();
     if (targetSegment.clipId !== selectedClipId) {
@@ -1757,6 +2036,8 @@ export function VideoEditingPage({
     if (scrubbingRef.current) return;
     if (pendingPreviewSeekRef.current) return;
     if (!videoRef.current || !currentDraft) return;
+    if (timelineEndedRef.current) return;
+    if (!isCurrentPreviewEvent(videoRef.current)) return;
     const previewClipId = previewHandleRef.current?.clipId;
     const playbackClip = currentDraft.videoTrack.find(
       (clip) => clip.clipId === previewClipId
@@ -1779,8 +2060,9 @@ export function VideoEditingPage({
       playbackSegment.endUs,
       playbackSegment.startUs + timelineOffset
     );
-    setPlayheadUs(nextPlayheadUs);
-    syncBackgroundMusic(nextPlayheadUs, timelinePlayingRef.current);
+    commitPlayheadUs(nextPlayheadUs);
+    ensureTimelinePlayheadVisible(nextPlayheadUs);
+    syncBackgroundMusic(nextPlayheadUs, previewActuallyPlayingRef.current);
     const previewEndUs = playbackClip.sourceRange.outUs;
     if (rawPreviewUs >= previewEndUs - 1_000) {
       if (timelinePlayingRef.current) advanceTimelinePlayback();
@@ -1793,37 +2075,122 @@ export function VideoEditingPage({
       stopTimelinePlayback();
       return;
     }
-    const startUs = playheadUs >= totalDurationUs ? 0 : playheadUs;
+    const startUs = timelineEndedRef.current || playheadUsRef.current >= totalDurationUs
+      ? 0
+      : playheadUsRef.current;
     const targetSegment = resolveTimelineSegmentAt(segments, startUs);
     if (!targetSegment) return;
-    timelinePlayingRef.current = true;
+    timelineEndedRef.current = false;
     playbackSwitchingRef.current = false;
-    setTimelinePlaying(true);
-    setPlayheadUs(startUs);
+    previewRecoveryAttemptsRef.current.clear();
+    setTimelinePlayIntent(true);
+    commitPlayheadUs(startUs);
+    ensureTimelinePlayheadVisible(startUs);
     setSelectedClipId(targetSegment.clipId);
+    const video = videoRef.current;
+    if (currentDraft && video && isCurrentPreviewEvent(video) &&
+      previewHandleRef.current?.clipId === targetSegment.clipId &&
+      hasFreshPreviewHandle(previewHandleRef.current?.preview) &&
+      !pendingPreviewSeekRef.current && !video.seeking && video.readyState >= 2 &&
+      Math.abs(video.currentTime - timelineToSourceUs(currentDraft, targetSegment.clipId, startUs) / 1_000_000) <= 0.001) {
+      startCurrentPreviewPlayback(targetSegment.clipId);
+      return;
+    }
     void ensurePreview(targetSegment.clipId, false, undefined, startUs, true);
   }
 
   function stopTimelinePlayback() {
-    timelinePlayingRef.current = false;
+    setTimelinePlayIntent(false);
+    previewRequestRef.current += 1;
+    previewActuallyPlayingRef.current = false;
+    playbackAttemptRef.current += 1;
     playbackSwitchingRef.current = false;
-    setTimelinePlaying(false);
+    clearPreviewPlaybackTimer();
+    if (pendingPreviewSeekRef.current) {
+      previewRequestRef.current += 1;
+      abandonPreviewSeek(pendingPreviewSeekRef.current.token);
+    }
     videoRef.current?.pause();
     musicRef.current?.pause();
   }
 
-  function startCurrentPreviewPlayback(clipId: string, timelineUs: number) {
+  function startCurrentPreviewPlayback(clipId: string) {
     if (!timelinePlayingRef.current || !videoRef.current || !currentDraft) return;
     const clip = currentDraft.videoTrack.find((candidate) => candidate.clipId === clipId);
     if (!clip) return;
     videoRef.current.playbackRate = clip.speed.numerator / clip.speed.denominator;
     videoRef.current.muted = clip.sourceAudio.muted;
     videoRef.current.volume = clip.sourceAudio.volumePermille / 1_000;
-    syncBackgroundMusic(timelineUs, true);
-    void videoRef.current.play().catch(() => {
-      stopTimelinePlayback();
-      setMessage('无法开始时间线预览，请再次点击播放。');
+    const video = videoRef.current;
+    if (!isCurrentPreviewEvent(video)) return;
+    previewActuallyPlayingRef.current = false;
+    musicRef.current?.pause();
+    const attempt = ++playbackAttemptRef.current;
+    armPreviewPlaybackTimer(video, clipId);
+    void video.play().catch(() => {
+      if (attempt !== playbackAttemptRef.current || !isCurrentPreviewEvent(video)) return;
+      recoverPreviewPlayback(video, clipId);
     });
+  }
+
+  function handlePreviewPlaying(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+    if (!isCurrentPreviewEvent(video)) return;
+    clearPreviewPlaybackTimer();
+    previewActuallyPlayingRef.current = true;
+    if (!timelinePlayingRef.current) {
+      video.pause();
+      previewActuallyPlayingRef.current = false;
+      return;
+    }
+    armPreviewPlaybackTimer(video, video.dataset.previewClipId ?? '', 3_000);
+    setTimelinePlaying(true);
+    if (!scrubbingRef.current && !pendingPreviewSeekRef.current) {
+      stageHeldRef.current = false;
+      setShowStageFrame(false);
+    }
+    syncPlayheadFromPreview();
+  }
+
+  function handlePreviewPause(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+    if (!isCurrentPreviewEvent(video)) return;
+    previewActuallyPlayingRef.current = false;
+    setTimelinePlaying(false);
+    musicRef.current?.pause();
+    if (playbackSwitchingRef.current || pendingPreviewSeekRef.current || video.ended) return;
+    setTimelinePlayIntent(false);
+    playbackAttemptRef.current += 1;
+    clearPreviewPlaybackTimer();
+  }
+
+  function handlePreviewSeeking(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+    if (!isCurrentPreviewEvent(video)) return;
+    previewActuallyPlayingRef.current = false;
+    musicRef.current?.pause();
+  }
+
+  function handlePreviewWaiting(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+    if (!isCurrentPreviewEvent(video)) return;
+    previewActuallyPlayingRef.current = false;
+    musicRef.current?.pause();
+    if (timelinePlayingRef.current && previewPlaybackTimerRef.current === undefined) {
+      armPreviewPlaybackTimer(video, video.dataset.previewClipId ?? '');
+    }
+  }
+
+  function handlePreviewError(event: SyntheticEvent<HTMLVideoElement>) {
+    recoverPreviewPlayback(event.currentTarget, event.currentTarget.dataset.previewClipId ?? '');
+  }
+
+  function handlePreviewEnded(event: SyntheticEvent<HTMLVideoElement>) {
+    if (!isCurrentPreviewEvent(event.currentTarget)) return;
+    previewActuallyPlayingRef.current = false;
+    musicRef.current?.pause();
+    clearPreviewPlaybackTimer();
+    advanceTimelinePlayback();
   }
 
   function advanceTimelinePlayback() {
@@ -1842,13 +2209,58 @@ export function VideoEditingPage({
     videoRef.current?.pause();
     const nextSegment = segments[playbackSegment.index + 1];
     if (!nextSegment) {
-      setPlayheadUs(totalDurationUs);
+      timelineEndedRef.current = true;
+      commitPlayheadUs(totalDurationUs);
       stopTimelinePlayback();
       return;
     }
     const nextPlayheadUs = Math.max(playbackSegment.endUs, nextSegment.startUs);
-    setPlayheadUs(nextPlayheadUs);
+    commitPlayheadUs(nextPlayheadUs);
+    ensureTimelinePlayheadVisible(nextPlayheadUs);
     setSelectedClipId(nextSegment.clipId);
+
+    // The next clip is normally mounted and seeked in the hidden preview
+    // element before this boundary is reached. Promote that element directly
+    // so a prepared clip does not pass through a pause/prepare/seek gap.
+    if (nextPreview?.clipId === nextSegment.clipId) {
+      const nextVideo = Array.from(
+        document.querySelectorAll<HTMLVideoElement>('video[data-preview-clip-id]')
+      ).find((candidate) => candidate.dataset.previewClipId === nextSegment.clipId);
+      const nextClip = currentDraft?.videoTrack.find(
+        (clip) => clip.clipId === nextSegment.clipId
+      );
+      const expectedSourceUs = nextClip?.sourceRange.inUs ?? nextSegment.sourceInUs;
+      if (
+        hasFreshPreviewHandle(nextPreview.preview) &&
+        nextVideo &&
+        nextClip &&
+        nextVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        !nextVideo.seeking &&
+        Math.abs(nextVideo.currentTime - expectedSourceUs / 1_000_000) <= 0.05
+      ) {
+        videoRef.current?.pause();
+        previewHandleRef.current = { clipId: nextSegment.clipId, preview: nextPreview.preview };
+        setPreview(nextPreview.preview);
+        nextVideo.playbackRate = nextClip.speed.numerator / nextClip.speed.denominator;
+        nextVideo.muted = nextClip.sourceAudio.muted;
+        nextVideo.volume = nextClip.sourceAudio.volumePermille / 1_000;
+        requestAnimationFrame(() => {
+          if (!timelinePlayingRef.current) {
+            playbackSwitchingRef.current = false;
+            return;
+          }
+          videoRef.current = nextVideo;
+          playbackSwitchingRef.current = false;
+          void nextVideo.play().catch(() => {
+            if (timelinePlayingRef.current) {
+              stopTimelinePlayback();
+              setMessage('无法继续播放时间线，请再次点击播放。');
+            }
+          });
+        });
+        return;
+      }
+    }
     void ensurePreview(
       nextSegment.clipId,
       false,
@@ -2154,21 +2566,43 @@ export function VideoEditingPage({
                 }}
               >
                 {preview ? (
-                  <video
-                    aria-busy={previewSeeking}
-                    aria-label="时间线预览"
-                    className="uc-video-editor__video"
-                    data-preview-clip-id={previewHandleRef.current?.clipId}
-                    key={`${previewHandleRef.current?.clipId ?? ''}:${preview.url}`}
-                    onEnded={advanceTimelinePlayback}
-                    onLoadedData={applyPendingPreviewSeek}
-                    onLoadedMetadata={applyPendingPreviewSeek}
-                    onSeeked={completePreviewSeek}
-                    onTimeUpdate={syncPlayheadFromPreview}
-                    playsInline
-                    ref={videoRef}
-                    src={preview.url}
-                  />
+                  [
+                    { clipId: previewHandleRef.current?.clipId ?? '', preview, sourceUs: 0 },
+                    ...(nextPreview && nextPreview.clipId !== previewHandleRef.current?.clipId ? [nextPreview] : [])
+                  ].map((entry) => {
+                    const isCurrent = entry.clipId === previewHandleRef.current?.clipId;
+                    const prepareNext = (video: HTMLVideoElement) => {
+                      if (video.readyState >= 1 && !video.seeking &&
+                        Math.abs(video.currentTime - entry.sourceUs / 1_000_000) > 0.001) {
+                        video.currentTime = entry.sourceUs / 1_000_000;
+                      }
+                    };
+                    return <video
+                      aria-busy={isCurrent ? previewSeeking : undefined}
+                      aria-hidden={!isCurrent}
+                      aria-label={isCurrent ? '时间线预览' : undefined}
+                      className="uc-video-editor__video"
+                      data-preview-clip-id={entry.clipId}
+                      key={`${entry.clipId}:${entry.preview.url}`}
+                      style={isCurrent ? undefined : { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' }}
+                      onEnded={isCurrent ? handlePreviewEnded : undefined}
+                      onError={isCurrent ? handlePreviewError : undefined}
+                      onLoadedData={isCurrent ? applyPendingPreviewSeek : (event) => prepareNext(event.currentTarget)}
+                      onLoadedMetadata={isCurrent ? applyPendingPreviewSeek : (event) => prepareNext(event.currentTarget)}
+                      onPause={isCurrent ? handlePreviewPause : undefined}
+                      onPlaying={isCurrent ? handlePreviewPlaying : undefined}
+                      onSeeking={isCurrent ? handlePreviewSeeking : undefined}
+                      onSeeked={isCurrent ? completePreviewSeek : undefined}
+                      onStalled={isCurrent ? handlePreviewWaiting : undefined}
+                      onTimeUpdate={isCurrent ? syncPlayheadFromPreview : undefined}
+                      onWaiting={isCurrent ? handlePreviewWaiting : undefined}
+                      playsInline
+                      preload="auto"
+                      muted={!isCurrent}
+                      ref={(node) => { if (isCurrent && node) videoRef.current = node; }}
+                      src={entry.preview.url}
+                    />;
+                  })
                 ) : (
                   selectedClip && frameUrls[selectedClip.clipId] ? (
                     <img
@@ -2228,7 +2662,7 @@ export function VideoEditingPage({
                 aria-hidden="true"
                 key={musicPreview.url}
                 onLoadedMetadata={() =>
-                  syncBackgroundMusic(playheadUs, timelinePlayingRef.current)
+                  syncBackgroundMusic(playheadUsRef.current, previewActuallyPlayingRef.current)
                 }
                 ref={musicRef}
                 src={musicPreview.url}
@@ -2251,7 +2685,9 @@ export function VideoEditingPage({
               <div className="uc-video-editor__transport-tools">
                 <Dropdown
                   className="uc-video-editor__zoom-menu"
-                  menuStyle={{ minWidth: 132, maxHeight: 320, overflowY: 'auto' }}
+                  ref={zoomMenuRef}
+                  menuStyle={{ minWidth: 132, maxHeight: 320, ...previewMenuStyle }}
+                  onOpen={() => placePreviewMenu(zoomMenuRef.current, 132, 320)}
                   onSelect={(eventKey) => {
                     if (eventKey === 'clear-preview-cache') {
                       void clearPreviewCache();
@@ -2293,8 +2729,10 @@ export function VideoEditingPage({
                 </Dropdown>
                 <Dropdown
                   className="uc-video-editor__ratio-menu"
+                  ref={ratioMenuRef}
                   disabled={!currentDraft || operationBlocked}
-                  menuStyle={{ minWidth: 184, maxHeight: 356, overflowY: 'auto' }}
+                  menuStyle={{ minWidth: 184, maxHeight: 356, ...previewMenuStyle }}
+                  onOpen={() => placePreviewMenu(ratioMenuRef.current, 184, 356)}
                   onSelect={selectCanvasRatio}
                   placement="bottomEnd"
                   renderToggle={(props, ref) => (
@@ -2588,6 +3026,19 @@ export function VideoEditingPage({
                   clipNames={clipNames}
                   contactSheets={contactSheetUrls}
                   frames={frameUrls}
+                  onContactSheetError={(clipId, url) => {
+                    if (contactSheetCacheRef.current.get(clipId) !== url) return;
+                    URL.revokeObjectURL(url);
+                    contactSheetCacheRef.current.delete(clipId);
+                    // A failed image falls back once to Canvas, not an endless reload loop.
+                    failedContactSheetsRef.current.add(clipId);
+                    setContactSheetUrls((current) => {
+                      const next = { ...current };
+                      delete next[clipId];
+                      return next;
+                    });
+                    setTimelineFrameRefresh((value) => value + 1);
+                  }}
                   onMove={(clipId, toIndex) =>
                     void runCommand(
                       { kind: 'move_clip', clipId, toIndex },
@@ -2834,6 +3285,7 @@ export function VideoEditingPage({
               draft={currentDraft}
               key={`${currentDraft.draftId}-${currentDraft.outputPreference.fileName ?? ''}-${currentDraft.outputPreference.conflictPolicy}`}
               media={exportMedia}
+              storage={storage}
               onCancel={() => void cancelExport()}
               onConfirm={setExportConfirmed}
               onNavigate={onNavigate}
@@ -3135,6 +3587,7 @@ function VideoTimelineTrack({
   clipNames,
   contactSheets,
   frames,
+  onContactSheetError,
   onMove,
   onSeek,
   onSelect,
@@ -3149,6 +3602,7 @@ function VideoTimelineTrack({
   readonly clipNames: Readonly<Record<string, string>>;
   readonly contactSheets: Readonly<Record<string, string>>;
   readonly frames: Readonly<Record<string, string>>;
+  readonly onContactSheetError: (clipId: string, url: string) => void;
   readonly onMove: (clipId: string, toIndex: number) => void;
   readonly onSeek: (timelineUs: number) => void;
   readonly onSelect: (clipId: string) => void;
@@ -3160,16 +3614,48 @@ function VideoTimelineTrack({
   readonly totalDurationUs: number;
 }) {
   const laneRef = useRef<HTMLDivElement | null>(null);
-  const dragPreviewRef = useRef<HTMLElement | null>(null);
+  const [dragState, setDragState] = useState<TimelineDragState>();
+  const dragStateRef = useRef<TimelineDragState>();
   function clearDragPreview() {
-    dragPreviewRef.current?.remove();
-    dragPreviewRef.current = null;
+    dragStateRef.current = undefined;
+    setDragState(undefined);
   }
   function updateDragPreviewPosition(clientX: number, clientY: number) {
-    const dragPreview = dragPreviewRef.current;
-    if (!dragPreview || (clientX === 0 && clientY === 0)) return;
-    dragPreview.style.top = `${clientY + 12}px`;
-    dragPreview.style.left = `${clientX + 12}px`;
+    if (!laneRef.current || (clientX === 0 && clientY === 0)) return;
+    const active = dragStateRef.current;
+    if (!active) return;
+    const rect = laneRef.current.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(0, clientX - rect.left - active.width / 2),
+      Math.max(0, rect.width - active.width)
+    );
+    const insideLane = clientY >= rect.top && clientY <= rect.bottom;
+    const next = insideLane
+      ? { ...active, left }
+      : { clipId: active.clipId, left, width: active.width };
+    dragStateRef.current = next;
+    setDragState(next);
+  }
+  function updateDragTarget(clientX: number) {
+    const lane = laneRef.current;
+    const active = dragStateRef.current;
+    if (!lane || !active) return;
+    const target = segments.find((segment) => {
+      const element = lane.querySelector<HTMLElement>(
+        `.uc-video-editor__seg[data-clip-id="${CSS.escape(segment.clipId)}"]`
+      );
+      if (!element) return false;
+      const bounds = element.getBoundingClientRect();
+      return clientX < bounds.left + bounds.width / 2;
+    });
+    const last = segments[segments.length - 1];
+    const next = target
+      ? { ...active, targetIndex: target.index, placeAfter: false }
+      : last
+        ? { ...active, targetIndex: last.index, placeAfter: true }
+        : active;
+    dragStateRef.current = next;
+    setDragState(next);
   }
   useEffect(() => {
     const move = (event: DragEvent) => updateDragPreviewPosition(event.clientX, event.clientY);
@@ -3192,6 +3678,12 @@ function VideoTimelineTrack({
     }
     return grouped;
   }, [thumbnailSlots]);
+  const draggedSegment = dragState
+    ? segments.find((segment) => segment.clipId === dragState.clipId)
+    : undefined;
+  const draggedSlots = draggedSegment
+    ? slotsByClip.get(draggedSegment.clipId) ?? []
+    : [];
   return segments.length ? (
         <div
           className="uc-video-editor__lane uc-video-editor__lane--video"
@@ -3210,6 +3702,32 @@ function VideoTimelineTrack({
               )
             );
           }}
+          onDragOver={(event) => {
+            if (!canReorder || !dragStateRef.current) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            updateDragPreviewPosition(event.clientX, event.clientY);
+            updateDragTarget(event.clientX);
+          }}
+          onDrop={(event) => {
+            if (!canReorder) return;
+            event.preventDefault();
+            const active = dragStateRef.current;
+            const clipId = active?.clipId ?? event.dataTransfer.getData('text/plain');
+            const sourceIndex = segments.findIndex((item) => item.clipId === clipId);
+            if (sourceIndex >= 0) {
+              updateDragTarget(event.clientX);
+              const target = dragStateRef.current;
+              const targetIndex = target?.targetIndex ?? sourceIndex;
+              const toIndex = resolveTimelineDropIndex(
+                sourceIndex,
+                targetIndex,
+                target?.placeAfter ?? false
+              );
+              if (toIndex !== sourceIndex) onMove(clipId, toIndex);
+            }
+            clearDragPreview();
+          }}
           ref={laneRef}
         >
           {segments.map((segment) => {
@@ -3223,56 +3741,37 @@ function VideoTimelineTrack({
                   selectedClipId === segment.clipId
                     ? ' uc-video-editor__seg--selected'
                     : ''
-                }`}
+                }${dragState?.clipId === segment.clipId ? ' uc-video-editor__seg--dragging' : ''}`}
+                data-clip-id={segment.clipId}
                 draggable={canReorder}
                 key={segment.clipId}
                 onClick={() => onSelect(segment.clipId)}
-                onDragOver={(event) => {
-                  if (!canReorder) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                }}
                 onDragStart={(event) => {
                   clearDragPreview();
                   onSelect(segment.clipId);
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('text/plain', segment.clipId);
+                  const laneBounds = laneRef.current?.getBoundingClientRect();
                   const bounds = event.currentTarget.getBoundingClientRect();
-                  const dragPreview = event.currentTarget.cloneNode(true) as HTMLElement;
-                  dragPreview.classList.add('uc-video-editor__drag-preview');
-                  dragPreview.setAttribute('aria-hidden', 'true');
-                  dragPreview.removeAttribute('draggable');
-                  dragPreview.style.width = `${Math.min(bounds.width, 320)}px`;
-                  dragPreview.style.height = `${bounds.height}px`;
-                  document.body.append(dragPreview);
-                  dragPreviewRef.current = dragPreview;
-                  updateDragPreviewPosition(event.clientX, event.clientY);
-                  // The visible preview is a DOM overlay; suppress the native snapshot.
+                  const width = Math.max(4, bounds.width);
+                  const state = {
+                    clipId: segment.clipId,
+                    left: laneBounds
+                      ? Math.max(0, bounds.left - laneBounds.left)
+                      : 0,
+                    width,
+                    targetIndex: segment.index,
+                    placeAfter: false
+                  };
+                  dragStateRef.current = state;
+                  setDragState(state);
+                  // Keep the browser snapshot invisible; the ghost is constrained to the video lane.
                   const emptyDragImage = document.createElement('canvas');
                   emptyDragImage.width = emptyDragImage.height = 1;
                   event.dataTransfer.setDragImage(emptyDragImage, 0, 0);
                 }}
-                onDrag={(event) => updateDragPreviewPosition(event.clientX, event.clientY)}
+                 onDrag={(event) => updateDragPreviewPosition(event.clientX, event.clientY)}
                 onDragEnd={clearDragPreview}
-                onDrop={(event) => {
-                  clearDragPreview();
-                  if (!canReorder) return;
-                  event.preventDefault();
-                  const clipId = event.dataTransfer.getData('text/plain');
-                  const sourceIndex = segments.findIndex(
-                    (item) => item.clipId === clipId
-                  );
-                  if (sourceIndex < 0) return;
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  const placeAfter =
-                    event.clientX >= bounds.left + bounds.width / 2;
-                  const toIndex = resolveTimelineDropIndex(
-                    sourceIndex,
-                    segment.index,
-                    placeAfter
-                  );
-                  if (toIndex !== sourceIndex) onMove(clipId, toIndex);
-                }}
                 style={{
                   left: `${(segment.startUs / 1_000_000) * pixelsPerSecond}px`,
                   width: `${Math.max(4, (segment.durationUs / 1_000_000) * pixelsPerSecond)}px`,
@@ -3303,6 +3802,7 @@ function VideoTimelineTrack({
                   {(slotsByClip.get(segment.clipId) ?? []).map((slot) => {
                     const contactSheetUrl = contactSheets[segment.clipId];
                     const fallbackUrl = thumbnailFrames[slot.key];
+                    if (!contactSheetUrl && !fallbackUrl) return null;
                     return (
                       <span
                         className="uc-video-editor__thumbnail"
@@ -3312,13 +3812,14 @@ function VideoTimelineTrack({
                           width: `${slot.widthPx}px`
                         }}
                       >
-                        {contactSheetUrl && !slot.requiresExactFrame ? (
+                        {contactSheetUrl && !fallbackUrl ? (
                           <span className="uc-video-editor__contact-sheet-cell"
                             style={{ minHeight: `${slot.widthPx * contactSheetFrameHeightPx / contactSheetFrameWidthPx}px` }}>
                           <img
                             alt=""
                             className="uc-video-editor__contact-sheet"
                             draggable={false}
+                            onError={() => onContactSheetError(segment.clipId, contactSheetUrl)}
                             src={contactSheetUrl}
                             style={{
                               transform: `translateX(${contactSheetTranslateX(slot.stripFrameIndex)})`
@@ -3339,6 +3840,75 @@ function VideoTimelineTrack({
               </button>
             );
           })}
+          {dragState ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="uc-video-editor__drag-ghost"
+                style={{ left: `${dragState.left}px`, width: `${dragState.width}px` }}
+              >
+                {draggedSegment ? (
+                  <>
+                    {frames[draggedSegment.clipId] ? (
+                      <img
+                        alt=""
+                        className="uc-video-editor__drag-ghost-poster"
+                        draggable={false}
+                        src={frames[draggedSegment.clipId]}
+                      />
+                    ) : null}
+                    <span className="uc-video-editor__drag-ghost-strip">
+                      {draggedSlots.map((slot) => {
+                        const contactSheetUrl = contactSheets[draggedSegment.clipId];
+                        const fallbackUrl = thumbnailFrames[slot.key];
+                        if (!contactSheetUrl && !fallbackUrl) return null;
+                        return contactSheetUrl && !fallbackUrl ? (
+                          <span
+                            className="uc-video-editor__drag-ghost-cell"
+                            key={slot.key}
+                            style={{ left: `${slot.leftPx - draggedSegment.startUs / 1_000_000 * pixelsPerSecond}px`, width: `${slot.widthPx}px` }}
+                          >
+                            <img
+                              alt=""
+                              draggable={false}
+                              src={contactSheetUrl}
+                              style={{ transform: `translateX(${contactSheetTranslateX(slot.stripFrameIndex)})` }}
+                            />
+                          </span>
+                        ) : (
+                          <img
+                            alt=""
+                            className="uc-video-editor__drag-ghost-cell"
+                            draggable={false}
+                            src={fallbackUrl}
+                            style={{ left: `${slot.leftPx - draggedSegment.startUs / 1_000_000 * pixelsPerSecond}px`, width: `${slot.widthPx}px` }}
+                          />
+                        );
+                      })}
+                    </span>
+                    <span className="uc-video-editor__drag-ghost-label">
+                      {clipNames[draggedSegment.clipId] ?? `片段 ${draggedSegment.index + 1}`}
+                    </span>
+                  </>
+                ) : null}
+              </span>
+              {dragState.targetIndex !== undefined ? (
+                <span
+                  aria-hidden="true"
+                  className="uc-video-editor__drag-marker"
+                  style={{
+                    left: `${(() => {
+                      const target = segments[dragState.targetIndex!];
+                      if (!target) return 0;
+                      const start = target.startUs / 1_000_000 * pixelsPerSecond;
+                      const end = target.endUs / 1_000_000 * pixelsPerSecond;
+                      return dragState.placeAfter ? end : start;
+                    })()}px`
+                  }}
+                />
+              ) : null}
+            </>
+          ) : null}
         </div>
       ) : (
         <div className="uc-video-editor__lane uc-video-editor__lane--video">
@@ -3407,6 +3977,8 @@ function TimelinePlayhead({
             const flushMove = () => {
               animationFrameId = undefined;
               if (!active || !scaleRef.current) return;
+              const scaleRect = scaleRef.current.getBoundingClientRect();
+              let scaleLeft = scaleRect.left;
               const viewport = viewportRef.current;
               if (viewport) {
                 const viewportRect = viewport.getBoundingClientRect();
@@ -3418,13 +3990,13 @@ function TimelinePlayhead({
                   scrollWidth: viewport.scrollWidth
                 });
                 if (nextScrollLeft !== viewport.scrollLeft) {
+                  scaleLeft -= nextScrollLeft - viewport.scrollLeft;
                   viewport.scrollLeft = nextScrollLeft;
                 }
               }
-              const scaleRect = scaleRef.current.getBoundingClientRect();
               const nextPositionUs = resolveTimelinePositionUs(
                 pendingClientX,
-                scaleRect.left,
+                scaleLeft,
                 scaleRect.width,
                 totalDurationUs
               );
@@ -4391,6 +4963,7 @@ function ExportInspector({
   confirmed,
   draft,
   media,
+  storage,
   onCancel,
   onConfirm,
   onNavigate,
@@ -4407,9 +4980,10 @@ function ExportInspector({
   readonly confirmed: boolean;
   readonly draft: VideoEditorDraftDto;
   readonly media?: StorageLocalMediaHandleDto;
+  readonly storage?: StorageApi;
   readonly onCancel: () => void;
   readonly onConfirm: (confirmed: boolean) => void;
-  readonly onNavigate?: (itemId: 'tasks' | 'library') => void;
+  readonly onNavigate?: (itemId: 'tasks' | 'library', taskId?: string) => void;
   readonly onPreflight: () => void;
   readonly onReveal: () => void;
   readonly onRetry: () => void;
@@ -4426,6 +5000,9 @@ function ExportInspector({
     draft.outputPreference.conflictPolicy
   );
   const [resultPreviewExpanded, setResultPreviewExpanded] = useState(false);
+  const resultPreviewVideoRef = useRef<HTMLVideoElement>(null);
+  const [previewError, setPreviewError] = useState(false);
+  const retryPreviewRef = useRef<() => void>(() => {});
   const state = exportStateDisplay(task?.state);
   const completed = task?.state === 'completed' && Boolean(task.workId);
   const active = Boolean(task && isExportPollingState(task.state));
@@ -4447,6 +5024,126 @@ function ExportInspector({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [completed, resultPreviewExpanded]);
+
+  useEffect(() => {
+    const video = resultPreviewVideoRef.current;
+    const workId = task?.workId;
+    if (!video || !media || !storage || !workId) return;
+    let active = true;
+    let handle = media;
+    let wanted = false;
+    let recovering = false;
+    let attempted = false;
+    let loadedReplacement = false;
+    let replacing = false;
+    let generation = 0;
+    let position = 0;
+    let progressTime = video.currentTime;
+    let progressAt = performance.now();
+    let timeout: number | undefined;
+    setPreviewError(false);
+    const clearDeadline = () => window.clearTimeout(timeout);
+    const fail = () => {
+      clearDeadline();
+      generation++;
+      recovering = false;
+      wanted = false;
+      video.pause();
+      setPreviewError(true);
+    };
+    const resume = () => {
+      if (!active || !recovering || !loadedReplacement || video.seeking) return;
+      recovering = false;
+      clearDeadline();
+      progressTime = video.currentTime;
+      progressAt = performance.now();
+      if (wanted) void video.play().catch(() => { if (active) fail(); });
+    };
+    const recover = async () => {
+      if (!active || recovering) return;
+      if (attempted) { fail(); return; }
+      attempted = true;
+      recovering = true;
+      loadedReplacement = false;
+      replacing = false;
+      const request = ++generation;
+      position = Number.isFinite(video.currentTime) ? video.currentTime : position;
+      const rate = video.playbackRate;
+      setPreviewError(false);
+      timeout = window.setTimeout(fail, 12000);
+      try {
+        const result = await storage.createWorkMediaHandle(workId);
+        // A timeout, unmount or Work change invalidates late IPC results.
+        if (!active || !recovering || request !== generation) return;
+        if (!result.ok) { fail(); return; }
+        handle = result.value;
+        replacing = true;
+        video.src = handle.url;
+        video.load();
+        video.playbackRate = rate;
+      } catch {
+        if (active && recovering && request === generation) fail();
+      }
+    };
+    const onMetadata = () => {
+      if (!recovering || !replacing) return;
+      loadedReplacement = true;
+      video.currentTime = Math.min(position, Number.isFinite(video.duration)
+        ? Math.max(0, video.duration - 0.01) : position);
+      resume();
+    };
+    const onPlay = () => {
+      if (!wanted && !recovering) attempted = false;
+      wanted = true;
+      progressTime = video.currentTime;
+      progressAt = performance.now();
+      if (Date.parse(handle.expiresAt) <= Date.now()) void recover();
+    };
+    const onPause = () => {
+      // load() queues a pause while the old decoder is being replaced.
+      if (!recovering || !replacing || loadedReplacement) wanted = false;
+    };
+    const onError = () => {
+      if (recovering) { if (replacing && video.error) fail(); }
+      else void recover();
+    };
+    const onSeek = () => {
+      if (!recovering) {
+        progressTime = video.currentTime;
+        progressAt = performance.now();
+        if (Date.parse(handle.expiresAt) <= Date.now()) void recover();
+      }
+    };
+    retryPreviewRef.current = () => { attempted = false; wanted = true; void recover(); };
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('error', onError);
+    video.addEventListener('seeking', onSeek);
+    video.addEventListener('loadedmetadata', onMetadata);
+    video.addEventListener('seeked', resume);
+    const monitor = window.setInterval(() => {
+      if (!wanted || recovering || video.ended) return;
+      if (Math.abs(video.currentTime - progressTime) > 0.05) {
+        progressTime = video.currentTime;
+        progressAt = performance.now();
+      } else if (performance.now() - progressAt >= 4000) void recover();
+    }, 1000);
+    // Reopening the inspector may mount an already expired handle.
+    if (Date.parse(handle.expiresAt) <= Date.now()) void recover();
+    else video.load();
+    return () => {
+      active = false;
+      clearDeadline();
+      window.clearInterval(monitor);
+      retryPreviewRef.current = () => {};
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+      video.removeEventListener('error', onError);
+      video.removeEventListener('seeking', onSeek);
+      video.removeEventListener('loadedmetadata', onMetadata);
+      video.removeEventListener('seeked', resume);
+    };
+  }, [media, storage, task?.workId]);
 
   function savePreferences(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4518,7 +5215,7 @@ function ExportInspector({
           />
           <Fact
             label="目标"
-            value={`当前项目独立结果 · ${fileName.trim() || draft.title}.webm`}
+            value={`当前项目独立结果 · ${(fileName.trim() || draft.title).replace(/\.(?:webm|mp4)$/i, '')}.mp4`}
           />
           <Fact
             label="格式"
@@ -4574,11 +5271,11 @@ function ExportInspector({
           <progress
             aria-label="导出进度"
             max="100"
-            value={Math.max(0, Math.min(100, task.progress?.percent ?? 0))}
+            value={Math.max(0, Math.min(100, task.progress?.percent ?? (task.state === 'completed' ? 100 : 0)))}
           />
           <p>
             {task.progress?.percent === undefined
-              ? '当前阶段尚未报告百分比。'
+              ? task.state === 'completed' ? '已处理 100.0%' : '当前阶段尚未报告百分比。'
               : `已处理 ${task.progress.percent.toFixed(1)}%`}
           </p>
           {task.attempt > 1 ? (
@@ -4608,7 +5305,7 @@ function ExportInspector({
               </Button>
             ) : null}
             {onNavigate ? (
-              <Button onClick={() => onNavigate('tasks')} variant="ghost">
+              <Button onClick={() => onNavigate('tasks', task.taskId)} variant="ghost">
                 打开任务中心
               </Button>
             ) : null}
@@ -4633,7 +5330,8 @@ function ExportInspector({
                 controls
                 controlsList="nofullscreen"
                 playsInline
-                preload="metadata"
+                preload="auto"
+                ref={resultPreviewVideoRef}
                 src={media.url}
               />
               <button
@@ -4651,6 +5349,12 @@ function ExportInspector({
                 )}
               </button>
             </div>
+          ) : null}
+          {previewError ? (
+            <p role="alert" data-export-preview-error>
+              预览暂时无法播放，已导出的文件不受影响。
+              <Button onClick={() => retryPreviewRef.current()} variant="secondary">重试播放</Button>
+            </p>
           ) : null}
           <div className="uc-video-editor__export-actions">
             <Button disabled={busy} onClick={onReveal} variant="secondary">
@@ -4810,6 +5514,25 @@ export function resolveTimelineEdgeAutoScroll({
     maximumScrollLeft,
     Math.max(0, boundedScrollLeft + delta)
   );
+}
+
+export function resolveTimelinePlaybackScrollLeft({
+  playheadPx,
+  scrollLeft,
+  viewportWidth,
+  scrollWidth
+}: TimelinePlaybackScrollInput): number {
+  if (viewportWidth <= 0 || scrollWidth <= viewportWidth) return Math.max(0, scrollLeft);
+  const maximumScrollLeft = Math.max(0, scrollWidth - viewportWidth);
+  const boundedScrollLeft = Math.min(maximumScrollLeft, Math.max(0, scrollLeft));
+  const rightEdge = boundedScrollLeft + viewportWidth;
+  if (playheadPx < boundedScrollLeft) {
+    return Math.max(0, playheadPx - viewportWidth * 0.1);
+  }
+  if (playheadPx < rightEdge) return boundedScrollLeft;
+  // Page only after the cursor crosses the right edge. While it remains in
+  // the viewport, the scrollbar must stay completely still.
+  return Math.min(maximumScrollLeft, Math.max(0, playheadPx - viewportWidth * 0.1));
 }
 
 export function buildTimelineRulerTicks(
@@ -5091,12 +5814,12 @@ async function extractTimelineFrameBatch(
   video.muted = true;
   video.preload = 'auto';
   video.src = previewUrl;
-  const extractedFrames: ExtractedTimelineFrame[] = [];
   try {
     if (!(await waitForVideoReady(video, signal))) return;
     const orderedRequests = [...requests].sort(
       (left, right) => left.sourceUs - right.sourceUs
     );
+    const extractedFrames: ExtractedTimelineFrame[] = [];
     for (const request of orderedRequests) {
       if (isCancelled()) break;
       if (!(await seekVideoFrame(video, request.sourceUs, signal))) continue;
@@ -5108,12 +5831,8 @@ async function extractTimelineFrameBatch(
         break;
       }
       extractedFrames.push({ request, frameUrl });
+      onFrames(extractedFrames.slice(-1));
     }
-    if (isCancelled()) {
-      for (const frame of extractedFrames) URL.revokeObjectURL(frame.frameUrl);
-      return;
-    }
-    if (extractedFrames.length > 0) onFrames(extractedFrames);
   } finally {
     video.removeAttribute('src');
     video.load();

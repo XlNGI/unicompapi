@@ -53,8 +53,11 @@ test('A4 gates success, playback and file actions on a registered Work', () => {
   assert.match(editorSource, /storage\.revealWorkFile\(exportTask\.workId\)/);
   assert.match(editorSource, /作品已登记/);
   assert.match(editorSource, /onNavigate\('library'\)/);
-  assert.match(editorSource, /onNavigate\('tasks'\)/);
+  assert.match(editorSource, /onNavigate\('tasks', task\.taskId\)/);
+  assert.match(editorSource, /task\.state === 'completed' \? 100 : 0/);
+  assert.match(editorSource, /task\.state === 'completed' \? '已处理 100\.0%' : '当前阶段尚未报告百分比。'/);
   assert.match(appSource, /onNavigate=\{handleNavigate\}/);
+  assert.match(appSource, /initialTaskId=\{selectedTaskId\}/);
   assert.match(appSource, /preferredDraftId=\{openedVideoDraftId\}/);
 });
 

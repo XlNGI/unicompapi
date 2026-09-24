@@ -631,7 +631,9 @@ export function resolveHistorySelection(input: {
     };
   }
   // 当任务处于生成中时，不应自动兜底选中历史中的最后一个作品，避免抢占正在生成状态的预览与焦点
-  const selectedTaskStatus = input.statusNodes?.find((node) => node.taskId === input.selectedTaskId);
+  const selectedTaskStatus = input.selectedTaskId
+    ? input.statusNodes?.find((node) => node.taskId === input.selectedTaskId)
+    : undefined;
   if (selectedTaskStatus) {
     return { matchedTarget: false, selectedTaskId: selectedTaskStatus.taskId,
       selectedStatusId: selectedTaskStatus.id, shouldScrollToLatest: false };

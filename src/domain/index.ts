@@ -9,6 +9,7 @@ export * from './entities/document-generation';
 export * from './entities/document-intent-plan';
 export * from './entities/presentation-plan';
 export * from './entities/document-agent';
+export * from './entities/document-task-runtime';
 export * from './entities/repair-plan';
 export * from './entities/execution';
 export * from './entities/file-reference';

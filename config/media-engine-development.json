@@ -27,7 +27,9 @@
       ],
       "requiredEncoders": [
         "libopus",
-        "libvpx-vp9"
+        "libvpx-vp9",
+        "libopenh264",
+        "aac"
       ]
     }
   }

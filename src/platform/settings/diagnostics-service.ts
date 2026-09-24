@@ -9,6 +9,10 @@ import type {
   DiagnosticLocationTarget,
   SettingsCapabilityDto
 } from '../../shared/settings-ipc';
+import {
+  normalizeDiagnosticEvent,
+  type DiagnosticLogInput
+} from './diagnostic-logger';
 
 export interface DiagnosticLocationAdapter {
   open(target: DiagnosticLocationTarget, lastBundlePath: string | undefined): Promise<void>;
@@ -86,6 +90,37 @@ export class DiagnosticsService {
     if (!settings.categories[category] || !levelEnabled(level, settings.level)) {
       return { written: false, rotated: false };
     }
+    return this.enqueueWrite(category, settings, (at) => ({
+      at,
+      category,
+      level,
+      message: redact(typeof message === 'string' ? message : '').slice(0, settings.maxFileBytes)
+    }));
+  }
+
+  async writeEvent(
+    input: DiagnosticLogInput,
+    settings: DiagnosticSettings
+  ): Promise<DiagnosticLogWriteResult> {
+    const event = normalizeDiagnosticEvent(input);
+    if (!event) return { written: false, rotated: false };
+    if (!settings.categories[event.category] || !levelEnabled(event.level, settings.level)) {
+      return { written: false, rotated: false };
+    }
+    return this.enqueueWrite(event.category, settings, (at) => ({
+      at,
+      category: event.category,
+      level: event.level,
+      code: event.code,
+      ...(Object.keys(event.facts).length > 0 ? { facts: event.facts } : {})
+    }));
+  }
+
+  private enqueueWrite(
+    category: DiagnosticLogCategory,
+    settings: DiagnosticSettings,
+    payload: (at: string) => object
+  ): Promise<DiagnosticLogWriteResult> {
     let result: DiagnosticLogWriteResult = { written: false, rotated: false };
     const operation = this.logQueue.then(async () => {
       if (settings.autoCleanup) {
@@ -95,12 +130,7 @@ export class DiagnosticsService {
       const root = path.join(this.userDataPath, 'logs');
       await mkdir(root, { recursive: true });
       const target = path.join(root, categoryFiles[category][0]);
-      const line = `${JSON.stringify({
-        at: this.now(),
-        category,
-        level,
-        message: redact(message).slice(0, settings.maxFileBytes)
-      })}\n`;
+      const line = `${redact(JSON.stringify(payload(this.now())))}\n`;
       const rotated = await rotateIfNeeded(target, Buffer.byteLength(line), settings.maxFileBytes);
       const handle = await open(target, 'a');
       try {
@@ -112,8 +142,7 @@ export class DiagnosticsService {
       result = { written: true, rotated };
     });
     this.logQueue = operation.catch(() => undefined);
-    await operation;
-    return result;
+    return operation.then(() => result);
   }
 
   async preview(settings: DiagnosticSettings): Promise<DiagnosticBundlePreviewDto> {

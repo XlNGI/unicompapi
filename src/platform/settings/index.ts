@@ -10,5 +10,6 @@ export * from './notification-service';
 export * from './proxy-service';
 export * from './shortcut-service';
 export * from './diagnostics-service';
+export * from './diagnostic-logger';
 export * from './updates-service';
 export * from './application-data-service';

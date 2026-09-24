@@ -78,8 +78,9 @@ export interface MediaEngineSingleSourceExportPlan {
   readonly outputPath: string;
   readonly sourceRange: SourceTimeRange;
   readonly includeAudio: boolean;
-  readonly videoCodec: 'libvpx-vp9';
-  readonly audioCodec?: 'libopus';
+  readonly videoCodec: 'libvpx-vp9' | 'libopenh264';
+  readonly audioCodec?: 'libopus' | 'aac';
+  readonly videoBitrate?: number;
 }
 
 export interface MediaEngineCompositionClip {
@@ -119,8 +120,9 @@ export interface MediaEngineCompositionExportPlan {
       readonly durationUs: number;
     };
   };
-  readonly videoCodec: 'libvpx-vp9';
-  readonly audioCodec: 'libopus';
+  readonly videoCodec: 'libvpx-vp9' | 'libopenh264';
+  readonly audioCodec: 'libopus' | 'aac';
+  readonly videoBitrate?: number;
 }
 
 export type MediaEngineExportPlan =
@@ -203,7 +205,8 @@ export type OutputVerification =
         | 'probe_failed'
         | 'no_video'
         | 'invalid_dimensions'
-        | 'invalid_duration';
+        | 'invalid_duration'
+        | 'format_mismatch';
     };
 
 export interface FfmpegMediaEngineAdapterOptions {
@@ -564,6 +567,12 @@ export class FfmpegMediaEngineAdapter
     if (!Number.isSafeInteger(probe.durationUs) || probe.durationUs <= 0) {
       return { status: 'invalid', path: target, reason: 'invalid_duration' };
     }
+    if (path.extname(target).toLowerCase() === '.mp4' && (
+      !probe.container?.split(',').includes('mp4') || video.codec !== 'h264' ||
+      probe.streams.some((stream) => stream.type === 'audio' && stream.codec !== 'aac')
+    )) {
+      return { status: 'invalid', path: target, reason: 'format_mismatch' };
+    }
     return {
       status: 'verified',
       path: target,
@@ -617,6 +626,7 @@ export function buildExportArguments(
     return buildCompositionExportArguments(plan, temporaryPath);
   }
 
+  const mp4 = plan.videoCodec === 'libopenh264';
   const common = [
     '-hide_banner',
     '-loglevel',
@@ -633,29 +643,23 @@ export function buildExportArguments(
     plan.source.sourcePath,
     '-map',
     '0:v:0',
-    '-c:v',
-    plan.videoCodec,
-    '-deadline',
-    'good',
-    '-crf',
-    '32',
-    '-b:v',
-    '0'
+    '-c:v', plan.videoCodec,
+    ...(mp4
+      ? ['-b:v', String(plan.videoBitrate), '-profile:v', 'main', '-pix_fmt', 'yuv420p']
+      : ['-deadline', 'good', '-crf', '32', '-b:v', '0'])
   ];
   if (!plan.includeAudio) {
-    return [...common, '-an', '-f', 'webm', temporaryPath];
+    return [...common, '-an', ...(mp4 ? ['-movflags', '+faststart', '-f', 'mp4'] : ['-f', 'webm']), temporaryPath];
   }
   return [
     ...common,
     '-map',
     '0:a:0?',
-    '-c:a',
-    plan.audioCodec ?? 'libopus',
+    '-c:a', plan.audioCodec ?? (mp4 ? 'aac' : 'libopus'),
     '-b:a',
-    '96k',
+    mp4 ? '192k' : '96k',
     '-shortest',
-    '-f',
-    'webm',
+    ...(mp4 ? ['-movflags', '+faststart', '-f', 'mp4'] : ['-f', 'webm']),
     temporaryPath
   ];
 }
@@ -834,9 +838,13 @@ export function buildCompositionExportArguments(
   args.push(
     '-filter_complex', filters.join(';'),
     '-map', `[${videoLabel}]`, '-map', `[${audioLabel}]`,
-    '-c:v', plan.videoCodec, '-deadline', 'good', '-crf', '32', '-b:v', '0',
-    '-pix_fmt', 'yuv420p', '-c:a', plan.audioCodec, '-b:a', '96k',
-    '-f', 'webm', temporaryPath
+    '-c:v', plan.videoCodec,
+    ...(plan.videoCodec === 'libopenh264'
+      ? ['-b:v', String(plan.videoBitrate), '-profile:v', 'main']
+      : ['-deadline', 'good', '-crf', '32', '-b:v', '0']),
+    '-pix_fmt', 'yuv420p', '-c:a', plan.audioCodec, '-b:a', plan.videoCodec === 'libopenh264' ? '192k' : '96k',
+    ...(plan.videoCodec === 'libopenh264' ? ['-movflags', '+faststart', '-f', 'mp4'] : ['-f', 'webm']),
+    temporaryPath
   );
   return args;
 }
@@ -907,13 +915,16 @@ function validateExportPlan(plan: MediaEngineExportPlan): string | null {
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
-  if (path.extname(plan.outputPath).toLowerCase() !== '.webm') {
-    return 'development export requires a .webm output';
+  const mp4 = plan.videoCodec === 'libopenh264';
+  if (path.extname(plan.outputPath).toLowerCase() !== (mp4 ? '.mp4' : '.webm')) {
+    return 'export extension does not match its codec';
   }
-  if (plan.videoCodec !== 'libvpx-vp9') return 'unsupported video codec';
+  if (plan.videoCodec !== 'libvpx-vp9' && !mp4) return 'unsupported video codec';
+  if (mp4 && (!Number.isSafeInteger(plan.videoBitrate) ||
+      Number(plan.videoBitrate) <= 0)) return 'MP4 export requires a positive video bitrate';
   if (
     ('composition' in plan || plan.includeAudio) &&
-    plan.audioCodec !== 'libopus'
+    plan.audioCodec !== (mp4 ? 'aac' : 'libopus')
   ) {
     return 'unsupported audio codec';
   }

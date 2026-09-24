@@ -23,6 +23,7 @@ import {
   type UsageSchemaV1
 } from '../../src/domain';
 import {
+  createDocumentToolCallingBridge,
   NewApiChatAdapter,
   NewApiImageAdapter,
   NewApiManagementAdapter,
@@ -1074,6 +1075,73 @@ describe('NewAPI chat adapter', () => {
     expect(body).not.toHaveProperty('audio');
     expect(body).not.toHaveProperty('user');
     expect(body).not.toHaveProperty('thinking');
+  });
+
+  it('preserves assistant calls and bounded document observations on the next request', async () => {
+    const wireCall = { id: 'read-1', type: 'function', function: { name: 'read_document_structure', arguments: '{}' } };
+    let round = 0;
+    const fixture = runtimeFixture(async () => streamResponse((round++ === 0
+      ? chatStreamEvent({ tool_calls: [{ index: 0, ...wireCall }] }, 'tool_calls')
+      : chatStreamEvent({ content: 'Reviewed' }, 'stop')) + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const execute = vi.fn(async () => ({ revision: 3 }));
+    const bridge = createDocumentToolCallingBridge({
+      bindings: [{ id: 'read_document_structure', fields: {}, authorize: async () => true, execute }],
+      budgetUnits: 4, maxCalls: 2, timeoutMs: 1_000
+    });
+    const handle = await adapter.submit({
+      routeSnapshot: routeFor('text_chat'),
+      request: { responseExecutionId: 'response-document-tools', invocationAttemptId: 'attempt-document-tools',
+        messages: [{ role: 'user', content: 'Inspect' }], tools: bridge.tools, parameterValues: {} },
+      toolBridge: bridge.bridge
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(fixture.requests).toHaveLength(2);
+    expect(requestJson(fixture.requests[1]).messages).toEqual([
+      { role: 'user', content: 'Inspect' },
+      { role: 'assistant', content: '', tool_calls: [wireCall] },
+      { role: 'tool', tool_call_id: 'read-1', name: 'read_document_structure', content: JSON.stringify({
+        ok: true, callId: 'read-1', toolId: 'read_document_structure', toolVersion: '1.0',
+        costUnits: 1, outcomeUnknown: false, result: { revision: 3 }
+      }) }
+    ]);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts empty finish reasons on gateway deltas but waits for an explicit terminal event', async () => {
+    const placeholder = (delta: Record<string, unknown>) => chatStreamEvent(delta, undefined, {
+      choices: [{ index: 0, delta, finish_reason: '' }]
+    });
+    const sse = placeholder({ role: 'assistant', content: '' }) +
+      placeholder({ reasoning_content: 'Synthetic reasoning' }) + placeholder({ content: '完整回答' }) +
+      chatStreamEvent({}, 'stop') + 'data: [DONE]\n\n';
+    const bytes = new TextEncoder().encode(sse);
+    const result = await runChatStream(Array.from(bytes, (byte) => Uint8Array.of(byte)), 'text_reasoning');
+    expect(result.terminal).toMatchObject({ state: 'completed', finishReason: 'stop' });
+    expect(result.lifecycle.content).toBe('完整回答');
+    expect(result.lifecycle.reasoningContent).toBe('Synthetic reasoning');
+    expect(result.lifecycle.states).toEqual(['started', 'completed']);
+  });
+
+  it.each([
+    { tail: 'data: [DONE]\n\n', reason: 'finish_reason_missing' },
+    { tail: '', reason: 'terminal_marker_missing' }
+  ])('does not infer completion from an empty finish reason: $reason', async ({ tail, reason }) => {
+    const sse = chatStreamEvent({}, undefined, {
+      choices: [{ index: 0, delta: { content: 'partial' }, finish_reason: '' }]
+    }) + tail;
+    const result = await runChatStream([new TextEncoder().encode(sse)]);
+    expect(result.terminal).toMatchObject({ state: 'failed', safeCode: `newapi.invalid_response.${reason}` });
+    expect(result.lifecycle.states).toEqual(['started', 'failed']);
+  });
+
+  it.each([' ', 'end_turn', 'STOP', ['stop'], 0, false, {}])('rejects an unsupported finish reason without coercion: %j', async (finishReason) => {
+    const sse = chatStreamEvent({}, undefined, {
+      choices: [{ index: 0, delta: { content: 'untrusted' }, finish_reason: finishReason }]
+    }) + 'data: [DONE]\n\n';
+    const result = await runChatStream([new TextEncoder().encode(sse)]);
+    expect(result.terminal).toMatchObject({ state: 'failed', safeCode: 'newapi.invalid_response.finish_reason_invalid' });
+    expect(result.lifecycle.content).toBe('');
   });
 
   it('serializes only allowlisted native document tools', async () => {

@@ -43,15 +43,16 @@ class ControlledExportAdapter implements MediaEngineAdapter {
   readonly descriptor = { adapterId: 'ffmpeg', adapterVersion: 'test' };
   mode: 'wait' | 'fail' | 'succeed' = 'wait';
   started = false;
+  outputContainer = 'mp4';
   private finish?: (result: MediaEngineExportResult) => void;
 
   async getCapabilities() {
     return {
       descriptor: this.descriptor,
       version: 'ffmpeg test',
-      videoEncoders: ['libvpx-vp9'],
-      audioEncoders: ['libopus'],
-      containers: ['webm'],
+      videoEncoders: ['libopenh264'],
+      audioEncoders: ['aac'],
+      containers: ['mp4'],
       filters: ['concat', 'scale', 'pad', 'atrim', 'amix'],
       supportsProbe: true as const,
       supportsPreview: true as const,
@@ -99,7 +100,7 @@ class ControlledExportAdapter implements MediaEngineAdapter {
           durationUs: 1_000_000,
           hasVideo: true,
           hasAudio: false,
-          container: 'webm',
+          container: this.outputContainer,
           width: 64,
           height: 64
         }
@@ -125,7 +126,7 @@ class ControlledExportAdapter implements MediaEngineAdapter {
           durationUs: 1_000_000,
           hasVideo: true as const,
           hasAudio: false,
-          container: 'webm',
+          container: this.outputContainer,
           width: 64,
           height: 64
         };
@@ -225,6 +226,22 @@ async function fixture(
 }
 
 describe('VideoExportController fault handling', () => {
+  it('never registers a work when the output container differs from the frozen plan', async () => {
+    const adapter = new ControlledExportAdapter();
+    adapter.mode = 'succeed';
+    adapter.outputContainer = 'webm';
+    const test = await fixture(adapter);
+    const started = await test.controller.startExport({
+      draftId: test.draft.id, expectedRevision: test.draft.revision
+    });
+    if (!started.ok) throw new Error(started.error.message);
+    await test.controller.waitForExports();
+    await expect(test.controller.getExport({ taskId: started.value.taskId }))
+      .resolves.toMatchObject({ ok: true, value: { state: 'failed' } });
+    await expect(new JsonWorkRepository(test.storage, test.projectId).list(test.projectId))
+      .resolves.toEqual([]);
+  });
+
   it('freezes fail-on-conflict without changing the requested output name', async () => {
     const adapter = new ControlledExportAdapter();
     const test = await fixture(adapter);
@@ -248,8 +265,8 @@ describe('VideoExportController fault handling', () => {
     const plans = await new JsonVideoExportPlanRepository(test.storage, test.projectId)
       .list(test.projectId);
     expect(plans[0]?.output).toMatchObject({
-      relativePath: 'files/results/collision.webm',
-      fileName: 'collision.webm',
+      relativePath: 'files/results/collision.mp4',
+      fileName: 'collision.mp4',
       conflictPolicy: 'fail'
     });
     await waitUntil(() => adapter.started);

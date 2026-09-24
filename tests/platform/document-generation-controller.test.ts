@@ -11,6 +11,7 @@ import {
   DocumentGenerationApplicationService
 } from '../../src/application';
 import {
+  addUserMessage,
   appendAssistantMessageChunk,
   beginAssistantMessage,
   completeAssistantMessage,
@@ -33,6 +34,7 @@ import {
   PlatformDocumentGenerationExecutor,
   type StorageProjectSession
 } from '../../src/platform';
+import { emitProductionEvent, getProductionTraceStore } from '../../src/platform/conversation-production-trace';
 
 const temporaryRoots: string[] = [];
 
@@ -77,6 +79,7 @@ async function createEnvironment(options: {
   });
   const documentApplication = new DocumentGenerationApplicationService({
     projectId,
+    onProgress: async (event) => { await emitProductionEvent(event); },
     conversations: {
       load: async (conversationId) => {
         conversationLoadCount += 1;
@@ -281,6 +284,8 @@ describe('document generation controller', () => {
     let conversation: Conversation = stored;
     const messageId = toMessageId('message-ai-1');
     const steps: Array<(current: typeof conversation) => typeof conversation> = [
+      (current) => addUserMessage(current, { id: toMessageId('user-document-trace'),
+        content: '请制作项目周报', createdAt: toIsoTimestamp(now()) }),
       (current) =>
         beginAssistantMessage(current, {
           id: messageId,
@@ -340,6 +345,12 @@ describe('document generation controller', () => {
     expect((await works.get(toWorkId(result.value.workId)))?.mediaKind).toBe(
       'document'
     );
+    const events = await getProductionTraceStore({ rootDirectory, projectId: 'doc-ipc-project' }).list({ conversationId });
+    expect(events.at(-1)).toMatchObject({ code: 'task_complete', status: 'completed',
+      sourceMessageId: 'user-document-trace', assistantMessageId: messageId });
+    const register = events.findIndex((event) => event.code === 'document_register' && event.status === 'completed');
+    expect(register).toBeGreaterThan(-1);
+    expect(register).toBeLessThan(events.length - 1);
   });
 
   it('recovers malformed presentation JSON and completes the full PPTX workflow', async () => {

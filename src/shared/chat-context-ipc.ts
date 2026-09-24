@@ -1,3 +1,5 @@
+import type { ConversationTaskProgressSnapshot } from './conversation-task-progress';
+
 export const chatContextIpcChannels = {
   createConversation: 'chat-context:create-conversation',
   getConversation: 'chat-context:get-conversation',
@@ -50,6 +52,7 @@ export const chatContextIpcChannels = {
 
 export type ChatContextIpcErrorCode =
   | 'native_search_authorization_required'
+  | 'model_selection_required'
   | 'invalid_request'
   | 'project_not_open'
   | 'project_scope_mismatch'
@@ -389,6 +392,7 @@ export interface ConversationResponseExecutionDto {
   readonly streamSequence: number;
   readonly reasoningContent: string;
   readonly content: string;
+  readonly taskProgress?: readonly ConversationTaskProgressSnapshot[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -404,6 +408,18 @@ export interface ConversationIntentPlanDto {
   readonly action?: 'answer' | 'create' | 'revise' | 'analyze';
   readonly documentKind?: 'word' | 'excel' | 'ppt' | 'auto';
   readonly deliverables?: readonly ('word' | 'excel' | 'ppt')[];
+  readonly steps?: readonly {
+    readonly stepId: string;
+    readonly kind: 'chat' | 'document';
+    readonly action: 'answer' | 'create' | 'revise' | 'analyze';
+    readonly documentKind?: 'word' | 'excel' | 'ppt' | 'auto';
+    readonly dependsOn: readonly string[];
+    readonly parameters: Readonly<Record<string, string | number | boolean>>;
+    readonly sourcePolicy: 'none' | 'internal' | 'web' | 'mixed';
+    readonly missing: readonly string[];
+    readonly confidence: 'high' | 'medium' | 'low';
+    readonly needsConfirmation: boolean;
+  }[];
   readonly targetHint?: {
     readonly unit: 'document' | 'version' | 'page' | 'section' | 'table' | 'cell' | 'block';
     readonly ordinal?: number;
@@ -418,6 +434,7 @@ export interface ConversationIntentPlanDto {
 }
 
 export interface ConversationWorkflowDto {
+  readonly planningFailureCode?: 'classification_timeout' | 'classification_unavailable' | 'classification_invalid_response' | 'invalid_intent_plan';
   readonly workflowId: string;
   readonly projectId: string;
   readonly conversationId: string;
@@ -478,11 +495,16 @@ export interface ConversationResponseStreamEventDto {
   readonly sequence: number;
   readonly type: 'execution_created' | 'stream_started' | 'reasoning_delta' | 'content_delta' |
     'cancel_requested' | 'stream_completed' | 'stream_failed' |
-    'stream_cancelled' | 'stream_interrupted' | 'stream_resumed';
+    'stream_cancelled' | 'stream_interrupted' | 'stream_resumed' | 'task_progress';
   readonly reasoningDelta?: string;
   readonly contentDelta?: string;
   readonly safeCode?: string;
   readonly interruptionReason?: 'provider_disconnected' | 'transport_interrupted' | 'application_shutdown';
+  readonly stage?: 'planning' | 'retrieval' | 'analysis' | 'design' | 'rendering' | 'checking' | 'publishing' | 'completed';
+  readonly progressStatus?: 'started' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
+  readonly taskRevision?: number;
+  readonly pageId?: string;
+  readonly pageRevision?: number;
   readonly occurredAt: string;
 }
 

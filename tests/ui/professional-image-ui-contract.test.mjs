@@ -234,7 +234,9 @@ test('professional image history uses project-and-mode scoped verified local wor
   assert.match(historySource, /draftId,/);
   assert.match(historySource, /mediaKind,/);
   assert.match(historySource, /workspaceMode,/);
-  assert.match(historySource, /limit: 50/);
+  assert.match(historySource, /limit: 30/);
+  assert.match(historySource, /\.slice\(0, 30\)/);
+  assert.doesNotMatch(historySource, /nextCursor|加载更早任务/);
   assert.match(historySource, /a\.createdAt\.localeCompare\(b\.createdAt\)/);
   assert.match(historySource, /aria-pressed={selectedWorkId === work\.workId}/);
   assert.match(historySource, /onClick={\(\) => selectWork\(work\)}/);
@@ -276,7 +278,8 @@ test('professional image history keeps concise truthful timeline states', () => 
   assert.match(historySource, /HistoryTaskCard key={card\.id}/);
   assert.match(historySource, /onLocalStorageChanged/);
   assert.match(historySource, /timeline\.scrollLeft = timeline\.scrollWidth/);
-  assert.match(historySource, /onWheel={handleTimelineWheel}/);
+  assert.match(historySource, /timeline\.addEventListener\('wheel', handleTimelineWheel, \{ passive: false \}\)/);
+  assert.match(historySource, /timeline\.removeEventListener\('wheel', handleTimelineWheel\)/);
   assert.match(historySource, /event\.deltaX/);
   assert.match(historySource, /event\.deltaY/);
   assert.match(historySource, /event\.preventDefault\(\)/);

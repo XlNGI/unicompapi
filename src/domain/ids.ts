@@ -38,6 +38,7 @@ export type LocalResultObservationId = DomainId<'LocalResultObservationId'>;
 export type UsageSchemaId = DomainId<'UsageSchemaId'>;
 export type ProviderExecutionRouteSnapshotId = DomainId<'ProviderExecutionRouteSnapshotId'>;
 export type SubmissionIntentId = DomainId<'SubmissionIntentId'>;
+export type DocumentTaskRuntimeId = DomainId<'DocumentTaskRuntimeId'>;
 
 function toDomainId<Name extends string>(value: string, label: Name): DomainId<Name> {
   const normalized = value.trim();
@@ -110,3 +111,5 @@ export const toProviderExecutionRouteSnapshotId = (value: string) =>
   toDomainId(value, 'ProviderExecutionRouteSnapshotId');
 export const toSubmissionIntentId = (value: string) =>
   toDomainId(value, 'SubmissionIntentId');
+export const toDocumentTaskRuntimeId = (value: string) =>
+  toDomainId(value, 'DocumentTaskRuntimeId');

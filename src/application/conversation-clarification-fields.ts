@@ -34,5 +34,6 @@ export function conversationClarificationKey(reason: string): string {
 }
 
 export function conversationClarificationLabel(reason: string): string {
-  return labels[conversationClarificationKey(reason)] ?? reason;
+  return labels[conversationClarificationKey(reason)] ??
+    (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/iu.test(reason) ? '需要补充的具体要求' : reason);
 }

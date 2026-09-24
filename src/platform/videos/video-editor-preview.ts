@@ -12,6 +12,7 @@ import type {
 } from '../../domain';
 
 export const videoEditorPreviewArtifactKinds = [
+  'scrub_video',
   'proxy_video',
   'proxy_video_clear',
   'proxy_video_smooth',
@@ -121,9 +122,11 @@ export function createVideoEditorPreviewCacheKey(input: {
       schemaVersion: input.plan.schemaVersion,
       sourceIdentity: input.plan.sourceIdentity,
       sourceRange: input.plan.sourceRange,
-      speed: input.plan.speed,
-      transform: input.plan.transform,
-      sourceAudio: input.plan.sourceAudio,
+      ...(input.kind === 'scrub_video' ? {} : {
+        speed: input.plan.speed,
+        transform: input.plan.transform,
+        sourceAudio: input.plan.sourceAudio
+      }),
       kind: input.kind,
       adapter: input.adapter
     }))

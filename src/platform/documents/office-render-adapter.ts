@@ -1,7 +1,8 @@
 import { access, mkdir, mkdtemp, readdir, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import JSZip from 'jszip';
 import type { DocumentRenderAdapter, DocumentRenderResult } from './temporary-document-workflow';
 
 export interface OfficeRenderCommandConfig {
@@ -11,12 +12,66 @@ export interface OfficeRenderCommandConfig {
 }
 
 export function createConfiguredOfficeRenderAdapter(
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment?: Readonly<Record<string, string | undefined>>
 ): DocumentRenderAdapter | undefined {
-  const officeExecutable = environment.UNICOMP_OFFICE_RENDERER?.trim();
-  const pdfToPngExecutable = environment.UNICOMP_PDF_RENDERER?.trim();
+  return createOfficeRenderAdapterFromEnv(
+    environment ?? process.env,
+    environment === undefined ? readWindowsPersistentRendererEnv() : undefined
+  );
+}
+
+export function createOfficeRenderAdapterFromEnv(
+  environment: Readonly<Record<string, string | undefined>>,
+  fallback?: Readonly<Record<string, string | undefined>>
+): DocumentRenderAdapter | undefined {
+  const officeExecutable = firstNonEmpty(
+    environment.UNICOMP_OFFICE_RENDERER,
+    fallback?.UNICOMP_OFFICE_RENDERER
+  );
+  const pdfToPngExecutable = firstNonEmpty(
+    environment.UNICOMP_PDF_RENDERER,
+    fallback?.UNICOMP_PDF_RENDERER
+  );
   if (!officeExecutable || !pdfToPngExecutable) return undefined;
   return createOfficeRenderAdapter({ officeExecutable, pdfToPngExecutable });
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+function readWindowsPersistentRendererEnv(): Readonly<Record<string, string | undefined>> {
+  return {
+    UNICOMP_OFFICE_RENDERER: readWindowsPersistentEnv('UNICOMP_OFFICE_RENDERER'),
+    UNICOMP_PDF_RENDERER: readWindowsPersistentEnv('UNICOMP_PDF_RENDERER')
+  };
+}
+
+function readWindowsPersistentEnv(name: string): string | undefined {
+  if (process.platform !== 'win32') return undefined;
+  for (const key of [
+    'HKCU\\Environment',
+    'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
+  ]) {
+    try {
+      const output = execFileSync('reg', ['query', key, '/v', name], {
+        encoding: 'utf8',
+        timeout: 2000,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+      const match = /REG_(?:EXPAND_)?SZ\s+(\S.*)$/m.exec(output);
+      const value = match?.[1]?.trim();
+      if (value) return value;
+    } catch {
+      // Persistent user/machine environment is optional.
+    }
+  }
+  return undefined;
 }
 
 export class OfficeRenderUnavailableError extends Error {
@@ -50,11 +105,14 @@ export function createOfficeRenderAdapter(
       await run(config.pdfToPngExecutable, ['-png', pdfPath, pngPrefix], input.signal, timeoutMs);
       const pngFiles = (await readdir(workDirectory)).filter((file) => /^page-\d+\.png$/iu.test(file));
       if (pngFiles.length < 1) throw new OfficeRenderUnavailableError('PDF renderer did not produce page images');
-      const diagnostics = await inspectRenderedOutput(
+      const geometryDiagnostics = input.kind === 'ppt'
+        ? await inspectPptxGeometry(temporaryPath)
+        : [];
+      const diagnostics = [...geometryDiagnostics, ...await inspectRenderedOutput(
         pdfPath,
         pngFiles.map((file) => path.join(workDirectory, file)),
         input.kind
-      );
+      )];
       return {
         previewCount: pngFiles.length,
         warnings: input.kind === 'ppt' && pngFiles.length < 1 ? ['No presentation pages were rendered'] : [],
@@ -71,13 +129,13 @@ async function inspectRenderedOutput(
   pngPaths: readonly string[],
   kind: 'word' | 'excel' | 'ppt'
 ): Promise<readonly {
-  readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap';
+  readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap' | 'element_overflow';
   readonly severity: 'error' | 'warning';
   readonly scope: string;
   readonly message: string;
 }[]> {
   const diagnostics: Array<{
-    readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap';
+    readonly code: 'font_missing' | 'empty_page' | 'invalid_image' | 'page_count_mismatch' | 'text_overflow' | 'overlap' | 'element_overflow';
     readonly severity: 'error' | 'warning';
     readonly scope: string;
     readonly message: string;
@@ -105,23 +163,35 @@ async function inspectRenderedOutput(
       const content = await page.getTextContent();
       const items = content.items.filter((item) => 'str' in item) as Array<{ str: string; transform: number[]; width: number; height: number; fontName?: string }>;
       if (items.every((item) => item.str.trim().length === 0)) {
-        diagnostics.push({ code: 'empty_page', severity: 'warning', scope: `page:${pageNumber}`, message: `${kind} page contains no extractable text; verify intentional blank pages` });
+        diagnostics.push({ code: 'empty_page', severity: kind === 'ppt' ? 'error' : 'warning', scope: `page:${pageNumber}`, message: kind === 'ppt' ? 'Presentation page contains no extractable text' : `${kind} page contains no extractable text; verify intentional blank pages` });
       }
       const viewport = page.getViewport({ scale: 1 });
       const boxes = items.filter((item) => item.str.trim()).map((item) => {
+        // PDF coordinates use a bottom-left origin. Keep both corners and
+        // normalize them before comparing against the page bounds; treating
+        // the baseline as the top edge causes negative/rotated text to be
+        // missed or reported as overflow in the wrong direction.
         const x = item.transform[4] ?? 0;
         const y = item.transform[5] ?? 0;
-        return { left: x, right: x + Math.abs(item.width), top: y, bottom: y + Math.abs(item.height) };
+        const right = x + Math.abs(item.width);
+        const top = y + Math.abs(item.height);
+        return {
+          left: Math.min(x, right),
+          right: Math.max(x, right),
+          bottom: Math.min(y, top),
+          top: Math.max(y, top)
+        };
       });
       if (boxes.some((box) => box.left < -1 || box.right > viewport.width + 1 || box.top < -1 || box.bottom > viewport.height + 1)) {
-        diagnostics.push({ code: 'text_overflow', severity: 'warning', scope: `page:${pageNumber}`, message: 'Text bounding box extends outside the PDF page bounds' });
+        diagnostics.push({ code: 'text_overflow', severity: 'error', scope: `page:${pageNumber}`, message: 'Text bounding box extends outside the PDF page bounds' });
       }
+      const strictVisualQa = kind === 'ppt';
       for (let index = 0; index < boxes.length; index += 1) {
         for (let next = index + 1; next < boxes.length; next += 1) {
           const overlapWidth = Math.min(boxes[index].right, boxes[next].right) - Math.max(boxes[index].left, boxes[next].left);
           const overlapHeight = Math.min(boxes[index].bottom, boxes[next].bottom) - Math.max(boxes[index].top, boxes[next].top);
           if (overlapWidth > 2 && overlapHeight > 2) {
-            diagnostics.push({ code: 'overlap', severity: 'warning', scope: `page:${pageNumber}`, message: 'Text bounding boxes overlap; verify intentional layering' });
+            diagnostics.push({ code: 'overlap', severity: strictVisualQa ? 'error' : 'warning', scope: `page:${pageNumber}`, message: strictVisualQa ? 'Text bounding boxes overlap' : 'Text bounding boxes overlap; verify intentional layering' });
             index = boxes.length;
             break;
           }
@@ -130,9 +200,92 @@ async function inspectRenderedOutput(
     }
     document.cleanup();
   } catch {
-    diagnostics.push({ code: 'font_missing', severity: 'warning', scope: 'document', message: 'PDF text/font inspection was unavailable; visual review is required' });
+    diagnostics.push({ code: 'font_missing', severity: kind === 'ppt' ? 'error' : 'warning', scope: 'document', message: kind === 'ppt' ? 'PDF text/font inspection was unavailable; visual QA could not be completed' : 'PDF text/font inspection was unavailable; visual review is required' });
   }
   return diagnostics;
+}
+
+export async function inspectPptxGeometry(
+  filePath: string
+): Promise<readonly {
+  readonly code: 'element_overflow' | 'text_overflow';
+  readonly severity: 'error';
+  readonly scope: string;
+  readonly message: string;
+}[]> {
+  const buffer = await readFile(filePath);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch {
+    throw new OfficeRenderUnavailableError('PPTX geometry inspection could not open the package');
+  }
+  const presentation = zip.file('ppt/presentation.xml');
+  const presentationXml = presentation ? await presentation.async('string') : undefined;
+  const sizeTag = presentationXml && /<p:sldSz\b[^>]*>/u.exec(presentationXml)?.[0];
+  const slideWidth = sizeTag ? xmlIntegerAttribute(sizeTag, 'cx') : undefined;
+  const slideHeight = sizeTag ? xmlIntegerAttribute(sizeTag, 'cy') : undefined;
+  if (slideWidth === undefined || slideHeight === undefined || slideWidth <= 0 || slideHeight <= 0) {
+    throw new OfficeRenderUnavailableError('PPTX slide size is unavailable');
+  }
+  const diagnostics: Array<{
+    readonly code: 'element_overflow' | 'text_overflow';
+    readonly severity: 'error';
+    readonly scope: string;
+    readonly message: string;
+  }> = [];
+  const slideNames = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
+    .sort((left, right) => slideNumber(left) - slideNumber(right));
+  for (const slideName of slideNames) {
+    const xml = await zip.files[slideName].async('string');
+    const shapes = xml.match(/<p:(?:sp|pic|graphicFrame|cxnSp)\b[\s\S]*?<\/p:(?:sp|pic|graphicFrame|cxnSp)>/gu) ?? [];
+    for (const [index, shape] of shapes.entries()) {
+      const transform = /<(?:a:xfrm|p:xfrm)\b[\s\S]*?<\/(?:a:xfrm|p:xfrm)>/u.exec(shape)?.[0];
+      const origin = transform ?? shape;
+      const offTag = /<a:off\b[^>]*>/u.exec(origin)?.[0];
+      const extTag = /<a:ext\b[^>]*>/u.exec(origin)?.[0];
+      const x = offTag ? xmlIntegerAttribute(offTag, 'x') : undefined;
+      const y = offTag ? xmlIntegerAttribute(offTag, 'y') : undefined;
+      const width = extTag ? xmlIntegerAttribute(extTag, 'cx') : undefined;
+      const height = extTag ? xmlIntegerAttribute(extTag, 'cy') : undefined;
+      if (x === undefined || y === undefined || width === undefined || height === undefined) continue;
+      if (shapeFitsSlide(x, y, width, height, slideWidth, slideHeight)) continue;
+      const scope = `slide:${slideNumber(slideName)}:element:${index + 1}`;
+      const hasText = /<a:t\b[^>]*>/u.test(shape);
+      diagnostics.push({
+        code: hasText ? 'text_overflow' : 'element_overflow',
+        severity: 'error',
+        scope,
+        message: hasText ? 'PPT text shape exceeds the slide bounds' : 'PPT element exceeds the slide bounds'
+      });
+    }
+  }
+  return diagnostics;
+}
+
+
+function shapeFitsSlide(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  slideWidth: number,
+  slideHeight: number
+): boolean {
+  if (width < 0 || height < 0 || (width === 0 && height === 0)) return false;
+  return x >= 0 && y >= 0 && x + width <= slideWidth && y + height <= slideHeight;
+}
+
+function slideNumber(name: string): number {
+  return Number(/slide(\d+)\.xml$/u.exec(name)?.[1] ?? 0);
+}
+
+function xmlIntegerAttribute(tag: string, name: string): number | undefined {
+  const value = new RegExp(`\\b${name}="(-?\\d+)"`, 'u').exec(tag)?.[1];
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 async function run(

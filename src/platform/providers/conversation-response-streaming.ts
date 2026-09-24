@@ -9,6 +9,8 @@ import {
   type ConversationResponseInterruptionReason,
   type ConversationResponseStreamEventId,
   type ConversationResponseStreamEventType,
+  type ConversationTaskProgressStage,
+  type ConversationTaskProgressStatus,
   type ConversationResponseStreamEventV1,
   type IsoTimestamp
 } from '../../domain';
@@ -124,6 +126,27 @@ export class ConversationResponseExecutionLifecycle {
     return this.append(executionId, 'stream_resumed');
   }
 
+  taskProgress(
+    executionId: ConversationResponseExecutionId,
+    input: {
+      readonly stage: ConversationTaskProgressStage;
+      readonly status: ConversationTaskProgressStatus;
+      readonly revision: number;
+      readonly pageId?: string;
+      readonly pageRevision?: number;
+      readonly safeCode?: string;
+    }
+  ): Promise<ConversationResponseStreamEventV1> {
+    return this.append(executionId, 'task_progress', {
+      stage: input.stage,
+      progressStatus: input.status,
+      taskRevision: input.revision,
+      ...(input.pageId !== undefined ? { pageId: input.pageId } : {}),
+      ...(input.pageRevision !== undefined ? { pageRevision: input.pageRevision } : {}),
+      ...(input.safeCode !== undefined ? { safeCode: input.safeCode } : {})
+    });
+  }
+
   async interruptActiveForApplicationShutdown(): Promise<number> {
     const active = (await this.repository.list()).filter(
       (execution) => execution.state === 'pending' || execution.state === 'streaming'
@@ -174,6 +197,11 @@ export class ConversationResponseExecutionLifecycle {
       readonly contentDelta?: string;
       readonly safeCode?: string;
       readonly interruptionReason?: ConversationResponseInterruptionReason;
+      readonly stage?: ConversationTaskProgressStage;
+      readonly progressStatus?: ConversationTaskProgressStatus;
+      readonly taskRevision?: number;
+      readonly pageId?: string;
+      readonly pageRevision?: number;
     } = {},
     publish = true
   ): Promise<ConversationResponseStreamEventV1> {
@@ -187,6 +215,11 @@ export class ConversationResponseExecutionLifecycle {
       readonly contentDelta?: string;
       readonly safeCode?: string;
       readonly interruptionReason?: ConversationResponseInterruptionReason;
+      readonly stage?: ConversationTaskProgressStage;
+      readonly progressStatus?: ConversationTaskProgressStatus;
+      readonly taskRevision?: number;
+      readonly pageId?: string;
+      readonly pageRevision?: number;
     })[],
     publish = true
   ): Promise<readonly ConversationResponseStreamEventV1[]> {

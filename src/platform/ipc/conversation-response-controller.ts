@@ -53,6 +53,7 @@ import { ConversationAttachmentError, conversationAttachmentBatch, isImageAttach
 import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
 import { declinesWebResearch } from '../../application/conversation-intent-orchestrator';
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
+import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
 
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -476,6 +477,7 @@ export class ConversationResponseController {
         'Conversation provider runtime access is not approved'
       );
     }
+    const startResponse = runtime.start.bind(runtime);
     const workflow = input.workflow
       ? await this.requireReadyWorkflow(runtime, input)
       : undefined;
@@ -561,6 +563,14 @@ export class ConversationResponseController {
     if (!userMessage || userMessage.role !== 'user' || userMessage.state !== 'completed') {
       return failure('message_not_completed', 'The selected user message is not complete');
     }
+    const session = this.dependencies.getSession();
+    if (!session || session.projectId !== runtime.conversations.projectId) {
+      return failure('project_not_open', 'The source project is no longer active');
+    }
+    return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
+      conversationId: conversation.id, sourceMessageId: userMessage.id, traceId: userMessage.id,
+      clientCommandId: input.clientCommandId }, async () => {
+    try {
     // Fail locally before candidate authorization or provider dispatch. Factory
     // revalidates the pinned hashes immediately before forming provider messages.
     const attachmentQuery = conversationAttachmentQuery(workflow?.plan, userMessage);
@@ -657,6 +667,8 @@ export class ConversationResponseController {
       }
       throw error;
     });
+    await emitProductionEvent({ code: 'tool_authorization', status: 'completed',
+      facts: { purpose: 'content', count: input.contextSelections.length } });
     const pendingExecutionId = workflow
       ? `pending:${input.clientCommandId}`
       : undefined;
@@ -669,7 +681,7 @@ export class ConversationResponseController {
       : undefined;
     let execution: ConversationResponseExecutionReadModelV1;
     try {
-      execution = await runtime.start({
+      execution = await startResponse({
         subject: subject(draft),
         routeSelectionToken: prepared.routeSelectionToken,
         confirmation: {
@@ -716,6 +728,11 @@ export class ConversationResponseController {
         execution: toResponseExecutionDto(execution)
       }
     };
+    } catch (error) {
+      await emitProductionEvent({ code: 'task_complete', status: 'failed', facts: { purpose: 'content' } });
+      throw error;
+    }
+    });
   }
 
   private async requireReadyWorkflow(
@@ -858,6 +875,7 @@ function toResponseExecutionDto(
     streamSequence: execution.streamSequence,
     reasoningContent: execution.reasoningContent,
     content: execution.content,
+    ...(execution.taskProgress?.length ? { taskProgress: execution.taskProgress } : {}),
     createdAt: execution.createdAt,
     updatedAt: execution.updatedAt
   };

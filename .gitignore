@@ -37,6 +37,7 @@ Thumbs.db
 tmp/
 temp/
 outputs/
+/.e7-office-batch-*/
 
 # packaged artifacts
 *.dmg

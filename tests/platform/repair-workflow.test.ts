@@ -13,25 +13,20 @@ const outline = {
 const error: DocumentQualityDiagnostic = { code: 'capacity_exceeded', severity: 'error', scope: 'sections[0]', message: 'overflow' };
 
 describe('bounded repair workflow', () => {
-  it('prefers deterministic repair and stops once diagnostics pass', async () => {
+  it('stops without changing the document when no LLM repair planner is present', async () => {
     let diagnosed = 0;
     const result = await runBoundedRepairWorkflow({
       outline,
       diagnostics: [error],
-      diagnose: (value) => {
+      diagnose: () => {
         diagnosed += 1;
-        return value.sections[0].blocks[0].type === 'paragraph' && value.sections[0].blocks[0].text === '已修复'
-          ? []
-          : [error];
-      },
-      deterministicRepair: (value) => ({
-        outline: { ...value, sections: [{ ...value.sections[0], blocks: [{ type: 'paragraph', text: '已修复' }] }] },
-        summary: 'deterministic text fit'
-      })
+        return [error];
+      }
     });
-    expect(result.status).toBe('passed');
-    expect(diagnosed).toBe(1);
-    expect(result.summaries).toContain('deterministic text fit');
+    expect(result.status).toBe('needs_user');
+    expect(diagnosed).toBe(0);
+    expect(result.outline).toEqual(outline);
+    expect(result.summaries).toEqual([]);
   });
 
   it('validates the LLM RepairPlan and detects repeated diagnostics', async () => {

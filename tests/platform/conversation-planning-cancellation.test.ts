@@ -36,7 +36,8 @@ async function fixture(ready?: Promise<void>, attachments?: ConversationWorkflow
     getRuntime: () => ({ conversationService, workflowService, ready, attachments }) });
   return { controller, orchestrator, workflows, conversations, workflowService, setSession: (next: StorageProjectSession) => { session = next; }, session };
 }
-const request = { clientCommandId: 'planning-command', conversation: null, title: '报告', content: '做一份 Word 报告' };
+const request = { clientCommandId: 'planning-command', conversation: null, title: '报告', content: '做一份 Word 报告',
+  semanticCandidate: { candidateId: 'selected-route', productFeature: 'text_chat' as const } };
 
 describe('planning cancellation IPC controller', () => {
   it('prepares attachment summaries inside the ready planning operation and cancels the already saved plan', async () => {
@@ -62,6 +63,7 @@ describe('planning cancellation IPC controller', () => {
     if (!started.ok) throw new Error(started.error.message);
     expect(prepareSummary).not.toHaveBeenCalled();
     const answered = await f.controller.answer({ clientCommandId: 'summary-answer-command', workflowId: started.value.workflow.workflowId,
+      semanticCandidate: request.semanticCandidate,
       expectedWorkflowRevision: started.value.workflow.revision, expectedConversationRevision: started.value.conversation.revision, content: '做一份 Word 报告' });
     expect(answered).toMatchObject({ ok: true, value: { workflow: { status: 'ready' } } });
     expect(prepareSummary).toHaveBeenCalledOnce();
@@ -118,6 +120,7 @@ describe('planning cancellation IPC controller', () => {
       throw new Error('unreachable');
     });
     const pending = f.controller.answer({ clientCommandId: 'answer-command', workflowId: started.value.workflow.workflowId,
+      semanticCandidate: request.semanticCandidate,
       expectedWorkflowRevision: started.value.workflow.revision, expectedConversationRevision: started.value.conversation.revision, content: '做 PPT' });
     await entered.promise;
     expect(f.controller.cancelActivePlanning()).toBe(1);

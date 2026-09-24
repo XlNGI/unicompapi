@@ -41,6 +41,7 @@ describe('conversation attachment context', () => {
     const runtime = createChatContextRuntime({ userDataDirectory: path.join(data.root, 'user-data'),
       getSession: () => ({ projectId, projectName: '测试项目', rootDirectory: data.root }) });
     const started = await runtime.workflows.start({ clientCommandId: 'attachment-workflow-start', conversation: null,
+      semanticCandidate: { candidateId: 'synthetic-selected', productFeature: 'text_chat' },
       title: '附件问答', content: '资料中的收入是多少？', attachmentFileIds: [data.imported.fileId] });
     expect(started.ok).toBe(true);
     if (!started.ok) throw new Error(started.error.message);

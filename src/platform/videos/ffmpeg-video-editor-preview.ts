@@ -172,6 +172,7 @@ const artifactSpecifications: Record<
   VideoEditorPreviewArtifactKind,
   { readonly extension: string; readonly mimeType: string }
 > = {
+  scrub_video: { extension: 'mp4', mimeType: 'video/mp4' },
   proxy_video: { extension: 'webm', mimeType: 'video/webm' },
   proxy_video_clear: { extension: 'webm', mimeType: 'video/webm' },
   proxy_video_smooth: { extension: 'webm', mimeType: 'video/webm' },
@@ -233,6 +234,13 @@ function buildFfmpegArguments(input: {
       '-an',
       input.target
     ];
+  }
+
+  if (input.kind === 'scrub_video') {
+    return [...common, '-map', '0:v:0', '-an', '-threads', '2',
+      '-vf', "scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+      '-c:v', 'libopenh264', '-g', '1', '-b:v', '2000k', '-pix_fmt', 'yuv420p',
+      '-fps_mode', 'passthrough', '-movflags', '+faststart', input.target];
   }
 
   if (input.kind === 'audio_waveform') {

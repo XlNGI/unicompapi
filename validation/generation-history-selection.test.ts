@@ -82,7 +82,7 @@ describe('generation history selection', () => {
 
   it('selects latest failed task node when returning from other pages after generation failed', () => {
     const failedNodes = [
-      { id: 'task-1-failed', kind: 'failed' as const, occurredAt: '2026-09-16T10:15:00.000Z' }
+      { id: 'task-1-failed', taskId: 'task-1', kind: 'failed' as const, occurredAt: '2026-09-16T10:15:00.000Z' }
     ];
     expect(resolveHistorySelection({
       autoSelectActive: false,
@@ -93,6 +93,7 @@ describe('generation history selection', () => {
     })).toEqual({
       matchedTarget: false,
       selectedStatusId: 'task-1-failed',
+      selectedTaskId: 'task-1',
       selectedWorkId: undefined,
       shouldScrollToLatest: true
     });

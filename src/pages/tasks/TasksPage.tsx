@@ -45,6 +45,7 @@ import {
 interface TasksPageProps {
   onNavigate?: TaskCenterNavigate;
   onReuseParameters?: (target: TaskReuseTarget) => void;
+  initialTaskId?: string;
 }
 
 const taskStates: Record<string, { label: string; tone: StatusTone }> = {
@@ -91,7 +92,7 @@ function taskState(state?: string) {
   };
 }
 
-export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
+export function TasksPage({ onNavigate, onReuseParameters, initialTaskId }: TasksPageProps) {
   const { tasks, issues, loading, error } = useTaskReadStore();
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [details, setDetails] = useState<StorageTaskDetailsDto>();
@@ -153,8 +154,15 @@ export function TasksPage({ onNavigate, onReuseParameters }: TasksPageProps) {
   }
 
   useEffect(() => {
-    if (!selectedTaskId && tasks.length > 0) setSelectedTaskId(tasks[0]?.taskId);
-  }, [selectedTaskId, tasks]);
+    if (tasks.length === 0) return;
+    if (!selectedTaskId || (initialTaskId && tasks.some((task) => task.taskId === initialTaskId))) {
+      setSelectedTaskId(
+        initialTaskId && tasks.some((task) => task.taskId === initialTaskId)
+          ? initialTaskId
+          : tasks[0]?.taskId
+      );
+    }
+  }, [initialTaskId, selectedTaskId, tasks]);
 
   useEffect(() => {
     if (error) setMessage('读取任务失败，请重试');

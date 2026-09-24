@@ -36,7 +36,45 @@ export interface PresentationPlanElement {
   readonly content: DocumentOutlineBlock;
 }
 
+export type PresentationSceneElementType =
+  | 'text' | 'shape' | 'line' | 'image' | 'table' | 'chart' | 'group';
+
+export interface PresentationSceneGeometry {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface PresentationSceneStyle {
+  readonly fill?: string;
+  readonly stroke?: string;
+  readonly textColor?: string;
+  readonly fontSize?: number;
+  readonly fontFamily?: string;
+  readonly radius?: number;
+}
+
+export interface PresentationSceneElement {
+  readonly elementId: string;
+  readonly type: PresentationSceneElementType;
+  readonly geometry: PresentationSceneGeometry;
+  readonly zIndex: number;
+  readonly parentId?: string;
+  readonly readingOrder?: number;
+  readonly content?: string;
+  readonly assetRef?: string;
+  readonly style?: PresentationSceneStyle;
+}
+
+export interface PresentationPageScene {
+  readonly schemaVersion: 1;
+  readonly elements: readonly PresentationSceneElement[];
+}
+
 export interface PresentationPlanPage {
+  readonly pageId?: string;
+  readonly pageRevision?: number;
   readonly pageNumber: number;
   readonly sourceSection: string;
   readonly pageKind: PresentationPageKind;
@@ -47,6 +85,7 @@ export interface PresentationPlanPage {
   readonly capacity: PresentationPlanCapacity;
   readonly sourceRefs: readonly string[];
   readonly preserve: readonly string[];
+  readonly scene?: PresentationPageScene;
 }
 
 export interface PresentationPlanRevision {
@@ -136,6 +175,8 @@ function parsePage(value: unknown, index: number): PresentationPlanPage {
   const record = requireRecord(value, label);
   requireExactKeys(record, [
     'pageNumber',
+    'pageId',
+    'pageRevision',
     'sourceSection',
     'pageKind',
     'layout',
@@ -144,7 +185,8 @@ function parsePage(value: unknown, index: number): PresentationPlanPage {
     'elements',
     'capacity',
     'sourceRefs',
-    'preserve'
+    'preserve',
+    'scene'
   ]);
   const pageKind = requireEnum(record.pageKind, presentationPageKinds, `${label}.pageKind`);
   const layout = requireEnum(record.layout, presentationPageKinds, `${label}.layout`);
@@ -156,6 +198,8 @@ function parsePage(value: unknown, index: number): PresentationPlanPage {
     throw new TypeError(`${label}.elements exceeds the maximum item count`);
   }
   return {
+    ...(record.pageId !== undefined ? { pageId: requireSafeReference(record.pageId, `${label}.pageId`) } : {}),
+    ...(record.pageRevision !== undefined ? { pageRevision: requireNonNegativeInteger(record.pageRevision, `${label}.pageRevision`) } : {}),
     pageNumber: requirePositiveInteger(record.pageNumber, `${label}.pageNumber`),
     sourceSection: requireText(record.sourceSection, `${label}.sourceSection`),
     pageKind,
@@ -173,8 +217,99 @@ function parsePage(value: unknown, index: number): PresentationPlanPage {
     ),
     capacity: parseCapacity(record.capacity, `${label}.capacity`),
     sourceRefs: requireUniqueTextList(record.sourceRefs, `${label}.sourceRefs`),
-    preserve: requireUniqueTextList(record.preserve, `${label}.preserve`)
+    preserve: requireUniqueTextList(record.preserve, `${label}.preserve`),
+    ...(record.scene !== undefined ? { scene: parseScene(record.scene, `${label}.scene`) } : {})
   };
+}
+
+function parseScene(value: unknown, label: string): PresentationPageScene {
+  const record = requireRecord(value, label);
+  requireExactKeys(record, ['schemaVersion', 'elements']);
+  if (record.schemaVersion !== 1) throw new TypeError(`${label}.schemaVersion is invalid`);
+  const elements = requireArray(record.elements, `${label}.elements`);
+  if (elements.length > limits.maxElements) throw new TypeError(`${label}.elements exceeds the maximum item count`);
+  const parsed = elements.map((item, index) => parseSceneElement(item, `${label}.elements[${index}]`));
+  const ids = new Set(parsed.map((item) => item.elementId));
+  if (ids.size !== parsed.length || parsed.some((item) => item.parentId !== undefined && !ids.has(item.parentId))) {
+    throw new TypeError(`${label}.elements contain invalid parent references`);
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const byId = new Map(parsed.map((item) => [item.elementId, item]));
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    if (visiting.has(id)) throw new TypeError(`${label}.elements contain a parent cycle`);
+    visiting.add(id);
+    const parent = byId.get(id)?.parentId;
+    if (parent) visit(parent);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  parsed.forEach((item) => visit(item.elementId));
+  return { schemaVersion: 1, elements: parsed };
+}
+
+function parseSceneElement(value: unknown, label: string): PresentationSceneElement {
+  const record = requireRecord(value, label);
+  requireExactKeys(record, ['elementId', 'type', 'geometry', 'zIndex', 'parentId', 'readingOrder', 'content', 'assetRef', 'style']);
+  const type = requireEnum(record.type, ['text', 'shape', 'line', 'image', 'table', 'chart', 'group'] as const, `${label}.type`);
+  const geometry = parseGeometry(record.geometry, `${label}.geometry`);
+  const zIndex = requireNonNegativeInteger(record.zIndex, `${label}.zIndex`);
+  if (zIndex > 10_000) throw new TypeError(`${label}.zIndex is too large`);
+  const content = record.content === undefined ? undefined : requireText(record.content, `${label}.content`);
+  const assetRef = record.assetRef === undefined ? undefined : requireSafeReference(record.assetRef, `${label}.assetRef`);
+  const style = record.style === undefined ? undefined : parseSceneStyle(record.style, `${label}.style`);
+  if (type === 'image' && assetRef === undefined) throw new TypeError(`${label}.image requires assetRef`);
+  return {
+    elementId: requireSafeReference(record.elementId, `${label}.elementId`),
+    type,
+    geometry,
+    zIndex,
+    ...(record.parentId !== undefined ? { parentId: requireSafeReference(record.parentId, `${label}.parentId`) } : {}),
+    ...(record.readingOrder !== undefined ? { readingOrder: requireNonNegativeInteger(record.readingOrder, `${label}.readingOrder`) } : {}),
+    ...(content !== undefined ? { content } : {}),
+    ...(assetRef !== undefined ? { assetRef } : {}),
+    ...(style !== undefined ? { style } : {})
+  };
+}
+
+function parseGeometry(value: unknown, label: string): PresentationSceneGeometry {
+  const record = requireRecord(value, label);
+  requireExactKeys(record, ['x', 'y', 'width', 'height']);
+  const numbers = ['x', 'y', 'width', 'height'].map((key) => record[key]);
+  if (numbers.some((item) => typeof item !== 'number' || !Number.isFinite(item))) throw new TypeError(`${label} contains invalid numbers`);
+  const [x, y, width, height] = numbers as number[];
+  if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1 || y + height > 1) throw new TypeError(`${label} exceeds page bounds`);
+  return { x, y, width, height };
+}
+
+function parseSceneStyle(value: unknown, label: string): PresentationSceneStyle {
+  const record = requireRecord(value, label);
+  requireExactKeys(record, ['fill', 'stroke', 'textColor', 'fontSize', 'fontFamily', 'radius']);
+  const fields: PresentationSceneStyle = {
+    ...(record.fill !== undefined ? { fill: parseColor(record.fill, `${label}.fill`) } : {}),
+    ...(record.stroke !== undefined ? { stroke: parseColor(record.stroke, `${label}.stroke`) } : {}),
+    ...(record.textColor !== undefined ? { textColor: parseColor(record.textColor, `${label}.textColor`) } : {}),
+    ...(record.fontSize !== undefined ? { fontSize: positiveNumber(record.fontSize, `${label}.fontSize`) } : {}),
+    ...(record.fontFamily !== undefined ? { fontFamily: requireText(record.fontFamily, `${label}.fontFamily`, 100) } : {}),
+    ...(record.radius !== undefined ? { radius: nonNegativeNumber(record.radius, `${label}.radius`) } : {})
+  };
+  return fields;
+}
+
+function parseColor(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^(?:[0-9a-f]{3}|[0-9a-f]{6})$/iu.test(value)) throw new TypeError(`${label} is invalid`);
+  return value.toUpperCase();
+}
+
+function positiveNumber(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new TypeError(`${label} is invalid`);
+  return value;
+}
+
+function nonNegativeNumber(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new TypeError(`${label} is invalid`);
+  return value;
 }
 
 function parseElement(value: unknown, label: string): PresentationPlanElement {

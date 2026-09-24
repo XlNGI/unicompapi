@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
@@ -184,6 +184,7 @@ describe.skipIf(!hasProjectFfmpeg)('VideoExportController real closure', () => {
     expect(plans[0]).toMatchObject({
       draftId,
       draftRevision: draft.revision,
+      output: { container: 'mp4', videoCodec: 'libopenh264', audioCodec: 'aac' },
       planHash: expect.stringMatching(/^[a-f0-9]{64}$/)
     });
     expect(works).toHaveLength(1);
@@ -197,6 +198,23 @@ describe.skipIf(!hasProjectFfmpeg)('VideoExportController real closure', () => {
       ? outputFile!.locator.relativePath
       : 'invalid');
     await expect(stat(outputPath)).resolves.toMatchObject({ size: outputFile?.sizeBytes });
+    expect(outputPath).toMatch(/\.mp4$/);
+    const actual = await adapter.probe({ sourcePath: outputPath });
+    expect(actual.container?.split(',')).toContain('mp4');
+    expect(actual.streams).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'video', codec: 'h264' }),
+      expect.objectContaining({ type: 'audio', codec: 'aac' })
+    ]));
+    await execFileAsync(ffmpegPath, ['-v', 'error', '-xerror', '-i', outputPath, '-f', 'null', '-']);
+    const disguised = path.join(projectRoot, 'renamed-webm.mp4');
+    await copyFile(sourcePath, disguised);
+    await expect(adapter.verifyOutput(disguised)).resolves.toMatchObject({
+      status: 'invalid', reason: 'format_mismatch'
+    });
+    if (process.env.UNICOMP_MP4_EVIDENCE_DIR) {
+      await mkdir(process.env.UNICOMP_MP4_EVIDENCE_DIR, { recursive: true });
+      await copyFile(outputPath, path.join(process.env.UNICOMP_MP4_EVIDENCE_DIR, 'controller-export.mp4'));
+    }
 
     const persistedPlans = await storage.readJson<{
       schemaVersion: 1;

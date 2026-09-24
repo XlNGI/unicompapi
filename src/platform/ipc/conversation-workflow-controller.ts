@@ -20,6 +20,7 @@ import type { StorageProjectSession } from './storage-ipc-controller';
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { conversationAttachmentQuery } from '../../application/conversation-attachment-query';
 import { ConversationRevisionConflictError } from '../repositories/json-conversation-repository';
+import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
 
 export interface ConversationWorkflowControllerRuntime {
   readonly ready?: Promise<void>;
@@ -51,6 +52,7 @@ export class ConversationWorkflowController {
       const input = chatContextRequestParsers.startWorkflow(request);
       const session = this.dependencies.getSession();
       if (!session) return failure('project_not_open', 'A project must be open');
+      if (!input.semanticCandidate) return failure('model_selection_required', '本次请求尚未发出，请先选择一个可用模型。');
       const key = `${session.projectId}:${input.clientCommandId}`;
       const existing = this.startCommands.get(key);
       if (existing) return existing;
@@ -70,6 +72,7 @@ export class ConversationWorkflowController {
       const input = chatContextRequestParsers.answerWorkflow(request);
       const session = this.dependencies.getSession();
       if (!session) return failure('project_not_open', 'A project must be open');
+      if (!input.semanticCandidate) return failure('model_selection_required', '本次请求尚未发出，请先选择一个可用模型。');
       return this.withPlanning(session, input.clientCommandId ?? `answer:${input.workflowId}:${input.expectedWorkflowRevision}`, async (signal) => {
       const runtime = this.dependencies.getRuntime(session);
       await runtime.ready;
@@ -110,6 +113,11 @@ export class ConversationWorkflowController {
         content: input.content,
         ...(attachments ? { attachments } : {})
       });
+      const sourceMessageId = conversation.messages.at(-1)!.id;
+      return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
+        conversationId: conversation.id, sourceMessageId, traceId: sourceMessageId,
+        ...(input.clientCommandId ? { clientCommandId: input.clientCommandId } : {}) }, async () => {
+      await emitProductionEvent({ code: 'request_received', status: 'completed' });
       const updated = await runtime.workflowService.answer({
         workflowId,
         expectedRevision: input.expectedWorkflowRevision,
@@ -122,6 +130,7 @@ export class ConversationWorkflowController {
         }
       });
       this.preparedPlanningWorkflows.set(signal, updated);
+      await reportWorkflowDecision(updated);
       if (updated.status === 'ready') await runtime.attachments?.prepareSummary?.({
         conversation,
         query: conversationAttachmentQuery(updated.plan,
@@ -136,6 +145,7 @@ export class ConversationWorkflowController {
           workflow: toWorkflowDto(updated)
         }
       };
+      });
       });
     });
   }
@@ -326,6 +336,10 @@ export class ConversationWorkflowController {
     if (!source || source.role !== 'user') {
       return failure('message_not_completed', 'The workflow source message is unavailable');
     }
+    return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
+      conversationId: conversation.id, sourceMessageId: source.id, traceId: source.id,
+      clientCommandId: input.clientCommandId }, async () => {
+    await emitProductionEvent({ code: 'request_received', status: 'completed' });
     const workflow = await runtime.workflowService.create({
       projectId: session.projectId,
       conversationId: conversation.id,
@@ -344,6 +358,7 @@ export class ConversationWorkflowController {
       }
     });
     this.preparedPlanningWorkflows.set(signal, workflow);
+    await reportWorkflowDecision(workflow);
     if (workflow.status === 'ready') await runtime.attachments?.prepareSummary?.({
       conversation, query: conversationAttachmentQuery(workflow.plan, source), selection: input.semanticCandidate, signal
     });
@@ -354,6 +369,7 @@ export class ConversationWorkflowController {
         workflow: toWorkflowDto(workflow)
       }
     };
+    });
   }
 
   private requireRuntime():
@@ -381,8 +397,25 @@ export class ConversationWorkflowController {
   }
 }
 
+async function reportWorkflowDecision(workflow: ConversationWorkflowV1): Promise<void> {
+  if (workflow.status === 'failed' || workflow.status === 'cancelled') {
+    await emitProductionEvent({ code: 'plan_validation', status: workflow.status,
+      facts: { purpose: 'planning' } });
+    return;
+  }
+  await emitProductionEvent({ code: 'plan_decision', status: 'completed', facts: {
+    purpose: 'planning', planKind: workflow.plan.kind,
+    ...(workflow.plan.action ? { action: workflow.plan.action } : {}),
+    ...(workflow.plan.documentKind && workflow.plan.documentKind !== 'auto'
+      ? { documentKind: workflow.plan.documentKind } : {}),
+    sourcePolicy: workflow.plan.sourcePolicy, missingCount: workflow.pendingQuestions.length,
+    count: workflow.plan.steps?.length ?? 0
+  } });
+}
+
 export function toWorkflowDto(workflow: ConversationWorkflowV1): ConversationWorkflowDto {
   return {
+    ...(workflow.planningFailureCode ? { planningFailureCode: workflow.planningFailureCode } : {}),
     workflowId: workflow.id,
     projectId: workflow.projectId,
     conversationId: workflow.conversationId,

@@ -37,7 +37,7 @@ function specification(overrides = {}) {
       '--enable-libvpx'
     ],
     forbiddenConfigurationFlags: ['--enable-gpl', '--enable-nonfree'],
-    requiredEncoders: ['libopus', 'libvpx-vp9'],
+    requiredEncoders: ['libopus', 'libvpx-vp9', 'libopenh264', 'aac'],
     ...overrides
   };
 }
@@ -57,7 +57,7 @@ function validReports() {
   return {
     ffmpegVersion: `ffmpeg version n8.1.2 ${flags}`,
     ffprobeVersion: 'ffprobe version n8.1.2',
-    encoders: ' A....D libopus Opus\n V....D libvpx-vp9 VP9'
+    encoders: ' A....D libopus Opus\n A....D aac AAC\n V....D libvpx-vp9 VP9\n V..... libopenh264 H.264'
   };
 }
 

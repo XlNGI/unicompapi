@@ -21,6 +21,7 @@ import { ConversationControlledTextError, type ConversationSemanticClassifier } 
 import { AttachmentSummaryCacheBlockedError, ConversationAttachmentSummaryStore, summaryHash,
   type AttachmentSummaryCacheRecord, type AttachmentSummaryPart } from './conversation-attachment-summary-store';
 import type { ConversationSemanticCandidate } from '../../shared/chat-context-ipc';
+import { emitProductionEvent } from '../conversation-production-trace';
 
 export type ConversationAttachmentErrorCode =
   | 'attachment_unavailable' | 'attachment_changed'
@@ -173,6 +174,9 @@ export class ConversationAttachmentContextService {
     }
     const attachments = conversationAttachmentBatch(input.conversation);
     if (!attachments.length) return [];
+    await emitProductionEvent({ code: 'source_context', status: 'started',
+      facts: { tool: 'read_sources', count: attachments.length } });
+    try {
     const summaryCache = isSummaryRequest(input.query) ? await this.summaries.get(this.summaryKey(input.conversation)) : undefined;
     const references: ConversationContextReference[] = [];
     const budgetPerFile = Math.floor(this.maxReferenceTokens / attachments.length);
@@ -202,7 +206,13 @@ export class ConversationAttachmentContextService {
         contentHash: createHash('sha256').update(`${attachment.checksumSha256}\n${excerpt}`).digest('hex'),
         excerpt: `附件：${fileName}\n原文件 SHA-256：${attachment.checksumSha256}\n${excerpt}` });
     }
+    await emitProductionEvent({ code: 'source_context', status: 'completed',
+      facts: { tool: 'read_sources', count: references.length } });
     return references;
+    } catch (error) {
+      await emitProductionEvent({ code: 'source_context', status: 'failed', facts: { tool: 'read_sources' } });
+      throw error;
+    }
   }
 
   async resolveImage(input: {

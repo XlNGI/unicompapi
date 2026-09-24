@@ -65,6 +65,29 @@ export interface ControlledProviderToolCall {
   readonly arguments: Readonly<Record<string, unknown>>;
 }
 
+/** Provider wire representation for an assistant message that requested tools. */
+export interface ControlledProviderAssistantToolCall {
+  readonly id: string;
+  readonly type: 'function';
+  readonly function: {
+    readonly name: string;
+    readonly arguments: string;
+  };
+}
+
+export function toControlledProviderAssistantToolCalls(
+  calls: readonly ControlledProviderToolCall[]
+): readonly ControlledProviderAssistantToolCall[] {
+  return calls.map((call) => ({
+    id: call.id,
+    type: 'function' as const,
+    function: {
+      name: call.name,
+      arguments: JSON.stringify(call.arguments)
+    }
+  }));
+}
+
 export interface ControlledProviderToolBridge {
   execute(input: {
     readonly call: ControlledProviderToolCall;
@@ -77,6 +100,7 @@ export interface ControlledProviderToolLoopMessage {
   readonly content: string;
   readonly toolCallId?: string;
   readonly name?: string;
+  readonly toolCalls?: readonly ControlledProviderToolCall[];
 }
 
 export interface ControlledProviderToolLoopResponse {
@@ -110,7 +134,7 @@ export async function runControlledProviderToolLoop(input: {
     const calls = response.toolCalls ?? [];
     if (calls.length < 1 || calls.length > maxTools) throw new Error('tool calls are invalid');
     const assistantContent = response.content ?? '';
-    messages.push({ role: 'assistant', content: assistantContent });
+    messages.push({ role: 'assistant', content: assistantContent, toolCalls: calls });
     for (const call of calls) {
       if (!allowedToolNames.has(call.name) || !call.id) throw new Error('tool call is not allowed');
       const result = sanitizeControlledToolResult(await input.bridge.execute({ call, signal: input.signal ?? new AbortController().signal }));
