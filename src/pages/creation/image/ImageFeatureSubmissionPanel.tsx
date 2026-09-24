@@ -167,6 +167,11 @@ export function ImageFeatureSubmissionPanel({
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
   const busyRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const draftRef = useRef(draft);
   const parameterFormRef = useRef<DynamicParameterFormHandle>(null);
   // Commits are composed from refs, never from a render closure: the form can
@@ -557,6 +562,7 @@ export function ImageFeatureSubmissionPanel({
       prepared.confirmation.confirmationId,
       true
     );
+    if (!mountedRef.current || draftRef.current.draftId !== saved.draftId) return;
     if (!result.ok) {
       if (result.error.code === 'runtime_not_allowed') {
         silentlyFinishRuntimeGate();
@@ -666,6 +672,7 @@ export function ImageFeatureSubmissionPanel({
           selectedCandidate.candidateId,
           parameterValues
         );
+        if (!mountedRef.current || draftRef.current.draftId !== draft.draftId) return;
         if (!result.ok) {
           if (result.error.code === 'runtime_not_allowed') {
             silentlyFinishRuntimeGate();
@@ -689,7 +696,10 @@ export function ImageFeatureSubmissionPanel({
           }
           return;
         }
-        onDraftPersisted?.({
+        const inputUnchanged = draftRef.current.draftId === draft.draftId &&
+          draftRef.current.prompt.originalInput === draft.prompt.originalInput &&
+          JSON.stringify(draftRef.current.featureSelection) === JSON.stringify(draft.featureSelection);
+        if (inputUnchanged) onDraftPersisted?.({
           ...draft,
           draftId: result.value.draftId,
           updatedAt: result.value.draftUpdatedAt,

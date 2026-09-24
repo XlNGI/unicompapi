@@ -99,11 +99,11 @@ export class GlobalReadModelController {
       const entry = (await this.catalog.getEntries()).find(
         (candidate) => candidate.projectId === parsed.projectId
       );
-      if (!entry) return { ok: true, value: { items: [], issues: [] } };
+      if (!entry) return { ok: true, value: { items: [], activeItems: [], issues: [] } };
       if (!(await isAvailable(entry))) {
         return {
           ok: true,
-          value: { items: [], issues: [toIssue(entry, 'unavailable')] }
+          value: { items: [], activeItems: [], issues: [toIssue(entry, 'unavailable')] }
         };
       }
       try {
@@ -120,9 +120,14 @@ export class GlobalReadModelController {
             ? taskWorkspaceMode(task) === parsed.workspaceMode
             : task.sourceDraftId === parsed.draftId)
         );
-        const relevantTaskIds = new Set(relevantTasks.map((task) => task.id));
         const executionById = new Map(executions.map((execution) => [execution.id, execution]));
         const fileById = new Map(files.map((file) => [file.id, file]));
+        const worksByTaskId = new Map<string, Work[]>();
+        for (const work of works) {
+          const group = worksByTaskId.get(work.sourceTaskId) ?? [];
+          group.push(work);
+          worksByTaskId.set(work.sourceTaskId, group);
+        }
         const items: StorageGenerationHistoryItemDto[] = [];
 
         for (const task of relevantTasks) {
@@ -131,51 +136,52 @@ export class GlobalReadModelController {
             executionsByTaskId.get(task.id) ?? []
           );
           const latest = [...linked].sort((left, right) =>
-            right.updatedAt.localeCompare(left.updatedAt)
+            right.attempt - left.attempt || right.createdAt.localeCompare(left.createdAt)
           )[0];
-          if (latest && historyStatusStates.has(latest.state)) {
-            items.push({
-              kind: 'status',
-              taskId: task.id,
-              state: latest.state,
-              createdAt: task.createdAt,
-              occurredAt: latest.updatedAt
-            });
-          }
-        }
-
-        for (const work of works) {
-          if (
-            work.mediaKind !== parsed.mediaKind ||
-            !relevantTaskIds.has(work.sourceTaskId)
-          ) continue;
-          const execution = executionById.get(work.sourceExecutionId);
-          const file = fileById.get(work.fileId);
-          const verifiedAt = file?.lastVerification?.verifiedAt;
-          if (execution?.state !== 'completed' || file?.state !== 'available' || !verifiedAt) {
-            continue;
-          }
+          const taskWorks = (worksByTaskId.get(task.id) ?? []).flatMap((work) => {
+            if (work.mediaKind !== parsed.mediaKind || work.sourceTaskId !== task.id) return [];
+            const execution = executionById.get(work.sourceExecutionId);
+            const file = fileById.get(work.fileId);
+            const verifiedAt = file?.lastVerification?.verifiedAt;
+            if (execution?.state !== 'completed' || execution.taskId !== task.id ||
+              !task.executionIds.includes(execution.id) || work.projectId !== task.projectId ||
+              file?.projectId !== task.projectId || file.sourceExecutionId !== execution.id ||
+              file.state !== 'available' || !verifiedAt || file.lastVerification?.matchesExpected !== true ||
+              !file.checksumSha256 || file.lastVerification.checksumSha256 !== file.checksumSha256) return [];
+            return [{
+              workId: work.id,
+              projectId: entry.projectId,
+              name: work.name,
+              mediaKind: parsed.mediaKind,
+              createdAt: work.createdAt,
+              verifiedAt
+            }];
+          });
+          if (!taskWorks.length && (!latest || !historyStatusStates.has(latest.state))) continue;
           items.push({
-            kind: 'work',
-            workId: work.id,
-            projectId: entry.projectId,
-            name: work.name,
-            mediaKind: parsed.mediaKind,
-            sourceTaskId: work.sourceTaskId,
-            createdAt: work.createdAt,
-            verifiedAt
+            kind: 'task',
+            taskId: task.id,
+            createdAt: task.createdAt,
+            ...(latest && historyStatusStates.has(latest.state)
+              ? { state: latest.state === 'failed' && latest.failure && ['queued', 'processing'].includes(latest.failure.stage) && latest.failure.retryability === 'unknown'
+                  ? 'submission_outcome_unknown' : latest.state, occurredAt: latest.updatedAt }
+              : {}),
+            works: taskWorks
           });
         }
 
-        const sorted = items.sort(compareHistoryItems);
+        const activeItems = items.filter((item) => item.state !== undefined && !['completed', 'cancelled', 'failed', 'expired'].includes(item.state));
+        const activeIds = new Set(activeItems.map(item => item.taskId));
+        const completedItems = items.filter((item) => !activeIds.has(item.taskId)).sort(compareHistoryItems);
         const afterCursor = parsed.cursor
-          ? sorted.filter((item) => compareHistoryItemToCursor(item, parsed.cursor!) > 0)
-          : sorted;
+          ? completedItems.filter((item) => compareHistoryItemToCursor(item, parsed.cursor!) > 0)
+          : completedItems;
         const pageItems = afterCursor.slice(0, parsed.limit);
         return {
           ok: true,
           value: {
             items: pageItems,
+            activeItems,
             ...(afterCursor.length > parsed.limit && pageItems.length > 0
               ? { nextCursor: encodeHistoryCursor(pageItems.at(-1)!) }
               : {}),
@@ -185,7 +191,7 @@ export class GlobalReadModelController {
       } catch {
         return {
           ok: true,
-          value: { items: [], issues: [toIssue(entry, 'invalid_data')] }
+          value: { items: [], activeItems: [], issues: [toIssue(entry, 'invalid_data')] }
         };
       }
     } catch {
@@ -477,6 +483,7 @@ export class GlobalReadModelController {
 const MAX_PROJECT_SNAPSHOTS = 64;
 
 const historyStatusStates = new Set([
+  'created', 'completed', 'cancelled',
   'submitting', 'queued', 'processing', 'validating_sources', 'preparing_media',
   'encoding', 'remote_completed', 'downloading', 'writing', 'verifying',
   'writing_file', 'verifying_file', 'registering_work', 'cancel_requested',
@@ -486,7 +493,7 @@ const historyStatusStates = new Set([
 
 interface HistoryCursor {
   readonly createdAt: string;
-  readonly kind: StorageGenerationHistoryItemDto['kind'];
+  readonly kind: 'task';
   readonly id: string;
 }
 
@@ -561,9 +568,9 @@ function requiredHistoryId(value: unknown): string {
 
 function historyItemCursor(item: StorageGenerationHistoryItemDto): HistoryCursor {
   return {
-    createdAt: item.kind === 'work' ? item.createdAt : item.occurredAt,
+    createdAt: item.createdAt,
     kind: item.kind,
-    id: item.kind === 'work' ? item.workId : item.taskId
+    id: item.taskId
   };
 }
 
@@ -598,7 +605,7 @@ function decodeHistoryCursor(value: unknown): HistoryCursor {
   if (
     typeof parsed !== 'object' || parsed === null ||
     typeof parsed.createdAt !== 'string' || Number.isNaN(Date.parse(parsed.createdAt)) ||
-    !['work', 'status'].includes(parsed.kind) || typeof parsed.id !== 'string' ||
+    parsed.kind !== 'task' || typeof parsed.id !== 'string' ||
     parsed.id.length < 1
   ) throw new TypeError('Invalid history cursor');
   return parsed;

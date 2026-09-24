@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, MutableRefObject, RefObject, WheelEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent, MutableRefObject, RefObject } from 'react';
 import {
   LuCircleAlert,
   LuCircleX,
@@ -23,6 +23,7 @@ interface GenerationHistoryProps {
   readonly projectId: string;
   readonly refreshKey: number;
   readonly expectedWorkId?: string;
+  readonly expectedTaskId?: string;
   readonly userTookOverRef: MutableRefObject<boolean>;
   readonly onWorkSelectionChange?: (workId?: string) => void;
   readonly submissionProgress: {
@@ -31,7 +32,7 @@ interface GenerationHistoryProps {
   };
 }
 
-type HistoryWork = Extract<StorageGenerationHistoryItemDto, { readonly kind: 'work' }>;
+type HistoryWork = StorageGenerationHistoryItemDto['works'][number] & { readonly sourceTaskId: string };
 
 interface HistoryTask {
   readonly taskId: string;
@@ -40,11 +41,14 @@ interface HistoryTask {
   readonly latestExecutionUpdatedAt: string;
 }
 
+
 export type HistoryStatus =
   | 'pending'
   | 'awaiting_receipt'
   | 'receiving'
   | 'failed'
+  | 'completed'
+  | 'cancelled'
   | 'uncertain';
 
 interface HistoryStatusNode {
@@ -67,8 +71,11 @@ interface AutoSelectTask {
 const AUTO_SELECT_RETRY_DELAY_MS = 600;
 const AUTO_SELECT_MAX_RETRIES = 5;
 const AUTO_SELECT_MAX_WAIT_MS = 6_000;
+// View state only; task/work facts always come from storage.
+const historyViews = new Map<string, { workId?: string; statusId?: string; taskId?: string; scroll: number }>();
 
 const pendingExecutionStates = new Set([
+  'created',
   'submitting',
   'queued',
   'processing',
@@ -122,6 +129,7 @@ export function GenerationHistory({
   projectId,
   refreshKey,
   expectedWorkId,
+  expectedTaskId,
   userTookOverRef,
   submissionProgress,
   onWorkSelectionChange
@@ -130,11 +138,11 @@ export function GenerationHistory({
   const [works, setWorks] = useState<readonly HistoryWork[]>([]);
   const [tasks, setTasks] = useState<readonly HistoryTask[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [liveStartedAt, setLiveStartedAt] = useState<string>();
   const [selectedWorkId, setSelectedWorkId] = useState<string>();
   const [selectedStatusId, setSelectedStatusId] = useState<string>();
   const [retryKey, setRetryKey] = useState(0);
   const [scrollRequest, setScrollRequest] = useState(0);
+  const readOwnerRef = useRef<{ scope: string; running: boolean; queued?: () => void }>();
   const selectedWorkIdRef = useRef<string>();
   const selectedStatusIdRef = useRef<string>();
   const selectedTaskIdRef = useRef<string>();
@@ -142,27 +150,43 @@ export function GenerationHistory({
   const retryTimerRef = useRef<number>();
   const deadlineTimerRef = useRef<number>();
   const timelineRef = useRef<HTMLDivElement>(null);
+  const scrollLeftRef = useRef(0);
+  const followLatestScrollRef = useRef(true);
+  const scrollAnchorRef = useRef<{ id: string; x: number }>();
+  const viewScope = `${projectId}:${workspaceMode}:${mediaKind}`;
 
   useEffect(() => {
     onWorkSelectionChange?.(selectedWorkId);
   }, [onWorkSelectionChange, selectedWorkId]);
 
   useEffect(() => {
-    setLiveStartedAt(undefined);
-    selectedWorkIdRef.current = undefined;
-    setSelectedWorkId(undefined);
-    selectedStatusIdRef.current = undefined;
-    setSelectedStatusId(undefined);
-    selectedTaskIdRef.current = undefined;
-  }, [draftId, mediaKind, workspaceMode]);
+    const saved = historyViews.get(viewScope);
+    selectedWorkIdRef.current = saved?.workId;
+    setSelectedWorkId(saved?.workId);
+    selectedStatusIdRef.current = saved?.statusId;
+    setSelectedStatusId(saved?.statusId);
+    selectedTaskIdRef.current = saved?.taskId;
+    setWorks([]);
+    setTasks([]);
+    if (saved?.taskId) userTookOverRef.current = true;
+    return () => {
+      historyViews.set(viewScope, { workId: selectedWorkIdRef.current,
+        statusId: selectedStatusIdRef.current, taskId: selectedTaskIdRef.current,
+        scroll: scrollLeftRef.current });
+      if (historyViews.size > 32) historyViews.delete(historyViews.keys().next().value!);
+    };
+  }, [viewScope]);
 
   // 当进入生成中阶段（preparing/requesting/waiting）且用户未主动接管选择时，重置选中项为生成中态
   const isPendingGeneration = livePendingPhases.has(submissionProgress.phase);
   useEffect(() => {
     if (isPendingGeneration && !userTookOverRef.current) {
+      followLatestScrollRef.current = true;
       selectedWorkIdRef.current = undefined;
       setSelectedWorkId(undefined);
       setSelectedStatusId(undefined);
+      selectedStatusIdRef.current = undefined;
+      selectedTaskIdRef.current = undefined;
     }
   }, [isPendingGeneration]);
 
@@ -198,48 +222,69 @@ export function GenerationHistory({
       return;
     }
 
-    void loadProjectHistory(storage, projectId, draftId, mediaKind, workspaceMode).then((history) => {
+    const scope = `${projectId}:${workspaceMode}:${mediaKind}`;
+    if (readOwnerRef.current?.scope !== scope) readOwnerRef.current = { scope, running: false };
+    const owner = readOwnerRef.current;
+    const read = () => {
       if (cancelled) return;
-      const autoSelectTask = autoSelectTaskRef.current;
-      const hasPendingGeneration = livePendingPhases.has(submissionProgress.phase);
+      owner.running = true;
+      void loadProjectHistory(storage, projectId, draftId, mediaKind, workspaceMode).then((history) => {
+        if (cancelled) return;
+        const autoSelectTask = autoSelectTaskRef.current;
+        const hasPendingGeneration = livePendingPhases.has(submissionProgress.phase);
 
-      const statusNodes = buildHistoryStatusNodes(history.tasks);
-      const selection = resolveHistorySelection({
-        autoSelectActive: Boolean(autoSelectTask) && !userTookOverRef.current,
-        hasPendingGeneration: hasPendingGeneration && !userTookOverRef.current,
-        selectedTaskId: selectedTaskIdRef.current,
-        selectedStatusId: selectedStatusIdRef.current,
-        selectedWorkId: selectedWorkIdRef.current,
-        statusNodes,
-        targetWorkId: autoSelectTask?.targetWorkId,
-        works: history.works
-      });
-      setWorks(history.works);
-      setTasks(history.tasks);
-      selectedWorkIdRef.current = selection.selectedWorkId;
-      setSelectedWorkId(selection.selectedWorkId);
-      selectedStatusIdRef.current = selection.selectedStatusId;
-      setSelectedStatusId(selection.selectedStatusId);
-      selectedTaskIdRef.current = selection.selectedTaskId;
-      if (selection.shouldScrollToLatest) {
-        setScrollRequest((request) => request + 1);
-      }
-      setLoadFailed(false);
-      if (selection.matchedTarget) {
-        stopAutoSelectTask();
-      } else {
+        const statusNodes = buildHistoryStatusNodes(history.tasks);
+        const selection = resolveHistorySelection({
+          followTask: !userTookOverRef.current,
+          autoSelectActive: Boolean(autoSelectTask) && !userTookOverRef.current,
+          hasPendingGeneration: hasPendingGeneration && !userTookOverRef.current,
+          selectedTaskId: !userTookOverRef.current && expectedTaskId ? expectedTaskId : selectedTaskIdRef.current,
+          selectedStatusId: selectedStatusIdRef.current,
+          selectedWorkId: selectedWorkIdRef.current,
+          statusNodes,
+          targetWorkId: autoSelectTask?.targetWorkId,
+          works: history.works
+        });
+        const followingNewTask = !userTookOverRef.current && expectedTaskId &&
+          selectedTaskIdRef.current !== expectedTaskId && selection.selectedTaskId === expectedTaskId;
+        const timeline = timelineRef.current;
+        const visible = timeline && Array.from(timeline.querySelectorAll<HTMLElement>('[data-task-id]'))
+          .find(element => element.getBoundingClientRect().right > timeline.getBoundingClientRect().left);
+        if (visible) scrollAnchorRef.current = { id: visible.dataset.taskId!, x: visible.getBoundingClientRect().x };
+        setWorks(history.works);
+        setTasks(history.tasks);
+        selectedWorkIdRef.current = selection.selectedWorkId;
+        setSelectedWorkId(selection.selectedWorkId);
+        selectedStatusIdRef.current = selection.selectedStatusId;
+        setSelectedStatusId(selection.selectedStatusId);
+        selectedTaskIdRef.current = selection.selectedTaskId;
+        if (followLatestScrollRef.current && (selection.shouldScrollToLatest || followingNewTask)) {
+          setScrollRequest((request) => request + 1);
+        }
+        setLoadFailed(false);
+        if (selection.matchedTarget) {
+          stopAutoSelectTask();
+        } else {
+          scheduleAutoSelectRetry();
+        }
+      }).catch(() => {
+        if (cancelled) return;
+        setLoadFailed(true);
         scheduleAutoSelectRetry();
-      }
-    }).catch(() => {
-      if (cancelled) return;
-      setLoadFailed(true);
-      scheduleAutoSelectRetry();
-    });
+      }).finally(() => {
+        owner.running = false;
+        const queued = owner.queued;
+        owner.queued = undefined;
+        queued?.();
+      });
+    };
+    if (owner.running) owner.queued = read;
+    else read();
 
     return () => {
       cancelled = true;
     };
-  }, [draftId, expectedWorkId, mediaKind, projectId, refreshKey, retryKey, storage, submissionProgress.phase, workspaceMode]);
+  }, [draftId, expectedWorkId, expectedTaskId, mediaKind, projectId, refreshKey, retryKey, storage, submissionProgress.phase, workspaceMode]);
 
   useEffect(() => {
     if (!storage) return;
@@ -253,66 +298,63 @@ export function GenerationHistory({
     });
   }, [storage]);
 
-  useEffect(() => {
-    const phase = submissionProgress.phase;
-    if (
-      livePendingPhases.has(phase) ||
-      liveFailedPhases.has(phase) ||
-      liveUncertainPhases.has(phase)
-    ) {
-      setLiveStartedAt((startedAt) => startedAt ?? new Date().toISOString());
-      return;
-    }
-    if (phase === 'completed' && expectedWorkId && autoSelectTaskRef.current) {
-      setLiveStartedAt((startedAt) => startedAt ?? new Date().toISOString());
-      return;
-    }
-    if (phase === 'idle' || phase === 'ready' || phase === 'completed') {
-      setLiveStartedAt(undefined);
-    }
-  }, [expectedWorkId, submissionProgress.phase]);
-
-  const displayLivePhase = expectedWorkId && works.some((work) => work.workId === expectedWorkId)
-    ? 'idle'
-    : submissionProgress.phase;
-
   const nodes = useMemo(
-    () => buildHistoryNodes(works, tasks, displayLivePhase, liveStartedAt),
-    [displayLivePhase, liveStartedAt, tasks, works]
+    () => buildHistoryNodes(works, tasks),
+    [tasks, works]
   );
 
-  const historySummaryText = formatHistorySummary(summarizeHistoryNodes(nodes));
+  const cards = useMemo(() => groupHistoryNodes(nodes, tasks), [nodes, tasks]);
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline || !cards.length) return;
+    const anchor = scrollAnchorRef.current;
+    const element = anchor && Array.from(timeline.querySelectorAll<HTMLElement>('[data-task-id]'))
+      .find(item => item.dataset.taskId === anchor.id);
+    if (element && anchor) timeline.scrollLeft += element.getBoundingClientRect().x - anchor.x;
+    else if (historyViews.has(viewScope)) timeline.scrollLeft = historyViews.get(viewScope)!.scroll;
+    scrollAnchorRef.current = undefined;
+  }, [cards, viewScope]);
+  const historySummaryText = formatHistorySummary(summarizeHistoryNodes(
+    cards.map((card) => ({ kind: card.status?.kind ?? 'work' }))
+  ));
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline || !followLatestScrollRef.current) return;
+    timeline.scrollLeft = timeline.scrollWidth;
+  }, [scrollRequest]);
 
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) return;
-    timeline.scrollLeft = timeline.scrollWidth;
-  }, [scrollRequest]);
+    const handleTimelineWheel = (event: WheelEvent) => {
+      followLatestScrollRef.current = false;
+      if (timeline.scrollWidth <= timeline.clientWidth) return;
 
-  const handleTimelineWheel = (event: WheelEvent<HTMLElement>) => {
-    const timeline = timelineRef.current;
-    if (!timeline || timeline.scrollWidth <= timeline.clientWidth) return;
+      const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+      if (rawDelta === 0) return;
 
-    const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
-      ? event.deltaX
-      : event.deltaY;
-    if (rawDelta === 0) return;
+      const delta = event.deltaMode === 1
+        ? rawDelta * 24
+        : event.deltaMode === 2
+          ? rawDelta * timeline.clientWidth
+          : rawDelta;
+      const maxScrollLeft = timeline.scrollWidth - timeline.clientWidth;
+      const nextScrollLeft = Math.min(
+        maxScrollLeft,
+        Math.max(0, timeline.scrollLeft + delta)
+      );
+      if (nextScrollLeft === timeline.scrollLeft) return;
 
-    const delta = event.deltaMode === 1
-      ? rawDelta * 24
-      : event.deltaMode === 2
-        ? rawDelta * timeline.clientWidth
-        : rawDelta;
-    const maxScrollLeft = timeline.scrollWidth - timeline.clientWidth;
-    const nextScrollLeft = Math.min(
-      maxScrollLeft,
-      Math.max(0, timeline.scrollLeft + delta)
-    );
-    if (nextScrollLeft === timeline.scrollLeft) return;
-
-    event.preventDefault();
-    timeline.scrollLeft = nextScrollLeft;
-  };
+      event.preventDefault();
+      timeline.scrollLeft = nextScrollLeft;
+    };
+    // React's delegated wheel listener is passive and cannot cancel page scroll.
+    timeline.addEventListener('wheel', handleTimelineWheel, { passive: false });
+    return () => timeline.removeEventListener('wheel', handleTimelineWheel);
+  }, []);
 
   const selectedStatusNode = selectedStatusId
     ? nodes.find((node): node is HistoryStatusNode => node.kind !== 'work' && node.id === selectedStatusId)
@@ -362,7 +404,8 @@ export function GenerationHistory({
     setSelectedWorkId(undefined);
     selectedStatusIdRef.current = statusId;
     setSelectedStatusId(statusId);
-    selectedTaskIdRef.current = statusId.replace(/^task-/, '').replace(/-(?:pending|awaiting-receipt|receiving|failed|uncertain)$/, '');
+    selectedTaskIdRef.current = nodes.find((node): node is HistoryStatusNode =>
+      node.kind !== 'work' && node.id === statusId)?.taskId;
   }
 
   function scheduleAutoSelectRetry() {
@@ -407,7 +450,7 @@ export function GenerationHistory({
                     ? '生成失败'
                     : generationUncertain
                       ? '状态待确认'
-                      : '作品预览'
+                    : selectedStatusNode?.kind === 'cancelled' ? '任务已取消' : '作品预览'
               )}
             </strong>
             <span>
@@ -450,10 +493,12 @@ export function GenerationHistory({
             compact
             emptyDescription={
               generationFailed
-                ? `${submissionProgress.failureMessage ?? (isSelectedStatusFailed ? '生成任务已失败。' : '本次生成未完成。')} 请前往任务中心查看详情与重试。`
+                ? `${isSelectedStatusFailed ? '生成任务已失败。' : submissionProgress.failureMessage ?? '本次生成未完成。'} 请前往任务中心查看详情与恢复方式。`
                 : generationUncertain
                   ? '请先到任务中心确认最终状态。'
-                  : '完成左侧配置并生成后，作品会显示在这里。'
+                  : selectedStatusNode?.kind === 'completed' ? '任务已结束，当前没有可用的本地作品。请到任务中心或作品库检查。'
+                    : selectedStatusNode?.kind === 'cancelled' ? '此任务已取消。已有作品仍保留在任务卡中。'
+                      : '完成左侧配置并生成后，作品会显示在这里。'
             }
             emptyIcon={
               generationFailed ? (
@@ -467,7 +512,8 @@ export function GenerationHistory({
                 ? '生成失败'
                 : generationUncertain
                   ? '状态待确认'
-                  : '等待生成'
+                  : selectedStatusNode?.kind === 'cancelled' ? '任务已取消'
+                    : selectedStatusNode?.kind === 'completed' ? '暂无可用作品' : '等待生成'
             }
             loading={showLoadingPreview}
             loadingDescription="完成后将校验并登记到本地。"
@@ -483,61 +529,31 @@ export function GenerationHistory({
       <section
         aria-label="生成历史"
         className="uc-generation-history__timeline"
-        onWheel={handleTimelineWheel}
       >
         <header className="uc-generation-history__timeline-heading">
           <div>
             <strong>生成历史</strong>
             <span>{historySummaryText}</span>
           </div>
-          <span>最新在右侧</span>
+          <div>
+            {loadFailed && <span role="status">历史刷新失败</span>}
+            <span>最近 30 个任务 · 最新在右侧</span>
+          </div>
         </header>
 
         <div
           className="uc-generation-history__timeline-scroll uc-scrollbar"
           ref={timelineRef}
+          onPointerDown={() => { followLatestScrollRef.current = false; }}
+          onKeyDown={() => { followLatestScrollRef.current = false; }}
+          onScroll={(event) => { scrollLeftRef.current = event.currentTarget.scrollLeft; }}
         >
           {nodes.length > 0 ? (
             <ol className="uc-generation-history__nodes">
-              {nodes.map((node) => node.kind === 'work' ? (
-                <li className="uc-generation-history__node" key={node.work.workId}>
-                  <button
-                    aria-label={`查看作品 ${node.work.name}`}
-                    aria-pressed={node.work.workId === selectedWorkId}
-                    className="uc-generation-history__work"
-                    onClick={() => handleWorkSelection(node.work.workId)}
-                    type="button"
-                  >
-                    <HistoryMediaThumbnail
-                      selected={node.work.workId === selectedWorkId}
-                      work={node.work}
-                    />
-                  </button>
-                  <TimelineMarker tone="work" />
-                  <time dateTime={node.work.createdAt}>
-                    {formatTimelineTime(node.work.createdAt)}
-                  </time>
-                </li>
-              ) : (
-                <li className="uc-generation-history__node" key={node.id}>
-                  <button
-                    aria-label={node.kind === 'pending' ? '查看正在生成' : `查看生成状态 ${node.kind}`}
-                    aria-pressed={
-                      selectedStatusId !== undefined
-                        ? node.id === selectedStatusId
-                        : node.kind === 'pending' && !selectedWorkId && !selectedStatusId && (isPendingGeneration || Boolean(autoSelectTaskRef.current))
-                    }
-                    className="uc-generation-history__status-button"
-                    onClick={() => handleStatusSelection(node.id)}
-                    type="button"
-                  >
-                    <HistoryStatusCard status={node.kind} />
-                  </button>
-                  <TimelineMarker tone={node.kind} />
-                  <time dateTime={node.occurredAt}>
-                    {formatTimelineTime(node.occurredAt)}
-                  </time>
-                </li>
+              {cards.map((card) => (
+                <HistoryTaskCard key={card.id} card={card}
+                  selectedWorkId={selectedWorkId} selectedStatusId={selectedStatusId}
+                  onWorkSelection={handleWorkSelection} onStatusSelection={handleStatusSelection} />
               ))}
             </ol>
           ) : (
@@ -552,6 +568,7 @@ export function GenerationHistory({
 }
 
 export function resolveHistorySelection(input: {
+  readonly followTask?: boolean;
   readonly autoSelectActive: boolean;
   readonly hasPendingGeneration?: boolean;
   readonly selectedStatusId?: string;
@@ -592,6 +609,15 @@ export function resolveHistorySelection(input: {
       shouldScrollToLatest: false
     };
   }
+  if (!input.followTask && input.selectedStatusId && input.statusNodes?.some((node) => node.id === input.selectedStatusId)) {
+    return {
+      matchedTarget: false,
+      selectedStatusId: input.selectedStatusId,
+      selectedTaskId: input.selectedTaskId,
+      selectedWorkId: undefined,
+      shouldScrollToLatest: false
+    };
+  }
   const selectedTaskWork = input.selectedTaskId
     ? input.works.find((work) => work.sourceTaskId === input.selectedTaskId)
     : undefined;
@@ -604,16 +630,12 @@ export function resolveHistorySelection(input: {
       shouldScrollToLatest: false
     };
   }
-  if (input.selectedStatusId && input.statusNodes?.some((node) => node.id === input.selectedStatusId)) {
-    return {
-      matchedTarget: false,
-      selectedStatusId: input.selectedStatusId,
-      selectedTaskId: input.selectedTaskId,
-      selectedWorkId: undefined,
-      shouldScrollToLatest: false
-    };
-  }
   // 当任务处于生成中时，不应自动兜底选中历史中的最后一个作品，避免抢占正在生成状态的预览与焦点
+  const selectedTaskStatus = input.statusNodes?.find((node) => node.taskId === input.selectedTaskId);
+  if (selectedTaskStatus) {
+    return { matchedTarget: false, selectedTaskId: selectedTaskStatus.taskId,
+      selectedStatusId: selectedTaskStatus.id, shouldScrollToLatest: false };
+  }
   if (input.hasPendingGeneration) {
     return {
       matchedTarget: false,
@@ -627,7 +649,8 @@ export function resolveHistorySelection(input: {
   // 综合比对最新作品与最新状态节点：如果最新事件是一个状态节点（例如失败或待确认），且发生时间晚于或等于最新作品，优先选中该状态节点
   const latestWork = input.works[input.works.length - 1];
   const sortedStatuses = input.statusNodes && input.statusNodes.length > 0
-    ? [...input.statusNodes].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
+    ? input.statusNodes.filter(node => node.kind !== 'completed' || !input.works.some(work => work.sourceTaskId === node.taskId))
+      .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
     : [];
   const latestStatus = sortedStatuses[sortedStatuses.length - 1];
 
@@ -671,7 +694,7 @@ export function resolveHistoryStageFlags(input: {
   // 这里刻意不把“提交已完成但自动选中尚未落定”算作进行中：该窗口下调用点
   // 会用 expectedWorkId 兜底 previewWorkId，showLoadingPreview 必然为假，写进去也不会生效。
   // 主舞台在该窗口的形态由调用点 previewWorkId 的兜底决定，不由本函数决定。
-  const generationInFlight = isSelectedStatusActive ||
+  const generationInFlight = hasSelectedStatusNode ? isSelectedStatusActive :
     livePendingPhases.has(input.livePhase);
   const generationFailed = hasSelectedStatusNode
     ? input.selectedStatusKind === 'failed'
@@ -699,52 +722,19 @@ async function loadProjectHistory(
   draftId: string,
   mediaKind: 'image' | 'video',
   workspaceMode: StorageGenerationWorkspaceMode
-): Promise<{
-  readonly works: readonly HistoryWork[];
-  readonly tasks: readonly HistoryTask[];
-}> {
-  // 按项目和当前模式一次查询后端历史，避免按草稿逐个发起 IPC
-  const responses = [await storage.listGenerationHistory({
-    projectId,
-    draftId,
-    mediaKind,
-    workspaceMode,
-    limit: 50
-  })];
-
-  const allWorks: HistoryWork[] = [];
-  const allTasks: HistoryTask[] = [];
-  let anyOk = false;
-  for (const result of responses) {
-    if (!result.ok) continue;
-    anyOk = true;
-    for (const item of result.value.items) {
-      if (item.kind === 'work') {
-        allWorks.push(item);
-      } else if (item.kind === 'status') {
-        allTasks.push({
-          taskId: item.taskId,
-          createdAt: item.createdAt,
-          latestExecutionState: item.state,
-          latestExecutionUpdatedAt: item.occurredAt
-        });
-      }
-    }
-  }
-
-  if (!anyOk && responses.length > 0) throw new Error('history_read_failed');
-
-  // 按 workId 去重，按时间倒序取最近50个，再反转为时间线所需的升序
-  const recentWorks = [...new Map(allWorks.map((w) => [w.workId, w])).values()]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 50);
-
-  const works = sortHistoryWorks(recentWorks);
-  const tasks = [...new Map(allTasks.map((t) => [t.taskId, t])).values()]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 50);
-
-  return { works, tasks };
+): Promise<{ readonly works: readonly HistoryWork[]; readonly tasks: readonly HistoryTask[] }> {
+  const result = await storage.listGenerationHistory({ projectId, draftId, mediaKind, workspaceMode, limit: 30 });
+  if (!result.ok || result.value.issues.length > 0) throw new Error('history_read_failed');
+  // Merge active and finished tasks before applying the shared display limit.
+  const items = [...new Map([...result.value.activeItems, ...result.value.items]
+    .map(item => [item.taskId, item])).values()]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.taskId.localeCompare(b.taskId))
+    .slice(0, 30);
+  return {
+    works: sortHistoryWorks(items.flatMap(item => item.works.map(work => ({ ...work, sourceTaskId: item.taskId })))),
+    tasks: items.map(item => ({ taskId: item.taskId, createdAt: item.createdAt,
+      latestExecutionState: item.state ?? '', latestExecutionUpdatedAt: item.occurredAt ?? item.createdAt }))
+  };
 }
 
 function sortHistoryWorks(works: readonly HistoryWork[]): readonly HistoryWork[] {
@@ -779,6 +769,8 @@ function buildHistoryStatusNodes(
       });
     } else if (state === 'failed' || state === 'expired') {
       nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'failed', occurredAt });
+    } else if (state === 'completed' || state === 'cancelled') {
+      nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: state, occurredAt });
     } else if (uncertainExecutionStates.has(state)) {
       nodes.push({ id: `task-${task.taskId}`, taskId: task.taskId, kind: 'uncertain', occurredAt });
     }
@@ -788,30 +780,11 @@ function buildHistoryStatusNodes(
 
 function buildHistoryNodes(
   works: readonly HistoryWork[],
-  tasks: readonly HistoryTask[],
-  livePhase: SubmissionProgressPhase,
-  liveStartedAt?: string
+  tasks: readonly HistoryTask[]
 ): readonly HistoryNode[] {
   const nodes: HistoryNode[] = works.map((work) => ({ kind: 'work', work }));
   const taskStatusNodes = buildHistoryStatusNodes(tasks);
-  const taskStates = new Set<HistoryStatus>(taskStatusNodes.map((node) => node.kind));
   nodes.push(...taskStatusNodes);
-
-  const liveStatus = livePendingPhases.has(livePhase)
-    ? 'pending'
-    : liveFailedPhases.has(livePhase)
-      ? 'failed'
-      : liveUncertainPhases.has(livePhase)
-        ? 'uncertain'
-        : undefined;
-  if (liveStatus && liveStartedAt && !taskStates.has(liveStatus)) {
-    nodes.push({
-      id: 'live-current',
-      taskId: 'live-current',
-      kind: liveStatus,
-      occurredAt: liveStartedAt
-    });
-  }
 
   return nodes.sort((a, b) => {
     const aTime = a.kind === 'work' ? a.work.createdAt : a.occurredAt;
@@ -827,13 +800,16 @@ export function summarizeHistoryNodes(
   readonly running: number;
   readonly succeeded: number;
   readonly uncertain: number;
+  readonly cancelled?: number;
 } {
   let succeeded = 0;
   let failed = 0;
   let running = 0;
   let uncertain = 0;
+  let cancelled = 0;
   for (const node of nodes) {
-    if (node.kind === 'work') {
+    if (node.kind === 'cancelled') { cancelled += 1; continue; }
+    if (node.kind === 'work' || node.kind === 'completed') {
       succeeded += 1;
       continue;
     }
@@ -851,7 +827,86 @@ export function summarizeHistoryNodes(
     }
     uncertain += 1;
   }
-  return { failed, running, succeeded, uncertain };
+  return { failed, running, succeeded, uncertain, ...(cancelled ? { cancelled } : {}) };
+}
+
+interface HistoryTaskCardData {
+  readonly id: string;
+  readonly status?: HistoryStatusNode;
+  readonly works: readonly HistoryWork[];
+  readonly createdAt: string;
+}
+
+function groupHistoryNodes(nodes: readonly HistoryNode[], tasks: readonly HistoryTask[]): readonly HistoryTaskCardData[] {
+  const createdAtByTask = new Map(tasks.map((task) => [task.taskId, task.createdAt]));
+  const groups = new Map<string, { id: string; status?: HistoryStatusNode; works: HistoryWork[]; createdAt: string }>();
+  for (const node of nodes) {
+    const taskId = node.kind === 'work' ? node.work.sourceTaskId : node.taskId;
+    const id = taskId || (node.kind === 'work' ? node.work.workId : node.id);
+    const current = groups.get(id) ?? { id, works: [], createdAt: createdAtByTask.get(id)! };
+    if (node.kind === 'work') current.works.push(node.work);
+    else current.status = node;
+    groups.set(id, current);
+  }
+  return [...groups.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+}
+
+const historyStatusLabels: Record<HistoryStatus, string> = {
+  pending: '生成中', awaiting_receipt: '结果待接收', receiving: '正在接收',
+  failed: '失败', uncertain: '待确认', completed: '已完成', cancelled: '已取消'
+};
+
+function HistoryTaskCard({ card, selectedWorkId, selectedStatusId, onWorkSelection, onStatusSelection }: {
+  readonly card: HistoryTaskCardData;
+  readonly selectedWorkId?: string;
+  readonly selectedStatusId?: string;
+  readonly onWorkSelection: (workId: string) => void;
+  readonly onStatusSelection: (statusId: string) => void;
+}) {
+  const [rememberedWorkId, setRememberedWorkId] = useState<string>();
+  const work = card.works.find((item) => item.workId === selectedWorkId) ??
+    card.works.find((item) => item.workId === rememberedWorkId) ?? card.works[0];
+  const index = work ? card.works.indexOf(work) : -1;
+  const status = card.status;
+  function selectWork(next: HistoryWork) {
+    setRememberedWorkId(next.workId);
+    onWorkSelection(next.workId);
+  }
+  return (
+    <li className="uc-generation-history__node" data-task-id={card.id}>
+      <div className={`uc-generation-history__task-card${card.works.length > 1 ? ' has-multiple' : ''}`}>
+        {work && status && status.kind !== 'completed' ? (
+          <button type="button" className={`uc-generation-history__task-status is-${status.kind}`}
+            aria-label={`查看任务状态 ${historyStatusLabels[status.kind]}`}
+            aria-pressed={selectedStatusId === status.id} onClick={() => onStatusSelection(status.id)}>
+            {historyStatusLabels[status.kind]}
+          </button>
+        ) : null}
+        {work ? (
+          <button type="button" className="uc-generation-history__work"
+            aria-label={`查看作品 ${work.name}`} aria-pressed={selectedWorkId === work.workId}
+            onClick={() => selectWork(work)}>
+            <HistoryMediaThumbnail key={work.workId} work={work} selected={selectedWorkId === work.workId} />
+          </button>
+        ) : status ? (
+          <button type="button" className="uc-generation-history__status-button"
+            aria-label={`查看任务状态 ${historyStatusLabels[status.kind]}`}
+            aria-pressed={selectedStatusId === status.id} onClick={() => onStatusSelection(status.id)}>
+            <HistoryStatusCard status={status.kind} />
+          </button>
+        ) : null}
+        {card.works.length > 1 && <div className="uc-generation-history__work-switcher">
+          {card.works.length > 1 && <button type="button" aria-label="上一件作品"
+            disabled={index <= 0} onClick={() => selectWork(card.works[index - 1]!)}>‹</button>}
+          <span aria-live="polite">{`作品 ${index + 1}／${card.works.length}`}</span>
+          {card.works.length > 1 && <button type="button" aria-label="下一件作品"
+            disabled={index >= card.works.length - 1} onClick={() => selectWork(card.works[index + 1]!)}>›</button>}
+        </div>}
+      </div>
+      <TimelineMarker tone={status?.kind ?? 'work'} />
+      <time dateTime={card.createdAt}>{formatTimelineTime(card.createdAt)}</time>
+    </li>
+  );
 }
 
 export function formatHistorySummary(summary: {
@@ -859,10 +914,12 @@ export function formatHistorySummary(summary: {
   readonly running: number;
   readonly succeeded: number;
   readonly uncertain: number;
+  readonly cancelled?: number;
 }): string {
   const segments = [`成功 ${summary.succeeded}`, `失败 ${summary.failed}`];
   if (summary.running > 0) segments.push(`进行中 ${summary.running}`);
   if (summary.uncertain > 0) segments.push(`待确认 ${summary.uncertain}`);
+  if (summary.cancelled) segments.push(`已取消 ${summary.cancelled}`);
   return segments.join(' · ');
 }
 
@@ -936,6 +993,9 @@ function HistoryMediaThumbnail({
 }
 
 function HistoryStatusCard({ status }: { readonly status: HistoryStatus }) {
+  if (status === 'completed' || status === 'cancelled') {
+    return <div className="uc-generation-history__status"><span>{historyStatusLabels[status]}</span></div>;
+  }
   if (status === 'pending') {
     return (
       <div className="uc-generation-history__status uc-generation-history__status--pending">

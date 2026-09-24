@@ -246,26 +246,25 @@ export interface StorageTaskTimelineDto {
 }
 
 export type StorageGenerationHistoryItemDto =
-  | {
-      readonly kind: 'work';
+  {
+    readonly kind: 'task';
+    readonly taskId: string;
+    readonly createdAt: string;
+    readonly state?: string;
+    readonly occurredAt?: string;
+    readonly works: readonly {
       readonly workId: string;
       readonly projectId: string;
       readonly name: string;
       readonly mediaKind: 'image' | 'video';
-      readonly sourceTaskId: string;
       readonly createdAt: string;
       readonly verifiedAt: string;
-    }
-  | {
-      readonly kind: 'status';
-      readonly taskId: string;
-      readonly state: string;
-      readonly createdAt: string;
-      readonly occurredAt: string;
-    };
+    }[];
+  };
 
 export interface StorageGenerationHistoryPageDto {
   readonly items: readonly StorageGenerationHistoryItemDto[];
+  readonly activeItems: readonly StorageGenerationHistoryItemDto[];
   readonly nextCursor?: string;
   readonly issues: readonly StorageReadModelIssueDto[];
 }

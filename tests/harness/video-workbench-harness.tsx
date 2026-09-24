@@ -76,9 +76,10 @@ const api = {
     listTasks: async () => ok({ items: [], issues: [] }),
     listGenerationHistory: async () => {
       counters.history++;
-      return ok({ items: Array.from({ length: 10 }, (_, i) => ({ kind: 'work', workId: `work-${i}`,
+      return ok({ items: Array.from({ length: 10 }, (_, i) => ({ kind: 'task', taskId: `task-${i}`, createdAt: timestamp,
+        state: 'completed', occurredAt: timestamp, works: [{ workId: `work-${i}`,
         projectId: 'fixture-project', name: `Video ${i}`, mediaKind: 'video', sourceTaskId: `task-${i}`,
-        createdAt: timestamp, verifiedAt: timestamp })), issues: [] });
+        createdAt: timestamp, verifiedAt: timestamp }] })), activeItems: [], issues: [] });
     },
     onLocalStorageChanged: () => () => {},
     createWorkMediaHandle: async () => { counters.previews++; return ok({ url: videoUrl, mediaKind: 'video' }); }

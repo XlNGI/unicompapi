@@ -10,6 +10,7 @@ import {
   createProviderInvocationAttempt,
   createProviderInvocationEvent,
   createProviderProtocolBinding,
+  createProviderOperationRecord,
   createVideoTask,
   createVideoWorkspaceDraft,
   toCapabilityEvidenceId,
@@ -28,6 +29,7 @@ import {
   toTaskId,
   toUsageSchemaId,
   toWorkId,
+  toSubmissionIntentId,
   transitionExecution,
   type ProviderProtocolBinding
 } from '../../src/domain';
@@ -40,6 +42,10 @@ import {
   NEWAPI_VIDEO_ADAPTER_ID,
   NodeProjectStorage,
   ProviderPackageRegistry,
+  viduProviderPackageDescriptor,
+  ViduBoundedPoller,
+  ProviderSubmissionOrchestrator,
+  ProjectSubmissionAcceptanceStore,
   VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID,
   VideoWorkspaceMutationCoordinator,
   createVideoFeatureControllerRuntime
@@ -60,6 +66,77 @@ afterEach(async () => {
 });
 
 describe('video feature result recovery', () => {
+  it.each(['completed', 'query_error', 'receiver_error', 'cancelled', 'polling_exhausted'] as const)(
+    'persists receipt before polling and records the eventual %s outcome', async (outcome) => {
+      const fixture = await createFixture(NEWAPI_VIDEO_ADAPTER_ID);
+      const initial = createExecution({ id: fixture.execution.id, taskId: fixture.task.id, createdAt: t0 });
+      await fixture.executions.save(initial);
+      await new JsonProviderInvocationRepository(new NodeProjectStorage(fixture.root), fixture.projectId).appendEvent(
+        createProviderInvocationEvent({ id: toProviderInvocationEventId('event-accepted'), invocationAttemptId: fixture.attempt.id,
+          sequence: 2, type: 'provider_accepted', occurredAt: t2 })
+      );
+      const intentId = toSubmissionIntentId('intent-receipt-test');
+      vi.spyOn(ProviderSubmissionOrchestrator.prototype, 'submitDraft').mockResolvedValue({
+        schemaVersion: 1, submissionIntentId: intentId, status: 'provider_accepted', retryAllowed: false
+      } as Awaited<ReturnType<ProviderSubmissionOrchestrator['submitDraft']>>);
+      const acceptance = {
+        schemaVersion: 1, intent: { id: intentId, status: 'provider_accepted' },
+        routeSnapshot: fixture.route, invocationAttempt: fixture.attempt, invocationEvents: [],
+        subjectArtifacts: { kind: 'media', task: fixture.task, execution: initial },
+        providerOperationRecord: createProviderOperationRecord({
+          id: toProviderOperationRecordId('receipt-operation'), taskId: fixture.task.id, executionId: initial.id,
+          mediaKind: 'video', executionLifecycle: 'asynchronous_polling',
+          outcome: { kind: 'accepted_async', providerOperationId: 'remote-receipt', state: 'processing' },
+          createdAt: t0, updatedAt: t0
+        })
+      };
+      vi.spyOn(ProjectSubmissionAcceptanceStore.prototype, 'list').mockResolvedValue([
+        acceptance as unknown as Awaited<ReturnType<ProjectSubmissionAcceptanceStore['list']>>[number]
+      ]);
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      if (outcome === 'polling_exhausted') vi.spyOn(ViduBoundedPoller.prototype, 'poll').mockImplementation(async () => {
+        await gate;
+        return { state: 'polling_exhausted' };
+      });
+      const query = vi.fn(async () => {
+        await gate;
+        if (outcome === 'query_error') throw new Error('controlled query failure');
+        if (outcome === 'polling_exhausted') return { state: 'processing' as const };
+        return outcome === 'cancelled' ? { state: 'cancelled' as const } : { state: 'completed' as const, results: [] };
+      });
+      const receive = vi.fn(async (id: string) => {
+        if (outcome === 'receiver_error') throw new Error('controlled receipt failure');
+        let execution = (await fixture.executions.get(initial.id))!;
+        for (const state of ['downloading', 'writing', 'verifying', 'completed'] as const) {
+          execution = transitionExecution(execution, state, toIsoTimestamp('2026-08-17T01:05:00.000Z'));
+          await fixture.executions.save(execution);
+        }
+        return { ok: true as const, value: { executionId: id, works: [{ workId: 'received-work', name: 'Received' }] } };
+      });
+      const runtime = createRuntime(fixture, { attachNewApiVideoOperation: vi.fn(async () => undefined) }, {
+        providerPackages: new ProviderPackageRegistry([viduProviderPackageDescriptor]),
+        asyncOperationPort: { query, cancel: vi.fn() }, resultReceiver: { receive },
+        submissionAuthorization: { claimSubmission: vi.fn(), markRequestStarted: vi.fn(), releaseBeforeRequest: vi.fn(), recordOutcome: vi.fn() },
+        videoSubmission: { viduPackage: { createRouteAdapters: () => ({}) }, credentialVault: {} } as unknown as NonNullable<Parameters<typeof createVideoFeatureControllerRuntime>[0]['videoSubmission']>
+      });
+      let acknowledge!: () => void;
+      const acknowledged = new Promise<void>(resolve => { acknowledge = resolve; });
+      const operation = runtime.submit!({ subject: { kind: 'draft', draftId: toDraftId(fixture.task.sourceDraftId), draftRevision: 1 },
+        routeSelectionToken: 'controlled', confirmation: { schemaVersion: 1, confirmationId: 'controlled', confirmed: true } }, receipt => {
+        expect(receipt).toMatchObject({ taskId: fixture.task.id, executionId: initial.id, status: 'provider_accepted' });
+        acknowledge();
+      });
+      await acknowledged;
+      expect((await fixture.executions.get(initial.id))?.state).toBe('processing');
+      expect(receive).not.toHaveBeenCalled();
+      release();
+      await operation;
+      const saved = await fixture.executions.get(initial.id);
+      expect(saved?.state).toBe(outcome === 'completed' ? 'completed' : outcome === 'cancelled' ? 'cancelled' : 'failed');
+      if (outcome === 'query_error') expect(saved?.failure?.retryability).toBe('unknown');
+      if (outcome === 'receiver_error') expect(saved?.failure).toMatchObject({ stage: 'downloading', retryability: 'retryable' });
+    });
   it('restores a Vidu operation context and reuses the failed execution', async () => {
     const fixture = await createFixture(VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID);
     const rememberVideoOperation = vi.fn();
@@ -337,7 +414,8 @@ function createRuntime(
       readonly providerOperationId: string;
       readonly invocationAttemptId: string;
     }) => Promise<void>;
-  }
+  },
+  overrides: Partial<Parameters<typeof createVideoFeatureControllerRuntime>[0]> = {}
 ) {
   return createVideoFeatureControllerRuntime({
     session: {
@@ -359,6 +437,7 @@ function createRuntime(
     ...attachments,
     resultReceiver: { receive: fixture.receive },
     mutations: new VideoWorkspaceMutationCoordinator(),
-    now: () => '2026-08-17T01:05:00.000Z'
+    now: () => '2026-08-17T01:05:00.000Z',
+    ...overrides
   });
 }

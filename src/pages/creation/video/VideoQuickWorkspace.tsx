@@ -58,17 +58,28 @@ export function VideoQuickWorkspace({
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
+  const [expectedTaskId, setExpectedTaskId] = useState<string>();
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
   const userTookOverRef = useRef(false);
+  const lastProgressPhaseRef = useRef<SubmissionProgressPhase>('idle');
+  const currentDraftRef = useRef(draft);
+  currentDraftRef.current = draft;
   const handleProgressChange = useCallback((phase: SubmissionProgressPhase, failureMessage?: string) => {
-    if (phase === 'preparing') userTookOverRef.current = false;
+    if ((phase === 'preparing' && lastProgressPhaseRef.current !== 'preparing') ||
+      (phase === 'requesting' && lastProgressPhaseRef.current !== 'preparing' && lastProgressPhaseRef.current !== 'requesting')) {
+      userTookOverRef.current = false;
+      setExpectedTaskId(undefined);
+      setExpectedWorkId(undefined);
+    }
+    lastProgressPhaseRef.current = phase;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
   useEffect(() => {
     setHistoryRefreshKey(0);
+    setExpectedTaskId(undefined);
     setExpectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
@@ -200,9 +211,13 @@ export function VideoQuickWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
+              setExpectedTaskId(submission.taskId);
               setExpectedWorkId(submission.status === 'completed' ? submission.workId : undefined);
               setHistoryRefreshKey((key) => key + 1);
-              if (submission.status === 'completed') onClearUi?.();
+              if (submission.status === 'completed' &&
+                currentDraftRef.current.draftId === draft.draftId &&
+                currentDraftRef.current.prompt.originalInput === draft.prompt.originalInput &&
+                JSON.stringify(currentDraftRef.current.featureSelection) === JSON.stringify(draft.featureSelection)) onClearUi?.();
             }}
             showProgressSteps
           />
@@ -212,12 +227,13 @@ export function VideoQuickWorkspace({
         <Card aria-label="视频生成内容与历史" className="uc-generation-two-pane__result">
           <GenerationHistory
             draftId={draft.draftId}
-            key={draft.draftId}
+            key={draft.projectId}
             mediaKind="video"
             workspaceMode="quick_video"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}
+            expectedTaskId={expectedTaskId}
             userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />

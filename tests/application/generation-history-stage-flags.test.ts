@@ -12,6 +12,19 @@ function flags(input: Partial<Parameters<typeof resolveHistoryStageFlags>[0]> = 
 }
 
 describe('generation history stage flags', () => {
+  it('stops live waiting for a selected terminal task', () => {
+    for (const kind of ['completed', 'cancelled'] as const) {
+      expect(flags({ livePhase: 'waiting', selectedStatusKind: kind }).showLoadingPreview).toBe(false);
+    }
+  });
+
+  it('selects the result of an automatically followed task after receipt', () => {
+    const result = resolveHistorySelection({ autoSelectActive: false, followTask: true,
+      hasPendingGeneration: true, selectedTaskId: 'accepted', selectedStatusId: 'task-accepted',
+      works: [{ workId: 'new', sourceTaskId: 'accepted' }],
+      statusNodes: [{ id: 'task-accepted', taskId: 'accepted', kind: 'completed', occurredAt: '2026-09-24' }] });
+    expect(result.selectedWorkId).toBe('new');
+  });
   it('keeps a manually selected task when another task completes', () => {
     const result = resolveHistorySelection({
       autoSelectActive: false,

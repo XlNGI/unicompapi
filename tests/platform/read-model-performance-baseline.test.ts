@@ -36,6 +36,39 @@ afterEach(async () => {
 });
 
 describe('read-model I/O performance gate', () => {
+  it('uses attempt order, preserves cancelled tasks and rejects mismatched or unverified works', async () => {
+    const root = await createProjectFixture(0, 3, true);
+    const storage = new NodeProjectStorage(root);
+    const projectId = toProjectId('project-performance-0');
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    await catalog.remember({ projectId, projectName: 'History boundary', rootDirectory: root });
+    const tasks = (await storage.readJsonWithBackup(projectStoragePaths.entities.tasks, v => v as { entities: Task[] }))!.value.entities;
+    const executions = (await storage.readJsonWithBackup(projectStoragePaths.entities.executions, v => v as { entities: Execution[] }))!.value.entities;
+    const files = (await storage.readJsonWithBackup(projectStoragePaths.entities.fileReferences, v => v as { entities: FileReference[] }))!.value.entities;
+    const retry = { ...executions[0]!, id: toExecutionId('retry'), attempt: 2, state: 'failed' as const, updatedAt: createdAt };
+    await writeCollection(storage, projectStoragePaths.entities.tasks, tasks.map((t, i) => i === 0 ? { ...t, executionIds: [...t.executionIds, retry.id] } : t));
+    await writeCollection(storage, projectStoragePaths.entities.executions, [...executions.map((e, i) => i === 2 ? { ...e, state: 'cancelled' } : e), retry]);
+    await writeCollection(storage, projectStoragePaths.entities.fileReferences, files.map((f, i) => i === 1 ? { ...f, lastVerification: { ...f.lastVerification!, matchesExpected: false } } : f));
+    const extra = work(projectId, tasks[0]!.id, executions[1]!.id, files[0]!.id, 'mismatched');
+    const works = (await storage.readJsonWithBackup(projectStoragePaths.entities.works, v => v as { entities: Work[] }))!.value.entities;
+    await writeCollection(storage, projectStoragePaths.entities.works, [...works, extra]);
+    const result = await new GlobalReadModelController(catalog).listGenerationHistory({ projectId, draftId: 'draft-performance-shared-0', mediaKind: 'image' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.issues).toEqual([]);
+    expect(result.value.activeItems).toEqual([]);
+    expect(result.value.items).toHaveLength(3);
+    expect(result.value.items.find(t => t.taskId === tasks[0]!.id)).toMatchObject({ state: 'failed', works: [{ workId: works[0]!.id }] });
+    expect(result.value.items.find(t => t.taskId === tasks[0]!.id)?.works).toHaveLength(1);
+    expect(result.value.items.find(t => t.taskId === tasks[1]!.id)?.works).toEqual([]);
+    expect(result.value.items.find(t => t.taskId === tasks[2]!.id)).toMatchObject({ state: 'cancelled', works: [] });
+    await writeCollection(storage, projectStoragePaths.entities.executions, [...executions, {
+      ...retry, failure: { stage: 'processing', message: '查询中断', retryability: 'unknown' }
+    }]);
+    const uncertain = await new GlobalReadModelController(catalog).listGenerationHistory({ projectId, draftId: 'draft-performance-shared-0', mediaKind: 'image' });
+    expect(uncertain.ok && uncertain.value.activeItems.find(t => t.taskId === tasks[0]!.id))
+      .toMatchObject({ state: 'submission_outcome_unknown', works: [{ workId: works[0]!.id }] });
+  });
   it('reads each project entity file at most once per task and work snapshot', async () => {
     const projectCount = 2;
     const tasksPerProject = 25;
@@ -141,10 +174,7 @@ describe('read-model I/O performance gate', () => {
       mediaKind: 'image',
       limit: 20
     });
-    expect(first).toMatchObject({
-      ok: true,
-      value: { items: { length: 20 }, nextCursor: expect.any(String) }
-    });
+    expect(first).toMatchObject({ ok: true, value: { items: { length: 20 }, nextCursor: expect.any(String) } });
     if (!first.ok || !first.value.nextCursor) throw new TypeError('Missing cursor');
     const second = await controller.listGenerationHistory({
       projectId: 'project-performance-0',
@@ -153,9 +183,10 @@ describe('read-model I/O performance gate', () => {
       cursor: first.value.nextCursor,
       limit: 20
     });
-    expect(second).toMatchObject({ ok: true, value: { items: { length: 5 } } });
+    expect(second.ok && second.value.items).toHaveLength(5);
+    expect(second.ok && second.value.nextCursor).toBeUndefined();
     const ids = [...first.value.items, ...(second.ok ? second.value.items : [])]
-      .map((item) => item.kind === 'work' ? item.workId : item.taskId);
+      .map((item) => item.taskId);
     expect(new Set(ids).size).toBe(25);
     for (const path of [
       projectStoragePaths.entities.tasks,
@@ -163,6 +194,42 @@ describe('read-model I/O performance gate', () => {
       projectStoragePaths.entities.works,
       projectStoragePaths.entities.fileReferences
     ]) expect(reads.get(path)).toBe(1);
+  });
+
+  it('keeps verified works together in one task card and returns active tasks outside history paging', async () => {
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    const root = await createProjectFixture(0, 100, true);
+    await catalog.remember({ projectId: toProjectId('project-performance-0'), projectName: 'Performance project 0', rootDirectory: root });
+    const storage = new NodeProjectStorage(root);
+    const tasks = (await storage.readJsonWithBackup(projectStoragePaths.entities.tasks, (value) => value as { entities: Task[] }))!.value;
+    const executions = (await storage.readJsonWithBackup(projectStoragePaths.entities.executions, (value) => value as { entities: Execution[] }))!.value.entities;
+    const activeTask = tasks.entities[0]!;
+    const retryExecutionId = toExecutionId('execution-performance-retry');
+    const retryExecution = {
+      ...execution(activeTask.id, retryExecutionId),
+      attempt: 2,
+      state: 'processing' as const,
+      updatedAt: toIsoTimestamp('2026-08-28T00:02:00.000Z')
+    };
+    const updatedTask = { ...activeTask, executionIds: [...activeTask.executionIds, retryExecutionId] };
+    await writeCollection(storage, projectStoragePaths.entities.executions, [...executions, retryExecution]);
+    await writeCollection(storage, projectStoragePaths.entities.tasks, [updatedTask, ...tasks.entities.slice(1)]);
+    const extra = work(toProjectId('project-performance-0'), tasks.entities[1]!.id, executions[1]!.id, toFileReferenceId('file-performance-extra'), 'extra');
+    const existingWorks = (await storage.readJsonWithBackup(projectStoragePaths.entities.works, (value) => value as { entities: Work[] }))!.value.entities;
+    await writeCollection(storage, projectStoragePaths.entities.works, [...existingWorks, extra]);
+    const existingFiles = (await storage.readJsonWithBackup(projectStoragePaths.entities.fileReferences, (value) => value as { entities: FileReference[] }))!.value.entities;
+    await writeCollection(storage, projectStoragePaths.entities.fileReferences, [...existingFiles, file(toProjectId('project-performance-0'), toFileReferenceId('file-performance-extra'), executions[1]!.id, 'extra')]);
+
+    const controller = new GlobalReadModelController(catalog);
+    const first = await controller.listGenerationHistory({ projectId: 'project-performance-0', draftId: 'draft-performance-shared-0', mediaKind: 'image', limit: 20 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.activeItems.map((item) => item.taskId)).toContain(activeTask.id);
+    const activeCard = first.value.activeItems.find((item) => item.taskId === activeTask.id);
+    expect(activeCard).toMatchObject({ state: 'processing', works: [{ workId: 'work-performance-0-0' }] });
+    expect(first.value.items.find((item) => item.taskId === tasks.entities[1]!.id)?.works).toHaveLength(2);
+    expect(first.value.items).toHaveLength(20);
+    expect(first.value.nextCursor).toBeTruthy();
   });
 
   it('meets the Windows synthetic 10-project and 1000-entity read targets', async () => {

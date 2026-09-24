@@ -216,7 +216,7 @@ test('professional image preserves the current result after submission', () => {
     /if \(phase === 'preparing'\)[\s\S]{0,160}setResultWorkId\(undefined\)/
   );
   assert.doesNotMatch(professionalSource, /resultSelection|setResultWorkId/);
-  assert.match(professionalSource, /key={draft\.draftId}/);
+  assert.match(professionalSource, /key={draft\.projectId}/);
   assert.match(historySource, /resolveHistorySelection\(/);
   assert.match(historySource, /selectedWorkId: selectedWorkIdRef\.current/);
   const start = workbenchSource.indexOf('<ImageProfessionalWorkspace');
@@ -225,7 +225,7 @@ test('professional image preserves the current result after submission', () => {
   assert.doesNotMatch(invocation, /onClearUi=/);
 });
 
-test('professional image history uses current-draft verified local works only', () => {
+test('professional image history uses project-and-mode scoped verified local works', () => {
   for (const operation of ['listGenerationHistory', 'createWorkMediaHandle']) {
     assert.match(historySource, new RegExp(`storage\\.${operation}\\(`));
   }
@@ -233,10 +233,11 @@ test('professional image history uses current-draft verified local works only', 
   assert.match(historySource, /projectId,/);
   assert.match(historySource, /draftId,/);
   assert.match(historySource, /mediaKind,/);
-  assert.match(historySource, /limit: 20/);
+  assert.match(historySource, /workspaceMode,/);
+  assert.match(historySource, /limit: 50/);
   assert.match(historySource, /a\.createdAt\.localeCompare\(b\.createdAt\)/);
-  assert.match(historySource, /aria-pressed={node\.work\.workId === selectedWorkId}/);
-  assert.match(historySource, /handleWorkSelection\(node\.work\.workId\)/);
+  assert.match(historySource, /aria-pressed={selectedWorkId === work\.workId}/);
+  assert.match(historySource, /onClick={\(\) => selectWork\(work\)}/);
   assert.doesNotMatch(historySource, /remoteUrls|resultImageUrl|fetch\(|window\.localStorage/);
 });
 
@@ -255,7 +256,7 @@ test('professional image history keeps concise truthful timeline states', () => 
   }
   assert.match(
     historySource,
-    /const historySummaryText = formatHistorySummary\(summarizeHistoryNodes\(nodes\)\);/
+    /const historySummaryText = formatHistorySummary\(summarizeHistoryNodes\([\s\S]*?cards\.map/
   );
   assert.match(historySource, /<span>\{historySummaryText\}<\/span>/);
   assert.doesNotMatch(historySource, /\{works\.length\} 张作品/);
@@ -271,7 +272,8 @@ test('professional image history keeps concise truthful timeline states', () => 
   assert.match(pageStyles, /\.uc-generation-history__marker--receiving\s*{/);
   assert.doesNotMatch(historySource, /当前草稿的生成历史|按生成时间排列/);
   assert.match(historySource, /latestExecutionUpdatedAt \?\? task\.createdAt/);
-  assert.match(historySource, /startedAt \?\? new Date\(\)\.toISOString\(\)/);
+  assert.doesNotMatch(historySource, /startedAt \?\? new Date\(\)\.toISOString\(\)/);
+  assert.match(historySource, /HistoryTaskCard key={card\.id}/);
   assert.match(historySource, /onLocalStorageChanged/);
   assert.match(historySource, /timeline\.scrollLeft = timeline\.scrollWidth/);
   assert.match(historySource, /onWheel={handleTimelineWheel}/);

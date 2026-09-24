@@ -48,20 +48,29 @@ export function ImageProfessionalWorkspace({
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
+  const [expectedTaskId, setExpectedTaskId] = useState<string>();
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
   const userTookOverRef = useRef(false);
+  const lastProgressPhaseRef = useRef<SubmissionProgressPhase>('idle');
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
-    if (phase === 'preparing') userTookOverRef.current = false;
+    if ((phase === 'preparing' && lastProgressPhaseRef.current !== 'preparing') ||
+      (phase === 'requesting' && lastProgressPhaseRef.current !== 'preparing' && lastProgressPhaseRef.current !== 'requesting')) {
+      userTookOverRef.current = false;
+      setExpectedTaskId(undefined);
+      setExpectedWorkId(undefined);
+    }
+    lastProgressPhaseRef.current = phase;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
   useEffect(() => {
     setHistoryRefreshKey(0);
+    setExpectedTaskId(undefined);
     setExpectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
@@ -537,6 +546,7 @@ export function ImageProfessionalWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
+              setExpectedTaskId(submission.taskId);
               if (!userTookOverRef.current) {
                 setExpectedWorkId(
                   submission.status === 'completed' ? submission.workId : undefined
@@ -560,12 +570,13 @@ export function ImageProfessionalWorkspace({
         >
           <GenerationHistory
             draftId={draft.draftId}
-            key={draft.draftId}
+            key={draft.projectId}
             mediaKind="image"
             workspaceMode="professional_image"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}
+            expectedTaskId={expectedTaskId}
             userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />
