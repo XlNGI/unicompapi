@@ -135,7 +135,7 @@ const documentErrorMessages: Record<string, string> = {
     '单个内容组过长，无法在可读字号下排版，请拆分内容后重试。',
   generation_cancelled: '本次文档任务已取消，已有作品保留。',
   generation_failed: '本次文档未交付，已有作品保留。请查看失败原因。',
-  verification_failed: '本次修改未通过文件校验，原作品已保留。请核对修改范围后重新发起。',
+  verification_failed: '本地文件校验未通过，未登记为正式作品。',
   write_failed: '新版文件写入失败，原作品已保留。请检查磁盘空间与文件占用后重试保存。',
   registration_failed: '新版作品登记失败，原作品已保留。请重试保存。',
   result_sync_pending: '新版文档已保存，结果状态同步未完成。重试同步不会重复生成作品。',

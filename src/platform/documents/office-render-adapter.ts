@@ -1,7 +1,7 @@
 import { access, mkdir, mkdtemp, readdir, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import JSZip from 'jszip';
 import type { DocumentRenderAdapter, DocumentRenderResult } from './temporary-document-workflow';
 
@@ -12,12 +12,66 @@ export interface OfficeRenderCommandConfig {
 }
 
 export function createConfiguredOfficeRenderAdapter(
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment?: Readonly<Record<string, string | undefined>>
 ): DocumentRenderAdapter | undefined {
-  const officeExecutable = environment.UNICOMP_OFFICE_RENDERER?.trim();
-  const pdfToPngExecutable = environment.UNICOMP_PDF_RENDERER?.trim();
+  return createOfficeRenderAdapterFromEnv(
+    environment ?? process.env,
+    environment === undefined ? readWindowsPersistentRendererEnv() : undefined
+  );
+}
+
+export function createOfficeRenderAdapterFromEnv(
+  environment: Readonly<Record<string, string | undefined>>,
+  fallback?: Readonly<Record<string, string | undefined>>
+): DocumentRenderAdapter | undefined {
+  const officeExecutable = firstNonEmpty(
+    environment.UNICOMP_OFFICE_RENDERER,
+    fallback?.UNICOMP_OFFICE_RENDERER
+  );
+  const pdfToPngExecutable = firstNonEmpty(
+    environment.UNICOMP_PDF_RENDERER,
+    fallback?.UNICOMP_PDF_RENDERER
+  );
   if (!officeExecutable || !pdfToPngExecutable) return undefined;
   return createOfficeRenderAdapter({ officeExecutable, pdfToPngExecutable });
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+function readWindowsPersistentRendererEnv(): Readonly<Record<string, string | undefined>> {
+  return {
+    UNICOMP_OFFICE_RENDERER: readWindowsPersistentEnv('UNICOMP_OFFICE_RENDERER'),
+    UNICOMP_PDF_RENDERER: readWindowsPersistentEnv('UNICOMP_PDF_RENDERER')
+  };
+}
+
+function readWindowsPersistentEnv(name: string): string | undefined {
+  if (process.platform !== 'win32') return undefined;
+  for (const key of [
+    'HKCU\\Environment',
+    'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
+  ]) {
+    try {
+      const output = execFileSync('reg', ['query', key, '/v', name], {
+        encoding: 'utf8',
+        timeout: 2000,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+      const match = /REG_(?:EXPAND_)?SZ\s+(\S.*)$/m.exec(output);
+      const value = match?.[1]?.trim();
+      if (value) return value;
+    } catch {
+      // Persistent user/machine environment is optional.
+    }
+  }
+  return undefined;
 }
 
 export class OfficeRenderUnavailableError extends Error {
@@ -151,7 +205,7 @@ async function inspectRenderedOutput(
   return diagnostics;
 }
 
-async function inspectPptxGeometry(
+export async function inspectPptxGeometry(
   filePath: string
 ): Promise<readonly {
   readonly code: 'element_overflow' | 'text_overflow';
@@ -187,14 +241,16 @@ async function inspectPptxGeometry(
     const xml = await zip.files[slideName].async('string');
     const shapes = xml.match(/<p:(?:sp|pic|graphicFrame|cxnSp)\b[\s\S]*?<\/p:(?:sp|pic|graphicFrame|cxnSp)>/gu) ?? [];
     for (const [index, shape] of shapes.entries()) {
-      const offTag = /<a:off\b[^>]*>/u.exec(shape)?.[0];
-      const extTag = /<a:ext\b[^>]*>/u.exec(shape)?.[0];
+      const transform = /<(?:a:xfrm|p:xfrm)\b[\s\S]*?<\/(?:a:xfrm|p:xfrm)>/u.exec(shape)?.[0];
+      const origin = transform ?? shape;
+      const offTag = /<a:off\b[^>]*>/u.exec(origin)?.[0];
+      const extTag = /<a:ext\b[^>]*>/u.exec(origin)?.[0];
       const x = offTag ? xmlIntegerAttribute(offTag, 'x') : undefined;
       const y = offTag ? xmlIntegerAttribute(offTag, 'y') : undefined;
       const width = extTag ? xmlIntegerAttribute(extTag, 'cx') : undefined;
       const height = extTag ? xmlIntegerAttribute(extTag, 'cy') : undefined;
       if (x === undefined || y === undefined || width === undefined || height === undefined) continue;
-      if (x >= 0 && y >= 0 && width > 0 && height > 0 && x + width <= slideWidth && y + height <= slideHeight) continue;
+      if (shapeFitsSlide(x, y, width, height, slideWidth, slideHeight)) continue;
       const scope = `slide:${slideNumber(slideName)}:element:${index + 1}`;
       const hasText = /<a:t\b[^>]*>/u.test(shape);
       diagnostics.push({
@@ -206,6 +262,19 @@ async function inspectPptxGeometry(
     }
   }
   return diagnostics;
+}
+
+
+function shapeFitsSlide(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  slideWidth: number,
+  slideHeight: number
+): boolean {
+  if (width < 0 || height < 0 || (width === 0 && height === 0)) return false;
+  return x >= 0 && y >= 0 && x + width <= slideWidth && y + height <= slideHeight;
 }
 
 function slideNumber(name: string): number {

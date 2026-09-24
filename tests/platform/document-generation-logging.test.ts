@@ -19,4 +19,28 @@ describe('document generation logging', () => {
     expect(JSON.stringify(logged)).not.toContain('机密项目进展');
     expect(JSON.stringify(logged)).not.toContain('D:');
   });
+
+  it('records a safe reason when PPT visual QA renderer is missing', () => {
+    const error = Object.assign(
+      new Error('PPT visual QA renderer is unavailable; the file was not published'),
+      { code: 'verification_failed' }
+    );
+    expect(toDocumentGenerationLogError(error)).toEqual({
+      category: 'document_generation',
+      code: 'verification_failed',
+      reason: 'renderer_unavailable'
+    });
+  });
+
+  it('records a safe reason when PPT visual diagnostics fail', () => {
+    const error = Object.assign(
+      new Error('Rendered document failed visual diagnostics'),
+      { code: 'verification_failed' }
+    );
+    expect(toDocumentGenerationLogError(error)).toEqual({
+      category: 'document_generation',
+      code: 'verification_failed',
+      reason: 'visual_diagnostics'
+    });
+  });
 });

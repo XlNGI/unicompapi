@@ -21,6 +21,7 @@ import {
   type WorkId
 } from '../domain';
 import { ConversationApplicationError } from './conversation-service';
+import { DocumentTaskRuntimeConflictError } from './document-task-runtime-service';
 import type {
   DocumentRevisionAgentResult,
   DocumentRevisionPatch
@@ -720,6 +721,12 @@ export class DocumentGenerationApplicationService {
     } catch {
       const error = new DocumentGenerationApplicationError('result_sync_pending', '新版文档已保存，任务完成状态同步未完成。');
       await this.persistTerminalFailure(input, error);
+      if (error instanceof DocumentTaskRuntimeConflictError) {
+        throw new DocumentGenerationApplicationError(
+          'generation_failed',
+          'Document execution state could not be recorded safely'
+        );
+      }
       throw error;
     }
     return result;

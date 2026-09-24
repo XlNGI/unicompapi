@@ -38,9 +38,15 @@ export class DocumentGenerationRuntimeBridge implements DocumentGenerationRuntim
         event.operationId ?? event.code,
         event.facts ?? null
       ]));
-      const callId = `generation-${++this.sequence}`;
-      await this.service.beginToolCall(this.scope, { callId, toolId, inputHash });
-      this.active.set(key, { callId, toolId, step: this.sequence });
+      const callId = `generation-${this.sequence + 1}`;
+      const { runtime } = await this.service.beginToolCall(this.scope, { callId, toolId, inputHash });
+      this.sequence += 1;
+      const call = runtime.toolCalls?.find((item) => item.id === callId);
+      this.active.set(key, {
+        callId,
+        toolId,
+        step: call?.step ?? runtime.checkpoint.step
+      });
       return;
     }
     const active = this.active.get(key);

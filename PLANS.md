@@ -1,5 +1,37 @@
 # UniComp 开发计划
 
+### 2026-09-24 PPT 视觉 QA 把装饰线误判为越界
+
+正式 PPT 已能完成 LibreOffice/Poppler 渲染，但 `inspectPptxGeometry` 要求形状宽高都大于 0。工作汇报模板的卡片/时间线装饰线是合法的零宽或零高连接线，被记成 `element_overflow`。该诊断无法通过改大纲修好，于是校验失败、未登记作品。现改为：在幻灯片内的单向连接线视为合法几何，真实越出页面的形状仍失败。失败日志对视觉诊断记录 `visual_diagnostics`，不写路径或原文。新建失败提示不再说原作品已保留。
+
+### 2026-09-24 PPT 结构检查被 Task Runtime step 错位误报
+
+渲染器补读用户环境后，正式 PPT 已能写出临时文件。随后 `document_check` 嵌套在 `document_compile` 进行中，beginToolCall 因已有未完成写操作被拒绝，但 bridge 仍先增加了 sequence。结构检查因此用 step 4 去对 runtime step 3，`observation_call_mismatch` 被 IPC 压成 `storage_error`，生产 Trace 停在 structure_check started。
+
+现改为：只有 beginToolCall 成功后才占用 sequence，并以 runtime 记录的 step 作为 observation step。嵌套 layout check 仍可失败关闭，但不再污染后续结构检查。
+
+### 2026-09-24 PPT 渲染器环境未注入
+
+本机已安装 LibreOffice / Poppler，并写入用户环境变量，但 `pnpm dev` 从旧终端拉起，Electron 进程环境里没有 `UNICOMP_OFFICE_RENDERER` / `UNICOMP_PDF_RENDERER`。正式 PPT 在大纲校验后立刻 `verification_failed`，没有 compile/render 事件。
+
+现改为：未显式传入环境时，主进程补充读取 Windows 用户/系统环境变量；文档失败日志对“渲染器不可用”记录安全 reason，不写路径。提示改为“本地文件校验未通过，未登记为正式作品”。
+
+### 2026-09-24 诊断日志通道补齐
+
+设置页「日志与诊断」已有本地分类、级别、滚动、脱敏和诊断包，但业务几乎不写入。本轮不新增日志产品、不上云采集，只补结构化事件门面并接通高价值来源。
+
+新增 `writeEvent`：白名单 code + 标量 facts。主进程未捕获异常写入 `crash.log`；NewAPI 安全日志改为结构化事件，失败进 `network.log`，开始/完成进 `application.log`；对话发送前门禁（候选不可用、运行授权拒绝、附件门禁）写入 `chat.request_blocked`。未知字段、Prompt、路径、Token 和错误原文不落盘；写日志失败不影响主流程。调用记录与生产 Trace 仍是业务事实，不改成日志。
+
+验证：诊断事件定向测试与既有 B4 诊断服务测试；主/测试 TypeScript、变更文件 ESLint 与 `git diff --check`。未调用真实模型、联网或付费服务。
+
+### 2026-09-23 对话输入框模型选择面板 UI 优化
+
+对话页输入框的模型选择弹出层原先把搜索框放在回复方式上方，RSuite 分组标题带折叠箭头，看起来像下拉套下拉；同时全局 picker 半屏高度限制与列表自身滚动叠加，面板出现双滚动条，模型列表几乎只能露出一条。
+
+现将弹出层改为网格布局：回复方式固定顶部，搜索紧挨“选择模型”标题，只有模型列表滚动；去掉分组折叠箭头与额外缩进，回复方式选中态补勾选，触发器模式改为胶囊标签。选择、搜索、回复方式切换的数据合同未改，不写死服务商或模型。
+
+验证：对话页与 RSuite 控件合同测试、主/测试 TypeScript、变更文件 ESLint 与 git diff --check。未调用真实模型、联网或付费服务。
+
 ### 2026-09-23 语义规划超时竞态修复
 
 现场调用记录显示，本次语义请求已在 `08:11:53Z` 创建、`08:12:14Z` 被服务商接受，并在 `08:12:22Z` 收到结果；原实现的内外层 30 秒计时在本地收尾/计划解析前同时触发，错误地把已发出的请求映射成 `classification_timeout`。现将语义规划主预算设为 45 秒，并增加 5 秒有界完成宽限；宽限内已收到的结果继续完成解析，宽限结束才中止请求。分类器内部使用同一 50 秒硬上限，超时错误单独映射为 `classification_timeout`，不重试、不静默切换模型。

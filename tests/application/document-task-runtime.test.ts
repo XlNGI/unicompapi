@@ -182,6 +182,37 @@ describe('document task runtime lifecycle', () => {
     expect(runtime.observations[0].data).not.toHaveProperty('path');
   });
 
+  it('keeps structure-check steps aligned after a nested layout check is rejected', async () => {
+    const f = await fixture();
+    const bridge = new DocumentGenerationRuntimeBridge(f.service, f.runtime, f.runtime.executionId);
+    await bridge.start();
+    await bridge.progress({
+      code: 'document_compile', status: 'started', operationId: 'document-file-write',
+      facts: { documentKind: 'ppt', tool: 'write_document' }
+    });
+    await expect(bridge.progress({
+      code: 'document_check', status: 'started', operationId: 'document-layout',
+      facts: { documentKind: 'ppt', tool: 'check' }
+    })).rejects.toThrow('reconciliation_required');
+    await bridge.progress({
+      code: 'document_compile', status: 'completed', operationId: 'document-file-write',
+      facts: { documentKind: 'ppt', tool: 'write_document' }
+    });
+    await bridge.progress({
+      code: 'document_structure_check', status: 'started', operationId: 'document-output-structure',
+      facts: { documentKind: 'ppt', tool: 'check' }
+    });
+    await bridge.progress({
+      code: 'document_structure_check', status: 'completed', operationId: 'document-output-structure',
+      facts: { documentKind: 'ppt', tool: 'check' }
+    });
+    const runtime = await bridge.runtime();
+    expect(runtime.toolCalls.map((item) => ({ toolId: item.toolId, step: item.step, status: item.status }))).toEqual([
+      { toolId: 'apply_document_patch', step: 1, status: 'completed' },
+      { toolId: 'read_document_structure', step: 2, status: 'completed' }
+    ]);
+  });
+
   it('does not complete when a write progress result is cancelled', async () => {
     const f = await fixture();
     const bridge = new DocumentGenerationRuntimeBridge(f.service, f.runtime, f.runtime.executionId);
