@@ -110,15 +110,25 @@ async function run() {
     await screenshot('before-idle');
     const started=Date.now();
     window.minimize();
+    window.hide();
+    window.once('closed', () => {
+      report.windowClosedAt = new Date().toISOString();
+      void fs.writeFile(path.join(output,'window-closed.json'),JSON.stringify({at:report.windowClosedAt}));
+    });
     console.log('Real idle started:',report.idleStartedAt);
     await fs.writeFile(path.join(output,'progress.json'),JSON.stringify({startedAt:report.idleStartedAt,requiredMs:1_210_000}));
-    while(Date.now()-started<1_210_000) await delay(Math.min(30_000,1_210_000-(Date.now()-started)));
+    while(Date.now()-started<1_210_000) {
+      if (window.isDestroyed()) throw new Error('Idle test window closed before resume validation');
+      await delay(Math.min(30_000,1_210_000-(Date.now()-started)));
+    }
     report.actualIdleMs=Date.now()-started;
-    window.restore();
+    if (window.isDestroyed()) throw new Error('Idle test window closed before resume validation');
     window.show();
+    window.restore();
     await delay(500);
     const afterImages=await js(staticImages);
-    checks.push({name:'static thumbnails and posters survive real 20-minute background idle',passed:afterImages.every(i=>i.loaded && beforeStatic.some(old=>old.src===i.src)) && (await js('editingHarness.state()')).requests.length===before.state.requests.length});
+    report.afterImages=afterImages;
+    checks.push({name:'static thumbnails and posters survive real 20-minute background idle',passed:afterImages.length>0 && afterImages.every(i=>i.loaded && beforeStatic.some(old=>old.src===i.src)) && (await js('editingHarness.state()')).requests.length===before.state.requests.length});
     await js(`document.querySelector('.uc-video-editor__transport-play').click()`);
     await until(`(()=>{const v=document.querySelector('video[aria-label="时间线预览"]');return !v.paused && v.currentTime>${before.timeline+0.15} && v.src!==${JSON.stringify(before.timelineUrl)}})()`);
     checks.push({name:'timeline resumes at original position after real expired handle',passed:true});
@@ -128,7 +138,7 @@ async function run() {
     await js('realExport.pause()');
     checks.push({name:'actual elapsed idle exceeds 20 minutes without clock simulation',passed:report.actualIdleMs>=1_200_000});
     await screenshot('after-idle');
-    report.boundary='Windows Electron minimized for actual elapsed time; real local media protocol, 5-minute TTL and production Range response; synthetic files and isolated IPC, no user project writes, no sleep/lock test.';
+    report.boundary='Windows Electron minimized and hidden for actual elapsed time; real local media protocol, 5-minute TTL and production Range response; synthetic files and isolated IPC, no user project writes, no sleep/lock test.';
     await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));
     assert.ok(checks.every(c=>c.passed));
     console.log(JSON.stringify({checks,actualIdleMs:report.actualIdleMs,evidence:output}));
