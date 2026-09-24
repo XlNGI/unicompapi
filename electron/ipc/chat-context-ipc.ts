@@ -29,6 +29,7 @@ export function registerChatContextIpcHandlers(options: {
     readonly deepSeekRuntime: DeepSeekSharedRuntime;
     readonly newApiRuntime: NewApiSharedRuntime;
   };
+  onError?(error: unknown): void;
 }): ChatContextIpcLifecycle {
   const runtime = createChatContextRuntime({
     userDataDirectory: app.getPath('userData'),
@@ -36,7 +37,8 @@ export function registerChatContextIpcHandlers(options: {
     providerRegistry: options.providerRegistry,
     providerPackages: options.providerPackages,
     runtimeAuthorization: options.runtimeAuthorization,
-    textSubmission: options.textSubmission
+    textSubmission: options.textSubmission,
+    onError: options.onError
   });
   const conversations = runtime.conversations;
   const contexts = runtime.projectContexts;

@@ -63,7 +63,8 @@ import {
   type ApplicationDataPlan,
   type ApplicationDataService,
   type DiagnosticsService,
-  type UpdatesService
+  type UpdatesService,
+  type DiagnosticLogInput
 } from '../settings';
 
 interface PendingSettingsOperation {
@@ -136,11 +137,21 @@ export class SettingsController {
     try {
       const current = await this.repository.load();
       await this.b4.diagnostics.writeLog(
-        'networkErrors',
+        'application',
         level,
         message,
         current.document.diagnostics
       );
+    } catch {
+      // Diagnostics must never affect a provider request or its outcome.
+    }
+  }
+
+  async writeDiagnosticEvent(input: DiagnosticLogInput): Promise<void> {
+    if (!this.b4) return;
+    try {
+      const current = await this.repository.load();
+      await this.b4.diagnostics.writeEvent(input, current.document.diagnostics);
     } catch {
       // Diagnostics must never affect a provider request or its outcome.
     }
