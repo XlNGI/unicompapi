@@ -104,6 +104,7 @@ describe('video editor visibility effect behavior', () => {
     listWorks.mockResolvedValue({ ok: true, value: { items: [] } });
     listTasks.mockResolvedValue({ ok: true, value: { items: [] } });
     vi.stubGlobal('window', {
+      setTimeout, clearTimeout, setInterval, clearInterval,
       unicomp: {
         storage: { getProjectSession, listWorks, listTasks },
         videoEditors: { list: listDrafts }

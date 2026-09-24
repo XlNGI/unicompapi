@@ -10,7 +10,7 @@ import 'rsuite/dist/rsuite-no-reset.min.css';
 import '../../src/styles.css';
 import '../../src/styles/rsuite-bridge.css';
 
-const fixtures = (window as unknown as { editingFixtures: { videos: string[]; sheets: string[]; sheetUrls?: string[]; proxies?: string[]; deferProxies?: boolean } }).editingFixtures;
+const fixtures = (window as unknown as { editingFixtures: { videos: string[]; sheets: string[]; sheetUrls?: string[]; controlledMedia?: boolean; proxies?: string[]; deferProxies?: boolean } }).editingFixtures;
 let proxiesReleased = !fixtures.deferProxies;
 let proxiesReady = 0;
 const proxyReleases: Array<() => void> = [];
@@ -50,6 +50,10 @@ const draft: VideoEditorDraftDto = {
 };
 const originalDraft = JSON.stringify(draft);
 const unavailable = () => ({ ok: false as const, error: { code: 'preview_unavailable', message: 'isolated failure' } });
+const controlledHandle = (kind: string, index: number) => {
+  const expiresAt = new Date(Date.now() + 300000).toISOString();
+  return { url: `unicomp-media://local/${kind}-${index}-${crypto.randomUUID()}?expires=${encodeURIComponent(expiresAt)}`, expiresAt };
+};
 const indexOf = (clipId: string) => Number(clipId.split('-')[1]);
 const api = {
   storage: {
@@ -62,6 +66,10 @@ const api = {
       if (workDelayMs) await new Promise(resolve => setTimeout(resolve, workDelayMs));
       if (failWorkMedia) return unavailable();
       if (!workMedia || Date.parse(workMedia.expiresAt) <= Date.now()) {
+        if (fixtures.controlledMedia) {
+          workMedia = controlledHandle('video', 0);
+          return ok({ ...workMedia, mediaKind: 'video', mimeType: 'video/mp4' });
+        }
         const url = URL.createObjectURL(await (await fetch(fixtures.videos[0])).blob());
         handles.push(url);
         workMedia = { url, expiresAt: new Date(Date.now() + 300000).toISOString() };
@@ -77,6 +85,11 @@ const api = {
     createSourcePreview: async (_draftId: string, clipId: string) => {
       sourceRequests.push(clipId);
       if (failVideos) return unavailable();
+      if (fixtures.controlledMedia) {
+        const handle = controlledHandle('video', indexOf(clipId));
+        previewClipByUrl.set(handle.url, clipId);
+        return ok({ ...handle, mimeType: 'video/mp4', kind: 'original' });
+      }
       const blob = failNextSourcePreview
         ? new Blob(['broken preview'], { type: 'video/mp4' })
         : await (await fetch(fixtures.videos[indexOf(clipId)])).blob();
@@ -95,6 +108,7 @@ const api = {
       }
       requests.push(clipId);
       if (failSheets) return unavailable();
+      if (fixtures.controlledMedia) return ok({ ...controlledHandle('sheet', indexOf(clipId)), mimeType: 'image/jpeg', kind: 'thumbnail_strip' });
       const sheetUrl = fixtures.sheetUrls?.[indexOf(clipId)];
       if (sheetUrl) return ok({ url: sheetUrl, expiresAt: new Date(Date.now() + 300000).toISOString(), mimeType: 'image/jpeg', kind: 'thumbnail_strip' });
       const bytes = Uint8Array.from(atob(fixtures.sheets[indexOf(clipId)]), c => c.charCodeAt(0));

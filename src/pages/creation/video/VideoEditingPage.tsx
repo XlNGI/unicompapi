@@ -1,3 +1,4 @@
+import { readPreviewImage } from './read-preview-image';
 import { SelectPicker } from '../../../components/Pickers';
 import {
   useEffect,
@@ -1784,11 +1785,9 @@ export function VideoEditingPage({
                 'thumbnail_strip'
               );
               if (!isCancelled() && artifact.ok) {
-                const response = await fetch(artifact.value.url, {
-                  signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)])
-                });
-                if (!response.ok) throw new Error('Thumbnail read failed');
-                const imageUrl = URL.createObjectURL(await response.blob());
+                const imageUrl = URL.createObjectURL(
+                  await readPreviewImage(artifact.value.url, controller.signal)
+                );
                 const usable = await loadUsableContactSheet(imageUrl);
                 if (isCancelled() || !usable) {
                   URL.revokeObjectURL(imageUrl);

@@ -227,7 +227,11 @@ async function run() {
   await js(`document.querySelector('.uc-video-editor__transport-play').click(); HTMLMediaElement.prototype.play=window.originalPlay; window.rejectPendingPlay(new Error('cancelled test playback'))`);
   await delay(100);
   await js(`window.dragFrames=[]; window.dragPass=0; window.dragStarted=performance.now(); window.originalDraw=CanvasRenderingContext2D.prototype.drawImage; CanvasRenderingContext2D.prototype.drawImage=function(media,...args){ if(this.canvas.matches('.uc-video-editor__stage-frame') && media instanceof HTMLVideoElement){const target=Number(document.querySelector('[aria-label="主轨播放头"]').getAttribute('aria-valuenow'))/1e6; const clipId=editingHarness.clipForVideo(media); window.dragFrames.push({at:performance.now(),pass:window.dragPass,clip:clipId ? Number(clipId.slice(5)) : null,target,time:media.currentTime,seeking:media.seeking});} return window.originalDraw.call(this,media,...args)}; undefined`);
-  const dragGeometry=await js(`(()=>{const s=document.querySelector('.uc-video-editor__playhead-scale').getBoundingClientRect();const p=document.querySelector('[aria-label="主轨播放头"]').getBoundingClientRect();const v=document.querySelector('.uc-video-editor__timeline-canvas').parentElement.getBoundingClientRect();return {left:v.left,right:v.right,y:p.top+8,startX:s.left+2}})()`);
+  window.focus();
+  window.webContents.focus();
+  const dragGeometry=await js(`(()=>{const s=document.querySelector('.uc-video-editor__playhead-scale').getBoundingClientRect();const p=document.querySelector('[aria-label="主轨播放头"]').getBoundingClientRect();const v=document.querySelector('.uc-video-editor__timeline-canvas').parentElement.getBoundingClientRect();return {left:v.left,right:v.right,y:p.top+8,startX:p.left+p.width/2}})()`);
+  report.dragGeometry=dragGeometry;
+  assert.ok(await js(`!!document.elementFromPoint(${dragGeometry.startX},${dragGeometry.y})?.closest('[aria-label="主轨播放头"]')`),'drag must hit the playhead');
   window.webContents.sendInputEvent({type:'mouseDown',x:Math.round(dragGeometry.startX),y:Math.round(dragGeometry.y),button:'left',clickCount:1});
   window.webContents.sendInputEvent({type:'mouseMove',x:Math.round(dragGeometry.left+2),y:Math.round(dragGeometry.y),button:'left'});
   await js('editingHarness.releaseProxies()');

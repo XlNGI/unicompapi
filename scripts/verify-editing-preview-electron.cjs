@@ -6,12 +6,13 @@ const { execFileSync } = require('node:child_process');
 const { app, BrowserWindow, protocol } = require('electron');
 const root = path.resolve(__dirname, '..');
 const before = process.argv.includes('--before');
+const realIdle = process.argv.includes('--real-idle');
 const staticIdle = process.argv.includes('--static-idle');
 const exportIdle = process.argv.includes('--export-idle');
 const framesOnly = process.argv.includes('--frames-only');
 const label = before ? 'before' : framesOnly ? 'frames' : 'after';
-const output = path.join(root, staticIdle ? 'outputs/editing-static-idle' : exportIdle ? 'outputs/editing-export-idle' : 'outputs/editing-preview-fix', label);
-if (staticIdle) protocol.registerSchemesAsPrivileged([{scheme:'unicomp-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
+const output = path.join(root, realIdle ? 'outputs/editing-real-idle' : staticIdle ? 'outputs/editing-static-idle' : exportIdle ? 'outputs/editing-export-idle' : 'outputs/editing-preview-fix', label);
+if (staticIdle || realIdle) protocol.registerSchemesAsPrivileged([{scheme:'unicomp-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 let staticExpired = false;
 const checks = [];
 const report = { checks };
@@ -19,7 +20,7 @@ app.setPath('userData', path.join(os.tmpdir(), `unicomp-editing-preview-${proces
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
 app.on('window-all-closed', () => {});
-const deadline = setTimeout(() => { console.error('Deadline exceeded'); app.exit(1); }, 150000);
+const deadline = setTimeout(() => { console.error('Deadline exceeded'); app.exit(1); }, realIdle ? 1_380_000 : 150000);
 let window;
 const js = source => window.webContents.executeJavaScript(source);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -49,7 +50,7 @@ async function run() {
   const tooling = await import('./media-engine-common.mjs');
   const engine = await tooling.readMediaEngineManifest(root);
   const ffmpeg = tooling.resolveMediaEngineInstallation(root, engine).ffmpegPath;
-  const fixtures = { videos: [], sheets: [] };
+  const fixtures = { videos: [], sheets: [], controlledMedia: realIdle };
   for (const [index, size] of ['180x320', '320x180', '240x240'].entries()) {
     const video = path.join(temp, `${index}.mp4`), sheet = path.join(temp, `${index}.jpg`);
     execFileSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `testsrc2=size=${size}:rate=12`, '-t', '5', '-c:v', 'libopenh264', '-pix_fmt', 'yuv420p', video]);
@@ -57,7 +58,20 @@ async function run() {
     fixtures.videos.push(`data:video/mp4;base64,${(await fs.readFile(video)).toString('base64')}`);
     fixtures.sheets.push((await fs.readFile(sheet)).toString('base64'));
   }
+  if (realIdle) {
+    await require(require.resolve('esbuild',{paths:[require.resolve('vite')]})).build({
+      entryPoints:[path.join(root,'electron/ipc/local-media-response.ts')],bundle:true,platform:'node',format:'cjs',outfile:path.join(temp,'media-response.cjs')});
+  }
   await app.whenReady();
+  if (realIdle) {
+    const { createLocalMediaResponse } = require(path.join(temp,'media-response.cjs'));
+    protocol.handle('unicomp-media', async request => {
+      const url = new URL(request.url);
+      const match = /^\/(video|sheet)-([0-2])-[a-z0-9-]+$/.exec(url.pathname);
+      if (!match || Date.parse(url.searchParams.get('expires') ?? '') <= Date.now()) return new Response('expired',{status:404});
+      return createLocalMediaResponse(path.join(temp,`${match[2]}.${match[1]==='video'?'mp4':'jpg'}`),match[1]==='video'?'video/mp4':'image/jpeg',request.method,request.headers.get('range') ?? undefined);
+    });
+  }
   if (staticIdle) {
     fixtures.sheetUrls = fixtures.sheets.map((_,i)=>`unicomp-media://local/sheet-${i}`);
     protocol.handle('unicomp-media', request => {
@@ -71,7 +85,7 @@ async function run() {
       rollupOptions: { onwarn(warning, warn) { if (warning.code !== 'MODULE_LEVEL_DIRECTIVE') warn(warning); } },
       lib: { entry: path.join(root, 'tests/harness/video-editing-preview-harness.tsx'), formats: ['iife'], name: 'EditingHarness', fileName: () => 'harness.js' } } });
   await fs.writeFile(path.join(temp, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script>window.editingFixtures=${JSON.stringify(fixtures)}</script><script src="harness.js"></script></body></html>`);
-  window = new BrowserWindow({ show: true, width: 1280, height: 850, webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  window = new BrowserWindow({ show: true, width: 1280, height: 850, webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: realIdle } });
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true }));
   await window.loadFile(path.join(temp, 'index.html'));
   await until(`document.querySelectorAll('.uc-video-editor__seg').length === 3`);
@@ -82,6 +96,44 @@ async function run() {
   checks.push({ name: 'three clips have visible decoded thumbnail cells', passed: report.initial.every(s => s.slots.length && s.slots.every(t => t.loaded && t.imageHeight > 0 && t.imageWidth > 0)) });
   const staticImages = `Array.from(document.querySelectorAll('.uc-video-editor__seg-poster,.uc-video-editor__media-frame img,.uc-video-editor__contact-sheet')).map(i=>({src:i.src,loaded:i.naturalWidth>0}))`;
   const beforeStatic = await js(staticImages);
+  if (realIdle) {
+    await click('导出');
+    await until(`document.querySelector('.uc-video-editor__export-preview-video')?.readyState>=2`);
+    await js(`window.realTimeline=document.querySelector('video[aria-label="时间线预览"]');window.realExport=document.querySelector('.uc-video-editor__export-preview-video');document.querySelector('.uc-video-editor__transport-play').click()`);
+    await until('realTimeline.currentTime>1');
+    await js(`document.querySelector('.uc-video-editor__transport-play').click();void realExport.play()`);
+    await until('realExport.currentTime>1');
+    await js('realExport.pause()');
+    const before = await js(`({timeline:realTimeline.currentTime,export:realExport.currentTime,timelineUrl:realTimeline.src,exportUrl:realExport.src,state:editingHarness.state()})`);
+    report.beforeIdle=before;
+    report.idleStartedAt=new Date().toISOString();
+    await screenshot('before-idle');
+    const started=Date.now();
+    window.minimize();
+    console.log('Real idle started:',report.idleStartedAt);
+    await fs.writeFile(path.join(output,'progress.json'),JSON.stringify({startedAt:report.idleStartedAt,requiredMs:1_210_000}));
+    while(Date.now()-started<1_210_000) await delay(Math.min(30_000,1_210_000-(Date.now()-started)));
+    report.actualIdleMs=Date.now()-started;
+    window.restore();
+    window.show();
+    await delay(500);
+    const afterImages=await js(staticImages);
+    checks.push({name:'static thumbnails and posters survive real 20-minute background idle',passed:afterImages.every(i=>i.loaded && beforeStatic.some(old=>old.src===i.src)) && (await js('editingHarness.state()')).requests.length===before.state.requests.length});
+    await js(`document.querySelector('.uc-video-editor__transport-play').click()`);
+    await until(`(()=>{const v=document.querySelector('video[aria-label="时间线预览"]');return !v.paused && v.currentTime>${before.timeline+0.15} && v.src!==${JSON.stringify(before.timelineUrl)}})()`);
+    checks.push({name:'timeline resumes at original position after real expired handle',passed:true});
+    await js(`document.querySelector('.uc-video-editor__transport-play').click();void realExport.play().catch(()=>{})`);
+    await until(`!realExport.paused && realExport.currentTime>${before.export+0.15} && realExport.src!==${JSON.stringify(before.exportUrl)}`);
+    checks.push({name:'export result resumes at original position after real expired handle',passed:true});
+    await js('realExport.pause()');
+    checks.push({name:'actual elapsed idle exceeds 20 minutes without clock simulation',passed:report.actualIdleMs>=1_200_000});
+    await screenshot('after-idle');
+    report.boundary='Windows Electron minimized for actual elapsed time; real local media protocol, 5-minute TTL and production Range response; synthetic files and isolated IPC, no user project writes, no sleep/lock test.';
+    await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));
+    assert.ok(checks.every(c=>c.passed));
+    console.log(JSON.stringify({checks,actualIdleMs:report.actualIdleMs,evidence:output}));
+    return;
+  }
   if (!exportIdle) await js(`editingHarness.expire(${staticIdle ? 1201000 : 301000})`);
   if (staticIdle) staticExpired = true;
   // A resize changes visible thumbnail slots, as scrolling/zooming does.
