@@ -76,6 +76,48 @@ describe('temporary document workflow', () => {
     ]));
   });
 
+  it('allows continuation-capable layouts to split block groups across slides', async () => {
+    let generated = false;
+    const result = await prepareTemporaryDocumentVersion({
+      outline: {
+        kind: 'ppt',
+        title: '龙文化对比',
+        sections: [{
+          heading: '中国龙与西方龙',
+          level: 1,
+          pageKind: 'comparison',
+          blocks: [
+            {
+              type: 'table',
+              header: ['维度', '中国龙', '西方龙'],
+              rows: [
+                ['寓意', '祥瑞', '怪物'],
+                ['外形', '蛇身鹿角', '有翼巨蜥'],
+                ['职能', '司掌云雨', '守护财宝'],
+                ['关系', '和谐共处', '英雄讨伐']
+              ]
+            },
+            { type: 'bullets', items: ['翻译争议：跨文化传播中需要避免文化误读。'] }
+          ]
+        }]
+      },
+      generateTemporaryFile: async () => {
+        generated = true;
+        return {
+          fileName: '龙文化对比.pptx',
+          temporaryPath: '龙文化对比.tmp.pptx',
+          finalPath: '龙文化对比.pptx',
+          sizeBytes: 128
+        };
+      }
+    });
+    expect(result.status).toBe('ready');
+    expect(generated).toBe(true);
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'capacity_exceeded', severity: 'error' })
+    ]));
+  });
+
   it('does not publish when rendering fails or cancellation arrives', async () => {
     const failed = await prepareTemporaryDocumentVersion({
       outline,

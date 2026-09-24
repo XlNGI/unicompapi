@@ -995,6 +995,7 @@ function expandPresentationSection(
 
   return pages.map((page, index) => ({
     ...page,
+    ...(index === 0 && section.scene ? { scene: section.scene } : {}),
     continuationIndex: index + 1
   }));
 }
@@ -1264,6 +1265,16 @@ function renderPresentationCover(
   outline: DocumentOutline,
   template: PresentationTemplate
 ): void {
+  if (outline.coverScene && outline.coverScene.elements.length > 0) {
+    const slide = pptx.addSlide();
+    slide.background = { color: template.tokens.background };
+    renderScenePage(slide, outline.coverScene, template);
+    return;
+  }
+  if (template.id === 'natural_minimal') {
+    renderNaturalMinimalCover(pptx, outline, template);
+    return;
+  }
   const slide = pptx.addSlide();
   addPresentationFrame(slide, template, 'cover');
   const align = template.id === 'financing' ? 'left' : 'center';
@@ -1295,6 +1306,82 @@ function renderPresentationCover(
       wrap: true
     });
   }
+}
+
+function renderNaturalMinimalCover(
+  pptx: PptxGenJS,
+  outline: DocumentOutline,
+  template: PresentationTemplate
+): void {
+  const slide = pptx.addSlide();
+  addPresentationFrame(slide, template, 'cover');
+  slide.addShape('line', {
+    x: 0.92,
+    y: 1.18,
+    w: 1.28,
+    h: 0,
+    line: { color: template.tokens.secondaryAccent, width: 2.2 }
+  });
+  slide.addText('NATURAL NOTES', {
+    x: 0.92,
+    y: 1.38,
+    w: 3.2,
+    h: 0.28,
+    fontSize: 12,
+    bold: true,
+    charSpacing: 2.2,
+    color: template.tokens.secondaryAccent,
+    margin: 0,
+    fit: 'shrink'
+  });
+  slide.addText(outline.title, {
+    x: 0.92,
+    y: 2.02,
+    w: 8.9,
+    h: 1.7,
+    fontSize: coverTitleFontSize(outline.title),
+    bold: true,
+    color: template.tokens.text,
+    margin: 0,
+    breakLine: false,
+    valign: 'middle',
+    wrap: true
+  });
+  if (outline.sections.length > 0) {
+    slide.addText(outline.sections[0].heading, {
+      x: 0.95,
+      y: 4.35,
+      w: 7.7,
+      h: 0.62,
+      fontSize: 19,
+      color: template.tokens.muted,
+      margin: 0,
+      wrap: true
+    });
+  }
+  slide.addShape('ellipse', {
+    x: 9.85,
+    y: 1.35,
+    w: 2.1,
+    h: 2.1,
+    fill: { color: tintColor(template.tokens.accent, 0.76) },
+    line: { color: template.tokens.accent, transparency: 100 }
+  });
+  slide.addShape('ellipse', {
+    x: 10.55,
+    y: 2.05,
+    w: 1.25,
+    h: 1.25,
+    fill: { color: tintColor(template.tokens.secondaryAccent, 0.62) },
+    line: { color: template.tokens.secondaryAccent, transparency: 100 }
+  });
+  slide.addShape('line', {
+    x: 8.95,
+    y: 5.58,
+    w: 3.35,
+    h: 0,
+    line: { color: tintColor(template.tokens.accent, 0.2), width: 1.1 }
+  });
 }
 
 function renderScenePage(
@@ -1361,8 +1448,10 @@ function renderPresentationPage(
   pageNumber: number
 ): void {
   const slide = pptx.addSlide();
-  addPresentationFrame(slide, template, 'content');
   if (page.scene && page.scene.elements && page.scene.elements.length > 0) {
+    // The LLM-authored scene owns this page's composition. Keep only a safe
+    // background fallback and bypass every template frame and layout helper.
+    slide.background = { color: template.tokens.background };
     renderScenePage(slide, page.scene, template);
     slide.addText(String(pageNumber), {
       objectName: 'UniComp Page Number',
@@ -1384,6 +1473,22 @@ function renderPresentationPage(
     page.continuationIndex > 1 && hasData
       ? `${page.heading}（续 ${page.continuationIndex}）`
       : page.heading;
+  if (template.id === 'natural_minimal') {
+    renderNaturalMinimalPage(slide, page, template, title);
+    slide.addText(String(pageNumber), {
+      objectName: 'UniComp Page Number',
+      x: 12.25,
+      y: 7.04,
+      w: 0.45,
+      h: 0.2,
+      fontSize: 10,
+      color: template.tokens.muted,
+      align: 'right',
+      margin: 0
+    });
+    return;
+  }
+  addPresentationFrame(slide, template, 'content');
   if (page.layout.kind === 'section') {
     renderPresentationSectionPage(slide, page, template);
   } else if (page.layout.kind === 'closing') {
@@ -1417,6 +1522,312 @@ function renderPresentationPage(
     align: 'right',
     margin: 0
   });
+}
+
+function renderNaturalMinimalPage(
+  slide: PptxGenJS.Slide,
+  page: ExpandedPresentationPage,
+  template: PresentationTemplate,
+  title: string
+): void {
+  if (page.layout.kind === 'section') {
+    renderNaturalMinimalSectionPage(slide, page, template);
+    return;
+  }
+  if (page.layout.kind === 'closing') {
+    renderNaturalMinimalSectionPage(slide, page, template);
+    return;
+  }
+  const hasData = page.units.some(
+    (unit) => unit.type === 'table' || unit.type === 'chart'
+  );
+  slide.addText(title, {
+    x: 0.92,
+    y: 0.6,
+    w: 9.7,
+    h: 0.7,
+    fontSize: contentTitleFontSize(title),
+    bold: true,
+    color: template.tokens.text,
+    margin: 0,
+    wrap: true
+  });
+  slide.addShape('line', {
+    x: 0.94,
+    y: 1.42,
+    w: 1.45,
+    h: 0,
+    line: { color: template.tokens.secondaryAccent, width: 1.7 }
+  });
+  if (hasData) {
+    renderNaturalMinimalDataPage(slide, page, template);
+    return;
+  }
+  const { takeaway, action, body } = presentationTextPageParts(page);
+  const bottom = action ? 5.95 : 6.55;
+  let top = 1.78;
+  if (takeaway) {
+    slide.addText(takeaway.text, {
+      x: 0.96,
+      y: top,
+      w: 10.9,
+      h: 0.72,
+      fontSize: 23,
+      bold: true,
+      color: template.tokens.text,
+      margin: 0,
+      wrap: true
+    });
+    slide.addShape('line', {
+      x: 0.96,
+      y: top + 0.86,
+      w: 2.3,
+      h: 0,
+      line: { color: template.tokens.accent, width: 1.2 }
+    });
+    top += 1.18;
+  }
+  if (body.length > 0) {
+    drawNaturalMinimalUnits(slide, body, template, page.layout, 0.96, top, 11.3, bottom - top);
+  }
+  if (action) {
+    slide.addShape('line', {
+      x: 0.96,
+      y: 6.12,
+      w: 2.05,
+      h: 0,
+      line: { color: template.tokens.secondaryAccent, width: 1.4 }
+    });
+    slide.addText(`下一步  ${action.text}`, {
+      x: 3.2,
+      y: 5.96,
+      w: 8.95,
+      h: 0.44,
+      fontSize: 14,
+      color: template.tokens.muted,
+      margin: 0,
+      wrap: true,
+      fit: 'shrink'
+    });
+  }
+}
+
+function renderNaturalMinimalSectionPage(
+  slide: PptxGenJS.Slide,
+  page: ExpandedPresentationPage,
+  template: PresentationTemplate
+): void {
+  const { takeaway, action, body } = presentationTextPageParts(page);
+  slide.addText('SECTION', {
+    x: 0.96,
+    y: 1.12,
+    w: 1.25,
+    h: 0.25,
+    fontSize: 11,
+    bold: true,
+    charSpacing: 1.8,
+    color: template.tokens.secondaryAccent,
+    margin: 0
+  });
+  slide.addText(page.heading, {
+    x: 0.96,
+    y: 1.55,
+    w: 10.4,
+    h: 1.0,
+    fontSize: contentTitleFontSize(page.heading) + 3,
+    bold: true,
+    color: template.tokens.text,
+    margin: 0,
+    wrap: true
+  });
+  slide.addShape('line', {
+    x: 0.96,
+    y: 2.78,
+    w: 2.6,
+    h: 0,
+    line: { color: template.tokens.accent, width: 1.4 }
+  });
+  if (takeaway) {
+    slide.addText(takeaway.text, {
+      x: 0.96,
+      y: 3.08,
+      w: 8.8,
+      h: 1.05,
+      fontSize: 24,
+      bold: true,
+      color: template.tokens.text,
+      margin: 0,
+      wrap: true
+    });
+  }
+  if (body.length > 0) {
+    drawNaturalMinimalUnits(slide, body, template, page.layout, 0.96, 4.45, 10.9, 1.35);
+  }
+  if (action) {
+    slide.addText(`下一步  ${action.text}`, {
+      x: 0.96,
+      y: 6.18,
+      w: 11.1,
+      h: 0.35,
+      fontSize: 14,
+      color: template.tokens.muted,
+      margin: 0,
+      wrap: true,
+      fit: 'shrink'
+    });
+  }
+}
+
+function drawNaturalMinimalUnits(
+  slide: PptxGenJS.Slide,
+  units: readonly PresentationTextUnit[],
+  template: PresentationTemplate,
+  layout: PresentationLayout,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): void {
+  if (units.length === 0) return;
+  const columns = units.length > 2 ? 2 : 1;
+  const rows = Math.ceil(units.length / columns);
+  const gap = 0.72;
+  const itemWidth = (width - (columns - 1) * gap) / columns;
+  const itemHeight = (height - (rows - 1) * 0.42) / rows;
+  units.forEach((unit, index) => {
+    const column = columns === 1 ? 0 : index % columns;
+    const row = columns === 1 ? index : Math.floor(index / columns);
+    const itemX = x + column * (itemWidth + gap);
+    const itemY = y + row * (itemHeight + 0.42);
+    slide.addShape('line', {
+      x: itemX,
+      y: itemY,
+      w: 0,
+      h: Math.max(0.55, itemHeight - 0.06),
+      line: { color: index % 2 === 0 ? template.tokens.accent : template.tokens.secondaryAccent, width: 1.6 }
+    });
+    slide.addText(String(index + 1).padStart(2, '0'), {
+      x: itemX + 0.2,
+      y: itemY,
+      w: 0.42,
+      h: 0.25,
+      fontSize: 11,
+      bold: true,
+      color: template.tokens.secondaryAccent,
+      margin: 0
+    });
+    const [label, explanation] = splitContentGroup(unit.text);
+    if (label) {
+      slide.addText(label, {
+        x: itemX + 0.72,
+        y: itemY,
+        w: itemWidth - 0.78,
+        h: 0.34,
+        fontSize: 18,
+        bold: true,
+        color: template.tokens.text,
+        margin: 0,
+        wrap: true,
+        fit: 'shrink'
+      });
+    }
+    slide.addText(explanation, {
+      x: itemX + 0.72,
+      y: itemY + (label ? 0.43 : 0.02),
+      w: itemWidth - 0.78,
+      h: Math.max(0.42, itemHeight - (label ? 0.52 : 0.08)),
+      fontSize: layout.minBodyFontSize,
+      color: template.tokens.text,
+      italic: unit.quote,
+      margin: 0,
+      valign: 'top',
+      fit: 'shrink',
+      wrap: true
+    });
+  });
+}
+
+function renderNaturalMinimalDataPage(
+  slide: PptxGenJS.Slide,
+  page: ExpandedPresentationPage,
+  template: PresentationTemplate
+): void {
+  const { takeaway, action, body } = presentationTextPageParts(page);
+  let top = 1.76;
+  if (takeaway) {
+    slide.addText(takeaway.text, {
+      x: 0.96,
+      y: top,
+      w: 11.1,
+      h: 0.6,
+      fontSize: 20,
+      bold: true,
+      color: template.tokens.text,
+      margin: 0,
+      wrap: true
+    });
+    top += 0.88;
+  }
+  if (body.length > 0) {
+    drawNaturalMinimalUnits(slide, body, template, page.layout, 0.96, top, 11.1, 0.9);
+    top += 1.1;
+  }
+  const data = page.units.find(
+    (unit): unit is PresentationTableUnit | PresentationChartUnit =>
+      unit.type === 'table' || unit.type === 'chart'
+  );
+  if (data?.type === 'table') {
+    const rows = [
+      data.block.header.map((cell) => ({ text: cell, options: { bold: true, color: contrastingText(template.tokens.accent), fill: { color: template.tokens.accent } } })),
+      ...data.block.rows.map((row) => row.map((cell) => ({ text: cell, options: { color: template.tokens.text, fill: { color: template.tokens.surface } } })))
+    ];
+    slide.addTable(rows, {
+      x: 0.96,
+      y: top,
+      w: 11.1,
+      h: action ? 3.55 : 4.25,
+      fontSize: page.layout.minBodyFontSize,
+      color: template.tokens.text,
+      border: { pt: 0.4, color: tintColor(template.tokens.accent, 0.55) },
+      margin: 0.08,
+      valign: 'middle',
+      autoPage: false,
+      autoPageRepeatHeader: false
+    });
+  } else if (data?.type === 'chart') {
+    slide.addChart(
+      pptxChartType(data.block.chartKind),
+      [{ name: data.block.title ?? '数据', labels: data.block.data.map((item) => item.label), values: data.block.data.map((item) => item.value) }],
+      {
+        x: 0.96,
+        y: top,
+        w: 11.1,
+        h: action ? 3.55 : 4.25,
+        showTitle: Boolean(data.block.title),
+        title: data.block.title ?? '',
+        titleColor: template.tokens.text,
+        showLegend: true,
+        legendColor: template.tokens.text,
+        showValue: true,
+        catAxisLabelColor: template.tokens.muted,
+        valAxisLabelColor: template.tokens.muted,
+        chartColors: [template.tokens.accent, template.tokens.secondaryAccent, tintColor(template.tokens.accent, 0.44)]
+      }
+    );
+  }
+  if (action) {
+    slide.addText(`下一步  ${action.text}`, {
+      x: 0.96,
+      y: 6.1,
+      w: 11.1,
+      h: 0.36,
+      fontSize: 14,
+      color: template.tokens.muted,
+      margin: 0,
+      fit: 'shrink',
+      wrap: true
+    });
+  }
 }
 
 function renderPresentationSectionPage(
@@ -2167,6 +2578,11 @@ function renderPresentationClosing(
   template: PresentationTemplate
 ): void {
   const slide = pptx.addSlide();
+  if (outline.closingScene && outline.closingScene.elements.length > 0) {
+    slide.background = { color: template.tokens.background };
+    renderScenePage(slide, outline.closingScene, template);
+    return;
+  }
   addPresentationFrame(slide, template, 'closing');
   const finalTakeaway = [...outline.sections]
     .reverse()
@@ -2237,21 +2653,20 @@ function addPresentationFrame(
       });
       return;
     case 'natural_minimal':
-      slide.addShape('ellipse', {
-        x: 10.65,
-        y: variant === 'content' ? 1.08 : 0.72,
-        w: 2.05,
-        h: 2.05,
-        fill: { color: template.tokens.surface },
-        line: { color: template.tokens.accent, width: 0.65 }
+      slide.addShape('line', {
+        x: 12.08,
+        y: variant === 'content' ? 0.72 : 0.96,
+        w: 0,
+        h: variant === 'content' ? 5.4 : 4.7,
+        line: { color: tintColor(template.tokens.accent, 0.55), width: 0.8 }
       });
       slide.addShape('ellipse', {
-        x: 11.55,
-        y: variant === 'content' ? 1.92 : 1.55,
-        w: 0.95,
-        h: 0.95,
-        fill: { color: template.tokens.background },
-        line: { color: template.tokens.secondaryAccent, width: 0.85 }
+        x: 11.78,
+        y: variant === 'content' ? 6.3 : 6.0,
+        w: 0.62,
+        h: 0.62,
+        fill: { color: tintColor(template.tokens.secondaryAccent, 0.55) },
+        line: { color: template.tokens.secondaryAccent, transparency: 100 }
       });
       return;
     case 'business_minimal':

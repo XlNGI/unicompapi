@@ -47,6 +47,25 @@ describe('document body display projection', () => {
     expect(documentBodyPreview(raw)).toBe('# 数据\n\n### 明细\n\n| 地区 | 金额\\|元 |\n| --- | --- |\n| 华东 | 20 |\n| 华南 市场 | 30 |\n\n收入\n\n- 华东：20\n- 华南：30\n- 未知\n\n> 谨慎判断\n> 核对来源\n\n1. 整理\n2. 复核');
   });
 
+  it('hides scene layout fragments from a malformed streaming PPT preview', () => {
+    const raw = JSON.stringify({
+      kind: 'ppt',
+      title: '龙：从古老图腾到现代精神符号',
+      sections: [{
+        heading: '内容概览',
+        blocks: [{
+          type: 'bullets',
+          items: ['龙的文化意义', ':{', 'elementId: 1,t: 12,', 'width: 42,', 'zIndex: 1,']
+        }],
+        scene: { elements: [] }
+      }]
+    });
+
+    expect(documentBodyPreview(raw)).toBe(
+      '# 龙：从古老图腾到现代精神符号\n\n## 内容概览\n\n- 龙的文化意义'
+    );
+  });
+
   it('decodes complete escapes and withholds unfinished Unicode and surrogate pairs', () => {
     expect(documentBodyPreview('{"title":"\\u4')).toBe('');
     expect(documentBodyPreview('{"title":"\\u4e2d\\u65')).toBe('# 中');

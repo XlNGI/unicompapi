@@ -16,7 +16,10 @@ import {
   type GeneratedTemporaryDocumentFile
 } from './office-document-generator';
 import { buildPresentationPlanFromOutline } from './presentation-plan';
-import type { PresentationTemplateId } from './presentation-template';
+import {
+  resolvePresentationTemplate,
+  type PresentationTemplateId
+} from './presentation-template';
 import { unlink } from 'node:fs/promises';
 
 export type DocumentDiagnosticSeverity = 'error' | 'warning';
@@ -276,8 +279,11 @@ function collectDeterministicDiagnostics(
       }
     });
   });
+  const presentationTemplate = presentationPlan === undefined
+    ? undefined
+    : resolvePresentationTemplate(presentationPlan.templateId);
   for (const page of presentationPlan?.pages ?? []) {
-    if (!page.capacity.withinLimit) {
+    if (!page.capacity.withinLimit && !isSafeContinuationOverflow(page, presentationTemplate)) {
       diagnostics.push({
         code: 'capacity_exceeded',
         severity: 'error',
@@ -287,6 +293,25 @@ function collectDeterministicDiagnostics(
     }
   }
   return diagnostics;
+}
+
+/**
+ * The outline plan is intentionally one page per source section, while the
+ * PPT generator may split a section into continuation pages. A group-count
+ * overflow is therefore safe when the selected layout supports continuation
+ * and the section still fits its character budget. Character overflow remains
+ * an error because it can indicate an unusually large indivisible payload and
+ * should be surfaced before writing a file.
+ */
+function isSafeContinuationOverflow(
+  page: PresentationPlan['pages'][number],
+  template: ReturnType<typeof resolvePresentationTemplate> | undefined
+): boolean {
+  if (template === undefined) return false;
+  const layout = template.layouts[page.layout];
+  return layout.supportsContinuation &&
+    page.capacity.contentGroups > page.capacity.maxContentGroups &&
+    page.capacity.bodyCharacters <= page.capacity.maxBodyCharacters;
 }
 
 function cancelled(

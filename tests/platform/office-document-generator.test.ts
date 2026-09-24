@@ -1029,6 +1029,117 @@ describe('office document generator', () => {
     }
   });
 
+  it('uses an independent natural-minimal page architecture', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'ppt',
+        title: '自然主题结构验证',
+        sections: [
+          {
+            heading: '文化线索',
+            level: 1,
+            pageKind: 'insight',
+            takeaway: '自然与文化共同构成叙事的线索。',
+            blocks: [
+              {
+                type: 'bullets',
+                items: ['起源：从环境与信仰中形成。', '传播：在不同地域持续演化。']
+              }
+            ]
+          }
+        ]
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-09-24T10:00:00.000Z',
+      presentationTemplate: 'natural_minimal'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const contentSlide = zip.readAsText('ppt/slides/slide2.xml');
+
+    expect(contentSlide).toContain('自然与文化共同构成叙事的线索。');
+    expect(contentSlide).toContain('文化线索');
+    expect(contentSlide).not.toContain('核心结论');
+    expect(contentSlide).not.toContain('下一步：');
+  });
+
+  it('executes an LLM-authored scene without adding the template frame', async () => {
+    const outputDirectory = await createOutputDirectory();
+    const outline = parseDocumentOutline(
+      JSON.stringify({
+        kind: 'ppt',
+        title: '自主构图验证',
+        coverScene: {
+          schemaVersion: 1,
+          elements: [{
+            elementId: 'cover',
+            type: 'text',
+            geometry: { x: 0.1, y: 0.3, width: 0.8, height: 0.2 },
+            zIndex: 2,
+            content: '自主构图验证',
+            style: { fontSize: 42, textColor: '20372B' }
+          }]
+        },
+        sections: [{
+          heading: '主张与证据',
+          level: 1,
+          pageKind: 'insight',
+          blocks: [{ type: 'bullets', items: ['证据：内容由页面场景直接排版。'] }],
+          scene: {
+            schemaVersion: 1,
+            elements: [
+              {
+                elementId: 'hero',
+                type: 'text',
+                geometry: { x: 0.1, y: 0.18, width: 0.8, height: 0.18 },
+                zIndex: 2,
+                content: '主张与证据',
+                style: { fontSize: 34, textColor: '20372B' }
+              },
+              {
+                elementId: 'evidence',
+                type: 'text',
+                geometry: { x: 0.18, y: 0.58, width: 0.6, height: 0.18 },
+                zIndex: 2,
+                content: '证据：内容由页面场景直接排版。',
+                style: { fontSize: 20, textColor: '4E8B61' }
+              }
+            ]
+          }
+        }],
+        closingScene: {
+          schemaVersion: 1,
+          elements: [{
+            elementId: 'closing',
+            type: 'text',
+            geometry: { x: 0.2, y: 0.45, width: 0.6, height: 0.14 },
+            zIndex: 2,
+            content: '结束',
+            style: { fontSize: 28, textColor: '20372B' }
+          }]
+        }
+      })
+    );
+    const result = await generateDocumentFile({
+      kind: 'ppt',
+      outline,
+      outputDirectory,
+      now: '2026-09-24T10:00:00.000Z',
+      presentationTemplate: 'work_report'
+    });
+    const zip = new AdmZip(Buffer.from(await readFile(result.absolutePath)));
+    const contentSlide = zip.readAsText('ppt/slides/slide2.xml');
+
+    expect(contentSlide).toContain('证据：内容由页面场景直接排版。');
+    expect(contentSlide).not.toContain('核心结论');
+    expect(zip.readAsText('ppt/slides/slide1.xml')).toContain('自主构图验证');
+    expect(zip.readAsText('ppt/slides/slide3.xml')).toContain('结束');
+  });
+
   it('does not expose internal presentation template names in generated slides', async () => {
     const templateNames = ['工作汇报', '自然简约', '极简商务', '科技风', '融资演讲稿'];
     for (const presentationTemplate of [

@@ -72,7 +72,11 @@ PR：https://github.com/XlNGI/unicompapi/pull/9 。负责人已授权在这些�
 在 `feature/basic-editing-mp4-export` 将基础剪辑新导出固定为软件 MP4/H.264/AAC，保留历史 WebM 计划可读性与旧文件，不改布局、不调用服务商、不迁移用户数据。导出前置能力检查、冻结计划、文件名、FFmpeg 单源/组合参数和 IPC 合同已同步；本地探针在原子发布前检查 MP4 容器及 H.264/AAC 流，控制器在 Work 登记前再次检查容器、尺寸和时长。旧 WebM 不自动转换，重新导出草稿生成 MP4。
 
 证据：相关 Vitest 30/30、媒体工具 Node 8/8、`pnpm typecheck`、`pnpm lint`、`pnpm build` 和 `git diff --check` 通过；真实控制器生成 `outputs/editing-mp4/controller-export.mp4`，FFmpeg 全解码通过。Electron 隔离验证中，MP4 在 MIME 省略和显式 `video/mp4` 两种响应下均加载、播放、定位、播放到结束并重新打开成功，报告为 `outputs/editing-mp4/after.json`。未验证 macOS、原生系统播放器、正式打包和人工点击作品库页面；这些不影响本地导出合同，但不能据此宣称跨平台或发布验收完成。未提交、推送或合并。
+### 2026-09-24 单列会话执行流与附件入口优化
 
+对话页继续沿用单列主线：消息、语义规划、资料检索、受控执行、渲染校验和交付状态按时间顺序追加；生产步骤默认只显示自然语言标题与状态，进行中的步骤使用轻量脉冲动画，开发者模式才展开 docId、nodeId、耗时、operationId 和脱敏 facts。历史对话和项目上下文仍通过对话页按钮按需唤出，应用壳层侧栏保持原有行为。底部输入框新增可见附件按钮，文件仍先经过受控 `documentAttachments.importAttachment`，支持图片、文档和电子书，并保留停止任务、拖拽和粘贴入口。执行时间线压缩重复请求和技术事实入口，恢复原侧栏布局并消除右侧空白。
+
+验证：`pnpm build` 通过；对话页/UI 合同 22 项、生产时间线 17 项、主/测试 TypeScript、变更文件 ESLint 和 `git diff --check` 通过。完整 `pnpm test` 仍受工作树既有问题阻断：冻结交接包缺失 `manifests/SHA256SUMS.txt`、平台假设清单检测已有 2 项未批准匹配、Vidu wiring 合同已有 1 项计数偏差；均与本次对话 UI 修改无关，未修改这些范围。
 ### 2026-09-24 PPT 视觉 QA 把装饰线误判为越界
 
 正式 PPT 已能完成 LibreOffice/Poppler 渲染，但 `inspectPptxGeometry` 要求形状宽高都大于 0。工作汇报模板的卡片/时间线装饰线是合法的零宽或零高连接线，被记成 `element_overflow`。该诊断无法通过改大纲修好，于是校验失败、未登记作品。现改为：在幻灯片内的单向连接线视为合法几何，真实越出页面的形状仍失败。失败日志对视觉诊断记录 `visual_diagnostics`，不写路径或原文。新建失败提示不再说原作品已保留。
