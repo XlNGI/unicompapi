@@ -45,6 +45,20 @@ describe('ConversationWorkflowController', () => {
     expect(getRuntime).not.toHaveBeenCalled();
   });
 
+  it('rejects unsafe input before creating a conversation or calling the classifier', async () => {
+    const f = await semanticFixture('ready');
+    const result = await f.controller.start({
+      clientCommandId: 'unsafe-input',
+      conversation: null,
+      title: 'PPT',
+      content: '请使用 api_key: sk-test-value 制作 PPT',
+      semanticCandidate
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: 'local_safety_rejected' } });
+    expect(f.classify).not.toHaveBeenCalled();
+    expect(await f.workflows.list()).toEqual([]);
+  });
+
   it('never falls back to local business routing when production has no classifier', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-no-classifier-'));
     roots.push(root);

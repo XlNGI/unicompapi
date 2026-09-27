@@ -146,8 +146,8 @@ export function validateEvidenceManifest(value) {
     if (!acceptanceStatuses.includes(result.status)) throw new Error('Evidence status is invalid');
     if (!Array.isArray(result.evidenceRefs)) throw new Error('Evidence references are invalid');
     const evidenceRefs = result.evidenceRefs.map((reference) => {
-      const normalized = safeRelativePath(reference);
-      if (!normalized.startsWith('docs/active/evidence/phase9/')) {
+      const normalized = safeRelativePath(reference).replace(/^docs\/active\/evidence\/phase9\//, 'docs/evidence/phase9/');
+      if (!normalized.startsWith('docs/evidence/phase9/')) {
         throw new Error('Evidence references must stay inside the Phase 9 evidence root');
       }
       return normalized;
@@ -357,7 +357,7 @@ export function buildEvidenceManifest({ matrix, runtime, sourceCommit, collected
 }
 
 export async function writeEvidenceManifest(root, manifest, outputRelative) {
-  const evidenceRoot = path.resolve(root, 'docs', 'active', 'evidence', 'phase9');
+  const evidenceRoot = path.resolve(root, 'docs', 'evidence', 'phase9');
   const output = resolveInside(evidenceRoot, safeRelativePath(outputRelative));
   await mkdir(path.dirname(output), { recursive: true });
   await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');

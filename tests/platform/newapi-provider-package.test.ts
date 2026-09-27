@@ -1,5 +1,7 @@
 import type { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
+import { providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -1084,9 +1086,11 @@ describe('NewAPI chat adapter', () => {
       ? chatStreamEvent({ tool_calls: [{ index: 0, ...wireCall }] }, 'tool_calls')
       : chatStreamEvent({ content: 'Reviewed' }, 'stop')) + 'data: [DONE]\n\n'));
     const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
-    const execute = vi.fn(async () => ({ revision: 3 }));
+    const context = readDocumentToolContext();
+    const execute = vi.fn(async () => ({ schemaVersion: 1 as const, status: 'success' as const, observation: { revision: context.revision } }));
     const bridge = createDocumentToolCallingBridge({
-      bindings: [{ id: 'read_document_structure', fields: {}, authorize: async () => true, execute }],
+      bindings: [{ contract: readDocumentToolContract, authorize: async () => true, execute }],
+      getExecutionContext: () => context,
       budgetUnits: 4, maxCalls: 2, timeoutMs: 1_000
     });
     const handle = await adapter.submit({
@@ -1101,11 +1105,17 @@ describe('NewAPI chat adapter', () => {
       { role: 'user', content: 'Inspect' },
       { role: 'assistant', content: '', tool_calls: [wireCall] },
       { role: 'tool', tool_call_id: 'read-1', name: 'read_document_structure', content: JSON.stringify({
-        ok: true, callId: 'read-1', toolId: 'read_document_structure', toolVersion: '1.0',
-        costUnits: 1, outcomeUnknown: false, result: { revision: 3 }
+        schemaVersion: 1, status: 'success', observation: { revision: context.revision },
+        metadata: { callId: 'read-1', toolId: readDocumentToolContract.toolId, toolVersion: readDocumentToolContract.version,
+          costUnits: readDocumentToolContract.execution.budgetUnits }
       }) }
     ]);
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({ scope: 'document' }, expect.objectContaining({
+      currentDocumentId: context.currentDocumentId, revision: context.revision
+    }));
+    expect(requestJson(fixture.requests[0]).tools).toEqual(bridge.tools);
+    expect(JSON.stringify(requestJson(fixture.requests[0]))).not.toContain(context.currentDocumentId);
   });
 
   it('accepts empty finish reasons on gateway deltas but waits for an explicit terminal event', async () => {
@@ -1144,7 +1154,8 @@ describe('NewAPI chat adapter', () => {
     expect(result.lifecycle.content).toBe('');
   });
 
-  it('serializes only allowlisted native document tools', async () => {
+  it.each([true, false])('serializes canonical available tools and omits an empty set: %s', async (hasAvailableTools) => {
+    const tools = providerToolsFromContracts(hasAvailableTools ? [readDocumentToolContract] : []);
     const sse = [
       `data: ${JSON.stringify({ id: 'tool-stream', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v3', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\n`,
       'data: [DONE]\n\n'
@@ -1163,25 +1174,14 @@ describe('NewAPI chat adapter', () => {
       request: {
         responseExecutionId: 'response-tool-calling',
         invocationAttemptId: 'attempt-tool-calling',
-        messages: [{ role: 'user', content: 'apply' }],
-        tools: [{
-          type: 'function',
-          function: {
-            name: 'apply_document_patch',
-            parameters: { type: 'object', properties: {} }
-          }
-        }],
+        messages: [{ role: 'user', content: 'inspect' }],
+        tools,
         parameterValues: {}
       }
     });
     await handle.completion;
-    expect(requestJson(fixture.requests[0]).tools).toEqual([{
-      type: 'function',
-      function: {
-        name: 'apply_document_patch',
-        parameters: { type: 'object', properties: {} }
-      }
-    }]);
+    if (hasAvailableTools) expect(requestJson(fixture.requests[0]).tools).toEqual(tools);
+    else expect(requestJson(fixture.requests[0])).not.toHaveProperty('tools');
   });
 
   it('serializes default UniCompAPI chat fields without forcing stream/user', async () => {

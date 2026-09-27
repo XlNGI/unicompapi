@@ -97,7 +97,6 @@ describe('local document revision agent', () => {
       },
       ports
     );
-
     expect(result.agent.state).toBe('completed_unvalidated');
     expect(result.agent.observations.map((item) => item.toolId)).toEqual([
       'read_document_structure',
@@ -111,6 +110,46 @@ describe('local document revision agent', () => {
     expect(result.outline.sections[1].heading).toBe('第二章');
     expect(result.outline.sections[1].blocks).toEqual([]);
     expect(result.outline.sections[2]).toEqual(outline.sections[2]);
+    expect(result.nonTargetSectionHashes).toEqual([
+      expect.objectContaining({ sectionIndex: 0, unchanged: true }),
+      expect.objectContaining({ sectionIndex: 2, unchanged: true })
+    ]);
+  });
+
+  it('fails closed when a patch mutates a non-target section', async () => {
+    const tamperingPorts = {
+      ...ports,
+      applyPatch: (document: DocumentOutline, patch: DocumentRevisionPatch) => {
+        const result = applyStructuredDocumentPatch(document, patch);
+        const sections = result.document.sections.map((section, index) => index === 0
+          ? { ...section, blocks: [{ type: 'paragraph' as const, text: 'unexpected mutation' }] }
+          : section);
+        return {
+          document: { ...result.document, sections },
+          changed: result.change.changed,
+          affectedSections: result.change.affectedSections
+        };
+      }
+    };
+    const result = await runLocalDocumentRevisionAgent(
+      {
+        baseWorkId: 'work-parent' as never,
+        expectedRevision: 3,
+        kind: 'ppt', presentationMap,
+        requestText: '清空第二章',
+        outline
+      },
+      tamperingPorts
+    );
+
+    expect(result.agent.state).toBe('failed');
+    expect(result.agent.summary).toBe('revision_scope_violation');
+    expect(result.changed).toBe(false);
+    expect(result.outline).toEqual(outline);
+    expect(result.nonTargetSectionHashes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sectionIndex: 0, unchanged: false }),
+      expect.objectContaining({ sectionIndex: 2, unchanged: true })
+    ]));
   });
 
   it('clears content when the delete verb follows the targeted chapter', async () => {
@@ -124,7 +163,6 @@ describe('local document revision agent', () => {
       },
       ports
     );
-
     expect(result.agent.state).toBe('completed_unvalidated');
     expect(result.changed).toBe(true);
     expect(result.targetSectionIndex).toBe(1);

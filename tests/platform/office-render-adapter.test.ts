@@ -8,7 +8,8 @@ import {
   createOfficeRenderAdapter,
   createOfficeRenderAdapterFromEnv,
   inspectPptxGeometry,
-  OfficeRenderUnavailableError
+  OfficeRenderUnavailableError,
+  textBoundingBoxesOverlap
 } from '../../src/platform/documents/office-render-adapter';
 import {
   generateTemporaryDocumentFile,
@@ -21,6 +22,17 @@ afterEach(async () => {
 });
 
 describe('office render adapter', () => {
+  it('detects rendered text overlap using normalized top and bottom bounds', () => {
+    expect(textBoundingBoxesOverlap(
+      { left: 10, right: 80, bottom: 10, top: 50 },
+      { left: 40, right: 100, bottom: 30, top: 70 }
+    )).toBe(true);
+    expect(textBoundingBoxesOverlap(
+      { left: 10, right: 80, bottom: 10, top: 50 },
+      { left: 40, right: 100, bottom: 52, top: 70 }
+    )).toBe(false);
+  });
+
   it('requires explicit renderer configuration', () => {
     expect(createConfiguredOfficeRenderAdapter({})).toBeUndefined();
     expect(createConfiguredOfficeRenderAdapter({

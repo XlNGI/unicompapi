@@ -6,8 +6,14 @@ import {
   toConversationId,
   toConversationWorkflowId,
   type ConversationAttachmentReference,
-  type ConversationWorkflowV1
+  type ConversationWorkflowV1,
+  type DocumentContextSnapshot
 } from '../../domain';
+import {
+  ConversationRequestSafetyError,
+  validateConversationRequestSafety
+} from '../../application';
+import { buildDocumentContextSnapshot } from '../../application/document-context-snapshot';
 import {
   chatContextRequestParsers,
   type ChatContextIpcResult,
@@ -77,6 +83,11 @@ export class ConversationWorkflowController {
       const runtime = this.dependencies.getRuntime(session);
       await runtime.ready;
       signal.throwIfAborted();
+      validateConversationRequestSafety({
+        rawText: input.content,
+        projectId: session.projectId,
+        attachmentFileIds: input.attachmentFileIds
+      });
       const workflowId = toConversationWorkflowId(input.workflowId);
       const workflow = await runtime.workflowService.get(workflowId);
       if (!workflow) return failure('invalid_request', 'Conversation workflow does not exist');
@@ -126,6 +137,7 @@ export class ConversationWorkflowController {
         sourceMessageId: conversation.messages.at(-1)?.id,
         context: {
           ...semanticContext(conversation, workflow.sourceMessageId),
+          contextSnapshot: await buildWorkflowContextSnapshot(session.projectId, conversation, sourceMessageId, input.content),
           ...(input.semanticCandidate ? { semanticCandidate: input.semanticCandidate } : {})
         }
       });
@@ -311,6 +323,18 @@ export class ConversationWorkflowController {
     const runtime = this.dependencies.getRuntime(session);
     await runtime.ready;
     signal.throwIfAborted();
+    try {
+      validateConversationRequestSafety({
+        rawText: input.content,
+        projectId: session.projectId,
+        attachmentFileIds: input.attachmentFileIds
+      });
+    } catch (error) {
+      if (error instanceof ConversationRequestSafetyError) {
+        return failure('local_safety_rejected', '本地安全检查未通过，请修改输入后重试。');
+      }
+      throw error;
+    }
     let conversation = input.conversation
       ? await runtime.conversationService.get(
           toConversationId(input.conversation.conversationId)
@@ -348,6 +372,7 @@ export class ConversationWorkflowController {
       signal,
       context: {
         ...semanticContext(conversation),
+        contextSnapshot: await buildWorkflowContextSnapshot(session.projectId, conversation, source.id, input.content),
         ...(input.semanticCandidate ? { semanticCandidate: input.semanticCandidate } : {}),
         ...(input.intentHint
           ? {
@@ -471,4 +496,31 @@ function semanticContext(
       .slice(-8)
       .map((message) => message.displayContent ?? message.content)
   };
+}
+
+async function buildWorkflowContextSnapshot(
+  projectId: string,
+  conversation: Awaited<ReturnType<ConversationApplicationService['get']>>,
+  sourceMessageId: string,
+  requestText: string
+): Promise<DocumentContextSnapshot> {
+  const source = conversation.messages.find((message) => message.id === sourceMessageId);
+  const semantic = semanticContext(conversation, sourceMessageId);
+  return buildDocumentContextSnapshot({
+    projectId,
+    conversationId: conversation.id,
+    sourceMessageId,
+    requestText,
+    attachments: (source?.attachments ?? []).map((attachment) => ({
+      fileId: attachment.kind === 'file_reference' ? String(attachment.fileReferenceId) : String(attachment.assetId),
+      ...(attachment.kind === 'file_reference' && attachment.checksumSha256
+        ? { contentHash: attachment.checksumSha256 }
+        : {})
+    })),
+    existingDocuments: semantic.documents.map((document) => ({
+      documentRef: document.messageId,
+      kind: document.kind,
+      fileName: document.fileName
+    }))
+  });
 }

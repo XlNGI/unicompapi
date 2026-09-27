@@ -12,6 +12,7 @@ import {
   toIsoTimestamp,
   toMessageId,
   toProjectContextId,
+  type ConversationIntentPlan,
   type ConversationResponseDraftRepository,
   type ConversationResponseDraftV1,
   type ConversationResponseExecutionReadModelV1,
@@ -54,6 +55,7 @@ import { conversationAttachmentQuery } from '../../application/conversation-atta
 import { declinesWebResearch } from '../../application/conversation-intent-orchestrator';
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
+import { buildDocumentOutlinePrompt } from '../../shared/document-outline-contract';
 
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -611,7 +613,13 @@ export class ConversationResponseController {
       conversationRevision: conversation.revision,
       userMessageId: userMessage.id,
       userMessageRevision: userMessage.revision,
-      ...(workflow ? { promptContent: input.content } : {}),
+      ...(workflow
+        ? {
+            promptContent: workflow.plan.kind === 'document'
+              ? buildDocumentGenerationPrompt(input.content, workflow.plan)
+              : input.content
+          }
+        : {}),
       attachmentQuery,
       ...(imageQuery ? { imageQuery } : {}),
       ...(pageReferences.length ? { documentPageQuery } : {}),
@@ -824,6 +832,47 @@ export class ConversationResponseController {
   private now(): string {
     return (this.dependencies.now ?? (() => new Date().toISOString()))();
   }
+}
+
+/**
+ * The semantic plan is authoritative for document generation. Keep it in the
+ * provider-bound prompt as a bounded JSON contract so the content model gets
+ * the extracted requirements without gaining control over execution fields.
+ */
+function buildDocumentGenerationPrompt(
+  rawText: string,
+  plan: ConversationIntentPlan
+): string {
+  const operation = plan.action === 'revise'
+    ? 'edit'
+    : plan.action === 'analyze'
+      ? 'analyze'
+      : 'create';
+  const contract = {
+    schemaVersion: 1,
+    operation,
+    documentKind: plan.documentKind,
+    ...(plan.deliverables ? { deliverables: plan.deliverables } : {}),
+    ...(plan.steps ? { steps: plan.steps } : {}),
+    parameters: plan.parameters,
+    sourcePolicy: plan.sourcePolicy,
+    missing: plan.missing,
+    ambiguities: plan.ambiguities,
+    ...(plan.targetHint ? { targetHint: plan.targetHint } : {}),
+    needsConfirmation: plan.needsConfirmation
+  };
+  const outlineKind = plan.documentKind && plan.documentKind !== 'auto'
+    ? plan.documentKind
+    : 'word';
+  return [
+    '【UniComp 受控文档生成合同】',
+    '以下 JSON 由应用层生成，是本次文档生成的结构化需求；不得自行改变 operation、documentKind、目标范围、资料策略或缺失项。',
+    JSON.stringify(contract),
+    '【当前用户需求】',
+    rawText,
+    buildDocumentOutlinePrompt(outlineKind),
+    '【输出要求】不要输出路径、凭证、Provider、模型选择、工具调用、权限或 JSON 之外的解释。正文内容必须服从上述合同；合同未提供的事实不得臆造。'
+  ].join('\n');
 }
 
 class ProjectNotOpenError extends Error {}

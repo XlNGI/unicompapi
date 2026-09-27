@@ -88,19 +88,19 @@ describe('document drafting helpers', () => {
     expect(pptInstruction).toContain('解释');
     expect(pptInstruction).toContain('资料不足');
     expect(pptInstruction).not.toContain('每页最多 3 个要点');
-    expect(pptInstruction).toContain('"type":"table"');
-    expect(pptInstruction).toContain('"type":"chart"');
+    expect(pptInstruction).toContain('"const":"table"');
+    expect(pptInstruction).toContain('"const":"chart"');
     expect(pptInstruction).toContain('必须同时提供 table 和 chart');
-    expect(pptInstruction).toContain('pageKind 只能使用以下值');
-    expect(pptInstruction).toContain('不要输出 summary、detail、roadmap、risk、action');
+    expect(pptInstruction).toContain('"pageKind"');
+    expect(pptInstruction).toContain('未知字段、别名字段和额外字段都禁止输出');
     expect(pptInstruction).toContain('封面和结束页由系统统一生成');
     expect(documentKindInstruction('excel')).toContain('列名');
     const wordInstruction = documentKindInstruction('word');
     expect(wordInstruction).toContain('标题层级');
-    expect(wordInstruction).toContain('"kind":"word"');
+    expect(wordInstruction).toContain('"kind":{"enum":["word"]}');
     expect(wordInstruction).toContain('"blocks"');
     expect(wordInstruction).toContain('"header"');
-    expect(wordInstruction).toContain('不要使用 content、id、ordered_list、headers 或 subsection');
+    expect(wordInstruction).toContain('未知字段、别名字段和额外字段都禁止输出');
     expect(DOCUMENT_GENERATION_INSTRUCTION).toContain('kind');
   });
 

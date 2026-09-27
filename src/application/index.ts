@@ -6,6 +6,8 @@ export * from './document-intent-planner';
 export * from './document-agent-loop';
 export * from './document-revision-agent';
 export * from './conversation-intent-orchestrator';
+export * from './conversation-request-safety-gate';
+export * from './document-context-snapshot';
 export * from './conversation-workflow-service';
 export * from './conversation-context-builder';
 export * from './conversation-web-research-service';

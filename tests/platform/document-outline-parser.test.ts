@@ -122,6 +122,104 @@ describe('document outline parser', () => {
     );
   });
 
+  it('normalizes the approved shapeType scene alias before strict validation', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].scene = {
+      schemaVersion: 1,
+      elements: [{
+        elementId: 'panel', shapeType: 'rect',
+        geometry: { x: 0.1, y: 0.2, width: 0.4, height: 0.3 },
+        zIndex: 1, style: { fill: 'F5EBE6' }
+      }, {
+        elementId: 'body', type: 'text', geometry: { x: 0.12, y: 0.25, width: 0.3, height: 0.1 },
+        zIndex: 2, content: '说明文字'
+      }]
+    };
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0].scene?.elements[0]?.type).toBe('shape');
+  });
+
+  it('normalizes approved legacy scene style aliases before strict validation', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].scene = {
+      schemaVersion: 1,
+      elements: [{
+        elementId: 'panel', type: 'shape',
+        geometry: { x: 0.1, y: 0.2, width: 0.4, height: 0.3 },
+        zIndex: 1,
+        style: { fillColor: 'F5EBE6', lineColor: '20372B', strokeStyle: 'dashed', lineWidth: 2, opacity: 0.15, shapeType: 'rect', fontWeight: 'bold', textAlign: 'center' }
+      }, {
+        elementId: 'body', type: 'text', geometry: { x: 0.12, y: 0.25, width: 0.3, height: 0.1 },
+        zIndex: 2, content: '说明文字'
+      }]
+    };
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0].scene?.elements[0]?.style).toMatchObject({
+      fill: 'F5EBE6', stroke: '20372B'
+    });
+  });
+
+  it('drops the provider strokeWidth alias before strict scene validation', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].scene = {
+      schemaVersion: 1,
+      elements: [{
+        elementId: 'panel', type: 'shape',
+        geometry: { x: 0.1, y: 0.2, width: 0.4, height: 0.3 },
+        zIndex: 1,
+        style: { fill: 'F5EBE6', strokeColor: '20372B', strokeWidth: 2 }
+      }, {
+        elementId: 'body', type: 'text',
+        geometry: { x: 0.12, y: 0.25, width: 0.3, height: 0.1 },
+        zIndex: 2, content: '说明文字'
+      }]
+    };
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0].scene?.elements[0]?.style).toMatchObject({
+      fill: 'F5EBE6', stroke: '20372B'
+    });
+  });
+
+  it('drops the provider bold alias before strict scene validation', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].scene = {
+      schemaVersion: 1,
+      elements: [{
+        elementId: 'title', type: 'text',
+        geometry: { x: 0.1, y: 0.2, width: 0.4, height: 0.1 },
+        zIndex: 1,
+        content: '标题',
+        style: { fontSize: 28, textColor: '20372B', bold: true }
+      }]
+    };
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0].scene?.elements[0]?.style).toMatchObject({
+      fontSize: 28, textColor: '20372B'
+    });
+  });
+
+  it('normalizes provider aliases placed directly on scene elements', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].scene = {
+      schemaVersion: 1,
+      elements: [{
+        elementId: 'panel', shapeType: 'rect', type: 'shape',
+        geometry: { x: 0.1, y: 0.2, width: 0.4, height: 0.3 },
+        zIndex: 1, fillColor: 'F5EBE6', strokeColor: '20372B'
+      }, {
+        elementId: 'text', type: 'text', content: '标题',
+        geometry: { x: 0.1, y: 0.1, width: 0.3, height: 0.1 }, zIndex: 2
+      }]
+    };
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0].scene?.elements[0]?.style).toMatchObject({
+      fill: 'F5EBE6', stroke: '20372B'
+    });
+  });
+
+  it('rejects model IR fields that conflict with the upstream generation plan', () => {
+    const value = JSON.parse(validOutline());
+    value.operation = 'edit';
+    expect(() => parseDocumentContent(JSON.stringify(value), 'ppt', {
+      operation: 'create', attachmentRefs: []
+    })).toThrow(/Document IR plan conflict/);
+  });
+
   it('accepts normal long PPT text for layout-time wrapping and pagination', () => {
     const longTitle = JSON.parse(validOutline());
     longTitle.title = '人工智能智能体从对话到行动的企业级能力革命';
@@ -742,6 +840,106 @@ describe('content contract helpers', () => {
       )
     ).toThrow(DocumentOutlineError);
   });
+
+  it.each([
+    { extra: 'rootExtra' },
+    { sections: [{ heading: '正文', level: 1, blocks: [], extra: true }] },
+    { sections: [{ heading: '正文', level: 1, blocks: [{ type: 'paragraph', text: '内容', extra: true }] }] }
+  ])('fails closed for unknown outline fields', (extra) => {
+    expect(() => parseDocumentOutline(JSON.stringify({
+      kind: 'word',
+      title: '未知字段',
+      sections: [{ heading: '正文', level: 1, blocks: [{ type: 'paragraph', text: '内容' }] }],
+      ...extra
+    }))).toThrow(DocumentOutlineError);
+  });
+
+  it('normalizes the documented scene aliases before strict validation', () => {
+    const outline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '季度汇报',
+      coverScene: {
+        schemaVersion: 1,
+        elements: [
+          {
+            elementId: 'title',
+            type: 'text',
+            geometry: { x: 0.1, y: 0.2, width: 0.8, height: 0.2 },
+            zIndex: 1,
+            content: '季度汇报',
+            style: { fontSize: 30, textColor: '20372B', bold: true, opacity: 0.9 }
+          },
+          {
+            elementId: 'band',
+            shapeType: 'rect',
+            geometry: { x: 0, y: 0, width: 1, height: 0.1 },
+            zIndex: 0,
+            fillColor: '20372B',
+            lineColor: 'C8A24B',
+            lineWidth: 2
+          }
+        ]
+      },
+      sections: [{
+        heading: '结论',
+        level: 1,
+        blocks: [{ type: 'paragraph', text: '本季度完成核心目标。' }]
+      }]
+    }));
+
+    expect(outline.coverScene?.elements[1]).toMatchObject({
+      type: 'shape',
+      style: { fill: '20372B', stroke: 'C8A24B' }
+    });
+    expect(outline.coverScene?.elements[0].style).toEqual({
+      fontSize: 30,
+      textColor: '20372B'
+    });
+  });
+
+  it('rejects damaged JSON keys after the single bounded recovery attempt', () => {
+    expect(() => parseDocumentOutline(JSON.stringify({
+      kind: 'ppt',
+      title: '损坏样例',
+      coverScene: {
+        '、': 'schemaVersion',
+        ':': 1,
+        ',elements': []
+      },
+      sections: [{
+        heading: '正文',
+        level: 1,
+        blocks: [{ type: 'paragraph', text: '内容' }]
+      }]
+    }))).toThrow(DocumentOutlineError);
+  });
+
+  it.each(['fillColor', 'lineColor', 'shapeType', 'bold', 'opacity'])(
+    'does not retain legacy alias %s in the canonical outline',
+    (alias) => {
+      const outline = parseDocumentOutline(JSON.stringify({
+        kind: 'ppt',
+        title: '别名样例',
+        sections: [{
+          heading: '正文',
+          level: 1,
+          blocks: [{ type: 'paragraph', text: '内容' }],
+          scene: {
+            schemaVersion: 1,
+            elements: [{
+              elementId: 'body',
+              type: 'text',
+              geometry: { x: 0.1, y: 0.1, width: 0.8, height: 0.2 },
+              zIndex: 1,
+              content: '内容',
+              style: { textColor: '20372B', [alias]: alias === 'bold' ? true : '20372B' }
+            }]
+          }
+        }]
+      }));
+      expect(JSON.stringify(outline)).not.toContain(alias);
+    }
+  );
 
   it('keeps Markdown fallback for non-JSON content', () => {
     expect(parseDocumentContent('# 周报\n\n正文。', 'word').title).toBe('周报');

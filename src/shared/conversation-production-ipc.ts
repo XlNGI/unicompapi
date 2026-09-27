@@ -17,6 +17,7 @@ export interface ProductionEventFacts {
   readonly planKind?: 'chat' | 'document' | 'unknown';
   readonly action?: 'answer' | 'create' | 'revise' | 'analyze';
   readonly sourcePolicy?: 'none' | 'internal' | 'web' | 'mixed';
+  readonly errorCode?: 'TOOL_PRECONDITION_FAILED' | 'OUTLINE_INVALID';
   readonly tool?: 'read_sources' | 'search' | 'analyze' | 'write_document' | 'render' | 'check' | 'publish' | 'patch';
   readonly count?: number;
   readonly pageNumber?: number;
@@ -72,6 +73,7 @@ export function parseProductionEventFacts(input: unknown): ProductionEventFacts 
     purpose: ['planning', 'content', 'repair', 'tool', 'source_summary'], documentKind: ['word', 'excel', 'ppt'],
     planKind: ['chat', 'document', 'unknown'], action: ['answer', 'create', 'revise', 'analyze'],
     sourcePolicy: ['none', 'internal', 'web', 'mixed'],
+    errorCode: ['TOOL_PRECONDITION_FAILED', 'OUTLINE_INVALID'],
     tool: ['read_sources', 'search', 'analyze', 'write_document', 'render', 'check', 'publish', 'patch']
   };
   const counts = ['count', 'pageNumber', 'totalPages', 'bytes', 'missingCount', 'sectionCount', 'contentCharacters'];

@@ -23,6 +23,7 @@ import {
 } from './conversation-intent-orchestrator';
 import { conversationClarificationKey, conversationClarificationLabel } from './conversation-clarification-fields';
 import { documentClarificationQuestion } from './document-request-completeness';
+import { validateConversationRequestSafety } from './conversation-request-safety-gate';
 
 export type ConversationWorkflowApplicationErrorCode =
   | 'workflow_not_found'
@@ -66,6 +67,11 @@ export class ConversationWorkflowService {
     readonly signal?: AbortSignal;
   }): Promise<ConversationWorkflowV1> {
     if (input.projectId !== this.repository.projectId) throw new TypeError('Conversation workflow project does not match repository scope');
+    validateConversationRequestSafety({
+      rawText: input.rawText,
+      projectId: input.projectId,
+      context: input.context
+    });
     const decision = await this.orchestrator.analyze({ rawText: input.rawText, context: input.context, signal: input.signal });
     if (input.signal?.aborted) throw new ConversationIntentOrchestrationError('cancelled');
     const createdAt = toIsoTimestamp(this.now());
@@ -127,6 +133,11 @@ export class ConversationWorkflowService {
     readonly signal?: AbortSignal;
   }): Promise<ConversationWorkflowV1> {
     const current = await this.require(input.workflowId, input.expectedRevision);
+    validateConversationRequestSafety({
+      rawText: input.rawText,
+      projectId: current.projectId,
+      context: input.context
+    });
     if (!['needs_clarification', 'needs_confirmation', 'ready'].includes(current.status)) {
       throw new TypeError('Conversation workflow cannot accept an answer in its current state');
     }

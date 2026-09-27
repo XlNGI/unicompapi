@@ -4,6 +4,7 @@ import {
   type DocumentTaskRuntime, type DocumentTaskRuntimeRepository,
   type DocumentTaskRuntimeStatus, type DocumentToolObservation, type DocumentToolId
 } from '../domain';
+import { createCanonicalToolRegistry, deriveAvailableToolSet, type ToolExecutionContext } from '../domain/entities/canonical-tool-contract';
 
 export type DocumentTaskRuntimeScope = Pick<DocumentTaskRuntime,
   'id' | 'projectId' | 'conversationId' | 'executionId'>;
@@ -48,9 +49,13 @@ export class DocumentTaskRuntimeService {
   /** Write ahead: only the caller receiving execute=true may perform the tool. */
   async beginToolCall(scope: DocumentTaskRuntimeScope, input: {
     readonly callId: string; readonly toolId: DocumentToolId; readonly inputHash: string;
-  }): Promise<{ readonly runtime: DocumentTaskRuntime; readonly execute: boolean }> {
+  }, executionContext?: ToolExecutionContext): Promise<{ readonly runtime: DocumentTaskRuntime; readonly execute: boolean }> {
     const runtime = await this.require(scope);
     await this.assertBindings(runtime);
+    if (executionContext && (executionContext.projectContext.projectId !== runtime.projectId ||
+        executionContext.operation !== runtime.operation || executionContext.abortSignal.aborted ||
+        !deriveAvailableToolSet(createCanonicalToolRegistry(), { ...executionContext, implementedToolIds: [input.toolId] })
+          .some(contract => contract.toolId === input.toolId))) throw conflict('TOOL_PRECONDITION_FAILED');
     const previous = runtime.toolCalls.find(call => call.id === input.callId);
     if (previous) {
       if (previous.toolId !== input.toolId || previous.inputHash !== input.inputHash) throw conflict('call_id_conflict');
@@ -61,6 +66,9 @@ export class DocumentTaskRuntimeService {
     if (!this.canResume(runtime)) throw conflict('runtime_not_resumable');
     const definition = createDocumentToolRegistry().get(input.toolId);
     if (!definition) throw conflict('tool_not_allowed');
+    if (!executionContext && runtime.operation === 'create' && definition.requiresExistingDocument) {
+      throw conflict('TOOL_PRECONDITION_FAILED');
+    }
     const costUnits = runtime.checkpoint.costUnits + definition.maxCostUnits;
     const step = runtime.checkpoint.step + 1;
     if (step > runtime.budget.maxSteps || costUnits > runtime.budget.budgetUnits) throw conflict('runtime_budget_exceeded');

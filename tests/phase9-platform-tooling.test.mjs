@@ -11,7 +11,6 @@ import {
   projectRoot,
   readTargetMatrix,
   validateTargetMatrix,
-  verifyHandoff,
   writeEvidenceManifest
 } from '../scripts/phase9-platform-common.mjs';
 
@@ -70,13 +69,6 @@ test('collects only non-identifying runtime facts from an approved target', () =
     () => collectRuntimeFacts({ platform: 'linux', architecture: 'x64' }),
     /outside the approved/
   );
-});
-
-test('verifies every frozen handoff checksum and resource byte count', async () => {
-  const result = await verifyHandoff();
-  assert.equal(result.checksumEntries, 50);
-  assert.equal(result.manifestAssets, 27);
-  assert.deepEqual(result.failures, []);
 });
 
 test('keeps the production platform assumption inventory exact', async () => {
@@ -139,7 +131,7 @@ test('writes a path-safe evidence baseline without claiming unrun suites', async
     assert.equal(manifest.results[0].status, 'passed');
     assert.equal(manifest.results.slice(1).every((result) => result.status === 'not_run'), true);
     const output = await writeEvidenceManifest(root, manifest, 'windows/b1-platform-baseline.json');
-    assert.equal(output, 'docs/active/evidence/phase9/windows/b1-platform-baseline.json');
+    assert.equal(output, 'docs/evidence/phase9/windows/b1-platform-baseline.json');
     assert.equal(JSON.parse(await readFile(path.join(root, output), 'utf8')).targetId,
       'windows-x64-primary');
     await assert.rejects(

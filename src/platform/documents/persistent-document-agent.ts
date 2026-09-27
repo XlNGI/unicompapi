@@ -27,6 +27,7 @@ export async function runPersistentDocumentAgent(options: {
     initialObservations: runtime.observations,
     allowedTools: options.allowedTools,
     signal: options.signal,
+    documentIR: { operation: runtime.operation, attachmentRefs: runtime.attachmentRefs },
     // Loop completion is not publication. Only forward tool/planning progress;
     // the caller projects final runtime truth after this function has persisted it.
     onEvent: event => event.stage === 'completed' ? undefined : options.onEvent?.(event),

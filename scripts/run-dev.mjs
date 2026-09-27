@@ -16,9 +16,15 @@ try {
   }
 
   console.log(`Using ${verified.version}`);
+  // npm exposes its JavaScript entrypoint through `npm_execpath`, while pnpm
+  // on Windows exposes a native `.exe`. Passing the latter to Node makes Node
+  // try to load the executable as an ES module and fails with
+  // ERR_UNKNOWN_FILE_EXTENSION. Invoke native package-manager executables
+  // directly and keep Node as the runner for script entrypoints.
+  const isNativeExecutable = /\.(?:exe|cmd|bat)$/i.test(npmExecutable);
   const child = spawn(
-    process.execPath,
-    [npmExecutable, 'run', 'dev:app'],
+    isNativeExecutable ? npmExecutable : process.execPath,
+    isNativeExecutable ? ['run', 'dev:app'] : [npmExecutable, 'run', 'dev:app'],
     {
       cwd: projectRoot,
       env: {

@@ -48,7 +48,7 @@ const sourceSurfacePaths = [
   'src/pages/settings'
 ];
 
-const evidenceSurfacePaths = ['docs/active/evidence/phase9'];
+const evidenceSurfacePaths = ['docs/evidence/phase9'];
 const sourceExtensions = new Set(['.ts', '.tsx', '.mjs', '.cjs', '.js']);
 const evidenceExtensions = new Set(['.json', '.md']);
 

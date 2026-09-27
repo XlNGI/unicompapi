@@ -1,34 +1,31 @@
 import { createHash } from 'node:crypto';
-import { createDocumentToolRegistry } from '../../domain/entities/document-agent';
-import { atomicToolSchema, parseAtomicToolArguments, type DocumentAtomicToolBinding } from '../../application/document-atomic-tools';
+import {
+  createCanonicalToolRegistry, deriveAvailableToolSet, validateDocumentToolResult,
+  type CanonicalToolId, type CanonicalToolRegistry, type CanonicalToolContract,
+  type CanonicalToolArguments, type DocumentToolResult, type ToolExecutionContext
+} from '../../domain/entities/canonical-tool-contract';
+import { parseAtomicToolArguments, type DocumentAtomicToolBinding, type DocumentAtomicExecutionContext } from '../../application/document-atomic-tools';
 import type { DocumentTaskRuntimeScope, DocumentTaskRuntimeService } from '../../application/document-task-runtime-service';
 import type { DocumentToolObservation } from '../../domain/entities/document-agent';
-import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from './provider-tool-calling';
+import { providerToolsFromContracts, type ControlledProviderToolBridge, type ControlledProviderToolDefinition } from './provider-tool-calling';
 import { emitProductionEvent } from '../conversation-production-trace';
-import type { ProductionEventFacts } from '../../shared/conversation-production-ipc';
-
-const traceTools: Record<string, NonNullable<ProductionEventFacts['tool']>> = {
-  extract_source: 'read_sources', aggregate_data: 'analyze', generate_chart: 'write_document',
-  select_material: 'read_sources', read_document_structure: 'read_sources', apply_document_patch: 'patch',
-  render_preview: 'render', inspect_layout: 'check'
-};
 
 export interface DocumentToolCallingBridgeOptions {
-  /** Only tools implemented for this task are advertised. No implicit permission. */
   readonly bindings: readonly DocumentAtomicToolBinding[];
+  readonly registry?: CanonicalToolRegistry;
+  /** Runtime-owned live state; requested again for advertising, queued calls and execution. */
+  readonly getExecutionContext: () => ToolExecutionContext;
   readonly budgetUnits: number;
   readonly maxCalls: number;
+  /** Host ceiling; a contract may impose a shorter per-tool timeout. */
   readonly timeoutMs: number;
-  /** Optional durable checkpoint. When present, every distinct provider call
-   * is write-ahead persisted and its sanitized Observation is committed before
-   * the result is returned to the model. */
   readonly runtime?: {
     readonly service: Pick<DocumentTaskRuntimeService, 'beginToolCall' | 'recordObservation'>;
     readonly scope: DocumentTaskRuntimeScope;
   };
 }
 
-/** One instance per task. Units are local scheduling limits, never monetary prices. */
+/** One instance per task. Units are scheduling limits, never monetary prices. */
 export function createDocumentToolCallingBridge(options: DocumentToolCallingBridgeOptions): {
   readonly tools: readonly ControlledProviderToolDefinition[];
   readonly bridge: ControlledProviderToolBridge;
@@ -36,132 +33,185 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
 } {
   const budget = bounded(options.budgetUnits, 10_000);
   const maxCalls = bounded(options.maxCalls, 128);
-  const timeoutMs = bounded(options.timeoutMs, 900_000);
-  const registry = createDocumentToolRegistry();
-  const bindings = new Map(options.bindings.map(binding => [binding.id, {
-    ...binding, fields: structuredClone(binding.fields)
-  }]));
-  if (!bindings.size || bindings.size !== options.bindings.length) throw new TypeError('tool_registry_invalid');
-  const tools = [...bindings.values()].map(binding => ({
-    type: 'function' as const,
-    function: { name: binding.id, description: registry.get(binding.id)?.description, parameters: atomicToolSchema(binding) }
-  }));
+  const hostTimeoutMs = bounded(options.timeoutMs, 900_000);
+  const registry = options.registry ? createCanonicalToolRegistry([...options.registry.values()]) : createCanonicalToolRegistry();
+  const bindings = new Map<CanonicalToolId, DocumentAtomicToolBinding>();
+  for (const binding of options.bindings) {
+    const canonical = registry.get(binding.contract.toolId);
+    // The binding references a registered contract; it cannot override fields or metadata.
+    if (!canonical || stable(canonical) !== stable(binding.contract) || bindings.has(canonical.toolId) ||
+        'fields' in binding) throw new TypeError('tool_registry_invalid');
+    bindings.set(canonical.toolId, { contract: canonical, authorize: binding.authorize, execute: binding.execute });
+  }
+  if (!bindings.size) throw new TypeError('tool_registry_invalid');
+  const implementedToolIds = [...bindings.keys()];
+  const initialContext = options.getExecutionContext();
+  const taskDeadline = initialContext.taskContext.deadlineAt ?? Infinity;
+  const taskIdentity = stable([initialContext.projectContext, initialContext.taskContext.taskId]);
+  const live = (): ToolExecutionContext => {
+    const context = options.getExecutionContext();
+    if (stable([context.projectContext, context.taskContext.taskId]) !== taskIdentity) throw new TypeError('runtime_scope_mismatch');
+    return context;
+  };
+  const deadline = (context: ToolExecutionContext) => Math.min(taskDeadline, context.taskContext.deadlineAt ?? Infinity);
+  const available = (context: ToolExecutionContext) => context.abortSignal.aborted || Date.now() >= deadline(context)
+    ? [] : deriveAvailableToolSet(registry, { ...context, implementedToolIds });
   const calls = new Map<string, { fingerprint: string; result: Promise<Readonly<Record<string, unknown>>> }>();
   let spent = 0;
   let tail = Promise.resolve();
   let uncertain = false;
-  const fail = (errorCode: string, outcomeUnknown = false): Readonly<Record<string, unknown>> => ({ ok: false, errorCode, outcomeUnknown });
 
   return {
-    tools,
+    get tools() { return uncertain ? [] : providerToolsFromContracts(available(live()), registry); },
     spentCostUnits: () => spent,
     bridge: {
       execute({ call, signal }) {
-        if (signal.aborted) return Promise.resolve(fail('cancelled'));
-        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(call.id)) return Promise.resolve(fail('invalid_call_id'));
-        const binding = bindings.get(call.name as DocumentAtomicToolBinding['id']);
-        const definition = binding && registry.get(binding.id);
-        if (!binding || !definition) return Promise.resolve(fail('tool_not_allowed'));
-        let request;
-        try { request = parseAtomicToolArguments(binding, call.arguments); }
-        catch { return Promise.resolve(fail('invalid_tool_arguments')); }
-        const fingerprint = createHash('sha256').update(JSON.stringify([request.toolId,
-          Object.entries(request.input).sort(([a], [b]) => a.localeCompare(b)), request.reason])).digest('hex');
+        if (signal.aborted) return Promise.resolve(failure('cancelled'));
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(call.id)) return Promise.resolve(failure('invalid_call_id'));
+        const binding = bindings.get(call.name as CanonicalToolId);
+        if (!binding) return Promise.resolve(failure('tool_not_allowed'));
+        const contract = binding.contract;
+        let selected: ToolExecutionContext;
+        let args: CanonicalToolArguments;
+        try {
+          selected = live();
+          args = parseAtomicToolArguments(binding, call.arguments);
+        } catch { return Promise.resolve(failure('invalid_tool_arguments')); }
+        if (selected.abortSignal.aborted) return Promise.resolve(failure('cancelled'));
+        if (Date.now() >= deadline(selected)) return Promise.resolve(failure('tool_timeout'));
+        if (!available(selected).some(item => item.toolId === contract.toolId)) {
+          return report(contract, call.id, 'failed').then(() => failure('TOOL_PRECONDITION_FAILED'));
+        }
+        const bindingKey = stable([taskIdentity, selected.currentDocumentId, selected.revision]);
+        const fingerprint = hash(stable([contract.toolId, contract.version, bindingKey, args]));
         const previous = calls.get(call.id);
-        if (previous) return previous.fingerprint === fingerprint ? previous.result : Promise.resolve(fail('call_id_conflict'));
-        if (calls.size >= maxCalls) return Promise.resolve(fail('tool_call_limit'));
-        const validated = request;
-        const result = tail.then(async () => {
-          if (signal.aborted) return fail('cancelled');
-          if (uncertain) return fail('reconciliation_required', true);
-          if (spent + definition.maxCostUnits > budget) return fail('budget_exceeded');
-          let runtimeStarted = false;
-          let runtimeStep: number | undefined;
-          if (options.runtime) {
-            try {
-              const checkpoint = await options.runtime.service.beginToolCall(options.runtime.scope, {
-                callId: call.id,
-                toolId: definition.id,
-                inputHash: fingerprint
-              });
-              if (!checkpoint.execute) {
-                const previousObservation = checkpoint.runtime.observations.find((observation) =>
-                  observation.step === checkpoint.runtime.toolCalls.find((item) => item.id === call.id)?.step &&
-                  observation.toolId === definition.id
-                );
-                return previousObservation
-                  ? observationResult(call.id, definition.id, definition.version, previousObservation)
-                  : fail('reconciliation_required', true);
-              }
-              runtimeStarted = true;
-              runtimeStep = checkpoint.runtime.checkpoint.step;
-            } catch (error) {
-              const errorCode = runtimeErrorCode(error);
-              return fail(errorCode, errorCode === 'reconciliation_required');
-            }
-          }
+        if (previous) return previous.fingerprint === fingerprint ? previous.result : Promise.resolve(failure('call_id_conflict'));
+        if (calls.size >= maxCalls) return Promise.resolve(failure('tool_call_limit'));
+        const result = tail.then(async (): Promise<Readonly<Record<string, unknown>>> => {
+          if (signal.aborted || selected.abortSignal.aborted) return failure('cancelled');
+          if (uncertain) return failure('reconciliation_required', true);
+          const context = live();
+          if (stable([taskIdentity, context.currentDocumentId, context.revision]) !== bindingKey ||
+              !available(context).some(item => item.toolId === contract.toolId)) return failure('authorization_or_revision_invalid');
+          if (spent + contract.execution.budgetUnits > budget) return failure('budget_exceeded');
           const controller = new AbortController();
           let invoked = false;
+          let persistencePending = false;
+          let runtimeStarted = false;
+          let runtimeStep: number | undefined;
           let timeout: ReturnType<typeof setTimeout> | undefined;
-          let cancel: () => void = () => undefined;
-          const stopped = new Promise<Readonly<Record<string, unknown>>>((resolve) => {
+          const cancellers: Array<() => void> = [];
+          // Covers write-ahead persistence, authorization, execution and observation commit.
+          const stopped = new Promise<DocumentToolResult>(resolve => {
             const stop = (code: string) => {
               if (controller.signal.aborted) return;
               controller.abort();
-              // An uncooperative host can still finish: freeze all later execution.
               uncertain = true;
-              resolve(fail(code, invoked && definition.requiresWrite));
+              resolve(failure(code, persistencePending || (invoked && contract.preconditions.requiresWrite)));
             };
-            cancel = () => stop('cancelled');
-            signal.addEventListener('abort', cancel, { once: true });
-            timeout = setTimeout(() => stop('tool_timeout'), timeoutMs);
+            for (const parent of [signal, context.abortSignal]) {
+              const cancel = () => stop('cancelled');
+              parent.addEventListener('abort', cancel, { once: true });
+              cancellers.push(() => parent.removeEventListener('abort', cancel));
+              if (parent.aborted) cancel();
+            }
+            timeout = setTimeout(() => stop('tool_timeout'), Math.max(0, Math.min(hostTimeoutMs, contract.execution.timeoutMs, deadline(context) - Date.now())));
           });
-          const action = async (): Promise<Readonly<Record<string, unknown>>> => {
-            const authorized = await binding.authorize(validated, controller.signal);
+          const executionContext: DocumentAtomicExecutionContext = Object.freeze({
+            ...context,
+            projectContext: Object.freeze({ ...context.projectContext }),
+            taskContext: freeze(structuredClone(context.taskContext)),
+            authorization: freeze(structuredClone(context.authorization)),
+            capabilities: Object.freeze([...context.capabilities]),
+            currentDocumentIR: context.currentDocumentIR ? freeze(structuredClone(context.currentDocumentIR)) : undefined,
+            abortSignal: controller.signal,
+            callId: call.id,
+            idempotencyKey: hash(stable([taskIdentity, call.id, contract.toolId, contract.version, bindingKey,
+              contract.execution.idempotency.keyFields.map(key => args[key]), args]))
+          });
+          const execute = async (): Promise<DocumentToolResult> => {
+            const authorized = await binding.authorize(args, executionContext);
+            if (controller.signal.aborted) return failure('cancelled');
             await emitProductionEvent({ code: 'tool_authorization', status: authorized ? 'completed' : 'failed',
-              operationId: call.id, facts: { tool: traceTools[definition.id], purpose: 'tool' } });
-            if (!authorized) return fail('authorization_or_revision_invalid');
-            if (controller.signal.aborted) return fail('cancelled');
-            spent += definition.maxCostUnits;
+              operationId: call.id, facts: { tool: contract.diagnostics.traceType, purpose: 'tool' } });
+            if (!authorized) return failure('authorization_or_revision_invalid');
+            if (controller.signal.aborted) return failure('cancelled');
+            const current = live();
+            if (stable([taskIdentity, current.currentDocumentId, current.revision]) !== bindingKey ||
+                !available(current).some(item => item.toolId === contract.toolId)) return failure('authorization_or_revision_invalid');
+            spent += contract.execution.budgetUnits;
             await emitProductionEvent({ code: 'tool_call', status: 'started', operationId: call.id,
-              facts: { tool: traceTools[definition.id], purpose: 'tool' } });
-            if (controller.signal.aborted) return fail('cancelled');
+              facts: { tool: contract.diagnostics.traceType, purpose: 'tool' } });
+            if (controller.signal.aborted) return failure('cancelled');
             invoked = true;
-            const data = await binding.execute(validated, { callId: call.id, definition, signal: controller.signal });
-            if (controller.signal.aborted) return fail('cancelled', definition.requiresWrite);
-            return { ok: true, callId: call.id, toolId: definition.id, toolVersion: definition.version,
-              costUnits: definition.maxCostUnits, outcomeUnknown: false, result: safeObservation(data) };
+            const raw = await binding.execute(args, executionContext);
+            if (controller.signal.aborted) return failure('cancelled', contract.preconditions.requiresWrite);
+            let validated: DocumentToolResult;
+            try { validated = validateDocumentToolResult(contract, raw); }
+            catch {
+              if (contract.preconditions.requiresWrite) uncertain = true;
+              return failure('invalid_tool_result', contract.preconditions.requiresWrite);
+            }
+            if (validated.status === 'unknown') uncertain = true;
+            return validateDocumentToolResult(contract, safeObservation({ ...validated,
+              metadata: { ...validated.metadata, callId: call.id, toolId: contract.toolId,
+                toolVersion: contract.version, costUnits: contract.execution.budgetUnits } }));
+          };
+          const lifecycle = async (): Promise<Readonly<Record<string, unknown>>> => {
+            if (controller.signal.aborted) return failure('cancelled');
+            if (options.runtime) {
+              persistencePending = true;
+              const checkpoint = await options.runtime.service.beginToolCall(options.runtime.scope, {
+                callId: call.id, toolId: contract.toolId, inputHash: fingerprint
+              }, context);
+              persistencePending = false;
+              // A late persistence completion must never cause a new host operation.
+              if (controller.signal.aborted) return failure('reconciliation_required', true);
+              if (!checkpoint.execute) {
+                const observation = checkpoint.runtime.observations.find(item =>
+                  item.step === checkpoint.runtime.toolCalls.find(item => item.id === call.id)?.step && item.toolId === contract.toolId);
+                if (!observation) { uncertain = true; return failure('reconciliation_required', true); }
+                return observation.ok
+                  ? { schemaVersion: 1, status: 'success', observation: observation.data,
+                      metadata: { callId: call.id, toolId: contract.toolId, toolVersion: contract.version, replayed: true, projection: 'checkpoint_summary' } }
+                  : failure(observation.diagnostic ?? 'tool_failed');
+              }
+              runtimeStarted = true;
+              runtimeStep = checkpoint.runtime.checkpoint.step;
+            }
+            const outcome = await execute().catch(() => {
+              if (invoked && contract.preconditions.requiresWrite) uncertain = true;
+              return failure('tool_failed', invoked && contract.preconditions.requiresWrite);
+            });
+            if (controller.signal.aborted) return failure('reconciliation_required', true);
+            if (runtimeStarted && options.runtime) {
+              const observation: DocumentToolObservation = {
+                step: runtimeStep!, toolId: contract.toolId, ok: outcome.status === 'success',
+                data: checkpointSummary(outcome.observation),
+                ...(outcome.status !== 'success' ? { diagnostic: outcome.diagnostics?.[0]?.code ?? 'tool_failed' } : {})
+              };
+              persistencePending = true;
+              await options.runtime.service.recordObservation(options.runtime.scope, call.id, observation,
+                { outcomeUnknown: outcome.status === 'unknown' });
+              persistencePending = false;
+              if (controller.signal.aborted) return failure('reconciliation_required', true);
+            }
+            await report(contract, call.id, outcome.status === 'success' ? 'completed' : outcome.status === 'cancelled' ? 'cancelled' : 'failed');
+            return { ...outcome };
           };
           try {
-            const outcome = await Promise.race([action().catch(() => {
-              if (invoked && definition.requiresWrite) uncertain = true;
-              return fail('tool_failed', invoked && definition.requiresWrite);
+            const outcome = await Promise.race([lifecycle().catch(() => {
+              uncertain = true;
+              return failure('runtime_checkpoint_failed', true);
             }), stopped]);
-            if (runtimeStarted && options.runtime) {
-              const runtimeObservation: DocumentToolObservation = {
-                step: runtimeStep!,
-                toolId: definition.id,
-                ok: outcome.ok === true,
-                data: outcome.ok === true ? toRuntimeObservation(outcome.result) : {},
-                ...(outcome.ok !== true ? { diagnostic: String(outcome.errorCode ?? 'tool_failed') } : {})
-              };
-              try {
-                await options.runtime.service.recordObservation(options.runtime.scope, call.id, runtimeObservation, {
-                  outcomeUnknown: outcome.outcomeUnknown === true
-                });
-              } catch {
-                uncertain = true;
-                return fail('runtime_checkpoint_failed', true);
-              }
-            }
-            await emitProductionEvent({ code: 'tool_result', status: outcome.ok === true ? 'completed'
-              : outcome.errorCode === 'cancelled' ? 'cancelled' : 'failed', operationId: call.id,
-              facts: { tool: traceTools[definition.id], purpose: 'tool' } });
-            return outcome;
+            return { ...outcome };
           } finally {
             clearTimeout(timeout);
-            signal.removeEventListener('abort', cancel);
+            cancellers.forEach(remove => remove());
           }
+        }).catch(() => {
+          uncertain = true;
+          return failure('runtime_checkpoint_failed', true);
         });
         calls.set(call.id, { fingerprint, result });
         tail = result.then(() => undefined, () => undefined);
@@ -171,33 +221,21 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
   };
 }
 
-function observationResult(
-  callId: string,
-  toolId: string,
-  toolVersion: string,
-  observation: DocumentToolObservation
-): Readonly<Record<string, unknown>> {
-  return observation.ok
-    ? { ok: true, callId, toolId, toolVersion, outcomeUnknown: false, result: observation.data }
-    : { ok: false, errorCode: observation.diagnostic ?? 'tool_failed', outcomeUnknown: false };
+function failure(code: string, unknown = false): DocumentToolResult & Readonly<Record<string, unknown>> {
+  return { schemaVersion: 1, status: unknown ? 'unknown' : code === 'cancelled' ? 'cancelled' : 'failed',
+    diagnostics: [{ code, severity: 'error', message: code }] };
+}
+function report(contract: CanonicalToolContract, callId: string, status: 'completed' | 'failed' | 'cancelled') {
+  return emitProductionEvent({ code: 'tool_result', status, operationId: callId,
+    facts: { tool: contract.diagnostics.traceType, purpose: 'tool' } });
 }
 
-function toRuntimeObservation(value: unknown): Readonly<Record<string, unknown>> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const record: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) ||
-        /(?:path|url|token|secret|password|credential|api[_-]?key|content|body|prompt|__proto__|constructor|prototype)/iu.test(key)) continue;
-    if (typeof item === 'string') record[key] = item.slice(0, 500);
-    else if (typeof item === 'number' && Number.isFinite(item)) record[key] = item;
-    else if (typeof item === 'boolean' || item === null) record[key] = item;
-  }
-  return record;
-}
-
-function runtimeErrorCode(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return /reconciliation/i.test(message) ? 'reconciliation_required' : 'runtime_checkpoint_failed';
+/** Audit checkpoints intentionally omit document content, paths and nested payloads. */
+function checkpointSummary(value: Readonly<Record<string, unknown>> | undefined): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(value ?? {}).filter(([key, item]) =>
+    /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) &&
+    !/(?:path|url|token|secret|password|credential|api[_-]?key|content|body|prompt|__proto__|constructor|prototype)/iu.test(key) &&
+    (typeof item === 'number' || typeof item === 'boolean' || (typeof item === 'string' && item.length <= 500))));
 }
 
 function safeObservation(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -218,6 +256,7 @@ function safeObservation(value: Readonly<Record<string, unknown>>): Readonly<Rec
       const entries = Object.entries(item);
       if (entries.length > 64) throw new Error('observation_limit');
       return Object.fromEntries(entries.filter(([key]) => !/(?:path|url|token|secret|password|credential|api[_-]?key|__proto__|constructor|prototype)/iu.test(key))
+        .filter(([key]) => !/^(?:context|executionContext|runtimeContext|currentDocumentId|currentDocumentIR|documentRef|rootDirectory|projectContext|authorization|capabilities|abortSignal|signal|taskContext|checkpoint|idempotencyKey)$/iu.test(key))
         .map(([key, child]) => [key, visit(child, depth + 1)]));
     }
     throw new Error('observation_invalid');
@@ -226,7 +265,17 @@ function safeObservation(value: Readonly<Record<string, unknown>>): Readonly<Rec
   if (JSON.stringify(result).length > 32_000) throw new Error('observation_limit');
   return result;
 }
-
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, item]) => JSON.stringify(key) + ':' + stable(item)).join(',') + '}';
+  return JSON.stringify(value) ?? 'null';
+}
+function hash(value: string) { return createHash('sha256').update(value).digest('hex'); }
+function freeze<T>(value: T): T {
+  if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); }
+  return value;
+}
 function bounded(value: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > max) throw new TypeError('tool_policy_invalid');
   return value;

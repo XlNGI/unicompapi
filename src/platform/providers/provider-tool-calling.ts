@@ -1,54 +1,81 @@
+import {
+  canonicalToolInputSchema,
+  createCanonicalToolRegistry,
+  validateDocumentToolResult,
+  type CanonicalToolContract,
+  type CanonicalToolId,
+  type CanonicalToolRegistry
+} from '../../domain/entities/canonical-tool-contract';
+
 export interface ControlledProviderToolDefinition {
   readonly type: 'function';
   readonly function: {
     readonly name: string;
     readonly description?: string;
     readonly parameters: Readonly<Record<string, unknown>>;
+    readonly requiresExistingDocument?: boolean;
   };
 }
 
 const maxTools = 8;
 const maxSchemaBytes = 16_000;
-const allowedToolNames = new Set([
-  'extract_source',
-  'aggregate_data',
-  'generate_chart',
-  'select_material',
-  'read_document_structure',
-  'apply_document_patch',
-  'render_preview',
-  'inspect_layout'
-]);
+const protocolRegistry = createCanonicalToolRegistry();
 
-export function parseControlledProviderTools(value: unknown): readonly ControlledProviderToolDefinition[] | undefined {
+/** Project a Runtime-selected subset only. Registry membership is not authorization. */
+export function providerToolsFromContracts(
+  availableContracts: readonly CanonicalToolContract[],
+  registry: CanonicalToolRegistry = protocolRegistry
+): readonly ControlledProviderToolDefinition[] {
+  if (availableContracts.length > maxTools) throw new Error('controlled tool definitions are invalid');
+  const names = new Set<string>();
+  return availableContracts.map(contract => {
+    const registered = registry.get(contract.toolId);
+    if (!registered || registered.exposure !== 'provider' || names.has(contract.toolId) || !sameJsonValue(contract, registered)) {
+      throw new Error('controlled tool contract is invalid');
+    }
+    names.add(contract.toolId);
+    return canonicalProviderTool(registered);
+  });
+}
+
+/** Validate transported definitions against the contract, never infer task permissions. */
+export function parseControlledProviderTools(
+  value: unknown,
+  registry: CanonicalToolRegistry = protocolRegistry
+): readonly ControlledProviderToolDefinition[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length < 1 || value.length > maxTools) {
+  if (!Array.isArray(value) || value.length > maxTools) {
     throw new Error('controlled tool definitions are invalid');
   }
+  // No currently available tools means no Provider tools field at all.
+  if (value.length === 0) return undefined;
   const names = new Set<string>();
   return value.map((item, index) => {
-    if (!isRecord(item) || item.type !== 'function' || !isRecord(item.function)) {
+    if (!isRecord(item) || item.type !== 'function' || !isRecord(item.function) ||
+        Object.keys(item).some(key => key !== 'type' && key !== 'function') ||
+        Object.keys(item.function).some(key => !['name', 'description', 'parameters', 'requiresExistingDocument'].includes(key))) {
       throw new Error(`controlled tool ${index} is invalid`);
     }
     const name = item.function.name;
-    if (typeof name !== 'string' || !allowedToolNames.has(name) || names.has(name)) {
+    const contract = typeof name === 'string' ? registry.get(name as CanonicalToolId) : undefined;
+    if (!contract || contract.exposure !== 'provider' || names.has(contract.toolId)) {
       throw new Error(`controlled tool ${index} name is invalid`);
     }
-    names.add(name);
+    names.add(contract.toolId);
     const parameters = item.function.parameters;
-    if (!isRecord(parameters) || JSON.stringify(parameters).length > maxSchemaBytes) {
+    const canonical = canonicalProviderTool(contract);
+    if (!isRecord(parameters) || JSON.stringify(parameters).length > maxSchemaBytes ||
+        !sameJsonValue(parameters, canonical.function.parameters)) {
       throw new Error(`controlled tool ${index} parameters are invalid`);
     }
-    return {
-      type: 'function' as const,
-      function: {
-        name,
-        ...(item.function.description !== undefined
-          ? { description: boundedText(item.function.description) }
-          : {}),
-        parameters
-      }
-    };
+    if (item.function.requiresExistingDocument !== undefined &&
+        item.function.requiresExistingDocument !== contract.preconditions.requiresExistingDocument) {
+      throw new Error(`controlled tool ${index} prerequisite is invalid`);
+    }
+    if (item.function.description !== undefined && item.function.description !== contract.description) {
+      throw new Error(`controlled tool ${index} description is invalid`);
+    }
+    return canonical;
   });
 }
 
@@ -136,7 +163,7 @@ export async function runControlledProviderToolLoop(input: {
     const assistantContent = response.content ?? '';
     messages.push({ role: 'assistant', content: assistantContent, toolCalls: calls });
     for (const call of calls) {
-      if (!allowedToolNames.has(call.name) || !call.id) throw new Error('tool call is not allowed');
+      if (!protocolRegistry.has(call.name as CanonicalToolId) || !call.id) throw new Error('tool call is not allowed');
       const result = sanitizeControlledToolResult(await input.bridge.execute({ call, signal: input.signal ?? new AbortController().signal }));
       messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(result) });
     }
@@ -163,7 +190,32 @@ export function sanitizeControlledToolResult(
 ): Readonly<Record<string, unknown>> {
   const encoded = JSON.stringify(value);
   if (encoded.length > 32_000) throw new Error('controlled tool result is too large');
+  const toolId = isRecord(value.metadata) && typeof value.metadata.toolId === 'string'
+    ? value.metadata.toolId : undefined;
+  const contract = toolId === undefined ? undefined : protocolRegistry.get(toolId as CanonicalToolId);
+  if (contract?.exposure === 'provider') {
+    // Canonical results have their own closed envelope and depth/collection limits.
+    // Validate before redaction so the Provider cannot receive an uncontracted shape.
+    const validated = validateDocumentToolResult(contract, value);
+    return { ...validateDocumentToolResult(contract, redactValidatedToolValue(validated)) };
+  }
   return sanitizeToolValue(value, 0) as Readonly<Record<string, unknown>>;
+}
+
+/** Only called after canonical validation bounded the complete JSON tree. */
+function redactValidatedToolValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.replace(/(?:[a-z]:[\\/]|\\\\|https?:\/\/|\/)[^\s'"<>]*/giu, '[redacted]')
+      .replace(/(?:token|secret|password|credential|api[_-]?key)\s*[:=]\s*[^\s,;]+/giu, '[redacted]');
+  }
+  if (Array.isArray(value)) return value.map(redactValidatedToolValue);
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).filter(([key]) =>
+      !/(?:path|url|token|secret|password|credential|api[_-]?key)/iu.test(key) &&
+      !/^(?:context|executionContext|runtimeContext|currentDocumentId|currentDocumentIR|documentRef|rootDirectory|projectContext|authorization|capabilities|abortSignal|signal|taskContext|checkpoint|idempotencyKey)$/iu.test(key)
+    ).map(([key, item]) => [key, redactValidatedToolValue(item)]));
+  }
+  return value;
 }
 
 function sanitizeToolValue(value: unknown, depth: number): unknown {
@@ -227,7 +279,7 @@ export function assembleControlledToolCalls(
   if (indexes.some((index, position) => index !== position)) throw new Error('tool call indexes are not contiguous');
   return indexes.map((index) => {
     const call = calls.get(index)!;
-    if (!call.id || !call.name || !allowedToolNames.has(call.name)) throw new Error('tool call is incomplete');
+    if (!call.id || !call.name || !protocolRegistry.has(call.name as CanonicalToolId)) throw new Error('tool call is incomplete');
     return { id: call.id, name: call.name, arguments: parseControlledToolArguments(call.argumentsText) };
   });
 }
@@ -244,6 +296,31 @@ function boundedText(value: unknown, maximum = 2_000): string {
 }
 
 function boundedName(value: unknown): string {
-  if (typeof value !== 'string' || !allowedToolNames.has(value)) throw new Error('controlled tool name is invalid');
+  if (typeof value !== 'string' || !protocolRegistry.has(value as CanonicalToolId)) throw new Error('controlled tool name is invalid');
   return value;
+}
+
+function canonicalProviderTool(contract: CanonicalToolContract): ControlledProviderToolDefinition {
+  return {
+    type: 'function',
+    function: {
+      name: contract.toolId,
+      description: contract.description,
+      requiresExistingDocument: contract.preconditions.requiresExistingDocument,
+      parameters: canonicalToolInputSchema(contract)
+    }
+  };
+}
+
+/** JSON object order is immaterial; every field, type and array entry must agree. */
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+      left.every((item, index) => sameJsonValue(item, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key =>
+    Object.prototype.hasOwnProperty.call(right, key) && sameJsonValue(left[key], right[key]));
 }

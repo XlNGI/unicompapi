@@ -11,7 +11,7 @@ import {
 import { runRecoveryAudit } from './verify-phase9-recovery-audit.mjs';
 
 export const closeoutEvidencePath =
-  'docs/active/evidence/phase9/windows/phase9-closeout.json';
+  'docs/evidence/phase9/windows/phase9-closeout.json';
 
 export async function verifyPhase9Closeout(root = projectRoot) {
   const matrix = await readTargetMatrix(root);

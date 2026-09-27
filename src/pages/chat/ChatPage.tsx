@@ -67,6 +67,7 @@ import { documentPresentationPreferences } from '../../application/document-pres
 import '../../styles/pages.css';
 
 const errorMessages: Record<ChatContextIpcErrorCode, string> = {
+  local_safety_rejected: '本地安全检查未通过，请修改输入后重试。',
   model_selection_required: '本次请求尚未发出，请先选择一个可用模型。',
   invalid_request: '当前操作数据无效，请刷新后重试。',
   project_not_open: '请先打开目标项目。',
@@ -1950,7 +1951,11 @@ export function ChatPage({
       setDocumentCancelRequested(false);
       setNotice('');
       // The main process restores the persisted original template/images/options.
-      const generated = await documentGeneration.generateFromMessage({ ...generationContext, kind: delivery.kind });
+      const generated = await documentGeneration.generateFromMessage({
+        ...generationContext,
+        kind: delivery.kind,
+        operation: workflow.plan.action === 'revise' ? 'edit' : workflow.plan.action === 'analyze' ? 'analyze' : 'create'
+      });
       if (executionScope !== composerScopeRef.current) return;
       const [latest, pending] = await Promise.all([
         chat.getConversation(conversation.conversationId),
@@ -2338,6 +2343,7 @@ export function ChatPage({
         const generated = await documentGeneration.generateFromMessage({
           ...generationContext,
           kind,
+          operation: 'edit',
           parentWorkId: previousDocument.documentResult.workId,
           ...(kind === 'ppt'
             ? {
@@ -2594,6 +2600,7 @@ export function ChatPage({
           return await documentGeneration.generateFromMessage({
             ...generationContext,
             kind,
+            operation: action === 'revise' ? 'edit' : 'create',
             ...(previousDocument?.documentResult
               ? { parentWorkId: previousDocument.documentResult.workId }
               : {}),

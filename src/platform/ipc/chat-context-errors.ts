@@ -30,6 +30,7 @@ import {
   RuntimeAuthorizationDeniedError,
   SubmissionOrchestrationError
 } from '../providers';
+import { ConversationRequestSafetyError } from '../../application';
 
 export function chatContextFailure<T>(
   error: unknown,
@@ -38,6 +39,9 @@ export function chatContextFailure<T>(
   onError?.(error);
   if (error instanceof ConversationAttachmentError) {
     return failure(error.code, error.message);
+  }
+  if (error instanceof ConversationRequestSafetyError) {
+    return failure('local_safety_rejected', '本地安全检查未通过，请修改输入后重试。');
   }
   if (error instanceof ConversationDocumentPageError) {
     return failure(error.code, error.message);

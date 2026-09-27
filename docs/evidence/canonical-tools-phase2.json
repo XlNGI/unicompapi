@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "scope": "canonical-tool-contract-phase2-batch1",
+  "date": "2026-09-27",
+  "branch": "feature/ppt-goal-pipeline",
+  "baseCommit": "2ab69f1",
+  "state": "working_tree_automated_verified",
+  "providerCalls": 0,
+  "productionToolLoopConnected": false,
+  "tests": {
+    "command": "pnpm test",
+    "node": {
+      "passed": 384,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest": {
+      "files": 250,
+      "passed": 2151,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "checks": [
+    "pnpm typecheck",
+    "pnpm lint",
+    "pnpm build",
+    "pnpm audit:platform",
+    "pnpm verify:recovery-audit",
+    "pnpm verify:phase9-closeout",
+    "pnpm verify:plan-compliance",
+    "git diff --check"
+  ],
+  "coverage": [
+    "canonical-derived schemas and runtime validation",
+    "available tools filtered by live host context",
+    "model arguments exclude document identity and runtime data",
+    "read-only binding with real checkpoint and trace persistence",
+    "nested observations preserved in simulated provider handshake",
+    "idempotent calls and scoped revisions",
+    "cancellation and timeout during checkpoint begin/commit",
+    "late completion never invokes adapter after interruption"
+  ],
+  "protectedFiles": [
+    {
+      "file": "src/shared/document-outline-contract.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/platform/documents/document-outline-parser.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/platform/documents/document-generation-runner.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/platform/documents/office-document-generator.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/platform/documents/temporary-document-workflow.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/application/document-revision-agent.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/platform/providers/deepseek/deepseek-chat-adapter.ts",
+      "unchanged": true
+    },
+    {
+      "file": "src/platform/providers/newapi/newapi-chat-adapter.ts",
+      "unchanged": true
+    }
+  ],
+  "limits": [
+    "Only read_document_structure exposed when eligible and bound",
+    "Other seven legacy tools remain internal-only",
+    "Physical page scope requires a host reader",
+    "No production Tool Loop, generate_pptx, CRUD, or IR patches implemented"
+  ],
+  "log": "outputs/canonical-tools-phase2/test.log"
+}

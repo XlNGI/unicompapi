@@ -63,4 +63,22 @@ describe('document generation runtime bridge', () => {
     await bridge.complete(toWorkId('work-2'));
     expect(service.setStatus).toHaveBeenCalledWith(expect.anything(), 'failed');
   });
+
+  it('does not map create lifecycle checks to existing-document tools', async () => {
+    const runtime: FakeRuntime = { status: 'running', checkpoint: { step: 0 }, toolCalls: [], observations: [] };
+    const beginToolCall = vi.fn(async () => { throw new Error('must not claim an existing-document tool'); });
+    const service = {
+      require: vi.fn(async () => runtime),
+      beginToolCall,
+      recordObservation: vi.fn()
+    } as unknown as ConstructorParameters<typeof DocumentGenerationRuntimeBridge>[0];
+    const bridge = new DocumentGenerationRuntimeBridge(service, {
+      id: toDocumentTaskRuntimeId('runtime-create'), projectId: toProjectId('project-1'),
+      conversationId: toConversationId('conversation-1'), executionId: 'execution-create'
+    }, 'execution-create', 'create');
+
+    await bridge.progress({ code: 'plan_validation', status: 'started', operationId: 'outline', facts: { documentKind: 'ppt' } });
+    await bridge.progress({ code: 'document_compile', status: 'started', operationId: 'compile', facts: { documentKind: 'ppt' } });
+    expect(beginToolCall).not.toHaveBeenCalled();
+  });
 });

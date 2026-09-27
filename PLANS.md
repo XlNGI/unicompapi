@@ -1,5 +1,221 @@
 # UniComp 开发计划
 
+## 新版统一计划（当前代码基线，2026-09-27）
+
+本节是项目当前唯一有效的执行计划和状态来源，以当前源码、当前工作树和当前测试结果为基线。`docs/current/` 保留实施记录和专项方案，`docs/evidence/` 保留机器可验证证据；两者都不是当前待办或完成状态来源。旧历史计划目录已删除。新的计划、状态变更、阻断项和验收结论只更新本节。旧 E1-E7 仅作为历史映射，不再作为新的拆分方式。
+
+### 事实基线
+
+2026-09-27 维护范围更新（第二阶段第一批，工作树实现及自动化验收完成）：按负责人确认建立独立 Canonical Tool Contract，参数/元数据单源派生，分离完整 Registry 与当前任务 Available Tool Set，并分离 LLM 参数与 Runtime 注入上下文。仅验证 read_document_structure 的合同、绑定、结果与 Trace 链路；不接生产 Tool Loop、generate_pptx、复杂 CRUD，不改已验收 Outline 链路、Document IR 核心结构、Runner、PptxGenJS、QA、发布或 Provider Loop 轮数策略。前述整体目标的后续能力仍需独立验收。
+
+本批新增 `canonical-tool-contract.ts` 为文档工具定义唯一来源；`documentToolIds`、旧 `DocumentToolDefinition`、Provider Schema、参数 Validator、timeout/budget 和 Trace 类型均派生。`DocumentAtomicToolBinding` 仅保留 contract 引用、authorize、execute。完整 catalog 保留 8 个工具的历史身份，只有 read_document_structure 具备本批 Provider 合同，其余 7 个明确 internal、不编造业务参数，也不向模型公布。Available 集合逐次根据实际绑定、capability、文档/IR/revision、授权和操作类型过滤；执行前再次核对。模型参数仅 scope/ordinal，document 为默认 scope，page/section 必须 ordinal，文档身份、路径、权限、版本、AbortSignal 和 checkpoint 不作为输入参数。
+
+只读 Binding 从 Runtime 注入的 IR 返回 document/section Observation；page 必须通过 Host 提供的真实页面读取端口，否则返回 page_scope_unavailable，不用章节序号冒充物理页码。统一 ToolResult 校验 status、observation、diagnostics、artifactRefs、metadata；irPatch 本批不执行并拒绝接收。checkpoint 只持久化脱敏摘要；重放明确标识 checkpoint_summary。修复既有 Provider 结果清理把嵌套 blocks 截掉的问题，并让 checkpoint 开始、授权、执行、Observation 提交共享取消/超时边界；持久化结果未知时冻结后续调用，迟到完成不继续执行。未更改 Provider Loop 轮数策略或生产接线。
+
+本批最终验证：`pnpm test` Node/UI 384/384，Vitest 250 文件、2151/2151，0 失败/跳过；typecheck、lint、build、平台审计、恢复审计、既有关闭门禁和计划合规通过。验证包含合成 Provider 工具握手、真实本地 Runtime/Trace 持久化、未知结果和迟到写入回归；真实 Provider 调用 0，不能称为生产 Agent Loop 验收。受保护源码 Hash 与本批开始相同。结果见 `docs/evidence/canonical-tools-phase2.json`，运行日志见 `outputs/canonical-tools-phase2/test.log`。本批尚未提交、推送或合并；下一步需单独确认生产接线与 generate_pptx 范围。
+
+- 当前分支：`feature/ppt-goal-pipeline`；基线 `HEAD`：`2ab69f1`（2026-09-24）。本轮实现仍未合并回 `develop`。
+- 工作树不是干净基线：进入本轮时已有 29 个已跟踪文件未提交，另有未跟踪的 `mermaid-diagram.png`；本轮 P1/P2 又新增了安全门禁和上下文快照文件。所有这些修改都不能视为已合并或已发布能力。
+- 阶段 9 Windows x64 基线已收口；macOS 继续为 `required=false`、`not_run/deferred`；阶段 10 未启动。
+- 已合入的对话内 Office 文档生成功能属于既有独立功能系列。智能文档工作流扩展是在该基线上继续建设的维护专项，不新增业务一级页面。
+- 当前工作树已包含智能文档扩展的部分 Application、Domain、Platform、IPC、Chat 和测试修改；在功能分支提交、门禁和验收完成前，统一记为“工作树实现中”。
+
+### 当前代码基线
+
+当前代码已经具备以下可复用能力：
+
+- Application：本地安全/意图分析、会话语义编排、文档生成服务、有限文档 Agent loop、Task Runtime 和受控取消。
+- Domain：`DocumentIntentPlan`、`DocumentIR`、`DocumentToolRequest`、工具白名单、计划前置条件、`PresentationPlan`、`RepairPlan` 和运行时 checkpoint。
+- Platform：文档大纲严格解析与别名归一化、BM25 可重建检索、受控联网合同、Office 结构读取/补丁、PPTX 生成、Office/PDF 渲染适配和原子发布/Work 登记。
+- IPC/UI：Chat 工作流、附件与项目上下文、文档生成 IPC、生产 Trace、取消/恢复和最终文档卡片。
+- 当前工作树新增但尚未合并的能力：Outline Contract 单一来源、`operation` 感知的 Document IR、`requiresExistingDocument` 工具过滤、一次性 replan、PPT scene/style 别名归一化、新建 PPT 前置条件修复、受控文档生成合同、布局回写和非目标章节 Hash 保护。
+
+当前可验证门禁：`pnpm test` 通过，Node/UI 384/384，Vitest 250 个文件、2151 项全部通过；`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm audit:platform`、`pnpm verify:recovery-audit`、`pnpm verify:phase9-closeout`、`pnpm verify:plan-compliance` 和 `git diff --check` 均通过。冻结交接包完整性不属于当前默认门禁。Windows Electron/Office 可见人工验收和 P7/P8 交付收口仍未完成，不能据此宣称整体目标闭环已完成。
+
+### 目标闭环（用户目标，2026-09-27）
+
+以下闭环是当前智能 PPT 工作流的唯一目标架构。它描述目标和验收顺序，不代表当前已经全部实现；当前状态仍以本节状态矩阵和实际测试为准。
+
+```text
+用户输入
+  → 本地安全门禁（Schema、长度、权限、项目范围、附件引用、取消/超时）
+  → 无效：记录受控失败并立即终止
+  → 有效：主 Agent 进行意图识别与任务路由
+  → PPT：需求解析与上下文构建
+      （用户输入、上传文件、已有内容、RAG 结果、品牌/风格约束）
+  → PPT Planner 生成内容大纲
+  → 本地 Schema Validator
+  → 确定性 Repair
+  → 仍失败：有界 LLM 局部修复
+  → 稳定 Document IR
+  → 内容生成与内容/结构校验
+  → 视觉设计 Agent 生成 Design IR
+      （字体、颜色、间距、版式类型和视觉约束）
+  → 布局引擎计算位置并生成 Layout IR
+  → 碰撞/越界检测与受控自动调整
+  → 原子工具执行层生成 PPTX
+  → PDF/图片渲染与确定性 QA
+  → 失败：定位元素、局部打补丁、限次重跑
+  → 可选多模态视觉 QA
+  → 人工审核
+  → 不满意：自然语言修改 → Target Resolver → 局部修改 → 重新校验
+  → 导出 PPTX + PDF，保存源数据和脱敏交付说明
+```
+
+全程由 Agent Runtime 维护显式状态机、结构化日志、重试预算、熔断、总超时、取消和中断恢复。每个阶段都必须定义结构化输入/输出、失败码、权限和范围校验；任何失败、取消、超时、预算耗尽或连续相同诊断都必须结束当前循环，不得静默整篇重写或登记未验证作品。LLM 只能提出意图、计划、Design IR/RepairPlan 和局部语义修改，不能决定路径、凭证、Provider、费用、权限、正式 Work 或任意代码；Application 负责 Schema、实体、范围、状态和费用校验，Platform 负责白名单工具执行。
+
+### 目标阶段与当前差距
+
+| 目标阶段 | 当前状态 | 必须补齐的验收 |
+| --- | --- | --- |
+| 本地安全门禁与终止 | `in_progress` | 在主 Agent 前统一拒绝无效输入，并验证项目、附件、权限、取消和超时 |
+| 意图识别、任务路由与上下文构建 | `in_progress` | PPT/Word/Excel/普通问答路由，汇总用户输入、文件、已有内容、RAG 和品牌约束 |
+| PPT Planner、Schema、Repair、Document IR | `in_progress` | 稳定 IR、确定性修复优先、LLM 局部修复有界且可审计 |
+| Design IR 与 Layout IR | `in_progress` | 已有字体/颜色/间距/版式结构化、布局计算、碰撞/越界检测和受控调整；视觉 Agent 完整输入及复杂版式仍需补齐 |
+| 原子工具、PPTX/PDF/图片与确定性 QA | `in_progress` | 元素定位补丁、渲染后结构/视觉检查、失败隔离、原子发布和 Hash |
+| 多模态视觉 QA（可选） | `planned` | 明确授权、脱敏输入、失败回退和费用/超时边界 |
+| 人工审核、Target Resolver 与局部修改 | `in_progress` | 自然语言目标解析、局部范围保护、非目标内容 Hash 不变、重新校验 |
+| Agent Runtime 状态机与恢复 | `in_progress` | 状态持久化、日志、重试/熔断/超时/取消、重启恢复和未知结果处理 |
+| 最终导出与源数据交付 | `in_progress` | PPTX/PDF、来源/版本/修改范围/诊断摘要和可恢复本地作品登记 |
+
+### 全新实施分期（P0-P8）
+
+新功能只按以下分期推进；每个阶段必须从最新 `develop` 建立 `feature/*` 分支，并以当前代码为起点增量实现。阶段状态只在本节更新。
+
+| 阶段 | 目标 | 当前状态 | 主要交付与退出条件 |
+| --- | --- | --- | --- |
+| P0 基线冻结 | 固定源码、分支、工作树、测试和证据边界 | `in_progress` | 清点进入本轮时的未提交文件和未跟踪文件，建立功能分支，确认本轮纳入范围；新增机器可读 `plan-manifest` 和 `verify-plan-compliance`，不把工作树改动直接视为已合入 |
+| P1 本地安全门禁 | 在主 Agent 前拒绝无效输入 | `in_progress` | 统一校验 Schema、长度、附件/项目引用、权限、范围、敏感字段、取消和超时；失败只写受控诊断并终止，不进入模型或工具执行 |
+| P2 意图路由与上下文 | 判断任务类型并构建 PPT 输入上下文 | `in_progress` | 本地规则优先，复杂请求才调用 LLM；汇总用户输入、上传文件、已有内容、BM25/RAG、品牌和风格约束；路由到 PPT/Word/Excel/问答 |
+| P3 PPT Planner 与 Document IR | 生成、校验和稳定化内容计划 | `in_progress` | Planner 输出大纲；Schema Validator 拒绝未知/越权字段；先做确定性 Repair，失败才进行有界 LLM 局部修复；形成稳定、可重放的 Document IR |
+| P4 内容生成与结构校验 | 从 Document IR 生成内容并验证 | `in_progress` | 内容生成、章节/表格/页面结构校验、来源绑定、容量检查和 revision 保护；失败不发布、不登记 Work |
+| P5 Design IR 与 Layout IR | 将内容转为可计算的视觉和几何计划 | `in_progress` | 已有 Design/Layout IR、确定性越界/重叠诊断和最多 8 次自动调整；视觉 Agent 完整输入、复杂版式和元素级 Patch 仍未完成 |
+| P6 原子执行与确定性 QA | 生成 PPTX 并完成可复现质量检查 | `in_progress` | 白名单原子工具生成 PPTX；渲染 PDF/图片；执行 OOXML、文本、页数、字体、布局、溢出、重叠、Hash QA；失败时定位元素、局部打补丁、限次重跑；可选多模态 QA 必须独立授权 |
+| P7 人工审核与局部修改 | 支持自然语言修改并保护非目标内容 | `in_progress` | 人工审核通过后导出；不满意时由 Target Resolver 定位页/元素/章节，生成受控局部 Patch，验证非目标 Hash 不变，再回到 P6 |
+| P8 Runtime、恢复与交付收口 | 统一运行状态、恢复和最终交付 | `blocked` | Agent Runtime 持久化状态机、日志、预算、重试、熔断、超时、中断恢复和未知结果；最终导出 PPTX/PDF、源数据和脱敏说明；完成全量门禁及 Windows 人工验收 |
+
+P0-P8 的共同约束：LLM 只能返回受控语义计划、Design IR、RepairPlan 或局部修改建议；Application 校验实体、权限、范围、费用、状态和 revision；Platform 只执行白名单工具。任何失败、取消、超时、预算耗尽或连续相同诊断都必须停机或转为人工处理，不得无限重试、静默整篇重写或登记未验证作品。
+
+### 当前工作树增量（2026-09-27，P1 首批实现）
+
+已在 `feature/ppt-goal-pipeline` 实现本地安全门禁：`ConversationRequestSafetyGate` 在 IPC Controller 和 Application Workflow Service 两层校验空输入、长度、控制字符、疑似凭证内容、上下文上限、附件数量和项目范围。门禁失败返回受控 `local_safety_rejected`，不会创建新会话消息、固定附件或进入意图编排；合法请求保持现有工作流。
+
+新增安全门禁 6 项测试，并与会话工作流/Controller 定向回归合计 38 项通过；`pnpm typecheck`、变更文件 ESLint 和 `git diff --check` 通过。当前仍是功能分支未合并增量，全量 Node/UI 门禁和平台审计的既有阻断不因本轮通过而关闭。
+
+同一分支继续接入 `DocumentContextSnapshot`：在工作流进入语义编排前冻结请求 Hash、附件引用、已有文档、来源引用槽位、风格约束和来源策略；严格解析器拒绝路径、URL、凭证字段、未知字段和超限内容。Hash 使用 Web Crypto，保持 Renderer/主进程构建兼容。新增快照 2 项测试，与上述回归合计 40 项通过；`pnpm build`、`pnpm typecheck`、目标 ESLint 和 `git diff --check` 通过。RAG/品牌 Provider 仍需在后续阶段通过受控引用填充，不能把空引用快照解释为已完成检索。
+
+P3 首批实现扩展 `DocumentIR`：创建任务允许受控 `attachmentRefs` 作为资料来源，但仍拒绝已有文档引用、工具调用和 revision 依赖；新增内容标题/章节/块、来源引用、保留条件、风格约束和 revision Schema。新增 IR 回归后，Document Agent、PPT 大纲解析、上下文和 Controller 定向测试共 67 项通过；`pnpm build` 和 `pnpm typecheck` 通过。Planner 实际生成内容、确定性 Repair 和 LLM 局部 Repair 的运行时接线仍需后续 P3 增量完成。
+
+P3 IR 接线增量已完成：编译器从最终 outline（包含 revision/局部修复结果）确定性构造 `DocumentIR`，Application 将 IR 绑定到生成内容指纹并传入 Runner；旧编译器替身没有 `compileIR` 时保持兼容。Work ID 的受控引用允许 `:`、`.` 等合法 ID 字符，清空章节保留为空 blocks。新增编译桥接测试，文档生成 Controller 与 PPT revision/save 回归 35/35 通过。
+
+2026-09-27 真实 PPT 失败修复：截图对应的“检查文件结构与内容”失败根因为模板标题后缀归一化不一致，生成器将“（模板）”标题按模板规则渲染为基础标题，结构校验仍要求带后缀的完整字符串。现 PPT 内容校验对受控模板后缀做等价匹配，章节标题仍严格匹配；缺失字段只写脱敏诊断。Runner、Controller、revision/save 相关回归 73/73 通过。
+
+2026-09-27 第二次真实 PPT 失败修复：最新 draft 的 scene style 使用 Provider 别名 `strokeWidth`，严格 Schema 在“校验文档大纲”阶段拒绝。归一化层现在丢弃该无对应受控语义的装饰字段，保留 `strokeColor -> stroke`；真实 draft 解析成功，PPT 大纲解析回归 41/41 通过，typecheck/lint/build 通过。
+
+2026-09-27 第三次真实 PPT 失败修复：同一 Provider draft 继续暴露 `bold`、scene 元素顶层 `fillColor/strokeColor/strokeWidth/shapeType`，以及封面/结束页未经过别名归一化的问题。解析器现统一处理这些受控别名，未知字段仍 fail-closed；真实 draft 已解析为 4 个正文分节、5 个封面元素和 4 个结束页元素，新增回归后完整 Vitest 247 文件/2023 项通过。
+
+2026-09-27 生成请求参数合同接线：语义规划阶段抽取的 `operation`、`documentKind`、`topic`、`pageCount`、`style`、`requirements`、`sourcePolicy`、`targetHint` 等字段现在由 Application 组装为受控 JSON 合同，随文档内容请求提交给第二阶段 LLM；原始用户需求和资料仍作为参考输入。Provider 返回内容仍必须经过本地 Outline Schema、IR、布局、渲染和文件 QA，模型不能覆盖执行字段、资料策略、目标范围、路径、凭证或工具调用。新增 Controller 回归，确认合同已进入 provider-bound draft。
+
+2026-09-27 Outline Contract 第一阶段收口：新增纯合同模块 `src/shared/document-outline-contract.ts`，统一 Outline 根对象、section、block、scene 字段、枚举、限制、alias 映射、`additionalProperties:false` JSON Schema 和无 structured-output Provider 的 Prompt 降级约束。Chat 文档提示、Controller 受控生成合同和 Runtime `document-outline-parser.ts` 现在消费同一份 Contract；恢复逻辑仍留在 Parser/Excel 定向 recovery，不进入 Contract。保留有限 alias 输入归一化，标准输出不再携带 `fillColor`、`lineColor`、`shapeType`、`bold`、`opacity` 等旧字段；root/section/block 未知字段 fail-closed。新增真实失败样例与损坏 JSON key 回归。完整 `pnpm test` 为 Node/UI 384/384、Vitest 248 文件/2041 项；未修改 Document IR 核心结构、PptxGenJS、Runner、Canonical Tool Contract 或生产 Tool Loop。现有文本 Provider 只声明 `response_format: object`，因此本阶段实际使用由同一 Contract 派生的 JSON Schema Prompt 降级；待 Provider 能力合同明确支持 `json_schema` 后再接 structured output 传输。
+
+最新工程门禁复验：`pnpm lint`、`pnpm audit:platform`、`pnpm typecheck`、`pnpm build`、`pnpm verify:recovery-audit`、`pnpm verify:phase9-closeout`、`pnpm verify:plan-compliance` 和 `git diff --check` 通过；冻结交接包完整性已从当前默认门禁移除；完整 `pnpm test` 通过，Node/UI 384/384、Vitest 250 文件/2151 项。
+
+P5 首批实现新增 `PresentationDesignIR` 与 `PresentationLayoutIR`，从已验证 `PresentationPlan` 派生字体/颜色/元素设计信息、归一化几何框和确定性越界/重叠诊断；封面、正文和结束页均可回写调整后的几何，默认最多 8 次自动调整。仍未完成视觉 Agent 的完整输入、复杂版式策略和元素级 Patch。P5/P6 布局、渲染重叠和 Runner 定向测试通过。
+
+P7 维护增量：局部修订 Agent 现在对所有非目标章节保存稳定 SHA-256，检测越界写入或非目标内容变化时立即恢复原始大纲并返回 `revision_scope_violation`，阻止后续渲染、发布和 Work 登记；新增恶意执行器回归测试。场景元素级 Target Resolver、PDF/源数据交付 DTO 和 Windows Office 人工验收仍未完成。
+
+P0 机器化清单已新增 `config/plan-manifest.json` 和 `pnpm verify:plan-compliance`，固定 P0-P8、需求 ID 和必需命令；当前只验证清单结构与 package scripts，分支变更和 PR 证据仍需后续 CI 接入。
+
+### 计划执行保证机制
+
+计划不以“文档写过”为完成依据，而以阶段门禁为唯一推进条件。每个 P 阶段都必须有入口条件、允许修改范围、结构化输出、失败码、取消语义、总超时、最大循环次数、证据路径和退出条件；前一阶段未通过时，后一阶段不得开始。
+
+| 门禁 | 阻断条件 | 必须留下的证据 |
+| --- | --- | --- |
+| G0 基线门禁 | 不在 `feature/*` 分支、工作树范围不清、用户改动未区分 | 分支、基线 commit、文件清单、纳入/排除说明 |
+| G1 输入安全门禁 | Schema、长度、项目/附件引用、权限、敏感字段或取消校验失败 | 受控失败码、输入 Hash、脱敏诊断；不得有模型或工具调用 |
+| G2 计划门禁 | 意图路由、上下文来源、Document IR 或 RepairPlan 不合法 | 版本化计划、来源清单、Schema 结果、修复次数和终止原因 |
+| G3 设计/布局门禁 | Design IR/Layout IR 缺字段、元素越界、碰撞未解决或自动调整超限 | IR 快照、几何诊断、调整记录、未解决问题 |
+| G4 文件/质量门禁 | OOXML、内容、页数、字体、布局、溢出、重叠、Hash 或原子发布失败 | PPTX/PDF/图片临时产物、诊断、Hash、发布结果；失败不得登记 Work |
+| G5 人工审核门禁 | 用户未确认、Target Resolver 不唯一、局部范围或非目标 Hash 校验失败 | 审核决定、目标解析、Patch、前后结构摘要和非目标 Hash |
+| G6 交付门禁 | Runtime 未恢复、全量工程门禁失败、交付说明或源数据缺失 | 状态机终态、日志摘要、全量命令结果、源数据和最终 Work 关系 |
+
+状态只能按 `planned → in_progress → passed` 或 `in_progress → blocked/deferred` 迁移。`passed` 必须绑定功能分支 commit、同一轮自动化结果和所需人工证据；定向测试、旧记录、工作树代码和本地 preflight 不能单独触发 `passed`。任何门禁失败都冻结后续阶段，并在本节记录失败码、责任范围和重新验收条件。
+
+执行时使用需求 ID 到源码、测试和证据的可追溯矩阵，例如 `P1-SG-001`（输入安全）、`P3-IR-001`（Document IR）、`P5-LAYOUT-001`（布局碰撞）、`P6-QA-001`（确定性 QA）、`P7-EDIT-001`（局部修改）和 `P8-RECOVERY-001`（恢复）。每个 PR 必须列出覆盖的 ID；没有 ID、测试和证据的代码不能进入下一阶段。
+
+自动化门禁固定执行 `pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm test`、`pnpm audit:platform`、`pnpm verify:phase9-closeout` 和 `git diff --check`。冻结交接包完整性不再作为当前默认门禁。新增阶段行为必须同时增加领域/应用/平台合同测试；关键安全边界必须有失败路径测试。PR 合并前不得跳过失败命令，不得以历史通过数量替代当前结果。
+
+当前文档规则还没有机器化，P0 必须补齐这一层：`plan-manifest` 固定 P0-P8 的阶段、需求 ID、入口/退出条件、命令和证据类型；`verify-plan-compliance` 在本地和 CI 检查当前分支、变更文件、PR 声明的需求 ID、测试结果和状态迁移。检查失败时返回非零状态，禁止合并或把阶段标为 `passed`。该验证器不得读取凭证、外发数据或把 Markdown 中的文字直接当作通过事实。
+
+计划变更也受控：先在本节添加带日期的变更记录和影响的 P 阶段，再修改源码；旧文档只作证据，不通过修改旧状态来“追认”当前完成。这样可以同时约束计划、代码、测试、分支和人工验收，避免实现悄悄偏离目标。
+
+### 代码能力与交付状态
+
+| 范围 | 当前状态 | 已有证据 | 关闭条件 |
+| --- | --- | --- | --- |
+| 阶段 9 跨平台基线 | `passed`（范围内） | Windows 必需套件已收口；macOS 明确延期 | 仅在负责人重新批准范围时变更 |
+| 阶段 10 发布能力 | `not_started` | 计划边界仍为安装包、签名、公证、更新、生产媒体分发、SBOM 和正式发布准入 | 单独立项、分支和验收 |
+| 既有 Office v1 生成与基础修订 | `passed`（既有范围） | Word/Excel/PPT 本地生成、受控 IPC、文件校验和 Work 登记已在基线 | 不把 v1 的整篇重写能力当作目标闭环的局部 Agent 修改 |
+| 智能文档目标闭环实现 | `in_progress` | P1-P4 的部分代码和测试存在，P5 Design/Layout IR 尚未闭环，P7/P8 仍有验收缺口 | 按 P0-P8 逐阶段完成并通过统一门禁 |
+| 企业资料检索 | `in_progress` | 本地可重建 BM25 索引和检索评测代码存在；向量/embedding 未启动 | 向量/embedding 方案须先完成评测、数据治理和负责人批准 |
+| 智能文档联网检索 | `in_progress` | 授权、域名、脱敏、缓存、取消和离线回退合同存在；真实 transport 未启用 | 真实 transport、联网 UI 和费用验收必须独立批准 |
+| 多服务商 M0-M6 基线 | `passed` | 历史实施记录和当前代码保留已完成基线 | 后续服务商优化另行立项，不从旧专项计划自动启动 |
+| 2026-09-26/27 PPT 与 Document IR 修复 | `in_progress` | 解析器、Runtime、工具前置条件和 PPT 样式归一化定向测试通过；当前修改尚未合并 | 完成全量回归并在功能分支合并 |
+| 全量工程门禁 | `passed` | `pnpm test` Node/UI 384/384、Vitest 250 文件/2151 项；lint、平台审计、typecheck、build、recovery、closeout、plan compliance 和 diff 检查通过 | 只剩 Windows Electron/Office 人工验收和 P8 交付收口 |
+
+状态字段只使用 `planned`、`in_progress`、`blocked`、`passed`、`deferred` 和 `not_started`。未提交、未合并、人工待验收和“仅定向测试通过”属于证据或关闭条件，不另造状态值。
+
+### 证据索引
+
+- 智能文档总体方案：`docs/current/CONVERSATION_AGENT_AND_AUTONOMOUS_PPT_PLAN.md`。
+- PPT/联网子方案：`docs/current/CONVERSATIONAL_PPT_AND_MODEL_WEB_SEARCH_PLAN.md`。
+- E1-E7 历史映射：旧历史计划文件已删除；当前状态和证据只以本节、`docs/current/` 和 `docs/evidence/` 为准。
+- 当前 2026-09-26/27 维护记录：本节下方“历史实施记录”开头的 PPT、Document IR、渲染器和新建 PPT 条目；对应源码改动仍处于工作树状态。
+
+### 计划执行与交付顺序
+
+1. 先完成 P0：冻结当前工作树，建立功能分支并确认本轮代码范围；不得直接在 `develop` 上继续提交功能代码。
+2. 依次推进 P1-P4：安全门禁必须先于主 Agent，路由和上下文通过后才允许 Planner、Document IR 和内容生成。
+3. 再推进 P5-P6：Design/Layout IR、布局几何校验、原子 PPTX 执行、PDF/图片渲染和确定性 QA 必须形成闭环；失败只能限次局部修复。
+4. 完成 P7：人工审核、自然语言修改、Target Resolver 和非目标内容保护；任何修改重新回到 P6 验证。
+5. 最后完成 P8：Runtime 恢复、全量门禁、Windows Electron/Office 可见验收、交付说明和正式 Work 登记；P8 未完成不得宣称目标闭环完成。
+
+### 统一验收门禁
+
+当前计划的完成判断必须以同一轮证据为准：`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm test`、`pnpm audit:platform`、`pnpm verify:recovery-audit`、`pnpm verify:phase9-closeout`、`pnpm verify:plan-compliance` 和 `git diff --check`。冻结交接包完整性不属于当前门禁。涉及文档生成时，还必须有真实本地文件校验、OOXML/内容/布局/Hash/原子发布证据；涉及 Windows 用户流程时，自动化结果不能替代可见 Electron/Office 人工验收。
+
+### 统一记录规则
+
+- 当前状态、待办、阻断、分支和验收结果只写在本节。
+- `docs/current/` 和 `docs/evidence/` 只保留实施记录与机器证据，不再创建新的平行计划；计划状态只更新本节。
+- 历史事实需要纠正时，在本节新增带日期的更正记录，并链接原始证据；不重写原始验收结论。
+- 未提交代码、定向测试通过或本地 preflight 通过，都不能单独写成“已完成并合入”。
+
+## 历史实施记录（只读）
+
+### PPT Outline 样式别名归一化（2026-09-27，真实 draft 复验通过）
+
+最新失败 PPT 的真实 DraftCompiler 错误为 `outline.sections[0].scene is invalid: unsupported field: fillColor`，随后同一类 draft 还暴露了 `lineColor`、`lineWidth` 和 scene style 内的 `shapeType`。现归一化层将 `fillColor -> fill`、`strokeColor/lineColor -> stroke`，并丢弃无对应受控语义的旧装饰提示后再进入严格 scene schema；未知字段仍失败。用最新失败 assistant draft 复验解析成功，得到 7 个 PPT 正文分节；parser 40/40、typecheck、lint、production build 通过。
+
+### 本地 PPT 渲染器真实验证（2026-09-26，已通过）
+
+安装 LibreOffice 26.8.0.3，并将用户级 `UNICOMP_OFFICE_RENDERER` 配置为 `C:\\Program Files\\LibreOffice\\program\\soffice.com`；将 `UNICOMP_PDF_RENDERER` 配置为当前已验证的 Poppler `pdftoppm.exe`。真实生成临时 PPTX 85,871 bytes，经 LibreOffice 转 PDF、Poppler 输出 5 张 PNG，PPT 几何/文本/页数 QA diagnostics 为空；未调用模型、未登记 Work。需完全重启现有 Electron 进程后才能读取新用户级环境配置。渲染器定向测试 6/6 通过；变更前已有 `office-render-adapter.ts` 的 lint 类型注解告警未纳入本次功能修改。
+
+### Generation Plan 与 DraftCompiler 边界收紧（2026-09-26，定向验收通过）
+
+按架构约束收紧生成输入：operation 与 attachment refs 由上游生成计划传入，DraftCompiler 构造权威 IR 并拒绝模型返回的 operation/refs 覆盖或 create 依赖冲突；模型输出不再决定 create/edit。PPT scene 增加白名单归一化阶段，已知 `shapeType` 别名映射为 `type: shape` 后再进入严格 schema 校验，未知字段仍返回 `OUTLINE_INVALID`。相关 parser、生成服务、IPC 与 controller 定向测试 88/88、typecheck、变更文件 ESLint 通过。
+
+### 新建 PPT 前置条件回归修复（2026-09-26，已验证）
+
+最新《生成一个关于项羽的 PPT》失败根因已确认：任务 IR 是 `operation=create` 且无附件，但 `DocumentGenerationRuntimeBridge` 把 `plan_validation` 生命周期事件映射成了要求已有文档的 `read_document_structure`，runtime 在大纲编译前返回 `TOOL_PRECONDITION_FAILED`，因此没有进入编译、渲染或登记。现 create runtime 对计划校验、编译、结构检查、Hash、发布/登记等生命周期事件不再伪装成已有文档工具调用；生产 Trace 仍保留，edit 映射保持不变。相关回归测试 77/77、typecheck、变更文件 ESLint 通过。
+
+### Document IR 前置条件治理（2026-09-26，定向验收通过）
+
+维护优化：Document IR 现在显式携带 `operation`（`create`、`edit`、`analyze`），解析时拒绝 create 的已有文档引用字段和工具调用；工具注册表为每项工具声明 `requiresExistingDocument`，LLM 工具列表按 IR 过滤，bridge、agent loop 和持久化 runtime 在执行前再次校验。Plan Validator 统一返回 `TOOL_PRECONDITION_FAILED`（可恢复）或 `OUTLINE_INVALID`，create 误选 `read_document_structure` 时只自动 replan 一次，失败观察、重试次数和受限错误码写入结构化诊断/生产 Trace facts。
+
+新增/补齐无附件新建 PPT、有附件编辑、错误工具过滤、一次性 replan、provider 工具前置条件透传和 runtime 显式 operation 单元测试。`pnpm typecheck`、变更文件 ESLint、`pnpm build`、`git diff --check` 及定向 Vitest 79/79 通过。`pnpm test` 仍被工作树已有冻结交接包校验、平台假设清单、生产 trace UI 合同和 Vidu wiring 计数失败阻断，未发现与本轮 IR/工具前置条件改动直接相关的失败；未调用外部模型、联网或付费服务。
+
 ### 剪辑分支验证补齐与 develop 集成（2026-09-24，验证通过，PR #9）
 
 负责人明确授权：补齐失败验证，将最新 develop 普通合并进 feature/basic-editing-mp4-export，解决冲突、推送，经 PR 使用 merge commit 合入 develop，保留本地和远端功能分支。本轮在维护范围内执行，不重写共享历史，不改用户项目或调用付费服务。

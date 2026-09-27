@@ -118,6 +118,42 @@ describe('bounded document agent loop', () => {
     expect(result.steps).toBe(0);
   });
 
+  it('replans once after a create operation violates a tool prerequisite', async () => {
+    let decisions = 0;
+    let executions = 0;
+    const diagnostics: unknown[] = [];
+    const result = await runDocumentAgentLoop({
+      operation: 'create', maxSteps: 3,
+      execute: async () => { executions += 1; return {}; },
+      onDiagnostic: diagnostic => { diagnostics.push(diagnostic); },
+      nextDecision: async () => {
+        decisions += 1;
+        return decisions === 1
+          ? { kind: 'tool', request }
+          : { kind: 'complete', summary: 'replanned' };
+      }
+    });
+    expect(result.state).toBe('completed');
+    expect(result.observations[0]).toMatchObject({ diagnostic: 'TOOL_PRECONDITION_FAILED', ok: false });
+    expect(executions).toBe(0);
+    expect(decisions).toBe(2);
+    expect(diagnostics).toEqual([expect.objectContaining({
+      code: 'TOOL_PRECONDITION_FAILED', recoverable: true, replanAttempt: 1
+    })]);
+  });
+
+  it('allows only one recovery replan', async () => {
+    let decisions = 0;
+    const result = await runDocumentAgentLoop({
+      operation: 'create', maxSteps: 4,
+      execute: async () => ({}),
+      nextDecision: async () => { decisions += 1; return { kind: 'tool', request }; }
+    });
+    expect(result).toMatchObject({ state: 'failed', summary: 'TOOL_PRECONDITION_FAILED' });
+    expect(result.observations).toHaveLength(1);
+    expect(decisions).toBe(2);
+  });
+
   it('interrupts an in-flight tool when cancellation is requested', async () => {
     const controller = new AbortController();
     const resultPromise = runDocumentAgentLoop({

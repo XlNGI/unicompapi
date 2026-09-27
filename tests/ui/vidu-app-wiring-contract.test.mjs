@@ -67,7 +67,7 @@ test('Vidu runtime access is ledger-gated and no longer hard-blocked or frozen',
   assert.match(mainSource, /reconcileConnections\(registrySnapshot\.connections\)/);
   assert.equal(
     (mainSource.match(/runtimeAuthorization: runtimeAuthorizationLedger/g) ?? []).length,
-    2
+    3
   );
   assert.match(
     storageHandlerSource,

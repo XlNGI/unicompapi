@@ -1,8 +1,11 @@
 import type {
   DocumentOutline,
   DocumentWorkspaceKind,
-  PresentationPlan
+  PresentationPlan,
+  PresentationDesignIR,
+  PresentationLayoutIR
 } from '../../domain';
+import { applyPresentationLayoutToOutline, buildPresentationDesignIR, buildPresentationLayoutIR } from '../../domain';
 import {
   applyStructuredDocumentPatch,
   readStructuredDocument,
@@ -80,6 +83,8 @@ export interface TemporaryDocumentWorkflowResult {
   readonly structure: DocumentStructureSnapshot;
   readonly change?: DocumentPatchChange;
   readonly presentationPlan?: PresentationPlan;
+  readonly designIR?: PresentationDesignIR;
+  readonly layoutIR?: PresentationLayoutIR;
   readonly diagnostics: readonly DocumentQualityDiagnostic[];
   readonly temporary?: {
     readonly fileName: string;
@@ -113,13 +118,30 @@ export async function prepareTemporaryDocumentVersion(
       }]
     };
   }
-  const structure = readStructuredDocument(outline);
-  const presentationPlan = outline.kind === 'ppt'
+  const basePresentationPlan = outline.kind === 'ppt'
     ? buildPresentationPlanFromOutline(outline, {
         templateId: input.presentationTemplate
       })
     : undefined;
-  const diagnostics = collectDeterministicDiagnostics(outline, presentationPlan);
+  const baseLayoutIR = basePresentationPlan === undefined ? undefined : buildPresentationLayoutIR(basePresentationPlan);
+  if (basePresentationPlan !== undefined && baseLayoutIR !== undefined) {
+    outline = applyPresentationLayoutToOutline(outline, basePresentationPlan, baseLayoutIR);
+  }
+  const structure = readStructuredDocument(outline);
+  const presentationPlan = outline.kind === 'ppt'
+    ? buildPresentationPlanFromOutline(outline, { templateId: input.presentationTemplate })
+    : undefined;
+  const designIR = presentationPlan === undefined ? undefined : buildPresentationDesignIR(presentationPlan);
+  const layoutIR = presentationPlan === undefined ? undefined : buildPresentationLayoutIR(presentationPlan, { autoAdjust: false });
+  const diagnostics = [
+    ...collectDeterministicDiagnostics(outline, presentationPlan),
+    ...(layoutIR?.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      severity: diagnostic.severity,
+      scope: `page:${diagnostic.pageNumber}:${diagnostic.elementIds.join(',')}`,
+      message: diagnostic.message
+    })) ?? [])
+  ];
   if (diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
     return {
       status: 'rejected',
@@ -127,10 +149,12 @@ export async function prepareTemporaryDocumentVersion(
       structure,
       ...(change !== undefined ? { change } : {}),
       ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+      ...(designIR !== undefined ? { designIR } : {}),
+      ...(layoutIR !== undefined ? { layoutIR } : {}),
       diagnostics
     };
   }
-  if (input.signal?.aborted) return cancelled(outline, structure, change, presentationPlan, diagnostics);
+  if (input.signal?.aborted) return cancelled(outline, structure, change, presentationPlan, diagnostics, designIR, layoutIR);
   if (!input.generateTemporaryFile && !input.render) {
     return {
       status: 'ready',
@@ -138,6 +162,8 @@ export async function prepareTemporaryDocumentVersion(
       structure,
       ...(change !== undefined ? { change } : {}),
       ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+      ...(designIR !== undefined ? { designIR } : {}),
+      ...(layoutIR !== undefined ? { layoutIR } : {}),
       diagnostics
     };
   }
@@ -156,7 +182,7 @@ export async function prepareTemporaryDocumentVersion(
     });
     if (input.signal?.aborted) {
       await discardTemporaryDocument(temporary);
-      return cancelled(outline, structure, change, presentationPlan, diagnostics);
+      return cancelled(outline, structure, change, presentationPlan, diagnostics, designIR, layoutIR);
     }
     let rendered = false;
     if (input.render) {
@@ -185,6 +211,8 @@ export async function prepareTemporaryDocumentVersion(
             structure,
             ...(change !== undefined ? { change } : {}),
             ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+            ...(designIR !== undefined ? { designIR } : {}),
+            ...(layoutIR !== undefined ? { layoutIR } : {}),
             diagnostics
           };
         }
@@ -196,6 +224,8 @@ export async function prepareTemporaryDocumentVersion(
           structure,
           ...(change !== undefined ? { change } : {}),
           ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+          ...(designIR !== undefined ? { designIR } : {}),
+          ...(layoutIR !== undefined ? { layoutIR } : {}),
           diagnostics: [...diagnostics, {
             code: 'render_failed',
             severity: 'error',
@@ -211,6 +241,8 @@ export async function prepareTemporaryDocumentVersion(
       structure,
       ...(change !== undefined ? { change } : {}),
       ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+      ...(designIR !== undefined ? { designIR } : {}),
+      ...(layoutIR !== undefined ? { layoutIR } : {}),
       diagnostics,
       temporary: {
         fileName: temporary.fileName,
@@ -226,6 +258,8 @@ export async function prepareTemporaryDocumentVersion(
       structure,
       ...(change !== undefined ? { change } : {}),
       ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+      ...(designIR !== undefined ? { designIR } : {}),
+      ...(layoutIR !== undefined ? { layoutIR } : {}),
       diagnostics: [...diagnostics, {
         code: 'render_failed',
         severity: 'error',
@@ -319,7 +353,9 @@ function cancelled(
   structure = readStructuredDocument(outline),
   change?: DocumentPatchChange,
   presentationPlan?: PresentationPlan,
-  diagnostics: readonly DocumentQualityDiagnostic[] = []
+  diagnostics: readonly DocumentQualityDiagnostic[] = [],
+  designIR?: PresentationDesignIR,
+  layoutIR?: PresentationLayoutIR
 ): TemporaryDocumentWorkflowResult {
   return {
     status: 'cancelled',
@@ -327,6 +363,8 @@ function cancelled(
     structure,
     ...(change !== undefined ? { change } : {}),
     ...(presentationPlan !== undefined ? { presentationPlan } : {}),
+    ...(designIR !== undefined ? { designIR } : {}),
+    ...(layoutIR !== undefined ? { layoutIR } : {}),
     diagnostics
   };
 }

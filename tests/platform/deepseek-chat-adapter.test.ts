@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -227,9 +228,11 @@ describe('DeepSeek chat adapter', () => {
       streamResponse([chunk({ delta: { tool_calls: [{ index: 0, ...wireCall }] }, finishReason: 'tool_calls' }), '[DONE]']),
       streamResponse([chunk({ delta: { content: 'Reviewed' }, finishReason: 'stop' }), '[DONE]'])
     );
-    const execute = vi.fn(async () => ({ revision: 3 }));
+    const context = readDocumentToolContext();
+    const execute = vi.fn(async () => ({ schemaVersion: 1 as const, status: 'success' as const, observation: { revision: context.revision } }));
     const bridge = createDocumentToolCallingBridge({
-      bindings: [{ id: 'read_document_structure', fields: {}, authorize: async () => true, execute }],
+      bindings: [{ contract: readDocumentToolContract, authorize: async () => true, execute }],
+      getExecutionContext: () => context,
       budgetUnits: 4, maxCalls: 2, timeoutMs: 1_000
     });
     const handle = await fixture.adapter.submit({
@@ -243,11 +246,17 @@ describe('DeepSeek chat adapter', () => {
       { role: 'user', content: 'Synthetic user message' },
       { role: 'assistant', content: '', tool_calls: [wireCall] },
       { role: 'tool', tool_call_id: 'read-1', name: 'read_document_structure', content: JSON.stringify({
-        ok: true, callId: 'read-1', toolId: 'read_document_structure', toolVersion: '1.0',
-        costUnits: 1, outcomeUnknown: false, result: { revision: 3 }
+        schemaVersion: 1, status: 'success', observation: { revision: context.revision },
+        metadata: { callId: 'read-1', toolId: readDocumentToolContract.toolId, toolVersion: readDocumentToolContract.version,
+          costUnits: readDocumentToolContract.execution.budgetUnits }
       }) }
     ]);
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({ scope: 'document' }, expect.objectContaining({
+      currentDocumentId: context.currentDocumentId, revision: context.revision
+    }));
+    expect(bodyOf(fixture.transport.requests[0]).tools).toEqual(bridge.tools);
+    expect(JSON.stringify(bodyOf(fixture.transport.requests[0]))).not.toContain(context.currentDocumentId);
   });
 
   it('maps text_chat to strict SSE, persists final usage and emits only answer content', async () => {
