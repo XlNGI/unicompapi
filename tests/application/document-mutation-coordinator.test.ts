@@ -82,4 +82,14 @@ describe('document mutation coordinator', () => {
       patch: updateTextPatch(element.elementId, '已提交待刷新'), signal: new AbortController().signal });
     expect(pending.status).toBe('committed_pending_refresh');
   });
+
+  it('treats an uncertain candidate registration as reconciliation-required', async () => {
+    const { head, element } = await fixture();
+    const { api, calls } = ports(head);
+    api.registerCandidate.mockRejectedValue(new Error('storage acknowledgement lost'));
+    const result = await new DocumentMutationCoordinator(api).updateText({ mutationId: 'mutation-unknown', idempotencyKey: 'call-unknown',
+      patch: updateTextPatch(element.elementId, '可能已写入'), signal: new AbortController().signal });
+    expect(result.status).toBe('reconciliation_required');
+    expect(calls.reconcile).toBe(1);
+  });
 });

@@ -71,6 +71,7 @@ export class DocumentMutationCoordinator {
     if (replay) return replay;
     let head: DocumentMutationHead | undefined;
     let candidate: DocumentMutationCandidate | undefined;
+    let candidateRegistrationAttempted = false;
     try {
       head = await this.ports.readHead();
       const parsedPin = head.pin;
@@ -96,6 +97,7 @@ export class DocumentMutationCoordinator {
         runtimeRevision: parsedPin.runtimeRevision + 1, identityIndexVersion: 1, headWorkId: candidateWorkId };
       const boundCandidateIdentity = Object.freeze({ ...candidateIdentity, workId: candidateWorkId });
       record = { ...record, state: 'materialized', candidateChecksumSha256: candidateChecksum };
+      candidateRegistrationAttempted = true;
       candidate = await this.ports.registerCandidate({ pin: candidatePin, buffer: candidateBuffer, identity: boundCandidateIdentity,
         idempotencyKey: input.idempotencyKey, signal: input.signal });
       record = { ...record, state: 'commit_prepared', candidateWorkId: candidate.workId };
@@ -116,10 +118,10 @@ export class DocumentMutationCoordinator {
         return this.finish(input, result);
       }
     } catch (error) {
-      const state: DocumentMutationState = input.signal.aborted ? 'cancelled' : candidate ? 'unknown' : 'failed';
+      const state: DocumentMutationState = input.signal.aborted ? 'cancelled' : (candidate || candidateRegistrationAttempted) ? 'unknown' : 'failed';
       const basePin = head?.pin ?? await this.ports.readHead().then(value => value.pin).catch(() => emptyPin());
       const record = this.record(input, state, basePin, input.patch, error instanceof Error ? error.message : 'mutation_failed');
-      if (candidate) {
+      if (candidate || candidateRegistrationAttempted) {
         await this.ports.reconcile({ ...record, state: 'reconciliation_required' });
         return this.finish(input, { status: 'reconciliation_required', record: { ...record, state: 'reconciliation_required' }, candidate });
       }
