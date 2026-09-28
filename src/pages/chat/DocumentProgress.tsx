@@ -19,6 +19,8 @@ export interface DocumentProgressProps {
   /** Raw model content is projected to safe, readable document text before display. */
   readonly bodyContent?: string;
   readonly bodyStreaming?: boolean;
+  /** When developer mode is enabled, structured facts like docId, nodeId, duration and tool calls can be inspected */
+  readonly developerMode?: boolean;
 }
 
 const stages: Record<ConversationTaskProgressSnapshot['stage'], string> = {
@@ -41,7 +43,7 @@ function progressSummary(event: ConversationTaskProgressSnapshot): string {
 const eventTitles: Record<ProductionTraceEventDto['code'], string> = {
   request_received: '接收任务', model_request: '发送模型请求', model_response: '接收模型响应',
   plan_decision: '模型任务决策', plan_validation: '校验任务计划', source_context: '准备授权资料',
-  tool_authorization: '校验工具权限', tool_call: '调用本地工具', tool_result: '本地工具结果',
+  tool_authorization: '校验执行权限', tool_call: '执行受控步骤', tool_result: '步骤已完成',
   document_compile: '生成文档文件', document_render: '渲染文档', document_check: '校验文档',
   document_structure_check: '检查文档结构', document_hash_check: '校验文件完整性',
   document_register: '登记作品', document_publish: '发布文档', task_complete: '结束任务'
@@ -49,6 +51,29 @@ const eventTitles: Record<ProductionTraceEventDto['code'], string> = {
 const statusLabels = { started: '已开始', progress: '进行中', completed: '已完成', failed: '失败', cancelled: '已取消' };
 const toolLabels = { read_sources: '读取授权资料', search: '检索资料', analyze: '分析资料', write_document: '写入文档',
   render: '渲染预览', check: '质量检查', publish: '登记作品', patch: '修订文档' };
+
+interface DisplayProductionEvent {
+  readonly event: ProductionTraceEventDto;
+  /** The first sequence in a collapsed progress run keeps the React row mounted. */
+  readonly key: string;
+}
+
+function compactProgressEvents(events: readonly ProductionTraceEventDto[]): readonly DisplayProductionEvent[] {
+  const compacted: DisplayProductionEvent[] = [];
+  for (const event of events) {
+    const previous = compacted[compacted.length - 1];
+    const sameProgressRun = previous && previous.event.code === event.code &&
+      previous.event.facts?.purpose === event.facts?.purpose &&
+      (previous.event.status === 'progress' || event.status === 'progress');
+    if (sameProgressRun) {
+      compacted[compacted.length - 1] = { ...previous, event };
+    } else {
+      compacted.push({ event, key: `${event.conversationId}:${event.sequence}` });
+    }
+  }
+  return compacted;
+}
+
 function eventTitle(event: ProductionTraceEventDto): string {
   const localOperations: Record<string, string> = {
     'document-outline': '校验文档大纲', 'document-layout': '检查 PPT 布局容量',
@@ -86,18 +111,20 @@ function eventDetails(event: ProductionTraceEventDto): string[] {
   return details;
 }
 
-export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, bodyContent, bodyStreaming = false }: DocumentProgressProps) {
+export function DocumentProgress({ detail, taskProgress = [], preferDetail = false, events = [], request, requestBySource, incomplete, terminalDetail, bodyContent, bodyStreaming = false, developerMode = false }: DocumentProgressProps) {
   const latest = taskProgress.reduce<ConversationTaskProgressSnapshot | undefined>(
     (previous, event) => !previous || event.sequence > previous.sequence ? event : previous,
     undefined
   );
   const completedSteps = taskProgress.filter((event) => event.progressStatus === 'completed');
-  const lastEvent = events[events.length - 1];
+  const displayEvents = useMemo(() => compactProgressEvents(events), [events]);
+  const lastEvent = displayEvents[displayEvents.length - 1]?.event;
+  const bodyEventIndex = displayEvents.reduce((found, item, index) =>
+    item.event.code === 'model_response' && item.event.facts?.purpose === 'content' ? index : found, -1);
   const summary = terminalDetail ?? (lastEvent ? `${eventTitle(lastEvent)} · ${statusLabels[lastEvent.status]}`
     : latest && !preferDetail ? progressSummary(latest) : detail);
   const preview = useMemo(() => projectDocumentBody(bodyContent ?? ''), [bodyContent]);
   const body = preview.content;
-  const bodyEvent = [...events].reverse().find((event) => event.code === 'model_response' && event.facts?.purpose === 'content');
   const bodyPreview = body || preview.truncated ? (
     <section className="uc-chat-generated-body" aria-label="生成正文">
       <div className="uc-chat-generated-body__heading">生成正文</div>
@@ -106,27 +133,53 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
     </section>
   ) : null;
   return (
-    <section className="uc-chat-document-progress" aria-label="生产进度">
+    <section className="uc-chat-document-progress" aria-label="生产进度" data-developer-mode={developerMode ? 'true' : 'false'}>
       <p className="uc-chat-document-progress__summary" role="status" aria-live="polite">
         <span className="uc-chat-document-progress__label">生产进度</span>
         <span>{summary}</span>
       </p>
       {incomplete ? <p className="uc-chat-production-trace__issue" role="status">生产记录不完整，以下仅展示已保存的执行事实。</p> : null}
-      {events.length > 0 ? (
+      {displayEvents.length > 0 ? (
         <ol className="uc-chat-production-trace" aria-label="完整生产链路">
-          {events.map((event) => {
+          {displayEvents.map(({ event, key }, displayIndex) => {
             const eventRequest = requestBySource ? requestBySource.get(event.sourceMessageId) : request;
+            const eventIndex = events.indexOf(event);
+            const prevEvent = eventIndex > 0 ? events[eventIndex - 1] : undefined;
+            const durationMs = prevEvent ? Math.max(0, new Date(event.occurredAt).getTime() - new Date(prevEvent.occurredAt).getTime()) : undefined;
+            const naturalDetails = eventDetails(event);
             return (
-            <li key={`${event.conversationId}:${event.sequence}`} data-status={event.status} data-event-code={event.code}>
+            <li key={key} data-status={event.status} data-event-code={event.code}>
               <div className="uc-chat-production-trace__heading">
                 <span className="uc-chat-production-trace__direction">{eventDirection(event)}</span>
                 <strong>{eventTitle(event)}</strong>
                 <span className="uc-chat-production-trace__status">{statusLabels[event.status]}</span>
+                {durationMs !== undefined && developerMode ? (
+                  <span className="uc-chat-production-trace__duration" title="与前一步间隔耗时">
+                    {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(2)}s`}
+                  </span>
+                ) : null}
                 <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>
               </div>
               {event.code === 'request_received' && eventRequest ? <p className="uc-chat-production-trace__request">{eventRequest}</p> : null}
-              {eventDetails(event).length ? <p>{eventDetails(event).join(' · ')}</p> : null}
-              {event === bodyEvent ? bodyPreview : null}
+              {naturalDetails.length ? <p className="uc-chat-production-trace__details">{naturalDetails.join(' · ')}</p> : null}
+              {developerMode ? (
+                <details className="uc-chat-production-trace__devtools">
+                  <summary>查看执行事实 (docId / 工具调用)</summary>
+                  <dl className="uc-chat-production-trace__facts-grid">
+                    <div><dt>docId</dt><dd>{event.conversationId}</dd></div>
+                    <div><dt>nodeId</dt><dd>{event.traceId}:{event.sequence}</dd></div>
+                    {event.operationId ? <div><dt>operationId</dt><dd>{event.operationId}</dd></div> : null}
+                    {event.facts?.tool ? <div><dt>tool</dt><dd>{event.facts.tool}</dd></div> : null}
+                    {event.facts ? (
+                      <div className="uc-chat-production-trace__facts-raw">
+                        <dt>facts</dt>
+                        <dd><code>{JSON.stringify(event.facts, null, 2)}</code></dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                </details>
+              ) : null}
+              {displayIndex === bodyEventIndex ? bodyPreview : null}
             </li>
             );
           })}
@@ -139,7 +192,7 @@ export function DocumentProgress({ detail, taskProgress = [], preferDetail = fal
           </ul>
         </details>
       ) : null}
-      {!bodyEvent ? bodyPreview : null}
+      {bodyEventIndex < 0 ? bodyPreview : null}
     </section>
   );
 }

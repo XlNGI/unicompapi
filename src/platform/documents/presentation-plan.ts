@@ -80,6 +80,7 @@ export function buildPresentationPlanFromOutline(
       layout: layout.kind,
       composition,
       ...(section.takeaway !== undefined ? { takeaway: section.takeaway } : {}),
+      ...(section.scene !== undefined ? { scene: section.scene } : {}),
       elements,
       capacity,
       sourceRefs: sectionRefs,
@@ -111,6 +112,8 @@ export function buildPresentationPlanFromOutline(
     pages,
     sourceRefs,
     preserve,
+    ...(outline.coverScene !== undefined ? { coverScene: outline.coverScene } : {}),
+    ...(outline.closingScene !== undefined ? { closingScene: outline.closingScene } : {}),
     ...(options.revision !== undefined ? { revision: options.revision } : {})
   });
 }

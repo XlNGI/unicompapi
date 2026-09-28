@@ -146,6 +146,10 @@ export function projectDocumentBody(content: string): DocumentBodyProjection {
   const reader = new JsonPrefixReader(input);
   const root = reader.read();
   truncated ||= reader.resourceLimitReached;
+  // A streamed PPT response may contain an unfinished LLM-authored scene.
+  // Keep its layout instructions out of the readable body preview even when
+  // a malformed response has temporarily placed them in a list block.
+  const sceneHint = /"(?:scene|coverScene|closingScene|elements|elementId|zIndex)"\s*:/u.test(input);
   const pieces: string[] = [];
   let length = 0;
   function append(value: string): void {
@@ -181,7 +185,8 @@ export function projectDocumentBody(content: string): DocumentBodyProjection {
           const lines = items(field(block, 'items')).map((item, index) => {
             const value = text(item);
             return value ? `${type.value === 'bullets' ? '-' : `${index + 1}.`} ${value}` : '';
-          }).filter(Boolean);
+          }).filter((line) => Boolean(line) &&
+            !(sceneHint && isSceneMetadataPreviewLine(line)));
           append(lines.join('\n'));
           break;
         }
@@ -210,6 +215,13 @@ export function projectDocumentBody(content: string): DocumentBodyProjection {
     append(text(field(section, 'action')));
   }
   return { content: completeCodePoints(pieces.join('')), truncated };
+}
+
+function isSceneMetadataPreviewLine(value: string): boolean {
+  const normalized = value.replace(/^\s*[-\d.]+\s+/, '').trim();
+  if (/^[{}\[\],:]+$/u.test(normalized)) return true;
+  return /^(?:elementId|schemaVersion|geometry|elements|zIndex|parentId|readingOrder|style|font(?:Size|Family|Weight)|textColor|fill|stroke|opacity|align|verticalAlign|x|y|t|l|r|b|width|height)\s*:/u.test(normalized) ||
+    /(?:elementId|schemaVersion|zIndex|parentId|readingOrder|geometry|fontSize|textColor|width|height|\bt)\s*:/u.test(normalized);
 }
 
 export function documentBodyPreview(content: string): string {

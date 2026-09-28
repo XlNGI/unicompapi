@@ -11,6 +11,7 @@ import {
   LuMessagesSquare,
   LuPaperclip,
   LuPanelRight,
+  LuTerminal,
   LuPencil,
   LuSquare,
   LuTrash2,
@@ -526,6 +527,7 @@ export function ChatPage({
   const [includedContextIds, setIncludedContextIds] = useState<readonly string[]>([]);
   const [contextTab, setContextTab] = useState<'selected' | 'library'>('selected');
   const [contextOpen, setContextOpen] = useState(false);
+  const [developerMode, setDeveloperMode] = useState(false);
   const [contextSearch, setContextSearch] = useState('');
   const [renamingContextId, setRenamingContextId] = useState<string>();
   const [contextRename, setContextRename] = useState('');
@@ -543,7 +545,9 @@ export function ChatPage({
   const [candidateLoadFailures, setCandidateLoadFailures] = useState<readonly string[]>([]);
   const [candidateReloadVersion, setCandidateReloadVersion] = useState(0);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const followScrollFrameRef = useRef<number>();
   const dragDepthRef = useRef(0);
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
@@ -773,12 +777,34 @@ export function ChatPage({
   useEffect(() => {
     const content = messagesRef.current?.firstElementChild;
     if (!content || typeof ResizeObserver === 'undefined') return;
+    const scheduleFollowScroll = () => {
+      if (!followOutputRef.current || followScrollFrameRef.current !== undefined) return;
+      followScrollFrameRef.current = window.requestAnimationFrame(() => {
+        followScrollFrameRef.current = undefined;
+        const messages = messagesRef.current;
+        if (messages && followOutputRef.current) {
+          messages.scrollTo({ top: messages.scrollHeight, behavior: 'auto' });
+        }
+      });
+    };
     const observer = new ResizeObserver(() => {
-      const messages = messagesRef.current;
-      if (messages && followOutputRef.current) messages.scrollTo({ top: messages.scrollHeight, behavior: 'instant' });
+      scheduleFollowScroll();
     });
     observer.observe(content);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (followScrollFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(followScrollFrameRef.current);
+        followScrollFrameRef.current = undefined;
+      }
+    };
+  }, []);
+
+  useEffect(() => () => {
+    if (followScrollFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(followScrollFrameRef.current);
+      followScrollFrameRef.current = undefined;
+    }
   }, []);
 
   useEffect(() => {
@@ -1102,9 +1128,17 @@ export function ChatPage({
   useEffect(() => {
     const messages = messagesRef.current;
     if (!messages || !followOutputRef.current) return;
-    // Smooth programmatic scrolling emits intermediate scroll events away from
-    // the bottom, which would be mistaken for the user opting out of following.
-    messages.scrollTo({ top: messages.scrollHeight, behavior: 'instant' });
+    // Coalesce stream updates into one immediate scroll per frame. Smooth
+    // scrolling here makes every token update emit intermediate scroll events,
+    // which makes the message pane visibly oscillate while the body grows.
+    if (followScrollFrameRef.current !== undefined) return;
+    followScrollFrameRef.current = window.requestAnimationFrame(() => {
+      followScrollFrameRef.current = undefined;
+      const current = messagesRef.current;
+      if (current && followOutputRef.current) {
+        current.scrollTo({ top: current.scrollHeight, behavior: 'auto' });
+      }
+    });
     setShowScrollToBottom(false);
   }, [
     lastDisplayMessage?.content,
@@ -2142,6 +2176,14 @@ export function ChatPage({
     }
   }
 
+  function handleAttachmentInputChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    // Reset the input so choosing the same file again still emits a change event.
+    event.currentTarget.value = '';
+    if (!session || busy || responseInProgress || files.length === 0) return;
+    void importDroppedFiles(files);
+  }
+
   async function importDroppedFiles(files: readonly File[]) {
     if (attachmentImportInFlightRef.current) return;
     if (attachments.length + files.length > 8) {
@@ -2847,8 +2889,12 @@ export function ChatPage({
   function scrollMessagesToBottom() {
     const messages = messagesRef.current;
     if (!messages) return;
+    if (followScrollFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(followScrollFrameRef.current);
+      followScrollFrameRef.current = undefined;
+    }
     followOutputRef.current = true;
-    messages.scrollTo({ top: messages.scrollHeight, behavior: 'instant' });
+    messages.scrollTo({ top: messages.scrollHeight, behavior: 'auto' });
     setShowScrollToBottom(false);
   }
 
@@ -3101,6 +3147,17 @@ export function ChatPage({
                 {includedContextIds.length > 0 ? <b>{includedContextIds.length}</b> : null}
               </Button>
             </Whisper>
+            <Whisper placement="bottom" speaker={<Tooltip>{developerMode ? "关闭开发者模式" : "开启开发者模式"}</Tooltip>} trigger="hover">
+              <Button
+                aria-label={developerMode ? "关闭开发者模式" : "开启开发者模式"}
+                aria-pressed={developerMode}
+                className={developerMode ? "uc-chat-page__dev-toggle--active" : undefined}
+                onClick={() => setDeveloperMode(prev => !prev)}
+                variant="ghost"
+              >
+                <LuTerminal aria-hidden="true" />
+              </Button>
+            </Whisper>
           </div>
         </header>
 
@@ -3222,6 +3279,7 @@ export function ChatPage({
                               preferDetail={Boolean(item.documentResult || generationTerminal || isGeneratingFile || isDocumentStopping ||
                                 (isCurrentAssistant && responseExecution &&
                                   ['completed', 'failed', 'cancelled', 'interrupted'].includes(responseExecution.state)))}
+                              developerMode={developerMode}
                             />
                           ) : null}
                           {!isDocumentDraftMessage && !hideDocumentDraftContent && (item.content || !showProductionProgress) ? (
@@ -3491,6 +3549,26 @@ export function ChatPage({
                     <LuX aria-hidden="true" />
                   </Button>
                 ) : null}
+                <button
+                  aria-label="上传附件"
+                  className="uc-chat-page__attachment-trigger"
+                  disabled={!canCompose || busy || cancelRequested || responseInProgress}
+                  onClick={() => attachmentInputRef.current?.click()}
+                  title="上传图片、文档或电子书"
+                  type="button"
+                >
+                  <LuPaperclip aria-hidden="true" />
+                </button>
+                <input
+                  accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.epub"
+                  aria-label="选择要上传的附件"
+                  className="uc-chat-page__attachment-input"
+                  disabled={!canCompose || busy || cancelRequested || responseInProgress}
+                  multiple
+                  onChange={handleAttachmentInputChange}
+                  ref={attachmentInputRef}
+                  type={'file'}
+                />
                 <ModelSelect
                   appearance="subtle"
                   ariaLabel="模型设置"

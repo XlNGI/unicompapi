@@ -111,6 +111,7 @@ describe('document drafting helpers', () => {
     expect(inferPresentationTemplate('极简商务方案')).toBe('business_minimal');
     expect(inferPresentationTemplate('季度工作汇报')).toBe('work_report');
     expect(inferPresentationTemplate('制作校园活动 PPT')).toBe('work_report');
+    expect(inferPresentationTemplate('制作关于龙的文化与历史 PPT')).toBe('natural_minimal');
   });
 
   it('keeps an explicit PPT template above automatic matching', () => {

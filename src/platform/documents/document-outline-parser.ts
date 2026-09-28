@@ -9,6 +9,7 @@ import {
   type PresentationPageKind,
   type PresentationSectionMetadata
 } from '../../domain';
+import { parsePresentationPageScene } from '../../domain';
 
 export { presentationPageKinds } from '../../domain';
 export type {
@@ -84,7 +85,19 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
   const sections = parsed.sections.map((item, index) =>
     parseSection(item, index, kind)
   );
-  return validateDocumentOutline({ kind, title, sections });
+  const coverScene = kind === 'ppt' && parsed.coverScene !== undefined
+    ? parseSafeScene(parsed.coverScene, 'outline.coverScene')
+    : undefined;
+  const closingScene = kind === 'ppt' && parsed.closingScene !== undefined
+    ? parseSafeScene(parsed.closingScene, 'outline.closingScene')
+    : undefined;
+  return validateDocumentOutline({
+    kind,
+    title,
+    sections,
+    ...(coverScene !== undefined ? { coverScene } : {}),
+    ...(closingScene !== undefined ? { closingScene } : {})
+  });
 }
 
 export function parseDocumentContent(
@@ -145,6 +158,9 @@ export function recoverDocumentContent(
     action?: string;
   }> = [];
   const tokens = extractJsonStringTokens(candidate);
+  const sceneRanges = kind === 'ppt'
+    ? findPresentationSceneRanges(candidate)
+    : [];
   let title = '';
   let currentSection: (typeof sections)[number] | undefined;
   let activeKey: string | undefined;
@@ -166,6 +182,13 @@ export function recoverDocumentContent(
   };
 
   for (const token of tokens) {
+    if (sceneRanges.some((range) => token.start >= range.start && token.start < range.end)) {
+      // Scene strings are layout instructions. They must never become fallback
+      // body bullets when a streamed response is truncated or malformed.
+      activeKey = undefined;
+      previousEnd = token.end;
+      continue;
+    }
     const between = candidate.slice(previousEnd, token.start);
     if (activeKey === 'items' && between.includes(']')) {
       flushItems();
@@ -248,7 +271,8 @@ export function recoverDocumentContent(
     ])
   ]);
   const remaining = unassigned.filter(
-    (value) => value.length > 1 && !used.has(value)
+    (value) => value.length > 1 && !used.has(value) &&
+      !(kind === 'ppt' && isPresentationSceneMetadataValue(value))
   );
   if (remaining.length > 0) {
     ensureSection().blocks.push({ type: 'bullets', items: remaining });
@@ -624,11 +648,47 @@ function parsePresentationSectionMetadata(
     `${label}.action`,
     MAX_TEXT_LENGTH
   );
+  const scene = value.scene === undefined ? undefined : parseSafeScene(value.scene, `${label}.scene`);
   return {
     ...(pageKind !== undefined ? { pageKind } : {}),
     ...(takeaway !== undefined ? { takeaway } : {}),
-    ...(action !== undefined ? { action } : {})
+    ...(action !== undefined ? { action } : {}),
+    ...(scene !== undefined ? { scene } : {})
   };
+}
+
+function parseSafeScene(
+  value: unknown,
+  label: string
+): PresentationSectionMetadata['scene'] {
+  let scene: PresentationSectionMetadata['scene'];
+  try {
+    scene = parsePresentationPageScene(value);
+  } catch (error) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} is invalid: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (scene && scene.elements.length > 30) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} exceeds 30 design elements`
+    );
+  }
+  if (scene && !scene.elements.some((element) => element.type === 'text' && element.content)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} must contain text content`
+    );
+  }
+  if (scene?.elements.some((element) => element.type === 'image' || element.assetRef !== undefined)) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} cannot choose image files or asset paths`
+    );
+  }
+  return scene;
 }
 
 const presentationPageKindAliases: Readonly<Record<string, PresentationPageKind>> = {
@@ -979,8 +1039,111 @@ const presentationStructuralValues = new Set([
   'chart',
   'bar',
   'pie',
+  'scene',
+  'coverScene',
+  'closingScene',
+  'schemaVersion',
+  'elements',
+  'elementId',
+  'geometry',
+  'x',
+  'y',
+  't',
+  'l',
+  'r',
+  'b',
+  'width',
+  'height',
+  'zIndex',
+  'parentId',
+  'readingOrder',
+  'style',
+  'fontSize',
+  'fontFamily',
+  'fontWeight',
+  'textColor',
+  'fill',
+  'stroke',
+  'opacity',
+  'align',
+  'verticalAlign',
   ...presentationPageKinds
 ]);
+
+interface TextRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Finds the value ranges of scene fields without requiring valid JSON. The
+ * model response is often still streaming when recovery runs, so a tolerant
+ * brace scanner is safer than attempting a second JSON parse here.
+ */
+function findPresentationSceneRanges(content: string): readonly TextRange[] {
+  const ranges: TextRange[] = [];
+  const keyPattern = /"(?:scene|coverScene|closingScene)"\s*:/g;
+  let match: RegExpExecArray | null;
+  while ((match = keyPattern.exec(content)) !== null) {
+    const valueStart = firstNonWhitespace(content, match.index + match[0].length);
+    if (valueStart >= content.length) {
+      ranges.push({ start: match.index, end: content.length });
+      continue;
+    }
+    const opener = content[valueStart];
+    if (opener !== '{' && opener !== '[') {
+      ranges.push({ start: match.index, end: valueStart });
+      continue;
+    }
+    const end = scanBalancedValue(content, valueStart);
+    ranges.push({ start: match.index, end });
+  }
+  return ranges;
+}
+
+function firstNonWhitespace(value: string, start: number): number {
+  let index = start;
+  while (index < value.length && /\s/.test(value[index])) index += 1;
+  return index;
+}
+
+function scanBalancedValue(value: string, start: number): number {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === '{' || character === '[') {
+      stack.push(character);
+      continue;
+    }
+    if (character !== '}' && character !== ']') continue;
+    const expected = character === '}' ? '{' : '[';
+    if (stack[stack.length - 1] === expected) stack.pop();
+    else return index;
+    if (stack.length === 0) return index + 1;
+  }
+  return value.length;
+}
+
+function isPresentationSceneMetadataValue(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (/^[{}\[\],:]+$/u.test(normalized)) return true;
+  if (/^(?:elementId|schemaVersion|geometry|elements|zIndex|parentId|readingOrder|style|font(?:Size|Family|Weight)|textColor|fill|stroke|opacity|align|verticalAlign|x|y|t|l|r|b|width|height)\s*:/u.test(normalized)) return true;
+  if (/(?:elementId|schemaVersion|zIndex|parentId|readingOrder|geometry|fontSize|textColor|width|height|\bt)\s*:/u.test(normalized)) return true;
+  return false;
+}
 
 function extractJsonStringTokens(
   content: string

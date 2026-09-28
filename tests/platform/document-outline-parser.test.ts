@@ -87,6 +87,41 @@ describe('document outline parser', () => {
     });
   });
 
+  it('accepts an LLM-authored scene and rejects file paths in scene assets', () => {
+    const value = JSON.parse(validOutline());
+    value.sections[0].scene = {
+      schemaVersion: 1,
+      elements: [
+        {
+          elementId: 'title',
+          type: 'text',
+          geometry: { x: 0.08, y: 0.1, width: 0.7, height: 0.12 },
+          zIndex: 2,
+          content: '业绩概览',
+          style: { fontSize: 30, textColor: '20372B' }
+        },
+        {
+          elementId: 'rule',
+          type: 'line',
+          geometry: { x: 0.08, y: 0.25, width: 0.25, height: 0.001 },
+          zIndex: 1,
+          style: { stroke: 'D27B4A' }
+        }
+      ]
+    };
+    expect(parseDocumentOutline(JSON.stringify(value)).sections[0].scene)
+      .toMatchObject({ schemaVersion: 1 });
+
+    value.sections[0].scene.elements[0] = {
+      ...value.sections[0].scene.elements[0],
+      type: 'image',
+      assetRef: 'C:/private/image.png'
+    };
+    expect(() => parseDocumentOutline(JSON.stringify(value))).toThrow(
+      DocumentOutlineError
+    );
+  });
+
   it('accepts normal long PPT text for layout-time wrapping and pagination', () => {
     const longTitle = JSON.parse(validOutline());
     longTitle.title = '人工智能智能体从对话到行动的企业级能力革命';
@@ -175,6 +210,21 @@ describe('document outline parser', () => {
       '文学',
       '科学'
     ]);
+  });
+
+  it('does not leak truncated scene layout fields into recovered PPT body text', () => {
+    const malformed = [
+      '{"kind":"ppt","title":"龙：从古老图腾到现代精神符号","sections":[',
+      '{"heading":"内容概览","level":1,"blocks":[{"type":"bullets","items":["龙的文化意义"]}],',
+      '"scene":{"schemaVersion":1,"elements":[{"elementId":"title","type":"text",',
+      '"geometry":{"x":0.08,"y":0.12,"width":0.84,"height":0.12},"zIndex":1,',
+      '"content":"龙：从古老图腾到现代精神符号"}'
+    ].join('');
+
+    const recovered = recoverPresentationContent(malformed);
+    const body = JSON.stringify(recovered);
+    expect(body).toContain('龙的文化意义');
+    expect(body).not.toMatch(/elementId|schemaVersion|geometry|zIndex|width|height/);
   });
 
   it('rejects an unsupported PPT page kind', () => {
