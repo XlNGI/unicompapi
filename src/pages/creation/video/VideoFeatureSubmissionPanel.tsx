@@ -156,6 +156,11 @@ export function VideoFeatureSubmissionPanel({
     (candidate) => candidate.candidateId === featureSelection.candidateId
   );
   const busyRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const draftRef = useRef(draft);
   const onMessageRef = useRef(onMessage);
   const parameterFormRef = useRef<DynamicParameterFormHandle>(null);
@@ -450,7 +455,7 @@ export function VideoFeatureSubmissionPanel({
   }
 
   async function prepare() {
-    if (!api || !selectedCandidate || busy || blockedReason) return;
+    if (!api || !selectedCandidate || busyRef.current || busy || blockedReason) return;
     // Commit the control the user is still typing in, then run the full schema
     // validation on the merged values. An invalid intermediate state never
     // leaves this function.
@@ -550,6 +555,7 @@ export function VideoFeatureSubmissionPanel({
       prepared.confirmation.confirmationId,
       true
     );
+    if (!mountedRef.current || draftRef.current.draftId !== saved.draftId) return;
     if (!result.ok) {
       if (result.error.code === 'runtime_not_allowed') {
         silentlyFinishRuntimeGate();

@@ -30,6 +30,7 @@ test('autosave keeps image and video dynamic parameter contracts interactive', (
     const needsSaveBlock = blockFor(source, 'if (needsSave)');
     assert.doesNotMatch(needsSaveBlock, /setLoadState\(/);
     assert.doesNotMatch(needsSaveBlock, /setCandidates\(\[\]\)/);
+    assert.match(source, /setCandidates\(\[\]\)/);
   }
   assert.match(videoPanel, /if \(blockedReason\) \{[\s\S]*?setCandidates\(\[\]\)/);
   // Image candidates remain visible, but every submission path must reject

@@ -27,7 +27,8 @@ test('professional image and video workspaces share one generation history compo
     assert.match(source, /submissionProgress={submissionProgress}/);
     assert.match(source, /userTookOverRef={userTookOverRef}/);
     assert.match(source, /const userTookOverRef = useRef\(false\)/);
-    assert.match(source, /if \(phase === 'preparing'\) userTookOverRef\.current = false;/);
+    assert.match(source, /lastProgressPhaseRef/);
+    assert.match(source, /userTookOverRef\.current = false;/);
     assert.doesNotMatch(source, /onUserSelection/);
   }
 });
@@ -41,12 +42,15 @@ test('workspace owns the takeover state and shared history keeps no duplicate co
   assert.doesNotMatch(history, /onUserSelection/);
 });
 
-test('shared history accepts only current-draft verified local media works', () => {
+test('shared history accepts mode-scoped verified local media works', () => {
   assert.match(history, /storage\.listGenerationHistory\(\{/);
   assert.match(history, /projectId,/);
   assert.match(history, /draftId,/);
   assert.match(history, /mediaKind,/);
-  assert.match(history, /limit: 20/);
+  assert.match(history, /workspaceMode,/);
+  assert.match(history, /limit: 30/);
+  assert.match(history, /\.slice\(0, 30\)/);
+  assert.doesNotMatch(history, /nextCursor|加载更早任务/);
   assert.doesNotMatch(history, /storage\.listTasks|storage\.listWorks|storage\.getTaskDetails|storage\.getWorkDetails/);
   assert.doesNotMatch(history, /remoteUrls|fetch\(|localStorage/);
 });
@@ -60,7 +64,8 @@ test('shared history supports image and video previews with stable selection', (
   assert.match(history, /decoding="async"/);
   assert.match(history, /IntersectionObserver/);
   assert.match(history, /resolveHistorySelection\(/);
-  assert.match(history, /handleWorkSelection\(node\.work\.workId\)/);
+  assert.match(history, /groupHistoryNodes\(nodes, tasks\)/);
+  assert.match(history, /sourceTaskId/);
   assert.match(styles, /\.uc-generation-history\s*{[\s\S]*width: 100%;[\s\S]*height: 100%;/);
   assert.match(
     styles,
@@ -121,7 +126,7 @@ test('image-to-video preview isolates native controls from the two-pane inline-s
 });
 
 test('shared history maps wheel gestures to horizontal overflow without trapping boundaries', () => {
-  assert.match(history, /onWheel={handleTimelineWheel}/);
+  assert.match(history, /addEventListener\('wheel', handleTimelineWheel, \{ passive: false \}\)/);
   assert.match(history, /event\.deltaX/);
   assert.match(history, /event\.deltaY/);
   assert.match(history, /timeline\.scrollWidth <= timeline\.clientWidth/);

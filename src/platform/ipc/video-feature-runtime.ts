@@ -5,6 +5,7 @@ import {
   createProviderInvocationEvent,
   createLocalResultObservation,
   recoverRemoteCompletedExecution,
+  isTerminalExecutionState,
   toTaskId,
   toIsoTimestamp,
   toLocalResultObservationId,
@@ -310,7 +311,7 @@ export function createVideoFeatureControllerRuntime(
     now
   });
 
-  runtime.submit = async (input) => {
+  runtime.submit = async (input, onAccepted) => {
     let orchestration;
     try {
       orchestration = await orchestrator.submitDraft(input);
@@ -354,6 +355,18 @@ export function createVideoFeatureControllerRuntime(
     let localResultError: string | undefined;
     let diagnostic: ProviderFailureDiagnosticV1 | undefined;
     let finalStatus = orchestration.status;
+    const acceptedExecutionId = acceptance.subjectArtifacts.execution.id;
+    // The receipt ends the renderer request, so subsequent local failures must
+    // remain visible in persisted execution facts rather than only in the DTO.
+    const recordTrackingFailure = async (stage: 'processing' | 'downloading', message: string) => {
+      const current = await executions.get(acceptedExecutionId);
+      if (!current || isTerminalExecutionState(current.state)) return;
+      const failureStage = stage === 'downloading' && current.state === 'remote_completed' ? 'downloading' : current.state;
+      await executions.save(transitionExecution(current, 'failed', toIsoTimestamp(now()), {
+        failure: { stage: failureStage, message,
+          retryability: stage === 'downloading' && failureStage === 'downloading' ? 'retryable' : 'unknown' }
+      }));
+    };
     const resultVideoUrls = acceptance.providerOperationRecord
       ? extractVideoResultUrls(acceptance.providerOperationRecord.outcome)
       : [];
@@ -380,7 +393,19 @@ export function createVideoFeatureControllerRuntime(
         });
       }
 
-      // Match the existing video closed loop: poll async operations to completion.
+      if (execution && task && ['queued', 'processing', 'remote_completed'].includes(execution.state)) {
+        onAccepted?.({
+          schemaVersion: 1,
+          submissionIntentId: orchestration.submissionIntentId,
+          status: 'provider_accepted',
+          retryAllowed: false,
+          taskId: task.id,
+          executionId: execution.id,
+          feedback: '任务已接管，生成及本地登记进度请查看历史卡。'
+        });
+      }
+
+      // Continue the same bounded operation after the persisted receipt.
       if (
         execution &&
         (execution.state === 'queued' || execution.state === 'processing') &&
@@ -411,8 +436,11 @@ export function createVideoFeatureControllerRuntime(
 
           if (pollStatus.state === 'polling_exhausted') {
             localResultError =
-              '轮询超时：远端仍在排队或处理中。可稍后在任务中心刷新，禁止自动重试。';
-            finalStatus = 'provider_accepted';
+              '自动查询已结束，远端结果尚未确认。请在任务中心核对记录并联系服务商确认，勿重复提交。';
+            if (execution.state === 'queued' || execution.state === 'processing') {
+              await recordTrackingFailure('processing', localResultError);
+              finalStatus = 'unknown_outcome';
+            }
           } else if (pollStatus.state === 'failed') {
             diagnostic = pollStatus.failureDiagnostic ?? failureDiagnostic({ stage: 'upstream_response', message: pollStatus.message });
             localResultError = `远端反馈：${pollStatus.message}`;
@@ -430,6 +458,7 @@ export function createVideoFeatureControllerRuntime(
               ? `视频轮询失败：${error.message}`
               : '视频轮询失败，结果未知，禁止自动重试。';
           finalStatus = 'unknown_outcome';
+          await recordTrackingFailure('processing', '远端结果查询中断，结果尚未确认，勿重复提交。');
         }
       } else if (
         execution &&
@@ -438,6 +467,8 @@ export function createVideoFeatureControllerRuntime(
       ) {
         localResultError =
           '远端已接受请求，但未配置视频异步轮询端口，任务仍停留在排队/处理中。';
+        await recordTrackingFailure('processing', '远端请求已受理，但本地结果查询不可用，勿重复提交。');
+        finalStatus = 'unknown_outcome';
       }
 
       if (execution?.state === 'remote_completed' && options.resultReceiver) {
@@ -450,6 +481,7 @@ export function createVideoFeatureControllerRuntime(
             localResultError =
               `本地登记失败：${received.error.message}（${received.error.code}）`;
             finalStatus = 'completed';
+            await recordTrackingFailure('downloading', '远端已完成，但本地结果接收失败，可在任务中心恢复结果。');
           }
         } catch (error) {
           localResultError =
@@ -457,6 +489,7 @@ export function createVideoFeatureControllerRuntime(
               ? `本地登记失败：${error.message}`
               : '本地登记失败：结果接收异常';
           finalStatus = 'completed';
+          await recordTrackingFailure('downloading', '远端已完成，但本地结果接收异常，可在任务中心恢复结果。');
         }
       } else if (
         execution?.state === 'remote_completed' &&
@@ -464,6 +497,7 @@ export function createVideoFeatureControllerRuntime(
       ) {
         localResultError = '远端已完成，但未配置视频结果接收器，无法落盘。';
         finalStatus = 'completed';
+        await recordTrackingFailure('downloading', '远端已完成，但本地结果接收不可用。');
       }
     } else if (acceptance.intent.status === 'failed_before_submission') {
       const safeCode = latestSafeCode(acceptance.invocationEvents);
@@ -532,6 +566,8 @@ export function createVideoFeatureControllerRuntime(
       submissionIntentId: orchestration.submissionIntentId,
       status: finalStatus,
       retryAllowed: false as const,
+      taskId: acceptance.subjectArtifacts.task.id,
+      executionId: acceptance.subjectArtifacts.execution.id,
       ...(workId ? { workId } : {}),
       ...(resultVideoUrls.length > 0 ? { resultVideoUrls } : {}),
       ...(localResultError && !workId ? { localResultError } : {}),

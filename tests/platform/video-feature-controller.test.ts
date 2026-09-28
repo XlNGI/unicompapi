@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { VideoFeatureControllerRuntime } from '../../src/platform/ipc/video-feature-controller';
 import {
   createEmptyVideoWorkspaceDraft,
   createUsageSchema,
@@ -27,6 +28,33 @@ const projectId = toProjectId('project-video-feature-controller');
 const createdAt = toIsoTimestamp('2026-08-03T12:00:00.000Z');
 
 describe('VideoFeatureController', () => {
+  it('returns a persisted receipt while keeping the same operation owned until completion', async () => {
+    let finish!: () => void;
+    const completed = new Promise<void>((resolve) => { finish = resolve; });
+    const fixture = createFixture(false, async (_input, accepted) => {
+      accepted?.({ schemaVersion: 1, submissionIntentId: 'intent', status: 'provider_accepted',
+        retryAllowed: false, taskId: 'task-owned', executionId: 'execution-owned' });
+      await completed;
+      return { schemaVersion: 1, submissionIntentId: 'intent', status: 'completed', retryAllowed: false, workId: 'work' };
+    });
+    const prepared = await fixture.controller.prepareSubmission({ ...request(fixture.draft), candidateId: 'candidate-video-controller' });
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    let settled = false;
+    const submission = fixture.controller.submitDraft({ ...request(fixture.draft), routeSelectionToken: prepared.value.routeSelectionToken,
+      confirmationId: prepared.value.confirmation.confirmationId, confirmed: true }).then((value) => { settled = true; return value; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    try {
+      expect(settled).toBe(true);
+      expect(await submission).toMatchObject({ ok: true, value: { taskId: 'task-owned', status: 'provider_accepted' } });
+      let drained = false;
+      const waiting = fixture.controller.waitForOperations().then(() => { drained = true; });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      finish();
+      await waiting;
+      expect(drained).toBe(true);
+    } finally { finish(); }
+  });
   it('binds candidates and preparation to the exact saved draft revision', async () => {
     const fixture = createFixture();
     await expect(fixture.controller.listCandidates(request(fixture.draft))).resolves.toMatchObject({
@@ -118,7 +146,7 @@ describe('VideoFeatureController', () => {
   });
 });
 
-function createFixture(withRecovery = false) {
+function createFixture(withRecovery = false, submit?: VideoFeatureControllerRuntime['submit']) {
   let draft: VideoWorkspaceDraft = createVideoWorkspaceDraft({
     ...createEmptyVideoWorkspaceDraft({
       id: toDraftId('draft-video-feature-controller'),
@@ -170,6 +198,7 @@ function createFixture(withRecovery = false) {
     getRuntime: () => ({
       drafts,
       candidates,
+      ...(submit ? { submit } : {}),
       ...(withRecovery
         ? {
             async recoverResult(taskId: string) {

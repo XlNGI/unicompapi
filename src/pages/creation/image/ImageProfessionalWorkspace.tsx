@@ -48,21 +48,29 @@ export function ImageProfessionalWorkspace({
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
-  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
+  const [expectedTaskId, setExpectedTaskId] = useState<string>();
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
   const userTookOverRef = useRef(false);
+  const lastProgressPhaseRef = useRef<SubmissionProgressPhase>('idle');
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
-    if (phase === 'preparing') userTookOverRef.current = false;
+    if ((phase === 'preparing' && lastProgressPhaseRef.current !== 'preparing') ||
+      (phase === 'requesting' && lastProgressPhaseRef.current !== 'preparing' && lastProgressPhaseRef.current !== 'requesting')) {
+      userTookOverRef.current = false;
+      setExpectedTaskId(undefined);
+      setExpectedWorkId(undefined);
+    }
+    lastProgressPhaseRef.current = phase;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
   useEffect(() => {
     setHistoryRefreshKey(0);
+    setExpectedTaskId(undefined);
     setExpectedWorkId(undefined);
     setSubmissionProgress({ phase: 'idle' });
   }, [draft.draftId]);
@@ -70,29 +78,6 @@ export function ImageProfessionalWorkspace({
     draft.featureSelection?.productFeature === 'reference_to_image'
     ? draft.featureSelection.productFeature
     : undefined;
-
-  // 收集当前项目下全部专业生图草稿ID：文生图/图生图是同一草稿可切换的特性，
-  // 不作为历史拆分维度；专业生图统一显示最近10条作品，新建草稿后历史仍保留
-  useEffect(() => {
-    let active = true;
-    if (!imageWorkspaces) {
-      setSiblingDraftIds([]);
-      return;
-    }
-    void imageWorkspaces.list().then((result) => {
-      if (!active || !result.ok) return;
-      setSiblingDraftIds(
-        result.value
-          .filter((item) => item.mode === 'professional_image')
-          .map((item) => item.draftId)
-      );
-    }).catch(() => {
-      if (active) setSiblingDraftIds([]);
-    });
-    return () => {
-      active = false;
-    };
-  }, [imageWorkspaces, historyRefreshKey]);
 
   const unsupportedContexts = draft.contextReferences.filter(
     (reference) =>
@@ -561,6 +546,7 @@ export function ImageProfessionalWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
+              setExpectedTaskId(submission.taskId);
               if (!userTookOverRef.current) {
                 setExpectedWorkId(
                   submission.status === 'completed' ? submission.workId : undefined
@@ -584,12 +570,13 @@ export function ImageProfessionalWorkspace({
         >
           <GenerationHistory
             draftId={draft.draftId}
-            extraDraftIds={siblingDraftIds}
-            key={draft.draftId}
+            key={draft.projectId}
             mediaKind="image"
+            workspaceMode="professional_image"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}
+            expectedTaskId={expectedTaskId}
             userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />

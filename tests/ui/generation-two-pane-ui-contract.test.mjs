@@ -130,9 +130,9 @@ test('quick generation output is one framed reusable panel', () => {
   assert.match(outputPanel, /export function GenerationOutputPanel/);
   assert.match(componentStyles, /\.uc-generation-output-panel \{[\s\S]*border: 1px solid var\(--uc-color-border-default\);/);
   assert.match(componentStyles, /\.uc-generation-output-panel \{[\s\S]*border-radius: var\(--uc-radius-10\);/);
-  assert.match(quickImage, /<GenerationOutputPanel[\s\S]*<GenerationResultPreview[\s\S]*uc-image-quick__result-actions/);
-  assert.match(quickVideo, /<GenerationOutputPanel[\s\S]*<GenerationResultPreview[\s\S]*uc-image-quick__result-actions/);
-  assert.match(styles, /\.uc-generation-output-panel > \.uc-image-quick__stage \{[\s\S]*grid-template-rows: minmax\(0, 1fr\) auto;/);
+  assert.match(quickImage, /<GenerationHistory[\s\S]*mediaKind="image"/);
+  assert.match(quickVideo, /<GenerationHistory[\s\S]*mediaKind="video"/);
+  assert.match(quickImage + quickVideo, /uc-image-quick__result-actions/);
 });
 
 test('quick generation uses the remaining left pane height for model and submission', () => {
