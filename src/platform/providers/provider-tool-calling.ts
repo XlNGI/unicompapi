@@ -209,7 +209,8 @@ export function sanitizeControlledToolResult(
     // Artifact identities belong to the host's authoritative result. The model
     // only needs the kinds/count of published artifacts, never a Work/file ref.
     // This is a Provider DTO projection, not a replacement DocumentToolResult.
-    return { ...redacted, ...(redacted.artifactRefs === undefined ? {} : {
+    const providerResult = Object.fromEntries(Object.entries(redacted).filter(([key]) => key !== 'irPatch'));
+    return { ...providerResult, ...(redacted.artifactRefs === undefined ? {} : {
       artifactRefs: redacted.artifactRefs.map(({ kind }) => ({ kind }))
     }) };
   }
@@ -341,7 +342,7 @@ function redactValidatedToolValue(value: unknown): unknown {
   if (isRecord(value)) {
     return Object.fromEntries(Object.entries(value).filter(([key]) =>
       !/(?:path|url|token|secret|password|credential|api[_-]?key)/iu.test(key) &&
-      !/^(?:context|executionContext|runtimeContext|currentDocumentId|currentDocumentIR|documentId|documentRef|workId|fileId|projectId|rootDirectory|projectContext|authorization|capabilities|abortSignal|signal|taskContext|checkpoint|idempotencyKey)$/iu.test(key)
+      !/^(?:context|executionContext|runtimeContext|currentDocumentId|currentDocumentIR|currentVersionPin|documentId|documentRef|workId|fileId|projectId|documentLineageId|sourceExecutionId|checksum|checksumSha256|identityIndexVersion|identity|manifest|slidePart|shapeId|physicalLocator|candidatePin|basePin|rootDirectory|projectContext|authorization|capabilities|abortSignal|signal|taskContext|checkpoint|idempotencyKey)$/iu.test(key)
     ).map(([key, item]) => [key, redactValidatedToolValue(item)]));
   }
   return value;

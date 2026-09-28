@@ -4,7 +4,11 @@
 
 本节是项目当前唯一有效的执行计划和状态来源，以当前源码、当前工作树和当前测试结果为基线。`docs/current/` 保留实施记录和专项方案，`docs/evidence/` 保留机器可验证证据；两者都不是当前待办或完成状态来源。旧历史计划目录已删除。新的计划、状态变更、阻断项和验收结论只更新本节。旧 E1-E7 仅作为历史映射，不再作为新的拆分方式。
 
-2026-09-28 第二阶段第四批 P1 已完成 identity round-trip 与 mutation substrate 核心边界：采用 checksum-pinned external identity manifest，新增最小 `DocumentIRPatch(update_text)`、Document Version Pin、Mutation Coordinator、`update_element` Canonical 合同/Binding 和 reconciliation record。真实生成的重复文本 PPT 页已通过真实 PPTX XML round-trip：指定第二个元素更新后同一 opaque elementId 恢复，未修改元素身份保持不变。Coordinator 已覆盖 CAS 冲突、取消、幂等、QA 失败保护和 `committed_pending_refresh`。P1 当前状态为 `spike_and_core_boundary_passed`，尚未接入 ConversationDocumentToolSession 的生产写会话或真实 kimi-k3 update_element 验收；本批仍不进入 add/delete、add_slide、delete_slide 或 shape/image CRUD。详见 `docs/current/phase2-batch4-p1-identity.md`。
+2026-09-28 最新状态：第二阶段第四批 P2 已完成限定的 `update_element(text)` 生产闭环并收口。真实 wire model 为指定 `kimi-k3`，4 次 HTTP 完成 read(page 2) → update_element → 真实 PPTX 元素级读回 → 最终回答；目标 elementId 不漂移，相同文字的另一对象未修改，未修改 page/element ID 保留，旧文件有效，仅新增 1 个 child Work，authoritative revision 1→2，manifest/File/source execution/Hash/head pin 一致，无路径、内部 Work/File 身份或 Runtime Context 外发。前两次本地页码检查失败的 HTTP 数均为 0，不计为真实 Provider 成功。原 P1 的生产登记/持久幂等缺口已按 P2 范围补齐；不扩大为整体 CRUD 完成。
+
+P2 最终验证：Node/UI 384/384，Vitest 261 文件、2320/2320，共 2704 项，0 失败/跳过；typecheck、lint、build、平台/恢复/阶段关闭/计划合规审计与 diff 检查通过。新增生产多轮连续两次同 ID 更新、撤权、迟到取消、真实候选事务、QA 回滚、原子 head 替换前取消、提交后真实状态、并发/外部版本冲突、持久重放与 crash journal 阻断。当前仍限简单文本 shape；未知候选保留待 reconciliation，不添加恢复 UI或自动清理策略。P3 已具备设计基础但未启动，本轮到此停止。实际文件、完整链路、失败码和验收边界见 `docs/current/phase2-batch4-p2-production-update.md`，脱敏真实证据见 `docs/evidence/phase2-batch4-p2-real-provider.json`。
+
+P1 历史基线：`4367d79`、`1aceb94`、`e4d3384` 完成 identity round-trip 与 mutation substrate 核心边界，未接生产；实施记录仍保留于 `docs/current/phase2-batch4-p1-identity.md`。下文第三批等记录为当时状态，不覆盖本条 P2 最新结论。未实现 add_element、delete_element、add_slide、delete_slide、shape/image CRUD，未改 Outline Contract、Document IR 核心、PptxGenJS 或模板/设计架构。
 
 ### 事实基线
 

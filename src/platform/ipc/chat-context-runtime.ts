@@ -288,8 +288,13 @@ export function createChatContextRuntime(
     const documentPages = new ConversationDocumentPageContextService({
       rootDirectory: session.rootDirectory, projectId: session.projectId
     });
+    const mutationRenderer = createConfiguredOfficeRenderAdapter();
     const documentTools = new ConversationDocumentToolSessionService({
       rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: projectConversations,
+      ...(mutationRenderer ? { mutation: { renderPreview: mutationRenderer, canWrite: async () => {
+        const active = dependencies.getSession();
+        return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory;
+      } } } : {}),
       generatePptx: {
         compiler: new PlatformDocumentDraftCompiler(),
         executor: new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({

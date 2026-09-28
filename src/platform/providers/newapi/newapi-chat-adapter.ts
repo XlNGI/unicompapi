@@ -700,7 +700,7 @@ export class NewApiChatAdapter {
 
 function safeContinuationCause(error: unknown): string {
   if (error instanceof NewApiChatAdapterError) return error.safeCode;
-  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,80}$/.test(error.name)) return error.name;
+  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,80}$/.test(error.name)) return error.name.toLowerCase();
   return 'unknown';
 }
 

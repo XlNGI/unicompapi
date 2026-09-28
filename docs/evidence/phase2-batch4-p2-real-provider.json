@@ -1,0 +1,989 @@
+{
+  "schemaVersion": 2,
+  "requestedModel": "kimi-k3",
+  "mode": "real_provider",
+  "status": "passed",
+  "startedAt": "2026-09-28T19:32:54.934Z",
+  "outboundScope": "One synthetic PPT text update and real-file element readback; no user files or prior user conversations.",
+  "entryPoint": "createChatContextRuntime.responses.start -> canonical read/update -> coordinator -> candidate Work/manifest -> head CAS -> real-file read -> final answer",
+  "maximumNetworkRequests": 6,
+  "maximumRequestsPerCase": 6,
+  "maximumOutputTokensPerRequest": 1024,
+  "automaticRetries": 0,
+  "cost": "unknown",
+  "cases": [
+    {
+      "case": "real_element_update",
+      "status": "passed",
+      "networkRequests": 4,
+      "toolCalls": [
+        {
+          "callRef": "call-1",
+          "toolId": "read_document_structure"
+        },
+        {
+          "callRef": "call-2",
+          "toolId": "update_element"
+        },
+        {
+          "callRef": "call-3",
+          "toolId": "read_document_structure"
+        }
+      ],
+      "pathOrRuntimeContextLeak": false,
+      "toolCallIdMatched": true,
+      "schemasCanonical": true,
+      "requestStructures": [
+        {
+          "round": 1,
+          "availableTools": [
+            "read_document_structure",
+            "update_element"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "availableTools": [
+            "read_document_structure",
+            "update_element"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "read_document_structure",
+              "callRef": "call-1"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-1"
+            }
+          ]
+        },
+        {
+          "round": 3,
+          "availableTools": [
+            "read_document_structure",
+            "update_element"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "read_document_structure",
+              "callRef": "call-1"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-1"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "update_element",
+              "callRef": "call-2"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-2"
+            }
+          ]
+        },
+        {
+          "round": 4,
+          "availableTools": [
+            "read_document_structure",
+            "update_element"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "read_document_structure",
+              "callRef": "call-1"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-1"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "update_element",
+              "callRef": "call-2"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-2"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "read_document_structure",
+              "callRef": "call-3"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-3"
+            }
+          ]
+        }
+      ],
+      "targetDiscoveredByRead": true,
+      "actualFile": {
+        "oldNewChecksumDifferent": true,
+        "registeredWorkCount": 2,
+        "identityIndexVersion": 1,
+        "authoritativeRevision": 2,
+        "manifestPinVerified": true,
+        "targetIdentityStable": true,
+        "untouchedIdentitiesStable": true,
+        "duplicateTextUnchanged": true,
+        "originalArtifactPreserved": true,
+        "readByRegisteredPresentationReader": true
+      },
+      "updateExecuted": true,
+      "finalObservationFromRealFile": true,
+      "terminalState": "completed",
+      "trace": [
+        {
+          "code": "tool_authorization",
+          "status": "completed"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "read_document_structure_0_f5ff8099"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "operationId": "read_document_structure_0_f5ff8099"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "read_document_structure_0_f5ff8099"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "update_element_1_bed9de6a"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "operationId": "update_element_1_bed9de6a"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_pinned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_identity_resolved"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_patch_validated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_candidate_prepared"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_materialized"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_qa_verified"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_commit_prepared"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_commit_prepared"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_committed"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "mutation_session_refreshed"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "update_element_1_bed9de6a"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "read_document_structure_2_96a4056f"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "operationId": "read_document_structure_2_96a4056f"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "read_document_structure_2_96a4056f"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "provider_tools_from_contracts_enter:read_document_structure.update_element"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contracts_enumerated"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_read_document_structure_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_read_document_structure_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "started",
+          "operationId": "contract_update_element_schema_enter"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "contract_update_element_schema_returned"
+        },
+        {
+          "code": "plan_validation",
+          "status": "completed",
+          "operationId": "provider_tools_from_contracts_returned"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "mutation_committed_fact"
+        }
+      ],
+      "answerUsesObservation": true
+    }
+  ],
+  "networkRequests": 4,
+  "model": "kimi-k3",
+  "routeSource": "Explicit exact providerModelKey selection, revalidated against copied registry and fresh candidate eligibility; no fallback.",
+  "fixture": {
+    "registeredByExistingRunner": true,
+    "actualRenderQa": true,
+    "physicalPages": 4,
+    "duplicateTextObjects": 2
+  },
+  "settingsSource": "default",
+  "actualWireModel": "kimi-k3",
+  "usage": [
+    {
+      "status": "reported",
+      "sourceStage": "result",
+      "facts": [
+        {
+          "metricId": "completion_tokens",
+          "quantity": "64",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "prompt_tokens",
+          "quantity": "1682",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "total_tokens",
+          "quantity": "1746",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "cached_tokens",
+          "quantity": "1024",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "reasoning_tokens",
+          "quantity": "0",
+          "unit": "token",
+          "source": "provider_body"
+        }
+      ]
+    }
+  ],
+  "protectedUserConfigurationUnchanged": true,
+  "temporaryCleanupDeferred": true,
+  "finishedAt": "2026-09-28T19:34:05.352Z"
+}

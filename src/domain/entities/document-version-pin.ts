@@ -16,5 +16,7 @@ export function parseDocumentVersionPin(value: unknown): DocumentVersionPin {
       typeof item.checksumSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(item.checksumSha256) ||
       !Number.isSafeInteger(item.runtimeRevision) || Number(item.runtimeRevision) < 0 ||
       item.identityIndexVersion !== 1) throw new TypeError('invalid_document_version_pin');
-  return Object.freeze(item as unknown as DocumentVersionPin);
+  return Object.freeze({ documentLineageId: item.documentLineageId as string, headWorkId: item.headWorkId as string,
+    fileId: item.fileId as string, sourceExecutionId: item.sourceExecutionId as string, checksumSha256: item.checksumSha256,
+    runtimeRevision: Number(item.runtimeRevision), identityIndexVersion: 1 });
 }

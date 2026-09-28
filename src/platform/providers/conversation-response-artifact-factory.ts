@@ -28,7 +28,7 @@ import type { SubmissionArtifactFactoryPort } from './provider-submission-orches
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
-import { buildDocumentReadToolInstruction, buildDocumentGenerationToolInstruction, type ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
+import { buildDocumentReadToolInstruction, buildDocumentGenerationToolInstruction, buildDocumentMutationToolInstruction, type ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 import { buildDocumentGenerationConversationInstruction, isPptGenerationIntent } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseArtifactFactoryDependencies {
@@ -137,7 +137,7 @@ export class ConversationResponseArtifactFactory
       throw new ConversationDocumentPageError('document_page_scope_exceeded', '目标页面超过本次完整读取预算，请缩小问题范围后继续。');
     }
     const messages = toolSelection ? [
-      { role: 'system' as const, content: 'kind' in toolSelection ? buildDocumentGenerationToolInstruction(toolSelection) : buildDocumentReadToolInstruction(toolSelection) },
+      { role: 'system' as const, content: 'kind' in toolSelection ? (toolSelection.kind === 'generation' ? buildDocumentGenerationToolInstruction(toolSelection) : buildDocumentMutationToolInstruction(toolSelection)) : buildDocumentReadToolInstruction(toolSelection) },
       ...contextEnvelope.messages
     ] : isPptGenerationIntent(userMessage.content) ? [
       { role: 'system' as const, content: buildDocumentGenerationConversationInstruction() },
