@@ -65,7 +65,15 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
   let uncertain = false;
 
   return {
-    get tools() { return uncertain ? [] : providerToolsFromContracts(available(live()), registry); },
+    get tools() {
+      if (uncertain) return [];
+      const context = live();
+      return providerToolsFromContracts(available(context), registry, (stage, count) => {
+        void emitProductionEvent({ code: 'plan_validation',
+          status: stage.endsWith('_returned') || stage === 'contracts_enumerated' ? 'completed' : 'started',
+          operationId: stage, facts: { purpose: 'tool', count } });
+      });
+    },
     spentCostUnits: () => spent,
     bridge: {
       execute({ call, signal }) {

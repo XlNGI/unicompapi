@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   parseDocumentIR, toDocumentTaskRuntimeId,
-  buildDocumentIRFromOutline,
   type Conversation, type ConversationId, type ConversationResponseDraftV1,
   type DocumentIR, type FileReferenceId, type MessageId, type ProjectConversationRepository,
   type ProjectId, type WorkId
@@ -421,8 +420,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     let closed = false;
     let cancelRequested = false;
     let generatedWorkId: WorkId | undefined;
-    let generatedIR: DocumentIR | undefined;
-    let pages: readonly PptxPhysicalPage[] = [];
+    let generationEligible = selection.authorizationStatus === 'approved';
+    let observationDelivered = false;
+    let refreshEpoch = 0;
+    let generatedPin: ReturnType<typeof generatedDocumentPin> | undefined;
+    let currentDocument: { readonly ir: DocumentIR; readonly pages: readonly PptxPhysicalPage[];
+      readonly pin: ReturnType<typeof generatedDocumentPin> } | undefined;
     let checkpoint = { revision: 0, step: 0 };
     const runtimeId = toDocumentTaskRuntimeId(`document-generation-${hash(`${this.options.projectId}\n${input.responseExecutionId}`)}`);
     const repository = new JsonDocumentTaskRuntimeRepository(this.storage, this.options.projectId);
@@ -433,30 +436,85 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       conversationId: selection.conversationId, sourceMessageId: selection.currentUserMessageId,
       executionId: input.responseExecutionId, documentKind: 'ppt', operation: 'create',
       budget: { maxSteps: 8, budgetUnits: 24, timeoutMs } });
-    const refreshGenerated = async (): Promise<boolean> => {
-      if (generatedIR && generatedWorkId && !controller.signal.aborted && !closed) return true;
-      if (!generatedWorkId || controller.signal.aborted || closed) return false;
+    const invalidate = () => {
+      refreshEpoch += 1;
+      generationEligible = false;
+      currentDocument = undefined;
+    };
+    const refreshGenerated = async (signal: AbortSignal): Promise<boolean> => {
+      invalidate();
+      const epoch = refreshEpoch;
+      const activeRefresh = () => epoch === refreshEpoch && !signal.aborted && !controller.signal.aborted &&
+        !closed && this.active() && Date.now() < deadlineAt;
+      if (!activeRefresh() || !await this.matchesGeneration(selection) || !activeRefresh()) return false;
+      if (!generatedWorkId) {
+        generationEligible = selection.authorizationStatus === 'approved';
+        return true;
+      }
       try {
         const current = await this.reader.read(generatedWorkId);
-        pages = current.pages;
-        generatedIR = documentIRFromPages(current.fileName, generatedWorkId, pages);
-        await emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'runtime_context_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
+        if (!activeRefresh() || !current.pages.length || !await this.matchesGeneration(selection) || !activeRefresh()) return false;
+        const nextPin = generatedDocumentPin(current);
+        if (nextPin.workId !== generatedWorkId || (generatedPin && JSON.stringify(nextPin) !== JSON.stringify(generatedPin))) return false;
+        const work = await this.works.get(generatedWorkId);
+        const file = await this.files.get(nextPin.fileId);
+        if (!activeRefresh() || !work || !file || file.state !== 'available' ||
+            file.locator.kind !== 'project' || JSON.stringify(generatedDocumentPin({ work, file,
+              fileName: path.basename(file.locator.relativePath) })) !== JSON.stringify(nextPin)) return false;
+        const ir = documentIRFromPages(current.fileName, generatedWorkId, current.pages, nextPin.revision);
+        if (!activeRefresh()) return false;
+        // Commit a single verified snapshot. The generated Work fact survives
+        // revocation, but a cancelled or stale read can never restore tools.
+        generatedPin = nextPin;
+        currentDocument = { ir, pages: current.pages, pin: nextPin };
+        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'runtime_context_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
         return true;
       } catch (error) {
         const reason = error && typeof error === 'object' && 'safeReason' in error && typeof error.safeReason === 'string' ? error.safeReason : 'unknown';
-        await emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: `runtime_context_refresh_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
+        void emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: `runtime_context_refresh_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
         return false;
       }
     };
+    const prepareWithinDeadline = async (signal: AbortSignal): Promise<boolean> => {
+      if (signal.aborted || controller.signal.aborted || closed) { invalidate(); return false; }
+      const preparation = new AbortController();
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const removers: (() => void)[] = [];
+      const interrupted = new Promise<never>((_resolve, reject) => {
+        const stop = (reason: 'cancelled' | 'timeout') => {
+          if (settled) return;
+          settled = true;
+          invalidate();
+          preparation.abort();
+          controller.abort();
+          reject(reason === 'cancelled'
+            ? Object.assign(new Error('cancelled'), { name: 'AbortError' }) : unavailable());
+        };
+        for (const parent of [signal, controller.signal]) {
+          const cancelPreparation = () => stop('cancelled');
+          parent.addEventListener('abort', cancelPreparation, { once: true });
+          removers.push(() => parent.removeEventListener('abort', cancelPreparation));
+          if (parent.aborted) cancelPreparation();
+        }
+        timer = setTimeout(() => stop('timeout'), Math.max(0, Math.min(readContract.execution.timeoutMs, deadlineAt - Date.now())));
+      });
+      try { return await Promise.race([refreshGenerated(preparation.signal), interrupted]); }
+      finally {
+        settled = true;
+        clearTimeout(timer);
+        removers.forEach(remove => remove());
+      }
+    };
     const getExecutionContext = (): ToolExecutionContext => ({
-      currentDocumentId: generatedWorkId,
-      currentDocumentIR: generatedIR,
-      revision: selection.userMessageRevision,
+      currentDocumentId: generatedPin?.workId,
+      currentDocumentIR: currentDocument?.ir,
+      revision: generatedPin?.revision ?? selection.userMessageRevision,
       operation: 'create', capabilities: [generateContract.toolId, readContract.toolId],
-      projectContext: { projectId: this.options.projectId, ...(generatedWorkId ? { workId: generatedWorkId } : {}) },
+      projectContext: { projectId: this.options.projectId, ...(generatedPin ? { workId: generatedPin.workId } : {}) },
       authorization: {
-        canRead: Boolean((generatedWorkId && generatedIR || selection.authorizationStatus === 'approved') && !closed && !controller.signal.aborted),
-        canWrite: !generatedWorkId && selection.authorizationStatus === 'approved' && !closed && !controller.signal.aborted,
+        canRead: Boolean((currentDocument || (!generatedWorkId && generationEligible)) && !closed && !controller.signal.aborted && this.active()),
+        canWrite: !generatedWorkId && generationEligible && !closed && !controller.signal.aborted && this.active(),
         allowedToolIds: generatedWorkId ? [readContract.toolId] : [generateContract.toolId],
         generationAuthorization: selection.authorizationStatus
       },
@@ -464,19 +522,14 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       taskContext: { taskId: runtimeId, deadlineAt, checkpoint }
     });
     const readBinding = createReadDocumentStructureBinding({ registry, readPage: async (ordinal, context) => {
-      const page = pages[ordinal - 1];
-      if (context.abortSignal.aborted || !page || !generatedWorkId) throw unavailable();
-      return { pageNumber: page.pageNumber, totalPages: pages.length, hidden: page.hidden,
-        heading: safeText(page.heading), text: safeText(page.contentText) };
+      const page = currentDocument?.pages[ordinal - 1];
+      if (context.abortSignal.aborted || !page || !currentDocument || !generatedWorkId) throw unavailable();
+      const text = safeText(page.contentText);
+      if (text.length > 8_000) throw unavailable();
+      return { pageNumber: page.pageNumber, totalPages: currentDocument.pages.length, hidden: page.hidden,
+        heading: safeText(page.heading), text };
     } });
-    const generatedDependencies = this.options.generatePptx!;
-    const generationDependencies = { ...generatedDependencies, onGeneratedOutline: (outline: Parameters<typeof buildDocumentIRFromOutline>[0]['outline']) => {
-      generatedIR = buildDocumentIRFromOutline({ outline, operation: 'analyze', attachmentRefs: [], revision: {
-        baseWorkId: generatedWorkId ?? 'pending-generation', expectedRevision: selection.userMessageRevision
-      } });
-      void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'generated_outline_ready', facts: { tool: 'read_sources', purpose: 'tool' } });
-    } };
-    const generateBinding = createGeneratePptxBinding(generationDependencies, { registry });
+    const generateBinding = createGeneratePptxBinding(this.options.generatePptx, { registry });
     const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
       maxCalls: runtime.budget.maxSteps, timeoutMs: generateContract.execution.timeoutMs, getExecutionContext,
       runtime: { service: {
@@ -484,30 +537,50 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         recordObservation: async (...args) => { const result = await service.recordObservation(...args); checkpoint = { revision: result.revision, step: result.checkpoint.step }; return result; }
       }, scope: runtime }, bindings: [
         { contract: generateBinding.contract,
-          authorize: async (args, context) => selection.authorizationStatus === 'approved' && !generatedWorkId && await generateBinding.authorize(args, context),
+          authorize: async (args, context) => selection.authorizationStatus === 'approved' && !generatedWorkId &&
+            await this.matchesGeneration(selection) && await generateBinding.authorize(args, context),
           execute: async (args, context) => {
             const result = await generateBinding.execute(args, context);
             if (result.status === 'success') {
               const ref = result.artifactRefs?.find(item => item.kind === 'work')?.ref;
               if (ref) {
                 generatedWorkId = ref as WorkId;
+                invalidate();
                 await emitProductionEvent({ code: 'tool_result', status: 'completed', operationId: 'artifact_registered', facts: { tool: 'write_document', purpose: 'tool' } });
-                await refreshGenerated();
+                // File verification happens in the next bounded prepare step.
+                // Keep the successful generation result even if read access fails.
               }
             }
             return result;
           } },
         { contract: readBinding.contract,
-          authorize: async (args, context) => Boolean(generatedWorkId && generatedIR) && await readBinding.authorize(args, context),
-          execute: async (args, context) => readBinding.execute(args, context) }
+          authorize: async (args, context) => args.scope !== 'section' && Boolean(generatedWorkId) &&
+            await prepareWithinDeadline(context.abortSignal) && Boolean(currentDocument) &&
+            await readBinding.authorize(args, { ...context, currentDocumentIR: currentDocument?.ir }),
+          execute: async (args, context) => {
+            if (!currentDocument || !this.active() || args.scope === 'section') return failed('authorization_or_revision_invalid');
+            const result = await readBinding.execute(args, { ...context, currentDocumentIR: currentDocument.ir });
+            if (result.status !== 'success') return result;
+            if (!await prepareWithinDeadline(context.abortSignal) || !currentDocument || context.abortSignal.aborted) {
+              invalidate(); return failed('authorization_or_revision_invalid');
+            }
+            return { ...result, observation: { ...result.observation, fileName: safeText(currentDocument.pin.fileName),
+              totalPages: currentDocument.pages.length, structureUnit: 'physical_page',
+              limitations: 'Extracted text only; no image, shape or chart visual interpretation. Physical page order includes the cover and hidden pages.' } };
+          } }
       ] });
     const session: ConversationDocumentToolSession = {
       prepareTools: async signal => {
         void emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'prepare_tools_enter', facts: { tool: 'read_sources', purpose: 'tool' } });
-        if (signal.aborted || controller.signal.aborted || closed || Date.now() >= deadlineAt) return undefined;
-        // The generated outline is captured before the Runner side effect;
-        // continuation preparation must not reread the newly published file.
-        // Physical-page reads still use the host reader inside the binding.
+        if (!await prepareWithinDeadline(signal)) {
+          if (observationDelivered) {
+            const cancelled = signal.aborted || controller.signal.aborted || closed;
+            controller.abort();
+            if (cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+            throw unavailable();
+          }
+          return undefined;
+        }
         void emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'available_tool_set_finalize', facts: { tool: 'read_sources', purpose: 'tool' } });
         let availableTools: readonly ControlledProviderToolDefinition[];
         try {
@@ -522,11 +595,15 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
         return availableTools.length ? availableTools : undefined;
       },
-      bridge: { execute: request => bridge.bridge.execute(request) },
-      cancel: async () => { cancelRequested = true; controller.abort(); },
+      bridge: { execute: async request => {
+        const result = await bridge.bridge.execute(request);
+        if (request.call.name === readContract.toolId && result.status === 'success' && result.observation !== undefined) observationDelivered = true;
+        return result;
+      } },
+      cancel: async () => { cancelRequested = true; invalidate(); controller.abort(); },
       close: async () => {
         if (closed) return;
-        closed = true; controller.abort(); input.signal?.removeEventListener('abort', cancel);
+        closed = true; invalidate(); controller.abort(); input.signal?.removeEventListener('abort', cancel);
         if (this.sessions.get(input.responseExecutionId) === session) this.sessions.delete(input.responseExecutionId);
         const stored = await service.require(runtime);
         if (generatedWorkId && ['planning', 'running', 'paused'].includes(stored.status)) await service.complete(runtime, generatedWorkId);
@@ -657,11 +734,31 @@ function documentIR(selection: ConversationDocumentReadToolSelection, pages: rea
   return ir;
 }
 
-function documentIRFromPages(fileName: string, workId: WorkId, pages: readonly PptxPhysicalPage[]): DocumentIR {
-  const sections = pages.map(page => ({ sectionId: `page-${page.pageNumber}`, heading: `第 ${page.pageNumber} 页`, preserve: [],
-    blocks: [{ blockId: `page-${page.pageNumber}-text-1`, kind: 'text' as const, content: safeText(page.contentText), sourceRefs: [] }] }));
-  return parseDocumentIR({ operation: 'analyze', attachmentRefs: [], documentRef: workId,
+function generatedDocumentPin(current: Pick<Awaited<ReturnType<RegisteredPresentationReader['read']>>, 'work' | 'file' | 'fileName'>) {
+  const { work, file } = current;
+  // File registrations are immutable versions. Keep the complete pin for
+  // authorization and derive a stable, safe integer for existing IR guards.
+  const revision = Number.parseInt(hash(JSON.stringify([work.id, file.id, work.sourceExecutionId,
+    file.checksumSha256, file.updatedAt])).slice(0, 12), 16);
+  return { workId: work.id, fileId: file.id, workFileId: work.fileId, projectId: work.projectId, fileProjectId: file.projectId,
+    sourceExecutionId: work.sourceExecutionId, fileSourceExecutionId: file.sourceExecutionId,
+    checksumSha256: file.checksumSha256, sizeBytes: file.sizeBytes, fileUpdatedAt: file.updatedAt,
+    locatorFingerprint: hash(JSON.stringify(file.locator)), fileName: current.fileName, revision };
+}
+
+function documentIRFromPages(fileName: string, workId: WorkId, pages: readonly PptxPhysicalPage[], revision: number): DocumentIR {
+  const sections = pages.map(page => {
+    const text = safeText(page.contentText).trim();
+    const chunks = text ? text.match(/[\s\S]{1,4000}/gu)! : [];
+    return { sectionId: `page-${page.pageNumber}`, heading: `第 ${page.pageNumber} 页`, preserve: [],
+      blocks: chunks.map((content, index) => ({ blockId: `page-${page.pageNumber}-text-${index + 1}`,
+        kind: 'text', content, sourceRefs: [] })) };
+  });
+  const ir = parseDocumentIR({ operation: 'analyze', attachmentRefs: [], documentRef: workId,
+    revision: { baseWorkId: workId, expectedRevision: revision },
     content: { title: safeText(fileName), pageCount: pages.length, sections, sourceRefs: [], styleConstraints: [] } });
+  if (JSON.stringify(ir).length > 28_000) throw unavailable();
+  return ir;
 }
 
 function safeText(value: string): string {

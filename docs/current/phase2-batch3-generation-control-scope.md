@@ -1,10 +1,14 @@
 # 第二阶段第三批：生成工具与运行控制范围
 
-当前状态：`in_progress_implementation`。
+当前状态：`completed`（2026-09-28；第三批限定范围已收口，第四批 CRUD 未启动）。
 
-当前自动化门禁已通过；真实 Provider 的生成验收已执行但未通过：Provider 正确看到 Canonical `generate_pptx` Schema 并发起生成调用，生成 Binding/Runner 返回失败，尚未完成“生成后读取”真实场景。该失败不被记录为通过，后续必须定位真实生成失败原因后再结束本批。
+2026-09-28 函数边界诊断补记：已通过合成 Host 状态的同步对照执行证明，旧 Bridge 在生成后新增 workId 时抛出 runtime_scope_mismatch，尚未进入 providerToolsFromContracts。当前工作树已有身份修复保留；首轮 generate_pptx、次轮 read_document_structure 的 Schema 投影均同步返回。此结论不依赖异步 Trace 队列。新的同步标记及跨项目/跨任务拒绝回归均纳入全量测试。详见 docs/evidence/phase2-batch3-available-tool-boundary.json。
 
-本批从安全点继续，上一批正确提交为 `3a373b8`（生产只读接线）和 `6b63a96`（验收记录）。当前工作区已增量实现 Canonical `generate_pptx`、生成 Binding、生成 Session、Runner/QA 桥接、授权状态、动态 Loop 安全控制和回归测试；尚未提交或完成真实 Provider 生成验收。
+此前真实报告的模型应更正为 deepseek-v4-flash；报告 passed 仅表明当前脚本通过，不能替代指定 kimi-k3 的真实文件读回及最终回答验收。当前缓存 Outline IR 和 answerUsesObservation 校验的限制尚未处理，本轮按负责人最新指令只结束诊断，不标记整个第三批完成。
+
+上述诊断记录保留为过程事实。最终验收已由指定 `kimi-k3` 完成：从空隔离项目生成一份真实 PPTX，Runner/渲染 QA/Hash/Work 登记通过，同一 Runtime 重新读取物理页面并完成最终回答；详见 `docs/evidence/phase2-batch3-kimi-readback-real-provider.json`。
+
+本批从安全点继续，上一批正确提交为 `3a373b8`（生产只读接线）和 `6b63a96`（验收记录）；独立 Runtime 身份修复提交为 `ba6f75d`。当前增量包含 Canonical `generate_pptx`、生成 Binding、真实文件读回 Session、Runner/QA 桥接、授权状态、动态 Loop 安全控制、Provider 安全结果 DTO 和回归测试。本批已完成真实验收，未进入 CRUD。
 
 ## 职责边界
 

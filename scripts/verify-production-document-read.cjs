@@ -12,9 +12,12 @@ const { app, safeStorage } = require('electron');
 const { values } = parseArgs({ options: {
   'dry-run': { type: 'boolean', default: false },
   'authorized-two-synthetic-cases': { type: 'boolean', default: false },
-  'authorized-generation-case': { type: 'boolean', default: false }
+  'authorized-generation-case': { type: 'boolean', default: false },
+  model: { type: 'string' }
 } });
-const liveGeneration = values['authorized-generation-case'] && !values['dry-run'];
+const generationMode = values['authorized-generation-case'];
+const requestedModel = values.model;
+const liveGeneration = generationMode && !values['dry-run'];
 const live = (values['authorized-two-synthetic-cases'] || liveGeneration) && !values['dry-run'];
 const workspace = path.resolve(__dirname, '..');
 const sourceData = path.join(app.getPath('appData'), require('../package.json').name);
@@ -36,11 +39,11 @@ if (existsSync(localStateSource)) {
 } else if (live && process.platform === 'win32') encryptionContextFailure = 'encrypted_context_unavailable';
 app.setPath('userData', isolatedProfileAtStartup);
 const report = {
-  schemaVersion: 1, mode: live ? 'real_provider' : 'dry_run', status: 'in_progress',
+  schemaVersion: 2, ...(requestedModel ? { requestedModel: safeModel(requestedModel) } : {}), mode: live ? 'real_provider' : 'dry_run', status: 'in_progress',
   startedAt: new Date().toISOString(),
-  outboundScope: liveGeneration ? 'One synthetic PPT generation followed by structure reading; no user files, attachments or conversation history.' : 'Two synthetic PPT reading requests and tool observations only; no user files, attachments or conversation history.',
-  entryPoint: 'createChatContextRuntime.responses.start -> production dispatch -> canonical read tool',
-  maximumNetworkRequests: 4, maximumRequestsPerCase: 2, maximumOutputTokensPerRequest: 1024,
+  outboundScope: generationMode ? 'One synthetic PPT generation followed by structure reading; no user files, attachments or conversation history.' : 'Two synthetic PPT reading requests and tool observations only; no user files, attachments or conversation history.',
+  entryPoint: generationMode ? 'createChatContextRuntime.responses.start -> canonical generate -> actual registered PPTX read -> final answer' : 'createChatContextRuntime.responses.start -> production dispatch -> canonical read tool',
+  maximumNetworkRequests: 4, maximumRequestsPerCase: generationMode ? 4 : 2, maximumOutputTokensPerRequest: 1024,
   automaticRetries: 0, cost: 'unknown', cases: [], networkRequests: 0
 };
 let stage = 'setup';
@@ -56,6 +59,9 @@ const lifecycleAbort = new AbortController();
 const protectedHashes = new Map();
 const sensitiveValues = new Set([sourceData]);
 const markers = ['BLUE-ORBIT-471', 'GREEN-VALLEY-829'];
+const syntheticGenerationContent = ['# 合成闭环验收', '## 第一部分', `核验标记 ${markers[0]}。`, '## 第二部分', `核验标记 ${markers[1]}。`].join('\n\n');
+let hostVerification;
+let generatedVerification;
 const terminalStates = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
@@ -126,20 +132,20 @@ async function resolveConfiguredRoute(platform, isolatedProfile) {
       const model = snapshot.models.find(item => item.id === route?.modelId);
       const connection = snapshot.connections.find(item => item.id === route?.connectionId);
       const provider = snapshot.providers.find(item => item.id === route?.providerId);
-      if (!route || !model?.enabled || !connection?.credentialReference || !provider ||
+      if (!route || !model?.enabled || (requestedModel && model.providerModelKey !== requestedModel) || !connection?.credentialReference || !provider ||
         connection.state !== 'available' || connection.credentialVersionId !== route.credentialVersionId ||
         model.providerModelKey !== route.providerModelKey ||
         ![platform.NEWAPI_CHAT_ADAPTER_ID, platform.DEEPSEEK_CHAT_ADAPTER_ID].includes(route.adapterKey)) continue;
       sensitiveValues.add(connection.credentialReference);
-      report.model = safeModel(model.displayName);
-      report.routeSource = 'Most recent completed text route, revalidated against copied current registry and fresh candidate eligibility.';
+      report.model = safeModel(model.providerModelKey);
+      report.routeSource = requestedModel ? 'Explicit exact providerModelKey selection, revalidated against copied registry and fresh candidate eligibility; no fallback.' : 'Most recent completed text route, revalidated against copied current registry and fresh candidate eligibility.';
       return { registry, model, connection, provider, route };
     }
   }
-  throw Object.assign(new Error('configured_text_route_unavailable'), { code: 'configured_text_route_unavailable' });
+  throw Object.assign(new Error('configured_text_route_unavailable'), { code: requestedModel ? 'requested_model_route_unavailable' : 'configured_text_route_unavailable' });
 }
 
-function inspectOutbound(request, domain, expectedModel) {
+async function inspectOutbound(request, domain, expectedModel) {
   requireCondition(live && activeCase && !lifecycleAbort.signal.aborted, 'network_not_authorized');
   const generationCase = activeCase.case === 'generate_and_read';
   requireCondition(report.networkRequests < report.maximumNetworkRequests && activeCase.networkRequests < (generationCase ? 4 : 2), 'request_budget_exceeded');
@@ -149,64 +155,82 @@ function inspectOutbound(request, domain, expectedModel) {
   requireCondition(payload.model === expectedModel && payload.stream === true, 'unexpected_provider_payload');
   const tokenLimit = payload.max_completion_tokens ?? payload.max_tokens;
   requireCondition(Number.isSafeInteger(tokenLimit) && tokenLimit > 0 && tokenLimit <= 1024, 'output_budget_missing');
-  const pathLeak = /(?:[a-zA-Z]:\\|file:\/\/|\/Users\/|\/home\/)/u.test(payloadText) ||
-    [...sensitiveValues].some(value => value && payloadText.includes(value));
-  const contextLeak = /"(?:rootDirectory|relativePath|filePath|currentDocumentId|currentDocumentIR|authorization|abortSignal|taskContext|checkpoint)"\s*:/u.test(payloadText);
+  if (generationCase && activeCase.networkRequests > 0) await verifyGeneratedFile();
+  report.actualWireModel = safeModel(payload.model);
+  const inspectionText = payloadText + '\n' + (payload.messages ?? []).filter(message => message.role === 'tool').map(message => message.content).join('\n');
+  const pathLeak = /(?:[a-zA-Z]:\\|file:\/\/|\/Users\/|\/home\/)/u.test(inspectionText) ||
+    [...sensitiveValues].some(value => value && inspectionText.includes(value));
+  const contextLeak = /"(?:rootDirectory|relativePath|filePath|currentDocumentId|currentDocumentIR|authorization|abortSignal|taskContext|checkpoint)"\s*:/u.test(inspectionText);
   activeCase.pathOrRuntimeContextLeak ||= pathLeak || contextLeak;
   requireCondition(!pathLeak && !contextLeak, 'outbound_runtime_data_leak');
   if (generationCase) {
-    const priorResult = (payload.messages ?? []).find(message => message.role === 'tool');
-    let priorStatus;
-    if (priorResult) { try { priorStatus = JSON.parse(priorResult.content).status; } catch { priorStatus = 'invalid'; } }
-    const expectedToolId = activeCase.networkRequests === 0 || priorStatus !== 'success' ? 'generate_pptx' : 'read_document_structure';
-    if (expectedToolId === 'generate_pptx' && priorResult && priorStatus !== 'success') {
-      try { report.generationFailureDiagnostics = JSON.parse(priorResult.content).diagnostics?.map(item => item.code); } catch { /* redacted diagnostic only */ }
-      throw Object.assign(new Error('generation_tool_failed'), { code: 'generation_tool_failed' });
-    }
-    const contract = domain.createCanonicalToolRegistry().get(expectedToolId);
-    const schema = domain.canonicalToolInputSchema(contract);
-    const priorToolMessage = priorResult;
-    if (expectedToolId === 'read_document_structure' && priorToolMessage && (!Array.isArray(payload.tools) || payload.tools.length === 0)) {
-      const prior = JSON.parse(priorToolMessage.content);
-      report.generationFailureDiagnostics = prior.diagnostics?.map(item => item.code);
-      requireCondition(prior.status === 'success', 'generation_tool_failed');
-    }
-    if (!(Array.isArray(payload.tools) && payload.tools.length === 1 &&
-      payload.tools[0].function?.name === expectedToolId &&
-      JSON.stringify(payload.tools[0].function.parameters) === JSON.stringify(schema))) {
-      report.generationSchemaObserved = Array.isArray(payload.tools) ? payload.tools.map(tool => ({
-        name: tool.function?.name, parameterKeys: Object.keys(tool.function?.parameters ?? {})
-      })) : 'missing';
-      throw Object.assign(new Error('generation_schema_not_canonical'), { code: 'generation_schema_not_canonical' });
-    }
+    const expectedToolId = activeCase.networkRequests === 0 ? 'generate_pptx' : 'read_document_structure';
+    const registry = domain.createCanonicalToolRegistry();
+    const schema = domain.canonicalToolInputSchema(registry.get(expectedToolId));
+    requireCondition(Array.isArray(payload.tools) && payload.tools.length === 1 &&
+      payload.tools[0].type === 'function' && payload.tools[0].function?.name === expectedToolId &&
+      JSON.stringify(payload.tools[0].function.parameters) === JSON.stringify(schema), 'generation_schema_not_canonical');
     const calls = [];
-    for (const message of payload.messages ?? []) for (const call of message.tool_calls ?? []) {
-      requireCondition(call.function?.name === expectedToolId, 'unexpected_generation_tool');
-      const args = domain.validateCanonicalToolArguments(contract, JSON.parse(call.function.arguments));
-      if (expectedToolId === 'generate_pptx') requireCondition(args.title && args.content, 'generation_business_args_missing');
-      calls.push({ id: call.id, args });
-    }
-    const toolMessages = (payload.messages ?? []).filter(message => message.role === 'tool');
-    if (activeCase.networkRequests === 0) {
-      requireCondition(toolMessages.length === 0, 'generation_content_preinjected');
-      activeCase.generationArgs = calls[0]?.args;
-    } else {
-      if (generationCase && expectedToolId === 'read_document_structure' && calls.length === 0 && toolMessages.length === 1) {
-        const prior = JSON.parse(toolMessages[0].content);
-        if (prior.status !== 'success') report.generationFailureDiagnostics = prior.diagnostics?.map(item => item.code);
-        requireCondition(prior.status === 'success', 'generation_tool_failed');
-        activeCase.networkRequests += 1;
-        report.networkRequests += 1;
-        return;
+    const results = new Set();
+    const structure = [];
+    for (const message of payload.messages ?? []) {
+      const summary = { role: message.role, contentType: typeof message.content };
+      for (const call of message.tool_calls ?? []) {
+        requireCondition(message.role === 'assistant' && call.type === 'function' && typeof call.id === 'string' &&
+          !calls.some(item => item.id === call.id), 'duplicate_or_invalid_tool_call_id');
+        const callContract = registry.get(call.function?.name);
+        requireCondition(callContract?.exposure === 'provider', 'unexpected_generation_tool');
+        const args = domain.validateCanonicalToolArguments(callContract, JSON.parse(call.function.arguments));
+        const expectedCall = calls.length === 0 ? 'generate_pptx' : 'read_document_structure';
+        requireCondition(calls.length < 2 && call.function.name === expectedCall, 'unexpected_tool_sequence');
+        if (call.function.name === 'read_document_structure') requireCondition(args.scope === 'document', 'unexpected_tool_scope');
+        calls.push({ id: call.id, toolId: call.function.name, args });
+        summary.tool = call.function.name;
+        summary.callRef = 'call-' + calls.length;
       }
-      requireCondition(toolMessages.length === 1 && calls.length === 1, 'generation_tool_roundtrip_missing');
-      const result = JSON.parse(toolMessages[0].content);
-      requireCondition(result.status === 'success', 'generation_tool_failed');
-      activeCase.toolCalls.push({ toolId: expectedToolId, ...calls[0].args });
-      activeCase.toolCallIdMatched = toolMessages[0].tool_call_id === calls[0].id;
-      activeCase.artifactVerified = Boolean(result.artifactRefs?.some(ref => ref.kind === 'work')) || expectedToolId === 'read_document_structure';
-      if (expectedToolId === 'read_document_structure') activeCase.observationContainsExpectedFacts = Boolean(result.observation);
+      if (message.role === 'tool') {
+        const linked = calls.find(call => call.id === message.tool_call_id);
+        requireCondition(Boolean(linked) && !results.has(message.tool_call_id), 'tool_call_id_mismatch');
+        results.add(message.tool_call_id);
+        const result = JSON.parse(message.content);
+        requireCondition(result.status === 'success', 'generation_or_read_tool_failed');
+        const callRef = 'call-' + (calls.indexOf(linked) + 1);
+        summary.callRef = callRef;
+        if (!activeCase.toolCalls.some(item => item.callRef === callRef)) {
+          activeCase.toolCalls.push({ callRef, toolId: linked.toolId,
+            ...(linked.toolId === 'read_document_structure' ? { scope: linked.args.scope } : {}) });
+        }
+        activeCase.toolCallIdMatched = true;
+        if (linked.toolId === 'generate_pptx') {
+          requireCondition(result.observation?.generated === true && result.artifactRefs?.some(ref => ref.kind === 'work'), 'generation_artifact_missing');
+          activeCase.artifactVerified = Boolean(generatedVerification);
+        } else {
+          const observation = result.observation;
+          requireCondition(observation?.scope === 'document' && observation.structureUnit === 'physical_page' &&
+            observation.pageCount === generatedVerification.pages.length && observation.totalPages === generatedVerification.pages.length &&
+            observation.revision === generatedVerification.revision, 'physical_observation_metadata_mismatch');
+          requireCondition(observation.sections?.length === generatedVerification.pages.length, 'physical_page_count_mismatch');
+          for (const [index, page] of generatedVerification.pages.entries()) {
+            const section = observation.sections[index];
+            const text = section.blocks?.map(block => block.text ?? '').join('');
+            requireCondition(section.heading === `第 ${page.pageNumber} 页` && text?.trim() === page.contentText.trim(), 'physical_page_text_mismatch');
+          }
+          requireCondition(markers.every(marker => message.content.includes(marker)), 'generated_marker_missing');
+          activeCase.observationContainsExpectedFacts = true;
+          activeCase.observationMatchesPhysicalFile = true;
+        }
+      }
+      structure.push(summary);
     }
+    requireCondition(calls.length === results.size && calls.length === Math.min(activeCase.networkRequests, 2), 'tool_roundtrip_missing');
+    const identities = calls.map(call => ({ id: call.id, toolId: call.toolId }));
+    if (activeCase.historicCalls) requireCondition(activeCase.historicCalls.every((call, index) =>
+      call.id === identities[index]?.id && call.toolId === identities[index]?.toolId), 'historic_call_id_changed');
+    Object.defineProperty(activeCase, 'historicCalls', { value: identities, writable: true, configurable: true, enumerable: false });
+    (activeCase.requestStructures ??= []).push({ round: activeCase.networkRequests + 1,
+      model: safeModel(payload.model), availableTools: payload.tools.map(tool => tool.function.name),
+      messages: structure, toolChoiceType: typeof payload.tool_choice, responseFormatPresent: Boolean(payload.response_format),
+      previousResponseIdPresent: Boolean(payload.previous_response_id || payload.response_id) });
     activeCase.networkRequests += 1;
     report.networkRequests += 1;
     return;
@@ -251,6 +275,45 @@ function inspectOutbound(request, domain, expectedModel) {
   }
   activeCase.networkRequests += 1;
   report.networkRequests += 1;
+}
+
+
+async function verifyGeneratedFile() {
+  const { platform, storage, projectId, projectRoot } = hostVerification;
+  const works = await new platform.JsonWorkRepository(storage, projectId).list(projectId);
+  requireCondition(works.length === 1, 'expected_one_generated_work');
+  const { RegisteredPresentationReader } = require('../dist-electron/src/platform/documents/registered-presentation-reader');
+  const actual = await new RegisteredPresentationReader({ rootDirectory: projectRoot, projectId }).read(works[0].id);
+  requireCondition(actual.pages.length >= 4 && markers.every(marker => actual.pages.some(page => page.text.includes(marker))), 'generated_physical_file_invalid');
+  const checksum = createHash('sha256').update(actual.buffer).digest('hex');
+  requireCondition(checksum === actual.file.checksumSha256 && actual.buffer.length === actual.file.sizeBytes &&
+    actual.work.fileId === actual.file.id && actual.work.sourceExecutionId === actual.file.sourceExecutionId, 'registered_file_identity_mismatch');
+  const pin = JSON.stringify([actual.work.id, actual.file.id, actual.work.sourceExecutionId, checksum, actual.file.updatedAt]);
+  if (generatedVerification) requireCondition(generatedVerification.pin === pin, 'generated_file_changed_during_readback');
+  generatedVerification = { pin, pages: actual.pages,
+    revision: Number.parseInt(createHash('sha256').update(pin).digest('hex').slice(0, 12), 16) };
+  for (const sensitive of [actual.work.id, actual.file.id, actual.work.sourceExecutionId, checksum,
+    actual.file.locator.kind === 'project' ? actual.file.locator.relativePath : '']) if (sensitive) sensitiveValues.add(sensitive);
+  activeCase.physicalFile = { registeredWorkCount: works.length, physicalPages: actual.pages.length,
+    hashVerified: true, sizeVerified: true, sourceExecutionMatched: true, independentReaderUsed: true,
+    coverAndClosingIncluded: true, repeatedPinMatched: true };
+}
+
+async function seedGenerationConversation(platform, domain, storage, projectId) {
+  const now = domain.toIsoTimestamp(new Date().toISOString());
+  let conversation = domain.createConversation({ id: domain.toConversationId('conversation-synthetic-generation-' + randomUUID()),
+    projectId, title: '合成生成读回验收', createdAt: now });
+  const repository = new platform.JsonProjectConversationRepository(storage, projectId);
+  await repository.create(conversation);
+  let previousRevision = conversation.revision;
+  conversation = domain.addUserMessage(conversation, { id: domain.toMessageId('requirement-' + randomUUID()),
+    content: '请制作一份简单 PPT，内容如下：\n' + syntheticGenerationContent, createdAt: now });
+  await repository.save(conversation, previousRevision);
+  previousRevision = conversation.revision;
+  conversation = domain.addCompletedAssistantMessage(conversation, { id: domain.toMessageId('confirmation-' + randomUUID()),
+    content: '内容已明确。现在开始生成吗？', createdAt: now });
+  await repository.save(conversation, previousRevision);
+  return conversation;
 }
 
 async function createSyntheticDocument(platform, rootDirectory, projectId) {
@@ -301,7 +364,7 @@ async function seedConversation(platform, domain, storage, projectId, fixture, l
 
 async function executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, scope) {
   stage = `case_${scope}`;
-  const conversation = await seedConversation(platform, domain, storage, projectId, fixture, scope);
+  const conversation = generationMode ? await seedGenerationConversation(platform, domain, storage, projectId) : await seedConversation(platform, domain, storage, projectId, fixture, scope);
   const entry = { case: liveGeneration ? 'generate_and_read' : scope === 'page' ? 'physical_page_2' : 'whole_document', expectedScope: scope,
     status: 'in_progress', networkRequests: 0, schemasCanonical: true, pathOrRuntimeContextLeak: false,
     toolCalls: [], toolCallIdMatched: false, observationContainsExpectedFacts: false,
@@ -309,7 +372,7 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   activeCase = entry;
   report.cases.push(entry);
   const content = liveGeneration
-    ? '请直接生成一份简单的 PPT，主题是项目进展，不要指定固定页数。必须先调用 generate_pptx 工具完成生成，生成成功后再调用 read_document_structure 读取刚生成的 PPT 结构，最后告诉我生成结果和页数。不要暴露路径或运行时信息。'
+    ? '确认，现在开始生成这份 PPT。内容如下：\n' + syntheticGenerationContent + '\n请将以上标题、两个小节和核验标记原样作为生成内容，不添加其他内容，不指定固定页数。先调用 generate_pptx 一次，成功后调用 read_document_structure(scope=document) 读取刚生成的真实文件，再依据 Observation 回答：文件页数：N；核验标记：两个标记。完成后结束，不要再次生成。'
     : scope === 'page'
     ? '请读取当前 PPT 的第 2 页，回答本页的核验标记和一句话内容摘要。严格只调用一次可用的读取工具；收到成功 Observation 后立即回答，不要再次调用工具，不要猜测其他页。'
     : '请读取当前 PPT 的整篇文档，回答总页数、每一部分的核验标记和主要内容。严格只调用一次可用的读取工具；收到成功 Observation 后立即回答，不要再次调用工具，不要猜测。';
@@ -320,7 +383,7 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
     contextSelections: [], parameterValues, confirmed: true
   }), 'response_start_failed');
   const executionId = started.execution.responseExecutionId;
-  const deadline = Date.now() + 150_000;
+  const deadline = Date.now() + (generationMode ? 300_000 : 150_000);
   let execution = started.execution;
   while (!terminalStates.has(execution.state) && Date.now() < deadline && !lifecycleAbort.signal.aborted) {
     await new Promise(resolve => setTimeout(resolve, 150));
@@ -342,13 +405,20 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
     typeof event.safeCode === 'string' && /^[a-zA-Z0-9_.-]{1,120}$/.test(event.safeCode) ? [event.safeCode] : []);
   entry.answerUsesObservation = scope === 'page' ? execution.content.includes(markers[0])
     : markers.every(marker => execution.content.includes(marker));
+  if (liveGeneration) {
+    await verifyGeneratedFile();
+    const reportedPages = /文件页数\s*[：:]\s*(\d+)/u.exec(execution.content);
+    entry.finalPhysicalPageCountMatched = Number(reportedPages?.[1]) === generatedVerification.pages.length;
+    entry.answerUsesObservation &&= entry.finalPhysicalPageCountMatched && entry.observationMatchesPhysicalFile === true;
+  }
   const { ConversationProductionTraceStore } = require('../dist-electron/src/platform/conversation-production-trace');
   const trace = await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id });
   entry.trace = trace.filter(event => ['tool_authorization', 'tool_call', 'tool_result'].includes(event.code))
     .map(event => ({ code: event.code, status: event.status, ...(event.operationId ? { operationId: event.operationId } : {}), ...(event.facts?.tool ? { tool: event.facts.tool } : {}) }));
   requireCondition(execution.state === 'completed', 'provider_response_not_completed');
-  requireCondition((liveGeneration ? entry.networkRequests >= 2 && entry.toolCalls.some(item => item.toolId === 'generate_pptx') &&
-    entry.toolCalls.some(item => item.toolId === 'read_document_structure') && entry.artifactVerified && entry.toolCallIdMatched
+  requireCondition((liveGeneration ? entry.networkRequests >= 3 && entry.networkRequests <= 4 && entry.toolCalls.length === 2 &&
+    entry.toolCalls[0].toolId === 'generate_pptx' && entry.toolCalls[1].toolId === 'read_document_structure' &&
+    entry.artifactVerified && entry.toolCallIdMatched && entry.answerUsesObservation && entry.observationMatchesPhysicalFile
     : entry.networkRequests === 2 && entry.toolCalls.length === 1 && entry.toolCallIdMatched && entry.observationContainsExpectedFacts && entry.answerUsesObservation) && !entry.pathOrRuntimeContextLeak,
   'production_tool_roundtrip_not_verified');
   requireCondition(entry.trace.some(item => item.code === 'tool_result' && item.status === 'completed'), 'tool_trace_missing');
@@ -379,7 +449,12 @@ async function run() {
   const projectId = domain.toProjectId(`project-synthetic-read-${randomUUID()}`);
   sensitiveValues.add(projectId);
   const storage = new platform.NodeProjectStorage(projectRoot);
-  const fixture = await createSyntheticDocument(platform, projectRoot, projectId);
+  const fixture = generationMode ? undefined : await createSyntheticDocument(platform, projectRoot, projectId);
+  hostVerification = { platform, storage, projectId, projectRoot };
+  if (generationMode) {
+    requireCondition((await new platform.JsonWorkRepository(storage, projectId).list(projectId)).length === 0, 'generation_project_not_empty');
+    report.fixture = { emptyProject: true, seededDocument: false, syntheticConfirmation: true };
+  }
   const authorization = new platform.RuntimeAuthorizationLedger(
     new platform.JsonRuntimeAuthorizationLedgerStore(path.join(profile, 'runtime-authorization-ledger.json')));
   const { LedgerRuntimeAuthorizationSync } = require('../dist-electron/electron/ipc/runtime-authorization-sync');
@@ -397,7 +472,7 @@ async function run() {
   const { ElectronNewApiHttpTransport } = require('../dist-electron/electron/ipc/management-adapters');
   const realTransport = new ElectronNewApiHttpTransport();
   const transport = { async send(request) {
-    inspectOutbound(request, domain, selected.model.providerModelKey);
+    await inspectOutbound(request, domain, selected.model.providerModelKey);
     return realTransport.send({ ...request, signal: AbortSignal.any([request.signal, lifecycleAbort.signal]) });
   } };
   let proxyMode = { kind: 'system_default' };
@@ -445,17 +520,18 @@ async function run() {
     requireCondition(safeStorage.isEncryptionAvailable(), 'credential_encryption_unavailable');
     if (liveGeneration) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, 'document');
     else for (const scope of ['document', 'page']) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, scope);
-    requireCondition(report.networkRequests >= (liveGeneration ? 2 : 4), 'unexpected_network_request_count');
+    requireCondition(report.networkRequests >= (liveGeneration ? 3 : 4), 'unexpected_network_request_count');
     const observations = await new platform.JsonProviderUsageObservationRepository(storage).list();
     report.usage = observations.map(item => ({ status: item.status, sourceStage: item.sourceStage,
       facts: item.facts.filter(fact => /^[a-z_]{1,50}$/.test(fact.metricId) && /^\d+(?:\.\d+)?$/.test(fact.quantity))
         .map(fact => ({ metricId: fact.metricId, quantity: fact.quantity, unit: fact.unit, source: fact.source })) }));
     report.status = 'passed';
   } else {
-    for (const scope of liveGeneration ? ['generation'] : ['document', 'page']) await seedConversation(platform, domain, storage, projectId, fixture, scope);
+    if (generationMode) await seedGenerationConversation(platform, domain, storage, projectId);
+    else for (const scope of ['document', 'page']) await seedConversation(platform, domain, storage, projectId, fixture, scope);
     report.status = 'dry_run_passed';
-    report.dryRun = { isolatedCandidateReady: true, syntheticPptRegistered: true, providerCredentialsDecrypted: false,
-      seededConversations: 2, providerRequests: 0, productionRoundtripExecuted: false };
+    report.dryRun = { isolatedCandidateReady: true, syntheticPptRegistered: !generationMode, emptyGenerationProject: generationMode, providerCredentialsDecrypted: false,
+      seededConversations: generationMode ? 1 : 2, providerRequests: 0, productionRoundtripExecuted: false };
   }
 }
 
@@ -502,7 +578,7 @@ run().catch(error => {
   catch { report.status = 'failed'; report.safeCode = 'acceptance_cleanup_failed'; }
   clearTimeout(processDeadline);
   report.finishedAt = new Date().toISOString();
-  const outputDirectory = path.join(workspace, 'outputs/production-document-read');
+  const outputDirectory = path.join(workspace, generationMode ? 'outputs/phase2-batch3-kimi-readback' : 'outputs/production-document-read');
   try {
     await mkdir(outputDirectory, { recursive: true });
     await writeFile(path.join(outputDirectory, live ? 'real-provider.json' : 'dry-run.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');

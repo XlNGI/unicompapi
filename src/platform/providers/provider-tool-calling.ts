@@ -24,18 +24,26 @@ const protocolRegistry = createCanonicalToolRegistry();
 /** Project a Runtime-selected subset only. Registry membership is not authorization. */
 export function providerToolsFromContracts(
   availableContracts: readonly CanonicalToolContract[],
-  registry: CanonicalToolRegistry = protocolRegistry
+  registry: CanonicalToolRegistry = protocolRegistry,
+  diagnostic?: (stage: string, count: number) => void
 ): readonly ControlledProviderToolDefinition[] {
+  diagnostic?.(`provider_tools_from_contracts_enter:${availableContracts.map(contract => contract.toolId).join('.')}`, availableContracts.length);
   if (availableContracts.length > maxTools) throw new Error('controlled tool definitions are invalid');
   const names = new Set<string>();
-  return availableContracts.map(contract => {
+  diagnostic?.('contracts_enumerated', availableContracts.length);
+  const result = availableContracts.map(contract => {
     const registered = registry.get(contract.toolId);
     if (!registered || registered.exposure !== 'provider' || names.has(contract.toolId) || !sameJsonValue(contract, registered)) {
       throw new Error('controlled tool contract is invalid');
     }
     names.add(contract.toolId);
-    return canonicalProviderTool(registered);
+    diagnostic?.(`contract_${contract.toolId}_schema_enter`, names.size);
+    const projected = canonicalProviderTool(registered);
+    diagnostic?.(`contract_${contract.toolId}_schema_returned`, names.size);
+    return projected;
   });
+  diagnostic?.('provider_tools_from_contracts_returned', result.length);
+  return result;
 }
 
 /** Validate transported definitions against the contract, never infer task permissions. */
@@ -197,7 +205,13 @@ export function sanitizeControlledToolResult(
     // Canonical results have their own closed envelope and depth/collection limits.
     // Validate before redaction so the Provider cannot receive an uncontracted shape.
     const validated = validateDocumentToolResult(contract, value);
-    return { ...validateDocumentToolResult(contract, redactValidatedToolValue(validated)) };
+    const redacted = validateDocumentToolResult(contract, redactValidatedToolValue(validated));
+    // Artifact identities belong to the host's authoritative result. The model
+    // only needs the kinds/count of published artifacts, never a Work/file ref.
+    // This is a Provider DTO projection, not a replacement DocumentToolResult.
+    return { ...redacted, ...(redacted.artifactRefs === undefined ? {} : {
+      artifactRefs: redacted.artifactRefs.map(({ kind }) => ({ kind }))
+    }) };
   }
   return sanitizeToolValue(value, 0) as Readonly<Record<string, unknown>>;
 }
@@ -327,7 +341,7 @@ function redactValidatedToolValue(value: unknown): unknown {
   if (isRecord(value)) {
     return Object.fromEntries(Object.entries(value).filter(([key]) =>
       !/(?:path|url|token|secret|password|credential|api[_-]?key)/iu.test(key) &&
-      !/^(?:context|executionContext|runtimeContext|currentDocumentId|currentDocumentIR|documentRef|rootDirectory|projectContext|authorization|capabilities|abortSignal|signal|taskContext|checkpoint|idempotencyKey)$/iu.test(key)
+      !/^(?:context|executionContext|runtimeContext|currentDocumentId|currentDocumentIR|documentId|documentRef|workId|fileId|projectId|rootDirectory|projectContext|authorization|capabilities|abortSignal|signal|taskContext|checkpoint|idempotencyKey)$/iu.test(key)
     ).map(([key, item]) => [key, redactValidatedToolValue(item)]));
   }
   return value;

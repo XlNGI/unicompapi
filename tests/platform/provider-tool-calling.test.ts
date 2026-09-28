@@ -19,6 +19,24 @@ const readParameters = canonicalToolInputSchema(readContract);
 const readTool = () => providerToolsFromContracts([readContract])[0]!;
 
 describe('controlled provider tool calling', () => {
+  it('records synchronous projection return for each round without relying on trace persistence', () => {
+    for (const toolId of ['generate_pptx', 'read_document_structure'] as const) {
+      const contract = registry.get(toolId)!;
+      const markers: Array<[string, number]> = [];
+      const tools = providerToolsFromContracts([contract], registry, (stage, count) => markers.push([stage, count]));
+      markers.push(['caller_received_return', tools.length]);
+      expect(markers).toEqual([
+        [`provider_tools_from_contracts_enter:${toolId}`, 1],
+        ['contracts_enumerated', 1],
+        [`contract_${toolId}_schema_enter`, 1],
+        [`contract_${toolId}_schema_returned`, 1],
+        ['provider_tools_from_contracts_returned', 1],
+        ['caller_received_return', 1]
+      ]);
+      expect(tools[0].function.parameters).toEqual(canonicalToolInputSchema(contract));
+    }
+  });
+
   it('projects the canonical definition and rejects duplicate or unsafe names', () => {
     const tools = parseControlledProviderTools([readTool()]);
     expect(tools?.[0]?.function.name).toBe(readContract.toolId);
@@ -147,6 +165,73 @@ describe('controlled provider tool calling', () => {
         blockId: 'block-1', text: 'Read [redacted] with [redacted]'
       }] }] }
     });
+  });
+
+  it('projects artifact kinds without host identities and preserves the authoritative result', () => {
+    const result = {
+      schemaVersion: 1, status: 'success',
+      observation: { artifactRegistered: true, pageCount: 2, workId: 'internal-work-1',
+        documentId: 'internal-document-1', fileId: 'internal-file-1',
+        currentDocumentIR: { title: 'runtime-only-state' }, rootDirectory: 'C:\\private',
+        authorization: { canWrite: true } },
+      artifactRefs: [{ kind: 'work', ref: 'internal-work-1' }, { kind: 'file', ref: 'internal-file-1' },
+        { kind: 'preview', ref: 'internal-preview-1' }],
+      metadata: { toolId: 'generate_pptx', callId: 'call-original-generation',
+        workId: 'internal-work-1', fileId: 'internal-file-1', projectId: 'internal-project-1' }
+    };
+    const original = structuredClone(result);
+    const projected = sanitizeControlledToolResult(result);
+    expect(projected).toEqual({
+      schemaVersion: 1, status: 'success', observation: { artifactRegistered: true, pageCount: 2 },
+      artifactRefs: [{ kind: 'work' }, { kind: 'file' }, { kind: 'preview' }],
+      metadata: { toolId: 'generate_pptx', callId: 'call-original-generation' }
+    });
+    const wire = JSON.stringify(projected);
+    expect(JSON.stringify(sanitizeControlledToolResult(result))).toBe(wire);
+    expect(JSON.parse(wire)).toEqual(projected);
+    expect(wire).not.toMatch(/internal-|runtime-only-state|private|authorization|currentDocumentIR/);
+    expect(result).toEqual(original);
+    expect(result.artifactRefs[0].ref).toBe('internal-work-1');
+  });
+
+  it('keeps the original tool call ID when sending an artifact summary to continuation', async () => {
+    const call = { id: 'call-original-generation', name: 'generate_pptx',
+      arguments: { title: 'Test presentation', content: 'Public test content' } };
+    const authoritative = { schemaVersion: 1, status: 'success',
+      observation: { artifactRegistered: true }, artifactRefs: [{ kind: 'work', ref: 'internal-work-1' }],
+      metadata: { toolId: call.name, callId: call.id } };
+    let round = 0;
+    const result = await runControlledProviderToolLoop({
+      messages: [{ role: 'user', content: 'Generate the test presentation.' }],
+      request: async messages => {
+        if (round++ === 0) return { finishReason: 'tool_calls', toolCalls: [call] };
+        expect(messages.at(-2)?.toolCalls).toEqual([call]);
+        expect(messages.at(-1)).toMatchObject({ role: 'tool', toolCallId: call.id, name: call.name });
+        expect(JSON.parse(messages.at(-1)!.content)).toMatchObject({
+          artifactRefs: [{ kind: 'work' }], metadata: { callId: call.id }
+        });
+        expect(messages.at(-1)!.content).not.toContain('internal-work-1');
+        return { finishReason: 'stop', content: 'The presentation is ready.' };
+      },
+      bridge: { execute: async () => authoritative }
+    });
+    expect(result.content).toBe('The presentation is ready.');
+    expect(authoritative.artifactRefs).toEqual([{ kind: 'work', ref: 'internal-work-1' }]);
+  });
+
+  it.each([
+    ['Map', () => new Map([['internal', 'host-state']])],
+    ['Set', () => new Set(['host-state'])],
+    ['Error', () => new Error('host-state')],
+    ['AbortSignal', () => new AbortController().signal],
+    ['BigInt', () => BigInt(1)],
+    ['undefined', () => undefined],
+    ['circular object', () => { const value: Record<string, unknown> = {}; value.self = value; return value; }]
+  ])('refuses a %s in a canonical result before it can become a Provider message', (_label, createValue) => {
+    expect(() => sanitizeControlledToolResult({
+      schemaVersion: 1, status: 'success', metadata: { toolId: 'generate_pptx' },
+      observation: { hostValue: createValue() }
+    })).toThrow();
   });
 
   it('rejects invalid canonical envelopes and payload limits instead of silently trimming them', () => {

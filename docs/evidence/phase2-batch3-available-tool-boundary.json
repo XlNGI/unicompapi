@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "method": "Synchronous in-memory execution of baseline and working-tree Bridge using a synthetic Host; no Runner side effects or network",
+  "networkRequests": 0,
+  "results": [
+    {
+      "label": "baseline_d23220f",
+      "first": [
+        "generate_pptx"
+      ],
+      "second": {
+        "returned": false,
+        "errorType": "TypeError",
+        "reason": "runtime_scope_mismatch"
+      },
+      "projections": [
+        {
+          "stage": "entered",
+          "contractIds": [
+            "generate_pptx"
+          ]
+        },
+        {
+          "stage": "returned",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "label": "current_worktree",
+      "first": [
+        "generate_pptx"
+      ],
+      "second": {
+        "tools": [
+          "read_document_structure"
+        ],
+        "returned": true
+      },
+      "projections": [
+        {
+          "stage": "entered",
+          "contractIds": [
+            "generate_pptx"
+          ]
+        },
+        {
+          "stage": "returned",
+          "count": 1
+        },
+        {
+          "stage": "entered",
+          "contractIds": [
+            "read_document_structure"
+          ]
+        },
+        {
+          "stage": "returned",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "date": "2026-09-28",
+  "status": "function_boundary_proven",
+  "baseCommit": "d23220f",
+  "businessChangeAlreadyPresent": "Task identity uses projectId and taskId; current Work may refresh. This change preceded the final diagnostic-only verification and remains uncommitted.",
+  "checks": {
+    "nodeUiPassed": 384,
+    "vitestFiles": 253,
+    "vitestPassed": 2236,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "platformAudit": "passed",
+    "recoveryAudit": "passed",
+    "phase9Closeout": "passed",
+    "planCompliance": "passed"
+  },
+  "limits": {
+    "batch3Complete": false,
+    "liveAcceptanceModel": "deepseek-v4-flash",
+    "requestedKimiAcceptanceCompleted": false,
+    "finalAnswerUsesPhysicalFileReadbackProven": false,
+    "reason": "Prior generation readback uses cached Outline IR; prior acceptance passed without validating answerUsesObservation."
+  }
+}

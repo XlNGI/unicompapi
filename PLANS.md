@@ -6,7 +6,11 @@
 
 ### 事实基线
 
-2026-09-28 第二阶段第三批实施中：保留上一批提交 `3a373b8`、`6b63a96`；当前已在工作区增量接入 `generate_pptx` Canonical 合同、业务参数 Binding、生成 Session、Runner/QA 执行桥、授权状态和自然确认提示，并将动态 Provider Tool Loop 改为无固定业务轮数、带取消/超时/预算/重复进展保护。自动化门禁通过；真实 Provider 已成功生成并登记 PPTX，但生成后同一会话读回在下一轮返回 `newapi.operation_failed`，因此本批尚未完成，证据见 `docs/evidence/phase2-batch3-generation.json`。当前仍不接 CRUD。第三批约束和验收矩阵见 `docs/current/phase2-batch3-generation-control-scope.md`。
+2026-09-28 第二阶段第三批已满足负责人最新限定的收口条件：指定 `kimi-k3` 的真实生产链路完成“用户确认 → generate_pptx → Runner/渲染 QA/Hash/Work → Runtime live state/Available Tool Set 刷新 → read_document_structure → 真实 PPTX 读回 → 模型最终回答”。本次从空的隔离项目开始，只登记 1 份 Work；真实文件共 4 个物理页（含封面/结束页），独立 Reader 复核文件 Hash、大小、来源执行、版本及逐页 Observation，最终页数和两项合成核验标记均正确。真实 HTTP 共 3 次，无自动重试，实际 wire model 为 `kimi-k3`，路径/Runtime/真实 Work ID 未外发。脱敏报告见 `docs/evidence/phase2-batch3-kimi-readback-real-provider.json`。本轮到此停止，第四批 CRUD 未启动。
+
+独立回滚提交为 `ba6f75d`（仅 Bridge 的稳定身份与对应测试）。真实根因是旧 `live()` 将可变 `projectContext.workId` 纳入不可变 taskIdentity，在投影调用前同步抛出 `runtime_scope_mismatch`；现稳定身份为 `projectId + taskId`，跨项目/跨任务、逐调用文档/revision/授权保护保留。此前“Schema 派生卡住/Trace 队列死锁”的判断撤回。此前成功报告实际为 `deepseek-v4-flash`，且读取缓存 Outline IR、answerUsesObservation=false，不能视为 kimi 验收；本次已移除缓存捷径，重新完成真实文件验收。历史诊断证据保留于 `docs/evidence/phase2-batch3-available-tool-boundary.json`，不得与最终验收混用。
+
+本轮最终自动化：Node/UI 384/384，Vitest 255 文件、2256/2256，共 2640 项，0 失败/跳过；typecheck、lint、build 通过。平台/恢复/关闭/计划审计以 `docs/evidence/phase2-batch3-generation.json` 最终结果为准。本批沿用 Canonical 合同和动态工具过滤；生成后按真实文件重建会话读取快照，Provider ToolResult 仅投影 Artifact 类型/数量，内部 Work reference 保留。未改 Outline Contract、Document IR 核心、Runner、PptxGenJS、QA 或发布架构。本次真实验收只覆盖上述最终闭环，不把既有确认/取消自动化结果冒称为新增 UI 人工验收；读取仍限物理页文本，section、视觉理解、CRUD 不在本次范围。下文较早的“未完成/实施中”是历史过程记录，以本条及最终证据为准。
 
 第三批新增职责边界：LLM 负责需求理解、信息是否足够的判断、自然追问和生成确认请求；用户负责明确点击开始生成与随时停止；Runtime 只负责授权、安全、预算、沙箱、任务状态、取消、幂等和真实执行结果。Runtime 不根据字段齐全与否判断需求是否充分，也不替 LLM 做生成决策。
 
