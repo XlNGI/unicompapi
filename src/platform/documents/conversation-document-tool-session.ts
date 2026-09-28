@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   parseDocumentIR, toDocumentTaskRuntimeId,
+  buildDocumentIRFromOutline,
   type Conversation, type ConversationId, type ConversationResponseDraftV1,
   type DocumentIR, type FileReferenceId, type MessageId, type ProjectConversationRepository,
   type ProjectId, type WorkId
@@ -433,6 +434,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       executionId: input.responseExecutionId, documentKind: 'ppt', operation: 'create',
       budget: { maxSteps: 8, budgetUnits: 24, timeoutMs } });
     const refreshGenerated = async (): Promise<boolean> => {
+      if (generatedIR && generatedWorkId && !controller.signal.aborted && !closed) return true;
       if (!generatedWorkId || controller.signal.aborted || closed) return false;
       try {
         const current = await this.reader.read(generatedWorkId);
@@ -440,8 +442,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         generatedIR = documentIRFromPages(current.fileName, generatedWorkId, pages);
         await emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'runtime_context_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
         return true;
-      } catch {
-        await emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: 'runtime_context_refresh_failed', facts: { tool: 'read_sources', purpose: 'tool' } });
+      } catch (error) {
+        const reason = error && typeof error === 'object' && 'safeReason' in error && typeof error.safeReason === 'string' ? error.safeReason : 'unknown';
+        await emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: `runtime_context_refresh_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
         return false;
       }
     };
@@ -467,7 +470,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         heading: safeText(page.heading), text: safeText(page.contentText) };
     } });
     const generatedDependencies = this.options.generatePptx!;
-    const generateBinding = createGeneratePptxBinding(generatedDependencies, { registry });
+    const generationDependencies = { ...generatedDependencies, onGeneratedOutline: (outline: Parameters<typeof buildDocumentIRFromOutline>[0]['outline']) => {
+      generatedIR = buildDocumentIRFromOutline({ outline, operation: 'analyze', attachmentRefs: [], revision: {
+        baseWorkId: generatedWorkId ?? 'pending-generation', expectedRevision: selection.userMessageRevision
+      } });
+    } };
+    const generateBinding = createGeneratePptxBinding(generationDependencies, { registry });
     const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
       maxCalls: runtime.budget.maxSteps, timeoutMs: generateContract.execution.timeoutMs, getExecutionContext,
       runtime: { service: {
@@ -494,9 +502,11 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       ] });
     const session: ConversationDocumentToolSession = {
       prepareTools: async signal => {
+        await emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'prepare_tools_enter', facts: { tool: 'read_sources', purpose: 'tool' } });
         if (signal.aborted || controller.signal.aborted || closed || Date.now() >= deadlineAt) return undefined;
         await refreshGenerated();
         await emitProductionEvent({ code: 'tool_authorization', status: bridge.tools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
+        await emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool' } });
         return bridge.tools.length ? bridge.tools : undefined;
       },
       bridge: { execute: request => bridge.bridge.execute(request) },

@@ -23,6 +23,7 @@ export interface GeneratePptxToolDependencies {
   readonly executor: DocumentGenerationExecutorPort;
   /** Read live ownership/permission state; snapshot arguments cannot authorize execution. */
   readonly revalidateAuthorization: (context: DocumentAtomicExecutionContext, phase: 'before' | 'after') => Promise<boolean>;
+  readonly onGeneratedOutline?: (outline: NonNullable<ReturnType<DocumentDraftCompilerPort['compile']>>) => void;
   readonly createExecutionInput?: (input: {
     readonly args: CanonicalToolArguments;
     readonly outline: NonNullable<ReturnType<DocumentDraftCompilerPort['compile']>>;
@@ -52,6 +53,7 @@ export function createGeneratePptxBinding(
         const outline = dependencies.compiler.compile({
           content: String(args.content), kind: 'ppt', operation: 'create'
         });
+        dependencies.onGeneratedOutline?.(outline);
         if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
         const executionInput = dependencies.createExecutionInput
           ? await dependencies.createExecutionInput({ args, outline, context })

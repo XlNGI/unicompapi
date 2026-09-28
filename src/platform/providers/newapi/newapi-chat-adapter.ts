@@ -356,8 +356,13 @@ export class NewApiChatAdapter {
     let session: NewApiEventStreamSession | undefined;
     let availableToolNames = new Set<string>();
     const openSession = async (messages: readonly NewApiChatMessageV1[]) => {
-      const tools = parseControlledProviderTools(input.prepareTools
-        ? await input.prepareTools(externalController.signal) : request.tools);
+      let tools: readonly ControlledProviderToolDefinition[] | undefined;
+      try {
+        tools = parseControlledProviderTools(input.prepareTools
+          ? await input.prepareTools(externalController.signal) : request.tools);
+      } catch (error) {
+        throw new NewApiChatAdapterError(`newapi.continuation_prepare_failed.${safeContinuationCause(error)}`, safeContinuationCause(error));
+      }
       if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
       availableToolNames = new Set(tools?.map(tool => tool.function.name) ?? []);
       const serializedTools = JSON.stringify(tools);
@@ -668,6 +673,12 @@ export class NewApiChatAdapter {
       observedAt: this.now()
     }), newApiChatUsageSchema);
   }
+}
+
+function safeContinuationCause(error: unknown): string {
+  if (error instanceof NewApiChatAdapterError) return error.safeCode;
+  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,80}$/.test(error.name)) return error.name;
+  return 'unknown';
 }
 
 export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
