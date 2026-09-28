@@ -17,6 +17,7 @@ import { JsonDocumentTaskRuntimeRepository } from '../repositories/json-document
 import { JsonFileReferenceRepository, JsonWorkRepository } from '../repositories/json-repositories';
 import { NodeProjectStorage } from '../storage';
 import { createDocumentToolCallingBridge } from '../providers/document-tool-bridge';
+import { emitProductionEvent } from '../conversation-production-trace';
 import type { ControlledProviderToolBridge, ControlledProviderToolDefinition } from '../providers/provider-tool-calling';
 import { ConversationDocumentPageError } from './conversation-document-page-context';
 import { RegisteredPresentationReader } from './registered-presentation-reader';
@@ -437,8 +438,12 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         const current = await this.reader.read(generatedWorkId);
         pages = current.pages;
         generatedIR = documentIRFromPages(current.fileName, generatedWorkId, pages);
+        await emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'runtime_context_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
         return true;
-      } catch { return false; }
+      } catch {
+        await emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: 'runtime_context_refresh_failed', facts: { tool: 'read_sources', purpose: 'tool' } });
+        return false;
+      }
     };
     const getExecutionContext = (): ToolExecutionContext => ({
       currentDocumentId: generatedWorkId,
@@ -461,7 +466,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       return { pageNumber: page.pageNumber, totalPages: pages.length, hidden: page.hidden,
         heading: safeText(page.heading), text: safeText(page.contentText) };
     } });
-    const generatedDependencies = this.options.generatePptx;
+    const generatedDependencies = this.options.generatePptx!;
     const generateBinding = createGeneratePptxBinding(generatedDependencies, { registry });
     const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
       maxCalls: runtime.budget.maxSteps, timeoutMs: generateContract.execution.timeoutMs, getExecutionContext,
@@ -475,7 +480,11 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
             const result = await generateBinding.execute(args, context);
             if (result.status === 'success') {
               const ref = result.artifactRefs?.find(item => item.kind === 'work')?.ref;
-              if (ref) { generatedWorkId = ref as WorkId; await refreshGenerated(); }
+              if (ref) {
+                generatedWorkId = ref as WorkId;
+                await emitProductionEvent({ code: 'tool_result', status: 'completed', operationId: 'artifact_registered', facts: { tool: 'write_document', purpose: 'tool' } });
+                await refreshGenerated();
+              }
             }
             return result;
           } },
@@ -487,6 +496,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       prepareTools: async signal => {
         if (signal.aborted || controller.signal.aborted || closed || Date.now() >= deadlineAt) return undefined;
         await refreshGenerated();
+        await emitProductionEvent({ code: 'tool_authorization', status: bridge.tools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
         return bridge.tools.length ? bridge.tools : undefined;
       },
       bridge: { execute: request => bridge.bridge.execute(request) },
