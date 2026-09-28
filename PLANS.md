@@ -6,19 +6,23 @@
 
 ### 事实基线
 
-2026-09-27 维护范围更新（第二阶段第一批，工作树实现及自动化验收完成）：按负责人确认建立独立 Canonical Tool Contract，参数/元数据单源派生，分离完整 Registry 与当前任务 Available Tool Set，并分离 LLM 参数与 Runtime 注入上下文。仅验证 read_document_structure 的合同、绑定、结果与 Trace 链路；不接生产 Tool Loop、generate_pptx、复杂 CRUD，不改已验收 Outline 链路、Document IR 核心结构、Runner、PptxGenJS、QA、发布或 Provider Loop 轮数策略。前述整体目标的后续能力仍需独立验收。
+2026-09-27 本轮维护（生产只读工具循环，实施中）：已按负责人要求先复验上一批全部门禁，再提交可回滚基线 `1032ddf`（仅本地提交，不推送）；保留无关未跟踪 `mermaid-diagram.png`。本轮仅将 Canonical read_document_structure 接入真实会话响应生产调度，每轮发送前重建 Available Tool Set、执行前重验绑定/Hash/权限、返回安全 ToolResult 与 tool_call_id。另七项工具保持 internal，不接 generate_pptx/CRUD，不调整 Provider Loop 轮数上限。负责人已授权使用合成 PPT 对当前配置真实文本 Provider 做整篇和单页最小验收，凭证只在 SecureCredentialVault 回调内使用，用户项目不写入。
+
+2026-09-28 本轮生产只读接线已完成并通过真实 Provider 最小验收：`read_document_structure` 的整篇文档和物理第 2 页各完成首轮工具调用、Observation 回传和最终回答；Canonical Schema、tool_call_id、Trace、路径/Runtime 数据隔离均通过。修复 Provider 兼容缺陷：OpenAI-compatible 流式工具调用允许首个 `function.arguments` 为空增量，累计完成后仍严格执行 JSON/Canonical 参数校验。最终自动化和脱敏真实证据分别见 `docs/evidence/production-document-read.json` 与 `docs/evidence/production-document-read-real-provider.json`；本轮尚未提交、推送或合并。
+
+2026-09-27 上一批维护记录（第二阶段第一批，已提交回滚点 `1032ddf`）：按负责人确认建立独立 Canonical Tool Contract，参数/元数据单源派生，分离完整 Registry 与当前任务 Available Tool Set，并分离 LLM 参数与 Runtime 注入上下文。上一批仅验证 read_document_structure 的合同、绑定、结果与 Trace 链路；未接生产 Tool Loop、generate_pptx、复杂 CRUD，未改已验收 Outline 链路、Document IR 核心结构、Runner、PptxGenJS、QA、发布或 Provider Loop 轮数策略。本轮新增生产只读接线的范围和验收以顶部最新记录为准。
 
 本批新增 `canonical-tool-contract.ts` 为文档工具定义唯一来源；`documentToolIds`、旧 `DocumentToolDefinition`、Provider Schema、参数 Validator、timeout/budget 和 Trace 类型均派生。`DocumentAtomicToolBinding` 仅保留 contract 引用、authorize、execute。完整 catalog 保留 8 个工具的历史身份，只有 read_document_structure 具备本批 Provider 合同，其余 7 个明确 internal、不编造业务参数，也不向模型公布。Available 集合逐次根据实际绑定、capability、文档/IR/revision、授权和操作类型过滤；执行前再次核对。模型参数仅 scope/ordinal，document 为默认 scope，page/section 必须 ordinal，文档身份、路径、权限、版本、AbortSignal 和 checkpoint 不作为输入参数。
 
 只读 Binding 从 Runtime 注入的 IR 返回 document/section Observation；page 必须通过 Host 提供的真实页面读取端口，否则返回 page_scope_unavailable，不用章节序号冒充物理页码。统一 ToolResult 校验 status、observation、diagnostics、artifactRefs、metadata；irPatch 本批不执行并拒绝接收。checkpoint 只持久化脱敏摘要；重放明确标识 checkpoint_summary。修复既有 Provider 结果清理把嵌套 blocks 截掉的问题，并让 checkpoint 开始、授权、执行、Observation 提交共享取消/超时边界；持久化结果未知时冻结后续调用，迟到完成不继续执行。未更改 Provider Loop 轮数策略或生产接线。
 
-本批最终验证：`pnpm test` Node/UI 384/384，Vitest 250 文件、2151/2151，0 失败/跳过；typecheck、lint、build、平台审计、恢复审计、既有关闭门禁和计划合规通过。验证包含合成 Provider 工具握手、真实本地 Runtime/Trace 持久化、未知结果和迟到写入回归；真实 Provider 调用 0，不能称为生产 Agent Loop 验收。受保护源码 Hash 与本批开始相同。结果见 `docs/evidence/canonical-tools-phase2.json`，运行日志见 `outputs/canonical-tools-phase2/test.log`。本批尚未提交、推送或合并；下一步需单独确认生产接线与 generate_pptx 范围。
+上一批最终验证：`pnpm test` Node/UI 384/384，Vitest 250 文件、2151/2151，0 失败/跳过；typecheck、lint、build、平台审计、恢复审计、既有关闭门禁和计划合规通过。验证包含合成 Provider 工具握手、真实本地 Runtime/Trace 持久化、未知结果和迟到写入回归；该批真实 Provider 调用 0，不包含生产 Agent Loop 验收。受保护源码 Hash 与该批开始相同。结果见 `docs/evidence/canonical-tools-phase2.json`，运行日志见 `outputs/canonical-tools-phase2/test.log`。上一批已在本輪开始前复验并提交 `1032ddf`，尚未推送或合并；本轮仅生产只读接线已另获授权，generate_pptx 仍不在范围内。
 
-- 当前分支：`feature/ppt-goal-pipeline`；基线 `HEAD`：`2ab69f1`（2026-09-24）。本轮实现仍未合并回 `develop`。
-- 工作树不是干净基线：进入本轮时已有 29 个已跟踪文件未提交，另有未跟踪的 `mermaid-diagram.png`；本轮 P1/P2 又新增了安全门禁和上下文快照文件。所有这些修改都不能视为已合并或已发布能力。
+- 当前分支：`feature/ppt-goal-pipeline`；本轮生产只读接线的回滚基线：`1032ddf`。功能分支尚未合并回 `develop`，不视为已发布能力。
+- 历史工作树增量已纳入已验证回滚点 `1032ddf`；本轮实际文件清单见 `docs/current/production-document-read-loop.md`。无关未跟踪 `mermaid-diagram.png` 保留，不纳入本轮提交。
 - 阶段 9 Windows x64 基线已收口；macOS 继续为 `required=false`、`not_run/deferred`；阶段 10 未启动。
 - 已合入的对话内 Office 文档生成功能属于既有独立功能系列。智能文档工作流扩展是在该基线上继续建设的维护专项，不新增业务一级页面。
-- 当前工作树已包含智能文档扩展的部分 Application、Domain、Platform、IPC、Chat 和测试修改；在功能分支提交、门禁和验收完成前，统一记为“工作树实现中”。
+- 智能文档扩展的历史实现已提交功能分支回滚点；本轮生产只读工具接线以顶部维护记录和当前测试证据判断完成状态，不推导为整体目标已完成。
 
 ### 当前代码基线
 
@@ -30,7 +34,7 @@
 - IPC/UI：Chat 工作流、附件与项目上下文、文档生成 IPC、生产 Trace、取消/恢复和最终文档卡片。
 - 当前工作树新增但尚未合并的能力：Outline Contract 单一来源、`operation` 感知的 Document IR、`requiresExistingDocument` 工具过滤、一次性 replan、PPT scene/style 别名归一化、新建 PPT 前置条件修复、受控文档生成合同、布局回写和非目标章节 Hash 保护。
 
-当前可验证门禁：`pnpm test` 通过，Node/UI 384/384，Vitest 250 个文件、2151 项全部通过；`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm audit:platform`、`pnpm verify:recovery-audit`、`pnpm verify:phase9-closeout`、`pnpm verify:plan-compliance` 和 `git diff --check` 均通过。冻结交接包完整性不属于当前默认门禁。Windows Electron/Office 可见人工验收和 P7/P8 交付收口仍未完成，不能据此宣称整体目标闭环已完成。
+当前可验证门禁：`pnpm test` 通过，Node/UI 384/384，Vitest 252 个文件、2228 项全部通过，合计 2612 项、0 失败/跳过；`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm audit:platform`、`pnpm verify:recovery-audit`、`pnpm verify:phase9-closeout`、`pnpm verify:plan-compliance` 和 `git diff --check` 均通过。冻结交接包完整性不属于当前默认门禁。Windows Electron/Office 可见人工验收和 P7/P8 交付收口仍未完成，不能据此宣称整体目标闭环已完成。
 
 ### 目标闭环（用户目标，2026-09-27）
 

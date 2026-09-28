@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "mode": "real_provider",
+  "status": "passed",
+  "providerModel": "kimi-k3",
+  "routeRevalidated": true,
+  "syntheticOnly": true,
+  "networkRequests": 4,
+  "cases": [
+    {
+      "case": "whole_document",
+      "requests": 2,
+      "scope": "document",
+      "toolId": "read_document_structure",
+      "toolCallIdMatched": true,
+      "observationVerified": true,
+      "answerUsedObservation": true,
+      "pathOrRuntimeContextLeak": false,
+      "terminalState": "completed"
+    },
+    {
+      "case": "physical_page_2",
+      "requests": 2,
+      "scope": "page",
+      "ordinal": 2,
+      "toolId": "read_document_structure",
+      "toolCallIdMatched": true,
+      "observationVerified": true,
+      "answerUsedObservation": true,
+      "pathOrRuntimeContextLeak": false,
+      "terminalState": "completed"
+    }
+  ],
+  "fixture": {
+    "registeredByExistingRunner": true,
+    "localRenderAndQaPassed": true,
+    "physicalPages": 4,
+    "physicalPageTwoVerified": true
+  },
+  "schemaSource": "canonical-tool-contract.ts",
+  "settingsSource": "default",
+  "protectedUserConfigurationUnchanged": true,
+  "credentials": "used only inside SecureCredentialVault callback; not recorded",
+  "cost": "unknown",
+  "usageRecorded": true,
+  "rawReport": "outputs/production-document-read/real-provider.json"
+}

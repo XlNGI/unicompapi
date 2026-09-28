@@ -245,7 +245,10 @@ export function parseControlledToolCallDeltas(value: unknown): readonly Controll
     if (fn !== undefined && !isRecord(fn)) throw new Error(`tool call delta ${index} function is invalid`);
     const id = item.id === undefined ? undefined : boundedText(item.id);
     const name = fn?.name === undefined ? undefined : boundedName(fn.name);
-    const argumentsDelta = fn?.arguments === undefined ? undefined : boundedText(fn.arguments, 8_000);
+    // OpenAI-compatible streams may emit an initial empty arguments delta
+    // before later chunks provide the JSON body. The assembled call still
+    // goes through strict JSON and contract validation.
+    const argumentsDelta = fn?.arguments === undefined ? undefined : boundedArgumentsDelta(fn.arguments);
     return {
       index: Number(item.index),
       ...(id !== undefined ? { id } : {}),
@@ -277,9 +280,12 @@ export function assembleControlledToolCalls(
   }
   const indexes = [...calls.keys()].sort((left, right) => left - right);
   if (indexes.some((index, position) => index !== position)) throw new Error('tool call indexes are not contiguous');
+  const callIds = new Set<string>();
   return indexes.map((index) => {
     const call = calls.get(index)!;
     if (!call.id || !call.name || !protocolRegistry.has(call.name as CanonicalToolId)) throw new Error('tool call is incomplete');
+    if (callIds.has(call.id)) throw new Error('tool call IDs are not unique');
+    callIds.add(call.id);
     return { id: call.id, name: call.name, arguments: parseControlledToolArguments(call.argumentsText) };
   });
 }
@@ -297,6 +303,13 @@ function boundedText(value: unknown, maximum = 2_000): string {
 
 function boundedName(value: unknown): string {
   if (typeof value !== 'string' || !protocolRegistry.has(value as CanonicalToolId)) throw new Error('controlled tool name is invalid');
+  return value;
+}
+
+function boundedArgumentsDelta(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 8_000 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error('controlled tool arguments are invalid');
+  }
   return value;
 }
 

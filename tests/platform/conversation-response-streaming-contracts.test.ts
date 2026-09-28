@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createConversationResponseExecution,
   createConversationResponseStreamEvent,
@@ -19,6 +19,7 @@ import {
   toProviderId,
   toProviderInvocationAttemptId,
   type ConversationResponseExecutionId,
+  type ConversationResponseExecutionRepository,
   type ConversationResponseExecutionState
 } from '../../src/domain';
 import {
@@ -37,6 +38,7 @@ const t2 = toIsoTimestamp('2026-08-03T10:02:00.000Z');
 const t3 = toIsoTimestamp('2026-08-03T10:03:00.000Z');
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -121,6 +123,16 @@ function ids() {
 }
 
 describe('conversation response execution repository', () => {
+  it('reads execution and events from one committed storage snapshot', async () => {
+    const { storage, repository } = await fixture();
+    const item = execution();
+    await repository.create(item, createdEvent(item.id));
+    const read = vi.spyOn(storage, 'readJsonWithBackup');
+    await expect(repository.getSnapshot(item.id)).resolves.toEqual({ execution: item, events: [createdEvent(item.id)] });
+    expect(read).toHaveBeenCalledTimes(1);
+    await expect(repository.getSnapshot(toConversationResponseExecutionId('missing-snapshot'))).resolves.toBeUndefined();
+  });
+
   it('restores progress from persisted events after reopening the repository', async () => {
     const { storage, repository } = await fixture();
     const item = execution();
@@ -226,6 +238,54 @@ describe('conversation response execution repository', () => {
 });
 
 describe('controlled conversation response stream lifecycle', () => {
+  it('does not mix a captured execution state with events committed after that snapshot', async () => {
+    const { repository } = await fixture();
+    const item = execution();
+    await repository.create(item, createdEvent(item.id));
+    const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids(), undefined, () => t1);
+    await lifecycle.start(item.id);
+    await lifecycle.appendContent(item.id, 'Before concurrent completion');
+    const readSnapshot = repository.getSnapshot.bind(repository);
+    const get = vi.spyOn(repository, 'get');
+    const listEvents = vi.spyOn(repository, 'listEvents');
+    const snapshot = vi.spyOn(repository, 'getSnapshot').mockImplementationOnce(async id => {
+      const captured = await readSnapshot(id);
+      await repository.appendEvent(createConversationResponseStreamEvent({ id: toConversationResponseStreamEventId('racing-completion'),
+        responseExecutionId: item.id, sequence: 4, type: 'stream_completed', occurredAt: t2 }));
+      return captured;
+    });
+    await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({ state: 'streaming', streamSequence: 3,
+      content: 'Before concurrent completion' });
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+    expect(listEvents).not.toHaveBeenCalled();
+    await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({ state: 'completed', streamSequence: 4 });
+  });
+
+  it('preserves repositories without the optional atomic snapshot method', async () => {
+    const { repository } = await fixture();
+    const item = execution();
+    await repository.create(item, createdEvent(item.id));
+    const get = vi.fn(repository.get.bind(repository));
+    const listEvents = vi.fn(repository.listEvents.bind(repository));
+    const legacy: ConversationResponseExecutionRepository = { projectId, get, listEvents,
+      list: repository.list.bind(repository), getEvent: repository.getEvent.bind(repository),
+      create: repository.create.bind(repository), appendEvent: repository.appendEvent.bind(repository),
+      appendEvents: repository.appendEvents.bind(repository) };
+    const lifecycle = new ConversationResponseExecutionLifecycle(legacy, ids());
+    await expect(lifecycle.readModel(item.id)).resolves.toMatchObject({ state: 'pending', streamSequence: 1 });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(listEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fall back to split reads when an atomic snapshot reports a missing execution', async () => {
+    const { repository } = await fixture();
+    const get = vi.spyOn(repository, 'get');
+    const lifecycle = new ConversationResponseExecutionLifecycle(repository, ids());
+    await expect(lifecycle.readModel(toConversationResponseExecutionId('missing-snapshot'))).rejects.toThrow('does not exist');
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('persists a failed terminal event before publishing it to the renderer', async () => {
     const { repository } = await fixture();
     const item = execution({ id: 'response-execution-deferred-failure' });

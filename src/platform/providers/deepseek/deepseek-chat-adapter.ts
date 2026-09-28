@@ -172,6 +172,7 @@ export interface DeepSeekChatOperationHandle {
 }
 
 interface ActiveOperation {
+  readonly abort: () => void;
   readonly providerOperationId: string;
   readonly responseExecutionId: ConversationResponseExecutionId;
   readonly invocationAttemptId: ProviderInvocationAttemptId;
@@ -272,6 +273,7 @@ export class DeepSeekChatAdapter {
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly signal?: AbortSignal;
     readonly toolBridge?: ControlledProviderToolBridge;
+    readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
     readonly maxToolRounds?: number;
   }): Promise<DeepSeekChatOperationHandle> {
     if (this.disposed) {
@@ -279,7 +281,7 @@ export class DeepSeekChatAdapter {
     }
     const route = validateRoute(input.routeSnapshot);
     const request = parseDispatchRequest(input.request);
-    const body = serializeRequest(route, request);
+    serializeRequest(route, request);
     const providerOperationId = requireOpaqueId(
       this.ids.nextProviderOperationId(),
       'provider operation ID'
@@ -293,29 +295,39 @@ export class DeepSeekChatAdapter {
     const externalController = new AbortController();
     const removeExternalAbort = linkAbort(input.signal, externalController);
     let session: DeepSeekEventStreamSession | undefined;
-    const openSession = (messages: readonly DeepSeekChatMessageV1[]) =>
-      this.credentials.useCredential(
+    let availableToolNames = new Set<string>();
+    const openSession = async (messages: readonly DeepSeekChatMessageV1[]) => {
+      const tools = parseControlledProviderTools(input.prepareTools
+        ? await input.prepareTools(externalController.signal) : request.tools);
+      if (externalController.signal.aborted) throw new DeepSeekRuntimeError('cancelled', 'not_retryable');
+      availableToolNames = new Set(tools?.map(tool => tool.function.name) ?? []);
+      const serializedTools = JSON.stringify(tools);
+      const beforeRequestStarted = async () => {
+        await input.beforeRequestStarted?.();
+        if (input.prepareTools) {
+          const currentTools = parseControlledProviderTools(await input.prepareTools(externalController.signal));
+          if (JSON.stringify(currentTools) !== serializedTools) throw invalidRequest('Document tools changed before submission');
+        }
+        if (externalController.signal.aborted) throw new DeepSeekRuntimeError('cancelled', 'not_retryable');
+      };
+      return this.credentials.useCredential(
         { connectionId: route.connectionId, credentialVersionId: route.credentialVersionId },
         (credential) => this.runtime.openChatStream({
           credentials: credential,
-          body: serializeRequest(route, { ...request, messages }),
+          body: serializeRequest(route, { ...request, messages, tools }),
           signal: externalController.signal,
-          beforeRequestStarted: input.beforeRequestStarted
+          beforeRequestStarted
         })
       );
+    };
+    const toolBridge: ControlledProviderToolBridge | undefined = input.toolBridge ? {
+      execute: (call) => availableToolNames.has(call.call.name)
+        ? input.toolBridge!.execute(call)
+        : Promise.resolve({ schemaVersion: 1, status: 'failed',
+          diagnostics: [{ code: 'TOOL_PRECONDITION_FAILED', severity: 'error', message: 'TOOL_PRECONDITION_FAILED' }] })
+    } : undefined;
     try {
-      session = await this.credentials.useCredential(
-        {
-          connectionId: route.connectionId,
-          credentialVersionId: route.credentialVersionId
-        },
-        (credential) => this.runtime.openChatStream({
-          credentials: credential,
-          body,
-          signal: externalController.signal,
-          beforeRequestStarted: input.beforeRequestStarted
-        })
-      );
+      session = await openSession(request.messages);
       await this.lifecycle.start(request.responseExecutionId);
     } catch (error) {
       removeExternalAbort();
@@ -333,6 +345,7 @@ export class DeepSeekChatAdapter {
       );
     }
     const operation: ActiveOperation = {
+      abort: () => externalController.abort(),
       providerOperationId,
       responseExecutionId: request.responseExecutionId,
       invocationAttemptId: request.invocationAttemptId,
@@ -342,7 +355,7 @@ export class DeepSeekChatAdapter {
       session,
       openSession,
       messages: [...request.messages],
-      ...(input.toolBridge !== undefined ? { toolBridge: input.toolBridge } : {}),
+      ...(toolBridge !== undefined ? { toolBridge } : {}),
       maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4),
       signal: externalController.signal,
       removeExternalAbort
@@ -362,6 +375,7 @@ export class DeepSeekChatAdapter {
       operation.cancelReason = 'user';
       operation.cancelRequest = this.lifecycle.requestCancel(operation.responseExecutionId);
       void operation.cancelRequest.catch(() => undefined);
+      operation.abort();
       operation.session.cancel();
     }
     return true;
@@ -373,6 +387,7 @@ export class DeepSeekChatAdapter {
     const operations = [...this.active.values()];
     for (const operation of operations) {
       operation.cancelReason = 'application_shutdown';
+      operation.abort();
       operation.session.cancel();
     }
     await Promise.all(operations.map((operation) => operation.completion));
@@ -983,7 +998,10 @@ function serializeRequest(
     },
     ...parameters
   };
-  if (request.tools) body.tools = request.tools;
+  if (request.tools) body.tools = request.tools.map(tool => ({
+    type: tool.type,
+    function: { name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters }
+  }));
   const encoded = new TextEncoder().encode(JSON.stringify(body));
   if (encoded.byteLength > 2 * 1024 * 1024) {
     throw invalidRequest('DeepSeek request exceeded the local size limit');

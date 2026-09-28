@@ -56,6 +56,7 @@ import { declinesWebResearch } from '../../application/conversation-intent-orche
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
 import { buildDocumentOutlinePrompt } from '../../shared/document-outline-contract';
+import type { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -70,6 +71,7 @@ export interface ConversationResponseControllerRuntime {
   readonly workflowService?: ConversationWorkflowService;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
+  readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'>;
   /** Completes startup recovery before accessing persisted response state or executing writes. */
   readonly ready: Promise<void>;
   submit?(input: {
@@ -132,13 +134,16 @@ export class ConversationResponseController {
       }
       const attachmentQuery = conversationAttachmentQuery(undefined, message);
       const isPlainUserMessage = message.displayContent === undefined || message.displayContent === message.content;
-      const pageReferences = isPlainUserMessage ? await runtime.documentPages?.resolve({
+      const toolSelection = isPlainUserMessage ? await runtime.documentTools?.select({
+        conversation, currentUserMessageId: message.id, query: attachmentQuery
+      }) : undefined;
+      const pageReferences = isPlainUserMessage && !toolSelection ? await runtime.documentPages?.resolve({
         conversation, currentUserMessageId: message.id, query: attachmentQuery
       }) ?? [] : [];
-      if (!pageReferences.length) await runtime.attachments?.resolve({
+      if (!pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
         conversation, currentUserMessageId: message.id, query: attachmentQuery
       });
-      const imageQuery = isPlainUserMessage && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
+      const imageQuery = isPlainUserMessage && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
       const draft = createConversationResponseDraft({
         id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
         projectId: runtime.conversations.projectId,
@@ -579,15 +584,18 @@ export class ConversationResponseController {
     const isPageQuestion = workflow ? workflow.plan.kind === 'chat'
       : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
     const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
-    const pageReferences = documentPageQuery ? await runtime.documentPages?.resolve({
+    const toolSelection = documentPageQuery ? await runtime.documentTools?.select({
+      conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
+    }) : undefined;
+    const pageReferences = documentPageQuery && !toolSelection ? await runtime.documentPages?.resolve({
       conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
     }) ?? [] : [];
-    if (!pageReferences.length) await runtime.attachments?.resolve({
+    if (!pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
       conversation,
       currentUserMessageId: userMessage.id,
       query: attachmentQuery
     });
-    const imageQuery = isPageQuestion && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
+    const imageQuery = isPageQuestion && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
     const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
     const declinedSearch = declinesWebResearch(lastUserText);
     if (workflow && (declinedSearch || workflow.plan.sourcePolicy === 'internal')) {
@@ -595,7 +603,7 @@ export class ConversationResponseController {
     }
     const localSources = Boolean(workflow?.plan.sourcePolicy === 'mixed' && runtime.nativeSearch &&
       await runtime.nativeSearch.preferLocal(conversation, workflow));
-    const prepareNativeSearch = Boolean(workflow && runtime.nativeSearch && !declinedSearch && !localSources &&
+    const prepareNativeSearch = Boolean(workflow && !toolSelection && runtime.nativeSearch && !declinedSearch && !localSources &&
       (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await runtime.nativeSearch.allowsConversation(conversation.id)));
     if (workflow?.plan.kind === 'document' && !prepareNativeSearch) {
       // Persist source disclosure before pinning the conversation revision for
@@ -657,6 +665,7 @@ export class ConversationResponseController {
       await runtime.drafts.save(contextualized, draft.revision);
       draft = contextualized;
     }
+    if (toolSelection) await runtime.documentTools!.pinDraft({ draft, selection: toolSelection });
     if (workflow && runtime.nativeSearch && prepareNativeSearch) {
       const binding = await runtime.candidates.resolveBinding(subject(draft), input.candidateId);
       try {

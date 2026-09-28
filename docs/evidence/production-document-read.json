@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "scope": "production-document-read-loop",
+  "date": "2026-09-28",
+  "branch": "feature/ppt-goal-pipeline",
+  "rollbackCommit": "1032ddf",
+  "status": "passed",
+  "exposedTools": ["read_document_structure"],
+  "internalToolsPreserved": 7,
+  "providerLoopRoundsChanged": false,
+  "generatePptxConnected": false,
+  "crudConnected": false,
+  "checks": {
+    "nodeUiPassed": 384,
+    "vitestFilesPassed": 252,
+    "vitestTestsPassed": 2228,
+    "vitestFailed": 0,
+    "vitestSkipped": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "platformAudit": "passed",
+    "recoveryAudit": "passed",
+    "phase9Closeout": "passed",
+    "planCompliance": "passed",
+    "diffCheck": "passed"
+  },
+  "coverage": [
+    "responses.start production dispatch",
+    "Canonical Registry to Available Tool Set filtering",
+    "runtime-injected document context",
+    "Canonical provider schema and argument validation",
+    "tool_call_id correlation",
+    "safe ToolResult projection",
+    "permission, revision, hash and cancellation revalidation",
+    "final request-start TOCTOU guard",
+    "execution snapshot race regression",
+    "empty streamed arguments delta compatibility"
+  ],
+  "protectedBoundaries": [
+    "Outline Contract and parser",
+    "Document IR core",
+    "PptxGenJS",
+    "Runner QA and publish",
+    "Provider loop round policy"
+  ],
+  "evidenceLog": "outputs/production-document-read/test-final.log",
+  "realProviderEvidence": "docs/evidence/production-document-read-real-provider.json"
+}

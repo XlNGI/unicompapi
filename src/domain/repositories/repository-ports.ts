@@ -117,6 +117,11 @@ export interface ConversationWorkflowRepository {
 export interface ConversationResponseExecutionRepository {
   readonly projectId: ProjectId;
   get(id: ConversationResponseExecutionId): Promise<ConversationResponseExecutionV1 | undefined>;
+  /** Execution state and its timeline from the same committed storage revision. */
+  getSnapshot?(id: ConversationResponseExecutionId): Promise<{
+    readonly execution: ConversationResponseExecutionV1;
+    readonly events: readonly ConversationResponseStreamEventV1[];
+  } | undefined>;
   list(conversationId?: ConversationId): Promise<readonly ConversationResponseExecutionV1[]>;
   listEvents(
     executionId: ConversationResponseExecutionId

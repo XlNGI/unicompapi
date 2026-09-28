@@ -5,7 +5,7 @@ import {
   type CanonicalToolArguments, type DocumentToolResult, type ToolExecutionContext
 } from '../../domain/entities/canonical-tool-contract';
 import { parseAtomicToolArguments, type DocumentAtomicToolBinding, type DocumentAtomicExecutionContext } from '../../application/document-atomic-tools';
-import type { DocumentTaskRuntimeScope, DocumentTaskRuntimeService } from '../../application/document-task-runtime-service';
+import { DocumentTaskRuntimeConflictError, type DocumentTaskRuntimeScope, type DocumentTaskRuntimeService } from '../../application/document-task-runtime-service';
 import type { DocumentToolObservation } from '../../domain/entities/document-agent';
 import { providerToolsFromContracts, type ControlledProviderToolBridge, type ControlledProviderToolDefinition } from './provider-tool-calling';
 import { emitProductionEvent } from '../conversation-production-trace';
@@ -161,9 +161,28 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
             if (controller.signal.aborted) return failure('cancelled');
             if (options.runtime) {
               persistencePending = true;
-              const checkpoint = await options.runtime.service.beginToolCall(options.runtime.scope, {
-                callId: call.id, toolId: contract.toolId, inputHash: fingerprint
-              }, context);
+              let checkpoint;
+              try {
+                checkpoint = await options.runtime.service.beginToolCall(options.runtime.scope, {
+                  callId: call.id, toolId: contract.toolId, inputHash: fingerprint
+                }, context);
+              } catch (error) {
+                // These conflicts are raised before the write-ahead claim. They are
+                // known refusals, not an uncertain host write or storage failure.
+                const code = error instanceof DocumentTaskRuntimeConflictError
+                  ? error.message === 'runtime_binding_or_revision_invalid' || error.message === 'runtime_scope_mismatch'
+                    ? 'authorization_or_revision_invalid'
+                    : error.message === 'TOOL_PRECONDITION_FAILED' || error.message === 'tool_not_allowed'
+                      ? 'TOOL_PRECONDITION_FAILED'
+                      : error.message === 'runtime_budget_exceeded' ? 'budget_exceeded'
+                        : error.message === 'call_id_conflict' ? 'call_id_conflict' : undefined
+                  : undefined;
+                if (!code) throw error;
+                persistencePending = false;
+                if (controller.signal.aborted) return failure('reconciliation_required', true);
+                await report(contract, call.id, 'failed');
+                return failure(code);
+              }
               persistencePending = false;
               // A late persistence completion must never cause a new host operation.
               if (controller.signal.aborted) return failure('reconciliation_required', true);

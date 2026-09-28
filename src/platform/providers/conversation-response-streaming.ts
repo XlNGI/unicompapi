@@ -159,6 +159,11 @@ export class ConversationResponseExecutionLifecycle {
   }
 
   async readModel(executionId: ConversationResponseExecutionId) {
+    if (this.repository.getSnapshot) {
+      const snapshot = await this.repository.getSnapshot(executionId);
+      if (!snapshot) throw new ConversationResponseExecutionLifecycleError('Conversation response execution does not exist');
+      return projectConversationResponseExecution(snapshot);
+    }
     const execution = await this.requireExecution(executionId);
     const events = await this.repository.listEvents(executionId);
     return projectConversationResponseExecution({ execution, events });

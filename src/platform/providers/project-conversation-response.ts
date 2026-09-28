@@ -14,6 +14,7 @@ import type {
 } from './provider-feature-candidates';
 import { ConversationAttachmentError, type ConversationAttachmentContextService, conversationAttachmentBatch } from '../documents/conversation-attachment-context';
 import { resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
+import type { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 
 export class ProjectConversationResponseSubjectResolver
   implements FeatureSubjectResolverPort {
@@ -22,7 +23,8 @@ export class ProjectConversationResponseSubjectResolver
     private readonly drafts: ConversationResponseDraftRepository,
     private readonly contexts: ProjectContextRepository,
     private readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>,
-    private readonly attachments?: Pick<ConversationAttachmentContextService, 'resolveImage'>
+    private readonly attachments?: Pick<ConversationAttachmentContextService, 'resolveImage'>,
+    private readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare'>
   ) {
     if (
       conversations.projectId !== drafts.projectId ||
@@ -67,13 +69,14 @@ export class ProjectConversationResponseSubjectResolver
     ) {
       throw new TypeError('Conversation response user message changed');
     }
-    const pageReferences = await resolveConversationResponseDocumentPages({
+    const toolSelection = await this.documentTools?.prepare({ conversation, draft });
+    const pageReferences = toolSelection ? [] : await resolveConversationResponseDocumentPages({
       conversation, draft, service: this.documentPages
     });
     const imageInput = draft.imageQuery ? await this.attachments?.resolveImage({ conversation, currentUserMessageId: draft.userMessageId }) : undefined;
     if (draft.imageQuery && !imageInput) throw new ConversationAttachmentError('attachment_unsupported', '当前图片读取通道不可用。');
     const selectedContexts = [];
-    for (const selection of pageReferences.length ? [] : draft.contextSelections) {
+    for (const selection of pageReferences.length || toolSelection ? [] : draft.contextSelections) {
       const context = await this.contexts.get(selection.contextId);
       if (context) selectedContexts.push(context);
     }
@@ -81,9 +84,9 @@ export class ProjectConversationResponseSubjectResolver
       projectId: this.conversations.projectId,
       surface: 'conversation',
       contexts: selectedContexts,
-      selections: pageReferences.length ? [] : draft.contextSelections
+      selections: pageReferences.length || toolSelection ? [] : draft.contextSelections
     });
-    const attachmentBatch = pageReferences.length ? [] : conversationAttachmentBatch(conversation);
+    const attachmentBatch = pageReferences.length || toolSelection ? [] : conversationAttachmentBatch(conversation);
     return {
       projectId: this.conversations.projectId,
       subject: parsed,
@@ -91,11 +94,12 @@ export class ProjectConversationResponseSubjectResolver
       surface: 'conversation',
       imageCount: imageInput ? 1 : 0,
       videoCount: 0,
-      contextCount: contextSnapshots.length + attachmentBatch.length + pageReferences.length,
+      contextCount: contextSnapshots.length + attachmentBatch.length + pageReferences.length + (toolSelection ? 1 : 0),
       parameterValues: { ...draft.parameterValues },
       outboundTextSnapshot: draft.promptContent ?? userMessage.content,
       materialReferences: imageInput ? [{ kind: 'file_reference', referenceId: imageInput.fileId, revision: 1 }] : [],
       contextContentHashes: [
+        ...(toolSelection ? [toolSelection.bindingHash] : []),
         ...pageReferences.map((reference) => reference.contentHash),
         ...contextSnapshots.map((snapshot) => snapshot.contentHash),
         ...attachmentBatch.flatMap((attachment) =>

@@ -40,6 +40,17 @@ export class JsonConversationResponseExecutionRepository
     return (await this.read()).executions.find((execution) => execution.id === id);
   }
 
+  async getSnapshot(id: ConversationResponseExecutionId): Promise<{
+    readonly execution: ConversationResponseExecutionV1;
+    readonly events: readonly ConversationResponseStreamEventV1[];
+  } | undefined> {
+    const document = await this.read();
+    const execution = document.executions.find(item => item.id === id);
+    if (!execution) return undefined;
+    return { execution, events: document.events.filter(event => event.responseExecutionId === id)
+      .sort((left, right) => left.sequence - right.sequence) };
+  }
+
   async list(
     conversationId?: ConversationId
   ): Promise<readonly ConversationResponseExecutionV1[]> {

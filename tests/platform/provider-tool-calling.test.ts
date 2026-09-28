@@ -186,6 +186,33 @@ describe('controlled provider tool calling', () => {
     }])).toThrow();
   });
 
+  it('rejects duplicate call IDs across different indexes in one assistant message', () => {
+    expect(() => assembleControlledToolCalls([
+      { index: 0, id: 'duplicated-call', name: readContract.toolId, argumentsDelta: '{"scope":"page","ordinal":1}' },
+      { index: 1, id: 'duplicated-call', name: readContract.toolId, argumentsDelta: '{"scope":"page","ordinal":2}' }
+    ])).toThrow('IDs are not unique');
+    const call = [{ index: 0, id: 'replay-across-messages', name: readContract.toolId, argumentsDelta: '{}' }];
+    expect(assembleControlledToolCalls(call)).toEqual(assembleControlledToolCalls(call));
+  });
+
+  it('accepts an empty streamed arguments delta before the JSON chunks', () => {
+    expect(assembleControlledToolCalls([
+      ...parseControlledToolCallDeltas([{ index: 0, id: 'empty-arguments-prefix', type: 'function',
+        function: { name: readContract.toolId, arguments: '' } }]),
+      ...parseControlledToolCallDeltas([{ index: 0, function: { arguments: '{"scope":"page","ordinal":2}' } }])
+    ])).toEqual([{
+      id: 'empty-arguments-prefix',
+      name: readContract.toolId,
+      arguments: { scope: 'page', ordinal: 2 }
+    }]);
+    expect(() => assembleControlledToolCalls([
+      { index: 0, id: 'empty-arguments-only', name: readContract.toolId, argumentsDelta: '' }
+    ])).toThrow();
+    for (const argumentsDelta of [null, 2, {}, String.fromCharCode(0), 'x'.repeat(8001)]) {
+      expect(() => parseControlledToolCallDeltas([{ index: 0, function: { arguments: argumentsDelta } }])).toThrow();
+    }
+  });
+
   it('assembles streamed deltas and performs one bounded tool round', async () => {
     const calls = assembleControlledToolCalls([
       { index: 0, id: 'call-1', name: 'inspect_layout', argumentsDelta: '{"kind":"ppt"}' }
