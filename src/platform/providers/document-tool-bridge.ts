@@ -47,10 +47,13 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
   const implementedToolIds = [...bindings.keys()];
   const initialContext = options.getExecutionContext();
   const taskDeadline = initialContext.taskContext.deadlineAt ?? Infinity;
-  const taskIdentity = stable([initialContext.projectContext, initialContext.taskContext.taskId]);
+  // Project and task identify the execution. The current Work/document is
+  // intentionally mutable: a create tool may publish a Work that the next
+  // read tool must consume in the same runtime session.
+  const taskIdentity = stable([initialContext.projectContext.projectId, initialContext.taskContext.taskId]);
   const live = (): ToolExecutionContext => {
     const context = options.getExecutionContext();
-    if (stable([context.projectContext, context.taskContext.taskId]) !== taskIdentity) throw new TypeError('runtime_scope_mismatch');
+    if (stable([context.projectContext.projectId, context.taskContext.taskId]) !== taskIdentity) throw new TypeError('runtime_scope_mismatch');
     return context;
   };
   const deadline = (context: ToolExecutionContext) => Math.min(taskDeadline, context.taskContext.deadlineAt ?? Infinity);

@@ -70,6 +70,26 @@ describe('document tool calling bridge', () => {
     }));
   });
 
+  it('allows the current Work/document to refresh inside one create task runtime', () => {
+    let host = hostContext({ operation: 'create', currentDocumentId: undefined, currentDocumentIR: undefined, revision: 0,
+      projectContext: { projectId: 'project-1' }, authorization: { canRead: true, canWrite: true, allowedToolIds: [...canonicalToolIds] } });
+    const bridge = createDocumentToolCallingBridge({
+      bindings: [binding('read_document_structure')], registry: testRegistry,
+      getExecutionContext: () => host, budgetUnits: 16, maxCalls: 8, timeoutMs: 1_000
+    });
+    expect(bridge.tools).toEqual([]);
+    host = hostContext({ operation: 'create', currentDocumentId: 'work-2', currentDocumentIR: { operation: 'analyze', attachmentRefs: [] }, revision: 1,
+      projectContext: { projectId: 'project-1', workId: 'work-2' }, authorization: { canRead: true, canWrite: false, allowedToolIds: [...canonicalToolIds] } });
+    expect(bridge.tools).toHaveLength(1);
+    const rebound = host;
+    host = { ...rebound, projectContext: { ...rebound.projectContext, projectId: 'other-project' } };
+    expect(() => bridge.tools).toThrow('runtime_scope_mismatch');
+    host = { ...rebound, taskContext: { ...rebound.taskContext, taskId: 'other-task' } };
+    expect(() => bridge.tools).toThrow('runtime_scope_mismatch');
+    host = rebound;
+    expect(bridge.tools).toHaveLength(1);
+  });
+
   it.each([
     { currentDocumentId: undefined }, { currentDocumentIR: undefined }, { revision: undefined },
     { capabilities: [] }, { authorization: { canRead: false, canWrite: true, allowedToolIds: canonicalToolIds } },
