@@ -1184,18 +1184,27 @@ async function assertExpectedDocumentContent(
     path.basename(fileName, path.extname(fileName)).startsWith(
       `${sanitizeFileName(outline.title)}-`
     );
+  const missingText = requiredText.filter((value) => !matchesRequiredDocumentText(value, searchable, kind));
   if (
     !excelTitleIsInFileName ||
     requiredText.length === 0 ||
-    requiredText.some(
-      (value) => !searchable.includes(normalizeOfficeText(value))
-    )
+    missingText.length > 0
   ) {
     throw new DocumentGenerationError(
       'verification_failed',
-      'Generated document is missing required document content'
+      `Generated document is missing required document content${kind === 'ppt' && missingText.length > 0 ? `: ${missingText.slice(0, 3).map((value) => normalizeOfficeText(value).slice(0, 80)).join(', ')}` : ''}`
     );
   }
+}
+
+function matchesRequiredDocumentText(value: string, searchable: string, kind: DocumentWorkspaceKind): boolean {
+  const normalized = normalizeOfficeText(value);
+  if (searchable.includes(normalized)) return true;
+  if (kind !== 'ppt') return false;
+  const withoutTemplateSuffix = normalized
+    .replace(/[（(]模板[）)]$/u, '')
+    .replace(/[-_]?模板$/u, '');
+  return withoutTemplateSuffix.length > 0 && withoutTemplateSuffix !== normalized && searchable.includes(withoutTemplateSuffix);
 }
 
 const repairableDiagnosticCodes = new Set<DocumentQualityDiagnostic['code']>([

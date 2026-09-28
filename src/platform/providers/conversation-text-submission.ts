@@ -87,6 +87,13 @@ export interface ConversationTextSubmissionRuntimes {
     readonly tools: readonly ControlledProviderToolDefinition[];
     readonly maxRounds?: number;
   };
+  readonly documentToolCalling?: {
+    forExecution(input: { readonly responseExecutionId: string }): Promise<{
+      readonly prepareTools: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
+      readonly bridge: ControlledProviderToolBridge;
+      readonly close: () => Promise<void>;
+    } | undefined>;
+  };
 }
 
 export function createConversationTextSubmissionIdFactory(): ProviderSubmissionOrchestrationIdFactory {
@@ -151,6 +158,7 @@ export function createConversationTextDispatchBridge(
       protocolVersion: DEEPSEEK_CHAT_PROTOCOL_VERSION,
       submit: (input) => deepSeekAdapter.submit(input),
       toolCalling: options.toolCalling,
+      documentToolCalling: options.documentToolCalling,
       cancel: (providerOperationId) => deepSeekAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
       onCancellationTimeout: async (responseExecutionId) => {
@@ -177,6 +185,7 @@ export function createConversationTextDispatchBridge(
         searchRequestStarted: options.nativeSearch?.requestStarted.bind(options.nativeSearch)
       }),
       toolCalling: options.toolCalling,
+      documentToolCalling: options.documentToolCalling,
       cancel: (providerOperationId) => newApiAdapter.cancel(providerOperationId),
       coordinator: options.coordinator,
       onCancellationTimeout: async (responseExecutionId) => {
@@ -195,11 +204,13 @@ function wrapChatAdapter(input: {
   readonly protocolId: string;
   readonly protocolVersion: string;
   readonly toolCalling?: ConversationTextSubmissionRuntimes['toolCalling'];
+  readonly documentToolCalling?: ConversationTextSubmissionRuntimes['documentToolCalling'];
   submit(input: {
     readonly routeSnapshot: unknown;
     readonly request: unknown;
     readonly beforeRequestStarted: () => Promise<void>;
     readonly toolBridge?: ControlledProviderToolBridge;
+    readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
     readonly maxToolRounds?: number;
   }): Promise<{ readonly providerOperationId: string; readonly completion: Promise<unknown> }>;
   cancel(providerOperationId: string): Promise<boolean>;
@@ -217,9 +228,23 @@ function wrapChatAdapter(input: {
     protocolId: input.protocolId,
     protocolVersion: input.protocolVersion,
     async submit(dispatchRequest): Promise<SubmissionDispatchOutcome> {
+      let prepared: Awaited<ReturnType<NonNullable<ConversationTextSubmissionRuntimes['documentToolCalling']>['forExecution']>> | undefined;
+      let closeStarted = false;
+      const closePrepared = () => {
+        if (!prepared || closeStarted) return;
+        closeStarted = true;
+        // The session revokes its in-memory grant before its first await. Persistence
+        // cleanup must neither reject nor hold a completed/cancelled response open.
+        try { void prepared.close().catch(() => undefined); } catch { /* Cleanup cannot change the response outcome. */ }
+      };
       try {
-        const adapterRequest = input.toolCalling && isRecord(dispatchRequest.request) && !dispatchRequest.request.nativeSearch
-          ? { ...dispatchRequest.request, tools: input.toolCalling.tools }
+        const responseExecutionId = responseExecutionIdFromDispatchRequest(dispatchRequest.request);
+        const acceptsDocumentTools = isRecord(dispatchRequest.request) && !dispatchRequest.request.nativeSearch;
+        if (acceptsDocumentTools) prepared = await input.documentToolCalling?.forExecution({ responseExecutionId });
+        const staticToolCalling = acceptsDocumentTools && !input.documentToolCalling ? input.toolCalling : undefined;
+        // A configured factory owns this response's capabilities, including an empty result.
+        const adapterRequest = acceptsDocumentTools && (input.documentToolCalling || staticToolCalling)
+          ? { ...(dispatchRequest.request as Record<string, unknown>), tools: staticToolCalling?.tools }
           : dispatchRequest.request;
         const handle = await input.submit({
           routeSnapshot: dispatchRequest.routeSnapshot,
@@ -229,18 +254,17 @@ function wrapChatAdapter(input: {
             await emitProductionEvent({ code: 'model_request', status: 'started',
               operationId: responseExecutionIdFromDispatchRequest(adapterRequest), facts: { purpose: 'content' } });
           },
-          ...(input.toolCalling ? {
-            toolBridge: input.toolCalling.bridge,
-            maxToolRounds: input.toolCalling.maxRounds
-          } : {})
+          ...(prepared ? { toolBridge: prepared.bridge, prepareTools: prepared.prepareTools }
+            : staticToolCalling ? { toolBridge: staticToolCalling.bridge, maxToolRounds: staticToolCalling.maxRounds } : {})
         });
-        const responseExecutionId = responseExecutionIdFromDispatchRequest(adapterRequest);
+        const completion = prepared ? handle.completion.finally(closePrepared) : handle.completion;
+        void completion.catch(() => undefined);
         try {
           input.coordinator.register({
             responseExecutionId,
             providerOperationId: handle.providerOperationId,
             cancel: () => input.cancel(handle.providerOperationId),
-            completion: handle.completion,
+            completion,
             onCancellationTimeout: () => input.onCancellationTimeout(responseExecutionId)
           });
         } catch (error) {
@@ -252,6 +276,7 @@ function wrapChatAdapter(input: {
           providerOperationId: handle.providerOperationId
         };
       } catch (error) {
+        closePrepared();
         await emitProductionEvent({ code: 'model_request', status: 'failed', facts: { purpose: 'content' } });
         return {
           kind: 'failed_before_submission',

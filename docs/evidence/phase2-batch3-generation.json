@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "scope": "phase2-batch3-generation-control",
+  "status": "blocked_real_provider_readback",
+  "branch": "feature/ppt-goal-pipeline",
+  "previousCommits": ["3a373b8", "6b63a96"],
+  "automated": {
+    "vitestFiles": 253,
+    "vitestTests": 2234,
+    "failed": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "platformAudit": "passed"
+  },
+  "realProvider": {
+    "model": "kimi-k3",
+    "generateToolAdvertised": true,
+    "generateToolCalled": true,
+    "generationStatus": "success",
+    "runnerQaHashWorkRegistration": "passed",
+    "sameSessionReadback": "failed",
+    "readbackSafeCode": "newapi.operation_failed",
+    "pathOrRuntimeContextLeak": false,
+    "credentialsRecorded": false
+  },
+  "remainingBlocker": "After generate_pptx returned a verified Work, the next Provider request intended to expose read_document_structure failed before HTTP submission. The generated artifact remains real and registered; no false completion was reported.",
+  "rawReport": "outputs/phase2-batch3-real-generation.log"
+}

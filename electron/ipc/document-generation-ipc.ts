@@ -163,6 +163,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
               sourceMessageId: input.messageId,
               executionId,
               documentKind: input.kind,
+              operation: input.operation ?? (input.parentWorkId !== undefined ? 'edit' : 'create'),
               attachmentRefs: [...new Set(input.images.flatMap((image) => [image.fileId, image.workId].filter((value): value is string => value !== undefined)))],
               ...(input.parentWorkId !== undefined ? { workRef: { kind: 'candidate' as const, ref: input.parentWorkId } } : {}),
               budget: { maxSteps: 32, budgetUnits: 10_000, timeoutMs: 900_000 }
@@ -172,7 +173,7 @@ export function registerDocumentGenerationIpcHandlers(options: {
               projectId: runtime.projectId,
               conversationId: runtime.conversationId,
               executionId: runtime.executionId
-            }, executionId);
+            }, executionId, runtime.operation);
           }
         },
         projectId: session.projectId,

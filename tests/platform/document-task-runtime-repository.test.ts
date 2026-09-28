@@ -21,7 +21,7 @@ async function fixture() {
   const runtime = createDocumentTaskRuntime({
     id: toDocumentTaskRuntimeId('runtime-1'), projectId,
     conversationId: toConversationId('conversation-1'), sourceMessageId: toMessageId('message-1'),
-    executionId: 'execution-1', documentKind: 'ppt',
+    executionId: 'execution-1', documentKind: 'ppt', operation: 'edit',
     pageRefs: [{ pageId: 'page-1', pageRevision: 2 }],
     budget: { maxSteps: 8, budgetUnits: 16, timeoutMs: 120_000 },
     createdAt: toIsoTimestamp(now())

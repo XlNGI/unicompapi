@@ -219,14 +219,14 @@ function parseAcceptanceResult(value: unknown): PlatformAcceptanceResult {
 }
 
 function safeEvidenceRef(value: unknown): string {
-  const reference = nonBlank(value, 'result.evidenceRef').replace(/\\/g, '/');
+  const reference = nonBlank(value, 'result.evidenceRef').replace(/\\/g, '/').replace(/^docs\/active\/evidence\/phase9\//, 'docs/evidence/phase9/');
   if (
     reference.startsWith('/') ||
     /^[a-z]:\//i.test(reference) ||
     reference.split('/').includes('..') ||
-    !reference.startsWith('docs/active/evidence/phase9/')
+    !reference.startsWith('docs/evidence/phase9/')
   ) {
-    throw new TypeError('Evidence refs must stay inside docs/active/evidence/phase9');
+    throw new TypeError('Evidence refs must stay inside docs/evidence/phase9');
   }
   return reference;
 }

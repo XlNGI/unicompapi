@@ -112,7 +112,7 @@ describe('Phase 9 platform acceptance contracts', () => {
         caseId: 'b1.engineering_integrity',
         suite: 'engineering_integrity',
         status: 'passed',
-        evidenceRefs: ['docs/active/evidence/phase9/windows/gate.json']
+        evidenceRefs: ['docs/evidence/phase9/windows/gate.json']
       }]
     };
     expect(parsePlatformEvidenceManifest(evidence)).toEqual(evidence);
@@ -128,7 +128,7 @@ describe('Phase 9 platform acceptance contracts', () => {
 
   it('validates committed B2 Windows evidence without treating its not-run picker as complete', async () => {
     const evidence = JSON.parse(await readFile(path.resolve(
-      'docs/active/evidence/phase9/windows/b2-storage-security.json'
+      'docs/evidence/phase9/windows/b2-storage-security.json'
     ), 'utf8'));
     const parsedEvidence = parsePlatformEvidenceManifest(evidence);
     const target = parsePlatformTargetMatrix(matrix).targets[0];

@@ -12,6 +12,7 @@ import {
   toIsoTimestamp,
   toMessageId,
   toProjectContextId,
+  type ConversationIntentPlan,
   type ConversationResponseDraftRepository,
   type ConversationResponseDraftV1,
   type ConversationResponseExecutionReadModelV1,
@@ -54,6 +55,8 @@ import { conversationAttachmentQuery } from '../../application/conversation-atta
 import { declinesWebResearch } from '../../application/conversation-intent-orchestrator';
 import type { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { emitProductionEvent, withProductionTrace } from '../conversation-production-trace';
+import { buildDocumentOutlinePrompt } from '../../shared/document-outline-contract';
+import type { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseControllerRuntime {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -68,6 +71,7 @@ export interface ConversationResponseControllerRuntime {
   readonly workflowService?: ConversationWorkflowService;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
+  readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'>;
   /** Completes startup recovery before accessing persisted response state or executing writes. */
   readonly ready: Promise<void>;
   submit?(input: {
@@ -130,13 +134,16 @@ export class ConversationResponseController {
       }
       const attachmentQuery = conversationAttachmentQuery(undefined, message);
       const isPlainUserMessage = message.displayContent === undefined || message.displayContent === message.content;
-      const pageReferences = isPlainUserMessage ? await runtime.documentPages?.resolve({
+      const toolSelection = isPlainUserMessage ? await runtime.documentTools?.select({
+        conversation, currentUserMessageId: message.id, query: attachmentQuery
+      }) : undefined;
+      const pageReferences = isPlainUserMessage && !toolSelection ? await runtime.documentPages?.resolve({
         conversation, currentUserMessageId: message.id, query: attachmentQuery
       }) ?? [] : [];
-      if (!pageReferences.length) await runtime.attachments?.resolve({
+      if (!pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
         conversation, currentUserMessageId: message.id, query: attachmentQuery
       });
-      const imageQuery = isPlainUserMessage && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
+      const imageQuery = isPlainUserMessage && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
       const draft = createConversationResponseDraft({
         id: toConversationResponseDraftId(this.dependencies.nextResponseDraftId()),
         projectId: runtime.conversations.projectId,
@@ -577,15 +584,18 @@ export class ConversationResponseController {
     const isPageQuestion = workflow ? workflow.plan.kind === 'chat'
       : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
     const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
-    const pageReferences = documentPageQuery ? await runtime.documentPages?.resolve({
+    const toolSelection = documentPageQuery ? await runtime.documentTools?.select({
+      conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
+    }) : undefined;
+    const pageReferences = documentPageQuery && !toolSelection ? await runtime.documentPages?.resolve({
       conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
     }) ?? [] : [];
-    if (!pageReferences.length) await runtime.attachments?.resolve({
+    if (!pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
       conversation,
       currentUserMessageId: userMessage.id,
       query: attachmentQuery
     });
-    const imageQuery = isPageQuestion && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
+    const imageQuery = isPageQuestion && !toolSelection && !pageReferences.length && !declinesConversationImageInput(attachmentQuery) && (isConversationImageRequest(attachmentQuery) || conversationAttachmentBatch(conversation).some(item => isImageAttachment(item.fileName ?? ''))) ? attachmentQuery : undefined;
     const lastUserText = [...conversation.messages].reverse().find(m => m.role === 'user')?.content ?? '';
     const declinedSearch = declinesWebResearch(lastUserText);
     if (workflow && (declinedSearch || workflow.plan.sourcePolicy === 'internal')) {
@@ -593,7 +603,7 @@ export class ConversationResponseController {
     }
     const localSources = Boolean(workflow?.plan.sourcePolicy === 'mixed' && runtime.nativeSearch &&
       await runtime.nativeSearch.preferLocal(conversation, workflow));
-    const prepareNativeSearch = Boolean(workflow && runtime.nativeSearch && !declinedSearch && !localSources &&
+    const prepareNativeSearch = Boolean(workflow && !toolSelection && runtime.nativeSearch && !declinedSearch && !localSources &&
       (['web', 'mixed'].includes(workflow.plan.sourcePolicy) || await runtime.nativeSearch.allowsConversation(conversation.id)));
     if (workflow?.plan.kind === 'document' && !prepareNativeSearch) {
       // Persist source disclosure before pinning the conversation revision for
@@ -611,7 +621,13 @@ export class ConversationResponseController {
       conversationRevision: conversation.revision,
       userMessageId: userMessage.id,
       userMessageRevision: userMessage.revision,
-      ...(workflow ? { promptContent: input.content } : {}),
+      ...(workflow
+        ? {
+            promptContent: workflow.plan.kind === 'document'
+              ? buildDocumentGenerationPrompt(input.content, workflow.plan)
+              : input.content
+          }
+        : {}),
       attachmentQuery,
       ...(imageQuery ? { imageQuery } : {}),
       ...(pageReferences.length ? { documentPageQuery } : {}),
@@ -649,6 +665,7 @@ export class ConversationResponseController {
       await runtime.drafts.save(contextualized, draft.revision);
       draft = contextualized;
     }
+    if (toolSelection) await runtime.documentTools!.pinDraft({ draft, selection: toolSelection });
     if (workflow && runtime.nativeSearch && prepareNativeSearch) {
       const binding = await runtime.candidates.resolveBinding(subject(draft), input.candidateId);
       try {
@@ -824,6 +841,47 @@ export class ConversationResponseController {
   private now(): string {
     return (this.dependencies.now ?? (() => new Date().toISOString()))();
   }
+}
+
+/**
+ * The semantic plan is authoritative for document generation. Keep it in the
+ * provider-bound prompt as a bounded JSON contract so the content model gets
+ * the extracted requirements without gaining control over execution fields.
+ */
+function buildDocumentGenerationPrompt(
+  rawText: string,
+  plan: ConversationIntentPlan
+): string {
+  const operation = plan.action === 'revise'
+    ? 'edit'
+    : plan.action === 'analyze'
+      ? 'analyze'
+      : 'create';
+  const contract = {
+    schemaVersion: 1,
+    operation,
+    documentKind: plan.documentKind,
+    ...(plan.deliverables ? { deliverables: plan.deliverables } : {}),
+    ...(plan.steps ? { steps: plan.steps } : {}),
+    parameters: plan.parameters,
+    sourcePolicy: plan.sourcePolicy,
+    missing: plan.missing,
+    ambiguities: plan.ambiguities,
+    ...(plan.targetHint ? { targetHint: plan.targetHint } : {}),
+    needsConfirmation: plan.needsConfirmation
+  };
+  const outlineKind = plan.documentKind && plan.documentKind !== 'auto'
+    ? plan.documentKind
+    : 'word';
+  return [
+    '【UniComp 受控文档生成合同】',
+    '以下 JSON 由应用层生成，是本次文档生成的结构化需求；不得自行改变 operation、documentKind、目标范围、资料策略或缺失项。',
+    JSON.stringify(contract),
+    '【当前用户需求】',
+    rawText,
+    buildDocumentOutlinePrompt(outlineKind),
+    '【输出要求】不要输出路径、凭证、Provider、模型选择、工具调用、权限或 JSON 之外的解释。正文内容必须服从上述合同；合同未提供的事实不得臆造。'
+  ].join('\n');
 }
 
 class ProjectNotOpenError extends Error {}

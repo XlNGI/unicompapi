@@ -6,8 +6,11 @@ import {
   type DocumentToolId,
   type DocumentToolObservation,
   type DocumentToolRequest,
-  type DocumentAgentProgressEvent
+  type DocumentAgentProgressEvent,
+  type DocumentIR,
+  type DocumentPlanErrorCode
 } from '../domain';
+import { parseDocumentIR, validateDocumentPlan, type DocumentOperation } from '../domain/entities/document-agent';
 
 export interface DocumentAgentDecisionComplete {
   readonly kind: 'complete';
@@ -44,6 +47,8 @@ export interface DocumentAgentLoopOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly allowedTools?: readonly DocumentToolId[];
+  readonly documentIR?: DocumentIR;
+  readonly operation?: DocumentOperation;
   readonly repeatedDiagnosticLimit?: number;
   /** Remaining parent-task budget. Child loops cannot extend it. */
   readonly parentBudgetUnits?: number;
@@ -58,6 +63,14 @@ export interface DocumentAgentLoopOptions {
     observation: DocumentToolObservation,
     context: { readonly step: number; readonly costUnits: number }
   ) => void | Promise<void>;
+  /** Structured, redacted diagnostics for the local log sink. */
+  readonly onDiagnostic?: (diagnostic: {
+    readonly code: DocumentPlanErrorCode;
+    readonly operation?: DocumentOperation;
+    readonly toolId?: DocumentToolId;
+    readonly recoverable: boolean;
+    readonly replanAttempt: number;
+  }) => void | Promise<void>;
   readonly now?: () => string;
 }
 
@@ -78,6 +91,7 @@ export async function runDocumentAgentLoop(
     8
   );
   const allowedTools = new Set(options.allowedTools ?? [...registry.keys()]);
+  const documentIR = options.documentIR === undefined ? undefined : parseDocumentIR(options.documentIR);
   const observations: DocumentToolObservation[] = structuredClone([...(options.initialObservations ?? [])]);
   if (observations.length > maxSteps || observations.some((observation, index) =>
     observation.step !== index + 1 || !registry.has(observation.toolId))) {
@@ -92,6 +106,8 @@ export async function runDocumentAgentLoop(
   if (options.signal?.aborted) abort();
   let previousDiagnostic: string | undefined;
   let repeatedDiagnostics = 0;
+  let replans = observations.filter((observation) => observation.diagnostic === 'TOOL_PRECONDITION_FAILED').length;
+  const operation = documentIR?.operation ?? options.operation;
   for (const observation of observations) {
     if (observation.ok) {
       previousDiagnostic = undefined;
@@ -162,11 +178,57 @@ export async function runDocumentAgentLoop(
     try {
       request = parseDocumentToolRequest(decision.request);
     } catch (error) {
+      if (operation !== undefined) {
+        try {
+          await options.onDiagnostic?.({ code: 'OUTLINE_INVALID', operation, recoverable: false, replanAttempt: replans });
+        } catch {
+          return finish('failed', 'agent.checkpoint_failed');
+        }
+        return finish('failed', 'OUTLINE_INVALID');
+      }
       return finish('failed', safeError(error));
     }
     const definition = registry.get(request.toolId);
     if (!definition || !allowedTools.has(request.toolId)) {
+      if (operation !== undefined) {
+        try {
+          await options.onDiagnostic?.({ code: 'OUTLINE_INVALID', operation, toolId: request.toolId, recoverable: false, replanAttempt: replans });
+        } catch {
+          return finish('failed', 'agent.checkpoint_failed');
+        }
+        return finish('failed', 'OUTLINE_INVALID');
+      }
       return finish('failed', 'tool_not_allowed');
+    }
+    const planValidation = operation === undefined ? undefined : validateDocumentPlan({
+      ir: documentIR ?? { operation, attachmentRefs: [] },
+      toolIds: [request.toolId],
+      registry
+    });
+    if (planValidation !== undefined && !planValidation.ok) {
+      const diagnostic = planValidation.code;
+      const replanAttempt = replans + 1;
+      try {
+        await options.onDiagnostic?.({
+          code: diagnostic,
+          operation: planValidation.operation,
+          ...(planValidation.toolId !== undefined ? { toolId: planValidation.toolId } : {}),
+          recoverable: planValidation.recoverable && replanAttempt <= 1,
+          replanAttempt
+        });
+      } catch {
+        return finish('failed', 'agent.checkpoint_failed');
+      }
+      if (diagnostic === 'TOOL_PRECONDITION_FAILED' && replans >= 1) {
+        return finish('failed', diagnostic);
+      }
+      if (diagnostic === 'TOOL_PRECONDITION_FAILED') replans += 1;
+      const observation = makeObservation(step, request.toolId, false, {}, diagnostic);
+      try { await options.onObservation?.(observation, { step, costUnits }); } catch { return finish('failed', 'agent.checkpoint_failed'); }
+      observations.push(observation);
+      await emit({ step, stage: 'tool', status: 'failed', toolId: request.toolId, safeCode: diagnostic });
+      if (diagnostic === 'TOOL_PRECONDITION_FAILED') continue;
+      return finish('failed', diagnostic);
     }
     if (costUnits + definition.maxCostUnits > budgetUnits) {
       return finish('budget_exceeded');

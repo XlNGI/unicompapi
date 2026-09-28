@@ -39,6 +39,13 @@ export interface DocumentRevisionAgentResult {
   readonly targetSectionIndex?: number;
   readonly patch?: DocumentRevisionPatch;
   readonly patches?: readonly DocumentRevisionPatch[];
+  /** Redacted evidence that sections outside the requested scope were unchanged. */
+  readonly nonTargetSectionHashes?: readonly {
+    readonly sectionIndex: number;
+    readonly before: string;
+    readonly after: string;
+    readonly unchanged: boolean;
+  }[];
 }
 
 export interface DocumentRevisionAgentPorts {
@@ -119,7 +126,13 @@ export async function runLocalDocumentRevisionAgent(
   }
 
   const targetSectionIndex = patches[0].target.sectionIndex;
-  let current = input.outline;
+  const targetSectionIndexes = new Set(patches.map((patch) => patch.target.sectionIndex));
+  const nonTargetIndexes = input.outline.sections
+    .map((_section, sectionIndex) => sectionIndex)
+    .filter((sectionIndex) => !targetSectionIndexes.has(sectionIndex));
+  const beforeHashes = await hashSections(input.outline, nonTargetIndexes);
+  let current = structuredClone(input.outline);
+  let scopeViolation = false;
   const execute: DocumentAgentToolExecutor = async (request, context) => {
     if (context.signal.aborted) throw new Error('cancelled');
     switch (request.toolId) {
@@ -132,6 +145,9 @@ export async function runLocalDocumentRevisionAgent(
         for (const patch of requestedPatches) {
           const applied = ports.applyPatch(current, patch);
           current = applied.document;
+          if (applied.affectedSections.some((section) => !targetSectionIndexes.has(section))) {
+            scopeViolation = true;
+          }
           changed ||= applied.changed;
           applied.affectedSections.forEach((section) => affectedSections.add(section));
         }
@@ -157,16 +173,38 @@ export async function runLocalDocumentRevisionAgent(
       nextDecision: async (observations) => nextLocalDecision(
         observations,
         input.kind,
-        patches
+        patches,
+        scopeViolation
     )
   });
+  const afterHashes = await hashSections(current, nonTargetIndexes);
+  const nonTargetSectionHashes = nonTargetIndexes.map((sectionIndex) => {
+    const before = beforeHashes.get(sectionIndex) ?? '';
+    const after = afterHashes.get(sectionIndex) ?? '';
+    return { sectionIndex, before, after, unchanged: before === after };
+  });
+  if (scopeViolation || nonTargetSectionHashes.some((item) => !item.unchanged)) {
+    return {
+      outline: input.outline,
+      agent: {
+        ...agent,
+        state: 'failed',
+        summary: 'revision_scope_violation'
+      },
+      changed: false,
+      targetSectionIndex,
+      patches,
+      nonTargetSectionHashes
+    };
+  }
   if (agent.state !== 'completed') {
     return {
       outline: input.outline,
       agent,
       changed: false,
       targetSectionIndex,
-      patches
+      patches,
+      nonTargetSectionHashes
     };
   }
   const renderObservation = agent.observations.find(
@@ -190,6 +228,7 @@ export async function runLocalDocumentRevisionAgent(
     agent: finalAgent,
     changed,
     targetSectionIndex,
+    nonTargetSectionHashes,
     ...(changed
       ? {
           ...(patches.length === 1 ? { patch: patches[0] } : {}),
@@ -202,8 +241,12 @@ export async function runLocalDocumentRevisionAgent(
 function nextLocalDecision(
   observations: readonly DocumentToolObservation[],
   kind: DocumentWorkspaceKind,
-  patches: readonly DocumentRevisionPatch[]
+  patches: readonly DocumentRevisionPatch[],
+  scopeViolation = false
 ): DocumentAgentDecision {
+  if (scopeViolation) {
+    return { kind: 'complete', summary: 'Revision scope validation failed' };
+  }
   const last = observations.at(-1)?.toolId;
   if (last === undefined) {
     return {
@@ -251,6 +294,32 @@ function nextLocalDecision(
     kind: 'complete',
     summary: 'Revision patch validated; file verification remains with the runner'
   };
+}
+
+async function hashSections(
+  outline: DocumentOutline,
+  indexes: readonly number[]
+): Promise<ReadonlyMap<number, string>> {
+  if (indexes.length === 0) return new Map();
+  if (!globalThis.crypto?.subtle) throw new Error('revision_scope_hash_unavailable');
+  const hashes = await Promise.all(indexes.map(async (sectionIndex) => {
+    const digest = await globalThis.crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(stableSerialize(outline.sections[sectionIndex] ?? null))
+    );
+    const hash = [...new Uint8Array(digest)]
+      .map((item) => item.toString(16).padStart(2, '0'))
+      .join('');
+    return [sectionIndex, hash] as const;
+  }));
+  return new Map(hashes);
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`;
 }
 
 function resolveRevisionPatches(

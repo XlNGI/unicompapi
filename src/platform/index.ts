@@ -4,6 +4,7 @@ export * from './files';
 export * from './ipc';
 export * from './providers';
 export * from './documents';
+export * from './documents/document-mutation-head-store';
 export * from './search';
 export * from './images';
 export * from './videos';

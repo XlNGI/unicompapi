@@ -28,6 +28,8 @@ import type { SubmissionArtifactFactoryPort } from './provider-submission-orches
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
+import { buildDocumentReadToolInstruction, buildDocumentGenerationToolInstruction, buildDocumentMutationToolInstruction, type ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
+import { buildDocumentGenerationConversationInstruction, isPptGenerationIntent } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseArtifactFactoryDependencies {
   readonly nativeSearch?: ConversationNativeSearch;
@@ -38,6 +40,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly contextBuilder?: ConversationContextBuilder;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
+  readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare' | 'registerExecution'>;
   nextMessageId?: () => MessageId;
   nextExecutionId?: () => string;
   nextStreamEventId?: () => string;
@@ -81,11 +84,15 @@ export class ConversationResponseArtifactFactory
       throw new TypeError('Conversation response user message is unavailable for artifact creation');
     }
     const nativeSearch = await this.dependencies.nativeSearch?.dispatch(draft, input.candidate);
-    const pageReferences = await resolveConversationResponseDocumentPages({
+    const toolSelection = await this.dependencies.documentTools?.prepare({ conversation, draft });
+    if (toolSelection && (nativeSearch || !input.subject.contextContentHashes.includes(toolSelection.bindingHash))) {
+      throw new ConversationDocumentPageError('document_page_unavailable', '文档读取授权范围或版本已变化，请重新提交。');
+    }
+    const pageReferences = toolSelection ? [] : await resolveConversationResponseDocumentPages({
       conversation, draft, service: this.dependencies.documentPages
     });
     const selectedContexts = [];
-    for (const selection of pageReferences.length ? [] : draft.contextSelections) {
+    for (const selection of pageReferences.length || toolSelection ? [] : draft.contextSelections) {
       const context = await this.dependencies.contexts.get(selection.contextId);
       if (context) selectedContexts.push(context);
     }
@@ -93,7 +100,7 @@ export class ConversationResponseArtifactFactory
       projectId: this.dependencies.conversations.projectId,
       surface: 'conversation',
       contexts: selectedContexts,
-      selections: pageReferences.length ? [] : draft.contextSelections
+      selections: pageReferences.length || toolSelection ? [] : draft.contextSelections
     });
     if (pageReferences.some((reference) => !input.subject.contextContentHashes?.includes(reference.contentHash))) {
       throw new ConversationDocumentPageError('document_page_unavailable', '作品页面在请求准备后发生变化，请重新核对后再提问。');
@@ -102,7 +109,7 @@ export class ConversationResponseArtifactFactory
     if (draft.imageQuery && (!imageInput || input.subject.imageCount !== 1 || !input.subject.materialReferences.some(item => item.referenceId === imageInput.fileId) || !input.subject.contextContentHashes.includes(imageInput.image.checksumSha256))) {
       throw new ConversationAttachmentError('attachment_changed', '图片与已确认的发送范围不一致，请重新确认。');
     }
-    const attachmentReferences = pageReferences.length ? [] : await this.dependencies.attachments?.resolve({
+    const attachmentReferences = pageReferences.length || toolSelection ? [] : await this.dependencies.attachments?.resolve({
       conversation,
       currentUserMessageId: draft.userMessageId,
       query: draft.attachmentQuery ?? userMessage.displayContent ?? userMessage.content,
@@ -122,14 +129,20 @@ export class ConversationResponseArtifactFactory
       conversation,
       currentUserMessageId: draft.userMessageId,
       currentUserContent: input.subject.outboundTextSnapshot,
-      omitHistory: pageReferences.length > 0 || !!nativeSearch,
+      omitHistory: pageReferences.length > 0 || !!nativeSearch || !!toolSelection,
       references
     });
     if (pageReferences.some((page) => !contextEnvelope.references.some((reference) =>
       reference.sourceId === page.sourceId && reference.contentHash === page.contentHash && reference.excerpt === page.excerpt))) {
       throw new ConversationDocumentPageError('document_page_scope_exceeded', '目标页面超过本次完整读取预算，请缩小问题范围后继续。');
     }
-    const messages = contextEnvelope.messages;
+    const messages = toolSelection ? [
+      { role: 'system' as const, content: 'kind' in toolSelection ? (toolSelection.kind === 'generation' ? buildDocumentGenerationToolInstruction(toolSelection) : buildDocumentMutationToolInstruction(toolSelection)) : buildDocumentReadToolInstruction(toolSelection) },
+      ...contextEnvelope.messages
+    ] : isPptGenerationIntent(userMessage.content) ? [
+      { role: 'system' as const, content: buildDocumentGenerationConversationInstruction() },
+      ...contextEnvelope.messages
+    ] : contextEnvelope.messages;
     const createdAt = toIsoTimestamp(input.createdAt);
     const assistantMessageId = this.nextMessageId();
     const pendingConversation = beginAssistantMessage(conversation, {
@@ -182,6 +195,9 @@ export class ConversationResponseArtifactFactory
       occurredAt: createdAt
     });
     await this.dependencies.executions.create(responseExecution, createdEvent);
+    if (toolSelection) {
+      await this.dependencies.documentTools!.registerExecution({ selection: toolSelection, responseExecutionId: responseExecution.id });
+    }
 
     return {
       subjectArtifacts: {

@@ -13,7 +13,8 @@ import {
   createDocumentToolRegistry,
   documentToolIds,
   type DocumentToolId,
-  type DocumentToolObservation
+  type DocumentToolObservation,
+  type DocumentOperation
 } from './document-agent';
 import {
   documentWorkspaceKinds,
@@ -83,6 +84,7 @@ export interface DocumentTaskRuntime {
   readonly revision: number;
   readonly status: DocumentTaskRuntimeStatus;
   readonly documentKind: DocumentWorkspaceKind;
+  readonly operation: DocumentOperation;
   readonly attachmentRefs: readonly string[];
   readonly workRef?: DocumentTaskRuntimeWorkRef;
   readonly pageRefs: readonly DocumentTaskRuntimePageRef[];
@@ -111,6 +113,7 @@ export function createDocumentTaskRuntime(input: {
   readonly sourceMessageId: MessageId;
   readonly executionId: string;
   readonly documentKind: DocumentWorkspaceKind;
+  readonly operation?: DocumentOperation;
   readonly attachmentRefs?: readonly string[];
   readonly workRef?: DocumentTaskRuntimeWorkRef;
   readonly pageRefs?: readonly DocumentTaskRuntimePageRef[];
@@ -127,6 +130,7 @@ export function createDocumentTaskRuntime(input: {
     revision: 0,
     status: 'planning',
     documentKind: input.documentKind,
+    operation: input.operation ?? (input.attachmentRefs && input.attachmentRefs.length > 0 ? 'edit' : 'create'),
     attachmentRefs: input.attachmentRefs ?? [],
     ...(input.workRef !== undefined ? { workRef: input.workRef } : {}),
     pageRefs: input.pageRefs ?? [],
@@ -143,7 +147,7 @@ export function parseDocumentTaskRuntime(value: unknown): DocumentTaskRuntime {
   const record = requireRecord(value, 'DocumentTaskRuntime');
   requireExactKeys(record, [
     'schemaVersion', 'id', 'projectId', 'conversationId', 'sourceMessageId',
-    'executionId', 'revision', 'status', 'documentKind', 'attachmentRefs',
+    'executionId', 'revision', 'status', 'documentKind', 'operation', 'attachmentRefs',
     'workRef', 'pageRefs', 'checkpoint', 'toolCalls', 'observations', 'budget',
     'createdAt', 'updatedAt'
   ]);
@@ -153,6 +157,10 @@ export function parseDocumentTaskRuntime(value: unknown): DocumentTaskRuntime {
   const updatedAt = toIsoTimestamp(String(record.updatedAt));
   if (updatedAt < createdAt) throw new TypeError('Document task runtime updatedAt is stale');
   const attachmentRefs = parseReferenceList(record.attachmentRefs, 'attachmentRefs', limits.maxAttachments);
+  const operation = record.operation === undefined
+    ? (attachmentRefs.length > 0 ? 'edit' : 'create')
+    : requireEnum(record.operation, ['create', 'edit', 'analyze'] as const, 'operation');
+  if (operation === 'create' && attachmentRefs.length > 0) throw new TypeError('Create runtime cannot reference an existing document');
   const pageRefs = parsePageRefs(record.pageRefs);
   const checkpoint = parseCheckpoint(record.checkpoint);
   const toolCalls = parseToolCalls(record.toolCalls);
@@ -195,6 +203,7 @@ export function parseDocumentTaskRuntime(value: unknown): DocumentTaskRuntime {
     revision,
     status,
     documentKind: requireEnum(record.documentKind, documentWorkspaceKinds, 'documentKind'),
+    operation,
     attachmentRefs,
     ...(workRef !== undefined ? { workRef } : {}),
     pageRefs,

@@ -43,4 +43,13 @@ describe('document generation logging', () => {
       reason: 'visual_diagnostics'
     });
   });
+
+  it('records machine-readable outline classification without content', () => {
+    expect(toDocumentGenerationLogError(Object.assign(new Error('outline rejected'), { code: 'invalid_outline' }))).toMatchObject({
+      code: 'invalid_outline', diagnosticCode: 'OUTLINE_INVALID'
+    });
+    expect(toDocumentGenerationLogError(Object.assign(new Error('tool precondition'), { code: 'TOOL_PRECONDITION_FAILED' }))).toMatchObject({
+      diagnosticCode: 'TOOL_PRECONDITION_FAILED'
+    });
+  });
 });

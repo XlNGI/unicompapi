@@ -63,6 +63,7 @@ import {
   type NewApiEventStreamSession,
   type NewApiSharedRuntime
 } from './newapi-runtime';
+import { emitProductionEvent } from '../../conversation-production-trace';
 
 export interface NewApiCredentialResolverPort {
   useCredential<T>(
@@ -201,7 +202,7 @@ interface ActiveOperation {
   readonly openSession: (messages: readonly NewApiChatMessageV1[]) => Promise<NewApiEventStreamSession>;
   readonly messages: NewApiChatMessageV1[];
   readonly toolBridge?: ControlledProviderToolBridge;
-  readonly maxToolRounds: number;
+  readonly maxToolRounds?: number;
   readonly signal: AbortSignal;
   cancelReason?: 'user' | 'application_shutdown';
   cancelRequest?: Promise<unknown>;
@@ -300,6 +301,7 @@ export class NewApiChatAdapter {
     readonly beforeRequestStarted?: () => Promise<void>;
     readonly signal?: AbortSignal;
     readonly toolBridge?: ControlledProviderToolBridge;
+    readonly prepareTools?: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>;
     readonly maxToolRounds?: number;
     readonly nativeSearchGuard?: (request: NativeSearchRequest, route: ReturnType<typeof validateRoute>) => Promise<void>;
     readonly observeSearch?: (grantId: string, evidence: NativeSearchEvidence) => Promise<void>;
@@ -332,14 +334,14 @@ export class NewApiChatAdapter {
       );
     }
     if (request.nativeSearch) {
-      if (!input.nativeSearchGuard || !input.observeSearch || request.tools || request.image) throw invalidRequest('Native search requires a separate scoped grant');
+      if (!input.nativeSearchGuard || !input.observeSearch || request.tools || request.image || input.prepareTools) throw invalidRequest('Native search requires a separate scoped grant');
       await input.nativeSearchGuard(request.nativeSearch, route);
     }
     const guardedStart = async () => {
       if (request.nativeSearch) await input.nativeSearchGuard!(request.nativeSearch, route);
       await input.beforeRequestStarted?.();
     };
-    const body = serializeRequest(route, request, parameterSchema);
+    serializeRequest(route, request, parameterSchema);
     const providerOperationId = requireOpaqueId(
       this.ids.nextProviderOperationId(),
       'provider operation ID'
@@ -353,31 +355,67 @@ export class NewApiChatAdapter {
     const externalController = new AbortController();
     const removeExternalAbort = linkAbort(input.signal, externalController);
     let session: NewApiEventStreamSession | undefined;
-    const openSession = (messages: readonly NewApiChatMessageV1[]) =>
-      this.credentials.useCredential(
+    let availableToolNames = new Set<string>();
+    const openSession = async (messages: readonly NewApiChatMessageV1[]) => {
+      const continuation = messages.some(message => message.role === 'tool');
+      const stage = async (name: string, status: 'started' | 'completed', startedAt: number) => {
+        void emitProductionEvent({ code: 'model_request', status, operationId: `continuation_${name}`, facts: { purpose: 'content', count: Math.max(0, Date.now() - startedAt) } });
+      };
+      const historyStartedAt = Date.now();
+      if (continuation) await stage('history_build', 'started', historyStartedAt);
+      let tools: readonly ControlledProviderToolDefinition[] | undefined;
+      try {
+        tools = parseControlledProviderTools(input.prepareTools
+          ? await prepareToolsWithTimeout(input.prepareTools, externalController.signal, continuation ? 15_000 : 60_000)
+          : request.tools);
+      } catch (error) {
+        throw new NewApiChatAdapterError(`newapi.continuation_prepare_failed.${safeContinuationCause(error)}`, safeContinuationMessage(error));
+      }
+      if (continuation) await stage('history_build', 'completed', historyStartedAt);
+      if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
+      availableToolNames = new Set(tools?.map(tool => tool.function.name) ?? []);
+      const serializedTools = JSON.stringify(tools);
+      const beforeRequestStarted = async () => {
+        const startAt = Date.now();
+        if (continuation) await stage('before_request', 'started', startAt);
+        await guardedStart();
+        if (continuation) await stage('messages_map', 'started', startAt);
+        if (input.prepareTools) {
+          const currentTools = parseControlledProviderTools(await input.prepareTools(externalController.signal));
+          if (JSON.stringify(currentTools) !== serializedTools) throw invalidRequest('Document tools changed before submission');
+        }
+        if (continuation) await stage('messages_map', 'completed', startAt);
+        if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
+        if (continuation) await stage('before_request', 'completed', startAt);
+      };
+      const bodyStartedAt = Date.now();
+      if (continuation) await stage('request_body_build', 'started', bodyStartedAt);
+      if (continuation) await stage('request_serialize', 'started', bodyStartedAt);
+      const body = serializeRequest(route, { ...request, messages, tools }, parameterSchema);
+      if (continuation) await stage('request_serialize', 'completed', bodyStartedAt);
+      if (continuation) await stage('request_body_build', 'completed', bodyStartedAt);
+      if (continuation) void stage('credential_lookup', 'started', Date.now());
+      const credentialSession = await this.credentials.useCredential(
         { connectionId: route.connectionId, credentialVersionId: route.credentialVersionId },
-        (credential) => this.runtime.openChatStream({
-          connection,
-          credentials: credential,
-          body: serializeRequest(route, { ...request, messages }, parameterSchema),
-          signal: externalController.signal,
-          beforeRequestStarted: guardedStart
-        })
-      );
-    try {
-      session = await this.credentials.useCredential(
-        {
-          connectionId: route.connectionId,
-          credentialVersionId: route.credentialVersionId
-        },
         (credential) => this.runtime.openChatStream({
           connection,
           credentials: credential,
           body,
           signal: externalController.signal,
-          beforeRequestStarted: guardedStart
+          beforeRequestStarted
         })
       );
+      if (continuation) void stage('credential_lookup', 'completed', Date.now());
+      return credentialSession;
+    };
+    const toolBridge: ControlledProviderToolBridge | undefined = input.toolBridge ? {
+      execute: (call) => availableToolNames.has(call.call.name)
+        ? input.toolBridge!.execute(call)
+        : Promise.resolve({ schemaVersion: 1, status: 'failed',
+          diagnostics: [{ code: 'TOOL_PRECONDITION_FAILED', severity: 'error', message: 'TOOL_PRECONDITION_FAILED' }] })
+    } : undefined;
+    try {
+      session = await openSession(request.messages);
       await this.lifecycle.start(request.responseExecutionId);
       if (request.nativeSearch && !externalController.signal.aborted) {
         await input.searchRequestStarted?.(request.nativeSearch.grantId);
@@ -409,8 +447,8 @@ export class NewApiChatAdapter {
       openSession,
       messages: [...request.messages],
       ...(request.nativeSearch ? { nativeSearch: request.nativeSearch, observeSearch: (evidence: NativeSearchEvidence) => input.observeSearch!(request.nativeSearch!.grantId, evidence) } : {}),
-      ...(input.toolBridge !== undefined ? { toolBridge: input.toolBridge } : {}),
-      maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4),
+      ...(toolBridge !== undefined ? { toolBridge } : {}),
+      ...(input.prepareTools ? {} : { maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4) }),
       signal: externalController.signal,
       removeExternalAbort
     };
@@ -483,9 +521,17 @@ export class NewApiChatAdapter {
           }
         }
       );
-      let rounds = 0;
+      const seenToolCalls = new Set<string>();
       while (stream.finishReason === 'tool_calls') {
-        if (!operation.toolBridge || !stream.toolCalls || ++rounds > operation.maxToolRounds) {
+        if (!operation.toolBridge || !stream.toolCalls) {
+          throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
+        }
+        const progressKey = JSON.stringify(stream.toolCalls.map(call => [call.id, call.name, call.arguments]));
+        if (seenToolCalls.has(progressKey)) {
+          throw new NewApiChatAdapterError('newapi.tool_loop_no_progress', 'Tool calling made no progress');
+        }
+        seenToolCalls.add(progressKey);
+        if (operation.maxToolRounds !== undefined && seenToolCalls.size > operation.maxToolRounds) {
           throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
         }
         operation.messages.push({
@@ -649,6 +695,35 @@ export class NewApiChatAdapter {
       facts: [],
       observedAt: this.now()
     }), newApiChatUsageSchema);
+  }
+}
+
+function safeContinuationCause(error: unknown): string {
+  if (error instanceof NewApiChatAdapterError) return error.safeCode;
+  if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,80}$/.test(error.name)) return error.name.toLowerCase();
+  return 'unknown';
+}
+
+function safeContinuationMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/parameters?/iu.test(message)) return 'parameters';
+  if (/tools?/iu.test(message)) return 'tools';
+  return safeContinuationCause(error);
+}
+
+async function prepareToolsWithTimeout(
+  prepare: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>,
+  signal: AbortSignal,
+  timeoutMs: number
+): Promise<readonly ControlledProviderToolDefinition[] | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new NewApiChatAdapterError('newapi.continuation_prepare_timeout', 'prepareTools timeout')), timeoutMs);
+  });
+  try {
+    return await Promise.race([prepare(signal), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -1084,7 +1159,10 @@ function serializeRequest(
     stream: true,
     stream_options: { include_usage: true }
   };
-  if (request.tools) body.tools = request.tools;
+  if (request.tools) body.tools = request.tools.map(tool => ({
+    type: tool.type,
+    function: { name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters }
+  }));
   if (request.nativeSearch) { body.tools = nativeSearchTools(request.nativeSearch); body.tool_choice = 'auto'; }
   if (typeof parameters.max_tokens === 'number') {
     body.max_tokens = parameters.max_tokens;

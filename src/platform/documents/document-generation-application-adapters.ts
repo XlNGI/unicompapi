@@ -6,6 +6,7 @@ import {
   type DocumentGenerationExecutionResult,
   type DocumentGenerationExecutorPort
 } from '../../application';
+import { buildDocumentIRFromOutline } from '../../domain';
 import {
   DocumentGenerationError,
   type DocumentGenerationRunner
@@ -19,15 +20,27 @@ import {
 import { PresentationLayoutError } from './office-document-generator';
 
 export class PlatformDocumentDraftCompiler implements DocumentDraftCompilerPort {
+  compileIR(input: Parameters<NonNullable<DocumentDraftCompilerPort['compileIR']>>[0]) {
+    return buildDocumentIRFromOutline(input);
+  }
+
   compile(input: Parameters<DocumentDraftCompilerPort['compile']>[0]) {
     return withCompilationErrors(() =>
-      parseDocumentContent(stripPreamble(input.content), input.kind)
+      parseDocumentContent(stripPreamble(input.content), input.kind,
+        input.operation === undefined ? undefined : {
+          operation: input.operation,
+          attachmentRefs: input.attachmentRefs ?? []
+        })
     );
   }
 
   recover(input: Parameters<DocumentDraftCompilerPort['recover']>[0]) {
     return withCompilationErrors(() =>
-      recoverDocumentContent(stripPreamble(input.content), input.kind)
+      recoverDocumentContent(stripPreamble(input.content), input.kind,
+        input.operation === undefined ? undefined : {
+          operation: input.operation,
+          attachmentRefs: input.attachmentRefs ?? []
+        })
     );
   }
 }
@@ -86,7 +99,9 @@ function withCompilationErrors<T>(operation: () => T): T {
       throw new DocumentDraftCompilationError(
         isResourceLimitError(error.message)
           ? 'resource_limit'
-          : 'invalid_structure',
+          : /Document IR plan conflict/i.test(error.message)
+            ? 'ir_conflict'
+            : 'invalid_structure',
         error.message
       );
     }

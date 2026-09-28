@@ -4,11 +4,15 @@ import {
   parseRequestedPresentationTotalPages,
   presentationBodySectionCount
 } from '../../application/presentation-page-count';
+import {
+  buildDocumentOutlinePrompt,
+  type OutlineDocumentKind
+} from '../../shared/document-outline-contract';
 
 export type PresentationTemplateSelection = 'auto' | PresentationTemplateId;
 
 export const DOCUMENT_GENERATION_INSTRUCTION =
-  '请直接输出文档正文（优先按文档类型规则输出严格 JSON 大纲，无法结构化时使用 Markdown），不要寒暄、不要解释、不要任何前后缀。JSON 大纲必须使用 kind、title、sections、heading、level、blocks 字段；正文块只能使用 paragraph、bullets、numbered、quote、table、chart 及其规范字段，不要使用 content、id、ordered_list、headers 或 subsection。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
+  '请直接输出文档正文（优先按 Outline Contract 输出严格 JSON 大纲，无法结构化时使用 Markdown），不要寒暄、不要解释、不要任何前后缀。JSON 大纲必须包含 kind、title、sections、heading、level、blocks 字段。内容必须基于用户提供的附件与资料撰写，优先引用资料中的事实、数据和结论，不得编造；资料不足以支撑的部分要明确省略或说明。';
 
 export function inferDocumentKind(requirements: string): 'word' | 'excel' | 'ppt' {
   const text = requirements.toLowerCase();
@@ -162,34 +166,26 @@ export function extractSectionHeadings(
   return headings;
 }
 
-export function documentKindInstruction(
-  kind: 'word' | 'excel' | 'ppt'
-): string {
+export function documentKindInstruction(kind: OutlineDocumentKind): string {
   if (kind === 'ppt') {
     return [
       '这是 PPT 文档：每页表达一个明确结论，并用 3 至 5 个内容组支撑。每个内容组必须包含短标题和解释文字；不要用只有几个词的空泛要点。用户明确要求总页数时，必须服从前文的精确页数与单页容量约束。',
-      'pageKind 只能使用以下值：cover（封面）、section（章节页）、insight（结论/总结/详情/风险）、comparison（对比）、process（路线图/行动建议）、data（数据）、image_text（图文）、closing（结束页）。不要输出 summary、detail、roadmap、risk、action 等其他值。',
       '封面和结束页由系统统一生成；sections 只填写正文内容。不要把“封面”“谢谢”“谢谢观看”“感谢观看”作为正文 section，也不要把表格或图表挂在致谢页下。用户明确要求页数时，按总页数预算组织内容，避免通过重复页或碎片页凑页数。',
-      '页面的构图、留白、信息层级和视觉节奏由你自主设计，不要套用工作汇报、自然简约、商务卡片或其他固定模板。每个正文 section 必须输出 scene 作为页面设计稿，并同时输出 coverScene 与 closingScene；scene.schemaVersion 固定为 1，scene.elements 最多 30 个；元素只能使用 text、shape、line、group，不能使用 image、assetRef 或任何文件路径。坐标使用 0 到 1 的归一化值，必须完全落在页面范围内。text 元素的 content 必须来自同一页的标题、takeaway、action 或 blocks 原文；用 shape 和 line 组织视觉层级，不要把所有内容排成相同的卡片网格。',
-      'scene 元素格式：{"elementId":"title","type":"text","geometry":{"x":0.08,"y":0.12,"width":0.72,"height":0.12},"zIndex":2,"content":"页面标题","style":{"fontSize":30,"textColor":"20372B"}}。每页至少安排一个标题 text 和一个正文 text；根据内容自行选择不对称构图、主次比例、留白和强调色。不要输出“核心结论”“下一步”这类系统标签，除非它们确实是内容的一部分。',
-      '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
-      '{"kind":"ppt","title":"标题","coverScene":{"schemaVersion":1,"elements":[{"elementId":"cover-title","type":"text","geometry":{"x":0.08,"y":0.32,"width":0.84,"height":0.2},"zIndex":2,"content":"标题","style":{"fontSize":42,"textColor":"20372B"}}]},"sections":[{"heading":"分节标题","level":1,"pageKind":"insight","takeaway":"明确结论","action":"下一步行动","scene":{"schemaVersion":1,"elements":[{"elementId":"title","type":"text","geometry":{"x":0.08,"y":0.12,"width":0.72,"height":0.12},"zIndex":2,"content":"分节标题","style":{"fontSize":30,"textColor":"20372B"}},{"elementId":"body","type":"text","geometry":{"x":0.12,"y":0.36,"width":0.68,"height":0.22},"zIndex":2,"content":"短标题：解释文字","style":{"fontSize":18,"textColor":"20372B"}}]},"blocks":[{"type":"bullets","items":["短标题：解释文字"]}]}],"closingScene":{"schemaVersion":1,"elements":[{"elementId":"closing","type":"text","geometry":{"x":0.12,"y":0.42,"width":0.76,"height":0.16},"zIndex":2,"content":"谢谢观看","style":{"fontSize":30,"textColor":"20372B"}}]}}。',
-      '只在资料中有足够数据时输出 table 或 chart；table 使用 {"type":"table","header":["列名"],"rows":[["数据"]]}，chart 使用 {"type":"chart","chartKind":"bar","data":[{"label":"分类","value":1}]}；需要比较数值时必须同时提供 table 和 chart，chartKind 使用 bar 或 pie，value 必须是数字。没有可靠数据时不要编造。资料不足时写明建议、假设或待确认项，不能虚构业绩、客户、预算或收益。',
-      '如果无法输出 JSON，才使用 Markdown 标题、带解释的完整要点和标准管线表格。'
+      '页面的构图、留白、信息层级和视觉节奏由你自主设计，不要套用固定模板。text 元素的 content 必须来自同一页的标题、takeaway、action 或 blocks 原文；用 shape 和 line 组织视觉层级，不要把所有内容排成相同的卡片网格。',
+      buildDocumentOutlinePrompt('ppt'),
+      '只在资料中有足够数据时输出 table 或 chart；需要比较数值时必须同时提供 table 和 chart；没有可靠数据时不要编造。资料不足时写明建议、假设或待确认项，不能虚构业绩、客户、预算或收益。'
     ].join('\n');
   }
   if (kind === 'excel') {
     return [
       '这是 Excel 表格：以清晰的列名与数据行为主，避免大段文字，需要汇总时给出合计行。',
-      '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
-      '{"kind":"excel","title":"表格标题","sections":[{"heading":"工作表名称","level":1,"blocks":[{"type":"table","header":["姓名","部门","状态"],"rows":[["示例姓名","示例部门","待确认"]]}]}]}。',
-      '用户没有提供真实数据时，生成可直接填写的通用模板；文本字段可以使用“示例姓名1”这类占位符，数值字段必须留空或输出纯数字，不能把“示例基本工资1”写进金额列。涉及基本工资、绩效、补贴、扣款、实发工资时，实发工资应按“基本工资+绩效+补贴-扣款”计算；汇总行只放可核对的合计公式或留空，不要用“待确认”填满数值列。请在表格外的说明中标明“示例数据，仅供模板演示”，不能虚构真实员工、金额或经营数据。不要使用 columns、data、headers 或 content 字段。'
+      buildDocumentOutlinePrompt('excel'),
+      '用户没有提供真实数据时，生成可直接填写的通用模板；数值字段必须留空或输出纯数字，不能虚构真实员工、金额或经营数据。'
     ].join('\n');
   }
   return [
     '这是 Word 文档：标题层级清晰，段落完整，关键数据用表格呈现。',
-    '优先只输出一个 JSON 对象，不要 Markdown 代码围栏或解释，格式为：',
-    '{"kind":"word","title":"标题","sections":[{"heading":"分节标题","level":1,"blocks":[{"type":"paragraph","text":"正文"},{"type":"numbered","items":["步骤"]},{"type":"table","header":["列名"],"rows":[["数据"]]}]}]}。',
-    '不要使用 content、id、ordered_list、headers 或 subsection；只有无法结构化时才使用 Markdown 标题、段落、列表和标准管线表格。'
+    buildDocumentOutlinePrompt('word'),
+    '只有无法结构化时才使用 Markdown 标题、段落、列表和标准管线表格。'
   ].join('\n');
 }

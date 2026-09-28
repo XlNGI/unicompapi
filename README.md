@@ -18,7 +18,7 @@ UniComp 自有代码采用 Apache-2.0，详见根目录 [`LICENSE`](LICENSE)。�
 handoff/UniComp-技术开发启动包-V1.0.0/
 ```
 
-开发时不得直接修改交接包中的权威资料、设计图和原始压缩包。如需形成工程侧结论，请写入 `docs/active/`；冻结后的正式结论再移动或复制到 `docs/frozen/`。
+开发时不得直接修改交接包中的权威资料、设计图和原始压缩包。当前工程计划写入根目录 `PLANS.md`，实施记录写入 `docs/current/`，机器可验证证据写入 `docs/evidence/`。
 
 ## 当前优先级
 
@@ -27,7 +27,7 @@ handoff/UniComp-技术开发启动包-V1.0.0/
 1. 项目负责人最新明确决策；
 2. `handoff/UniComp-技术开发启动包-V1.0.0/03-最终UI交接包-已解压/UniComp-AI-最终UI与开发交接包-V1.2.1`；
 3. 根目录 `AGENTS.md` 与 `PLANS.md`；
-4. `docs/active/` 与 `docs/frozen/` 中的正式开发记录；
+4. `docs/current/` 与 `docs/evidence/` 中的工程记录和证据；
 5. `handoff` 中的历史归档和旧资料。
 
 ## 协作方式
@@ -43,7 +43,7 @@ handoff/UniComp-技术开发启动包-V1.0.0/
 | 开发者 A | UI 状态系统 | 状态组件、主题、可访问性、UI 测试与阶段 3 页面准备 |
 | 开发者 B | 本地领域与平台 | 实体、目录、索引、状态机、恢复和受控 IPC |
 
-详细分工见 `docs/active/阶段2-任务拆分.md`。
+详细分工见根目录 `PLANS.md` 的当前 P0-P8 计划。
 
 ## 技术方向
 

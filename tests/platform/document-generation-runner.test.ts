@@ -147,6 +147,14 @@ const employeeSalaryOutline = parseDocumentOutline(
 );
 
 describe('document generation runner', () => {
+  it('accepts the renderer-normalized PPT template title while keeping section checks strict', async () => {
+    const rootDirectory = await createProjectRoot();
+    const templateOutline = parseDocumentOutline(JSON.stringify({
+      kind: 'ppt', title: '季度经营汇报（模板）', sections: [{ heading: '总体经营结论', level: 1, blocks: [{ type: 'paragraph', text: '结论内容' }] }]
+    }));
+    const runner = new DocumentGenerationRunner({ rootDirectory, projectId: toProjectId('doc-template-title'), renderPreview: async () => ({ previewCount: 1, diagnostics: [] }) });
+    await expect(runner.run({ kind: 'ppt', title: templateOutline.title, contentFingerprint: 'a'.repeat(64), draftRevision: 1, sourceDraftId: 'message-template-title', outline: templateOutline })).resolves.toMatchObject({ work: { name: expect.stringContaining('季度经营汇报') } });
+  });
   it('records the real file, render, checks, publication and Work registration in order', async () => {
     const rootDirectory = await createProjectRoot();
     const events: DocumentGenerationProgressEvent[] = [];

@@ -51,6 +51,7 @@ export const chatContextIpcChannels = {
 } as const;
 
 export type ChatContextIpcErrorCode =
+  | 'local_safety_rejected'
   | 'native_search_authorization_required'
   | 'model_selection_required'
   | 'invalid_request'

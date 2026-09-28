@@ -1,0 +1,524 @@
+{
+  "schemaVersion": 2,
+  "requestedModel": "kimi-k3",
+  "mode": "real_provider",
+  "status": "passed",
+  "startedAt": "2026-09-28T15:59:28.865Z",
+  "outboundScope": "One synthetic PPT generation followed by structure reading; no user files, attachments or conversation history.",
+  "entryPoint": "createChatContextRuntime.responses.start -> canonical generate -> actual registered PPTX read -> final answer",
+  "maximumNetworkRequests": 4,
+  "maximumRequestsPerCase": 4,
+  "maximumOutputTokensPerRequest": 1024,
+  "automaticRetries": 0,
+  "cost": "unknown",
+  "cases": [
+    {
+      "case": "generate_and_read",
+      "expectedScope": "document",
+      "status": "passed",
+      "networkRequests": 3,
+      "schemasCanonical": true,
+      "pathOrRuntimeContextLeak": false,
+      "toolCalls": [
+        {
+          "callRef": "call-1",
+          "toolId": "generate_pptx"
+        },
+        {
+          "callRef": "call-2",
+          "toolId": "read_document_structure",
+          "scope": "document"
+        }
+      ],
+      "toolCallIdMatched": true,
+      "observationContainsExpectedFacts": true,
+      "documentContentFromObservationOnly": false,
+      "requestStructures": [
+        {
+          "round": 1,
+          "model": "kimi-k3",
+          "availableTools": [
+            "generate_pptx"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            }
+          ],
+          "toolChoiceType": "undefined",
+          "responseFormatPresent": false,
+          "previousResponseIdPresent": false
+        },
+        {
+          "round": 2,
+          "model": "kimi-k3",
+          "availableTools": [
+            "read_document_structure"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "generate_pptx",
+              "callRef": "call-1"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-1"
+            }
+          ],
+          "toolChoiceType": "undefined",
+          "responseFormatPresent": false,
+          "previousResponseIdPresent": false
+        },
+        {
+          "round": 3,
+          "model": "kimi-k3",
+          "availableTools": [
+            "read_document_structure"
+          ],
+          "messages": [
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "system",
+              "contentType": "string"
+            },
+            {
+              "role": "user",
+              "contentType": "string"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "generate_pptx",
+              "callRef": "call-1"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-1"
+            },
+            {
+              "role": "assistant",
+              "contentType": "string",
+              "tool": "read_document_structure",
+              "callRef": "call-2"
+            },
+            {
+              "role": "tool",
+              "contentType": "string",
+              "callRef": "call-2"
+            }
+          ],
+          "toolChoiceType": "undefined",
+          "responseFormatPresent": false,
+          "previousResponseIdPresent": false
+        }
+      ],
+      "physicalFile": {
+        "registeredWorkCount": 1,
+        "physicalPages": 4,
+        "hashVerified": true,
+        "sizeVerified": true,
+        "sourceExecutionMatched": true,
+        "independentReaderUsed": true,
+        "coverAndClosingIncluded": true,
+        "repeatedPinMatched": true
+      },
+      "artifactVerified": true,
+      "observationMatchesPhysicalFile": true,
+      "terminalState": "completed",
+      "terminalDiagnostics": [],
+      "answerUsesObservation": true,
+      "finalPhysicalPageCountMatched": true,
+      "trace": [
+        {
+          "code": "tool_authorization",
+          "status": "completed"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "prepare_tools_enter",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "failed",
+          "operationId": "available_tools_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "prepare_tools_exit",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "prepare_tools_enter",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "failed",
+          "operationId": "available_tools_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "prepare_tools_exit",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "generate_pptx_0_7853c552",
+          "tool": "write_document"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "operationId": "generate_pptx_0_7853c552",
+          "tool": "write_document"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "artifact_registered",
+          "tool": "write_document"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "generate_pptx_0_7853c552",
+          "tool": "write_document"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "prepare_tools_enter",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "runtime_context_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tools_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "prepare_tools_exit",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "prepare_tools_enter",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "runtime_context_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tools_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "prepare_tools_exit",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "runtime_context_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "read_document_structure_1_2527d884",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "operationId": "read_document_structure_1_2527d884",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "runtime_context_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "operationId": "read_document_structure_1_2527d884",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "prepare_tools_enter",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "runtime_context_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tools_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "prepare_tools_exit",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "prepare_tools_enter",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "runtime_context_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "started",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tools_refreshed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "available_tool_set_finalize",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "operationId": "prepare_tools_exit",
+          "tool": "read_sources"
+        }
+      ]
+    }
+  ],
+  "networkRequests": 3,
+  "model": "kimi-k3",
+  "routeSource": "Explicit exact providerModelKey selection, revalidated against copied registry and fresh candidate eligibility; no fallback.",
+  "fixture": {
+    "emptyProject": true,
+    "seededDocument": false,
+    "syntheticConfirmation": true
+  },
+  "settingsSource": "default",
+  "actualWireModel": "kimi-k3",
+  "usage": [
+    {
+      "status": "reported",
+      "sourceStage": "result",
+      "facts": [
+        {
+          "metricId": "completion_tokens",
+          "quantity": "43",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "prompt_tokens",
+          "quantity": "1464",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "total_tokens",
+          "quantity": "1507",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "cached_tokens",
+          "quantity": "0",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "reasoning_tokens",
+          "quantity": "0",
+          "unit": "token",
+          "source": "provider_body"
+        }
+      ]
+    }
+  ],
+  "protectedUserConfigurationUnchanged": true,
+  "temporaryCleanupDeferred": true,
+  "finishedAt": "2026-09-28T16:01:02.488Z"
+}

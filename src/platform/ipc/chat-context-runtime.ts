@@ -47,6 +47,10 @@ import {
 import { NodeProjectStorage } from '../storage';
 import { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
+import { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
+import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../documents/document-generation-application-adapters';
+import { DocumentGenerationRunner } from '../documents/document-generation-runner';
+import { createConfiguredOfficeRenderAdapter } from '../documents/office-render-adapter';
 import { createPresentationWorkflowScope } from '../documents/registered-presentation-reader';
 import { documentDeliveryFailureReason } from '../documents/conversation-document-workflow';
 import { ConversationSemanticClassifier, conversationSemanticLimits } from '../providers/conversation-semantic-classifier';
@@ -204,6 +208,7 @@ export function createChatContextRuntime(
     readonly contextService: ProjectContextRegistryService;
     readonly workflowService: ConversationWorkflowService;
     readonly attachments: ConversationAttachmentContextService;
+    readonly documentTools: ConversationDocumentToolSessionService;
     readonly webResearch: ConversationWebResearchControllerRuntime;
     readonly responses: ConversationResponseControllerRuntime;
   };
@@ -283,6 +288,30 @@ export function createChatContextRuntime(
     const documentPages = new ConversationDocumentPageContextService({
       rootDirectory: session.rootDirectory, projectId: session.projectId
     });
+    const mutationRenderer = createConfiguredOfficeRenderAdapter();
+    const documentTools = new ConversationDocumentToolSessionService({
+      rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: projectConversations,
+      ...(mutationRenderer ? { mutation: { renderPreview: mutationRenderer, canWrite: async () => {
+        const active = dependencies.getSession();
+        return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory;
+      } } } : {}),
+      generatePptx: {
+        compiler: new PlatformDocumentDraftCompiler(),
+        executor: new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({
+          rootDirectory: session.rootDirectory, projectId: session.projectId,
+          renderPreview: createConfiguredOfficeRenderAdapter(), requireRenderForPpt: true
+        })),
+        revalidateAuthorization: async context => {
+          const active = dependencies.getSession();
+          return !context.abortSignal.aborted && context.authorization.generationAuthorization === 'approved' &&
+            active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory;
+        }
+      },
+      getCurrentProjectId: () => {
+        const active = dependencies.getSession();
+        return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory ? active.projectId : undefined;
+      }
+    });
     const workflowService = new ConversationWorkflowService(
       new JsonConversationWorkflowRepository(storage, session.projectId, now),
       new ConversationIntentOrchestrator({
@@ -317,7 +346,8 @@ export function createChatContextRuntime(
         responseDrafts,
         contextRepository,
         documentPages,
-        attachments
+        attachments,
+        documentTools
       ),
       new RegistryFeatureCandidateSource(
         providerRegistry,
@@ -367,6 +397,7 @@ export function createChatContextRuntime(
       workflowService,
       attachments,
       documentPages,
+      documentTools,
       nativeSearch,
       ready: responseRecovery
     };
@@ -383,12 +414,14 @@ export function createChatContextRuntime(
         executions: responseExecutions,
         attachments,
         documentPages,
+        documentTools,
         nextMessageId: () => conversationIds.nextMessageId(),
         now
       });
       const dispatch = createConversationTextDispatchBridge({
         nativeSearch,
         ...textSubmission,
+        documentToolCalling: documentTools,
         providerRegistry,
         providerPackages,
         lifecycle: responseLifecycle,
@@ -526,6 +559,7 @@ export function createChatContextRuntime(
       contextService,
       workflowService,
       attachments,
+      documentTools,
       webResearch: {
         conversationService: new ConversationApplicationService(
           projectConversations,
@@ -706,6 +740,7 @@ export function createChatContextRuntime(
         // Adapter completion owns the terminal transition. Only persisted handles
         // left without a live adapter are marked interrupted directly.
         const cancelled = await runtime.responses.executionCoordinator.cancelAll();
+        await runtime.documentTools.dispose();
         const orphaned = await runtime.responses.executions.listActive();
         for (const execution of orphaned) {
           await runtime.responses.executions.interrupt(

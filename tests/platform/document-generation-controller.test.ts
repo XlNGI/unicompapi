@@ -395,7 +395,6 @@ describe('document generation controller', () => {
       kind: 'ppt',
       presentationTemplate: 'technology'
     });
-
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.error.message);
     expect(result.value.fileName.endsWith('.pptx')).toBe(true);

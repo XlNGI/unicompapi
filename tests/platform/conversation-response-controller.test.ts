@@ -601,6 +601,52 @@ describe('ConversationResponseController', () => {
     );
   });
 
+  it('submits the validated document plan as a bounded provider contract', async () => {
+    const value = fixture();
+    const plan = parseConversationIntentPlan({
+      schemaVersion: 1,
+      kind: 'document',
+      action: 'create',
+      documentKind: 'ppt',
+      parameters: {
+        topic: '季度经营汇报',
+        pageCount: 5,
+        style: '简洁商务',
+        requirements: '突出收入、风险和下一步行动'
+      },
+      sourcePolicy: 'internal',
+      missing: [],
+      ambiguities: [],
+      confidence: 'high',
+      needsConfirmation: false
+    });
+    value.workflowService.get.mockResolvedValue({ ...value.readyWorkflow, plan });
+
+    const result = await value.controller.start({
+      ...startRequest('workflow-document-contract'),
+      conversation: {
+        conversationId: 'conversation-controller',
+        expectedRevision: 2,
+        editedMessageId: null
+      },
+      content: '制作季度经营汇报 PPT',
+      workflow: {
+        workflowId: value.readyWorkflow.id,
+        expectedRevision: value.readyWorkflow.revision
+      }
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const createDraft = value.draftRepository.create as unknown as {
+      mock: { calls: readonly (readonly unknown[])[] };
+    };
+    const draft = createDraft.mock.calls.at(-1)?.[0] as { promptContent?: string } | undefined;
+    expect(draft?.promptContent).toContain('【UniComp 受控文档生成合同】');
+    expect(draft?.promptContent).toContain('"documentKind":"ppt"');
+    expect(draft?.promptContent).toContain('"pageCount":5');
+    expect(draft?.promptContent).toContain('制作季度经营汇报 PPT');
+  });
+
   it('passes a transport interruption callback for a cancellation that outlives the request', async () => {
     const value = fixture();
     const pending = execution('pending');

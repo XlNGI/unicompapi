@@ -1,5 +1,7 @@
 import type { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
+import { providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -1084,9 +1086,11 @@ describe('NewAPI chat adapter', () => {
       ? chatStreamEvent({ tool_calls: [{ index: 0, ...wireCall }] }, 'tool_calls')
       : chatStreamEvent({ content: 'Reviewed' }, 'stop')) + 'data: [DONE]\n\n'));
     const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
-    const execute = vi.fn(async () => ({ revision: 3 }));
+    const context = readDocumentToolContext();
+    const execute = vi.fn(async () => ({ schemaVersion: 1 as const, status: 'success' as const, observation: { revision: context.revision } }));
     const bridge = createDocumentToolCallingBridge({
-      bindings: [{ id: 'read_document_structure', fields: {}, authorize: async () => true, execute }],
+      bindings: [{ contract: readDocumentToolContract, authorize: async () => true, execute }],
+      getExecutionContext: () => context,
       budgetUnits: 4, maxCalls: 2, timeoutMs: 1_000
     });
     const handle = await adapter.submit({
@@ -1101,11 +1105,102 @@ describe('NewAPI chat adapter', () => {
       { role: 'user', content: 'Inspect' },
       { role: 'assistant', content: '', tool_calls: [wireCall] },
       { role: 'tool', tool_call_id: 'read-1', name: 'read_document_structure', content: JSON.stringify({
-        ok: true, callId: 'read-1', toolId: 'read_document_structure', toolVersion: '1.0',
-        costUnits: 1, outcomeUnknown: false, result: { revision: 3 }
+        schemaVersion: 1, status: 'success', observation: { revision: context.revision },
+        metadata: { callId: 'read-1', toolId: readDocumentToolContract.toolId, toolVersion: readDocumentToolContract.version,
+          costUnits: readDocumentToolContract.execution.budgetUnits }
       }) }
     ]);
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({ scope: 'document' }, expect.objectContaining({
+      currentDocumentId: context.currentDocumentId, revision: context.revision
+    }));
+    expect(requestJson(fixture.requests[0]).tools).toEqual(bridge.tools.map(tool => ({
+      type: 'function', function: { name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters }
+    })));
+    expect(JSON.stringify(requestJson(fixture.requests[0]).tools)).not.toContain('requiresExistingDocument');
+    expect(JSON.stringify(requestJson(fixture.requests[0]))).not.toContain(context.currentDocumentId);
+  });
+
+  it('refreshes available tools for each request and safely correlates a rejected stale call', async () => {
+    const firstCall = { id: 'read-current-1', type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } };
+    const revokedCall = { ...firstCall, id: 'read-current-2' };
+    let round = 0;
+    const fixture = runtimeFixture(async () => {
+      const response = round++;
+      return streamResponse((response < 2
+        ? chatStreamEvent({ tool_calls: [{ index: 0, ...(response === 0 ? firstCall : revokedCall) }] }, 'tool_calls')
+        : chatStreamEvent({ content: 'Read complete' }, 'stop')) + 'data: [DONE]\n\n');
+    });
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    let revoked = false;
+    const prepareTools = vi.fn(async (signal: AbortSignal) => {
+      expect(signal.aborted).toBe(false);
+      return revoked ? [] : definitions;
+    });
+    const execute = vi.fn(async () => {
+      revoked = true;
+      return { schemaVersion: 1, status: 'success', observation: { totalSections: 2 }, metadata: { toolId: readDocumentToolContract.toolId } };
+    });
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'),
+      request: { responseExecutionId: 'response-current-tools', invocationAttemptId: 'attempt-current-tools',
+        messages: [{ role: 'user', content: 'Inspect' }], parameterValues: {}, tools: definitions },
+      prepareTools, toolBridge: { execute }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(prepareTools).toHaveBeenCalledTimes(6);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(requestJson(fixture.requests[0])).toHaveProperty('tools');
+    expect(requestJson(fixture.requests[1])).not.toHaveProperty('tools');
+    expect(requestJson(fixture.requests[2])).not.toHaveProperty('tools');
+    const messages = requestJson(fixture.requests[2]).messages as { role: string; tool_call_id?: string; content: string }[];
+    expect(messages.filter(message => message.role === 'tool').map(message => message.tool_call_id)).toEqual(['read-current-1', 'read-current-2']);
+    expect(JSON.parse(messages.at(-1)!.content)).toMatchObject({ status: 'failed', diagnostics: [{ code: 'TOOL_PRECONDITION_FAILED' }] });
+  });
+
+  it.each([undefined, []])('does not reuse static schemas when preparation returns %j', async (available) => {
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ content: 'No document' }, 'stop') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'),
+      request: { responseExecutionId: 'response-no-tools', invocationAttemptId: 'attempt-no-tools',
+        messages: [{ role: 'user', content: 'Inspect' }], parameterValues: {}, tools: providerToolsFromContracts([readDocumentToolContract]) },
+      prepareTools: async () => available });
+    await handle.completion;
+    expect(requestJson(fixture.requests[0])).not.toHaveProperty('tools');
+  });
+
+  it('rejects dynamic schema drift before network submission', async () => {
+    const fixture = runtimeFixture(async () => { throw new Error('Unexpected request'); });
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const definition = providerToolsFromContracts([readDocumentToolContract])[0]!;
+    await expect(adapter.submit({ routeSnapshot: routeFor('text_chat'),
+      request: { responseExecutionId: 'response-invalid-tools', invocationAttemptId: 'attempt-invalid-tools',
+        messages: [{ role: 'user', content: 'Inspect' }], parameterValues: {} },
+      prepareTools: async () => [{ ...definition, function: { ...definition.function,
+        parameters: { type: 'object', properties: { documentRef: { type: 'string' } } } } }]
+    })).rejects.toThrow('parameters');
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('does not resend an observation when the final request-start hook revokes the available tools', async () => {
+    const fixture = runtimeFixture(async () => streamResponse(chatStreamEvent({ tool_calls: [{ index: 0, id: 'read-final-guard', type: 'function',
+      function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, 'tool_calls') + 'data: [DONE]\n\n'));
+    const adapter = new NewApiChatAdapter(fixture.runtime, credentialResolver(), connectionResolver(), schemaResolver(), lifecycleFixture().port, usageSink().port);
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    let requestStarts = 0;
+    let available = true;
+    const handle = await adapter.submit({ routeSnapshot: routeFor('text_chat'),
+      request: { responseExecutionId: 'response-final-guard', invocationAttemptId: 'attempt-final-guard',
+        messages: [{ role: 'user', content: 'Inspect' }], parameterValues: {} },
+      prepareTools: async () => available ? definitions : undefined,
+      beforeRequestStarted: async () => { if (++requestStarts === 2) available = false; },
+      toolBridge: { execute: async () => ({ schemaVersion: 1, status: 'success',
+        observation: { text: 'OBSERVATION-MUST-NOT-BE-RESENT' }, metadata: { toolId: readDocumentToolContract.toolId } }) }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'failed' });
+    expect(requestStarts).toBe(2);
+    expect(fixture.requests).toHaveLength(1);
+    expect(JSON.stringify(fixture.requests.map(requestJson))).not.toContain('OBSERVATION-MUST-NOT-BE-RESENT');
   });
 
   it('accepts empty finish reasons on gateway deltas but waits for an explicit terminal event', async () => {
@@ -1144,7 +1239,8 @@ describe('NewAPI chat adapter', () => {
     expect(result.lifecycle.content).toBe('');
   });
 
-  it('serializes only allowlisted native document tools', async () => {
+  it.each([true, false])('serializes canonical available tools and omits an empty set: %s', async (hasAvailableTools) => {
+    const tools = providerToolsFromContracts(hasAvailableTools ? [readDocumentToolContract] : []);
     const sse = [
       `data: ${JSON.stringify({ id: 'tool-stream', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v3', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\n`,
       'data: [DONE]\n\n'
@@ -1163,25 +1259,16 @@ describe('NewAPI chat adapter', () => {
       request: {
         responseExecutionId: 'response-tool-calling',
         invocationAttemptId: 'attempt-tool-calling',
-        messages: [{ role: 'user', content: 'apply' }],
-        tools: [{
-          type: 'function',
-          function: {
-            name: 'apply_document_patch',
-            parameters: { type: 'object', properties: {} }
-          }
-        }],
+        messages: [{ role: 'user', content: 'inspect' }],
+        tools,
         parameterValues: {}
       }
     });
     await handle.completion;
-    expect(requestJson(fixture.requests[0]).tools).toEqual([{
-      type: 'function',
-      function: {
-        name: 'apply_document_patch',
-        parameters: { type: 'object', properties: {} }
-      }
-    }]);
+    if (hasAvailableTools) expect(requestJson(fixture.requests[0]).tools).toEqual(tools.map(tool => ({
+      type: 'function', function: { name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters }
+    })));
+    else expect(requestJson(fixture.requests[0])).not.toHaveProperty('tools');
   });
 
   it('serializes default UniCompAPI chat fields without forcing stream/user', async () => {

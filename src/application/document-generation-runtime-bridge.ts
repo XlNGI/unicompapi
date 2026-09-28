@@ -1,4 +1,4 @@
-import type { DocumentToolId, WorkId } from '../domain';
+import type { DocumentOperation, DocumentToolId, WorkId } from '../domain';
 import type {
   DocumentGenerationProgressEvent,
   DocumentGenerationRuntimeSession
@@ -18,7 +18,8 @@ export class DocumentGenerationRuntimeBridge implements DocumentGenerationRuntim
   constructor(
     private readonly service: DocumentTaskRuntimeService,
     private readonly scope: DocumentTaskRuntimeScope,
-    executionId: string
+    executionId: string,
+    private readonly operation?: DocumentOperation
   ) {
     this.executionId = executionId;
   }
@@ -28,7 +29,7 @@ export class DocumentGenerationRuntimeBridge implements DocumentGenerationRuntim
   }
 
   async progress(event: DocumentGenerationProgressEvent): Promise<void> {
-    const toolId = toolForEvent(event.code);
+    const toolId = toolForEvent(event.code, this.operation);
     if (!toolId || event.status === 'progress') return;
     const key = operationKey(event);
     if (event.status === 'started') {
@@ -110,7 +111,14 @@ function operationKey(event: DocumentGenerationProgressEvent): string {
   return `${code}:${event.operationId ?? code}`;
 }
 
-function toolForEvent(code: DocumentGenerationProgressEvent['code']): DocumentToolId | undefined {
+function toolForEvent(code: DocumentGenerationProgressEvent['code'], operation?: DocumentOperation): DocumentToolId | undefined {
+  // New-document lifecycle checks do not read an existing document. They are
+  // persisted as production facts, but must not be represented by an
+  // existing-document tool in the durable task runtime.
+  if (operation === 'create' && [
+    'plan_validation', 'document_compile', 'document_check', 'document_structure_check',
+    'document_hash_check', 'document_publish', 'document_register', 'tool_call'
+  ].includes(code)) return undefined;
   switch (code) {
     case 'plan_validation':
     case 'document_structure_check':

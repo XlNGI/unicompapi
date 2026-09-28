@@ -64,13 +64,15 @@ export class RegisteredPresentationReader {
       return { work, file, fileName: path.basename(file.locator.relativePath), buffer, pages, map };
     } catch (error) {
       if (error instanceof DocumentGenerationApplicationError) throw error;
-      throw sourceError();
+      throw sourceError(error instanceof Error ? error.name : 'unknown');
     }
   }
 }
 
-function sourceError() {
-  return new DocumentGenerationApplicationError('revision_scope_violation', '原 PPT 文件不可读取或已发生变化，请核对作品版本后重新发起修改。');
+function sourceError(reason = 'unknown') {
+  const error = new DocumentGenerationApplicationError('revision_scope_violation', '原 PPT 文件不可读取或已发生变化，请核对作品版本后重新发起修改。');
+  Object.defineProperty(error, 'safeReason', { value: /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(reason) ? reason : 'unknown', enumerable: false });
+  return error;
 }
 function scopeError() {
   return new DocumentGenerationApplicationError('revision_scope_violation', '无法将章节唯一对应到 PPT 的实际页面，请核对目标范围后重新发起修改。');

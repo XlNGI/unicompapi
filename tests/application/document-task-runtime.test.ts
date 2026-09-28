@@ -11,7 +11,7 @@ const projectId = toProjectId('project-service');
 const input = {
   id: toDocumentTaskRuntimeId('runtime-1'), projectId,
   conversationId: toConversationId('conversation-1'), sourceMessageId: toMessageId('message-1'),
-  executionId: 'execution-1', documentKind: 'ppt' as const,
+  executionId: 'execution-1', documentKind: 'ppt' as const, operation: 'edit' as const,
   attachmentRefs: ['attachment-1'], workRef: { kind: 'candidate' as const, ref: 'candidate-1', revision: 2 },
   pageRefs: [{ pageId: 'page-1', pageRevision: 2 }],
   budget: { maxSteps: 8, budgetUnits: 16, timeoutMs: 1000 }
@@ -44,6 +44,16 @@ async function fixture(overrides: Partial<typeof input> = {}) {
 }
 
 describe('document task runtime lifecycle', () => {
+  it('keeps create PPT and attachment-backed edit operations explicit', async () => {
+    const created = createDocumentTaskRuntime({
+      ...input, operation: 'create', attachmentRefs: [], workRef: undefined, pageRefs: [],
+      createdAt: toIsoTimestamp(now())
+    });
+    const edited = createDocumentTaskRuntime({ ...input, operation: 'edit', createdAt: toIsoTimestamp(now()) });
+    expect(created).toMatchObject({ documentKind: 'ppt', operation: 'create', attachmentRefs: [] });
+    expect(edited).toMatchObject({ documentKind: 'ppt', operation: 'edit', attachmentRefs: ['attachment-1'] });
+  });
+
   it('writes ahead, settles and reopens an idempotent observation without charging again', async () => {
     const f = await fixture();
     expect((await f.service.beginToolCall(f.runtime, call)).execute).toBe(true);

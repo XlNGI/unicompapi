@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "planId": "ppt-goal-pipeline",
+  "source": "PLANS.md",
+  "phases": [
+    { "id": "P0", "status": "in_progress", "requirements": ["P0-BASELINE-001"] },
+    { "id": "P1", "status": "in_progress", "requirements": ["P1-SG-001"] },
+    { "id": "P2", "status": "in_progress", "requirements": ["P2-CONTEXT-001"] },
+    { "id": "P3", "status": "in_progress", "requirements": ["P3-IR-001", "P3-REPAIR-001"] },
+    { "id": "P4", "status": "in_progress", "requirements": ["P4-CONTENT-001"] },
+    { "id": "P5", "status": "in_progress", "requirements": ["P5-DESIGN-001", "P5-LAYOUT-001"] },
+    { "id": "P6", "status": "in_progress", "requirements": ["P6-QA-001", "P6-PUBLISH-001"] },
+    { "id": "P7", "status": "in_progress", "requirements": ["P7-EDIT-001"] },
+    { "id": "P8", "status": "blocked", "requirements": ["P8-RECOVERY-001", "P8-DELIVERY-001"] }
+  ],
+  "requiredCommands": [
+    "typecheck",
+    "lint",
+    "build",
+    "test",
+    "audit:platform",
+    "verify:phase9-closeout"
+  ]
+}

@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readDocumentToolContext, readDocumentToolContract } from '../fixtures/document-tool-context';
+import { providerToolsFromContracts } from '../../src/platform/providers/provider-tool-calling';
 import {
   createProviderConnection,
   createProviderExecutionRouteSnapshot,
@@ -21,6 +23,7 @@ import {
 } from '../../src/domain';
 import {
   createDocumentToolCallingBridge,
+  createConversationTextDispatchBridge,
   DEEPSEEK_CHAT_ADAPTER_ID,
   DEEPSEEK_CHAT_ADAPTER_VERSION,
   DEEPSEEK_CHAT_PARAMETER_SCHEMA_ID,
@@ -57,6 +60,8 @@ import {
   type DeepSeekSafeLogEvent,
   type DeepSeekUsageObservationSinkPort
 } from '../../src/platform';
+
+afterEach(() => vi.restoreAllMocks());
 
 const timestamp = toIsoTimestamp('2026-08-03T12:00:00.000Z');
 const credential: StructuredCredentialRecord = {
@@ -130,6 +135,93 @@ describe('DeepSeek official package contracts', () => {
     ]);
   });
 });
+
+describe('response-specific document tool dispatch', () => {
+  it.each([false, true])('passes a dynamic session and closes it after completion without changing outcome (cleanup fails: %s)', async (cleanupFails) => {
+    const terminal = { state: 'completed' as const, providerOperationId: 'dynamic-operation', finishReason: 'stop' as const, usageAvailability: 'not_reported' as const };
+    let complete!: (value: typeof terminal) => void;
+    const completion = new Promise<typeof terminal>(resolve => { complete = resolve; });
+    const submit = vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockResolvedValue({ providerOperationId: 'dynamic-operation', completion });
+    const close = vi.fn(async () => { if (cleanupFails) throw new Error('Cleanup unavailable'); });
+    const session = { prepareTools: vi.fn(async () => providerToolsFromContracts([readDocumentToolContract])),
+      bridge: { execute: vi.fn(async () => ({ schemaVersion: 1, status: 'success' })) }, close };
+    const forExecution = vi.fn(async () => session);
+    const fixture = textDispatchFixture({ documentToolCalling: { forExecution },
+      toolCalling: { tools: providerToolsFromContracts([readDocumentToolContract]), bridge: { execute: vi.fn() } } });
+    const originalRequest = { ...dispatchRequest({}), tools: providerToolsFromContracts([readDocumentToolContract]) };
+    const outcome = await fixture.bridge.submit({ routeSnapshot: routeSnapshot('text_chat'),
+      request: originalRequest, beforeRequestStarted: async () => undefined });
+    expect(outcome).toEqual({ kind: 'accepted_async', providerOperationId: 'dynamic-operation' });
+    expect(forExecution).toHaveBeenCalledWith({ responseExecutionId: originalRequest.responseExecutionId });
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({ prepareTools: session.prepareTools, toolBridge: session.bridge,
+      request: { tools: undefined } });
+    expect(originalRequest.tools).toHaveLength(1);
+    expect(close).not.toHaveBeenCalled();
+    complete(terminal);
+    await expect(fixture.register.mock.calls[0]![0].completion).resolves.toEqual(terminal);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not inherit request or static schemas when the configured factory has no bound document', async () => {
+    const submit = vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockResolvedValue({ providerOperationId: 'plain-operation', completion: Promise.resolve({
+      state: 'completed', providerOperationId: 'plain-operation', finishReason: 'stop', usageAvailability: 'not_reported'
+    }) });
+    const tools = providerToolsFromContracts([readDocumentToolContract]);
+    const forExecution = vi.fn(async () => undefined);
+    const fixture = textDispatchFixture({ documentToolCalling: { forExecution }, toolCalling: { tools, bridge: { execute: vi.fn() } } });
+    await fixture.bridge.submit({ routeSnapshot: routeSnapshot('text_chat'), request: { ...dispatchRequest({}), tools },
+      beforeRequestStarted: async () => undefined });
+    expect(submit.mock.calls[0]?.[0].request).toMatchObject({ tools: undefined });
+    expect(submit.mock.calls[0]?.[0].toolBridge).toBeUndefined();
+    expect(submit.mock.calls[0]?.[0].prepareTools).toBeUndefined();
+  });
+
+  it('keeps static tool calling available when no per-response factory is configured', async () => {
+    const submit = vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockResolvedValue({ providerOperationId: 'static-operation', completion: Promise.resolve({
+      state: 'completed', providerOperationId: 'static-operation', finishReason: 'stop', usageAvailability: 'not_reported'
+    }) });
+    const toolCalling = { tools: providerToolsFromContracts([readDocumentToolContract]), bridge: { execute: vi.fn() }, maxRounds: 2 };
+    const fixture = textDispatchFixture({ toolCalling });
+    await fixture.bridge.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}), beforeRequestStarted: async () => undefined });
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({ request: { tools: toolCalling.tools }, toolBridge: toolCalling.bridge, maxToolRounds: 2 });
+    expect(submit.mock.calls[0]?.[0].prepareTools).toBeUndefined();
+  });
+
+  it('closes a prepared session once when adapter submission fails', async () => {
+    vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockRejectedValue(new Error('Before submission'));
+    const close = vi.fn(async () => undefined);
+    const session = { prepareTools: async () => [], bridge: { execute: vi.fn() }, close };
+    const fixture = textDispatchFixture({ documentToolCalling: { forExecution: async () => session } });
+    await expect(fixture.bridge.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}),
+      beforeRequestStarted: async () => undefined })).resolves.toMatchObject({ kind: 'failed_before_submission' });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(fixture.register).not.toHaveBeenCalled();
+  });
+
+  it('does not hold completion open when session cleanup never finishes', async () => {
+    const terminal = { state: 'completed' as const, providerOperationId: 'cleanup-pending', finishReason: 'stop' as const, usageAvailability: 'not_reported' as const };
+    vi.spyOn(DeepSeekChatAdapter.prototype, 'submit').mockResolvedValue({ providerOperationId: terminal.providerOperationId,
+      completion: Promise.resolve(terminal) });
+    const close = vi.fn(() => new Promise<void>(() => undefined));
+    const fixture = textDispatchFixture({ documentToolCalling: { forExecution: async () => ({
+      prepareTools: async () => [], bridge: { execute: vi.fn() }, close
+    }) } });
+    await expect(fixture.bridge.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}),
+      beforeRequestStarted: async () => undefined })).resolves.toMatchObject({ kind: 'accepted_async' });
+    await expect(fixture.register.mock.calls[0]![0].completion).resolves.toEqual(terminal);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+function textDispatchFixture(overrides: Partial<Parameters<typeof createConversationTextDispatchBridge>[0]>) {
+  const register = vi.fn((_operation: { completion: Promise<unknown> }) => undefined);
+  const bridge = createConversationTextDispatchBridge({
+    deepSeekRuntime: {}, newApiRuntime: {}, credentialVault: {}, providerRegistry: {},
+    providerPackages: { resolveAdapter: () => undefined }, usage: {}, lifecycle: {}, conversations: {},
+    coordinator: { register }, ...overrides
+  } as unknown as Parameters<typeof createConversationTextDispatchBridge>[0]);
+  return { bridge, register };
+}
 
 describe('DeepSeek management adapter', () => {
   it('uses GET /models for free validation and exact catalog discovery without leaking secrets', async () => {
@@ -227,9 +319,11 @@ describe('DeepSeek chat adapter', () => {
       streamResponse([chunk({ delta: { tool_calls: [{ index: 0, ...wireCall }] }, finishReason: 'tool_calls' }), '[DONE]']),
       streamResponse([chunk({ delta: { content: 'Reviewed' }, finishReason: 'stop' }), '[DONE]'])
     );
-    const execute = vi.fn(async () => ({ revision: 3 }));
+    const context = readDocumentToolContext();
+    const execute = vi.fn(async () => ({ schemaVersion: 1 as const, status: 'success' as const, observation: { revision: context.revision } }));
     const bridge = createDocumentToolCallingBridge({
-      bindings: [{ id: 'read_document_structure', fields: {}, authorize: async () => true, execute }],
+      bindings: [{ contract: readDocumentToolContract, authorize: async () => true, execute }],
+      getExecutionContext: () => context,
       budgetUnits: 4, maxCalls: 2, timeoutMs: 1_000
     });
     const handle = await fixture.adapter.submit({
@@ -243,11 +337,114 @@ describe('DeepSeek chat adapter', () => {
       { role: 'user', content: 'Synthetic user message' },
       { role: 'assistant', content: '', tool_calls: [wireCall] },
       { role: 'tool', tool_call_id: 'read-1', name: 'read_document_structure', content: JSON.stringify({
-        ok: true, callId: 'read-1', toolId: 'read_document_structure', toolVersion: '1.0',
-        costUnits: 1, outcomeUnknown: false, result: { revision: 3 }
+        schemaVersion: 1, status: 'success', observation: { revision: context.revision },
+        metadata: { callId: 'read-1', toolId: readDocumentToolContract.toolId, toolVersion: readDocumentToolContract.version,
+          costUnits: readDocumentToolContract.execution.budgetUnits }
       }) }
     ]);
     expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({ scope: 'document' }, expect.objectContaining({
+      currentDocumentId: context.currentDocumentId, revision: context.revision
+    }));
+    expect(bodyOf(fixture.transport.requests[0]).tools).toEqual(bridge.tools.map(tool => ({
+      type: 'function', function: { name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters }
+    })));
+    expect(JSON.stringify(bodyOf(fixture.transport.requests[0]).tools)).not.toContain('requiresExistingDocument');
+    expect(JSON.stringify(bodyOf(fixture.transport.requests[0]))).not.toContain(context.currentDocumentId);
+  });
+
+  it('refreshes available tools for every request and rejects calls omitted from that request', async () => {
+    const fixture = chatFixture();
+    const firstCall = { id: 'read-current-1', type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } };
+    const revokedCall = { ...firstCall, id: 'read-current-2' };
+    fixture.transport.responses.push(
+      streamResponse([chunk({ delta: { tool_calls: [{ index: 0, ...firstCall }] }, finishReason: 'tool_calls' }), '[DONE]']),
+      streamResponse([chunk({ delta: { tool_calls: [{ index: 0, ...revokedCall }] }, finishReason: 'tool_calls' }), '[DONE]']),
+      streamResponse([chunk({ delta: { content: 'Read complete' }, finishReason: 'stop' }), '[DONE]'])
+    );
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    let revoked = false;
+    const prepareTools = vi.fn(async (signal: AbortSignal) => {
+      expect(signal.aborted).toBe(false);
+      return revoked ? [] : definitions;
+    });
+    const execute = vi.fn(async () => {
+      revoked = true;
+      return { schemaVersion: 1, status: 'success', observation: { totalSections: 2 }, metadata: { toolId: readDocumentToolContract.toolId } };
+    });
+    const handle = await fixture.adapter.submit({
+      routeSnapshot: routeSnapshot('text_chat'), request: { ...dispatchRequest({}), tools: definitions },
+      prepareTools, toolBridge: { execute }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'completed' });
+    expect(prepareTools).toHaveBeenCalledTimes(6);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(bodyOf(fixture.transport.requests[0])).toHaveProperty('tools');
+    expect(bodyOf(fixture.transport.requests[1])).not.toHaveProperty('tools');
+    expect(bodyOf(fixture.transport.requests[2])).not.toHaveProperty('tools');
+    const messages = bodyOf(fixture.transport.requests[2]).messages as { role: string; tool_call_id?: string; content: string }[];
+    expect(messages.filter(message => message.role === 'tool').map(message => message.tool_call_id)).toEqual(['read-current-1', 'read-current-2']);
+    expect(JSON.parse(messages.at(-1)!.content)).toMatchObject({ status: 'failed', diagnostics: [{ code: 'TOOL_PRECONDITION_FAILED' }] });
+  });
+
+  it.each([undefined, []])('does not reuse static tool schemas when preparation returns %j', async (available) => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([chunk({ delta: { content: 'No document' }, finishReason: 'stop' }), '[DONE]']));
+    const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'),
+      request: { ...dispatchRequest({}), tools: providerToolsFromContracts([readDocumentToolContract]) },
+      prepareTools: async () => available });
+    await handle.completion;
+    expect(bodyOf(fixture.transport.requests[0])).not.toHaveProperty('tools');
+  });
+
+  it('rejects prepared schema drift before sending the request', async () => {
+    const fixture = chatFixture();
+    const definition = providerToolsFromContracts([readDocumentToolContract])[0]!;
+    await expect(fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}),
+      prepareTools: async () => [{ ...definition, function: { ...definition.function,
+        parameters: { type: 'object', properties: { documentRef: { type: 'string' } } } } }]
+    })).rejects.toThrow('parameters');
+    expect(fixture.transport.requests).toHaveLength(0);
+  });
+
+  it('does not transmit a prepared observation after the final request-start hook revokes document access', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([chunk({ delta: { tool_calls: [{ index: 0, id: 'read-final-guard', type: 'function',
+      function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, finishReason: 'tool_calls' }), '[DONE]']));
+    const definitions = providerToolsFromContracts([readDocumentToolContract]);
+    let requestStarts = 0;
+    let available = true;
+    const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}),
+      prepareTools: async () => available ? definitions : undefined,
+      beforeRequestStarted: async () => { if (++requestStarts === 2) available = false; },
+      toolBridge: { execute: async () => ({ schemaVersion: 1, status: 'success',
+        observation: { text: 'OBSERVATION-MUST-NOT-BE-RESENT' }, metadata: { toolId: readDocumentToolContract.toolId } }) }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ state: 'failed' });
+    expect(requestStarts).toBe(2);
+    expect(fixture.transport.requests).toHaveLength(1);
+    expect(JSON.stringify(fixture.transport.requests.map(bodyOf))).not.toContain('OBSERVATION-MUST-NOT-BE-RESENT');
+  });
+
+  it('cancels while the next request is preparing document tools', async () => {
+    const fixture = chatFixture();
+    fixture.transport.responses.push(streamResponse([chunk({ delta: { tool_calls: [{ index: 0, id: 'read-cancel',
+      type: 'function', function: { name: readDocumentToolContract.toolId, arguments: '{}' } }] }, finishReason: 'tool_calls' }), '[DONE]']));
+    let preparing!: () => void;
+    const pendingPreparation = new Promise<void>(resolve => { preparing = resolve; });
+    let preparationCount = 0;
+    const handle = await fixture.adapter.submit({ routeSnapshot: routeSnapshot('text_chat'), request: dispatchRequest({}),
+      prepareTools: async signal => {
+        if (preparationCount++ < 2) return providerToolsFromContracts([readDocumentToolContract]);
+        preparing();
+        return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true }));
+      },
+      toolBridge: { execute: async () => ({ schemaVersion: 1, status: 'success' }) }
+    });
+    await pendingPreparation;
+    await expect(fixture.adapter.cancel(handle.providerOperationId)).resolves.toBe(true);
+    await expect(handle.completion).resolves.toMatchObject({ state: 'cancelled' });
+    expect(fixture.transport.requests).toHaveLength(1);
   });
 
   it('maps text_chat to strict SSE, persists final usage and emits only answer content', async () => {

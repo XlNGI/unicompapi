@@ -11,6 +11,7 @@ import {
   type DocumentMessageResult,
   type DocumentGenerationFailureCode,
   type DocumentGenerationStatus,
+  type DocumentIR,
   type DocumentOutline,
   type DocumentWorkspaceKind,
   type ExecutionId,
@@ -20,6 +21,7 @@ import {
   type TaskId,
   type WorkId
 } from '../domain';
+import type { DocumentOperation } from '../domain/entities/document-agent';
 import { ConversationApplicationError } from './conversation-service';
 import { DocumentTaskRuntimeConflictError } from './document-task-runtime-service';
 import type {
@@ -42,6 +44,7 @@ import type { PresentationRevisionMap } from './presentation-revision-map';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
+  | 'ir_conflict'
   | 'resource_limit';
 
 export class DocumentDraftCompilationError extends Error {
@@ -86,13 +89,23 @@ export class DocumentGenerationApplicationError extends Error {
 }
 
 export interface DocumentDraftCompilerPort {
+  compileIR?(input: {
+    readonly outline: DocumentOutline;
+    readonly operation: DocumentOperation;
+    readonly attachmentRefs?: readonly string[];
+    readonly revision?: DocumentIR['revision'];
+  }): DocumentIR;
   compile(input: {
     readonly content: string;
     readonly kind: DocumentWorkspaceKind;
+    readonly operation?: DocumentOperation;
+    readonly attachmentRefs?: readonly string[];
   }): DocumentOutline;
   recover(input: {
     readonly content: string;
     readonly kind: DocumentWorkspaceKind;
+    readonly operation?: DocumentOperation;
+    readonly attachmentRefs?: readonly string[];
   }): DocumentOutline;
 }
 
@@ -204,6 +217,7 @@ export interface DocumentGenerationExecutionInput {
   readonly draftRevision: number;
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
+  readonly documentIR?: DocumentIR;
   readonly parentWorkId?: WorkId;
   readonly sourceChecksumSha256?: string;
   /** Stable identity and validated patch for a scoped parent revision. */
@@ -255,6 +269,8 @@ export interface GenerateDocumentFromMessageInput {
   readonly expectedRevision: number;
   readonly messageId: MessageId;
   readonly kind: DocumentWorkspaceKind;
+  /** Resolved upstream by the workflow/generation plan. */
+  readonly operation?: DocumentOperation;
   readonly parentWorkId?: WorkId;
   readonly revisionTargetSectionHeading?: string;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
@@ -837,6 +853,8 @@ export class DocumentGenerationApplicationService {
         conversation,
         input.messageId
       );
+      const operation = input.operation ?? (input.parentWorkId === undefined ? 'create' : 'edit');
+      const attachmentRefs = input.parentWorkId === undefined ? [] : [String(input.parentWorkId)];
       const previousMessage = input.parentWorkId === undefined
         ? undefined
         : [...conversation.messages]
@@ -852,7 +870,9 @@ export class DocumentGenerationApplicationService {
       const previousOutline = previousMessage
         ? this.compileLegacyDraft(
             previousMessage.documentResult?.validatedContent ?? previousMessage.content,
-            input.kind
+            input.kind,
+            operation,
+            attachmentRefs
           )
         : undefined;
       const revisionTarget = requestText === undefined
@@ -879,7 +899,7 @@ export class DocumentGenerationApplicationService {
         isExplicitClearRevisionRequest(requestText);
       let outline = useDeterministicClearRevision
         ? previousOutline
-        : this.compileDraft(content, input.kind);
+        : this.compileDraft(content, input.kind, operation, attachmentRefs);
       let revisionTargetSectionHeading: string | undefined;
       let revisionPatch: DocumentRevisionPatch | undefined;
       let revisionPatches: readonly DocumentRevisionPatch[] | undefined;
@@ -954,7 +974,11 @@ export class DocumentGenerationApplicationService {
               revision.agent.state !== 'completed_unvalidated'
             ) {
               throw new DocumentGenerationApplicationError(
-                revision.agent.state === 'cancelled' ? 'cancelled' : 'unvalidated_output',
+                revision.agent.state === 'cancelled'
+                  ? 'cancelled'
+                  : revision.agent.summary === 'revision_scope_violation'
+                    ? 'revision_scope_violation'
+                    : 'unvalidated_output',
                 'Document revision workflow did not complete structural validation'
               );
             }
@@ -1006,6 +1030,14 @@ export class DocumentGenerationApplicationService {
           'Document generation was cancelled before file creation'
         );
       }
+      const documentIR = this.dependencies.compiler.compileIR?.({
+        outline,
+        operation,
+        attachmentRefs: input.parentWorkId === undefined ? attachmentRefs : [],
+        ...(input.parentWorkId !== undefined
+          ? { revision: { baseWorkId: String(input.parentWorkId), expectedRevision: input.expectedRevision } }
+          : {})
+      });
       validatingOutline = false;
       await reportGenerationProgress({ code: 'plan_validation', status: 'completed', operationId: 'document-outline',
         facts: { purpose: 'content', documentKind: input.kind, count: outline.sections.length } });
@@ -1026,11 +1058,13 @@ export class DocumentGenerationApplicationService {
         parentWorkId: input.parentWorkId ?? null,
         ...(presentationMap ? { sourceChecksumSha256: presentationMap.checksumSha256 } : {}),
         images: input.images,
-        outline
+        outline,
+        ...(documentIR !== undefined ? { documentIR } : {})
       })),
       draftRevision: 1,
       sourceDraftId: `message-${input.messageId}`,
       outline,
+      ...(documentIR !== undefined ? { documentIR } : {}),
       ...(input.parentWorkId !== undefined
         ? { parentWorkId: input.parentWorkId }
         : {}),
@@ -1124,17 +1158,19 @@ export class DocumentGenerationApplicationService {
 
   private compileDraft(
     content: string,
-    kind: DocumentWorkspaceKind
+    kind: DocumentWorkspaceKind,
+    operation?: DocumentOperation,
+    attachmentRefs: readonly string[] = []
   ): DocumentOutline {
     try {
-      return this.dependencies.compiler.compile({ content, kind });
+      return this.dependencies.compiler.compile({ content, kind, operation, attachmentRefs });
     } catch (error) {
       if (
         error instanceof DocumentDraftCompilationError &&
         error.code === 'invalid_structure' &&
         /not valid JSON/i.test(error.message)
       ) {
-        return this.dependencies.compiler.recover({ content, kind });
+        return this.dependencies.compiler.recover({ content, kind, operation, attachmentRefs });
       }
       throw error;
     }
@@ -1142,13 +1178,15 @@ export class DocumentGenerationApplicationService {
 
   private compileLegacyDraft(
     content: string,
-    kind: DocumentWorkspaceKind
+    kind: DocumentWorkspaceKind,
+    operation?: DocumentOperation,
+    attachmentRefs: readonly string[] = []
   ): DocumentOutline {
     try {
-      return this.dependencies.compiler.compile({ content, kind });
+      return this.dependencies.compiler.compile({ content, kind, operation, attachmentRefs });
     } catch (error) {
       if (error instanceof DocumentDraftCompilationError && error.code === 'invalid_structure') {
-        return this.dependencies.compiler.recover({ content, kind });
+        return this.dependencies.compiler.recover({ content, kind, operation, attachmentRefs });
       }
       throw error;
     }
@@ -1496,6 +1534,7 @@ export function toDocumentGenerationApplicationInput(input: {
   readonly expectedRevision: number;
   readonly messageId: string;
   readonly kind: DocumentWorkspaceKind;
+  readonly operation?: DocumentOperation;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
   readonly parentWorkId?: string;
@@ -1508,7 +1547,8 @@ export function toDocumentGenerationApplicationInput(input: {
     messageId: toMessageId(input.messageId),
     ...(parentWorkId !== undefined
       ? { parentWorkId: toWorkId(parentWorkId) }
-      : {})
+      : {}),
+    ...(input.operation !== undefined ? { operation: input.operation } : {})
   };
 }
 

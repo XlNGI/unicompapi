@@ -4,6 +4,7 @@ import {
   type ConversationIntentAssessment,
   type ConversationIntentPlan,
   type ConversationWorkflowV1,
+  type DocumentContextSnapshot,
   type DocumentWorkspaceKind
 } from '../domain';
 import {
@@ -16,6 +17,7 @@ import { hasDocumentSubject } from './document-request-completeness';
 
 export interface ConversationSemanticContext extends OfficeRequestContext {
   readonly recentUserMessages?: readonly string[];
+  readonly contextSnapshot?: DocumentContextSnapshot;
   readonly requestedIntentKind?: 'document';
   readonly requestedDocumentKind?: DocumentWorkspaceKind | 'auto';
   readonly semanticCandidate?: {

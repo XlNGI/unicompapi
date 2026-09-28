@@ -62,14 +62,14 @@ test('security audit detects sensitive public fields and evidence secrets', asyn
   const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-recovery-audit-'));
   try {
     await mkdir(path.join(root, 'electron'), { recursive: true });
-    await mkdir(path.join(root, 'docs', 'active', 'evidence', 'phase9'), { recursive: true });
+    await mkdir(path.join(root, 'docs', 'evidence', 'phase9'), { recursive: true });
     await writeFile(
       path.join(root, 'electron', 'preload.ts'),
       'export interface UnsafeDto { readonly accessToken: string; }\n',
       'utf8'
     );
     await writeFile(
-      path.join(root, 'docs', 'active', 'evidence', 'phase9', 'unsafe.json'),
+      path.join(root, 'docs', 'evidence', 'phase9', 'unsafe.json'),
       '{"apiKey":"sk-examplecredential123456789"}\n',
       'utf8'
     );

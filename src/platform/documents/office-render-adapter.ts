@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import JSZip from 'jszip';
+import type * as PdfJsModule from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { DocumentRenderAdapter, DocumentRenderResult } from './temporary-document-workflow';
 
 export interface OfficeRenderCommandConfig {
@@ -79,6 +80,23 @@ export class OfficeRenderUnavailableError extends Error {
     super(message);
     this.name = 'OfficeRenderUnavailableError';
   }
+}
+
+export interface TextBoundingBox {
+  readonly left: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly top: number;
+}
+
+/** Returns true when two rendered text boxes overlap by more than the QA tolerance. */
+export function textBoundingBoxesOverlap(
+  left: TextBoundingBox,
+  right: TextBoundingBox
+): boolean {
+  const overlapWidth = Math.min(left.right, right.right) - Math.max(left.left, right.left);
+  const overlapHeight = Math.min(left.top, right.top) - Math.max(left.bottom, right.bottom);
+  return overlapWidth > 2 && overlapHeight > 2;
 }
 
 /**
@@ -192,9 +210,7 @@ async function inspectRenderedOutput(
       const strictVisualQa = kind === 'ppt';
       for (let index = 0; index < boxes.length; index += 1) {
         for (let next = index + 1; next < boxes.length; next += 1) {
-          const overlapWidth = Math.min(boxes[index].right, boxes[next].right) - Math.max(boxes[index].left, boxes[next].left);
-          const overlapHeight = Math.min(boxes[index].bottom, boxes[next].bottom) - Math.max(boxes[index].top, boxes[next].top);
-          if (overlapWidth > 2 && overlapHeight > 2) {
+          if (textBoundingBoxesOverlap(boxes[index], boxes[next])) {
             diagnostics.push({ code: 'overlap', severity: strictVisualQa ? 'error' : 'warning', scope: `page:${pageNumber}`, message: strictVisualQa ? 'Text bounding boxes overlap' : 'Text bounding boxes overlap; verify intentional layering' });
             index = boxes.length;
             break;
@@ -209,12 +225,10 @@ async function inspectRenderedOutput(
   return diagnostics;
 }
 
-type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
-
 const importEsm = new Function(
   'specifier',
   'return import(specifier);'
-) as (specifier: string) => Promise<PdfJsModule>;
+) as (specifier: string) => Promise<typeof PdfJsModule>;
 
 export async function inspectPptxGeometry(
   filePath: string

@@ -75,6 +75,8 @@ export interface DocumentGenerationFromMessageRequest {
   readonly expectedRevision: number;
   readonly messageId: string;
   readonly kind: 'word' | 'excel' | 'ppt';
+  /** Resolved by the workflow/orchestrator; never inferred from model output. */
+  readonly operation?: 'create' | 'edit' | 'analyze';
   readonly parentWorkId?: string;
   readonly theme?: 'blueprint' | 'ink' | 'forest' | 'financing';
   readonly presentationTemplate?: PresentationTemplateId;
@@ -226,6 +228,7 @@ export const documentGenerationRequestParsers = {
         'expectedRevision',
         'messageId',
         'kind',
+        'operation',
         'parentWorkId',
         'theme',
         'presentationTemplate',
@@ -235,6 +238,9 @@ export const documentGenerationRequestParsers = {
       'generateFromMessage'
     );
     const kind = requireKind(value.kind);
+    if (value.operation !== undefined && !['create', 'edit', 'analyze'].includes(String(value.operation))) {
+      throw new TypeError('operation is invalid');
+    }
     const theme =
       value.theme === undefined ? undefined : requireTheme(value.theme);
     const presentationTemplate = resolvePresentationTemplate(
@@ -253,6 +259,7 @@ export const documentGenerationRequestParsers = {
       ),
       messageId: requireString(value.messageId, 'messageId'),
       kind,
+      ...(value.operation !== undefined ? { operation: value.operation as DocumentGenerationFromMessageRequest['operation'] } : {}),
       ...(value.parentWorkId !== undefined
         ? { parentWorkId: requireString(value.parentWorkId, 'parentWorkId') }
         : {}),

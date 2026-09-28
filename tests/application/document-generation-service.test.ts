@@ -666,9 +666,9 @@ describe('document generation application service', () => {
     );
     expect(revisionAgent.mock.calls[0]?.[0]).not.toHaveProperty('proposedOutline');
     expect(compile).toHaveBeenCalledTimes(1);
-    expect(compile).toHaveBeenCalledWith({
-      content: JSON.stringify(previousOutline),
-      kind: 'ppt'
+      expect(compile).toHaveBeenCalledWith({
+        content: JSON.stringify(previousOutline),
+        kind: 'ppt', operation: 'edit', attachmentRefs: [String(parentWorkId)]
     });
     expect(recover).not.toHaveBeenCalled();
     expect(JSON.parse(fingerprint.mock.calls[0][0])).toMatchObject({
@@ -1258,7 +1258,7 @@ describe('document generation application service', () => {
         images: []
       });
 
-      expect(recover).toHaveBeenCalledWith({ content: 'not structured', kind });
+      expect(recover).toHaveBeenCalledWith({ content: 'not structured', kind, operation: 'create', attachmentRefs: [] });
     }
   );
 });

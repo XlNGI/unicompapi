@@ -1,7 +1,4 @@
 import {
-  documentWorkspaceKinds,
-  presentationPageKinds,
-  presentationDocumentPageLimits,
   type DocumentOutline,
   type DocumentOutlineBlock,
   type DocumentOutlineSection,
@@ -10,8 +7,18 @@ import {
   type PresentationSectionMetadata
 } from '../../domain';
 import { parsePresentationPageScene } from '../../domain';
+import { parseDocumentIR, type DocumentOperation } from '../../domain/entities/document-agent';
+import {
+  outlineAliasDefinitions,
+  buildDocumentOutlineJsonSchema,
+  outlineContractLimits,
+  outlineDocumentKinds,
+  outlinePageKindAliases,
+  outlinePresentationPageKinds,
+  type OutlineJsonSchema
+} from '../../shared/document-outline-contract';
 
-export { presentationPageKinds } from '../../domain';
+export const presentationPageKinds = outlinePresentationPageKinds;
 export type {
   DocumentOutline,
   DocumentOutlineBlock,
@@ -30,21 +37,30 @@ export class DocumentOutlineError extends Error {
   }
 }
 
-const MAX_TITLE_LENGTH = 200;
-const MAX_SECTIONS = 100;
-const MAX_BLOCKS_PER_SECTION = 100;
-const MAX_ITEMS = 50;
-const MAX_TEXT_LENGTH = 2000;
-const MAX_TABLE_COLUMNS = 50;
-const MAX_TABLE_ROWS = 200;
-const MAX_TABLE_CELL_LENGTH = 1000;
-const MAX_CHART_ITEMS = 50;
-const MAX_CHART_LABEL_LENGTH = 100;
+const MAX_TITLE_LENGTH = outlineContractLimits.maxTitleLength;
+const MAX_SECTIONS = outlineContractLimits.maxSections;
+const MAX_BLOCKS_PER_SECTION = outlineContractLimits.maxBlocksPerSection;
+const MAX_ITEMS = outlineContractLimits.maxItems;
+const MAX_TEXT_LENGTH = outlineContractLimits.maxTextLength;
+const MAX_TABLE_COLUMNS = outlineContractLimits.maxTableColumns;
+const MAX_TABLE_ROWS = outlineContractLimits.maxTableRows;
+const MAX_TABLE_CELL_LENGTH = outlineContractLimits.maxTableCellLength;
+const MAX_CHART_ITEMS = outlineContractLimits.maxChartItems;
+const MAX_CHART_LABEL_LENGTH = outlineContractLimits.maxChartLabelLength;
 export const presentationOutlineLimits = {
-  maxTotalCharacters: 48_000,
-  maxContentGroups: 80,
-  maxEstimatedPages: presentationDocumentPageLimits.maximumPages
+  maxTotalCharacters: outlineContractLimits.maxTotalCharacters,
+  maxContentGroups: outlineContractLimits.maxContentGroups,
+  maxEstimatedPages: outlineContractLimits.maxEstimatedPages
 } as const;
+
+export interface DocumentDraftIRPlan {
+  readonly operation: DocumentOperation;
+  readonly attachmentRefs: readonly string[];
+}
+
+function isSafeIRReference(value: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,256}$/.test(value);
+}
 
 export function parseDocumentOutline(jsonText: string): DocumentOutline {
   let parsed: unknown;
@@ -65,6 +81,8 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
     );
   }
   const kind = parseKind(parsed.kind);
+  const contract = buildDocumentOutlineJsonSchema(kind);
+  assertContractKeys(parsed, 'outline', contract);
   const title = parseBoundedText(
     parsed.title,
     'outline.title',
@@ -83,13 +101,13 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
     );
   }
   const sections = parsed.sections.map((item, index) =>
-    parseSection(item, index, kind)
+    parseSection(item, index, kind, contract)
   );
   const coverScene = kind === 'ppt' && parsed.coverScene !== undefined
-    ? parseSafeScene(parsed.coverScene, 'outline.coverScene')
+    ? parseSafeScene(normalizeSceneAliases(parsed.coverScene), 'outline.coverScene')
     : undefined;
   const closingScene = kind === 'ppt' && parsed.closingScene !== undefined
-    ? parseSafeScene(parsed.closingScene, 'outline.closingScene')
+    ? parseSafeScene(normalizeSceneAliases(parsed.closingScene), 'outline.closingScene')
     : undefined;
   return validateDocumentOutline({
     kind,
@@ -102,7 +120,8 @@ export function parseDocumentOutline(jsonText: string): DocumentOutline {
 
 export function parseDocumentContent(
   content: string,
-  kind: DocumentWorkspaceKind
+  kind: DocumentWorkspaceKind,
+  plan?: DocumentDraftIRPlan
 ): DocumentOutline {
   const cleaned = stripPreamble(content);
   const candidate = unwrapJsonFence(cleaned);
@@ -126,6 +145,7 @@ export function parseDocumentContent(
     }
     throw error;
   }
+  if (plan) assertModelDoesNotOverrideIRPlan(parsed, plan);
   if ('kind' in parsed) {
     const outline = parseDocumentOutline(candidate);
     if (outline.kind !== kind) {
@@ -141,12 +161,18 @@ export function parseDocumentContent(
 
 export function recoverDocumentContent(
   content: string,
-  kind: DocumentWorkspaceKind
+  kind: DocumentWorkspaceKind,
+  plan?: DocumentDraftIRPlan
 ): DocumentOutline {
   const cleaned = stripPreamble(content);
   const candidate = unwrapJsonFence(cleaned);
   if (!candidate.startsWith('{') && !candidate.startsWith('[')) {
     return parseMarkdownToOutline(cleaned, kind);
+  }
+  if (plan && candidate.startsWith('{')) {
+    try { assertModelDoesNotOverrideIRPlan(parseJsonRecord(candidate), plan); } catch (error) {
+      if (error instanceof DocumentOutlineError && /Document IR plan conflict/i.test(error.message)) throw error;
+    }
   }
 
   const sections: Array<{
@@ -464,10 +490,58 @@ function splitTableRow(line: string): string[] {
   return inner.split('|').map((cell) => cell.trim());
 }
 
+function schemaField(schema: OutlineJsonSchema, key: string): OutlineJsonSchema {
+  const properties = schema.properties;
+  if (!isRecord(properties) || !isRecord(properties[key])) {
+    throw new DocumentOutlineError('document_invalid_outline', `Outline contract is missing ${key}`);
+  }
+  return properties[key] as OutlineJsonSchema;
+}
+
+function schemaItems(schema: OutlineJsonSchema): OutlineJsonSchema {
+  if (!isRecord(schema.items)) {
+    throw new DocumentOutlineError('document_invalid_outline', 'Outline contract items are invalid');
+  }
+  return schema.items as OutlineJsonSchema;
+}
+
+function blockSchemaForType(schema: OutlineJsonSchema, type: string): OutlineJsonSchema {
+  const variants = schema.oneOf;
+  if (!Array.isArray(variants)) {
+    throw new DocumentOutlineError('document_invalid_outline', 'Outline contract block variants are invalid');
+  }
+  const variant = variants.find((item) => {
+    if (!isRecord(item) || !isRecord(item.properties) || !isRecord(item.properties.type)) return false;
+    return item.properties.type.const === type;
+  });
+  if (!isRecord(variant)) {
+    throw new DocumentOutlineError('document_invalid_outline', `Outline contract block type ${type} is missing`);
+  }
+  return variant as OutlineJsonSchema;
+}
+
+function assertContractKeys(
+  value: Record<string, unknown>,
+  label: string,
+  schema: OutlineJsonSchema
+): void {
+  if (!isRecord(schema.properties)) {
+    throw new DocumentOutlineError('document_invalid_outline', `${label} contract properties are invalid`);
+  }
+  const unsupported = Object.keys(value).find((key) => !Object.prototype.hasOwnProperty.call(schema.properties, key));
+  if (unsupported) {
+    throw new DocumentOutlineError(
+      'document_invalid_outline',
+      `${label} contains unsupported field: ${unsupported}`
+    );
+  }
+}
+
 function parseSection(
   value: unknown,
   index: number,
-  kind: DocumentWorkspaceKind
+  kind: DocumentWorkspaceKind,
+  contract: OutlineJsonSchema
 ): DocumentOutlineSection {
   if (!isRecord(value)) {
     throw new DocumentOutlineError(
@@ -475,6 +549,8 @@ function parseSection(
       `outline.sections[${index}] must be an object`
     );
   }
+  const sectionContract = schemaItems(schemaField(contract, 'sections'));
+  assertContractKeys(value, `outline.sections[${index}]`, sectionContract);
   const heading = parseBoundedText(
     value.heading,
     `outline.sections[${index}].heading`,
@@ -499,10 +575,10 @@ function parseSection(
     );
   }
   let blocks = value.blocks.map((block, blockIndex) =>
-    parseBlock(block, index, blockIndex, kind)
+    parseBlock(block, index, blockIndex, kind, sectionContract)
   );
   if (kind === 'excel') {
-    blocks = appendExcelFooter(blocks, value.footers, index);
+    blocks = appendExcelFooter(blocks, value.footers, index, sectionContract);
   }
   return {
     heading,
@@ -575,7 +651,8 @@ function repairExcelRowsArray(candidate: string): DocumentOutline | undefined {
 function appendExcelFooter(
   blocks: DocumentOutlineBlock[],
   value: unknown,
-  sectionIndex: number
+  sectionIndex: number,
+  sectionContract?: OutlineJsonSchema
 ): DocumentOutlineBlock[] {
   if (value === undefined) return blocks;
   if (!isRecord(value) || !Array.isArray(value.values)) {
@@ -583,6 +660,9 @@ function appendExcelFooter(
       'document_invalid_outline',
       `outline.sections[${sectionIndex}].footers must contain a values array`
     );
+  }
+  if (sectionContract) {
+    assertContractKeys(value, `outline.sections[${sectionIndex}].footers`, schemaField(sectionContract, 'footers'));
   }
   const tableIndex = blocks.reduce(
     (last, block, blockIndex) => (block.type === 'table' ? blockIndex : last),
@@ -663,7 +743,7 @@ function parseSafeScene(
 ): PresentationSectionMetadata['scene'] {
   let scene: PresentationSectionMetadata['scene'];
   try {
-    scene = parsePresentationPageScene(value);
+    scene = parsePresentationPageScene(normalizeSceneAliases(value));
   } catch (error) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
@@ -691,16 +771,66 @@ function parseSafeScene(
   return scene;
 }
 
-const presentationPageKindAliases: Readonly<Record<string, PresentationPageKind>> = {
-  // Models commonly use these semantic labels even when the prompt lists the
-  // renderer's canonical layout enum. Keep the compatibility surface small
-  // and map only to existing, supported layouts.
-  summary: 'insight',
-  detail: 'insight',
-  roadmap: 'process',
-  risk: 'insight',
-  action: 'process'
-};
+/**
+ * Accept only documented legacy aliases before the strict scene parser runs.
+ * Unknown fields remain rejected by parsePresentationPageScene.
+ */
+function normalizeSceneAliases(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.elements)) return value;
+  return {
+    ...value,
+    elements: value.elements.map((item) => {
+      if (!isRecord(item)) return item;
+      const rest: Record<string, unknown> = { ...item };
+      const elementStyle: Record<string, unknown> = isRecord(rest.style) ? { ...rest.style } : {};
+      for (const [alias, target] of Object.entries(outlineAliasDefinitions.sceneElement)) {
+        if (target === 'style.fill' && elementStyle.fill === undefined && rest[alias] !== undefined) elementStyle.fill = rest[alias];
+        if (target === 'style.stroke' && elementStyle.stroke === undefined && rest[alias] !== undefined) elementStyle.stroke = rest[alias];
+        if (target === 'type' && rest.type === undefined && rest[alias] !== undefined) rest.type = 'shape';
+        delete rest[alias];
+      }
+      return {
+        ...rest,
+        ...(Object.keys(elementStyle).length > 0 ? { style: normalizeSceneStyleAliases(elementStyle) } : {})
+      };
+    })
+  };
+}
+
+function normalizeSceneStyleAliases(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const style: Record<string, unknown> = { ...value };
+  for (const [alias, target] of Object.entries(outlineAliasDefinitions.sceneStyle)) {
+    if (target === 'fill' && style.fill === undefined && style[alias] !== undefined) style.fill = style[alias];
+    if (target === 'stroke' && style.stroke === undefined && style[alias] !== undefined) style.stroke = style[alias];
+    delete style[alias];
+  }
+  return style;
+}
+
+function assertModelDoesNotOverrideIRPlan(
+  value: Record<string, unknown>,
+  plan: DocumentDraftIRPlan
+): void {
+  // Construct the authoritative IR from the upstream plan first. Model fields
+  // below are only conflict signals; they never become the source of truth.
+  const upstreamIR = plan.attachmentRefs.every(isSafeIRReference)
+    ? parseDocumentIR(plan)
+    : { operation: plan.operation, attachmentRefs: [...plan.attachmentRefs] };
+  if (value.operation !== undefined && value.operation !== upstreamIR.operation) {
+    throw new DocumentOutlineError('document_invalid_outline', 'Document IR plan conflict: model operation cannot override the upstream operation');
+  }
+  if (value.attachmentRefs !== undefined) {
+    if (!Array.isArray(value.attachmentRefs) ||
+        JSON.stringify(value.attachmentRefs) !== JSON.stringify(upstreamIR.attachmentRefs)) {
+      throw new DocumentOutlineError('document_invalid_outline', 'Document IR plan conflict: model attachmentRefs cannot override the upstream references');
+    }
+  }
+  if (upstreamIR.operation === 'create' && ['documentRef', 'pageRefs', 'workRef', 'toolCalls'].some((key) =>
+    Object.prototype.hasOwnProperty.call(value, key))) {
+    throw new DocumentOutlineError('document_invalid_outline', 'Document IR plan conflict: create output cannot add existing-document dependencies');
+  }
+}
 
 function normalizePresentationPageKind(
   value: unknown
@@ -714,7 +844,7 @@ function normalizePresentationPageKind(
   if (presentationPageKinds.includes(normalized as PresentationPageKind)) {
     return normalized as PresentationPageKind;
   }
-  return presentationPageKindAliases[normalized];
+  return outlinePageKindAliases[normalized];
 }
 
 function parseOptionalBoundedText(
@@ -807,7 +937,8 @@ function parseBlock(
   value: unknown,
   sectionIndex: number,
   blockIndex: number,
-  kind: DocumentWorkspaceKind
+  kind: DocumentWorkspaceKind,
+  sectionContract: OutlineJsonSchema
 ): DocumentOutlineBlock {
   if (!isRecord(value) || typeof value.type !== 'string') {
     throw new DocumentOutlineError(
@@ -816,6 +947,11 @@ function parseBlock(
     );
   }
   const label = `outline.sections[${sectionIndex}].blocks[${blockIndex}]`;
+  const blockContract = blockSchemaForType(
+    schemaItems(schemaField(sectionContract, 'blocks')),
+    value.type
+  );
+  assertContractKeys(value, label, blockContract);
   switch (value.type) {
     case 'paragraph':
       return {
@@ -1172,7 +1308,7 @@ function extractJsonStringTokens(
 function parseKind(value: unknown): DocumentWorkspaceKind {
   if (
     typeof value !== 'string' ||
-    !documentWorkspaceKinds.includes(value as DocumentWorkspaceKind)
+    !outlineDocumentKinds.includes(value as DocumentWorkspaceKind)
   ) {
     throw new DocumentOutlineError(
       'document_invalid_outline',
@@ -1381,7 +1517,7 @@ function normalizeObservedTable(
 export function isDocumentOutline(value: unknown): value is DocumentOutline {
   if (!isRecord(value)) return false;
   if (
-    !documentWorkspaceKinds.includes(value.kind as DocumentWorkspaceKind) ||
+    !outlineDocumentKinds.includes(value.kind as DocumentWorkspaceKind) ||
     typeof value.title !== 'string' ||
     value.title.trim().length === 0 ||
     !Array.isArray(value.sections)

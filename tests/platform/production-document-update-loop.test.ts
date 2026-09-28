@@ -1,0 +1,326 @@
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  addCompletedAssistantMessage, addUserMessage, attachDocumentResultToMessage,
+  createProjectConversation, createProvider, createProviderConnection, createProviderModel, createProviderProtocolBinding,
+  toConnectionId, toConversationId, toIsoTimestamp, toMessageId, toModelId, toProjectId, toProtocolBindingId, toProviderId, toWorkId,
+  type Conversation
+} from '../../src/domain';
+import { canonicalToolInputSchema, createCanonicalToolRegistry } from '../../src/domain/entities/canonical-tool-contract';
+import {
+  createChatContextRuntime, createOpenAiCompatibleDefaultTextDefinition, DeepSeekSharedRuntime, NewApiSharedRuntime,
+  JsonProviderRegistryStore, RuntimeAuthorizationLedger, JsonRuntimeAuthorizationLedgerStore, SecureCredentialVault,
+  NodeProjectStorage, JsonFileReferenceRepository, JsonWorkRepository, JsonProjectConversationRepository,
+  JsonDocumentTaskRuntimeRepository, DocumentGenerationRunner, NEWAPI_PROVIDER_PACKAGE_ID, NEWAPI_PROVIDER_PACKAGE_VERSION,
+  NEWAPI_COMPATIBLE_TEMPLATE_ID, NEWAPI_CREDENTIAL_SCHEMA_ID, NEWAPI_ENDPOINT_POLICY_ID, NEWAPI_CHAT_ADAPTER_ID,
+  NEWAPI_ADAPTER_VERSION, NEWAPI_CHAT_PROTOCOL_ID, NEWAPI_PROTOCOL_VERSION, type NewApiHttpTransportResponse
+} from '../../src/platform';
+import { RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
+import { readPptxDocument } from '../../src/platform/documents/pptx-page-reader';
+import { parseDocumentOutline } from '../../src/platform/documents/document-outline-parser';
+import { DocumentIdentityIndexStore } from '../../src/platform/documents/document-identity-index-store';
+import { DocumentMutationHeadStore } from '../../src/platform/documents/document-mutation-head-store';
+import { buildPresentationIdentityManifest, readIdentityElementText } from '../../src/platform/documents/presentation-identity-manifest';
+import * as officeRenderer from '../../src/platform/documents/office-render-adapter';
+import { DocumentMutationCoordinator } from '../../src/application/document-mutation-coordinator';
+import { DocumentTaskRuntimeService } from '../../src/application/document-task-runtime-service';
+import { ConversationResponseExecutionLifecycle } from '../../src/platform/providers/conversation-response-streaming';
+
+const roots: string[] = [];
+const cleanups: Array<() => Promise<void>> = [];
+const projectId = toProjectId('project-production-update-loop');
+const now = toIsoTimestamp('2026-09-28T12:00:00.000Z');
+const registry = createCanonicalToolRegistry();
+const reading = registry.get('read_document_structure')!;
+const updating = registry.get('update_element')!;
+const originalText = '年度销售目标';
+const firstText = '2027 年全球销售目标';
+const secondText = '2028 年全球销售目标';
+
+afterEach(async () => {
+  await Promise.allSettled(cleanups.splice(0).map(cleanup => cleanup()));
+  vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })));
+});
+
+interface WireCall { readonly id: string; readonly type: string; readonly function: { readonly name: string; readonly arguments: string } }
+interface WireMessage { readonly role: string; readonly content: string; readonly tool_call_id?: string; readonly tool_calls?: readonly WireCall[] }
+interface WireRequest { readonly model: string; readonly messages: readonly WireMessage[]; readonly tools?: readonly {
+  readonly type: string; readonly function: { readonly name: string; readonly parameters: Record<string, unknown> }
+}[] }
+interface ElementObservation { readonly elementId: string; readonly kind: string; readonly text: string }
+interface ToolResult { readonly status: string; readonly observation?: { readonly page?: { readonly elements: readonly ElementObservation[] };
+  readonly elementId?: string; readonly changed?: boolean; readonly field?: string } }
+
+async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false) {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-production-update-'));
+  roots.push(rootDirectory);
+  const userDataDirectory = path.join(rootDirectory, 'test-profile');
+  await mkdir(userDataDirectory);
+  const storage = new NodeProjectStorage(rootDirectory);
+  const conversations = new JsonProjectConversationRepository(storage, projectId, () => now);
+  const files = new JsonFileReferenceRepository(storage, projectId);
+  const works = new JsonWorkRepository(storage, projectId);
+  const identityStore = new DocumentIdentityIndexStore(storage);
+  const headStore = new DocumentMutationHeadStore(storage);
+  const render = vi.fn(async (temporaryPath: string) => ({ previewCount: (await readPptxDocument(await readFile(temporaryPath))).length, diagnostics: [] }));
+  vi.spyOn(officeRenderer, 'createConfiguredOfficeRenderAdapter').mockReturnValue(render);
+  const outline = parseDocumentOutline(JSON.stringify({ kind: 'ppt', title: '真实元素更新测试', sections: [
+    { heading: '目标页', level: 1, blocks: [{ type: 'paragraph', text: originalText }] },
+    { heading: '重复文本页', level: 1, blocks: [{ type: 'paragraph', text: originalText }] }
+  ] }));
+  const source = await new DocumentGenerationRunner({ rootDirectory, projectId, renderPreview: render, requireRenderForPpt: true }).run({
+    kind: 'ppt', title: outline.title, contentFingerprint: createHash('sha256').update(JSON.stringify(outline)).digest('hex'),
+    draftRevision: 1, sourceDraftId: 'synthetic-update-source', outline
+  });
+  const sourceRead = await new RegisteredPresentationReader({ rootDirectory, projectId }).read(source.work.id);
+  const identity = await identityStore.ensureForWork({ workId: source.work.id, build: () => buildPresentationIdentityManifest({
+    buffer: sourceRead.buffer, documentLineageId: 'lineage-production-update', workId: source.work.id,
+    fileId: source.file.id, sourceExecutionId: source.work.sourceExecutionId, revision: 1
+  }) });
+  const targetPage = identity.pages.find(page => page.physicalPageNumber === 2)!;
+  const target = identity.elements.find(element => element.pageId === targetPage.pageId && element.text === originalText)!;
+  const duplicate = identity.elements.find(element => element.elementId !== target.elementId && element.text === originalText)!;
+  expect(target).toBeDefined(); expect(duplicate).toBeDefined();
+  await headStore.save({ documentLineageId: identity.documentLineageId, headWorkId: source.work.id, fileId: source.file.id,
+    sourceExecutionId: source.work.sourceExecutionId, checksumSha256: source.file.checksumSha256!, runtimeRevision: 1, identityIndexVersion: 1 });
+  let conversation: Conversation = createProjectConversation({ id: toConversationId('conversation-production-update'), projectId,
+    title: '生产文本更新闭环', createdAt: now });
+  await conversations.create(conversation);
+  const save = async (next: Conversation) => { await conversations.save(next, conversation.revision); conversation = next; };
+  await save(addUserMessage(conversation, { id: toMessageId('source-update-message'), content: '生成一个测试 PPT。', createdAt: now }));
+  const assistantId = toMessageId('source-update-result');
+  await save(addCompletedAssistantMessage(conversation, { id: assistantId, content: '测试 PPT 已生成。', createdAt: now }));
+  await save(attachDocumentResultToMessage(conversation, assistantId, { kind: 'ppt', workId: source.work.id,
+    fileName: sourceRead.fileName, sizeBytes: sourceRead.buffer.length, validatedContent: 'STALE-CACHED-OUTLINE-DO-NOT-USE' }, now));
+  const provider = await providerFixture(userDataDirectory);
+  const requests: WireRequest[] = [];
+  const errors: unknown[] = [];
+  const readSpy = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
+  const mutateSpy = vi.spyOn(DocumentMutationCoordinator.prototype, 'updateText');
+  const beginSpy = vi.spyOn(DocumentTaskRuntimeService.prototype, 'beginToolCall');
+  const failureSpy = vi.spyOn(ConversationResponseExecutionLifecycle.prototype, 'failDeferredPublish');
+  const calls: WireCall[] = [];
+  let releaseLateCall!: () => void;
+  const lateCall = new Promise<void>(resolve => { releaseLateCall = resolve; });
+  let signalPrepared!: () => void;
+  const updatePrepared = new Promise<void>(resolve => { signalPrepared = resolve; });
+  const call = (id: string, name: string, args: Record<string, unknown>): WireCall => {
+    const value = { id, type: 'function', function: { name, arguments: JSON.stringify(args) } };
+    calls.push(value); return value;
+  };
+  const resultFor = (payload: WireRequest, id: string): ToolResult => JSON.parse(payload.messages.find(message => message.role === 'tool' && message.tool_call_id === id)!.content) as ToolResult;
+  const pageElement = (result: ToolResult): ElementObservation => {
+    expect(result.status).toBe('success');
+    return result.observation!.page!.elements.find(element => element.elementId === target.elementId)!;
+  };
+  const transport = { send: async (request: { readonly body?: Uint8Array }): Promise<NewApiHttpTransportResponse> => {
+    const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
+    requests.push(payload);
+    let next: WireCall;
+    if (requests.length === 1) {
+      next = call('read-target-1', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (requests.length === 2) {
+      const observed = pageElement(resultFor(payload, 'read-target-1'));
+      expect(observed.text).toBe(originalText);
+      expect(observed.elementId).toBe(target.elementId);
+      if (revokeBeforeWrite) {
+        const liveFile = (await files.get(source.file.id))!;
+        await files.save({ ...liveFile, state: 'missing', updatedAt: toIsoTimestamp('2026-09-28T12:00:01.000Z') });
+      }
+      next = call('update-target-2', updating.toolId, { elementId: observed.elementId, text: firstText });
+    } else if (revokeBeforeWrite) {
+      return stream(provider.modelKey, { content: '权限已撤销，没有修改。' }, 'stop');
+    } else if (requests.length === 3) {
+      expect(resultFor(payload, 'update-target-2')).toMatchObject({ status: 'success', observation: { elementId: target.elementId, changed: true, field: 'text' } });
+      next = call('read-updated-3', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (requests.length === 4) {
+      expect(pageElement(resultFor(payload, 'read-updated-3')).text).toBe(firstText);
+      next = call('update-again-4', updating.toolId, { elementId: target.elementId, text: secondText });
+    } else if (requests.length === 5) {
+      expect(resultFor(payload, 'update-again-4')).toMatchObject({ status: 'success', observation: { elementId: target.elementId, changed: true } });
+      next = call('read-final-5', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else {
+      if (requests.length !== 6) throw new Error('Unexpected extra synthetic request');
+      const final = pageElement(resultFor(payload, 'read-final-5'));
+      expect(final.text).toBe(secondText);
+      return stream(provider.modelKey, { content: '已从真实文件核验：' + final.text }, 'stop');
+    }
+    if (cancelBeforeWrite && requests.length === 2) {
+      signalPrepared();
+      // Deliberately ignore AbortSignal here to model a late server response.
+      await lateCall;
+    }
+    return stream(provider.modelKey, { tool_calls: [{ index: 0, ...next }] }, 'tool_calls');
+  } };
+  const newApiRuntime = new NewApiSharedRuntime({ transport });
+  const deepSeekRuntime = new DeepSeekSharedRuntime({ transport: { send: async () => { throw new Error('Unexpected provider'); } } });
+  const runtime = createChatContextRuntime({ userDataDirectory, providerRegistry: provider.registry, runtimeAuthorization: provider.authorization,
+    getSession: () => ({ projectId, projectName: 'Synthetic production update', rootDirectory }),
+    textSubmission: { credentialVault: provider.vault, deepSeekRuntime, newApiRuntime }, now: () => now, onError: error => errors.push(error) });
+  cleanups.push(async () => { releaseLateCall(); await runtime.interruptActiveResponses(); await runtime.waitForMutations(); deepSeekRuntime.dispose(); newApiRuntime.dispose(); });
+  let activeExecutionId: string | undefined;
+  async function run() {
+    const candidates = await runtime.responses.listTextCandidates({ productFeature: 'text_chat' });
+    if (!candidates.ok) throw new Error('Candidates failed: ' + candidates.error.code);
+    const candidate = candidates.value.find(item => item.available);
+    if (!candidate) throw new Error('No candidate');
+    const started = await runtime.responses.start({ clientCommandId: 'start-production-update',
+      conversation: { conversationId: conversation.id, expectedRevision: conversation.revision, editedMessageId: null }, title: conversation.title,
+      content: '把当前 PPT 第二页的“年度销售目标”改成“2027 年全球销售目标”，读取核验后，再改成“2028 年全球销售目标”并再次读取第二页核验，最后简短告诉我结果。',
+      productFeature: 'text_chat', candidateId: candidate.candidateId, contextSelections: [], parameterValues: {}, confirmed: true });
+    if (!started.ok) throw new Error('Start failed: ' + started.error.code);
+    const executionId = started.value.execution.responseExecutionId;
+    activeExecutionId = executionId;
+    await vi.waitFor(async () => {
+      const current = await runtime.responses.getExecution({ responseExecutionId: executionId });
+      if (!current.ok) throw new Error('Missing execution: ' + current.error.code);
+      expect(['completed', 'failed', 'cancelled']).toContain(current.value.state);
+    }, { timeout: 10_000, interval: 30 });
+    await runtime.waitForMutations();
+    const current = await runtime.responses.getExecution({ responseExecutionId: executionId });
+    if (!current.ok) throw new Error('Missing execution');
+    return current.value;
+  }
+  return { run, rootDirectory, storage, works, files, identityStore, headStore, identity, source, sourceRead, target, duplicate,
+    requests, errors, calls, render, readSpy, mutateSpy, beginSpy, failureSpy, updatePrepared, releaseLateCall,
+    cancel: async () => {
+      if (!activeExecutionId) throw new Error('Execution not started');
+      return runtime.responses.cancelExecution({ responseExecutionId: activeExecutionId });
+    } };
+}
+
+describe('production NewAPI update_element continuation', () => {
+  it('reads, updates the same element twice and reads each actual revision without changing duplicate text', async () => {
+    const data = await fixture();
+    const execution = await data.run();
+    expect(execution.state).toBe('completed');
+    expect(execution.content).toBe('已从真实文件核验：' + secondText);
+    expect(data.errors).toEqual([]);
+    expect(data.requests).toHaveLength(6);
+    expect(data.mutateSpy).toHaveBeenCalledTimes(2);
+    const head = (await data.headStore.get(data.identity.documentLineageId))!;
+    expect(head.runtimeRevision).toBe(3);
+    expect(head.headWorkId).not.toBe(data.source.work.id);
+    expect(head.checksumSha256).not.toBe(data.source.file.checksumSha256);
+    expect(await data.works.list(projectId)).toHaveLength(3);
+    const currentIdentity = (await data.identityStore.getForWork(head.headWorkId))!;
+    expect(currentIdentity.identityIndexVersion).toBe(1);
+    expect(currentIdentity.elements.map(element => element.elementId)).toEqual(data.identity.elements.map(element => element.elementId));
+    expect(currentIdentity.pages.map(page => page.pageId)).toEqual(data.identity.pages.map(page => page.pageId));
+    const actual = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(toWorkId(head.headWorkId));
+    expect(actual.file.checksumSha256).toBe(head.checksumSha256);
+    expect(createHash('sha256').update(actual.buffer).digest('hex')).toBe(head.checksumSha256);
+    expect(await readIdentityElementText(actual.buffer, currentIdentity, data.target.elementId)).toBe(secondText);
+    expect(await readIdentityElementText(actual.buffer, currentIdentity, data.duplicate.elementId)).toBe(originalText);
+    const old = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(data.source.work.id);
+    expect(await readIdentityElementText(old.buffer, data.identity, data.target.elementId)).toBe(originalText);
+    for (const request of data.requests) {
+      expect(request.tools?.map(tool => tool.function.name).sort()).toEqual([reading.toolId, updating.toolId].sort());
+      for (const tool of request.tools!) expect(tool.function.parameters).toEqual(canonicalToolInputSchema(registry.get(tool.function.name as 'update_element')!));
+    }
+    const final = data.requests.at(-1)!;
+    expect(final.messages.filter(message => message.role === 'tool').map(message => message.tool_call_id)).toEqual(data.calls.map(call => call.id));
+    expect(final.messages.filter(message => message.role === 'assistant' && message.tool_calls).flatMap(message => message.tool_calls!)).toEqual(data.calls);
+    expect(final.messages.slice(-10).map(message => message.role)).toEqual(['assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool']);
+    const contexts = data.beginSpy.mock.calls.filter(([, call]) => call.toolId === updating.toolId).map(([, , context]) => context!);
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0].taskContext.taskId).toBe(contexts[1].taskContext.taskId);
+    expect(contexts[0].revision).toBe(1); expect(contexts[1].revision).toBe(2);
+    expect(contexts[0].currentDocumentId).toBe(data.source.work.id);
+    expect(contexts[1].currentDocumentId).not.toBe(data.source.work.id);
+    const runtimes = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(runtimes.some(runtime => runtime.toolCalls.filter(call => call.toolId === updating.toolId && call.status === 'completed').length === 2)).toBe(true);
+    const allWorks = await data.works.list(projectId);
+    const outgoing = JSON.stringify(data.requests) + data.requests.flatMap(request => request.messages.filter(message => message.role === 'tool').map(message => message.content)).join('\n');
+    for (const hidden of [data.rootDirectory, data.identity.documentLineageId, head.checksumSha256,
+      ...allWorks.flatMap(work => [work.id, work.fileId, work.sourceExecutionId]),
+      '"rootDirectory"', '"relativePath"', '"slidePart"', '"shapeId"', '"identityIndexVersion"', '"manifest"',
+      '"currentDocumentIR"', '"authorization"', '"abortSignal"', '"projectContext"', '"taskContext"', '"irPatch"']) expect(outgoing).not.toContain(hidden);
+    expect(data.render.mock.calls.length).toBeGreaterThanOrEqual(3);
+  }, 20_000);
+
+  it('does not start mutation after current-file access is revoked while the model responds', async () => {
+    const data = await fixture(true);
+    const execution = await data.run();
+    expect(execution.state).toBe('failed');
+    expect(data.failureSpy).toHaveBeenCalledWith(expect.any(String), expect.stringMatching(/^[a-z0-9][a-z0-9_.-]{0,127}$/u));
+    expect(data.requests).toHaveLength(2);
+    expect(data.requests[1].tools?.some(tool => tool.function.name === updating.toolId)).toBe(true);
+    expect(data.mutateSpy).not.toHaveBeenCalled();
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect((await data.headStore.get(data.identity.documentLineageId))?.headWorkId).toBe(data.source.work.id);
+  }, 20_000);
+
+  it('cancels through Runtime before adapter start and ignores the late provider update call', async () => {
+    const data = await fixture(false, true);
+    const running = data.run();
+    await data.updatePrepared;
+    expect(data.calls.at(-1)?.function.name).toBe(updating.toolId);
+    const cancelled = await data.cancel();
+    expect(cancelled.ok).toBe(true);
+    data.releaseLateCall();
+    const execution = await running;
+    expect(execution.state).toBe('cancelled');
+    expect(data.mutateSpy).not.toHaveBeenCalled();
+    expect(data.requests).toHaveLength(2);
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect((await data.headStore.get(data.identity.documentLineageId))?.headWorkId).toBe(data.source.work.id);
+    const old = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(data.source.work.id);
+    expect(await readIdentityElementText(old.buffer, data.identity, data.target.elementId)).toBe(originalText);
+  }, 20_000);
+});
+
+function stream(model: string, delta: Record<string, unknown>, finishReason: 'stop' | 'tool_calls'): NewApiHttpTransportResponse {
+  const body = 'data: ' + JSON.stringify({ id: 'synthetic-production-update', object: 'chat.completion.chunk', created: 1, model,
+    choices: [{ index: 0, delta, finish_reason: finishReason }] }) + '\n\ndata: [DONE]\n\n';
+  return { status: 200, headers: { 'content-type': 'text/event-stream' }, stream: (async function* () { yield Buffer.from(body); })() };
+}
+async function providerFixture(directory: string) {
+  const providerId = toProviderId('provider-generation-loop');
+  const connectionId = toConnectionId('connection-generation-loop');
+  const bindingId = toProtocolBindingId('binding-generation-loop');
+  const modelId = toModelId('model-generation-loop');
+  const modelKey = 'synthetic-newapi-text';
+  const definition = createOpenAiCompatibleDefaultTextDefinition({ packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+    packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION, providerModelKey: modelKey, features: ['text_chat'] });
+  const template = definition.profileTemplates[0]!;
+  const providerRegistry = new JsonProviderRegistryStore(path.join(directory, 'provider-registry.json'));
+  await providerRegistry.mutate(snapshot => ({ result: undefined, snapshot: { ...snapshot,
+    providers: [createProvider({ id: providerId, name: 'Synthetic NewAPI', packageId: NEWAPI_PROVIDER_PACKAGE_ID,
+      packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION, accessCategory: 'online', identityState: 'verified', createdAt: now, updatedAt: now })],
+    connections: [createProviderConnection({ id: connectionId, providerId, name: 'Synthetic connection', endpoint: 'https://gateway.example.test/v1',
+      packageId: NEWAPI_PROVIDER_PACKAGE_ID, packageVersion: NEWAPI_PROVIDER_PACKAGE_VERSION, templateId: NEWAPI_COMPATIBLE_TEMPLATE_ID,
+      templateKind: 'compatible_custom', credentialSchemaId: NEWAPI_CREDENTIAL_SCHEMA_ID, credentialSchemaVersion: 1,
+      credentialVersionId: 'credential-version-generation-loop', credentialReference: 'synthetic-generation-reference',
+      connectionPolicyId: 'connection.newapi.compatible', connectionPolicyRevision: 1,
+      discoveryPolicyId: 'discovery.newapi.models', discoveryPolicyRevision: 1,
+      endpointPolicyId: NEWAPI_ENDPOINT_POLICY_ID, endpointPolicyRevision: 1,
+      connectionConfigVersionId: 'connection-config-generation-loop', connectionRevision: 1,
+      adapterBindings: [{ adapterId: NEWAPI_CHAT_ADAPTER_ID, adapterVersion: NEWAPI_ADAPTER_VERSION,
+        protocolId: NEWAPI_CHAT_PROTOCOL_ID, protocolVersion: NEWAPI_PROTOCOL_VERSION }],
+      state: 'available', identityState: 'verified', credentialState: 'valid', createdAt: now, updatedAt: now })],
+    protocolBindings: [createProviderProtocolBinding({ id: bindingId, providerId, connectionId,
+      protocolId: NEWAPI_CHAT_PROTOCOL_ID, protocolVersion: NEWAPI_PROTOCOL_VERSION, adapterKind: NEWAPI_CHAT_ADAPTER_ID,
+      mediaKind: 'unknown', authScheme: 'bearer', executionLifecycle: 'synchronous_completed', supportedPurposes: [], createdAt: now, updatedAt: now })],
+    models: [createProviderModel({ id: modelId, providerId, connectionId, protocolBindingId: bindingId,
+      providerModelKey: modelKey, mediaKind: 'unknown', revision: 1, displayName: 'Synthetic model',
+      activeProfileId: 'profile-generation-loop', catalogState: 'present', enabled: true, createdAt: now, updatedAt: now })],
+    modelDefinitions: [definition], modelProfiles: [{ schemaVersion: 1, profileId: 'profile-generation-loop', revision: 1,
+      packageId: definition.packageId, sourceTemplateId: template.templateId, adapterKey: template.adapterKey,
+      modelId, modelRevision: 1, protocolBindingId: bindingId, status: 'verified', features: template.features, evidenceIds: [], recordedAt: now }]
+  } }));
+  const authorization = new RuntimeAuthorizationLedger(new JsonRuntimeAuthorizationLedgerStore(path.join(directory, 'authorization.json')), () => now);
+  await authorization.upsertPolicy({ policyId: 'policy-generation-loop', providerPackageId: NEWAPI_PROVIDER_PACKAGE_ID,
+    connectionId, adapterKey: NEWAPI_CHAT_ADAPTER_ID, state: 'interactive_allowed', revision: 1,
+    allowedOperations: ['submit', 'query', 'cancel', 'receive_result'] });
+  const vault = new SecureCredentialVault(path.join(directory, 'synthetic-credentials.json'), {
+    isAvailable: () => true, protect: value => Buffer.from(value), unprotect: value => Buffer.from(value).toString('utf8')
+  });
+  await vault.saveRecord('synthetic-generation-reference', { schemaId: NEWAPI_CREDENTIAL_SCHEMA_ID, schemaVersion: 1,
+    values: { api_key: 'synthetic-offline-unit-test-key' } });
+  return { registry: providerRegistry, authorization, vault, modelKey };
+}
