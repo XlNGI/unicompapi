@@ -35,7 +35,7 @@ Candidate manifest 在 head CAS 前生成并验证。候选 Work 注册后再执
 - checksum/locator 不匹配被拒绝。
 - Patch 校验拒绝未知字段、运行时字段和非法文本。
 - Coordinator 测试覆盖 commit、幂等、CAS 冲突、取消、QA 失败保护和 `committed_pending_refresh`。
-- `pnpm test`：258 个 Vitest 文件、2263 项通过；`pnpm typecheck`、`pnpm lint`、`pnpm build` 通过。
+- `pnpm test`：258 个 Vitest 文件、2264 项通过；`pnpm typecheck`、`pnpm lint`、`pnpm build` 通过。
 
 ## 当前边界
 
