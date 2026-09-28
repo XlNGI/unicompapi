@@ -4,6 +4,8 @@
 
 本节是项目当前唯一有效的执行计划和状态来源，以当前源码、当前工作树和当前测试结果为基线。`docs/current/` 保留实施记录和专项方案，`docs/evidence/` 保留机器可验证证据；两者都不是当前待办或完成状态来源。旧历史计划目录已删除。新的计划、状态变更、阻断项和验收结论只更新本节。旧 E1-E7 仅作为历史映射，不再作为新的拆分方式。
 
+2026-09-28 第二阶段第四批 P1 已完成 identity round-trip 与 mutation substrate 核心边界：采用 checksum-pinned external identity manifest，新增最小 `DocumentIRPatch(update_text)`、Document Version Pin、Mutation Coordinator、`update_element` Canonical 合同/Binding 和 reconciliation record。真实生成的重复文本 PPT 页已通过真实 PPTX XML round-trip：指定第二个元素更新后同一 opaque elementId 恢复，未修改元素身份保持不变。Coordinator 已覆盖 CAS 冲突、取消、幂等、QA 失败保护和 `committed_pending_refresh`。P1 当前状态为 `spike_and_core_boundary_passed`，尚未接入 ConversationDocumentToolSession 的生产写会话或真实 kimi-k3 update_element 验收；本批仍不进入 add/delete、add_slide、delete_slide 或 shape/image CRUD。详见 `docs/current/phase2-batch4-p1-identity.md`。
+
 ### 事实基线
 
 2026-09-28 第二阶段第三批已满足负责人最新限定的收口条件：指定 `kimi-k3` 的真实生产链路完成“用户确认 → generate_pptx → Runner/渲染 QA/Hash/Work → Runtime live state/Available Tool Set 刷新 → read_document_structure → 真实 PPTX 读回 → 模型最终回答”。本次从空的隔离项目开始，只登记 1 份 Work；真实文件共 4 个物理页（含封面/结束页），独立 Reader 复核文件 Hash、大小、来源执行、版本及逐页 Observation，最终页数和两项合成核验标记均正确。真实 HTTP 共 3 次，无自动重试，实际 wire model 为 `kimi-k3`，路径/Runtime/真实 Work ID 未外发。脱敏报告见 `docs/evidence/phase2-batch3-kimi-readback-real-provider.json`。本轮到此停止，第四批 CRUD 未启动。

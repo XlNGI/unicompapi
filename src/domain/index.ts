@@ -11,6 +11,8 @@ export * from './entities/document-context-snapshot';
 export * from './entities/presentation-plan';
 export * from './entities/presentation-design';
 export * from './entities/document-agent';
+export * from './entities/document-ir-patch';
+export * from './entities/document-version-pin';
 export * from './entities/canonical-tool-contract';
 export * from './entities/document-task-runtime';
 export * from './entities/repair-plan';

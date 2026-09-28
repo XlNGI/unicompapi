@@ -14,6 +14,7 @@ import {
 
 const registry = createCanonicalToolRegistry();
 const read = registry.get('read_document_structure')!;
+const update = registry.get('update_element')!;
 const context: AvailableToolContext = {
   implementedToolIds: canonicalToolIds,
   capabilities: canonicalToolIds,
@@ -26,9 +27,9 @@ const context: AvailableToolContext = {
 
 describe('canonical document tool contracts', () => {
   it('keeps the existing registry while exposing only the established business contract', () => {
-    expect(registry.size).toBe(9);
+    expect(registry.size).toBe(10);
     expect([...registry.keys()]).toEqual(canonicalToolIds);
-    expect(deriveAvailableToolSet(registry, context).map(contract => contract.toolId)).toEqual(['read_document_structure']);
+    expect(deriveAvailableToolSet(registry, context).map(contract => contract.toolId)).toEqual(['read_document_structure', 'update_element']);
     for (const contract of registry.values()) {
       expect(contract.schemaVersion).toBe(1);
       expect(contract.input.additionalProperties).toBe(false);
@@ -36,7 +37,7 @@ describe('canonical document tool contracts', () => {
       expect(contract.execution.timeoutMs).toBeGreaterThan(0);
       expect(contract.execution.budgetUnits).toBeGreaterThan(0);
       expect(contract.diagnostics.failureCodes).toContain('invalid_tool_arguments');
-      if (contract.toolId !== read.toolId && contract.toolId !== 'generate_pptx') {
+      if (contract.toolId !== read.toolId && contract.toolId !== 'generate_pptx' && contract.toolId !== 'update_element') {
         expect(contract.exposure).toBe('internal');
         expect(contract.input.fields).toEqual({});
       }
@@ -66,6 +67,21 @@ describe('canonical document tool contracts', () => {
     expect(validateCanonicalToolArguments(read, { scope: 'document' })).toEqual({ scope: 'document' });
     expect(validateCanonicalToolArguments(read, { scope: 'page', ordinal: 3 })).toEqual({ scope: 'page', ordinal: 3 });
     expect(validateCanonicalToolArguments(read, { scope: 'section', ordinal: 1 })).toEqual({ scope: 'section', ordinal: 1 });
+  });
+
+  it('exposes only business update arguments and accepts a validated IR patch result', () => {
+    expect(canonicalToolInputSchema(update)).toMatchObject({
+      additionalProperties: false,
+      required: ['elementId', 'text'],
+      properties: { elementId: { type: 'string' }, text: { type: 'string' } }
+    });
+    expect(validateCanonicalToolArguments(update, { elementId: 'element-1', text: '新文本' })).toEqual({ elementId: 'element-1', text: '新文本' });
+    expect(() => validateCanonicalToolArguments(update, { elementId: 'element-1', text: '新文本', revision: 1 })).toThrow('invalid_tool_arguments');
+    expect(validateDocumentToolResult(update, {
+      schemaVersion: 1, status: 'success',
+      irPatch: { schemaVersion: 1, operations: [{ op: 'update_text', target: { elementId: 'element-1' }, text: '新文本' }] },
+      observation: { changedElementId: 'element-1' }, artifactRefs: [{ kind: 'work', ref: 'work-candidate-1' }]
+    })).toMatchObject({ status: 'success' });
   });
 
   it.each([
@@ -183,6 +199,6 @@ describe('canonical document tool contracts', () => {
   it('does not leak transient registry mutation into the authoritative catalog', () => {
     const empty: CanonicalToolRegistry = createCanonicalToolRegistry([]);
     expect(deriveAvailableToolSet(empty, context)).toEqual([]);
-    expect(createCanonicalToolRegistry().size).toBe(9);
+    expect(createCanonicalToolRegistry().size).toBe(10);
   });
 });
