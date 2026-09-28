@@ -328,6 +328,12 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   }
   if (!terminalStates.has(execution.state)) {
     await runtime.responses.cancelExecution({ responseExecutionId: executionId });
+    try {
+      const { ConversationProductionTraceStore } = require('../dist-electron/src/platform/conversation-production-trace');
+      const timeoutTrace = await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id });
+      entry.trace = timeoutTrace.filter(event => ['model_request', 'tool_authorization', 'tool_call', 'tool_result'].includes(event.code))
+        .map(event => ({ code: event.code, status: event.status, ...(event.operationId ? { operationId: event.operationId } : {}), ...(event.facts?.tool ? { tool: event.facts.tool } : {}) }));
+    } catch { /* keep timeout report bounded */ }
     throw Object.assign(new Error('case_deadline_exceeded'), { code: 'case_deadline_exceeded' });
   }
   entry.terminalState = execution.state;
@@ -339,7 +345,7 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   const { ConversationProductionTraceStore } = require('../dist-electron/src/platform/conversation-production-trace');
   const trace = await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id });
   entry.trace = trace.filter(event => ['tool_authorization', 'tool_call', 'tool_result'].includes(event.code))
-    .map(event => ({ code: event.code, status: event.status, ...(event.facts?.tool ? { tool: event.facts.tool } : {}) }));
+    .map(event => ({ code: event.code, status: event.status, ...(event.operationId ? { operationId: event.operationId } : {}), ...(event.facts?.tool ? { tool: event.facts.tool } : {}) }));
   requireCondition(execution.state === 'completed', 'provider_response_not_completed');
   requireCondition((liveGeneration ? entry.networkRequests >= 2 && entry.toolCalls.some(item => item.toolId === 'generate_pptx') &&
     entry.toolCalls.some(item => item.toolId === 'read_document_structure') && entry.artifactVerified && entry.toolCallIdMatched

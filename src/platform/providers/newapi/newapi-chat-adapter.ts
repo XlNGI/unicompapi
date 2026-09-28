@@ -63,6 +63,7 @@ import {
   type NewApiEventStreamSession,
   type NewApiSharedRuntime
 } from './newapi-runtime';
+import { emitProductionEvent } from '../../conversation-production-trace';
 
 export interface NewApiCredentialResolverPort {
   useCredential<T>(
@@ -356,34 +357,55 @@ export class NewApiChatAdapter {
     let session: NewApiEventStreamSession | undefined;
     let availableToolNames = new Set<string>();
     const openSession = async (messages: readonly NewApiChatMessageV1[]) => {
+      const continuation = messages.some(message => message.role === 'tool');
+      const stage = async (name: string, status: 'started' | 'completed', startedAt: number) => {
+        void emitProductionEvent({ code: 'model_request', status, operationId: `continuation_${name}`, facts: { purpose: 'content', count: Math.max(0, Date.now() - startedAt) } });
+      };
+      const historyStartedAt = Date.now();
+      if (continuation) await stage('history_build', 'started', historyStartedAt);
       let tools: readonly ControlledProviderToolDefinition[] | undefined;
       try {
         tools = parseControlledProviderTools(input.prepareTools
           ? await input.prepareTools(externalController.signal) : request.tools);
       } catch (error) {
-        throw new NewApiChatAdapterError(`newapi.continuation_prepare_failed.${safeContinuationCause(error)}`, safeContinuationCause(error));
+        throw new NewApiChatAdapterError(`newapi.continuation_prepare_failed.${safeContinuationCause(error)}`, safeContinuationMessage(error));
       }
+      if (continuation) await stage('history_build', 'completed', historyStartedAt);
       if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
       availableToolNames = new Set(tools?.map(tool => tool.function.name) ?? []);
       const serializedTools = JSON.stringify(tools);
       const beforeRequestStarted = async () => {
+        const startAt = Date.now();
+        if (continuation) await stage('before_request', 'started', startAt);
         await guardedStart();
+        if (continuation) await stage('messages_map', 'started', startAt);
         if (input.prepareTools) {
           const currentTools = parseControlledProviderTools(await input.prepareTools(externalController.signal));
           if (JSON.stringify(currentTools) !== serializedTools) throw invalidRequest('Document tools changed before submission');
         }
+        if (continuation) await stage('messages_map', 'completed', startAt);
         if (externalController.signal.aborted) throw new NewApiRuntimeError('cancelled', 'not_retryable');
+        if (continuation) await stage('before_request', 'completed', startAt);
       };
-      return this.credentials.useCredential(
+      const bodyStartedAt = Date.now();
+      if (continuation) await stage('request_body_build', 'started', bodyStartedAt);
+      if (continuation) await stage('request_serialize', 'started', bodyStartedAt);
+      const body = serializeRequest(route, { ...request, messages, tools }, parameterSchema);
+      if (continuation) await stage('request_serialize', 'completed', bodyStartedAt);
+      if (continuation) await stage('request_body_build', 'completed', bodyStartedAt);
+      if (continuation) void stage('credential_lookup', 'started', Date.now());
+      const credentialSession = await this.credentials.useCredential(
         { connectionId: route.connectionId, credentialVersionId: route.credentialVersionId },
         (credential) => this.runtime.openChatStream({
           connection,
           credentials: credential,
-          body: serializeRequest(route, { ...request, messages, tools }, parameterSchema),
+          body,
           signal: externalController.signal,
           beforeRequestStarted
         })
       );
+      if (continuation) void stage('credential_lookup', 'completed', Date.now());
+      return credentialSession;
     };
     const toolBridge: ControlledProviderToolBridge | undefined = input.toolBridge ? {
       execute: (call) => availableToolNames.has(call.call.name)
@@ -679,6 +701,13 @@ function safeContinuationCause(error: unknown): string {
   if (error instanceof NewApiChatAdapterError) return error.safeCode;
   if (error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,80}$/.test(error.name)) return error.name;
   return 'unknown';
+}
+
+function safeContinuationMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/parameters?/iu.test(message)) return 'parameters';
+  if (/tools?/iu.test(message)) return 'tools';
+  return safeContinuationCause(error);
 }
 
 export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {

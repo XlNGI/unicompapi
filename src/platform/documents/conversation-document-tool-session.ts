@@ -474,6 +474,7 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       generatedIR = buildDocumentIRFromOutline({ outline, operation: 'analyze', attachmentRefs: [], revision: {
         baseWorkId: generatedWorkId ?? 'pending-generation', expectedRevision: selection.userMessageRevision
       } });
+      void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'generated_outline_ready', facts: { tool: 'read_sources', purpose: 'tool' } });
     } };
     const generateBinding = createGeneratePptxBinding(generationDependencies, { registry });
     const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
@@ -502,11 +503,13 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       ] });
     const session: ConversationDocumentToolSession = {
       prepareTools: async signal => {
-        await emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'prepare_tools_enter', facts: { tool: 'read_sources', purpose: 'tool' } });
+        void emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'prepare_tools_enter', facts: { tool: 'read_sources', purpose: 'tool' } });
         if (signal.aborted || controller.signal.aborted || closed || Date.now() >= deadlineAt) return undefined;
-        await refreshGenerated();
-        await emitProductionEvent({ code: 'tool_authorization', status: bridge.tools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
-        await emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool' } });
+        // The generated outline is captured before the Runner side effect;
+        // continuation preparation must not reread the newly published file.
+        // Physical-page reads still use the host reader inside the binding.
+        void emitProductionEvent({ code: 'tool_authorization', status: bridge.tools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
+        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool' } });
         return bridge.tools.length ? bridge.tools : undefined;
       },
       bridge: { execute: request => bridge.bridge.execute(request) },
