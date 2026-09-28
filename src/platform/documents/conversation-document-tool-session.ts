@@ -508,9 +508,19 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         // The generated outline is captured before the Runner side effect;
         // continuation preparation must not reread the newly published file.
         // Physical-page reads still use the host reader inside the binding.
-        void emitProductionEvent({ code: 'tool_authorization', status: bridge.tools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool' } });
-        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool' } });
-        return bridge.tools.length ? bridge.tools : undefined;
+        void emitProductionEvent({ code: 'tool_authorization', status: 'started', operationId: 'available_tool_set_finalize', facts: { tool: 'read_sources', purpose: 'tool' } });
+        let availableTools: readonly ControlledProviderToolDefinition[];
+        try {
+          availableTools = bridge.tools;
+        } catch (error) {
+          const reason = error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(error.name) ? error.name : 'unknown';
+          void emitProductionEvent({ code: 'tool_authorization', status: 'failed', operationId: `available_tool_set_finalize_failed_${reason}`, facts: { tool: 'read_sources', purpose: 'tool' } });
+          throw error;
+        }
+        void emitProductionEvent({ code: 'tool_authorization', status: availableTools.some(tool => tool.function.name === readContract.toolId) ? 'completed' : 'failed', operationId: 'available_tools_refreshed', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
+        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'available_tool_set_finalize', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
+        void emitProductionEvent({ code: 'tool_authorization', status: 'completed', operationId: 'prepare_tools_exit', facts: { tool: 'read_sources', purpose: 'tool', count: availableTools.length } });
+        return availableTools.length ? availableTools : undefined;
       },
       bridge: { execute: request => bridge.bridge.execute(request) },
       cancel: async () => { cancelRequested = true; controller.abort(); },

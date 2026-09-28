@@ -366,7 +366,8 @@ export class NewApiChatAdapter {
       let tools: readonly ControlledProviderToolDefinition[] | undefined;
       try {
         tools = parseControlledProviderTools(input.prepareTools
-          ? await input.prepareTools(externalController.signal) : request.tools);
+          ? await prepareToolsWithTimeout(input.prepareTools, externalController.signal, continuation ? 15_000 : 60_000)
+          : request.tools);
       } catch (error) {
         throw new NewApiChatAdapterError(`newapi.continuation_prepare_failed.${safeContinuationCause(error)}`, safeContinuationMessage(error));
       }
@@ -708,6 +709,22 @@ function safeContinuationMessage(error: unknown): string {
   if (/parameters?/iu.test(message)) return 'parameters';
   if (/tools?/iu.test(message)) return 'tools';
   return safeContinuationCause(error);
+}
+
+async function prepareToolsWithTimeout(
+  prepare: (signal: AbortSignal) => Promise<readonly ControlledProviderToolDefinition[] | undefined>,
+  signal: AbortSignal,
+  timeoutMs: number
+): Promise<readonly ControlledProviderToolDefinition[] | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new NewApiChatAdapterError('newapi.continuation_prepare_timeout', 'prepareTools timeout')), timeoutMs);
+  });
+  try {
+    return await Promise.race([prepare(signal), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function mapNewApiUsage(value: unknown): readonly UsageFactV1[] {
