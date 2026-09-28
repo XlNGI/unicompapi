@@ -6,6 +6,8 @@
 
 ### 事实基线
 
+2026-09-28 最新交付状态：生产只读接线已提交 `3a373b8`，上一批回滚点为 `1032ddf`。最终同一源码的完整测试为 Node/UI 384/384、Vitest 252 文件/2228 项，0 失败/跳过；类型、Lint、构建、平台/恢复/关闭/计划审计通过。真实 Provider kimi-k3 最小验收通过整篇和物理第 2 页，最终批次共 4 次 HTTP；该次数不包括故障定位的早期调用。下文“实施中/尚未提交”是本轮过程记录，以本条为准。保留 Provider 原轮数策略、其他七项 internal 工具；不接 generate_pptx/CRUD。未推送、合并、发布或关机。临时验收目录在 Electron 退出前清理延迟，退出后清理命令又被自动审批策略拒绝，已保留且不纳入 Git。
+
 2026-09-27 本轮维护（生产只读工具循环，实施中）：已按负责人要求先复验上一批全部门禁，再提交可回滚基线 `1032ddf`（仅本地提交，不推送）；保留无关未跟踪 `mermaid-diagram.png`。本轮仅将 Canonical read_document_structure 接入真实会话响应生产调度，每轮发送前重建 Available Tool Set、执行前重验绑定/Hash/权限、返回安全 ToolResult 与 tool_call_id。另七项工具保持 internal，不接 generate_pptx/CRUD，不调整 Provider Loop 轮数上限。负责人已授权使用合成 PPT 对当前配置真实文本 Provider 做整篇和单页最小验收，凭证只在 SecureCredentialVault 回调内使用，用户项目不写入。
 
 2026-09-28 本轮生产只读接线已完成并通过真实 Provider 最小验收：`read_document_structure` 的整篇文档和物理第 2 页各完成首轮工具调用、Observation 回传和最终回答；Canonical Schema、tool_call_id、Trace、路径/Runtime 数据隔离均通过。修复 Provider 兼容缺陷：OpenAI-compatible 流式工具调用允许首个 `function.arguments` 为空增量，累计完成后仍严格执行 JSON/Canonical 参数校验。最终自动化和脱敏真实证据分别见 `docs/evidence/production-document-read.json` 与 `docs/evidence/production-document-read-real-provider.json`；本轮尚未提交、推送或合并。

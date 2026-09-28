@@ -2,46 +2,184 @@
   "schemaVersion": 1,
   "mode": "real_provider",
   "status": "passed",
-  "providerModel": "kimi-k3",
-  "routeRevalidated": true,
-  "syntheticOnly": true,
-  "networkRequests": 4,
+  "startedAt": "2026-09-28T00:49:45.357Z",
+  "outboundScope": "Two synthetic PPT reading requests and tool observations only; no user files, attachments or conversation history.",
+  "entryPoint": "createChatContextRuntime.responses.start -> production dispatch -> canonical read tool",
+  "maximumNetworkRequests": 4,
+  "maximumRequestsPerCase": 2,
+  "maximumOutputTokensPerRequest": 1024,
+  "automaticRetries": 0,
+  "cost": "unknown",
   "cases": [
     {
       "case": "whole_document",
-      "requests": 2,
-      "scope": "document",
-      "toolId": "read_document_structure",
-      "toolCallIdMatched": true,
-      "observationVerified": true,
-      "answerUsedObservation": true,
+      "expectedScope": "document",
+      "status": "passed",
+      "networkRequests": 2,
+      "schemasCanonical": true,
       "pathOrRuntimeContextLeak": false,
-      "terminalState": "completed"
+      "toolCalls": [
+        {
+          "toolId": "read_document_structure",
+          "scope": "document"
+        }
+      ],
+      "toolCallIdMatched": true,
+      "observationContainsExpectedFacts": true,
+      "documentContentFromObservationOnly": true,
+      "terminalState": "completed",
+      "terminalDiagnostics": [],
+      "answerUsesObservation": true,
+      "trace": [
+        {
+          "code": "tool_authorization",
+          "status": "completed"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "tool": "read_sources"
+        }
+      ]
     },
     {
       "case": "physical_page_2",
-      "requests": 2,
-      "scope": "page",
-      "ordinal": 2,
-      "toolId": "read_document_structure",
-      "toolCallIdMatched": true,
-      "observationVerified": true,
-      "answerUsedObservation": true,
+      "expectedScope": "page",
+      "status": "passed",
+      "networkRequests": 2,
+      "schemasCanonical": true,
       "pathOrRuntimeContextLeak": false,
-      "terminalState": "completed"
+      "toolCalls": [
+        {
+          "toolId": "read_document_structure",
+          "scope": "page",
+          "ordinal": 2
+        }
+      ],
+      "toolCallIdMatched": true,
+      "observationContainsExpectedFacts": true,
+      "documentContentFromObservationOnly": true,
+      "terminalState": "completed",
+      "terminalDiagnostics": [],
+      "answerUsesObservation": true,
+      "trace": [
+        {
+          "code": "tool_authorization",
+          "status": "completed"
+        },
+        {
+          "code": "tool_authorization",
+          "status": "completed",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_call",
+          "status": "started",
+          "tool": "read_sources"
+        },
+        {
+          "code": "tool_result",
+          "status": "completed",
+          "tool": "read_sources"
+        }
+      ]
     }
   ],
+  "networkRequests": 4,
+  "model": "kimi-k3",
+  "routeSource": "Most recent completed text route, revalidated against copied current registry and fresh candidate eligibility.",
   "fixture": {
     "registeredByExistingRunner": true,
     "localRenderAndQaPassed": true,
     "physicalPages": 4,
     "physicalPageTwoVerified": true
   },
-  "schemaSource": "canonical-tool-contract.ts",
   "settingsSource": "default",
+  "usage": [
+    {
+      "status": "reported",
+      "sourceStage": "result",
+      "facts": [
+        {
+          "metricId": "completion_tokens",
+          "quantity": "518",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "prompt_tokens",
+          "quantity": "1230",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "total_tokens",
+          "quantity": "1748",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "cached_tokens",
+          "quantity": "0",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "reasoning_tokens",
+          "quantity": "173",
+          "unit": "token",
+          "source": "provider_body"
+        }
+      ]
+    },
+    {
+      "status": "reported",
+      "sourceStage": "result",
+      "facts": [
+        {
+          "metricId": "completion_tokens",
+          "quantity": "331",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "prompt_tokens",
+          "quantity": "1021",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "total_tokens",
+          "quantity": "1352",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "cached_tokens",
+          "quantity": "0",
+          "unit": "token",
+          "source": "provider_body"
+        },
+        {
+          "metricId": "reasoning_tokens",
+          "quantity": "196",
+          "unit": "token",
+          "source": "provider_body"
+        }
+      ]
+    }
+  ],
   "protectedUserConfigurationUnchanged": true,
-  "credentials": "used only inside SecureCredentialVault callback; not recorded",
-  "cost": "unknown",
-  "usageRecorded": true,
-  "rawReport": "outputs/production-document-read/real-provider.json"
+  "temporaryCleanupDeferred": true,
+  "finishedAt": "2026-09-28T00:51:12.665Z"
 }

@@ -2,6 +2,8 @@
 
 本批以已验证并提交的 `1032ddf4338ca7ed0780ae17eed7e920dd3fff16` 为回滚点，在 `feature/ppt-goal-pipeline` 完成增量接线。当前执行状态以 `PLANS.md` 顶部记录和本批机器证据为准。
 
+实现提交为 `3a373b8`。证据归档保留最终真实报告，不含凭证、请求正文、用户文档或文件路径；尚未推送、合并或发布。
+
 ## 本批边界
 
 只开放 `read_document_structure`。其余七个工具仍保持既有 `internal` 状态，未删除、重写或新增 Provider 暴露。复用上一批 Canonical Contract、Available Tool Set、参数 Validator、只读 Binding 和 Runtime。
@@ -140,7 +142,7 @@ pnpm exec electron scripts/verify-production-document-read.cjs --authorized-two-
 
 最终通过批次为 2026-09-28 00:49:45—00:51:12 UTC，当前配置模型 kimi-k3。两案例均只调用一次 read_document_structure，随后根据 Observation 完成回答；每例 2 次 HTTP，最终批次共 4 次。该数字不包含故障定位的早期调用。最小验收请求明确要求读取一次后立即回答。此前一次复验中模型在成功读取后仍要求更多工具调用，脚本的请求预算阻止了第三次 HTTP；这属于仍保留的模型/轮数策略限制，未通过放宽预算掩盖。最终响应 usage 不能解释为完整诊断任务费用。
 
-早期本地预检发现设置文件缺失、会话连续 revision 保存和隔离 Electron profile 加密上下文问题，均在脚本内修复。脚本在 app ready 前从 Local State 仅复制 os_crypt 加密配置，不复制 Cookies，不记录解密值。真实网络发现的空 arguments 增量缺陷已修复并纳入默认回归。最终报告保留临时清理延迟事实，进程退出后由任务统一清理。
+早期本地预检发现设置文件缺失、会话连续 revision 保存和隔离 Electron profile 加密上下文问题，均在脚本内修复。脚本在 app ready 前从 Local State 仅复制 os_crypt 加密配置，不复制 Cookies，不记录解密值。真实网络发现的空 arguments 增量缺陷已修复并纳入默认回归。最终报告保留临时清理延迟事实；进程退出后的任务清理命令被自动审批策略拒绝，临时目录保留，不纳入 Git。
 
 ## 尚未处理
 

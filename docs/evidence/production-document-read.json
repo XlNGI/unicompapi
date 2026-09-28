@@ -4,6 +4,7 @@
   "date": "2026-09-28",
   "branch": "feature/ppt-goal-pipeline",
   "rollbackCommit": "1032ddf",
+  "implementationCommit": "3a373b8",
   "status": "passed",
   "exposedTools": ["read_document_structure"],
   "internalToolsPreserved": 7,
