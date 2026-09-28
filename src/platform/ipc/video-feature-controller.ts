@@ -30,7 +30,7 @@ export interface VideoFeatureControllerRuntime {
     readonly subject: FeatureCandidateSubjectV1;
     readonly routeSelectionToken: string;
     readonly confirmation: SubmissionUserConfirmationV1;
-  }): Promise<VideoFeatureSubmissionDto>;
+  }, onAccepted?: (receipt: VideoFeatureSubmissionDto) => void): Promise<VideoFeatureSubmissionDto>;
   recoverResult?(taskId: string): Promise<VideoFeatureRecoveryDto>;
 }
 
@@ -79,7 +79,9 @@ export class VideoFeatureController {
   submitDraft(
     request: unknown
   ): Promise<VideoFeatureIpcResult<VideoFeatureSubmissionDto>> {
-    return this.execute(async () => {
+    let acknowledge!: (value: VideoFeatureIpcResult<VideoFeatureSubmissionDto>) => void;
+    const accepted = new Promise<VideoFeatureIpcResult<VideoFeatureSubmissionDto>>((resolve) => { acknowledge = resolve; });
+    const operation = this.execute<VideoFeatureSubmissionDto>(async () => {
       const input = parseSubmitRequest(request);
       if (!input.confirmed) {
         return failure('confirmation_required', 'Explicit confirmation is required');
@@ -108,9 +110,12 @@ export class VideoFeatureController {
           subject: resolved.subject,
           routeSelectionToken: input.routeSelectionToken,
           confirmation
-        })
+        }, (receipt) => acknowledge({ ok: true, value: receipt }))
       };
     });
+    // Only the IPC response finishes early. execute() still owns the complete
+    // runtime operation, including polling, local registration and close guards.
+    return Promise.race([accepted, operation]);
   }
 
   recoverResult(

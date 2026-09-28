@@ -76,45 +76,32 @@ export function VideoImageWorkspace({
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
-  const [siblingDraftIds, setSiblingDraftIds] = useState<readonly string[]>([]);
+  const [expectedTaskId, setExpectedTaskId] = useState<string>();
   const [submissionProgress, setSubmissionProgress] = useState<{
     readonly phase: SubmissionProgressPhase;
     readonly failureMessage?: string;
   }>({ phase: 'idle' });
   const userTookOverRef = useRef(false);
+  const lastProgressPhaseRef = useRef<SubmissionProgressPhase>('idle');
   const handleProgressChange = useCallback((
     phase: SubmissionProgressPhase,
     failureMessage?: string
   ) => {
-    if (phase === 'preparing') userTookOverRef.current = false;
+    if ((phase === 'preparing' && lastProgressPhaseRef.current !== 'preparing') ||
+      (phase === 'requesting' && lastProgressPhaseRef.current !== 'preparing' && lastProgressPhaseRef.current !== 'requesting')) {
+      userTookOverRef.current = false;
+      setExpectedTaskId(undefined);
+      setExpectedWorkId(undefined);
+    }
+    lastProgressPhaseRef.current = phase;
     setSubmissionProgress({ phase, failureMessage });
   }, []);
 
   useEffect(() => {
+    setExpectedTaskId(undefined);
+    setSubmissionProgress({ phase: 'idle' });
     setExpectedWorkId(undefined);
   }, [draft.draftId]);
-
-  // 收集当前项目下所有图生视频草稿ID，使生成历史按模式过滤而非仅当前草稿
-  useEffect(() => {
-    let active = true;
-    if (!videoWorkspaces) {
-      setSiblingDraftIds([]);
-      return;
-    }
-    void videoWorkspaces.list().then((result) => {
-      if (!active || !result.ok) return;
-      setSiblingDraftIds(
-        result.value
-          .filter((item) => item.mode === 'image_to_video')
-          .map((item) => item.draftId)
-      );
-    }).catch(() => {
-      if (active) setSiblingDraftIds([]);
-    });
-    return () => {
-      active = false;
-    };
-  }, [videoWorkspaces, historyRefreshKey]);
 
   const legacySelections = useMemo(
     () => draft.imageToVideo.materials?.slots.flatMap(
@@ -577,6 +564,7 @@ export function VideoImageWorkspace({
             onMessage={onMessage}
             onProgressChange={handleProgressChange}
             onSubmissionComplete={(submission) => {
+              setExpectedTaskId(submission.taskId);
               if (!userTookOverRef.current) {
                 setExpectedWorkId(
                   submission.status === 'completed' ? submission.workId : undefined
@@ -599,12 +587,13 @@ export function VideoImageWorkspace({
         >
           <GenerationHistory
             draftId={draft.draftId}
-            extraDraftIds={siblingDraftIds}
-            key={draft.draftId}
+            key={draft.projectId}
             mediaKind="video"
+            workspaceMode="image_to_video"
             projectId={draft.projectId}
             refreshKey={historyRefreshKey}
             expectedWorkId={expectedWorkId}
+            expectedTaskId={expectedTaskId}
             userTookOverRef={userTookOverRef}
             submissionProgress={submissionProgress}
           />
