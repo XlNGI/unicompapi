@@ -11,6 +11,7 @@ import {
   type ToolExecutionContext
 } from '../../domain/entities/canonical-tool-contract';
 import { createReadDocumentStructureBinding } from '../../application/read-document-structure-tool';
+import { createGeneratePptxBinding, type GeneratePptxToolDependencies } from '../../application/generate-pptx-tool';
 import { DocumentTaskRuntimeService } from '../../application/document-task-runtime-service';
 import { JsonDocumentTaskRuntimeRepository } from '../repositories/json-document-task-runtime-repository';
 import { JsonFileReferenceRepository, JsonWorkRepository } from '../repositories/json-repositories';
@@ -22,7 +23,7 @@ import { RegisteredPresentationReader } from './registered-presentation-reader';
 import type { PptxPhysicalPage } from './pptx-page-reader';
 
 /** Host-only pin. No document body or filesystem locator is part of this value. */
-export interface ConversationDocumentToolSelection {
+export interface ConversationDocumentReadToolSelection {
   readonly projectId: ProjectId;
   readonly conversationId: ConversationId;
   readonly currentUserMessageId: MessageId;
@@ -42,15 +43,29 @@ export interface ConversationDocumentToolSelection {
   readonly bindingHash: string;
 }
 
+export interface ConversationDocumentGenerationToolSelection {
+  readonly kind: 'generation';
+  readonly projectId: ProjectId;
+  readonly conversationId: ConversationId;
+  readonly currentUserMessageId: MessageId;
+  readonly userMessageRevision: number;
+  readonly userMessageHash: string;
+  readonly authorizationStatus: 'not_requested' | 'awaiting_user' | 'approved' | 'revoked';
+  readonly bindingHash: string;
+}
+
+export type ConversationDocumentToolSelection = ConversationDocumentReadToolSelection | ConversationDocumentGenerationToolSelection;
+
 export interface ConversationDocumentToolSession {
   prepareTools(signal: AbortSignal): Promise<readonly ControlledProviderToolDefinition[] | undefined>;
   readonly bridge: ControlledProviderToolBridge;
+  cancel?(): Promise<void>;
   close(): Promise<void>;
 }
 
 export interface ConversationDocumentToolSessionPort {
   select(input: { readonly conversation: Conversation; readonly currentUserMessageId: MessageId;
-    readonly query: string }): Promise<ConversationDocumentToolSelection | undefined>;
+    readonly query: string }): Promise<ConversationDocumentReadToolSelection | undefined>;
   prepare(input: { readonly conversation: Conversation; readonly draft: ConversationResponseDraftV1 }): Promise<ConversationDocumentToolSelection | undefined>;
   pinDraft(input: { readonly draft: ConversationResponseDraftV1; readonly selection: ConversationDocumentToolSelection }): Promise<void>;
   registerExecution(input: { readonly selection: ConversationDocumentToolSelection; readonly responseExecutionId: string }): Promise<void>;
@@ -73,8 +88,9 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
   constructor(private readonly options: {
     readonly rootDirectory: string;
     readonly projectId: ProjectId;
-    readonly conversations: ProjectConversationRepository;
-    readonly getCurrentProjectId?: () => ProjectId | undefined;
+  readonly conversations: ProjectConversationRepository;
+  readonly getCurrentProjectId?: () => ProjectId | undefined;
+    readonly generatePptx?: GeneratePptxToolDependencies;
   }) {
     if (options.conversations.projectId !== options.projectId) throw unavailable();
     this.storage = new NodeProjectStorage(options.rootDirectory);
@@ -83,8 +99,8 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     this.reader = new RegisteredPresentationReader(options);
   }
 
-  async select(input: Parameters<ConversationDocumentToolSessionPort['select']>[0]): Promise<ConversationDocumentToolSelection | undefined> {
-    if (!isReadRequest(input.query)) return undefined;
+  async select(input: Parameters<ConversationDocumentToolSessionPort['select']>[0]): Promise<ConversationDocumentReadToolSelection | undefined> {
+    if (!isReadRequest(input.query) && !isPptGenerationIntent(input.query) && !isPptGenerationConfirmation(input.conversation, input.currentUserMessageId)) return undefined;
     if (!this.active() || input.conversation.projectId !== this.options.projectId || input.conversation.status !== 'active') throw unavailable();
     const conversation = await this.options.conversations.get(input.conversation.id);
     if (!conversation || conversation.revision !== input.conversation.revision || conversation.status !== 'active') throw unavailable();
@@ -92,6 +108,18 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       message.role === 'user' && message.state === 'completed');
     if (currentIndex < 0) throw unavailable();
     const message = conversation.messages[currentIndex];
+    if (!isReadRequest(input.query)) {
+      const approved = isPptGenerationApproved(conversation, message.id, input.query);
+      const selection: ConversationDocumentGenerationToolSelection = Object.freeze({
+        kind: 'generation', projectId: this.options.projectId, conversationId: conversation.id,
+        currentUserMessageId: message.id, userMessageRevision: message.revision,
+        userMessageHash: hash(JSON.stringify([message.content, message.displayContent])),
+        authorizationStatus: approved ? 'approved' : 'awaiting_user',
+        bindingHash: hash(JSON.stringify([conversation.id, message.id, message.revision, approved]))
+      });
+      this.issued.add(selection);
+      return selection as unknown as ConversationDocumentReadToolSelection;
+    }
     const seen = new Set<string>();
     const documents = conversation.messages.slice(0, currentIndex).reverse().filter(prior => {
       const document = prior.documentResult;
@@ -145,8 +173,23 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       draft.promptContent === message.displayContent) && (draft.promptContent === undefined ||
       draft.promptContent === message.content || draft.promptContent === message.displayContent);
     if (!ordinary) return undefined;
-    return this.select({ conversation, currentUserMessageId: message.id,
-      query: draft.documentPageQuery ?? draft.attachmentQuery ?? message.displayContent ?? message.content });
+    const query = draft.documentPageQuery ?? draft.attachmentQuery ?? message.displayContent ?? message.content;
+    if (isPptGenerationIntent(query) || isPptGenerationConfirmation(conversation, message.id)) {
+      const approved = isPptGenerationApproved(conversation, message.id, query);
+      const selection = Object.freeze({
+        kind: 'generation' as const,
+        projectId: this.options.projectId,
+        conversationId: conversation.id,
+        currentUserMessageId: message.id,
+        userMessageRevision: message.revision,
+        userMessageHash: hash(JSON.stringify([message.content, message.displayContent])),
+        authorizationStatus: approved ? 'approved' as const : 'awaiting_user' as const,
+        bindingHash: hash(JSON.stringify([conversation.id, message.id, message.revision, approved]))
+      });
+      this.issued.add(selection);
+      return selection;
+    }
+    return this.select({ conversation, currentUserMessageId: message.id, query });
   }
 
   async pinDraft(input: Parameters<ConversationDocumentToolSessionPort['pinDraft']>[0]): Promise<void> {
@@ -187,6 +230,10 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession> {
     const { selection } = input;
     if (!this.active() || !this.issued.has(selection) || !/^[A-Za-z0-9_.:-]{1,256}$/u.test(input.responseExecutionId)) throw unavailable();
+    if ('kind' in selection) {
+      if (!await this.matchesGeneration(selection)) throw unavailable();
+      return this.createGenerationSession(input as { readonly selection: ConversationDocumentGenerationToolSelection; readonly responseExecutionId: string; readonly signal?: AbortSignal });
+    }
     if (!await this.matches(selection)) throw unavailable();
     const registry = createCanonicalToolRegistry();
     const contract = registry.get('read_document_structure')!;
@@ -356,18 +403,123 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
     return session;
   }
 
+  private async createGenerationSession(input: { readonly selection: ConversationDocumentGenerationToolSelection; readonly responseExecutionId: string;
+    readonly signal?: AbortSignal }): Promise<ConversationDocumentToolSession> {
+    if (!this.options.generatePptx) throw unavailable();
+    const selection = input.selection;
+    const registry = createCanonicalToolRegistry();
+    const generateContract = registry.get('generate_pptx')!;
+    const readContract = registry.get('read_document_structure')!;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    input.signal?.addEventListener('abort', cancel, { once: true });
+    if (input.signal?.aborted) cancel();
+    const timeoutMs = Math.min(generateContract.execution.timeoutMs * 2, 900_000);
+    const deadlineAt = Date.now() + timeoutMs;
+    let closed = false;
+    let cancelRequested = false;
+    let generatedWorkId: WorkId | undefined;
+    let generatedIR: DocumentIR | undefined;
+    let pages: readonly PptxPhysicalPage[] = [];
+    let checkpoint = { revision: 0, step: 0 };
+    const runtimeId = toDocumentTaskRuntimeId(`document-generation-${hash(`${this.options.projectId}\n${input.responseExecutionId}`)}`);
+    const repository = new JsonDocumentTaskRuntimeRepository(this.storage, this.options.projectId);
+    const service = new DocumentTaskRuntimeService(repository, {
+      validateBindings: async () => this.matches(selection)
+    });
+    const runtime = await service.create({ id: runtimeId, projectId: this.options.projectId,
+      conversationId: selection.conversationId, sourceMessageId: selection.currentUserMessageId,
+      executionId: input.responseExecutionId, documentKind: 'ppt', operation: 'create',
+      budget: { maxSteps: 8, budgetUnits: 24, timeoutMs } });
+    const refreshGenerated = async (): Promise<boolean> => {
+      if (!generatedWorkId || controller.signal.aborted || closed) return false;
+      try {
+        const current = await this.reader.read(generatedWorkId);
+        pages = current.pages;
+        generatedIR = documentIRFromPages(current.fileName, generatedWorkId, pages);
+        return true;
+      } catch { return false; }
+    };
+    const getExecutionContext = (): ToolExecutionContext => ({
+      currentDocumentId: generatedWorkId,
+      currentDocumentIR: generatedIR,
+      revision: selection.userMessageRevision,
+      operation: 'create', capabilities: [generateContract.toolId, readContract.toolId],
+      projectContext: { projectId: this.options.projectId, ...(generatedWorkId ? { workId: generatedWorkId } : {}) },
+      authorization: {
+        canRead: Boolean((generatedWorkId && generatedIR || selection.authorizationStatus === 'approved') && !closed && !controller.signal.aborted),
+        canWrite: !generatedWorkId && selection.authorizationStatus === 'approved' && !closed && !controller.signal.aborted,
+        allowedToolIds: generatedWorkId ? [readContract.toolId] : [generateContract.toolId],
+        generationAuthorization: selection.authorizationStatus
+      },
+      abortSignal: controller.signal,
+      taskContext: { taskId: runtimeId, deadlineAt, checkpoint }
+    });
+    const readBinding = createReadDocumentStructureBinding({ registry, readPage: async (ordinal, context) => {
+      const page = pages[ordinal - 1];
+      if (context.abortSignal.aborted || !page || !generatedWorkId) throw unavailable();
+      return { pageNumber: page.pageNumber, totalPages: pages.length, hidden: page.hidden,
+        heading: safeText(page.heading), text: safeText(page.contentText) };
+    } });
+    const generatedDependencies = this.options.generatePptx;
+    const generateBinding = createGeneratePptxBinding(generatedDependencies, { registry });
+    const bridge = createDocumentToolCallingBridge({ registry, budgetUnits: runtime.budget.budgetUnits,
+      maxCalls: runtime.budget.maxSteps, timeoutMs: generateContract.execution.timeoutMs, getExecutionContext,
+      runtime: { service: {
+        beginToolCall: async (...args) => { const result = await service.beginToolCall(...args); checkpoint = { revision: result.runtime.revision, step: result.runtime.checkpoint.step }; return result; },
+        recordObservation: async (...args) => { const result = await service.recordObservation(...args); checkpoint = { revision: result.revision, step: result.checkpoint.step }; return result; }
+      }, scope: runtime }, bindings: [
+        { contract: generateBinding.contract,
+          authorize: async (args, context) => selection.authorizationStatus === 'approved' && !generatedWorkId && await generateBinding.authorize(args, context),
+          execute: async (args, context) => {
+            const result = await generateBinding.execute(args, context);
+            if (result.status === 'success') {
+              const ref = result.artifactRefs?.find(item => item.kind === 'work')?.ref;
+              if (ref) { generatedWorkId = ref as WorkId; await refreshGenerated(); }
+            }
+            return result;
+          } },
+        { contract: readBinding.contract,
+          authorize: async (args, context) => Boolean(generatedWorkId && generatedIR) && await readBinding.authorize(args, context),
+          execute: async (args, context) => readBinding.execute(args, context) }
+      ] });
+    const session: ConversationDocumentToolSession = {
+      prepareTools: async signal => {
+        if (signal.aborted || controller.signal.aborted || closed || Date.now() >= deadlineAt) return undefined;
+        await refreshGenerated();
+        return bridge.tools.length ? bridge.tools : undefined;
+      },
+      bridge: { execute: request => bridge.bridge.execute(request) },
+      cancel: async () => { cancelRequested = true; controller.abort(); },
+      close: async () => {
+        if (closed) return;
+        closed = true; controller.abort(); input.signal?.removeEventListener('abort', cancel);
+        if (this.sessions.get(input.responseExecutionId) === session) this.sessions.delete(input.responseExecutionId);
+        const stored = await service.require(runtime);
+        if (generatedWorkId && ['planning', 'running', 'paused'].includes(stored.status)) await service.complete(runtime, generatedWorkId);
+        else if (cancelRequested && ['planning', 'running', 'paused'].includes(stored.status)) await service.setStatus(runtime, 'cancelled');
+        else if (['planning', 'running', 'paused'].includes(stored.status)) await service.setStatus(runtime, 'paused');
+      }
+    };
+    return session;
+  }
+
   private active(): boolean {
     return !this.disposed && (!this.options.getCurrentProjectId || this.options.getCurrentProjectId() === this.options.projectId);
   }
 
   private async matches(selection: ConversationDocumentToolSelection): Promise<boolean> {
+    if ('kind' in selection && selection.kind === 'generation') return this.matchesGeneration(selection);
     if (!this.active() || selection.projectId !== this.options.projectId) return false;
     try {
       const conversation = await this.options.conversations.get(selection.conversationId);
       if (!conversation || conversation.projectId !== this.options.projectId || conversation.status !== 'active') return false;
       const userIndex = conversation.messages.findIndex(message => message.id === selection.currentUserMessageId);
-      const sourceIndex = conversation.messages.findIndex(message => message.id === selection.sourceMessageId);
       const user = conversation.messages[userIndex];
+      if ('kind' in selection) return Boolean(userIndex >= 0 && user?.role === 'user' && user.state === 'completed' &&
+        user.revision === selection.userMessageRevision && hash(JSON.stringify([user.content, user.displayContent])) === selection.userMessageHash &&
+        selection.authorizationStatus === 'approved');
+      const sourceIndex = conversation.messages.findIndex(message => message.id === selection.sourceMessageId);
       const source = conversation.messages[sourceIndex];
       if (userIndex < 0 || sourceIndex < 0 || sourceIndex >= userIndex || user.role !== 'user' || user.state !== 'completed' ||
           user.revision !== selection.userMessageRevision || hash(JSON.stringify([user.content, user.displayContent])) !== selection.userMessageHash ||
@@ -385,9 +537,20 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
         path.basename(file.locator.relativePath) === selection.fileName);
     } catch { return false; }
   }
+
+  private async matchesGeneration(selection: ConversationDocumentGenerationToolSelection): Promise<boolean> {
+    if (!this.active() || selection.projectId !== this.options.projectId) return false;
+    try {
+      const conversation = await this.options.conversations.get(selection.conversationId);
+      const user = conversation?.messages.find(message => message.id === selection.currentUserMessageId);
+      return Boolean(conversation && conversation.projectId === this.options.projectId && conversation.status === 'active' &&
+        user?.role === 'user' && user.state === 'completed' && user.revision === selection.userMessageRevision &&
+        hash(JSON.stringify([user.content, user.displayContent])) === selection.userMessageHash);
+    } catch { return false; }
+  }
 }
 
-export function buildDocumentReadToolInstruction(selection: ConversationDocumentToolSelection): string {
+export function buildDocumentReadToolInstruction(selection: ConversationDocumentReadToolSelection): string {
   return [
     'The host has bound one registered PPT from this conversation. Use the available read tool before answering questions about its contents.',
     selection.scope === 'page' ? `The user authorized only physical page ${selection.ordinal}. Request that page; do not request the entire document, a different page or a section.`
@@ -398,18 +561,55 @@ export function buildDocumentReadToolInstruction(selection: ConversationDocument
   ].join('\n');
 }
 
-function sameFile(selection: ConversationDocumentToolSelection, current: Awaited<ReturnType<RegisteredPresentationReader['read']>>): boolean {
+export function buildDocumentGenerationToolInstruction(selection: ConversationDocumentGenerationToolSelection): string {
+  return [
+    'You may use the business-level generate_pptx tool. Never request or reveal paths, document IDs, revisions, permissions or runtime context.',
+    selection.authorizationStatus === 'approved'
+      ? 'The user explicitly approved this generation request. Use reasonable defaults for omitted optional values, then call generate_pptx when the request is sufficiently specified.'
+      : 'The user has not approved generation yet. Ask naturally: “现在开始生成吗？” Do not call generate_pptx until the user explicitly agrees.',
+    'The tool accepts only title, content, theme, presentationTemplate and requestedTotalPages. The host owns output and publication.'
+  ].join('\n');
+}
+
+export function buildDocumentGenerationConversationInstruction(): string {
+  return [
+    'When the user expresses an intent to make a PPT, first judge from the conversation whether the request is sufficiently specified.',
+    'Ask naturally for only missing information and do not repeat information already provided. Reasonable defaults are allowed; do not use a rigid questionnaire.',
+    'When sufficient, ask the user “现在开始生成吗？” before calling generate_pptx. If the user explicitly asked to generate immediately, treat that as approval and call the business-level tool.',
+    'Never expose paths, provider details or runtime context. The user can stop generation at any time.'
+  ].join('\n');
+}
+
+export function isPptGenerationIntent(value: string): boolean {
+  return /(?:PPT|演示文稿|幻灯片|presentation|slide)/iu.test(value) &&
+    /(?:做|制作|生成|创建|新建|写|设计|make|create|generate|build)/iu.test(value);
+}
+
+function isPptGenerationConfirmation(conversation: Conversation, messageId: MessageId): boolean {
+  const index = conversation.messages.findIndex(message => message.id === messageId);
+  if (index <= 0) return false;
+  const previous = conversation.messages[index - 1];
+  return previous.role === 'assistant' && /现在开始生成吗|开始生成|确认生成/iu.test(previous.content) &&
+    /^(?:好|好的|可以|确认|开始|同意|是|yes|y|ok|go|sure|请开始|现在开始)[。！!！\s]*$/iu.test(conversation.messages[index]?.content.trim() ?? '');
+}
+
+function isPptGenerationApproved(conversation: Conversation, messageId: MessageId, current: string): boolean {
+  return /(?:直接|立即|马上|现在就|开始生成|确认生成|直接生成|generate now|start generating)/iu.test(current) ||
+    isPptGenerationConfirmation(conversation, messageId);
+}
+
+function sameFile(selection: ConversationDocumentReadToolSelection, current: Awaited<ReturnType<RegisteredPresentationReader['read']>>): boolean {
   return current.work.id === selection.workId && current.work.fileId === selection.fileId && current.file.id === selection.fileId &&
     current.file.checksumSha256 === selection.checksumSha256 && current.file.sizeBytes === selection.sizeBytes &&
     current.file.updatedAt === selection.fileUpdatedAt && current.fileName === selection.fileName;
 }
 
-function scopeAllowed(selection: ConversationDocumentToolSelection, args: CanonicalToolArguments): boolean {
+function scopeAllowed(selection: ConversationDocumentReadToolSelection, args: CanonicalToolArguments): boolean {
   return selection.scope === 'page' ? args.scope === 'page' && args.ordinal === selection.ordinal
     : args.scope === 'document' || args.scope === 'page';
 }
 
-function documentIR(selection: ConversationDocumentToolSelection, pages: readonly PptxPhysicalPage[]): DocumentIR {
+function documentIR(selection: ConversationDocumentReadToolSelection, pages: readonly PptxPhysicalPage[]): DocumentIR {
   // Preserve all readable text, or fail closed when existing IR/result limits cannot represent it.
   const sections = pages.map(page => {
     const text = safeText(page.contentText).trim();
@@ -422,6 +622,13 @@ function documentIR(selection: ConversationDocumentToolSelection, pages: readonl
     content: { title: safeText(selection.fileName), pageCount: pages.length, sections, sourceRefs: [], styleConstraints: [] } });
   if (JSON.stringify(ir).length > 28_000) throw unavailable();
   return ir;
+}
+
+function documentIRFromPages(fileName: string, workId: WorkId, pages: readonly PptxPhysicalPage[]): DocumentIR {
+  const sections = pages.map(page => ({ sectionId: `page-${page.pageNumber}`, heading: `第 ${page.pageNumber} 页`, preserve: [],
+    blocks: [{ blockId: `page-${page.pageNumber}-text-1`, kind: 'text' as const, content: safeText(page.contentText), sourceRefs: [] }] }));
+  return parseDocumentIR({ operation: 'analyze', attachmentRefs: [], documentRef: workId,
+    content: { title: safeText(fileName), pageCount: pages.length, sections, sourceRefs: [], styleConstraints: [] } });
 }
 
 function safeText(value: string): string {

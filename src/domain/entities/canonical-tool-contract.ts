@@ -152,6 +152,35 @@ const canonicalToolCatalog = [
     }
   },
   {
+    toolId: 'generate_pptx',
+    description: 'Generate a verified PowerPoint presentation from business content. The runtime owns the project, output location, revision, authorization and publication.',
+    exposure: 'provider',
+    input: {
+      type: 'object', additionalProperties: false,
+      fields: {
+        title: { type: 'string', maxLength: 200, required: true },
+        content: { type: 'string', maxLength: 12_000, required: true },
+        theme: { type: 'string', maxLength: 32, enum: ['blueprint', 'ink', 'forest', 'financing', 'university'], defaultValue: 'blueprint' },
+        presentationTemplate: { type: 'string', maxLength: 32, enum: ['work_report', 'natural_minimal', 'business_minimal', 'technology', 'financing'], defaultValue: 'work_report' },
+        requestedTotalPages: { type: 'integer', minimum: 1, maximum: 20 }
+      }
+    },
+    ...metadata({ requiresWrite: true, requiresExistingDocument: false, budgetUnits: 8, traceType: 'write_document' }),
+    effects: {
+      modifiesDocumentIR: false, modifiesArtifact: true, producesIRPatch: false,
+      producesObservation: true, producesDiagnostics: true, producesArtifactRefs: true
+    },
+    execution: {
+      cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required', scope: 'task_call', keyFields: ['title', 'content', 'theme', 'presentationTemplate', 'requestedTotalPages'] }
+    },
+    preconditions: {
+      requiresExistingDocument: false, requiresDocumentIR: false, requiresWrite: true,
+      requiresRevision: false, requiresAuthorization: true, allowedOperations: ['create']
+    },
+    diagnostics: { traceType: 'write_document', failureCodes: [...commonFailureCodes, 'generation_failed', 'verification_failed', 'page_count_mismatch', 'idempotent_replay'] }
+  },
+  {
     toolId: 'apply_document_patch', description: 'Controlled apply_document_patch operation', exposure: 'internal', input: internalInput,
     ...metadata({ requiresWrite: true, requiresExistingDocument: true, budgetUnits: 4, traceType: 'patch' })
   },
@@ -188,6 +217,8 @@ export interface ToolAuthorizationContext {
   readonly canRead: boolean;
   readonly canWrite: boolean;
   readonly allowedToolIds: readonly CanonicalToolId[];
+  /** Runtime-only per-task consent. Never projected into Provider arguments. */
+  readonly generationAuthorization?: 'not_requested' | 'awaiting_user' | 'approved' | 'revoked';
 }
 
 /** Host-owned execution state. No part of this object is merged into Provider parameters. */
@@ -358,7 +389,7 @@ function assertContract(contract: CanonicalToolContract): void {
     if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key) || reservedNames.includes(key) ||
         (field.required !== undefined && typeof field.required !== 'boolean')) throw new TypeError('tool_schema_invalid');
     if (field.type === 'string') {
-      if (!Number.isSafeInteger(field.maxLength) || field.maxLength < 1 || field.maxLength > 2_000 ||
+      if (!Number.isSafeInteger(field.maxLength) || field.maxLength < 1 || field.maxLength > 20_000 ||
           (field.enum && (!field.enum.length || field.enum.length > 64 || field.enum.some(item => !item.trim() || item.length > field.maxLength))) ||
           (field.defaultValue !== undefined && (typeof field.defaultValue !== 'string' || !field.defaultValue.trim() || field.defaultValue.length > field.maxLength ||
             (field.enum && !field.enum.includes(field.defaultValue))))) throw new TypeError('tool_schema_invalid');

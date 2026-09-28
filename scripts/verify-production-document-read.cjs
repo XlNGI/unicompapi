@@ -11,9 +11,11 @@ const { app, safeStorage } = require('electron');
 // needs the owner's explicit two-case authorization and never retries.
 const { values } = parseArgs({ options: {
   'dry-run': { type: 'boolean', default: false },
-  'authorized-two-synthetic-cases': { type: 'boolean', default: false }
+  'authorized-two-synthetic-cases': { type: 'boolean', default: false },
+  'authorized-generation-case': { type: 'boolean', default: false }
 } });
-const live = values['authorized-two-synthetic-cases'] && !values['dry-run'];
+const liveGeneration = values['authorized-generation-case'] && !values['dry-run'];
+const live = (values['authorized-two-synthetic-cases'] || liveGeneration) && !values['dry-run'];
 const workspace = path.resolve(__dirname, '..');
 const sourceData = path.join(app.getPath('appData'), require('../package.json').name);
 const temporaryRootAtStartup = mkdtempSync(path.join(os.tmpdir(), 'unicomp-production-read-'));
@@ -36,7 +38,7 @@ app.setPath('userData', isolatedProfileAtStartup);
 const report = {
   schemaVersion: 1, mode: live ? 'real_provider' : 'dry_run', status: 'in_progress',
   startedAt: new Date().toISOString(),
-  outboundScope: 'Two synthetic PPT reading requests and tool observations only; no user files, attachments or conversation history.',
+  outboundScope: liveGeneration ? 'One synthetic PPT generation followed by structure reading; no user files, attachments or conversation history.' : 'Two synthetic PPT reading requests and tool observations only; no user files, attachments or conversation history.',
   entryPoint: 'createChatContextRuntime.responses.start -> production dispatch -> canonical read tool',
   maximumNetworkRequests: 4, maximumRequestsPerCase: 2, maximumOutputTokensPerRequest: 1024,
   automaticRetries: 0, cost: 'unknown', cases: [], networkRequests: 0
@@ -139,7 +141,8 @@ async function resolveConfiguredRoute(platform, isolatedProfile) {
 
 function inspectOutbound(request, domain, expectedModel) {
   requireCondition(live && activeCase && !lifecycleAbort.signal.aborted, 'network_not_authorized');
-  requireCondition(report.networkRequests < report.maximumNetworkRequests && activeCase.networkRequests < 2, 'request_budget_exceeded');
+  const generationCase = activeCase.case === 'generate_and_read';
+  requireCondition(report.networkRequests < report.maximumNetworkRequests && activeCase.networkRequests < (generationCase ? 4 : 2), 'request_budget_exceeded');
   requireCondition(request.method === 'POST' && new URL(request.url).pathname.endsWith('/chat/completions'), 'unexpected_network_operation');
   const payloadText = Buffer.from(request.body ?? []).toString('utf8');
   const payload = JSON.parse(payloadText);
@@ -151,6 +154,63 @@ function inspectOutbound(request, domain, expectedModel) {
   const contextLeak = /"(?:rootDirectory|relativePath|filePath|currentDocumentId|currentDocumentIR|authorization|abortSignal|taskContext|checkpoint)"\s*:/u.test(payloadText);
   activeCase.pathOrRuntimeContextLeak ||= pathLeak || contextLeak;
   requireCondition(!pathLeak && !contextLeak, 'outbound_runtime_data_leak');
+  if (generationCase) {
+    const priorResult = (payload.messages ?? []).find(message => message.role === 'tool');
+    let priorStatus;
+    if (priorResult) { try { priorStatus = JSON.parse(priorResult.content).status; } catch { priorStatus = 'invalid'; } }
+    const expectedToolId = activeCase.networkRequests === 0 || priorStatus !== 'success' ? 'generate_pptx' : 'read_document_structure';
+    if (expectedToolId === 'generate_pptx' && priorResult && priorStatus !== 'success') {
+      try { report.generationFailureDiagnostics = JSON.parse(priorResult.content).diagnostics?.map(item => item.code); } catch { /* redacted diagnostic only */ }
+      throw Object.assign(new Error('generation_tool_failed'), { code: 'generation_tool_failed' });
+    }
+    const contract = domain.createCanonicalToolRegistry().get(expectedToolId);
+    const schema = domain.canonicalToolInputSchema(contract);
+    const priorToolMessage = priorResult;
+    if (expectedToolId === 'read_document_structure' && priorToolMessage && (!Array.isArray(payload.tools) || payload.tools.length === 0)) {
+      const prior = JSON.parse(priorToolMessage.content);
+      report.generationFailureDiagnostics = prior.diagnostics?.map(item => item.code);
+      requireCondition(prior.status === 'success', 'generation_tool_failed');
+    }
+    if (!(Array.isArray(payload.tools) && payload.tools.length === 1 &&
+      payload.tools[0].function?.name === expectedToolId &&
+      JSON.stringify(payload.tools[0].function.parameters) === JSON.stringify(schema))) {
+      report.generationSchemaObserved = Array.isArray(payload.tools) ? payload.tools.map(tool => ({
+        name: tool.function?.name, parameterKeys: Object.keys(tool.function?.parameters ?? {})
+      })) : 'missing';
+      throw Object.assign(new Error('generation_schema_not_canonical'), { code: 'generation_schema_not_canonical' });
+    }
+    const calls = [];
+    for (const message of payload.messages ?? []) for (const call of message.tool_calls ?? []) {
+      requireCondition(call.function?.name === expectedToolId, 'unexpected_generation_tool');
+      const args = domain.validateCanonicalToolArguments(contract, JSON.parse(call.function.arguments));
+      if (expectedToolId === 'generate_pptx') requireCondition(args.title && args.content, 'generation_business_args_missing');
+      calls.push({ id: call.id, args });
+    }
+    const toolMessages = (payload.messages ?? []).filter(message => message.role === 'tool');
+    if (activeCase.networkRequests === 0) {
+      requireCondition(toolMessages.length === 0, 'generation_content_preinjected');
+      activeCase.generationArgs = calls[0]?.args;
+    } else {
+      if (generationCase && expectedToolId === 'read_document_structure' && calls.length === 0 && toolMessages.length === 1) {
+        const prior = JSON.parse(toolMessages[0].content);
+        if (prior.status !== 'success') report.generationFailureDiagnostics = prior.diagnostics?.map(item => item.code);
+        requireCondition(prior.status === 'success', 'generation_tool_failed');
+        activeCase.networkRequests += 1;
+        report.networkRequests += 1;
+        return;
+      }
+      requireCondition(toolMessages.length === 1 && calls.length === 1, 'generation_tool_roundtrip_missing');
+      const result = JSON.parse(toolMessages[0].content);
+      requireCondition(result.status === 'success', 'generation_tool_failed');
+      activeCase.toolCalls.push({ toolId: expectedToolId, ...calls[0].args });
+      activeCase.toolCallIdMatched = toolMessages[0].tool_call_id === calls[0].id;
+      activeCase.artifactVerified = Boolean(result.artifactRefs?.some(ref => ref.kind === 'work')) || expectedToolId === 'read_document_structure';
+      if (expectedToolId === 'read_document_structure') activeCase.observationContainsExpectedFacts = Boolean(result.observation);
+    }
+    activeCase.networkRequests += 1;
+    report.networkRequests += 1;
+    return;
+  }
   const contract = domain.createCanonicalToolRegistry().get('read_document_structure');
   const schema = domain.canonicalToolInputSchema(contract);
   requireCondition(Array.isArray(payload.tools) && payload.tools.length === 1, 'unexpected_available_tools');
@@ -242,13 +302,15 @@ async function seedConversation(platform, domain, storage, projectId, fixture, l
 async function executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, scope) {
   stage = `case_${scope}`;
   const conversation = await seedConversation(platform, domain, storage, projectId, fixture, scope);
-  const entry = { case: scope === 'page' ? 'physical_page_2' : 'whole_document', expectedScope: scope,
+  const entry = { case: liveGeneration ? 'generate_and_read' : scope === 'page' ? 'physical_page_2' : 'whole_document', expectedScope: scope,
     status: 'in_progress', networkRequests: 0, schemasCanonical: true, pathOrRuntimeContextLeak: false,
     toolCalls: [], toolCallIdMatched: false, observationContainsExpectedFacts: false,
     documentContentFromObservationOnly: false };
   activeCase = entry;
   report.cases.push(entry);
-  const content = scope === 'page'
+  const content = liveGeneration
+    ? '请直接生成一份简单的 PPT，主题是项目进展，不要指定固定页数。必须先调用 generate_pptx 工具完成生成，生成成功后再调用 read_document_structure 读取刚生成的 PPT 结构，最后告诉我生成结果和页数。不要暴露路径或运行时信息。'
+    : scope === 'page'
     ? '请读取当前 PPT 的第 2 页，回答本页的核验标记和一句话内容摘要。严格只调用一次可用的读取工具；收到成功 Observation 后立即回答，不要再次调用工具，不要猜测其他页。'
     : '请读取当前 PPT 的整篇文档，回答总页数、每一部分的核验标记和主要内容。严格只调用一次可用的读取工具；收到成功 Observation 后立即回答，不要再次调用工具，不要猜测。';
   const started = resultValue(await runtime.responses.start({
@@ -279,8 +341,9 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   entry.trace = trace.filter(event => ['tool_authorization', 'tool_call', 'tool_result'].includes(event.code))
     .map(event => ({ code: event.code, status: event.status, ...(event.facts?.tool ? { tool: event.facts.tool } : {}) }));
   requireCondition(execution.state === 'completed', 'provider_response_not_completed');
-  requireCondition(entry.networkRequests === 2 && entry.toolCalls.length === 1 && entry.toolCallIdMatched &&
-    entry.observationContainsExpectedFacts && entry.answerUsesObservation && !entry.pathOrRuntimeContextLeak,
+  requireCondition((liveGeneration ? entry.networkRequests >= 2 && entry.toolCalls.some(item => item.toolId === 'generate_pptx') &&
+    entry.toolCalls.some(item => item.toolId === 'read_document_structure') && entry.artifactVerified && entry.toolCallIdMatched
+    : entry.networkRequests === 2 && entry.toolCalls.length === 1 && entry.toolCallIdMatched && entry.observationContainsExpectedFacts && entry.answerUsesObservation) && !entry.pathOrRuntimeContextLeak,
   'production_tool_roundtrip_not_verified');
   requireCondition(entry.trace.some(item => item.code === 'tool_result' && item.status === 'completed'), 'tool_trace_missing');
   entry.status = 'passed';
@@ -374,15 +437,16 @@ async function run() {
   const parameterValues = { [field.fieldId]: Math.min(field.maximum ?? 1024, 1024) };
   if (live) {
     requireCondition(safeStorage.isEncryptionAvailable(), 'credential_encryption_unavailable');
-    for (const scope of ['document', 'page']) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, scope);
-    requireCondition(report.networkRequests === 4, 'unexpected_network_request_count');
+    if (liveGeneration) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, 'document');
+    else for (const scope of ['document', 'page']) await executeCase(platform, domain, storage, projectId, fixture, candidate, parameterValues, scope);
+    requireCondition(report.networkRequests >= (liveGeneration ? 2 : 4), 'unexpected_network_request_count');
     const observations = await new platform.JsonProviderUsageObservationRepository(storage).list();
     report.usage = observations.map(item => ({ status: item.status, sourceStage: item.sourceStage,
       facts: item.facts.filter(fact => /^[a-z_]{1,50}$/.test(fact.metricId) && /^\d+(?:\.\d+)?$/.test(fact.quantity))
         .map(fact => ({ metricId: fact.metricId, quantity: fact.quantity, unit: fact.unit, source: fact.source })) }));
     report.status = 'passed';
   } else {
-    for (const scope of ['document', 'page']) await seedConversation(platform, domain, storage, projectId, fixture, scope);
+    for (const scope of liveGeneration ? ['generation'] : ['document', 'page']) await seedConversation(platform, domain, storage, projectId, fixture, scope);
     report.status = 'dry_run_passed';
     report.dryRun = { isolatedCandidateReady: true, syntheticPptRegistered: true, providerCredentialsDecrypted: false,
       seededConversations: 2, providerRequests: 0, productionRoundtripExecuted: false };

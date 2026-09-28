@@ -6,6 +6,12 @@
 
 ### 事实基线
 
+2026-09-28 第二阶段第三批实施中：保留上一批提交 `3a373b8`、`6b63a96`；当前已在工作区增量接入 `generate_pptx` Canonical 合同、业务参数 Binding、生成 Session、Runner/QA 执行桥、授权状态和自然确认提示，并将动态 Provider Tool Loop 改为无固定业务轮数、带取消/超时/预算/重复进展保护。自动化门禁通过；真实 Provider 已成功生成并登记 PPTX，但生成后同一会话读回在下一轮返回 `newapi.operation_failed`，因此本批尚未完成，证据见 `docs/evidence/phase2-batch3-generation.json`。当前仍不接 CRUD。第三批约束和验收矩阵见 `docs/current/phase2-batch3-generation-control-scope.md`。
+
+第三批新增职责边界：LLM 负责需求理解、信息是否足够的判断、自然追问和生成确认请求；用户负责明确点击开始生成与随时停止；Runtime 只负责授权、安全、预算、沙箱、任务状态、取消、幂等和真实执行结果。Runtime 不根据字段齐全与否判断需求是否充分，也不替 LLM 做生成决策。
+
+第三批新增交互和取消门禁：PPT 意图在信息不足时自然追问；信息足够时先询问“现在开始生成吗？”；用户一开始明确要求直接生成时视为本次授权，不重复确认；已存在信息不重复询问，允许合理默认值。生成授权状态至少为 `not_requested`、`awaiting_user`、`approved`、`revoked`，Runtime 只验证本次授权是否有效。用户停止必须直接调用 `cancel(taskId)`，标记 `cancel_requested`，中止 AbortController、阻止新 Tool Call 和未启动 Adapter，已启动操作在安全可取消点退出；工具准备未启动、`generate_pptx` 执行中、Artifact 已真实写入后三种时机都必须有独立回归。Artifact 已写入时不得谎报未生成，应停止后续 Loop 并如实报告。
+
 2026-09-28 最新交付状态：生产只读接线已提交 `3a373b8`，上一批回滚点为 `1032ddf`。最终同一源码的完整测试为 Node/UI 384/384、Vitest 252 文件/2228 项，0 失败/跳过；类型、Lint、构建、平台/恢复/关闭/计划审计通过。真实 Provider kimi-k3 最小验收通过整篇和物理第 2 页，最终批次共 4 次 HTTP；该次数不包括故障定位的早期调用。下文“实施中/尚未提交”是本轮过程记录，以本条为准。保留 Provider 原轮数策略、其他七项 internal 工具；不接 generate_pptx/CRUD。未推送、合并、发布或关机。临时验收目录在 Electron 退出前清理延迟，退出后清理命令又被自动审批策略拒绝，已保留且不纳入 Git。
 
 2026-09-27 本轮维护（生产只读工具循环，实施中）：已按负责人要求先复验上一批全部门禁，再提交可回滚基线 `1032ddf`（仅本地提交，不推送）；保留无关未跟踪 `mermaid-diagram.png`。本轮仅将 Canonical read_document_structure 接入真实会话响应生产调度，每轮发送前重建 Available Tool Set、执行前重验绑定/Hash/权限、返回安全 ToolResult 与 tool_call_id。另七项工具保持 internal，不接 generate_pptx/CRUD，不调整 Provider Loop 轮数上限。负责人已授权使用合成 PPT 对当前配置真实文本 Provider 做整篇和单页最小验收，凭证只在 SecureCredentialVault 回调内使用，用户项目不写入。

@@ -26,7 +26,7 @@ const context: AvailableToolContext = {
 
 describe('canonical document tool contracts', () => {
   it('keeps the existing registry while exposing only the established business contract', () => {
-    expect(registry.size).toBe(8);
+    expect(registry.size).toBe(9);
     expect([...registry.keys()]).toEqual(canonicalToolIds);
     expect(deriveAvailableToolSet(registry, context).map(contract => contract.toolId)).toEqual(['read_document_structure']);
     for (const contract of registry.values()) {
@@ -36,7 +36,7 @@ describe('canonical document tool contracts', () => {
       expect(contract.execution.timeoutMs).toBeGreaterThan(0);
       expect(contract.execution.budgetUnits).toBeGreaterThan(0);
       expect(contract.diagnostics.failureCodes).toContain('invalid_tool_arguments');
-      if (contract.toolId !== read.toolId) {
+      if (contract.toolId !== read.toolId && contract.toolId !== 'generate_pptx') {
         expect(contract.exposure).toBe('internal');
         expect(contract.input.fields).toEqual({});
       }
@@ -114,7 +114,7 @@ describe('canonical document tool contracts', () => {
   });
 
   it('permits querying a newly initialized and bound IR without forcing file parsing', () => {
-    expect(deriveAvailableToolSet(registry, { ...context, operation: 'create', currentDocumentIR: { operation: 'create', attachmentRefs: [] } })).toEqual([read]);
+    expect(deriveAvailableToolSet(registry, { ...context, operation: 'create', currentDocumentIR: { operation: 'create', attachmentRefs: [] } }).map(item => item.toolId)).toEqual(['read_document_structure', 'generate_pptx']);
   });
 
   it('checks write authorization and explicit operation restrictions from the contract', () => {
@@ -183,6 +183,6 @@ describe('canonical document tool contracts', () => {
   it('does not leak transient registry mutation into the authoritative catalog', () => {
     const empty: CanonicalToolRegistry = createCanonicalToolRegistry([]);
     expect(deriveAvailableToolSet(empty, context)).toEqual([]);
-    expect(createCanonicalToolRegistry().size).toBe(8);
+    expect(createCanonicalToolRegistry().size).toBe(9);
   });
 });

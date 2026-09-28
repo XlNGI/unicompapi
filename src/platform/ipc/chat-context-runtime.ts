@@ -48,6 +48,9 @@ import { NodeProjectStorage } from '../storage';
 import { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
 import { ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
+import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../documents/document-generation-application-adapters';
+import { DocumentGenerationRunner } from '../documents/document-generation-runner';
+import { createConfiguredOfficeRenderAdapter } from '../documents/office-render-adapter';
 import { createPresentationWorkflowScope } from '../documents/registered-presentation-reader';
 import { documentDeliveryFailureReason } from '../documents/conversation-document-workflow';
 import { ConversationSemanticClassifier, conversationSemanticLimits } from '../providers/conversation-semantic-classifier';
@@ -287,6 +290,18 @@ export function createChatContextRuntime(
     });
     const documentTools = new ConversationDocumentToolSessionService({
       rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: projectConversations,
+      generatePptx: {
+        compiler: new PlatformDocumentDraftCompiler(),
+        executor: new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({
+          rootDirectory: session.rootDirectory, projectId: session.projectId,
+          renderPreview: createConfiguredOfficeRenderAdapter(), requireRenderForPpt: true
+        })),
+        revalidateAuthorization: async context => {
+          const active = dependencies.getSession();
+          return !context.abortSignal.aborted && context.authorization.generationAuthorization === 'approved' &&
+            active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory;
+        }
+      },
       getCurrentProjectId: () => {
         const active = dependencies.getSession();
         return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory ? active.projectId : undefined;

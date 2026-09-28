@@ -234,11 +234,17 @@ describe('production registered document read sessions', () => {
       await expect(data.service.select(await data.question(query))).rejects.toMatchObject({ code: 'document_page_ambiguous' });
     });
 
-  it.each(['你好', '制作一份新的PPT', '删除当前 PPT 的第2页', '修改当前 PPT 的第2页标题'])(
+  it.each(['你好', '删除当前 PPT 的第2页', '修改当前 PPT 的第2页标题'])(
     'keeps unrelated and mutation requests on their existing path: %s', async query => {
       const data = await fixture();
       expect(await data.service.select(await data.question(query))).toBeUndefined();
     });
+
+  it('creates an awaiting-user generation selection for a new PPT request', async () => {
+    const data = await fixture();
+    const selection = await data.service.select(await data.question('制作一份新的PPT'));
+    expect(selection).toMatchObject({ kind: 'generation', authorizationStatus: 'awaiting_user' });
+  });
 
   it('does not attach tools to an internal generation prompt or a different project', async () => {
     const data = await fixture();

@@ -201,7 +201,7 @@ interface ActiveOperation {
   readonly openSession: (messages: readonly NewApiChatMessageV1[]) => Promise<NewApiEventStreamSession>;
   readonly messages: NewApiChatMessageV1[];
   readonly toolBridge?: ControlledProviderToolBridge;
-  readonly maxToolRounds: number;
+  readonly maxToolRounds?: number;
   readonly signal: AbortSignal;
   cancelReason?: 'user' | 'application_shutdown';
   cancelRequest?: Promise<unknown>;
@@ -420,7 +420,7 @@ export class NewApiChatAdapter {
       messages: [...request.messages],
       ...(request.nativeSearch ? { nativeSearch: request.nativeSearch, observeSearch: (evidence: NativeSearchEvidence) => input.observeSearch!(request.nativeSearch!.grantId, evidence) } : {}),
       ...(toolBridge !== undefined ? { toolBridge } : {}),
-      maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4),
+      ...(input.prepareTools ? {} : { maxToolRounds: Math.min(Math.max(input.maxToolRounds ?? 2, 1), 4) }),
       signal: externalController.signal,
       removeExternalAbort
     };
@@ -493,9 +493,17 @@ export class NewApiChatAdapter {
           }
         }
       );
-      let rounds = 0;
+      const seenToolCalls = new Set<string>();
       while (stream.finishReason === 'tool_calls') {
-        if (!operation.toolBridge || !stream.toolCalls || ++rounds > operation.maxToolRounds) {
+        if (!operation.toolBridge || !stream.toolCalls) {
+          throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
+        }
+        const progressKey = JSON.stringify(stream.toolCalls.map(call => [call.id, call.name, call.arguments]));
+        if (seenToolCalls.has(progressKey)) {
+          throw new NewApiChatAdapterError('newapi.tool_loop_no_progress', 'Tool calling made no progress');
+        }
+        seenToolCalls.add(progressKey);
+        if (operation.maxToolRounds !== undefined && seenToolCalls.size > operation.maxToolRounds) {
           throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
         }
         operation.messages.push({

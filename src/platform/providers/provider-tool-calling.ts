@@ -202,6 +202,121 @@ export function sanitizeControlledToolResult(
   return sanitizeToolValue(value, 0) as Readonly<Record<string, unknown>>;
 }
 
+export type ControlledProviderToolLoopErrorCode =
+  | 'cancelled'
+  | 'timeout'
+  | 'budget_exceeded'
+  | 'no_progress'
+  | 'failure_limit'
+  | 'unknown_result';
+
+/**
+ * Runtime safety limits for the provider/tool handshake. These are deliberately
+ * expressed as a call budget and state guards, rather than a business round
+ * count. A progressing task may therefore use more than four provider turns.
+ */
+export class ControlledProviderToolLoopError extends Error {
+  constructor(readonly code: ControlledProviderToolLoopErrorCode, message = code) {
+    super(message);
+    this.name = 'ControlledProviderToolLoopError';
+  }
+}
+
+export interface ControlledProviderToolLoopController {
+  readonly signal: AbortSignal;
+  assertCanProceed(): void;
+  recordToolCalls(calls: readonly ControlledProviderToolCall[]): void;
+  recordToolResult(result: Readonly<Record<string, unknown>>): void;
+  recordToolFailure(): void;
+  dispose(): void;
+}
+
+export function createControlledProviderToolLoopController(input: {
+  readonly signal: AbortSignal;
+  readonly onTimeout?: () => void;
+  readonly totalTimeoutMs?: number;
+  readonly maxToolCalls?: number;
+  readonly maxFailures?: number;
+}): ControlledProviderToolLoopController {
+  const totalTimeoutMs = input.totalTimeoutMs ?? 120_000;
+  const maxToolCalls = input.maxToolCalls ?? 64;
+  const maxFailures = input.maxFailures ?? 3;
+  if (!Number.isSafeInteger(totalTimeoutMs) || totalTimeoutMs < 1_000 || totalTimeoutMs > 900_000 ||
+      !Number.isSafeInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > 256 ||
+      !Number.isSafeInteger(maxFailures) || maxFailures < 1 || maxFailures > 16) {
+    throw new Error('controlled tool loop limits are invalid');
+  }
+  const startedAt = Date.now();
+  let totalCalls = 0;
+  let consecutiveFailures = 0;
+  let timedOut = false;
+  let disposed = false;
+  const seenProgress = new Set<string>();
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try { input.onTimeout?.(); } catch { /* abort is best effort; assertCanProceed still fails closed */ }
+  }, totalTimeoutMs);
+  const onAbort = () => { clearTimeout(timeout); };
+  input.signal.addEventListener('abort', onAbort, { once: true });
+
+  const assertCanProceed = (): void => {
+    if (disposed) throw new ControlledProviderToolLoopError('cancelled');
+    if (input.signal.aborted) throw new ControlledProviderToolLoopError('cancelled');
+    if (timedOut || Date.now() - startedAt >= totalTimeoutMs) {
+      timedOut = true;
+      try { input.onTimeout?.(); } catch { /* fail closed below */ }
+      throw new ControlledProviderToolLoopError('timeout');
+    }
+  };
+  return {
+    signal: input.signal,
+    assertCanProceed,
+    recordToolCalls(calls) {
+      assertCanProceed();
+      if (calls.length < 1 || calls.length > maxTools) {
+        throw new ControlledProviderToolLoopError('budget_exceeded');
+      }
+      totalCalls += calls.length;
+      if (totalCalls > maxToolCalls) {
+        throw new ControlledProviderToolLoopError('budget_exceeded');
+      }
+      const key = stableJson(calls.map(call => ({ id: call.id, name: call.name, arguments: call.arguments })));
+      if (seenProgress.has(key)) {
+        throw new ControlledProviderToolLoopError('no_progress');
+      }
+      seenProgress.add(key);
+    },
+    recordToolResult(result) {
+      assertCanProceed();
+      const status = result.status;
+      if (status === 'unknown') {
+        throw new ControlledProviderToolLoopError('unknown_result');
+      }
+      if (status === 'failed') {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= maxFailures) {
+          throw new ControlledProviderToolLoopError('failure_limit');
+        }
+        return;
+      }
+      consecutiveFailures = 0;
+    },
+    recordToolFailure() {
+      assertCanProceed();
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= maxFailures) {
+        throw new ControlledProviderToolLoopError('failure_limit');
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      clearTimeout(timeout);
+      input.signal.removeEventListener('abort', onAbort);
+    }
+  };
+}
+
 /** Only called after canonical validation bounded the complete JSON tree. */
 function redactValidatedToolValue(value: unknown): unknown {
   if (typeof value === 'string') {
@@ -304,6 +419,12 @@ function boundedText(value: unknown, maximum = 2_000): string {
 function boundedName(value: unknown): string {
   if (typeof value !== 'string' || !protocolRegistry.has(value as CanonicalToolId)) throw new Error('controlled tool name is invalid');
   return value;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (isRecord(value)) return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
 }
 
 function boundedArgumentsDelta(value: unknown): string {
