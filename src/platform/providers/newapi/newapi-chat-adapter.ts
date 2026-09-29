@@ -48,9 +48,9 @@ import {
 } from './unicompapi-model-capabilities';
 import {
   assembleControlledToolCalls,
-  sanitizeControlledToolResult,
   parseControlledProviderTools,
   parseControlledToolCallDeltas,
+  runControlledProviderToolRounds,
   toControlledProviderAssistantToolCalls,
   type ControlledProviderToolDefinition,
   type ControlledProviderToolBridge,
@@ -521,38 +521,39 @@ export class NewApiChatAdapter {
           }
         }
       );
-      const seenToolCalls = new Set<string>();
-      while (stream.finishReason === 'tool_calls') {
-        if (!operation.toolBridge || !stream.toolCalls) {
-          throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
-        }
-        const progressKey = JSON.stringify(stream.toolCalls.map(call => [call.id, call.name, call.arguments]));
-        if (seenToolCalls.has(progressKey)) {
-          throw new NewApiChatAdapterError('newapi.tool_loop_no_progress', 'Tool calling made no progress');
-        }
-        seenToolCalls.add(progressKey);
-        if (operation.maxToolRounds !== undefined && seenToolCalls.size > operation.maxToolRounds) {
-          throw new NewApiChatAdapterError('newapi.tool_loop_limit', 'Tool calling loop limit exceeded');
-        }
-        operation.messages.push({
+      stream = await runControlledProviderToolRounds({
+        initialResponse: stream,
+        messages: operation.messages,
+        bridge: operation.toolBridge,
+        signal: operation.signal,
+        shouldContinue: response => response.finishReason === 'tool_calls',
+        ...(operation.maxToolRounds !== undefined ? { maxRounds: operation.maxToolRounds } : {}),
+        appendAssistant: (response, messages) => messages.push({
           role: 'assistant',
-          content: stream.content ?? '',
-          toolCalls: toControlledProviderAssistantToolCalls(stream.toolCalls)
-        });
-        for (const call of stream.toolCalls) {
-          const result = await operation.toolBridge.execute({ call, signal: operation.signal });
-          operation.messages.push({ role: 'tool', content: JSON.stringify(sanitizeControlledToolResult(result)), toolCallId: call.id, name: call.name });
-        }
-        operation.session.close();
-        operation.session = await operation.openSession(operation.messages);
-        stream = await consumeNewApiStream(operation.session.stream, expectedModel,
-          async (contentDelta) => { await this.lifecycle.appendContent(operation.responseExecutionId, contentDelta); },
-          async (reasoningDelta) => {
-            if (operation.productFeature === 'text_reasoning') {
-              await this.lifecycle.appendReasoning(operation.responseExecutionId, reasoningDelta);
-            }
-          });
-      }
+          content: response.content ?? '',
+          toolCalls: toControlledProviderAssistantToolCalls(
+            'toolCalls' in response ? response.toolCalls ?? [] : []
+          )
+        }),
+        appendTool: (call, result, messages) => messages.push({
+          role: 'tool', content: JSON.stringify(result), toolCallId: call.id, name: call.name
+        }),
+        requestNext: async messages => {
+          operation.session.close();
+          operation.session = await operation.openSession(messages);
+          return consumeNewApiStream(operation.session.stream, expectedModel,
+            async contentDelta => { await this.lifecycle.appendContent(operation.responseExecutionId, contentDelta); },
+            async reasoningDelta => {
+              if (operation.productFeature === 'text_reasoning') {
+                await this.lifecycle.appendReasoning(operation.responseExecutionId, reasoningDelta);
+              }
+            });
+        },
+        toLoopError: code => new NewApiChatAdapterError(
+          code === 'no_progress' ? 'newapi.tool_loop_no_progress' : 'newapi.tool_loop_limit',
+          code === 'no_progress' ? 'Tool calling made no progress' : 'Tool calling loop limit exceeded'
+        )
+      });
       const observation = createUsageObservation({
         observationId: this.ids.nextProviderUsageObservationId(),
         invocationAttemptId: operation.invocationAttemptId,

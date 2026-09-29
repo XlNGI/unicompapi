@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "scope": "agent-native-behavior-validation",
+  "date": "2026-09-29",
+  "status": "partial",
+  "defaultLegacyPathPreserved": true,
+  "agentNativeFeatureFlag": "VITE_AGENT_NATIVE_CONVERSATION=1",
+  "protectedConfigManifest": {
+    "before": "outputs/phase2-batch4-p2-kimi-update/real-provider.json:protectedConfigManifest.before",
+    "after": "outputs/phase2-batch4-p2-kimi-update/real-provider.json:protectedConfigManifest.after",
+    "diffCount": 0
+  },
+  "scenarios": {
+    "context_confirmation": {
+      "status": "passed",
+      "mode": "production_runtime_synthetic_provider",
+      "evidence": "tests/platform/production-document-generation-loop.test.ts",
+      "assertions": [
+        "four conversational turns with final user text exactly equivalent to the requested confirmation case",
+        "provider input contained prior user and assistant history",
+        "generate_pptx tool call followed by read_document_structure",
+        "registered PPT and physical readback completed"
+      ]
+    },
+    "discussion_without_mutation": {
+      "status": "passed",
+      "mode": "production_runtime_synthetic_provider",
+      "evidence": "tests/platform/production-document-generation-loop.test.ts",
+      "assertions": [
+        "assistant text completed with zero tool calls",
+        "no document Work was created",
+        "no generation executor was invoked"
+      ]
+    },
+    "existing_ppt_read_or_mutation": {
+      "status": "passed",
+      "mode": "real_provider",
+      "requestedModel": "kimi-k3",
+      "evidence": "outputs/phase2-batch4-p2-kimi-update/real-provider.json",
+      "assertions": [
+        "actual wire model was kimi-k3",
+        "read_document_structure -> update_element -> read_document_structure",
+        "real file hash, revision, identity and RegisteredReader readback matched",
+        "no path or runtime context leak"
+      ],
+      "acceptanceEnvironment": {
+        "isolatedUserConfig": true,
+        "protectedConfigChanged": false,
+        "protectedConfigDiffCount": 0
+      }
+    },
+    "tool_error_observation_continuation": {
+      "status": "passed",
+      "mode": "production_runtime_synthetic_provider",
+      "evidence": "tests/platform/production-document-update-loop.test.ts",
+      "assertions": [
+        "invalid_tool_arguments returned as failed Observation and followed by read",
+        "revision_conflict returned as failed Observation and followed by fresh read",
+        "tool_failed returned as failed Observation and followed by fresh read",
+        "conversation execution completed after each recoverable failure"
+      ]
+    }
+  },
+  "blockingFailure": null,
+  "knownLimitations": [
+    "The synthetic-provider scenarios are production-runtime tests, not live-provider UI acceptance.",
+    "The real-provider Electron scenario passed with isolated configuration and zero protected-config diff.",
+    "Repository-wide typecheck and lint are currently blocked by unrelated working-tree UI changes: ChatPage references missing setHistoryOpen, and AppLayout required chatHistory/onChatConversationNavigate props are missing in App and two harnesses."
+  ]
+}

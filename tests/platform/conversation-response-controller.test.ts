@@ -273,6 +273,21 @@ describe('ConversationResponseController', () => {
     expect(f.runtime.start).not.toHaveBeenCalled();
   });
 
+  it('starts the Agent-native path without creating or validating a semantic workflow', async () => {
+    const value = fixture();
+    const select = vi.fn(async () => undefined);
+    Object.assign(value.runtime, { documentTools: { select, pinDraft: vi.fn() } });
+    const request = { ...startRequest(), confirmed: undefined };
+    delete (request as { confirmed?: unknown }).confirmed;
+    const result = await value.controller.startAgent(request);
+    expect(result).toMatchObject({ ok: true });
+    expect(value.workflowService.get).not.toHaveBeenCalled();
+    expect(value.workflowService.beginExecution).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(value.draftRepository.create).toHaveBeenCalledWith(expect.objectContaining({ agentNative: true }));
+    expect(value.runtime.start).toHaveBeenCalledOnce();
+  });
+
   it('discloses document sources before pinning the response revision', async () => {
     const f = fixture();
     const workflow = { ...f.readyWorkflow, plan: { ...f.readyWorkflow.plan, kind: 'document' as const, action: 'create' as const, documentKind: 'ppt' as const } };

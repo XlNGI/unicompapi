@@ -103,6 +103,9 @@ export function registerChatContextIpcHandlers(options: {
   ipcMain.handle(chatContextIpcChannels.startResponse, (_event, request: unknown) =>
     runtime.responses.start(request)
   );
+  ipcMain.handle(chatContextIpcChannels.startAgentResponse, (_event, request: unknown) =>
+    runtime.responses.startAgent(request)
+  );
   ipcMain.handle(chatContextIpcChannels.startWorkflow, (_event, request: unknown) =>
     workflows.start(request)
   );

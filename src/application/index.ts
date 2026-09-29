@@ -10,6 +10,7 @@ export * from './conversation-request-safety-gate';
 export * from './document-context-snapshot';
 export * from './conversation-workflow-service';
 export * from './conversation-context-builder';
+export * from './agent-context-assembler';
 export * from './conversation-web-research-service';
 export * from './latest-snapshot-autosave';
 export * from './presentation-page-count';

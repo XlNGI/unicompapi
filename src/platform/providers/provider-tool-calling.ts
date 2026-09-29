@@ -144,6 +144,68 @@ export interface ControlledProviderToolLoopResponse {
   readonly finishReason: 'stop' | 'tool_calls' | 'length';
 }
 
+export interface ControlledProviderToolRoundResponse {
+  readonly content?: string;
+  readonly toolCalls?: readonly ControlledProviderToolCall[];
+  readonly finishReason: string;
+}
+
+/** Production Provider rounds share one bounded call, progress and failure loop. */
+export async function runControlledProviderToolRounds<
+  TMessage,
+  TResponse extends ControlledProviderToolRoundResponse
+>(input: {
+  readonly initialResponse: TResponse;
+  readonly messages: TMessage[];
+  readonly bridge?: ControlledProviderToolBridge;
+  readonly signal: AbortSignal;
+  readonly shouldContinue: (response: TResponse) => boolean;
+  readonly maxRounds?: number;
+  readonly requestNext: (messages: readonly TMessage[]) => Promise<TResponse>;
+  readonly appendAssistant: (response: TResponse, messages: TMessage[]) => void;
+  readonly appendTool: (call: ControlledProviderToolCall, result: Readonly<Record<string, unknown>>, messages: TMessage[]) => void;
+  readonly toLoopError: (code: ControlledProviderToolLoopErrorCode) => Error;
+}): Promise<TResponse> {
+  const maxRounds = input.maxRounds ?? 64;
+  if (!Number.isSafeInteger(maxRounds) || maxRounds < 1 || maxRounds > 64) {
+    throw new Error('controlled tool loop rounds are invalid');
+  }
+  const controller = createControlledProviderToolLoopController({
+    signal: input.signal,
+    maxToolCalls: 64
+  });
+  let response = input.initialResponse;
+  let rounds = 0;
+  try {
+    while (input.shouldContinue(response)) {
+      if (!input.bridge || !response.toolCalls?.length) {
+        throw input.toLoopError('budget_exceeded');
+      }
+      controller.assertCanProceed();
+      controller.recordToolCalls(response.toolCalls);
+      rounds += 1;
+      if (rounds > maxRounds) throw input.toLoopError('budget_exceeded');
+      input.appendAssistant(response, input.messages);
+      for (const call of response.toolCalls) {
+        controller.assertCanProceed();
+        const raw = await input.bridge.execute({ call, signal: input.signal });
+        const result = sanitizeControlledToolResult(raw);
+        controller.recordToolResult(result);
+        input.appendTool(call, result, input.messages);
+      }
+      response = await input.requestNext(input.messages);
+    }
+    return response;
+  } catch (error) {
+    if (error instanceof ControlledProviderToolLoopError) {
+      throw input.toLoopError(error.code);
+    }
+    throw error;
+  } finally {
+    controller.dispose();
+  }
+}
+
 /**
  * Bounded provider/tool handshake. The provider transport is deliberately
  * injected so this helper cannot select endpoints, credentials, or commands.

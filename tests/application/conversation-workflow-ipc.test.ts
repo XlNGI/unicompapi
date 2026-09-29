@@ -62,6 +62,21 @@ describe('conversation workflow IPC parsers', () => {
     })).toThrow('unexpected or missing fields');
   });
 
+  it('accepts an Agent-native response without workflow or semantic confirmation fields', () => {
+    const request = chatContextRequestParsers.startAgentResponse({
+      clientCommandId: 'agent-command-1',
+      conversation: null,
+      title: 'Agent conversation',
+      content: '可以，继续处理刚才的方案',
+      productFeature: 'text_chat' as const,
+      candidateId: 'candidate-1',
+      contextSelections: [],
+      parameterValues: {}
+    });
+    expect(request).not.toHaveProperty('workflow');
+    expect(request).not.toHaveProperty('agentNative');
+  });
+
   it('rejects stale-shaped clarification answers and unknown fields', () => {
     expect(chatContextRequestParsers.answerWorkflow({
       workflowId: 'workflow-1',

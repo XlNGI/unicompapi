@@ -345,6 +345,12 @@ export class ConversationResponseController {
     });
   }
 
+  /** Agent-native entry: semantic routing and confirmation stay with the model. */
+  startAgent(request: unknown): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
+    const parsed = chatContextRequestParsers.startAgentResponse(request);
+    return this.start({ ...parsed, confirmed: true, agentNative: true });
+  }
+
   getExecution(
     request: unknown
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>> {
@@ -581,7 +587,10 @@ export class ConversationResponseController {
     // Fail locally before candidate authorization or provider dispatch. Factory
     // revalidates the pinned hashes immediately before forming provider messages.
     const attachmentQuery = conversationAttachmentQuery(workflow?.plan, userMessage);
-    const isPageQuestion = workflow ? workflow.plan.kind === 'chat'
+    // Agent-native requests must reach the model before any query-shaped
+    // document selection. The Agent chooses whether to read or mutate after
+    // seeing the available tools and conversation context.
+    const isPageQuestion = input.agentNative ? false : workflow ? workflow.plan.kind === 'chat'
       : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
     const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
     const toolSelection = documentPageQuery ? await runtime.documentTools?.select({
@@ -621,6 +630,7 @@ export class ConversationResponseController {
       conversationRevision: conversation.revision,
       userMessageId: userMessage.id,
       userMessageRevision: userMessage.revision,
+      ...(input.agentNative ? { agentNative: true } : {}),
       ...(workflow
         ? {
             promptContent: workflow.plan.kind === 'document'
