@@ -119,6 +119,7 @@ export interface NewApiImageDispatchRequestV1 {
   readonly projectId: string;
   readonly prompt: string;
   readonly assetId?: string;
+  readonly assetIds?: readonly string[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
 }
 
@@ -431,7 +432,7 @@ function parseDispatchRequest(
   const item = exactRequestRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    ['taskId', 'executionId', 'assetId'],
+    ['taskId', 'executionId', 'assetId', 'assetIds'],
     'NewAPI image request'
   );
   const projectId = requireOpaqueId(item.projectId, 'project ID');
@@ -444,12 +445,14 @@ function parseDispatchRequest(
   } catch {
     throw invalidRequest('newapi.invalid_request', 'The image parameter projection is invalid');
   }
-  const assetId = item.assetId === undefined
-    ? undefined
-    : requireOpaqueId(item.assetId, 'asset ID');
+  const assetIds = item.assetIds !== undefined
+    ? requireAssetIds(item.assetIds)
+    : item.assetId === undefined
+      ? undefined
+      : [requireOpaqueId(item.assetId, 'asset ID')];
   if (
-    (schema.productFeature === 'text_to_image' && assetId !== undefined) ||
-    (schema.productFeature !== 'text_to_image' && assetId === undefined)
+    (schema.productFeature === 'text_to_image' && assetIds !== undefined) ||
+    (schema.productFeature !== 'text_to_image' && assetIds === undefined)
   ) {
     throw invalidRequest(
       'newapi.invalid_request',
@@ -463,7 +466,7 @@ function parseDispatchRequest(
     ) as ProviderInvocationAttemptId,
     projectId,
     prompt: boundedUserText(item.prompt, 'prompt', 100_000),
-    ...(assetId === undefined ? {} : { assetId }),
+    ...(assetIds === undefined ? {} : { assetIds }),
     parameterValues
   };
 }
@@ -479,7 +482,7 @@ async function serializeImageRequest(
     ...request.parameterValues
   };
   if (route.productFeature !== 'text_to_image') {
-    if (!request.assetId || !materials) {
+    if (!request.assetIds || request.assetIds.length !== 1 || !materials) {
       throw invalidRequest(
         'newapi.invalid_request',
         'Reference image generation requires one controlled input image'
@@ -487,7 +490,7 @@ async function serializeImageRequest(
     }
     const material = await materials.resolve({
       projectId: toProjectId(request.projectId),
-      assetId: toAssetId(request.assetId)
+      assetId: toAssetId(request.assetIds[0])
     });
     if (!material || !material.mimeType.startsWith('image/')) {
       throw invalidRequest(
@@ -509,6 +512,17 @@ async function serializeImageRequest(
     );
   }
   return bytes;
+}
+
+function requireAssetIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 16) {
+    throw invalidRequest('newapi.invalid_request', 'The NewAPI image asset list is invalid');
+  }
+  const ids = value.map((item) => requireOpaqueId(item, 'asset ID'));
+  if (new Set(ids).size !== ids.length) {
+    throw invalidRequest('newapi.invalid_request', 'The NewAPI image asset list must be unique');
+  }
+  return ids;
 }
 
 function parseImageResponse(body: Uint8Array): {

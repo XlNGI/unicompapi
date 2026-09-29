@@ -120,7 +120,7 @@ describe('registry-backed feature candidates', () => {
     })).rejects.toMatchObject({ code: 'stale_route_selection' });
   });
 
-  it('enforces pure-text quick creation, full professional parameters and exact one-image features', async () => {
+  it('enforces pure-text quick creation, full professional parameters and declared multi-image features', async () => {
     const quickWithMedia = resolver({
       ...resolvedSubject(),
       imageCount: 1
@@ -143,7 +143,7 @@ describe('registry-backed feature candidates', () => {
       draftRevision: 1
     };
     const candidate = resolvedCandidate(professionalSchema);
-    for (const imageCount of [0, 2]) {
+    for (const imageCount of [0]) {
       const service = new ProviderFeatureCandidateService(
         resolver({
           ...resolvedSubject(),
@@ -185,6 +185,22 @@ describe('registry-backed feature candidates', () => {
         }
       }
     ]);
+
+    const multiImageService = new ProviderFeatureCandidateService(
+      resolver({
+        ...resolvedSubject(),
+        subject: professionalSubject,
+        productFeature: 'reference_to_image',
+        surface: 'professional',
+        imageCount: 2,
+        parameterValues: { quality: 'standard', style: 'natural' }
+      }),
+      { async list() { return [candidate]; } },
+      new RouteSelectionTokenVault(),
+      () => now
+    );
+    await expect(multiImageService.listFeatureCandidates(professionalSubject))
+      .resolves.toMatchObject([{ available: true }]);
   });
 
   it('does not expose models retained under deleted connection tombstones', async () => {

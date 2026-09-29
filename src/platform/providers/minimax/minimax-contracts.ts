@@ -35,7 +35,7 @@ export const MINIMAX_H3_VIDEO_USAGE_SCHEMA_ID = 'usage.minimax-h3.video';
 export const MINIMAX_H3_TEXT_TO_VIDEO_CONSTRAINT_SET_ID =
   'constraints.minimax-h3.text-only';
 export const MINIMAX_H3_IMAGE_TO_VIDEO_CONSTRAINT_SET_ID =
-  'constraints.minimax-h3.single-controlled-first-frame';
+  'constraints.minimax-h3.multi-reference-image-single-output';
 
 export const frozenMiniMaxH3ModelKeys = [
   'MiniMax-H3',

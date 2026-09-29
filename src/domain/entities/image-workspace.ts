@@ -201,6 +201,7 @@ interface ImageWorkspaceDraftBase {
   readonly origin: ImageWorkspaceOrigin;
   readonly prompt: PromptSnapshot;
   readonly input?: ImageInputReference;
+  readonly referenceImages?: readonly ImageInputReference[];
   readonly contextReferences: readonly ImageContextReference[];
   readonly featureSelection?: ImageFeatureSelection;
   readonly createdAt: IsoTimestamp;
@@ -541,6 +542,7 @@ export function isImageWorkspaceDraft(
       'origin',
       'prompt',
       'input',
+      'referenceImages',
       'contextReferences',
       'featureSelection',
       'createdAt',
@@ -559,6 +561,10 @@ export function isImageWorkspaceDraft(
     !isWorkspaceOrigin(value.origin) ||
     !isPromptSnapshot(value.prompt) ||
     (value.input !== undefined && !isImageInput(value.input, value.mode)) ||
+    (value.referenceImages !== undefined &&
+      (value.mode !== 'professional_image' ||
+        value.input !== undefined ||
+        !isImageReferenceList(value.referenceImages))) ||
     !isContextReferences(value.contextReferences) ||
     (value.featureSelection !== undefined &&
       !isFeatureSelection(value.featureSelection, value.mode)) ||
@@ -645,6 +651,13 @@ function isImageInput(value: unknown, mode: ImageWorkspaceMode): boolean {
     ? 'reference'
     : 'source';
   return value.role === expectedRole;
+}
+
+function isImageReferenceList(value: unknown): boolean {
+  return Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((reference) => isImageInput(reference, 'professional_image')) &&
+    new Set(value.map((reference) => reference.assetId)).size === value.length;
 }
 
 function isNormalizedRegion(value: unknown): boolean {

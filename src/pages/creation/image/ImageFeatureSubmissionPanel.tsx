@@ -156,7 +156,8 @@ export function ImageFeatureSubmissionPanel({
   const scope = `${draft.draftId}:${featureSelection.productFeature}`;
   const currentCandidates = candidateScope === scope ? candidates : [];
   const missingPrompt = !draft.prompt.finalPrompt.trim();
-  const missingImage = featureSelection.productFeature === 'reference_to_image' && !draft.input;
+  const referenceImageCount = draft.referenceImages?.length ?? (draft.input ? 1 : 0);
+  const missingImage = featureSelection.productFeature === 'reference_to_image' && referenceImageCount === 0;
   const inputRequired = missingPrompt && missingImage
     ? '请输入提示词，并添加一张参考图。'
     : missingPrompt ? '请输入提示词。' : missingImage ? '请添加一张参考图。' : undefined;
@@ -779,7 +780,9 @@ export function ImageFeatureSubmissionPanel({
     : !candidatesReady ? { title: '正在读取模型…', warning: false }
     : currentCandidates.length === 0 ? {
         title: `暂无可用的${featureName}模型`,
-        description: `当前没有可供本项目选择的${featureName}模型，请到模型与服务商检查连接及模型配置。`,
+        description: referenceImageCount > 1
+          ? `已添加 ${referenceImageCount} 张参考图。当前项目没有档案明确声明支持多图的${featureName}模型，未声明的模型已阻止提交。只保留一张后，单图模型可以继续使用。`
+          : `当前没有可供本项目选择的${featureName}模型，请到模型与服务商检查连接及模型配置。`,
         warning: true, action: 'providers'
       }
     : !selectedCandidate ? { title: '请选择模型', warning: false }
@@ -812,6 +815,12 @@ export function ImageFeatureSubmissionPanel({
         </p>
       ) : (
         <>
+      {referenceImageCount > 1 && candidatesReady && currentCandidates.length > 0 &&
+        currentCandidates.every((candidate) => !candidate.available) ? (
+        <p className="uc-image-quick__hint" role="status">
+          {`已添加 ${referenceImageCount} 张参考图。下面这些模型没有声明多图请求，所以不能提交。只保留一张图片后，单图模型可以继续使用。`}
+        </p>
+      ) : null}
       <ModelSelect
         disabled={!candidatesReady || currentCandidates.length === 0 || busy}
         showEmptyState={false}
@@ -824,7 +833,12 @@ export function ImageFeatureSubmissionPanel({
           available: candidate.available,
           unavailableReasons: candidate.unavailableReasons
         }))}
-        reasonLabels={unavailableReasonLabels}
+        reasonLabels={{
+          ...unavailableReasonLabels,
+          ...(referenceImageCount > 1 ? {
+            feature_unsupported: '模型档案未声明多图请求，多图时不能提交；只保留一张后可继续使用'
+          } : {})
+        }}
         value={featureSelection.candidateId ?? ''}
       />
 

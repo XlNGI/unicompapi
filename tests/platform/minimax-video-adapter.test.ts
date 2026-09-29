@@ -190,6 +190,39 @@ describe('MiniMax video adapter', () => {
     );
   });
 
+  it('uploads ordered reference images and sends reference_image roles for multi-image video', async () => {
+    const fixture = videoFixture();
+    fixture.transport.responses.push(
+      jsonResponse({ file: { file_id: 'reference-file-1' } }),
+      jsonResponse({ file: { file_id: 'reference-file-2' } }),
+      jsonResponse({ task_id: 'minimax-task-multi-reference' })
+    );
+    const outcome = await fixture.adapter.submit({
+      routeSnapshot: routeSnapshot('image_to_video'),
+      request: {
+        ...dispatchRequest('image_to_video', { resolution: '2K', duration: 6 }),
+        assetId: undefined,
+        assetIds: ['asset-minimax-reference-1', 'asset-minimax-reference-2']
+      }
+    });
+
+    expect(outcome).toMatchObject({
+      kind: 'accepted_async',
+      providerOperationId: 'minimax-task-multi-reference'
+    });
+    expect(fixture.images.calls.map((call) => call.assetId)).toEqual([
+      'asset-minimax-reference-1',
+      'asset-minimax-reference-2'
+    ]);
+    expect(bodyOf(fixture.transport.requests[2])).toMatchObject({
+      content: [
+        { type: 'text', text: 'A controlled synthetic prompt' },
+        { image_url: { url: 'mm_file://reference-file-1' }, role: 'reference_image' },
+        { image_url: { url: 'mm_file://reference-file-2' }, role: 'reference_image' }
+      ]
+    });
+  });
+
   it('treats upload failure as failed_before_submission', async () => {
     const fixture = videoFixture();
     fixture.transport.responses.push(jsonResponse({
@@ -337,7 +370,7 @@ class RecordingImageResolver implements ControlledMiniMaxImagePort {
   };
   async resolve(input: { projectId: string; assetId: string }) {
     this.calls.push(input);
-    return this.image;
+    return { ...this.image, assetId: input.assetId };
   }
 }
 

@@ -145,7 +145,7 @@ describe('ProductFeature and ParameterSchema V2 contracts', () => {
     })).toThrow('conversation context');
   });
 
-  it('enforces professional reference and single-image constraints', () => {
+  it('enforces professional reference and multi-image generation constraints', () => {
     expect(() => validateProductFeatureRequest({
       productFeature: 'reference_to_image',
       surface: 'professional',
@@ -165,7 +165,12 @@ describe('ProductFeature and ParameterSchema V2 contracts', () => {
       productFeature: 'image_to_video',
       surface: 'professional',
       imageCount: 2
-    })).toThrow('exactly one');
+    })).not.toThrow();
+    expect(() => validateProductFeatureRequest({
+      productFeature: 'reference_to_image',
+      surface: 'professional',
+      imageCount: 2
+    })).not.toThrow();
     expect(() => validateProductFeatureRequest({
       productFeature: 'reference_to_image',
       surface: 'quick',

@@ -116,6 +116,7 @@ export interface MiniMaxVideoDispatchRequestV1 {
   readonly projectId: string;
   readonly prompt: string;
   readonly assetId?: string;
+  readonly assetIds?: readonly string[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
 }
 
@@ -230,14 +231,11 @@ export class MiniMaxVideoAdapter
         connection,
         usagePersisted: false
       };
-      const image = route.productFeature === 'image_to_video'
-        ? validateImage(await this.images.resolve({
-            projectId: request.projectId,
-            assetId: request.assetId!
-          }), request.assetId!)
-        : undefined;
-      const fileId = image
-        ? await this.credentials.useCredential(
+      const images = route.productFeature === 'image_to_video'
+        ? await resolveImages(this.images, request.projectId, request.assetIds)
+        : [];
+      const fileIds = images.length > 0
+        ? await Promise.all(images.map((image, index) => this.credentials.useCredential(
             {
               connectionId: route.connectionId,
               credentialVersionId: route.credentialVersionId
@@ -245,16 +243,14 @@ export class MiniMaxVideoAdapter
             (credential) => this.runtime.requestFileUpload({
               connection,
               credentials: credential,
-              filename: image.mimeType === 'image/jpeg'
-                ? 'first-frame.jpg'
-                : 'first-frame.png',
+              filename: images.length === 1 ? 'first-frame.png' : `reference-${index + 1}.png`,
               mimeType: image.mimeType,
               bytes: image.bytes,
               signal: input.signal
             }).then(parseUploadResponse)
-          )
-        : undefined;
-      const body = serializeVideoRequest(route, request, fileId);
+          )))
+        : [];
+      const body = serializeVideoRequest(route, request, fileIds);
       const responseBody = await this.credentials.useCredential(
         {
           connectionId: route.connectionId,
@@ -727,7 +723,7 @@ function parseDispatchRequest(
   const item = exactRequestRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    ['assetId', 'taskId', 'executionId'],
+    ['assetId', 'assetIds', 'taskId', 'executionId'],
     'MiniMax video request'
   );
   const projectId = requireOpaqueRequestId(item.projectId, 'project ID');
@@ -737,12 +733,14 @@ function parseDispatchRequest(
       'The MiniMax request project does not match the route snapshot'
     );
   }
-  const assetId = item.assetId === undefined
-    ? undefined
-    : requireOpaqueRequestId(item.assetId, 'asset ID');
+  const assetIds = item.assetIds !== undefined
+    ? requireAssetIds(item.assetIds)
+    : item.assetId === undefined
+      ? undefined
+      : [requireOpaqueRequestId(item.assetId, 'asset ID')];
   if (
-    (route.productFeature === 'image_to_video' && !assetId) ||
-    (route.productFeature === 'text_to_video' && assetId)
+    (route.productFeature === 'image_to_video' && (!assetIds || assetIds.length < 1)) ||
+    (route.productFeature === 'text_to_video' && assetIds)
   ) {
     throw invalidRequest(
       'minimax.invalid_request',
@@ -762,7 +760,7 @@ function parseDispatchRequest(
     invocationAttemptId: requireInvocationAttemptId(item.invocationAttemptId),
     projectId,
     prompt: boundedPrompt(item.prompt),
-    ...(assetId ? { assetId } : {}),
+    ...(assetIds ? { assetIds } : {}),
     parameterValues
   };
 }
@@ -798,10 +796,34 @@ function validateImage(
   return { ...image, mimeType, bytes: Uint8Array.from(image.bytes) };
 }
 
+async function resolveImages(
+  images: ControlledMiniMaxImagePort,
+  projectId: string,
+  assetIds: readonly string[] | undefined
+): Promise<readonly ControlledMiniMaxImageV1[]> {
+  if (!assetIds || assetIds.length < 1 || assetIds.length > 9) {
+    throw invalidRequest('minimax.invalid_request', 'MiniMax reference video requires 1 to 9 images');
+  }
+  return Promise.all(assetIds.map(async (assetId) => validateImage(
+    await images.resolve({ projectId, assetId }), assetId
+  )));
+}
+
+function requireAssetIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 9) {
+    throw invalidRequest('minimax.invalid_request', 'MiniMax assetIds must contain 1 to 9 items');
+  }
+  const ids = value.map((item) => requireOpaqueRequestId(item, 'asset ID'));
+  if (new Set(ids).size !== ids.length) {
+    throw invalidRequest('minimax.invalid_request', 'MiniMax assetIds must be unique');
+  }
+  return ids;
+}
+
 function serializeVideoRequest(
   route: ValidatedMiniMaxRoute,
   request: MiniMaxVideoDispatchRequestV1,
-  fileId: string | undefined
+  fileIds: readonly string[]
 ): Uint8Array {
   const settings: Record<string, ParameterValue> = {};
   for (const [key, value] of Object.entries(request.parameterValues)) {
@@ -823,11 +845,14 @@ function serializeVideoRequest(
     { type: 'text', text: request.prompt }
   ];
   if (route.productFeature === 'image_to_video') {
-    content.push({
-      type: 'image_url',
-      image_url: { url: `mm_file://${fileId}` },
-      role: 'first_frame'
-    });
+    const role = fileIds.length > 1 ? 'reference_image' : 'first_frame';
+    for (const fileId of fileIds) {
+      content.push({
+        type: 'image_url',
+        image_url: { url: `mm_file://${fileId}` },
+        role
+      });
+    }
   }
   const body: Record<string, unknown> = {
     model: route.providerModelKey,

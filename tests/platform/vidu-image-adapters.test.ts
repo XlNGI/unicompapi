@@ -23,6 +23,7 @@ import {
   SecureCredentialVault,
   ViduGeminiImageV2Adapter,
   ViduImageV1Adapter,
+  ViduReferenceImageV2Adapter,
   ViduSharedRuntime,
   ViduTransportFailure,
   type ControlledImageMaterial,
@@ -194,6 +195,82 @@ describe('Vidu synchronous image adapters', () => {
     );
   });
 
+  it('submits one to seven ordered reference images for official viduq1', async () => {
+    const fixture = await createFixture('referenceQ1');
+    fixture.transport.responses.push(
+      jsonResponse({ task_id: 'vidu-q1-task' }),
+      jsonResponse({ state: 'success', creations: [{ url: 'https://files.synthetic.invalid/q1.png' }] })
+    );
+    const adapter = new ViduReferenceImageV2Adapter(fixture.dependencies);
+    const assetIds = Array.from({ length: 7 }, (_, index) =>
+      toAssetId(`asset-controlled-${index + 1}`)
+    );
+
+    await expect(adapter.submit(submitRequest(
+      fixture,
+      'reference_to_image',
+      assetIds,
+      { aspect_ratio: '1:1', resolution: '1080p' }
+    ))).resolves.toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url', value: 'https://files.synthetic.invalid/q1.png' }]
+    });
+    expect(bodyOf(fixture.transport.requests[0])).toMatchObject({
+      model: 'viduq1',
+      images: Array.from({ length: 7 }, () => 'data:image/png;base64,c3ludGhldGljLWlucHV0')
+    });
+
+    await expect(adapter.submit(submitRequest(
+      fixture,
+      'reference_to_image',
+      [...assetIds, toAssetId('asset-controlled-8')],
+      {}
+    ))).resolves.toMatchObject({
+      kind: 'failed_before_submission',
+      message: 'Between 1 and 7 controlled image inputs are required',
+      retryability: 'not_retryable'
+    });
+    expect(fixture.transport.requests).toHaveLength(2);
+  });
+
+  it('submits one to seven ordered reference images for official viduq2', async () => {
+    const fixture = await createFixture('referenceQ2');
+    fixture.transport.responses.push(
+      jsonResponse({ task_id: 'vidu-q2-task' }),
+      jsonResponse({ state: 'success', creations: [{ url: 'https://files.synthetic.invalid/q2.png' }] })
+    );
+    const adapter = new ViduReferenceImageV2Adapter(fixture.dependencies);
+    const assetIds = [toAssetId('asset-one'), toAssetId('asset-two')];
+
+    await expect(adapter.submit(submitRequest(
+      fixture,
+      'reference_to_image',
+      assetIds,
+      { aspect_ratio: '1:1', resolution: '1080p' }
+    ))).resolves.toMatchObject({
+      kind: 'completed_sync',
+      results: [{ kind: 'remote_url', value: 'https://files.synthetic.invalid/q2.png' }]
+    });
+    expect(bodyOf(fixture.transport.requests[0])).toMatchObject({
+      model: 'viduq2',
+      images: [
+        'data:image/png;base64,c3ludGhldGljLWlucHV0',
+        'data:image/png;base64,c3ludGhldGljLWlucHV0'
+      ]
+    });
+
+    await expect(adapter.submit(submitRequest(
+      fixture,
+      'reference_to_image',
+      [...assetIds, ...Array.from({ length: 6 }, (_, index) => toAssetId(`asset-extra-${index}`))],
+      {}
+    ))).resolves.toMatchObject({
+      kind: 'failed_before_submission',
+      message: 'Between 1 and 7 controlled image inputs are required',
+      retryability: 'not_retryable'
+    });
+  });
+
   it('blocks oversized serialized requests and malformed multi-result responses', async () => {
     const fixture = await createFixture('gemini');
     fixture.materials.material = {
@@ -246,7 +323,7 @@ describe('Vidu synchronous image adapters', () => {
   });
 });
 
-type ProtocolKind = 'imageV1' | 'gemini';
+type ProtocolKind = 'imageV1' | 'gemini' | 'referenceQ1' | 'referenceQ2';
 
 async function createFixture(
   protocol: ProtocolKind,
@@ -273,7 +350,9 @@ async function createFixture(
     binding.id === (
       protocol === 'imageV1'
         ? VIDU_USER_PROTOCOL_BINDING_IDS.imageV1
-        : VIDU_USER_PROTOCOL_BINDING_IDS.geminiImageV2
+        : protocol === 'gemini'
+          ? VIDU_USER_PROTOCOL_BINDING_IDS.geminiImageV2
+          : VIDU_USER_PROTOCOL_BINDING_IDS.referenceImageV2
     )
   )!;
   const binding = protocol === 'imageV1' && options.verifiedImageV1Auth === false
@@ -281,8 +360,12 @@ async function createFixture(
     : protocol === 'imageV1'
       ? createProviderProtocolBinding({ ...originalBinding, authScheme: 'bearer' })
       : originalBinding;
-  const model = frozen.models.find(
-    (candidate) => candidate.protocolBindingId === binding.id
+  const model = frozen.models.find((candidate) =>
+    protocol === 'referenceQ1'
+      ? candidate.providerModelKey === 'viduq1'
+      : protocol === 'referenceQ2'
+        ? candidate.providerModelKey === 'viduq2'
+        : candidate.protocolBindingId === binding.id
   )!;
   const evidence = frozen.capabilities.find(
     (candidate) => candidate.id === model.capabilityEvidenceId

@@ -39,6 +39,36 @@ describe('generation history stage flags', () => {
     expect(result.selectedWorkId).toBeUndefined();
   });
 
+  it('shows the registered work when a latched completed task gains a result', () => {
+    const result = resolveHistorySelection({
+      autoSelectActive: false,
+      followTask: false,
+      selectedTaskId: 'task-video',
+      selectedStatusId: 'task-task-video',
+      works: [
+        { workId: 'older', sourceTaskId: 'task-video', createdAt: '2026-09-29T08:18:50.864Z' },
+        { workId: 'latest', sourceTaskId: 'task-video', createdAt: '2026-09-29T08:25:43.297Z' }
+      ],
+      statusNodes: [{ id: 'task-task-video', taskId: 'task-video', kind: 'completed', occurredAt: '2026-09-29T08:25:43.274Z' }]
+    });
+    expect(result.selectedWorkId).toBe('latest');
+    expect(result.selectedTaskId).toBe('task-video');
+    expect(result.selectedStatusId).toBeUndefined();
+  });
+
+  it('keeps a latched completed task without a local work', () => {
+    const result = resolveHistorySelection({
+      autoSelectActive: false,
+      followTask: false,
+      selectedTaskId: 'task-empty',
+      selectedStatusId: 'task-task-empty',
+      works: [{ workId: 'other', sourceTaskId: 'task-other', createdAt: '2026-09-29T08:25:43.297Z' }],
+      statusNodes: [{ id: 'task-task-empty', taskId: 'task-empty', kind: 'completed', occurredAt: '2026-09-29T08:25:43.274Z' }]
+    });
+    expect(result.selectedStatusId).toBe('task-task-empty');
+    expect(result.selectedWorkId).toBeUndefined();
+  });
+
   it('shows the in-flight preview when nothing is selected and a generation is running', () => {
     const result = flags({ livePhase: 'waiting' });
     expect(result.generationInFlight).toBe(true);

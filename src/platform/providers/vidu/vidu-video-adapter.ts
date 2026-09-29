@@ -91,13 +91,16 @@ export class ViduReferenceVideoV2Adapter
           ...parameters.optional
         });
       } else {
-        const material = await this.dependencies.materials.resolve({
-          projectId: request.task.projectId,
-          assetId: video.materials[0].assetId
-        });
+        const images = await Promise.all(video.materials.map(async (material) => {
+          const resolved = await this.dependencies.materials.resolve({
+            projectId: request.task.projectId,
+            assetId: material.assetId
+          });
+          return `data:${resolved.mimeType};base64,${resolved.base64}`;
+        }));
         body = serializeBoundedJson({
           model: request.model.providerModelKey,
-          images: [`data:${material.mimeType};base64,${material.base64}`],
+          images,
           prompt,
           audio: parameters.audio,
           ...parameters.optional
@@ -448,11 +451,12 @@ function validateSubmitRequest(
   if (
     request.evidence.capability !== 'reference_to_video' ||
     !request.binding.supportedPurposes.includes('reference_to_video') ||
-    video!.materials.length !== 1 ||
-    video!.materials[0]?.mediaKind !== 'image' ||
+    video!.materials.length < 1 ||
+    video!.materials.length > 7 ||
+    video!.materials.some((material) => material.mediaKind !== 'image') ||
     !assetIds ||
-    assetIds.length !== 1 ||
-    assetIds[0] !== video!.materials[0]?.assetId
+    assetIds.length !== video!.materials.length ||
+    assetIds.some((assetId, index) => assetId !== video!.materials[index]?.assetId)
   ) {
     throw new ViduVideoAdapterError(
       'The video operation does not match the Vidu reference protocol',

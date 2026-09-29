@@ -209,12 +209,12 @@ async function inspectRenderedOutput(
   return diagnostics;
 }
 
-type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+import type * as PdfJsModule from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const importEsm = new Function(
   'specifier',
   'return import(specifier);'
-) as (specifier: string) => Promise<PdfJsModule>;
+) as (specifier: string) => Promise<typeof PdfJsModule>;
 
 export async function inspectPptxGeometry(
   filePath: string

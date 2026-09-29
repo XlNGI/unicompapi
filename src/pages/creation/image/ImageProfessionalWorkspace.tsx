@@ -14,7 +14,7 @@ import { ControlledImageDropZone } from '../../../components/ControlledImageDrop
 import { StatusPill } from '../../../components/StatusPill';
 import type { SubmissionProgressPhase } from '../../../components/SubmissionProgressSteps';
 import { composeImagePromptEnhancementInput } from '../../../shared/prompt-enhancement-input';
-import type { ImageWorkspaceInputAssetDto } from '../../../shared/image-workspace-ipc';
+import { hasInvalidImageReference, remapDeletedImageReferences } from '../../../shared/image-reference-prompt';
 import { CreationAdvancedSection } from '../CreationAdvancedSection';
 import { WorkspaceContextSelector } from '../WorkspaceContextSelector';
 import type { GenerationImageDraftDto } from './ImageGenerationControls';
@@ -43,8 +43,8 @@ export function ImageProfessionalWorkspace({
   onBlockingReasonChange
 }: ImageProfessionalWorkspaceProps) {
   const imageWorkspaces = window.unicomp?.imageWorkspaces;
-  const [input, setInput] = useState<ImageWorkspaceInputAssetDto>();
-  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewUrls, setPreviewUrls] = useState<Readonly<Record<string, string>>>({});
+  const [previewFailures, setPreviewFailures] = useState<Readonly<Record<string, boolean>>>({});
   const [busy, setBusy] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [expectedWorkId, setExpectedWorkId] = useState<string>();
@@ -93,12 +93,15 @@ export function ImageProfessionalWorkspace({
     !enhancementInput.required ||
     (Boolean(enhancementContent) &&
       draft.prompt.finalPrompt.trim() === enhancementContent?.trim());
+  const referenceImages = draft.referenceImages ?? (draft.input ? [draft.input] : []);
   const blockedReason = !productFeature
     ? '请先明确选择文生图或图生图。'
-    : productFeature === 'text_to_image' && draft.input
+    : productFeature === 'text_to_image' && referenceImages.length > 0
       ? '文生图不能包含图片，请先清除当前图片。'
-      : productFeature === 'reference_to_image' && !draft.input
-        ? '图生图必须选择恰好一张图片。'
+      : productFeature === 'reference_to_image' && referenceImages.length === 0
+        ? '图生图至少需要一张参考图片。'
+        : hasInvalidImageReference(draft.prompt.finalPrompt)
+          ? '提示词包含已删除图片的失效引用，请修改提示词后再提交。'
         : unsupportedContexts.length > 0
           ? '草稿含有未固定版本或不受支持的旧上下文，请先清理。'
           : !enhancementSatisfied
@@ -112,23 +115,31 @@ export function ImageProfessionalWorkspace({
 
   useEffect(() => {
     let active = true;
-    setInput(undefined);
-    setPreviewUrl('');
-    if (!imageWorkspaces || !draft.input) return;
-    void Promise.all([
-      imageWorkspaces.getInput(draft.draftId),
-      imageWorkspaces.createInputPreview(draft.draftId)
-    ]).then(([inputResult, previewResult]) => {
+    if (!imageWorkspaces || referenceImages.length === 0) {
+      setPreviewUrls({});
+      setPreviewFailures({});
+      return;
+    }
+    void Promise.all(
+      referenceImages.map(async (reference) => [
+        reference.assetId,
+        await imageWorkspaces.createInputPreview(draft.draftId, reference.assetId)
+      ] as const)
+    ).then((previewResults) => {
       if (!active) return;
-      if (inputResult.ok) setInput(inputResult.value);
-      if (previewResult.ok) setPreviewUrl(previewResult.value.url);
+      setPreviewUrls(Object.fromEntries(
+        previewResults.flatMap(([assetId, result]) => result.ok ? [[assetId, result.value.url]] : [])
+      ));
+      setPreviewFailures(Object.fromEntries(
+        previewResults.flatMap(([assetId, result]) => result.ok ? [] : [[assetId, true]])
+      ));
     }).catch(() => {
       if (active) onMessage('项目图片读取失败，请重新选择。');
     });
     return () => {
       active = false;
     };
-  }, [draft.draftId, draft.input?.assetId, imageWorkspaces, onMessage]);
+  }, [draft.draftId, draft.input?.assetId, referenceImages.map((reference) => reference.assetId).join(','), imageWorkspaces, onMessage]);
 
   function changeDraft(next: GenerationImageDraftDto) {
     onDraftChange({ ...next, state: 'editing' });
@@ -136,7 +147,7 @@ export function ImageProfessionalWorkspace({
 
   function selectFeature(nextFeature: 'text_to_image' | 'reference_to_image') {
     if (nextFeature === productFeature) return;
-    if (nextFeature === 'text_to_image' && draft.input) {
+    if (nextFeature === 'text_to_image' && referenceImages.length > 0) {
       onMessage('切换文生图前请先清除当前图片。');
       return;
     }
@@ -206,12 +217,36 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
-      setInput(result.value.input);
-      const preview = await imageWorkspaces.createInputPreview(
-        result.value.draft.draftId
-      );
-      setPreviewUrl(preview.ok ? preview.value.url : '');
+      const selected = result.value.draft.input;
+      if (selected && referenceImages.some((reference) => reference.assetId === selected.assetId)) {
+        await imageWorkspaces.clearInput(saved.draftId);
+        onMessage('这张图片已经在参考列表中。');
+        return;
+      }
+      const next = selected
+        ? {
+            ...result.value.draft,
+            input: undefined,
+            referenceImages: [...referenceImages, selected]
+          }
+        : result.value.draft;
+      const preview = selected
+        ? await imageWorkspaces.createInputPreview(result.value.draft.draftId, selected.assetId)
+        : undefined;
+      const persisted = await imageWorkspaces.update(next as GenerationImageDraftDto);
+      if (!persisted.ok) {
+        onMessage('参考图片写入草稿失败，请重试。');
+        return;
+      }
+      onDraftPersisted(persisted.value as GenerationImageDraftDto);
+      setPreviewUrls((current) => preview?.ok && selected ? { ...current, [selected.assetId]: preview.value.url } : current);
+      setPreviewFailures((current) => {
+        if (!selected) return current;
+        const next = { ...current };
+        if (preview?.ok) delete next[selected.assetId];
+        else next[selected.assetId] = true;
+        return next;
+      });
       onMessage('图片已复制并登记到当前项目；没有上传、分析或生成。');
     } catch {
       onMessage('选择图片失败，请重试。');
@@ -243,12 +278,36 @@ export function ImageProfessionalWorkspace({
         return;
       }
       if (result.value.cancelled || !result.value.draft) return;
-      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
-      setInput(result.value.input);
-      const preview = await imageWorkspaces.createInputPreview(
-        result.value.draft.draftId
-      );
-      setPreviewUrl(preview.ok ? preview.value.url : '');
+      const selected = result.value.draft.input;
+      if (selected && referenceImages.some((reference) => reference.assetId === selected.assetId)) {
+        await imageWorkspaces.clearInput(saved.draftId);
+        onMessage('这张图片已经在参考列表中。');
+        return;
+      }
+      const next = selected
+        ? {
+            ...result.value.draft,
+            input: undefined,
+            referenceImages: [...referenceImages, selected]
+          }
+        : result.value.draft;
+      const preview = selected
+        ? await imageWorkspaces.createInputPreview(result.value.draft.draftId, selected.assetId)
+        : undefined;
+      const persisted = await imageWorkspaces.update(next as GenerationImageDraftDto);
+      if (!persisted.ok) {
+        onMessage('参考图片写入草稿失败，请重试。');
+        return;
+      }
+      onDraftPersisted(persisted.value as GenerationImageDraftDto);
+      setPreviewUrls((current) => preview?.ok && selected ? { ...current, [selected.assetId]: preview.value.url } : current);
+      setPreviewFailures((current) => {
+        if (!selected) return current;
+        const next = { ...current };
+        if (preview?.ok) delete next[selected.assetId];
+        else next[selected.assetId] = true;
+        return next;
+      });
       onMessage('图片已完成本地校验并登记到当前项目。');
     } catch {
       onMessage('拖入图片失败，请重试。');
@@ -273,10 +332,36 @@ export function ImageProfessionalWorkspace({
         onMessage('添加本地作品失败，请确认作品文件仍然可用。');
         return;
       }
-      onDraftPersisted(result.value.draft as GenerationImageDraftDto);
-      setInput(result.value.input);
-      const preview = await imageWorkspaces.createInputPreview(saved.draftId);
-      setPreviewUrl(preview.ok ? preview.value.url : '');
+      const selected = result.value.draft.input;
+      if (selected && referenceImages.some((reference) => reference.assetId === selected.assetId)) {
+        await imageWorkspaces.clearInput(saved.draftId);
+        onMessage('这张图片已经在参考列表中。');
+        return;
+      }
+      const next = selected
+        ? {
+            ...result.value.draft,
+            input: undefined,
+            referenceImages: [...referenceImages, selected]
+          }
+        : result.value.draft;
+      const preview = selected
+        ? await imageWorkspaces.createInputPreview(saved.draftId, selected.assetId)
+        : undefined;
+      const persisted = await imageWorkspaces.update(next as GenerationImageDraftDto);
+      if (!persisted.ok) {
+        onMessage('参考图片写入草稿失败，请重试。');
+        return;
+      }
+      onDraftPersisted(persisted.value as GenerationImageDraftDto);
+      setPreviewUrls((current) => preview?.ok && selected ? { ...current, [selected.assetId]: preview.value.url } : current);
+      setPreviewFailures((current) => {
+        if (!selected) return current;
+        const next = { ...current };
+        if (preview?.ok) delete next[selected.assetId];
+        else next[selected.assetId] = true;
+        return next;
+      });
       onMessage('本地作品已重新校验并添加为当前参考图。');
     } catch {
       onMessage('添加本地作品失败，请重试。');
@@ -285,22 +370,33 @@ export function ImageProfessionalWorkspace({
     }
   }
 
-  async function clearReference() {
-    if (!imageWorkspaces || !draft.input || busy) return;
+  async function removeReference(index: number) {
+    if (!imageWorkspaces || referenceImages.length === 0 || busy) return;
+    if (index < 0 || index >= referenceImages.length) return;
     setBusy(true);
     onMessage('');
     try {
       const saved = await ensureSavedDraft();
       if (!saved) return;
-      const result = await imageWorkspaces.clearInput(saved.draftId);
-      if (!result.ok) {
-        onMessage('清除图片失败，请重试。');
+      const remaining = referenceImages.filter((_, itemIndex) => itemIndex !== index);
+      const persisted = await imageWorkspaces.update({
+        ...saved,
+        input: undefined,
+        referenceImages: remaining.length > 0 ? remaining : undefined,
+        prompt: {
+          ...saved.prompt,
+          originalInput: remapDeletedImageReferences(saved.prompt.originalInput, index + 1),
+          finalPrompt: remapDeletedImageReferences(saved.prompt.finalPrompt, index + 1)
+        },
+        state: 'editing'
+      });
+      if (!persisted.ok) {
+        onMessage('清除参考图片失败，请重试。');
         return;
       }
-      onDraftPersisted(result.value as GenerationImageDraftDto);
-      setInput(undefined);
-      setPreviewUrl('');
-      onMessage('已从当前草稿清除图片引用；项目内原始素材记录保持不变。');
+      onDraftPersisted(persisted.value as GenerationImageDraftDto);
+      setPreviewUrls({});
+      onMessage('参考图片已移除并重新编号；原始文件未删除。');
     } catch {
       onMessage('清除图片失败，请重试。');
     } finally {
@@ -343,7 +439,7 @@ export function ImageProfessionalWorkspace({
             <span aria-hidden="true">1</span>
             <div>
               <h2>创作方式与输入</h2>
-              <p>生图方式、图片和项目上下文均需明确选择并保存。</p>
+              <p>生图方式、参考图片和项目上下文均需明确选择并保存。</p>
             </div>
           </header>
 
@@ -364,53 +460,74 @@ export function ImageProfessionalWorkspace({
               type="button"
             >
               <LuFileImage aria-hidden="true" />
-              <span><strong>图生图</strong><small>恰好一张图片</small></span>
+              <span><strong>图生图</strong><small>一张或多张参考图片</small></span>
             </button>
           </div>
 
           <div className="uc-image-quick__field">
-            <span>原始创作需求</span>
-            <div
-              className={`uc-image-professional__prompt-input${productFeature === 'reference_to_image' ? ' has-reference' : ''}`}
-            >
-              <Input
-                aria-label="原始创作需求"
-                as="textarea"
-                className="uc-image-professional__prompt-textarea"
-                maxLength={1000}
-                onChange={(value) => changeOriginalInput(value)}
-                placeholder="描述主体、场景、氛围和创作用途"
-                rows={8}
-                value={draft.prompt.originalInput}
-              />
-              {productFeature === 'reference_to_image' ? (
+            {productFeature === 'reference_to_image' ? (
+              <div className="uc-image-professional__reference-field">
+                <span>参考图片 <small>已添加 {referenceImages.length} 张</small></span>
                 <ControlledImageDropZone
                   disabled={!imageWorkspaces || busy}
-                  hasImage={Boolean(draft.input)}
+                  hasImage={referenceImages.length > 0}
                   onDropFile={(file, dropToken) => void importReference(file, dropToken)}
                   onDropWork={(workId) => void useWorkAsReference(workId)}
                   onReject={onMessage}
                 >
                   <section
-                    className={`uc-image-professional__reference${input ? ' has-image' : ' is-empty'}`}
+                    className={`uc-image-professional__reference${referenceImages.length > 0 ? ' has-image' : ' is-empty'}`}
                   >
-                    {previewUrl ? (
-                      <figure className="uc-image-professional__preview">
-                        <div className="uc-image-professional__preview-media">
-                          <img alt={`项目图片：${input?.name ?? '本地图片'}`} src={previewUrl} />
-                          <div className="uc-image-professional__preview-overlay">
-                            <Button
-                              aria-label="删除图片"
-                              className="uc-image-professional__preview-delete"
-                              disabled={busy}
-                              onClick={() => void clearReference()}
-                              variant="secondary"
-                            >
-                              <LuTrash2 aria-hidden="true" />
-                            </Button>
+                    {referenceImages.length > 0 ? (
+                      <div className="uc-image-professional__reference-strip">
+                        {referenceImages.map((reference, index) => (
+                          <div className="uc-image-professional__reference-item" key={reference.assetId}>
+                            <div className="uc-image-professional__reference-thumbnail">
+                              {previewUrls[reference.assetId] ? (
+                                <img alt={`图${index + 1}`} src={previewUrls[reference.assetId]} />
+                              ) : (
+                                <span className="uc-image-professional__reference-status">
+                                  {previewFailures[reference.assetId] ? '预览失败' : '读取中'}
+                                </span>
+                              )}
+                              <Button
+                                aria-label={`删除图${index + 1}`}
+                                className="uc-image-professional__reference-delete"
+                                disabled={busy}
+                                onClick={() => void removeReference(index)}
+                                size="xs"
+                                style={{
+                                  width: 24,
+                                  minWidth: 24,
+                                  height: 24,
+                                  minHeight: 24,
+                                  padding: 0,
+                                  border: '1px solid var(--uc-color-border-default)',
+                                  borderRadius: 'var(--uc-radius-6)',
+                                  background: 'var(--uc-color-surface-panel)',
+                                  color: 'var(--uc-color-text-primary)',
+                                  boxShadow: '0 1px 3px rgb(0 0 0 / 24%)'
+                                }}
+                                title={`删除图${index + 1}`}
+                                variant="secondary"
+                              >
+                                <LuTrash2 aria-hidden="true" />
+                              </Button>
+                            </div>
+                            <span className="uc-image-professional__reference-label">图{index + 1}</span>
                           </div>
-                        </div>
-                      </figure>
+                        ))}
+                        <Button
+                          aria-label="继续添加图片"
+                          className="uc-image-professional__reference-add"
+                          disabled={busy}
+                          onClick={() => void selectReference()}
+                          title="继续添加图片"
+                          variant="secondary"
+                        >
+                          <LuPlus aria-hidden="true" />
+                        </Button>
+                      </div>
                     ) : (
                       <div className="uc-image-professional__placeholder">
                         <Button
@@ -427,7 +544,20 @@ export function ImageProfessionalWorkspace({
                     )}
                   </section>
                 </ControlledImageDropZone>
-              ) : null}
+              </div>
+            ) : null}
+            <span>原始创作需求</span>
+            <div className="uc-image-professional__prompt-input">
+              <Input
+                aria-label="原始创作需求"
+                as="textarea"
+                className="uc-image-professional__prompt-textarea"
+                maxLength={1000}
+                onChange={(value) => changeOriginalInput(value)}
+                placeholder="描述主体、场景、氛围和创作用途"
+                rows={8}
+                value={draft.prompt.originalInput}
+              />
             </div>
             <small>{draft.prompt.originalInput.length} / 1000</small>
           </div>

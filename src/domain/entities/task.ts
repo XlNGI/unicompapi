@@ -192,7 +192,12 @@ export function createImageTask(input: CreateImageTaskInput): Task {
   if (input.confirmation.mode !== input.draft.mode) {
     throw new InvariantViolationError('image confirmation mode does not match draft');
   }
-  const expectedPurpose = input.draft.input &&
+  if (input.draft.prompt.finalPrompt.includes('（已失效）')) {
+    throw new InvariantViolationError(
+      'image prompt contains a deleted reference image'
+    );
+  }
+  const expectedPurpose = (input.draft.input || input.draft.referenceImages?.length) &&
     (input.draft.mode === 'quick_image' ||
       input.draft.mode === 'professional_image')
     ? 'reference_to_image'
@@ -221,7 +226,9 @@ export function createImageTask(input: CreateImageTaskInput): Task {
           ...item
         }))
       },
-      assetIds: input.draft.input ? [input.draft.input.assetId] : [],
+      assetIds: input.draft.referenceImages?.length
+        ? input.draft.referenceImages.map((reference) => reference.assetId)
+        : input.draft.input ? [input.draft.input.assetId] : [],
       confirmedAt: input.confirmedAt,
       image: {
         ...input.confirmation,
@@ -254,6 +261,11 @@ export function createVideoTask(input: CreateVideoTaskInput): Task {
   ) {
     throw new InvariantViolationError(
       'video confirmation does not match the source draft'
+    );
+  }
+  if (input.draft.prompt.finalPrompt.includes('（已失效）')) {
+    throw new InvariantViolationError(
+      'video prompt contains a deleted reference image'
     );
   }
   validateVideoConfirmationAgainstDraft(input.draft, input.confirmation);
@@ -338,13 +350,24 @@ function materialsForVideoDraft(
         }]
       : [];
   }
-  if (draft.mode === 'image_to_video' && draft.imageToVideo.source) {
-    return [{
-      assetId: draft.imageToVideo.source.assetId,
-      mediaKind: draft.imageToVideo.source.mediaKind,
-      role: draft.imageToVideo.source.role,
-      target: { kind: 'image_source' }
-    }];
+  if (draft.mode === 'image_to_video') {
+    const references = draft.imageToVideo.referenceImages;
+    if (references?.length) {
+      return references.map((reference) => ({
+        assetId: reference.assetId,
+        mediaKind: reference.mediaKind,
+        role: reference.role,
+        target: { kind: 'image_source' }
+      }));
+    }
+    if (draft.imageToVideo.source) {
+      return [{
+        assetId: draft.imageToVideo.source.assetId,
+        mediaKind: draft.imageToVideo.source.mediaKind,
+        role: draft.imageToVideo.source.role,
+        target: { kind: 'image_source' }
+      }];
+    }
   }
   const materials = draft.mode === 'text_to_video'
     ? draft.textToVideo.materials

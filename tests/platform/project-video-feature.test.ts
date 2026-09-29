@@ -92,37 +92,44 @@ describe('ProjectVideoFeatureSubjectResolver', () => {
     });
   });
 
-  it('requires exactly one registered image for image-to-video', async () => {
+  it('requires at least one registered image and preserves ordered multi-image references', async () => {
     const draft = createVideoWorkspaceDraft({
       ...savedDraft('image_to_video'),
       imageToVideo: {
         ...(savedDraft('image_to_video') as Extract<VideoWorkspaceDraft, {
           mode: 'image_to_video'
         }>).imageToVideo,
-        source: {
-          assetId: imageAsset.id,
-          mediaKind: 'image',
-          role: 'image_to_video_source',
-          selectedAt: createdAt
-        }
+        referenceImages: [
+          {
+            assetId: imageAsset.id,
+            mediaKind: 'image',
+            role: 'reference',
+            selectedAt: createdAt
+          },
+          {
+            assetId: imageAssetTwo.id,
+            mediaKind: 'image',
+            role: 'reference',
+            selectedAt: createdAt
+          }
+        ]
       }
     });
     const fixture = createFixture(draft);
     const value = await fixture.resolver.resolve(subject(fixture.draft));
     expect(value).toMatchObject({
       productFeature: 'image_to_video',
-      imageCount: 1,
+      imageCount: 2,
       videoCount: 0
     });
-    expect(value.materialReferences).toEqual([{
-      kind: 'asset',
-      referenceId: imageAsset.id,
-      revision: 1
-    }]);
+    expect(value.materialReferences).toEqual([
+      { kind: 'asset', referenceId: imageAsset.id, revision: 1 },
+      { kind: 'asset', referenceId: imageAssetTwo.id, revision: 1 }
+    ]);
 
     const missing = createFixture(savedDraft('image_to_video'));
     await expect(missing.resolver.resolve(subject(missing.draft)))
-      .rejects.toThrow(/exactly one image/);
+      .rejects.toThrow(/at least one image/);
   });
 
   it('publishes complete video contracts, including exact UniCompAPI mapped schemas', () => {
@@ -285,8 +292,14 @@ function createFixture(initialDraft: VideoWorkspaceDraft) {
     async save(value) { draft = structuredClone(value); }
   };
   const assets: AssetRepository = {
-    async get(id) { return id === imageAsset.id ? structuredClone(imageAsset) : undefined; },
-    async list() { return [structuredClone(imageAsset)]; },
+    async get(id) {
+      return id === imageAsset.id
+        ? structuredClone(imageAsset)
+        : id === imageAssetTwo.id
+          ? structuredClone(imageAssetTwo)
+          : undefined;
+    },
+    async list() { return [structuredClone(imageAsset), structuredClone(imageAssetTwo)]; },
     async save() {}
   };
   return {
@@ -350,6 +363,18 @@ const imageAsset: Asset = createAsset({
   mediaKind: 'image',
   origin: 'imported',
   role: 'image_to_video_source',
+  imageMetadata: { mimeType: 'image/png', width: 1280, height: 720 },
+  createdAt
+});
+
+const imageAssetTwo: Asset = createAsset({
+  id: toAssetId('asset-video-feature-resolver-two'),
+  projectId,
+  fileId: toFileReferenceId('file-video-feature-resolver-two'),
+  name: 'fixture-two.png',
+  mediaKind: 'image',
+  origin: 'imported',
+  role: 'reference',
   imageMetadata: { mimeType: 'image/png', width: 1280, height: 720 },
   createdAt
 });

@@ -135,6 +135,11 @@ export function TasksPage({ onNavigate, onReuseParameters, initialTaskId }: Task
     }
     if (event.timeStamp < taskCenterWheelLockedUntil.current) return;
     taskCenterWheelDelta.current += event.deltaY;
+    const scrollContainer = event.target instanceof HTMLElement
+      ? event.target.closest<HTMLElement>('.uc-scrollbar')
+      : null;
+    const taskCenterScrollTop = scrollContainer?.scrollTop ??
+      document.scrollingElement?.scrollTop ?? window.scrollY;
 
     if (taskCenterWheelDelta.current >= 16) {
       taskCenterWheelDelta.current = 0;
@@ -143,7 +148,10 @@ export function TasksPage({ onNavigate, onReuseParameters, initialTaskId }: Task
         taskCenterWheelLockedUntil.current = event.timeStamp + 420;
         setConsumptionChartsCollapsed(true);
       }
-    } else if (taskCenterWheelDelta.current <= -12) {
+    } else if (
+      taskCenterWheelDelta.current <= -12 &&
+      taskCenterScrollTop <= Math.abs(event.deltaY)
+    ) {
       taskCenterWheelDelta.current = 0;
       if (consumptionChartsCollapsedRef.current) {
         consumptionChartsCollapsedRef.current = false;

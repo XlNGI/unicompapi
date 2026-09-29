@@ -36,6 +36,7 @@ test('exposes only controlled local video workspace operations', () => {
     'derive',
     'selectMaterial',
     'importMaterial',
+    'useWorkAsMaterial',
     'getMaterial',
     'clearMaterial',
     'createMaterialPreview'
@@ -87,10 +88,12 @@ test('keeps generation drafts separate from the phase 7 editor', () => {
   assert.match(domainSource, /VideoEditHandoffIntent/);
 });
 
-test('video drafts carry explicit feature selection and one image source target', () => {
+test('video drafts carry explicit feature selection and ordered image references', () => {
   assert.match(sharedSource, /VideoWorkspaceFeatureSelectionDto/);
   assert.match(sharedSource, /featureSelection/);
   assert.match(sharedSource, /kind: 'image_source'/);
+  assert.match(sharedSource, /referenceImages/);
+  assert.match(domainSource, /isVideoImageReferenceList/);
   assert.match(domainSource, /defaultVideoFeatureForMode/);
   assert.match(domainSource, /contextRevision/);
   assert.match(domainSource, /includeInPrompt/);

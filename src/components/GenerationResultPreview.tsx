@@ -122,7 +122,7 @@ export function GenerationResultPreview({
         >
           {compact ? null : <strong>本地作品预览</strong>}
           {mediaKind === 'image' ? (
-            <img alt="生成结果预览" decoding="async" src={localUrl} />
+            <img alt="生成结果预览" decoding="async" draggable={false} src={localUrl} />
           ) : (
             <VideoPreview key={localUrl} src={localUrl} />
           )}
@@ -144,7 +144,7 @@ export function GenerationResultPreview({
             </>
           )}
           {mediaKind === 'image' ? (
-            <img alt="生成结果预览" decoding="async" loading="lazy" src={url} />
+            <img alt="生成结果预览" decoding="async" draggable={false} loading="lazy" src={url} />
           ) : (
             <VideoPreview src={url} />
           )}

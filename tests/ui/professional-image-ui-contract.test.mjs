@@ -55,7 +55,14 @@ test('professional image requires an explicit text or reference feature', () => 
   assert.match(professionalSource, /selectFeature\('reference_to_image'\)/);
   assert.match(professionalSource, /文生图/);
   assert.match(professionalSource, /图生图/);
-  assert.match(professionalSource, /图生图必须选择恰好一张图片/);
+  assert.match(professionalSource, /图生图至少需要一张参考图片/);
+  assert.match(professionalSource, /referenceImages/);
+  assert.match(professionalSource, /图\{index \+ 1\}/);
+  assert.match(professionalSource, /继续添加图片/);
+  assert.match(professionalSource, /remapDeletedImageReferences/);
+  assert.match(professionalSource, /hasInvalidImageReference/);
+  assert.match(featurePanelSource, /referenceImageCount/);
+  assert.match(featurePanelSource, /missingImage = featureSelection\.productFeature === 'reference_to_image' && referenceImageCount === 0/);
   assert.match(professionalSource, /文生图不能包含图片/);
   assert.match(professionalSource, /clearInput\(saved\.draftId\)/);
   assert.doesNotMatch(
@@ -68,12 +75,12 @@ test('professional image requires an explicit text or reference feature', () => 
   assert.doesNotMatch(professionalSource, /受控本地预览，不代表生成结果/);
   assert.match(professionalSource, /aria-label="添加图片"/);
   assert.match(professionalSource, /onClick=\{\(\) => void selectReference\(\)\}/);
-  assert.match(professionalSource, /uc-image-professional__preview-overlay/);
+  assert.match(professionalSource, /uc-image-professional__reference-strip/);
   // 缩略图上不再叠加“文件名 · 宽 × 高”标签
   assert.doesNotMatch(professionalSource, /uc-image-professional__preview-meta/);
   assert.doesNotMatch(professionalSource, /<strong>项目图片<\/strong>/);
-  assert.match(professionalSource, /aria-label="删除图片"/);
-  assert.match(professionalSource, /onClick=\{\(\) => void clearReference\(\)\}/);
+  assert.match(professionalSource, /aria-label=\{`删除图\$\{index \+ 1\}`\}/);
+  assert.match(professionalSource, /onClick=\{\(\) => void removeReference\(index\)\}/);
   assert.match(professionalSource, /has-image/);
   assert.match(professionalSource, /is-empty/);
   assert.doesNotMatch(
@@ -82,30 +89,43 @@ test('professional image requires an explicit text or reference feature', () => 
   );
 });
 
-test('professional image embeds a compact reference control in the enlarged prompt input', () => {
-  assert.match(
-    professionalSource,
-    /uc-image-professional__prompt-input[\s\S]*rows=\{8\}[\s\S]*ControlledImageDropZone/
+test('professional image places the compact reference strip above the prompt', () => {
+  assert.match(professionalSource, /uc-image-professional__reference-field[\s\S]*ControlledImageDropZone[\s\S]*uc-image-professional__prompt-input/);
+  assert.match(pageStyles, /\.uc-image-professional__reference-field\s*>\s*\.uc-controlled-image-drop-zone\s*\{[\s\S]*min-height:\s*0;/);
+  assert.match(pageStyles, /\.uc-image-professional__reference-thumbnail[\s\S]*width:\s*72px;[\s\S]*height:\s*72px;/);
+  assert.match(pageStyles, /\.uc-image-professional__reference\.is-empty\s*\{[\s\S]*width:\s*72px;[\s\S]*height:\s*72px;/);
+  assert.match(pageStyles, /\.uc-image-professional__reference-thumbnail img\s*\{[\s\S]*object-fit:\s*contain;/);
+  assert.match(professionalSource, /uc-image-professional__reference-thumbnail[\s\S]*uc-image-professional__reference-label/);
+  assert.doesNotMatch(pageStyles, /\.uc-image-professional__prompt-input\s*>\s*\.uc-controlled-image-drop-zone/);
+  assert.doesNotMatch(pageStyles, /\.uc-image-professional__prompt-input\.has-reference/);
+  assert.doesNotMatch(
+    pageStyles,
+    /\.uc-image-professional__workspace\s+\.uc-image-quick__field\s*\{[^}]*align-content:\s*start/
   );
   assert.match(
     pageStyles,
-    /\.uc-image-professional__prompt-input\s+\.uc-image-professional__prompt-textarea\s*\{[\s\S]*min-height:\s*220px;/
+    /\.uc-image-quick__field:has\(\.uc-image-professional__reference-field\)[\s\S]*?align-content:\s*start/
   );
   assert.match(
     pageStyles,
-    /\.uc-image-professional__prompt-input\s*>\s*\.uc-controlled-image-drop-zone\s*\{[\s\S]*right:\s*var\(--uc-space-3\);[\s\S]*bottom:\s*var\(--uc-space-3\);[\s\S]*width:\s*132px;[\s\S]*height:\s*88px;/
+    /\.uc-image-quick__field:has\(\.uc-image-professional__reference-field\)[\s\S]*?grid-template-rows:\s*max-content minmax\(178px, 1fr\)/
   );
   assert.match(
     pageStyles,
-    /\.uc-image-professional__prompt-input\.has-reference[\s\S]*\.uc-image-professional__prompt-textarea\s*\{[\s\S]*padding-bottom:\s*112px;/
+    /\.uc-image-professional__prompt-textarea,\s*\n\.uc-video-image__workspace \.uc-image-quick__field:has\(\.uc-image-professional__reference-field\) \.uc-image-professional__prompt-textarea \{[\s\S]*?height:\s*100%;/
   );
+  assert.match(professionalSource, /productFeature === 'reference_to_image' \? \([\s\S]*uc-image-professional__reference-field/);
+  assert.match(professionalSource, /productFeature === 'text_to_image'/);
 });
 
-test('professional image can drag a verified result into the reference slot', () => {
+test('professional image can drag a verified result into the reference slot', async () => {
+  const previewSource = await readFile('src/components/GenerationResultPreview.tsx', 'utf8');
   assert.match(historySource, /imageWorkDragDataType/);
   assert.match(historySource, /handleWorkDragStart/);
   assert.match(historySource, /draggable=\{Boolean\(selectedWorkId && mediaKind === 'image'\)\}/);
   assert.match(historySource, /onDragStart=\{selectedWorkId && mediaKind === 'image'/);
+  assert.match(historySource, /onDragStart=\{\(event\) => assignImageWorkDragData\(event, work\.workId\)\}/);
+  assert.match(previewSource, /alt="生成结果预览" decoding="async" draggable=\{false\}/);
   assert.match(professionalSource, /onDropWork=\{\(workId\)/);
   assert.match(professionalSource, /imageWorkspaces\.useWorkAsInput\(/);
   assert.doesNotMatch(professionalSource, /uc-image-professional__after-drop-zone/);
@@ -410,20 +430,17 @@ test('professional image uses controlled local media and the safe feature API', 
   }
   assert.match(
     professionalSource,
-    /selectInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+    /selectInput\([\s\S]*?onDraftPersisted\(persisted\.value/
   );
   assert.match(
     professionalSource,
-    /importInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+    /importInput\([\s\S]*?onDraftPersisted\(persisted\.value/
   );
   assert.match(
     professionalSource,
-    /useWorkAsInput\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+    /useWorkAsInput\([\s\S]*?onDraftPersisted\(persisted\.value/
   );
-  assert.match(
-    professionalSource,
-    /clearInput\([\s\S]*?onDraftPersisted\(result\.value/
-  );
+  assert.match(professionalSource, /clearInput\(/);
   for (const operation of ['listCandidates', 'prepareSubmission', 'submitDraft']) {
     assert.match(featurePanelSource, new RegExp(`api\\.${operation}\\(`));
   }

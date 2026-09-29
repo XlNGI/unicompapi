@@ -46,6 +46,7 @@ import {
   isOpenAiCompatiblePackageVersion
 } from './openai-compatible-identity';
 import { UNICOMPAPI_PROVIDER_PACKAGE_ID } from './unicompapi-contracts';
+import { UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID } from './unicompapi-model-capabilities';
 import { NewApiRuntimeError, type NewApiSharedRuntime } from './newapi-runtime';
 import { ControlledImageMaterialError } from '../vidu/controlled-image-material';
 
@@ -131,6 +132,7 @@ export interface NewApiVideoDispatchRequestV1 {
   readonly projectId: string;
   readonly prompt: string;
   readonly assetId?: string;
+  readonly assetIds?: readonly string[];
   readonly parameterValues: Readonly<Record<string, ParameterValue>>;
 }
 
@@ -196,13 +198,19 @@ export class NewApiVideoAdapter
         connection,
         usagePersisted: false
       };
-      const image = route.productFeature === 'image_to_video'
-        ? validateImage(await this.images.resolve({
+      const assetIds = request.assetIds ?? (
+        request.assetId ? [request.assetId] : []
+      );
+      const images = route.productFeature === 'image_to_video'
+        ? await Promise.all(assetIds.map(async (assetId) => validateImage(
+          await this.images.resolve({
             projectId: request.projectId,
-            assetId: request.assetId!
-          }), request.assetId!)
-        : undefined;
-      const serialized = serializeVideoRequest(route, request, image);
+            assetId
+          }),
+          assetId
+        )))
+        : [];
+      const serialized = serializeVideoRequest(route, request, images);
       const responseBody = await this.credentials.useCredential(
         {
           connectionId: route.connectionId,
@@ -639,7 +647,7 @@ function parseDispatchRequest(
   const item = exactRequestRecord(
     value,
     ['invocationAttemptId', 'projectId', 'prompt', 'parameterValues'],
-    ['assetId', 'taskId', 'executionId'],
+    ['assetId', 'assetIds', 'taskId', 'executionId'],
     'NewApi video request'
   );
   const projectId = requireOpaqueRequestId(item.projectId, 'project ID');
@@ -652,9 +660,19 @@ function parseDispatchRequest(
   const assetId = item.assetId === undefined
     ? undefined
     : requireOpaqueRequestId(item.assetId, 'asset ID');
+  const assetIds = item.assetIds === undefined
+    ? undefined
+    : requireAssetIdList(item.assetIds);
+  if (assetId && assetIds) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'The NewApi request cannot include both assetId and assetIds'
+    );
+  }
+  const hasMaterial = Boolean(assetId) || Boolean(assetIds?.length);
   if (
-    (route.productFeature === 'image_to_video' && !assetId) ||
-    (route.productFeature === 'text_to_video' && assetId)
+    (route.productFeature === 'image_to_video' && !hasMaterial) ||
+    (route.productFeature === 'text_to_video' && hasMaterial)
   ) {
     throw invalidRequest(
       'newapi.invalid_request',
@@ -675,6 +693,7 @@ function parseDispatchRequest(
     projectId,
     prompt: boundedPrompt(item.prompt),
     ...(assetId ? { assetId } : {}),
+    ...(assetIds ? { assetIds } : {}),
     parameterValues
   };
 }
@@ -708,7 +727,7 @@ function validateImage(
 function serializeVideoRequest(
   route: ValidatedNewApiRoute,
   request: NewApiVideoDispatchRequestV1,
-  image: ControlledNewApiImageV1 | undefined
+  images: readonly ControlledNewApiImageV1[]
 ): { readonly body: Uint8Array; readonly contentType: string } {
   const values = request.parameterValues;
   for (const [key, value] of Object.entries(values)) {
@@ -722,15 +741,23 @@ function serializeVideoRequest(
       );
     }
   }
-  if ((route.productFeature === 'image_to_video') !== Boolean(image)) {
+  if ((route.productFeature === 'image_to_video') !== (images.length > 0)) {
     throw invalidRequest(
       'newapi.invalid_request',
       'The NewAPI image input does not match the product feature'
     );
   }
+  const seedanceMultiReference = isSeedance20MultiReferenceRequest(route, images.length);
+  if (images.length > 1 && !seedanceMultiReference) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'This video model accepts only one reference image'
+    );
+  }
   validateUniCompApiVideoParameters(route, values);
 
   const isUniCompApiSeedance20 = isUniCompApiSeedance20Request(route);
+  const image = images[0];
   const imageDataUri = image
     ? `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString('base64')}`
     : undefined;
@@ -855,7 +882,7 @@ function serializeVideoRequest(
     body.metadata = metadata;
   }
 
-  if (isUniCompApiSeedance20) {
+  if (isUniCompApiSeedance20 || seedanceMultiReference) {
     const seedanceMetadata: Record<string, string | number | boolean> = {};
     for (const key of [
       'resolution',
@@ -874,15 +901,15 @@ function serializeVideoRequest(
       }
     }
     const content: Record<string, unknown>[] = [
-      { type: 'text', text: request.prompt }
-    ];
-    if (imageDataUri) {
-      content.push({
+      { type: 'text', text: request.prompt },
+      ...images.map((item) => ({
         type: 'image_url',
-        image_url: { url: imageDataUri },
-        role: 'first_frame'
-      });
-    }
+        image_url: {
+          url: `data:${item.mimeType};base64,${Buffer.from(item.bytes).toString('base64')}`
+        },
+        role: seedanceMultiReference ? 'reference_image' : 'first_frame'
+      }))
+    ];
     body = {
       model: route.providerModelKey,
       ...(Object.keys(seedanceMetadata).length > 0 ? { metadata: seedanceMetadata } : {}),
@@ -910,6 +937,36 @@ function encodeVideoRequestBody(
     body: encoded,
     contentType: 'application/json'
   };
+}
+
+const seedance20MultiReferenceLimit = 9;
+
+function isSeedance20MultiReferenceRequest(
+  route: ValidatedNewApiRoute,
+  imageCount: number
+): boolean {
+  return imageCount > 1 &&
+    imageCount <= seedance20MultiReferenceLimit &&
+    route.packageId === UNICOMPAPI_PROVIDER_PACKAGE_ID &&
+    route.parameterSchemaId === UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID;
+}
+
+function requireAssetIdList(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > seedance20MultiReferenceLimit
+  ) {
+    throw invalidRequest('newapi.invalid_request', 'The NewApi asset ID list is invalid');
+  }
+  const assetIds = value.map((item) => requireOpaqueRequestId(item, 'asset ID'));
+  if (new Set(assetIds).size !== assetIds.length) {
+    throw invalidRequest(
+      'newapi.invalid_request',
+      'The NewApi asset ID list contains duplicates'
+    );
+  }
+  return assetIds;
 }
 
 function isUniCompApiSeedance20Request(route: ValidatedNewApiRoute): boolean {

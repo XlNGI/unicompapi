@@ -91,6 +91,29 @@ describe('video workspace contracts', () => {
     ).toBe(false);
   });
 
+  it('accepts ordered image references on image-to-video drafts only', () => {
+    const base = createEmpty('image_to_video');
+    if (base.mode !== 'image_to_video') throw new Error('unexpected mode');
+    const candidate = {
+      ...base,
+      imageToVideo: {
+        ...base.imageToVideo,
+        source: undefined,
+        referenceImages: [
+          { assetId: toAssetId('asset-video-ref-one'), mediaKind: 'image', role: 'reference', selectedAt: t0 },
+          { assetId: toAssetId('asset-video-ref-two'), mediaKind: 'image', role: 'reference', selectedAt: t1 }
+        ]
+      }
+    };
+
+    expect(isVideoWorkspaceDraft(candidate)).toBe(true);
+    expect(isVideoWorkspaceDraft({
+      ...candidate,
+      mode: 'quick_video',
+      quick: { reference: undefined, referenceImages: candidate.imageToVideo.referenceImages }
+    })).toBe(false);
+  });
+
   it('binds dynamic material slots and parameters to model capability evidence', () => {
     const base = createEmpty('image_to_video');
     if (base.mode !== 'image_to_video') throw new Error('unexpected mode');

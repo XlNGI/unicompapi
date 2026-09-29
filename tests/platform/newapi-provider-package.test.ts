@@ -2694,6 +2694,124 @@ describe('NewAPI video adapter', () => {
     expect(body).not.toHaveProperty('image');
   });
 
+  it('sends Seedance 2.0 reference images instead of a single first frame', async () => {
+    const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_references', 'queued')));
+    const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const resolve = vi.fn(async (input: { readonly assetId: string }): Promise<ControlledNewApiImageV1> => ({
+      assetId: input.assetId,
+      mimeType: 'image/png',
+      width: 640,
+      height: 480,
+      sizeBytes: bytes.byteLength,
+      bytes
+    }));
+    const adapter = unicompapiVideoAdapter(fixture.runtime, usageSink(), resolve);
+    const outcome = await adapter.submit({
+      routeSnapshot: unicompapiVideoRoute(
+        'image_to_video',
+        'doubao-seedance-2-0-260128'
+      ),
+      request: {
+        invocationAttemptId: 'attempt-video-seedance-references',
+        projectId: 'project-newapi',
+        assetIds: ['asset-seedance-reference-1', 'asset-seedance-reference-2'],
+        prompt: 'Use image 1 as the person and image 2 as the costume',
+        parameterValues: { ratio: '16:9', duration: 5 }
+      }
+    });
+    expect(outcome).toEqual({
+      kind: 'accepted_async',
+      providerOperationId: 'task_seedance_references',
+      state: 'queued'
+    });
+    const body = JSON.parse(Buffer.from(fixture.requests[0].body!).toString('utf8'));
+    expect(body.content).toEqual([
+      { type: 'text', text: 'Use image 1 as the person and image 2 as the costume' },
+      {
+        type: 'image_url',
+        image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' },
+        role: 'reference_image'
+      },
+      {
+        type: 'image_url',
+        image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' },
+        role: 'reference_image'
+      }
+    ]);
+    expect(body).not.toHaveProperty('image');
+  });
+
+  it('rejects multiple Seedance images unless the verified image-to-video schema is selected', async () => {
+    const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const resolve = vi.fn(async (input: { readonly assetId: string }): Promise<ControlledNewApiImageV1> => ({
+      assetId: input.assetId,
+      mimeType: 'image/png',
+      width: 640,
+      height: 480,
+      sizeBytes: bytes.byteLength,
+      bytes
+    }));
+    const request = {
+      invocationAttemptId: 'attempt-video-seedance-schema-gate',
+      projectId: 'project-newapi',
+      assetIds: ['asset-seedance-reference-1', 'asset-seedance-reference-2'],
+      prompt: 'Use image 1 as the person and image 2 as the costume',
+      parameterValues: { ratio: '16:9', duration: 5 }
+    };
+    const fastFixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_fast_multi', 'queued')));
+    const fastAdapter = unicompapiVideoAdapter(fastFixture.runtime, usageSink(), resolve);
+    await expect(fastAdapter.submit({
+      routeSnapshot: unicompapiVideoRoute(
+        'image_to_video',
+        'doubao-seedance-2-0-fast-260128'
+      ),
+      request
+    })).resolves.toEqual({
+      kind: 'failed_before_submission',
+      message: 'The NewAPI request is invalid',
+      retryability: 'not_retryable'
+    });
+    expect(fastFixture.requests).toHaveLength(0);
+
+    const renamedFixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_schema', 'queued')));
+    const renamedAdapter = unicompapiVideoAdapter(renamedFixture.runtime, usageSink(), resolve);
+    const official = unicompapiVideoRoute('image_to_video', 'doubao-seedance-2-0-260128');
+    await renamedAdapter.submit({
+      routeSnapshot: {
+        ...official,
+        providerModelKey: 'custom-seedance-contract'
+      },
+      request: {
+        ...request,
+        invocationAttemptId: 'attempt-video-seedance-schema-name'
+      }
+    });
+    const renamedBody = JSON.parse(Buffer.from(renamedFixture.requests[0].body!).toString('utf8'));
+    expect(renamedBody.model).toBe('custom-seedance-contract');
+    expect(renamedBody.content.map((item: { role?: string }) => item.role)).toEqual([
+      undefined,
+      'reference_image',
+      'reference_image'
+    ]);
+
+    const mismatchedFixture = runtimeFixture(async () => jsonResponse(videoObject('task_seedance_mismatch', 'queued')));
+    const mismatchedAdapter = unicompapiVideoAdapter(mismatchedFixture.runtime, usageSink(), resolve);
+    await expect(mismatchedAdapter.submit({
+      routeSnapshot: {
+        ...official,
+        parameterSchemaId: uniCompApiSeedance2FastImageToVideoParameterSchema.schemaId
+      },
+      request: {
+        ...request,
+        invocationAttemptId: 'attempt-video-seedance-schema-mismatch'
+      }
+    })).resolves.toEqual({
+      kind: 'failed_before_submission',
+      message: 'The NewAPI request is invalid',
+      retryability: 'not_retryable'
+    });
+    expect(mismatchedFixture.requests).toHaveLength(0);
+  });
   it('projects viduq3-turbo image-to-video through /v1/videos with official fields', async () => {
     const fixture = runtimeFixture(async () => jsonResponse(videoObject('task_vidu_turbo', 'queued')));
     const resolve = vi.fn(async (): Promise<ControlledNewApiImageV1> => ({

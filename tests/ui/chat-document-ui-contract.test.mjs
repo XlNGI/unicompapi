@@ -146,7 +146,7 @@ test('production trace is expanded by default and legacy task progress stays com
   assert.match(page, /productionTrace\.list\(selectedId\)/);
   assert.match(progress, /aria-label="生产进度"/);
   assert.match(progress, /<ol className="uc-chat-production-trace" aria-label="完整生产链路">/);
-  assert.match(progress, /events\.map\(\(event\) =>/);
+  assert.match(progress, /displayEvents\.map\(\(\{ event, key \}, displayIndex\) =>/);
   assert.match(progress, /data-status=\{event.status\}/);
   assert.match(progress, /本地 → 模型/);
   assert.match(progress, /模型 → 本地/);
