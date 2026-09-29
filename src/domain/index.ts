@@ -10,6 +10,7 @@ export * from './entities/document-intent-plan';
 export * from './entities/document-context-snapshot';
 export * from './entities/presentation-plan';
 export * from './entities/presentation-design';
+export * from './entities/presentation-design-contract';
 export * from './entities/document-agent';
 export * from './entities/document-ir-patch';
 export * from './entities/document-version-pin';
