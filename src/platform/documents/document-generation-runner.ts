@@ -28,6 +28,7 @@ import type { RepairPlan } from '../../domain';
 import { resolveFileReferencePathSafely } from '../files';
 import type { DocumentThemeId } from './document-theme';
 import type { PresentationTemplateId } from './presentation-template';
+import type { PresentationDesignCompilationSnapshot } from './presentation-render-plan-compiler';
 import {
   FileVerificationError,
   FileVerificationPersistenceService,
@@ -65,6 +66,8 @@ import {
 import { readPptxDocument, readPptxSlideOrder } from './pptx-page-reader';
 import { emitProductionEvent } from '../conversation-production-trace';
 import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEvent } from '../../application/document-generation-service';
+import { planPresentationArtDirection, type PresentationArtDirectionPlanner } from '../../application/presentation-art-direction';
+import type { DocumentIR } from '../../domain/entities/document-agent';
 
 export type DocumentGenerationErrorCode =
   | 'invalid_plan'
@@ -98,6 +101,10 @@ export interface DocumentGenerationPlanInput {
   readonly draftRevision: number;
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
+  readonly documentIR?: DocumentIR;
+  readonly userRequirement?: string;
+  readonly requestArtDirection?: PresentationArtDirectionPlanner;
+  readonly artDirectionTimeoutMs?: number;
   readonly parentWorkId?: WorkId;
   readonly sourceChecksumSha256?: string;
   readonly revisionTargetSectionHeading?: string;
@@ -251,6 +258,21 @@ export class DocumentGenerationRunner {
       // verification stage, including failures during a repair candidate.
       execution = await this.move(context, execution, 'verifying_file');
       let currentOutline = input.outline;
+      const artDirection = input.kind === 'ppt' && !input.parentWorkId && !input.revisionPatch && !input.revisionPatches
+        ? await this.observe(input, 'plan_validation', 'presentation-art-direction', () => planPresentationArtDirection({
+            outline: input.outline, documentIR: input.documentIR, userRequirement: input.userRequirement ?? '',
+            brandingConstraints: [input.theme, input.presentationTemplate].filter((value): value is NonNullable<typeof value> => value !== undefined),
+            request: input.requestArtDirection, signal: input.signal ?? new AbortController().signal,
+            timeoutMs: input.artDirectionTimeoutMs
+          }), { purpose: 'planning', documentKind: 'ppt', count: input.outline.sections.length })
+        : undefined;
+      const artDirectionStatus = artDirection === undefined ? 'missing' as const
+        : artDirection.designIR ? 'validated' as const
+          : artDirection.diagnostics.some(item => item.code === 'art_direction_unavailable') ? 'missing' as const : 'invalid' as const;
+      const designIrStatus = artDirection?.designIR ? 'validated' as const : artDirectionStatus;
+      if (artDirection) await this.reportProgress(input, { code: 'plan_validation', status: 'completed',
+        operationId: artDirection.designIR ? 'presentation-design-validated' : 'presentation-design-fallback',
+        facts: { purpose: 'planning', documentKind: 'ppt', count: artDirection.diagnostics.length, artDirectionStatus, designIrStatus } });
       let repairDiagnostics: readonly DocumentQualityDiagnostic[] = [];
       const supportsLlmRepair = input.kind === 'ppt' && input.requestLlmRepair !== undefined &&
         this.options.renderPreview !== undefined &&
@@ -259,8 +281,14 @@ export class DocumentGenerationRunner {
         const operationSuffix = attempt === 0 ? '' : `:repair-${attempt}`;
         const candidate = await this.observe(input, 'document_compile', `document-file-write${operationSuffix}`, async () => generateTemporaryFile({
           onProgress: event => this.reportProgress(input, event),
+          onDesignCompiled: snapshot => this.recordDesignCompilation(input, snapshot, attempt),
           kind: input.kind,
           outline,
+          // A content repair changes reference identity: rerender it with the stable legacy path.
+          ...(attempt === 0 && artDirection?.designIR ? { designIR: artDirection.designIR } : {}),
+          artDirectionStatus,
+          designIrStatus,
+          ...(artDirection?.diagnostics.length ? { artDirectionDiagnostics: artDirection.diagnostics } : {}),
           outputDirectory,
           now: now(),
           ...(input.theme !== undefined ? { theme: input.theme } : {}),
@@ -555,6 +583,53 @@ export class DocumentGenerationRunner {
     } catch (error) {
       if (input.strictProgress) throw error;
       /* Best-effort UI telemetry cannot change the document transaction outcome. */
+    }
+  }
+
+  private async recordDesignCompilation(
+    input: DocumentGenerationPlanInput,
+    snapshot: PresentationDesignCompilationSnapshot,
+    attempt: number
+  ): Promise<void> {
+    const suffix = attempt === 0 ? '' : `-repair-${attempt}`;
+    const facts: NonNullable<DocumentGenerationProgressEvent['facts']> = {
+      purpose: 'planning', documentKind: 'ppt', tool: 'check', count: snapshot.pages.length,
+      designPath: snapshot.designPath,
+      ...(snapshot.fallbackReason ? { fallbackReason: snapshot.fallbackReason } : {}),
+      artDirectionStatus: snapshot.artDirectionStatus,
+      designIrStatus: snapshot.designIrStatus,
+      layoutStatus: snapshot.layoutStatus,
+      renderPlanStatus: snapshot.renderPlanStatus,
+      repairCount: snapshot.repairCount
+    };
+    await this.observe(input, 'document_check', `presentation-layout-summary${suffix}`, async () => undefined, facts);
+    for (const [index, diagnostic] of snapshot.diagnostics.entries()) {
+      await this.observe(input, 'document_check', `presentation-layout-diagnostic-${index + 1}${suffix}`, async () => undefined, {
+        purpose: 'planning', documentKind: 'ppt', tool: 'check', diagnosticCode: diagnostic.code.slice(0, 80),
+        ...(diagnostic.pageNumber ? { pageNumber: diagnostic.pageNumber } : {})
+      });
+    }
+    for (const repair of snapshot.repairs) {
+      for (const pageNumber of repair.pages) {
+        await this.observe(input, 'document_check', `presentation-layout-repair-${repair.attempt}${suffix}`, async () => undefined, {
+          purpose: 'planning', documentKind: 'ppt', tool: 'check', count: repair.attempt, pageNumber, repairAction: repair.action
+        });
+      }
+    }
+    for (const page of snapshot.pages) {
+      await this.observe(input, 'document_check', `presentation-layout-page-${page.pageNumber}${suffix}`, async () => undefined, {
+        purpose: 'planning', documentKind: 'ppt', tool: 'check', pageNumber: page.pageNumber,
+        pageRole: page.pageRole,
+        pageIntentDigest: `sha256:${createHash('sha256').update(page.pageIntent).digest('hex').slice(0, 20)}`,
+        ...(page.composition ? { composition: page.composition } : {}),
+        ...(page.selectedLayout ? { selectedLayout: page.selectedLayout } : {}),
+        elementCount: page.elementCount, density: page.density, whitespace: page.whitespace,
+        ...(page.primaryRegion ? { primaryRegion: page.primaryRegion } : {}),
+        ...(page.geometrySignature ? {
+          geometrySignature: `sha256:${createHash('sha256').update(page.geometrySignature).digest('hex').slice(0, 20)}`
+        } : {}),
+        fallback: page.fallback
+      });
     }
   }
 

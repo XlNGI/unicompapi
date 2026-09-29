@@ -186,6 +186,11 @@ describe('production Presentation Design IR v2 contract', () => {
 
   it('provides a faithful model-visible schema with every required nested field', () => {
     const schema = buildPresentationDesignIRJsonSchema();
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+    const pageSchema = properties.pages.items as { properties: Record<string, { properties: Record<string, { pattern?: string }> }> };
+    const referencePattern = pageSchema.properties.emphasis.properties.target.pattern!;
+    expect(new RegExp(referencePattern, 'u').test('outline.sections[0].blocks[0].items[1]')).toBe(true);
+    expect(new RegExp(referencePattern, 'u').test('outline/title')).toBe(false);
     const encoded = JSON.stringify(schema);
     for (const field of ['visualTone', 'typographyDirection', 'pageIntent', 'hierarchy', 'supporting', 'composition', 'focalArea', 'contentRoles', 'image', 'chart', 'visualStrategy']) expect(encoded).toContain(`"${field}"`);
     expect(encoded).toContain('"additionalProperties":false');
@@ -195,6 +200,15 @@ describe('production Presentation Design IR v2 contract', () => {
     expect(prompt).toContain(encoded);
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('outline.sections[0].blocks[0].items[1]');
+  });
+
+  it('rejects missing pages and nested geometry fields without partial acceptance', () => {
+    const outline = metricOutline();
+    const value = buildFallbackPresentationDesignIR(outline);
+    expect(validatePresentationDesignIR({ ...value, pages: value.pages.slice(1) }, { outline }).map(item => item.code))
+      .toEqual(expect.arrayContaining(['missing_page', 'page_count_mismatch', 'invalid_page_number']));
+    const pages = value.pages.map(page => ({ ...page, composition: { ...page.composition, x: 0.3 } }));
+    expect(validatePresentationDesignIR({ ...value, pages }, { outline }).map(item => item.code)).toContain('unknown_field');
   });
 });
 

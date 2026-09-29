@@ -61,10 +61,10 @@ async function fixture(texts = ['封面：验收演示文稿', '第二页独有�
   async function register(title = '验证文档', pageTexts = texts) {
     const index = ++version;
     const zip = new JSZip();
-    zip.file('ppt/presentation.xml', `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${pageTexts.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 1}"/>`).join('')}</p:sldIdLst></p:presentation>`);
+    zip.file('ppt/presentation.xml', `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldSz cx="12192000" cy="6858000"/><p:sldIdLst>${pageTexts.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 1}"/>`).join('')}</p:sldIdLst></p:presentation>`);
     zip.file('ppt/_rels/presentation.xml.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${pageTexts.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`).join('')}</Relationships>`);
     for (const [i, text] of pageTexts.entries()) {
-      zip.file(`ppt/slides/slide${i + 1}.xml`, `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"${i === 1 ? ' show="0"' : ''}><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`);
+      zip.file(`ppt/slides/slide${i + 1}.xml`, `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"${i === 1 ? ' show="0"' : ''}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="${i + 1}" name="Text ${i + 1}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:txBody><a:p><a:r><a:t>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`);
     }
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });
     const fileName = `${title}-${index}.pptx`;
@@ -238,6 +238,16 @@ describe('production registered document read sessions', () => {
     'keeps unrelated and mutation requests on their existing path: %s', async query => {
       const data = await fixture();
       expect(await data.service.select(await data.question(query))).toBeUndefined();
+    });
+
+  it.each(['新增一页 PPT', 'add a slide to the PPT', '在第二页后面加一页，标题叫市场机会'])(
+    'routes controlled add-slide intent into the mutation path: %s', async query => {
+      const data = await fixture();
+      const service = new ConversationDocumentToolSessionService({ rootDirectory: data.rootDirectory, projectId,
+        conversations: data.conversations, mutation: { renderPreview: async temporary => ({ previewCount: (await readFile(temporary)).length ? 1 : 0, diagnostics: [] }) } });
+      services.push(service);
+      const selection = await service.select(await data.question(query));
+      expect(selection).toMatchObject({ kind: 'mutation', writeAuthorized: true });
     });
 
   it('creates an awaiting-user generation selection for a new PPT request', async () => {

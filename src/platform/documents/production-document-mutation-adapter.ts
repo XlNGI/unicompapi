@@ -15,7 +15,7 @@ import { DocumentIdentityIndexStore } from './document-identity-index-store';
 import { DocumentMutationHeadStore } from './document-mutation-head-store';
 import { DocumentMutationCoordinator, type DocumentMutationCandidate, type DocumentMutationHead, type DocumentMutationRecord } from '../../application/document-mutation-coordinator';
 import type { ConversationDocumentMutationToolSelection } from './conversation-document-tool-session';
-import { applyPresentationTextPatch, carryForwardPresentationIdentityManifest, verifyPresentationIdentityManifest } from './presentation-identity-manifest';
+import { applyPresentationMutationPatch, carryForwardPresentationIdentityManifestForPatch, verifyPresentationIdentityManifest } from './presentation-identity-manifest';
 import type { DocumentRenderAdapter } from './temporary-document-workflow';
 import { inspectPptxGeometry } from './office-render-adapter';
 import { emitProductionEvent } from '../conversation-production-trace';
@@ -131,11 +131,10 @@ export function createProductionDocumentMutationHost(input: {
       const workId = 'work-mutation-' + key;
       const fileId = 'file-mutation-' + key;
       const sourceExecutionId = 'execution-mutation-' + key;
-      const buffer = await applyPresentationTextPatch({ buffer: head.buffer, manifest: head.identity, patch });
+      const buffer = await applyPresentationMutationPatch({ buffer: head.buffer, manifest: head.identity, patch });
       stop(signal);
-      const identity = await carryForwardPresentationIdentityManifest({ previous: head.identity, buffer,
-        revision: head.pin.runtimeRevision + 1, targetElementId: patch.operations[0].target.elementId, targetText: patch.operations[0].text,
-        fileId, sourceExecutionId });
+      const identity = await carryForwardPresentationIdentityManifestForPatch({ previous: head.identity, buffer,
+        revision: head.pin.runtimeRevision + 1, patch, fileId, sourceExecutionId });
       return { buffer, identity: { ...identity, workId }, pin: { ...head.pin, headWorkId: workId, fileId, sourceExecutionId,
         runtimeRevision: identity.revision, checksumSha256: hash(buffer) } };
     },

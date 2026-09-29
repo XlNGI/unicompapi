@@ -41,6 +41,7 @@ import {
   presentationBodySectionCount
 } from './presentation-page-count';
 import type { PresentationRevisionMap } from './presentation-revision-map';
+import type { PresentationArtDirectionPlanner, PresentationArtDirectionRequest } from './presentation-art-direction';
 
 export type DocumentDraftCompilationErrorCode =
   | 'invalid_structure'
@@ -163,12 +164,32 @@ export interface DocumentGenerationProgressEvent {
   readonly status: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled';
   readonly operationId?: string;
   readonly facts?: {
-    readonly purpose?: 'planning' | 'content' | 'repair' | 'tool';
+    readonly purpose?: 'planning' | 'content' | 'repair' | 'tool' | 'source_summary';
     readonly documentKind?: DocumentWorkspaceKind;
     readonly count?: number;
     readonly totalPages?: number;
     readonly bytes?: number;
     readonly tool?: 'read_sources' | 'search' | 'analyze' | 'write_document' | 'render' | 'check' | 'publish' | 'patch';
+    readonly designPath?: 'design-aware' | 'legacy-fallback';
+    readonly fallbackReason?: string;
+    readonly artDirectionStatus?: 'validated' | 'invalid' | 'missing';
+    readonly designIrStatus?: 'validated' | 'invalid' | 'missing';
+    readonly layoutStatus?: 'success' | 'failed' | 'skipped';
+    readonly renderPlanStatus?: 'valid' | 'invalid' | 'skipped';
+    readonly repairCount?: number;
+    readonly diagnosticCode?: string;
+    readonly repairAction?: 'reduce_gap' | 'rebalance_regions' | 'reduce_font_size' | 'compatible_composition';
+    readonly pageNumber?: number;
+    readonly pageRole?: 'hero' | 'statement' | 'comparison' | 'metric' | 'process' | 'evidence' | 'section' | 'content' | 'closing';
+    readonly pageIntentDigest?: string;
+    readonly composition?: 'single-focus' | 'comparison' | 'evidence-led' | 'sequence' | 'structured';
+    readonly selectedLayout?: 'weighted-regions' | 'adaptive-grid' | 'flow-track';
+    readonly elementCount?: number;
+    readonly density?: 'sparse' | 'balanced' | 'dense';
+    readonly whitespace?: 'minimal' | 'balanced' | 'generous';
+    readonly primaryRegion?: 'left' | 'center' | 'right' | 'top' | 'bottom' | 'leading' | 'trailing' | 'supporting';
+    readonly geometrySignature?: string;
+    readonly fallback?: boolean;
   };
 }
 
@@ -218,6 +239,10 @@ export interface DocumentGenerationExecutionInput {
   readonly sourceDraftId: string;
   readonly outline: DocumentOutline;
   readonly documentIR?: DocumentIR;
+  /** User semantic requirements only; never contains Runtime execution metadata. */
+  readonly userRequirement?: string;
+  readonly requestArtDirection?: PresentationArtDirectionPlanner;
+  readonly artDirectionTimeoutMs?: number;
   readonly parentWorkId?: WorkId;
   readonly sourceChecksumSha256?: string;
   /** Stable identity and validated patch for a scoped parent revision. */
@@ -391,6 +416,9 @@ export class DocumentGenerationApplicationService {
       readonly llmRepairPlanner?: (
         input: DocumentLlmRepairPlannerRequest
       ) => Promise<unknown>;
+      readonly artDirectionPlanner?: (input: PresentationArtDirectionRequest & {
+        readonly conversationId: ConversationId; readonly messageId: MessageId;
+      }) => Promise<unknown>;
       readonly fingerprint: (content: string) => string;
       readonly nextLocalExecutionId?: () => string;
       readonly wait?: (milliseconds: number) => Promise<void>;
@@ -1065,6 +1093,11 @@ export class DocumentGenerationApplicationService {
       sourceDraftId: `message-${input.messageId}`,
       outline,
       ...(documentIR !== undefined ? { documentIR } : {}),
+      ...(input.kind === 'ppt' && input.parentWorkId === undefined && operation === 'create'
+        ? { userRequirement: collectArtDirectionRequestText(conversation, input.messageId) ?? requestText ?? '',
+            ...(this.dependencies.artDirectionPlanner ? { requestArtDirection: (request: PresentationArtDirectionRequest) =>
+              this.dependencies.artDirectionPlanner!({ ...request, conversationId: input.conversationId, messageId: input.messageId }) } : {}) }
+        : {}),
       ...(input.parentWorkId !== undefined
         ? { parentWorkId: input.parentWorkId }
         : {}),
@@ -1444,6 +1477,35 @@ export function collectRevisionRequestText(
     legacyRequest?.displayContent ?? legacyRequest?.content ?? ''
   ).trim();
   return legacyContent.length > 0 ? legacyContent : undefined;
+}
+
+/**
+ * Art Direction needs the complete creation brief. A confirmation turn may be
+ * separated from the assistant outline by earlier assistant messages, so the
+ * revision helper's adjacent-user semantics would lose the original visual
+ * requirements. Stop at the last delivered document to keep the boundary
+ * deterministic and bounded.
+ */
+export function collectArtDirectionRequestText(
+  conversation: Conversation,
+  currentAssistantMessageId: MessageId
+): string | undefined {
+  const currentIndex = conversation.messages.findIndex(message => message.id === currentAssistantMessageId);
+  if (currentIndex < 1) return undefined;
+  const parts: string[] = [];
+  let characters = 0;
+  for (let index = currentIndex - 1; index >= 0 && parts.length < 8; index -= 1) {
+    const message = conversation.messages[index];
+    if (message.documentResult) break;
+    if (message.role !== 'user') continue;
+    const content = (message.displayContent ?? message.content).trim();
+    if (!content) continue;
+    const remaining = 16_000 - characters;
+    if (remaining <= 0) break;
+    parts.unshift(content.slice(0, remaining));
+    characters += Math.min(content.length, remaining);
+  }
+  return parts.length > 0 ? parts.join('\n') : undefined;
 }
 
 function validateFullPresentationPageCountRevision(

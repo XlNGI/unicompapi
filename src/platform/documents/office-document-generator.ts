@@ -31,6 +31,10 @@ import type { ExtractedThemeColors } from './pptx-theme-extractor';
 import type { DocumentRevisionPatch } from '../../application/document-revision-agent';
 import type { DocumentGenerationProgressCallback } from '../../application/document-generation-service';
 import type { PresentationPageScene } from '../../domain/entities/presentation-plan';
+import type { ProductionPresentationDesignIR } from '../../domain/entities/presentation-design-contract';
+import { compilePresentationRenderPlan, buildPresentationDesignSnapshot } from './presentation-render-plan-compiler';
+import type { PresentationDesignCompilationSnapshot, PresentationDesignStatus } from './presentation-render-plan-compiler';
+import { renderPresentationRenderPlan } from './presentation-design-renderer';
 import { applyOfficeDocumentPatchesToBuffer } from './office-document-tool-executor';
 import {
   presentationOutlineLimits,
@@ -69,6 +73,12 @@ export interface GenerateDocumentFileInput {
   readonly now: string;
   readonly theme?: DocumentThemeId;
   readonly presentationTemplate?: PresentationTemplateId;
+  /** Validated production Design IR. Invalid or absent IR uses the legacy template path. */
+  readonly designIR?: ProductionPresentationDesignIR;
+  readonly artDirectionStatus?: PresentationDesignStatus;
+  readonly designIrStatus?: PresentationDesignStatus;
+  readonly artDirectionDiagnostics?: readonly { readonly code: string }[];
+  readonly onDesignCompiled?: (snapshot: PresentationDesignCompilationSnapshot) => void | Promise<void>;
   readonly customTheme?: ExtractedThemeColors;
   readonly images?: readonly {
     readonly absolutePath: string;
@@ -132,7 +142,12 @@ async function buildDocumentOutput(
                 (input.theme === 'financing' ? 'financing' : 'work_report')
             ),
             input.images ?? [],
-            input.onProgress
+            input.onProgress,
+            input.designIR,
+            input.onDesignCompiled,
+            input.artDirectionStatus,
+            input.designIrStatus,
+            input.artDirectionDiagnostics
         );
   const revisedBuffer =
     (input.revisionSourceBuffer || input.revisionSourcePath) && (input.revisionPatch || input.revisionPatches)
@@ -797,7 +812,12 @@ async function buildPptBuffer(
   outline: DocumentOutline,
   template: PresentationTemplate,
   images: readonly PresentationImage[],
-  onProgress?: DocumentGenerationProgressCallback
+  onProgress?: DocumentGenerationProgressCallback,
+  designIR?: ProductionPresentationDesignIR,
+  onDesignCompiled?: GenerateDocumentFileInput['onDesignCompiled'],
+  artDirectionStatus?: PresentationDesignStatus,
+  designIrStatus?: PresentationDesignStatus,
+  artDirectionDiagnostics?: GenerateDocumentFileInput['artDirectionDiagnostics']
 ): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -814,26 +834,64 @@ async function buildPptBuffer(
     } catch { /* Progress recording cannot affect document generation. */ }
   };
   await reportLayout('started');
-  let renderOutline: DocumentOutline;
-  let pages: ReturnType<typeof expandPresentationSections>;
-  try {
-    renderOutline = normalizePresentationOutline(outline);
-    pages = expandPresentationSections(renderOutline, template, images);
-    const totalPages = 1 + pages.length + (renderOutline.sections.length > 0 ? 1 : 0);
-    if (totalPages > presentationOutlineLimits.maxEstimatedPages) {
-      throw new PresentationLayoutError(`PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`);
-    }
-    await reportLayout('completed', totalPages);
-  } catch (error) { await reportLayout('failed'); throw error; }
-
-  renderPresentationCover(pptx, outline, template);
-  pages.forEach((page, index) => {
-    renderPresentationPage(pptx, page, template, index + 2);
-  });
-  if (renderOutline.sections.length > 0) {
-    renderPresentationClosing(pptx, renderOutline, template);
+  const renderOutline = normalizePresentationOutline(outline);
+  let compilation = designIR === undefined ? undefined : compilePresentationRenderPlan(outline, designIR, template.tokens);
+  const containsSceneContent = Boolean(outline.coverScene?.elements.length || outline.closingScene?.elements.length ||
+    outline.sections.some(section => section.scene?.elements.length));
+  let fallbackReason = fallbackReasonFor(compilation, designIR !== undefined || artDirectionStatus === 'invalid', artDirectionStatus);
+  if (fallbackReason === undefined && renderOutline.sections.length !== outline.sections.length) fallbackReason = 'outline_normalization';
+  if (fallbackReason === undefined && containsSceneContent) fallbackReason = 'unsupported_scene_content';
+  if (fallbackReason === undefined && images.length > 0) fallbackReason = 'external_images_require_legacy_path';
+  if (fallbackReason === undefined && compilation?.plan && compilation.plan.pages.length > presentationOutlineLimits.maxEstimatedPages) {
+    fallbackReason = 'page_count_limit';
   }
+
+  let actualPageCount: number;
+  const designAware = fallbackReason === undefined && compilation?.plan !== undefined;
+  if (designAware) {
+    renderPresentationRenderPlan(pptx, compilation.plan!);
+    actualPageCount = compilation.plan!.pages.length;
+  } else {
+    let pages: ReturnType<typeof expandPresentationSections>;
+    try {
+      pages = expandPresentationSections(renderOutline, template, images);
+      actualPageCount = 1 + pages.length + (renderOutline.sections.length > 0 ? 1 : 0);
+      if (actualPageCount > presentationOutlineLimits.maxEstimatedPages) {
+        throw new PresentationLayoutError(`PPT 分页结果超过 ${presentationOutlineLimits.maxEstimatedPages} 页上限`);
+      }
+      renderPresentationCover(pptx, outline, template);
+      pages.forEach((page, index) => renderPresentationPage(pptx, page, template, index + 2));
+      if (renderOutline.sections.length > 0) renderPresentationClosing(pptx, renderOutline, template);
+    } catch (error) {
+      await reportLayout('failed');
+      throw error;
+    }
+  }
+  await reportLayout('completed', actualPageCount);
+
+  const snapshot = buildPresentationDesignSnapshot(compilation, {
+    requested: designIR !== undefined,
+    legacyPageCount: actualPageCount,
+    designPath: designAware ? 'design-aware' : 'legacy-fallback',
+    ...(artDirectionStatus ? { artDirectionStatus } : {}),
+    ...(designIrStatus ? { designIrStatus } : {}),
+    ...(artDirectionDiagnostics ? { artDirectionDiagnostics } : {}),
+    ...(fallbackReason ? { fallbackReason } : {})
+  });
+  try { await onDesignCompiled?.(snapshot); }
+  catch { /* Development observability cannot affect file generation. */ }
   return (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+}
+
+function fallbackReasonFor(
+  compilation: ReturnType<typeof compilePresentationRenderPlan> | undefined,
+  requested: boolean,
+  artDirectionStatus?: PresentationDesignStatus
+): string | undefined {
+  if (!requested) return 'missing_design_ir';
+  if (artDirectionStatus === 'invalid' && !compilation?.designIR) return 'art_direction_invalid';
+  if (!compilation?.plan) return compilation?.diagnostics[0]?.code ?? 'render_plan_unavailable';
+  return undefined;
 }
 
 function normalizePresentationOutline(outline: DocumentOutline): DocumentOutline {

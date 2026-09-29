@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { getProductionTraceStore, withProductionTrace } from '../../src/platform/conversation-production-trace';
 import { ConversationIntentOrchestrator } from '../../src/application/conversation-intent-orchestrator';
-import { toProjectId, type ProviderInvocationEventV1, type StructuredCredentialRecord } from '../../src/domain';
+import { buildDocumentIRFromOutline, toProjectId, type DocumentOutline, type ProviderInvocationEventV1, type StructuredCredentialRecord } from '../../src/domain';
 import { ConversationSemanticClassifier, semanticInput, semanticParameters } from '../../src/platform/providers/conversation-semantic-classifier';
+import { buildFallbackPresentationDesignIR, buildPresentationArtDirectionInput, parseArtDirection } from '../../src/domain/entities/presentation-design-contract';
 import { ProviderFeatureCandidateService, type ResolvedFeatureCandidateV1 } from '../../src/platform/providers/provider-feature-candidates';
 import { RegistryFeatureCandidateSource } from '../../src/platform/providers/provider-registry-feature-candidates';
 import { DeepSeekChatAdapter, DeepSeekSharedRuntime, deepSeekChatParameterSchema, DEEPSEEK_PROVIDER_PACKAGE_ID,
@@ -145,6 +146,89 @@ function kimiEvent(delta: Record<string, unknown>, finishReason?: string, model 
   return `data: ${JSON.stringify({ id: 'synthetic-kimi', model, object: 'chat.completion.chunk', created: 1,
     choices: [{ index: 0, delta, finish_reason: finishReason ?? null }] })}\n\n`;
 }
+
+const artDirectionOutline: DocumentOutline = { kind: 'ppt', title: '产品介绍', sections: [
+  { heading: '增长证据', level: 1, blocks: [{ type: 'paragraph', text: '营收同比增长 25%。' },
+    { type: 'paragraph', text: '续约率为 92%。' }] }
+] };
+
+function artDirectionInput(outline: DocumentOutline = artDirectionOutline) {
+  return buildPresentationArtDirectionInput({
+    userRequirement: '左侧强结论，右侧两个指标作为证据，留白较多。', outline,
+    documentIR: buildDocumentIRFromOutline({ outline, operation: 'create', attachmentRefs: ['private-attachment-ref'] }),
+    visualRequirements: ['第二个指标作为视觉焦点', '不要卡片堆叠'], brandingConstraints: ['保持品牌蓝色']
+  });
+}
+
+describe('controlled PPT Art Direction provider call', () => {
+  it('uses the actual adapter, the selected route and a bounded whitelisted semantic contract', async () => {
+    const direction = buildFallbackPresentationDesignIR(artDirectionOutline);
+    const f = fixture({ realAdapter: true, content: direction });
+    const input = artDirectionInput();
+    const output = await f.classifier.planArtDirection({ ...f.selection, input, signal: new AbortController().signal });
+    expect(parseArtDirection(output, { outline: artDirectionOutline })).toEqual(direction);
+    expect(f.requests).toHaveLength(1);
+    const body = JSON.parse(new TextDecoder().decode(f.requests[0].body));
+    expect(body.max_tokens).toBe(1024 + input.outline.pageCount * 768);
+    expect(body.tools).toBeUndefined();
+    expect(body.messages).toHaveLength(2);
+    expect(body.messages[0].content).toContain('Art Direction');
+    expect(body.messages[1].content).toContain('左侧强结论');
+    expect(body.messages[1].content).toContain('25%');
+    expect(body.messages[1].content).toContain('92%');
+    expect(body.messages[1].content).toContain('focalArea');
+    expect(body.messages[1].content).not.toMatch(/private-attachment-ref|synthetic-vault|synthetic-test-key|semantic-candidate/);
+    expect(f.events).toEqual(['claim', 'request', 'provider_accepted', 'result_received', 'completed', 'outcome']);
+    expect(f.runtime.activeRequestCount).toBe(0);
+  });
+
+  it.each(['plain', 'fenced', 'invalid', 'truncated'] as const)('preserves %s output for strict Design IR parsing and fallback', async kind => {
+    const json = JSON.stringify(buildFallbackPresentationDesignIR(artDirectionOutline));
+    const content = kind === 'plain' ? json : kind === 'fenced' ? '```json\n' + json + '\n```'
+      : kind === 'invalid' ? 'not JSON' : json.slice(0, -10);
+    const f = fixture({ newApiSse: kimiEvent({ content }, 'stop') + 'data: [DONE]\n\n' });
+    const output = await f.classifier.planArtDirection({ ...f.selection, input: artDirectionInput(), signal: new AbortController().signal });
+    expect(output).toBe(content);
+    if (kind === 'plain' || kind === 'fenced') expect(parseArtDirection(output, { outline: artDirectionOutline }).schemaVersion).toBe(2);
+    else expect(() => parseArtDirection(output, { outline: artDirectionOutline })).toThrow();
+    expect(f.openChatStream).toHaveBeenCalledOnce();
+    expect(f.authorization.recordOutcome).toHaveBeenCalledOnce();
+  });
+
+  it('scales output budget to 40 pages within the selected schema maximum', async () => {
+    const outline: DocumentOutline = { ...artDirectionOutline, sections: Array.from({ length: 38 }, (_, i) => ({
+      ...artDirectionOutline.sections[0], heading: `增长证据 ${i + 1}`
+    })) };
+    const input = artDirectionInput(outline);
+    const f = fixture({ realAdapter: true, content: { schemaVersion: 2 } });
+    await f.classifier.planArtDirection({ ...f.selection, input, signal: new AbortController().signal });
+    const body = JSON.parse(new TextDecoder().decode(f.requests[0].body));
+    expect(input.outline.pageCount).toBe(40);
+    expect(body.max_tokens).toBeGreaterThan(2048);
+    expect(body.max_tokens).toBeLessThanOrEqual(deepSeekChatParameterSchema.fields.find(field => field.fieldId === 'max_tokens')!.maximum ?? 32768);
+  });
+
+  it('rejects privileged input fields before authorization or dispatch', async () => {
+    const f = fixture();
+    const input = { ...artDirectionInput(), filePath: 'private-local-path', authorizationClaim: 'private-claim' };
+    await expect(f.classifier.planArtDirection({ ...f.selection, input, signal: new AbortController().signal })).rejects.toThrow();
+    expect(f.submit).not.toHaveBeenCalled();
+    expect(f.authorization.claimSubmission).not.toHaveBeenCalled();
+  });
+
+  it('propagates cancellation to the actual provider stream without a retry', async () => {
+    const f = fixture({ realAdapter: true, stalled: true });
+    const controller = new AbortController();
+    const promise = f.classifier.planArtDirection({ ...f.selection, input: artDirectionInput(), signal: controller.signal });
+    const assertion = expect(promise).rejects.toThrow();
+    await vi.waitFor(() => expect(f.requests).toHaveLength(1));
+    controller.abort();
+    await assertion;
+    expect(f.requests).toHaveLength(1);
+    expect(f.authorization.recordOutcome).toHaveBeenCalledOnce();
+    expect(f.runtime.activeRequestCount).toBe(0);
+  });
+});
 
 describe('controlled conversation semantic classifier', () => {
   it('accepts gateway placeholder finish reasons through the actual NewAPI adapter and asks for the missing PPT topic', async () => {

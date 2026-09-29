@@ -1,27 +1,26 @@
 import {
   createCanonicalToolRegistry,
-  validateCanonicalToolArguments
+  validateCanonicalToolArguments,
+  type CanonicalToolRegistry,
+  type DocumentToolResult
 } from '../domain/entities/canonical-tool-contract';
-import type { CanonicalToolRegistry, DocumentToolResult } from '../domain/entities/canonical-tool-contract';
-import { updateTextPatch } from '../domain/entities/document-ir-patch';
+import { deleteElementPatch } from '../domain/entities/document-ir-patch';
 import type { DocumentVersionPin } from '../domain/entities/document-version-pin';
 import type { DocumentMutationCoordinator } from './document-mutation-coordinator';
 import type { DocumentAtomicExecutionContext, DocumentAtomicToolBinding } from './document-atomic-tools';
 
-export interface UpdateElementToolDependencies {
+export interface DeleteElementToolDependencies {
   readonly coordinator: DocumentMutationCoordinator;
-  /** Resolves the pin captured in the Runtime context, never silently rebases a stale invocation. */
   readonly resolveVersionPin: (context: DocumentAtomicExecutionContext) => Promise<DocumentVersionPin>;
   readonly revalidateAuthorization: (context: DocumentAtomicExecutionContext, phase: 'before' | 'after') => Promise<boolean>;
 }
 
-/** Business-level text update. The coordinator owns identity, version and artifact state. */
-export function createUpdateElementBinding(
-  dependencies: UpdateElementToolDependencies,
+export function createDeleteElementBinding(
+  dependencies: DeleteElementToolDependencies,
   options: { readonly registry?: CanonicalToolRegistry } = {}
 ): DocumentAtomicToolBinding {
   const registry = options.registry ?? createCanonicalToolRegistry();
-  const contract = registry.get('update_element');
+  const contract = registry.get('delete_element');
   if (!contract) throw new TypeError('tool_not_registered');
   return {
     contract,
@@ -34,13 +33,13 @@ export function createUpdateElementBinding(
       if (!await authorize()) return failed(context.abortSignal.aborted ? 'cancelled' : 'authorization_denied', context.abortSignal.aborted ? 'cancelled' : 'failed');
       let expectedPin: DocumentVersionPin;
       try { expectedPin = await dependencies.resolveVersionPin(context); } catch { return failed('identity_stale'); }
+      if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
       if (expectedPin.headWorkId !== context.currentDocumentId || expectedPin.runtimeRevision !== context.revision) return failed('revision_conflict');
+      const elementId = String(args.elementId);
       let patch;
-      try { patch = updateTextPatch(String(args.elementId), String(args.text)); } catch { return failed('invalid_arguments'); }
+      try { patch = deleteElementPatch(elementId); } catch { return failed('invalid_arguments'); }
       const stableCallKey = await mutationId(context);
-      const result = await dependencies.coordinator.updateText({
-        // Runtime's general key includes the current revision/arguments. The durable write
-        // ledger must also recognize this task/call after a revision change or argument conflict.
+      const result = await dependencies.coordinator.mutate({
         mutationId: stableCallKey, idempotencyKey: stableCallKey,
         expectedPin, patch, signal: context.abortSignal, authorize
       });
@@ -48,8 +47,8 @@ export function createUpdateElementBinding(
       if (result.status === 'revision_conflict') return failed('revision_conflict');
       if (result.status === 'committed_pending_refresh' || result.status === 'committed') return {
         schemaVersion: 1, status: 'unknown',
-        observation: { elementId: String(args.elementId), changed: true, field: 'text', mutationState: 'committed_pending_refresh' },
-        diagnostics: [{ code: 'committed_pending_refresh', severity: 'warning', message: 'committed_pending_refresh' }]
+        observation: { elementId, operation: 'deleted', mutationState: 'committed_pending_refresh' },
+        diagnostics: [{ code: 'committed_pending_refresh', severity: 'warning' as const, message: 'committed_pending_refresh' }]
       };
       if (result.status === 'reconciliation_required') return failed('reconciliation_required', 'unknown');
       if (result.status !== 'session_refreshed') return failed(result.record.diagnostic ?? 'commit_failed');
@@ -57,7 +56,7 @@ export function createUpdateElementBinding(
       return {
         schemaVersion: 1, status: 'success',
         irPatch: patch as unknown as Readonly<Record<string, unknown>>,
-        observation: { elementId: String(args.elementId), changed: true, field: 'text' },
+        observation: { elementId, operation: 'deleted' },
         ...(!stillAuthorized ? { diagnostics: [{ code: 'authorization_denied', severity: 'warning' as const, message: 'authorization_denied' }] } : {})
       };
     }
@@ -65,7 +64,7 @@ export function createUpdateElementBinding(
 }
 
 function authorized(context: DocumentAtomicExecutionContext): boolean {
-  return context.authorization.canWrite && context.authorization.allowedToolIds.includes('update_element') &&
+  return context.authorization.canWrite && context.authorization.allowedToolIds.includes('delete_element') &&
     Boolean(context.currentDocumentId && context.currentDocumentIR && Number.isSafeInteger(context.revision)) &&
     !context.abortSignal.aborted && (context.taskContext.deadlineAt === undefined || Date.now() < context.taskContext.deadlineAt);
 }

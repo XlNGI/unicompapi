@@ -254,7 +254,7 @@ describe('document tool calling bridge', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it('binds idempotency to the Runtime document and revision', async () => {
+  it('binds idempotency to the Runtime document and revision for read tools', async () => {
     let host = hostContext();
     const execute = vi.fn(async () => success());
     const bridge = createBridge([binding('read_document_structure', execute)], { getExecutionContext: () => host });
@@ -263,6 +263,23 @@ describe('document tool calling bridge', () => {
     expect(await invoke(bridge, 'same-document')).toMatchObject(failure('call_id_conflict'));
     host = { ...host, currentDocumentId: 'document-1', revision: 4 };
     expect(await invoke(bridge, 'same-document')).toMatchObject(failure('call_id_conflict'));
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('replays a write call after the authoritative head advances within one lineage', async () => {
+    let host = hostContext({ currentVersionPin: {
+      documentLineageId: 'lineage-1', headWorkId: 'document-1', fileId: 'file-1',
+      sourceExecutionId: 'execution-1', checksumSha256: 'a'.repeat(64), runtimeRevision: 3, identityIndexVersion: 1
+    } });
+    const execute = vi.fn(async () => success({ operation: 'updated' }));
+    const bridge = createBridge([binding('apply_document_patch', execute)], { getExecutionContext: () => host });
+    expect(await invoke(bridge, 'write-retry', {}, 'apply_document_patch')).toMatchObject({ status: 'success' });
+    host = hostContext({ currentDocumentId: 'document-2', currentDocumentIR: { operation: 'edit', attachmentRefs: [], documentRef: 'document-2' }, revision: 4,
+      currentVersionPin: {
+        documentLineageId: 'lineage-1', headWorkId: 'document-2', fileId: 'file-2',
+        sourceExecutionId: 'execution-2', checksumSha256: 'b'.repeat(64), runtimeRevision: 4, identityIndexVersion: 1
+      } });
+    expect(await invoke(bridge, 'write-retry', {}, 'apply_document_patch')).toMatchObject({ status: 'success' });
     expect(execute).toHaveBeenCalledOnce();
   });
 

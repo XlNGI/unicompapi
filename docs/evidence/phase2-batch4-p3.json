@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "scope": "phase2-batch4-p3-add-delete-production",
+  "date": "2026-09-29",
+  "status": "passed",
+  "mode": "real_provider",
+  "requestedModel": "kimi-k3",
+  "maximumNetworkRequests": 7,
+  "realProvider": {
+    "executed": true,
+    "status": "passed",
+    "httpRequests": 6,
+    "maximumHttpRequests": 7,
+    "credentialsDecrypted": true,
+    "model": "kimi-k3",
+    "actualWireModel": "kimi-k3",
+    "toolCalls": [
+      "read_document_structure",
+      "add_element",
+      "read_document_structure",
+      "delete_element",
+      "read_document_structure"
+    ],
+    "availableTools": [
+      "add_element",
+      "delete_element",
+      "read_document_structure",
+      "update_element"
+    ],
+    "canonicalSchemas": true,
+    "toolCallIdsMatched": true,
+    "answerUsesRealObservation": true,
+    "pathOrRuntimeContextLeak": false,
+    "report": "outputs/phase2-batch4-p3-kimi-add-delete/real-provider.json"
+  },
+  "dryRun": {
+    "isolatedCandidateReady": true,
+    "syntheticPptRegistered": true,
+    "actualRenderQa": true,
+    "physicalPages": 4,
+    "duplicateTextObjects": 2,
+    "targetPagePhysicalNumber": 2,
+    "providerRequests": 0,
+    "protectedUserConfigurationUnchanged": true
+  },
+  "plannedRealProviderSequence": [
+    "read_document_structure",
+    "add_element",
+    "read_document_structure",
+    "delete_element",
+    "read_document_structure"
+  ],
+  "realProviderAssertions": {
+    "add": {
+      "authoritativeRevision": 2,
+      "newIdentityStable": true,
+      "untouchedIdentitiesStable": true,
+      "duplicateTextUnchanged": true,
+      "originalArtifactPreserved": true,
+      "registeredPresentationReaderReadBack": true
+    },
+    "delete": {
+      "authoritativeRevision": 3,
+      "deletedIdentityAbsent": true,
+      "tombstoneRecorded": true,
+      "untouchedIdentitiesStable": true,
+      "duplicateTextUnchanged": true,
+      "originalArtifactPreserved": true,
+      "registeredPresentationReaderReadBack": true
+    }
+  },
+  "boundaries": {
+    "supportsAddDelete": "implemented_and_real_provider_verified",
+    "realKimiAcceptance": "passed",
+    "supportsAddSlide": false,
+    "supportsShapeImageCrud": false,
+    "credentialsRecorded": false,
+    "internalIdentityOrPathLeak": "passed_in_live_mode"
+  },
+  "limitations": [
+    "Dry-run remains available as the default non-network verification mode.",
+    "The real-provider evidence uses one synthetic PPT and does not represent a general shape/image CRUD capability."
+  ]
+}

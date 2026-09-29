@@ -13,6 +13,8 @@ import {
   type DocumentToolResult
 } from '../domain/entities/canonical-tool-contract';
 import type { DocumentAtomicExecutionContext, DocumentAtomicToolBinding } from './document-atomic-tools';
+import { buildDocumentIRFromOutline } from '../domain/entities/document-agent';
+import type { PresentationArtDirectionPlanner } from './presentation-art-direction';
 
 /**
  * Host-owned inputs required to turn the business-only generate arguments into
@@ -21,6 +23,8 @@ import type { DocumentAtomicExecutionContext, DocumentAtomicToolBinding } from '
 export interface GeneratePptxToolDependencies {
   readonly compiler: DocumentDraftCompilerPort;
   readonly executor: DocumentGenerationExecutorPort;
+  /** Supplied by the host from the pinned user request, never by tool arguments. */
+  readonly artDirection?: { readonly userRequirement: string; readonly request: PresentationArtDirectionPlanner };
   /** Read live ownership/permission state; snapshot arguments cannot authorize execution. */
   readonly revalidateAuthorization: (context: DocumentAtomicExecutionContext, phase: 'before' | 'after') => Promise<boolean>;
   readonly onGeneratedOutline?: (outline: NonNullable<ReturnType<DocumentDraftCompilerPort['compile']>>) => void;
@@ -58,10 +62,15 @@ export function createGeneratePptxBinding(
         const executionInput = dependencies.createExecutionInput
           ? await dependencies.createExecutionInput({ args, outline, context })
           : await defaultExecutionInput(args, outline, context);
+        const documentIR = dependencies.compiler.compileIR?.({ outline, operation: 'create' }) ??
+          buildDocumentIRFromOutline({ outline, operation: 'create' });
         if (context.abortSignal.aborted) return failed('cancelled', 'cancelled');
         if (!await dependencies.revalidateAuthorization(context, 'before')) return failed('authorization_or_revision_invalid');
         const result = await dependencies.executor.run({
           ...executionInput,
+          documentIR,
+          ...(dependencies.artDirection ? { userRequirement: dependencies.artDirection.userRequirement,
+            requestArtDirection: dependencies.artDirection.request } : {}),
           // Runtime cancellation must reach the existing runner and its writer.
           signal: context.abortSignal
         });

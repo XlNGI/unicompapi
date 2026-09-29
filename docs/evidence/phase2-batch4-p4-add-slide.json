@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "scope": "phase2-batch4-p4-add-slide-production",
+  "date": "2026-09-29",
+  "status": "passed",
+  "mode": "real_provider",
+  "requestedModel": "kimi-k3",
+  "realProvider": {
+    "executed": true,
+    "status": "passed",
+    "httpRequests": 4,
+    "maximumHttpRequests": 7,
+    "credentialsDecrypted": true,
+    "model": "kimi-k3",
+    "actualWireModel": "kimi-k3",
+    "toolCalls": [
+      "read_document_structure",
+      "add_slide",
+      "read_document_structure"
+    ],
+    "availableTools": [
+      "add_element",
+      "add_slide",
+      "delete_element",
+      "read_document_structure",
+      "update_element"
+    ],
+    "canonicalSchemas": true,
+    "toolCallIdsMatched": true,
+    "answerUsesRealObservation": true,
+    "pathOrRuntimeContextLeak": false,
+    "report": "outputs/phase2-batch4-p4-kimi-add-slide/real-provider.json"
+  },
+  "assertions": {
+    "basePhysicalPages": 4,
+    "targetPhysicalPage": 2,
+    "newPhysicalPage": 3,
+    "authoritativeRevision": 2,
+    "newPageIdentityStable": true,
+    "titleIdentityStable": true,
+    "followingPageIdentitiesStable": true,
+    "originalArtifactPreserved": true,
+    "registeredPresentationReaderReadBack": true,
+    "duplicateTitlesResolvedByPageId": true,
+    "closingPageBoundaryCovered": true,
+    "noClosingPageAppendCovered": true
+  },
+  "dryRun": {
+    "isolatedCandidateReady": true,
+    "syntheticPptRegistered": true,
+    "actualRenderQa": true,
+    "duplicateTextFixture": true,
+    "providerRequests": 0,
+    "protectedUserConfigurationUnchanged": true
+  },
+  "boundaries": {
+    "supportsAddSlide": "implemented_and_real_provider_verified",
+    "supportsDeleteSlide": false,
+    "supportsReorderDuplicateMove": false,
+    "supportsShapeImageCrud": false,
+    "internalIdentityOrPathLeak": "passed_in_live_mode"
+  },
+  "limitations": [
+    "The new page is blank except for the optional controlled title text shape.",
+    "delete_slide and other page-management operations remain out of scope."
+  ]
+}

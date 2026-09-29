@@ -53,7 +53,14 @@ describe('document production trace integration', () => {
     const events = await getProductionTraceStore(scope).list({ conversationId });
     expect(events.map(event => `${event.operationId}:${event.status}`)).toEqual([
       'document-outline:started', 'document-outline:completed',
-      'document-file-write:started', 'document-layout:started', 'document-layout:completed', 'document-file-write:completed',
+      'presentation-art-direction:started', 'presentation-art-direction:completed',
+      'presentation-design-fallback:completed',
+      'document-file-write:started', 'document-layout:started', 'document-layout:completed',
+      'presentation-layout-summary:started', 'presentation-layout-summary:completed',
+      'presentation-layout-diagnostic-1:started', 'presentation-layout-diagnostic-1:completed',
+      'presentation-layout-page-1:started', 'presentation-layout-page-1:completed',
+      'presentation-layout-page-2:started', 'presentation-layout-page-2:completed',
+      'presentation-layout-page-3:started', 'presentation-layout-page-3:completed', 'document-file-write:completed',
       'document-output-structure:started', 'document-output-structure:completed',
       'document-temporary-hash:started', 'document-temporary-hash:completed',
       'document-atomic-publish:started', 'document-atomic-publish:completed',
@@ -61,6 +68,12 @@ describe('document production trace integration', () => {
       'document-work-register:started', 'document-work-register:completed'
     ]);
     expect(events.find(event => event.operationId === 'document-layout' && event.status === 'completed')?.facts?.totalPages).toBe(3);
+    expect(events.find(event => event.operationId === 'presentation-layout-summary' && event.status === 'completed')?.facts)
+      .toMatchObject({ designPath: 'legacy-fallback', fallbackReason: 'missing_design_ir', artDirectionStatus: 'missing', layoutStatus: 'skipped' });
+    expect(events.find(event => event.operationId === 'presentation-layout-diagnostic-1' && event.status === 'completed')?.facts?.diagnosticCode)
+      .toBe('art_direction_unavailable');
+    expect(events.find(event => event.operationId === 'presentation-layout-page-2' && event.status === 'completed')?.facts?.pageIntentDigest)
+      .toMatch(/^sha256:[a-f0-9]{20}$/u);
     expect(events.every(event => event.sourceMessageId === userId && event.assistantMessageId === assistantId)).toBe(true);
     expect(events.some(event => event.code === 'document_render')).toBe(false);
     expect(JSON.stringify(events)).not.toContain(rootDirectory);

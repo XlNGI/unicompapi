@@ -21,6 +21,7 @@ import {
   setDocumentGenerationStatusOnMessage,
   startAssistantMessageStreaming,
   toConversationId,
+  toConversationResponseExecutionId,
   toConversationResponseStreamEventId,
   toIsoTimestamp,
   toMessageId,
@@ -54,6 +55,7 @@ import { createConfiguredOfficeRenderAdapter } from '../documents/office-render-
 import { createPresentationWorkflowScope } from '../documents/registered-presentation-reader';
 import { documentDeliveryFailureReason } from '../documents/conversation-document-workflow';
 import { ConversationSemanticClassifier, conversationSemanticLimits } from '../providers/conversation-semantic-classifier';
+import { featureCandidateId } from '../providers/provider-registry-feature-candidates';
 import { ConversationController } from './conversation-controller';
 import { toConversationDto } from './conversation-controller';
 import {
@@ -291,6 +293,21 @@ export function createChatContextRuntime(
     const mutationRenderer = createConfiguredOfficeRenderAdapter();
     const documentTools = new ConversationDocumentToolSessionService({
       rootDirectory: session.rootDirectory, projectId: session.projectId, conversations: projectConversations,
+      ...(classifier ? { artDirectionPlanner: async (request) => {
+        const active = dependencies.getSession();
+        if (request.signal.aborted || active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) {
+          throw new Error('art_direction_session_unavailable');
+        }
+        const execution = await responseExecutions.get(toConversationResponseExecutionId(request.responseExecutionId));
+        const route = execution ? await invocationRoutes.get(execution.snapshot.routeSnapshotId) : undefined;
+        if (!route || (route.productFeature !== 'text_chat' && route.productFeature !== 'text_reasoning')) {
+          throw new Error('art_direction_route_unavailable');
+        }
+        return classifier.planArtDirection({
+          candidateId: featureCandidateId(route.modelId, route.profileId, route.productFeature),
+          productFeature: route.productFeature, input: request.input, signal: request.signal, timeoutMs: request.timeoutMs
+        });
+      } } : {}),
       ...(mutationRenderer ? { mutation: { renderPreview: mutationRenderer, canWrite: async () => {
         const active = dependencies.getSession();
         return active?.projectId === session.projectId && active.rootDirectory === session.rootDirectory;

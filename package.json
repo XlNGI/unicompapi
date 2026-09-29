@@ -21,6 +21,8 @@
     "collect:platform-evidence": "node scripts/collect-platform-evidence.mjs",
     "verify:secure-storage": "electron scripts/verify-secure-storage.cjs",
     "verify:runtime-integrations": "electron scripts/verify-runtime-integrations.cjs",
+    "verify:production-document-add-delete": "electron scripts/verify-production-document-add-delete.cjs --dry-run",
+    "verify:production-document-add-slide": "electron scripts/verify-production-document-add-delete.cjs --p4-add-slide --dry-run",
     "verify:capability-billing": "electron scripts/verify-p4-capability-billing-electron.cjs",
     "verify:parameter-input": "electron scripts/verify-parameter-input-electron.cjs",
     "verify:video-workbench": "electron scripts/verify-video-workbench-electron.cjs",

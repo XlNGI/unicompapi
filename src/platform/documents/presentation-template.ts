@@ -33,6 +33,7 @@ export interface PresentationLayout {
 }
 
 export interface PresentationTemplateTokens {
+  readonly fontFamily?: string;
   readonly background: string;
   readonly surface: string;
   readonly text: string;
@@ -193,7 +194,7 @@ function createTemplate(
     id,
     name,
     frameStyle,
-    tokens,
+    tokens: { ...tokens, fontFamily: 'Microsoft YaHei' },
     layouts: createLayouts(minBodyFontSize, maxBodyCharacters),
     compositionCycle
   };

@@ -16,3 +16,6 @@ export * from './presentation-page-count';
 export * from './document-task-runtime-service';
 export * from './document-generation-runtime-bridge';
 export * from './generate-pptx-tool';
+export * from './add-element-tool';
+export * from './delete-element-tool';
+export * from './add-slide-tool';

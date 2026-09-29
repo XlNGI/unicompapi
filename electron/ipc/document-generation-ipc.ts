@@ -212,6 +212,22 @@ export function registerDocumentGenerationIpcHandlers(options: {
         },
         compiler: new PlatformDocumentDraftCompiler(),
         generator: new PlatformDocumentGenerationExecutor(runner),
+        ...(repairClassifier ? { artDirectionPlanner: async (request) => {
+          const active = options.sessionRegistry.get();
+          if (request.signal.aborted || active?.projectId !== session.projectId || active.rootDirectory !== session.rootDirectory) {
+            throw new Error('art_direction_session_unavailable');
+          }
+          const execution = (await new JsonConversationResponseExecutionRepository(storage, session.projectId)
+            .list(request.conversationId)).find(item => item.snapshot.assistantMessageId === request.messageId);
+          const route = execution ? await invocationRoutes.get(execution.snapshot.routeSnapshotId) : undefined;
+          if (!route || (route.productFeature !== 'text_chat' && route.productFeature !== 'text_reasoning')) {
+            throw new Error('art_direction_route_unavailable');
+          }
+          return repairClassifier.planArtDirection({
+            candidateId: featureCandidateId(route.modelId, route.profileId, route.productFeature),
+            productFeature: route.productFeature, input: request.input, signal: request.signal
+          });
+        } } : {}),
         ...(repairClassifier ? { llmRepairPlanner: async (request: DocumentLlmRepairPlannerRequest) => {
           const execution = (await new JsonConversationResponseExecutionRepository(storage, session.projectId)
             .list(request.conversationId))

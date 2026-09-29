@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toConversationId, toMessageId, toProjectId, toWorkId } from '../../src/domain';
 import type { DocumentVersionPin } from '../../src/domain/entities/document-version-pin';
-import { updateTextPatch } from '../../src/domain/entities/document-ir-patch';
+import { addSlidePatch, addTextPatch, deleteElementPatch, updateTextPatch } from '../../src/domain/entities/document-ir-patch';
 import { DocumentGenerationRunner } from '../../src/platform/documents/document-generation-runner';
 import { parseDocumentOutline } from '../../src/platform/documents/document-outline-parser';
 import { DocumentIdentityIndexStore } from '../../src/platform/documents/document-identity-index-store';
@@ -273,5 +273,49 @@ describe('production mutation artifact transaction', () => {
     expect(await f.works.list(projectId)).toHaveLength(2);
     const actual = await f.reader.read(toWorkId(committed!.headWorkId));
     expect((await readIdentityElementTexts(actual.buffer, (await f.identities.getForWork(committed!.headWorkId))!)).get(f.target.elementId)).toBe('已更新目标');
+  });
+
+  it('adds a third duplicate text with a new identity, then deletes only that identity', async () => {
+    const f = await fixture();
+    const page = f.identity.pages.find(item => item.pageId === f.target.pageId)!;
+    const add = await f.host().coordinator.mutate({ mutationId: 'mutation-add-element', idempotencyKey: 'idempotency-add-element', expectedPin: f.pin,
+      patch: addTextPatch(page.pageId, 'element-host-add', '重复目标'), signal: new AbortController().signal, authorize: async () => true });
+    expect(add.status).toBe('session_refreshed');
+    const addedPin = add.candidate!.pin;
+    const added = await f.reader.read(toWorkId(addedPin.headWorkId));
+    const addedIdentity = (await f.identities.getForWork(addedPin.headWorkId))!;
+    expect(addedIdentity.elements.filter(item => item.text === '重复目标')).toHaveLength(3);
+    expect(await presentationIdentity.readIdentityElementText(added.buffer, addedIdentity, 'element-host-add')).toBe('重复目标');
+    const remove = await f.host().coordinator.mutate({ mutationId: 'mutation-delete-element', idempotencyKey: 'idempotency-delete-element', expectedPin: addedPin,
+      patch: deleteElementPatch('element-host-add'), signal: new AbortController().signal, authorize: async () => true });
+    expect(remove.status).toBe('session_refreshed');
+    const removed = await f.reader.read(toWorkId(remove.candidate!.pin.headWorkId));
+    const removedIdentity = (await f.identities.getForWork(remove.candidate!.pin.headWorkId))!;
+    expect(removedIdentity.elements.some(item => item.elementId === 'element-host-add')).toBe(false);
+    expect(removedIdentity.tombstones).toContainEqual({ elementId: 'element-host-add', pageId: page.pageId, revision: 3 });
+    expect(removedIdentity.elements.filter(item => item.text === '重复目标')).toHaveLength(2);
+    await expect(presentationIdentity.readIdentityElementText(removed.buffer, removedIdentity, 'element-host-add')).rejects.toMatchObject({ code: 'identity_unresolved' });
+    expect(await presentationIdentity.readIdentityElementText(removed.buffer, removedIdentity, f.target.elementId)).toBe('重复目标');
+    expect(await presentationIdentity.readIdentityElementText(removed.buffer, removedIdentity, f.untouched.elementId)).toBe('重复目标');
+  });
+
+  it('materializes add_slide through the production coordinator and restores stable page identities after read-back', async () => {
+    const f = await fixture();
+    const reference = f.identity.pages[0]!;
+    const originalIds = f.identity.pages.map(page => page.pageId);
+    const patch = addSlidePatch({ pageId: 'page-p4-host-generated', mode: 'after', referencePageId: reference.pageId,
+      title: '市场机会', titleElementId: 'element-p4-title-host-generated' });
+    const result = await f.host().coordinator.mutate({ mutationId: 'mutation-p4-slide', idempotencyKey: 'idempotency-p4-slide',
+      expectedPin: f.pin, patch, signal: new AbortController().signal, authorize: async () => true });
+    expect(result.status).toBe('session_refreshed');
+    const head = await f.heads.get(f.pin.documentLineageId);
+    expect(head?.runtimeRevision).toBe(2);
+    const registered = await f.reader.read(toWorkId(head!.headWorkId));
+    const manifest = (await f.identities.getForWork(head!.headWorkId))!;
+    expect(manifest.pages.map(page => page.pageId)).toEqual([originalIds[0], 'page-p4-host-generated', ...originalIds.slice(1)]);
+    expect(manifest.pages.filter(page => originalIds.includes(page.pageId)).map(page => page.pageId)).toEqual(originalIds);
+    expect(manifest.elements.find(element => element.elementId === 'element-p4-title-host-generated')).toMatchObject({ pageId: 'page-p4-host-generated', text: '市场机会' });
+    expect((await readPptxDocument(registered.buffer))[1]?.contentText).toContain('市场机会');
+    await verifyPresentationIdentityManifest(registered.buffer, manifest);
   });
 });
