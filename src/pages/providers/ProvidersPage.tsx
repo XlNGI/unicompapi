@@ -381,7 +381,7 @@ export function ProvidersPage() {
       : LuInfo;
 
   return (
-    <section className="uc-provider-page" aria-labelledby="providers-page-title">
+    <section className={`uc-provider-page${view === 'manage' && !addingConnection ? ' uc-provider-page--manage' : ''}`} aria-labelledby="providers-page-title">
       <header className="uc-provider-page__header">
         <div>
           <div className="uc-page-skeleton__heading-row">

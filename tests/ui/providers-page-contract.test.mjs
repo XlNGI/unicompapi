@@ -220,3 +220,17 @@ test('deleted connections are never listed in the manage view', () => {
   assert.doesNotMatch(manage, /showDeleted/);
   assert.match(manage, /connection\.state === 'deleted'/);
 });
+
+test('manage view keeps page chrome fixed and scrolls long catalogs internally', () => {
+  assert.match(shell, /view === 'manage' && !addingConnection \? ' uc-provider-page--manage'/);
+  assert.match(manage, /className="uc-provider-page__connection-list uc-scrollbar"/);
+  assert.match(manage, /className="uc-provider-page__model-list uc-scrollbar"/);
+  assert.match(manage, /className="uc-provider-page__tab-panel uc-scrollbar" aria-labelledby="connection-heading"/);
+  assert.match(manage, /className="uc-provider-page__tab-panel uc-scrollbar" aria-labelledby="credential-heading"/);
+  assert.match(pageStyles, /\.workspace:has\(\.uc-provider-page--manage\) \{[^}]*overflow: hidden;/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \{[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__workspace \{[^}]*min-height: 0;[^}]*grid-template-rows: minmax\(0, 1fr\);/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__connection-list,[^}]*overflow-y: auto;/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__model-list \{[^}]*overflow-y: auto;/);
+  assert.match(pageStyles, /\.uc-provider-page--manage \.uc-provider-page__tabs,[^}]*flex: 0 0 auto;/);
+});

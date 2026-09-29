@@ -726,7 +726,7 @@ export function SettingsPage() {
           ) : null}
         </nav>
 
-        <main className="uc-settings__content" tabIndex={-1}>
+        <main className="uc-settings__content uc-scrollbar" tabIndex={-1}>
           <div className="uc-settings__section-heading">
             <div>
               <h2>{category.label}</h2>
@@ -891,7 +891,7 @@ export function SettingsPage() {
           )}
         </main>
 
-        <aside className="uc-settings__status" aria-label="本机设置状态">
+        <aside className="uc-settings__status uc-scrollbar" aria-label="本机设置状态">
           <div className="uc-settings__status-heading">
             <h2>本机状态摘要</h2>
             <StatusPill tone={saveStateTone(saveState)}>{saveStateLabel(saveState)}</StatusPill>

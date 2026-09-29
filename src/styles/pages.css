@@ -9422,6 +9422,101 @@ button.uc-project-center__project-card:disabled {
   background: var(--uc-color-surface-base);
 }
 
+.workspace:has(.uc-provider-page--manage) {
+  overflow: hidden;
+}
+
+.uc-provider-page--manage {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.uc-provider-page--manage > .uc-provider-page__header,
+.uc-provider-page--manage > .uc-provider-page__notice {
+  flex: 0 0 auto;
+}
+
+.uc-provider-page--manage .uc-provider-page__workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.uc-provider-page--manage .uc-provider-page__connections,
+.uc-provider-page--manage .uc-provider-page__details {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.uc-provider-page--manage .uc-provider-page__connections {
+  padding-right: 0;
+}
+
+.uc-provider-page--manage .uc-provider-page__connections > :not(.uc-provider-page__connection-list) {
+  flex: 0 0 auto;
+  margin-right: var(--uc-space-4);
+}
+
+.uc-provider-page--manage .uc-provider-page__detail-heading,
+.uc-provider-page--manage .uc-provider-page__tabs,
+.uc-provider-page--manage .uc-provider-page__section-heading,
+.uc-provider-page--manage .uc-provider-page__capabilities,
+.uc-provider-page--manage .uc-provider-page__model-search-row,
+.uc-provider-page--manage .uc-provider-page__inline-form {
+  flex: 0 0 auto;
+}
+
+.uc-provider-page--manage .uc-provider-page__tab-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.uc-provider-page--manage .uc-provider-page__tab-panel[aria-labelledby="models-heading"] {
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.uc-provider-page--manage .uc-provider-page__connection-list,
+.uc-provider-page--manage .uc-provider-page__model-list {
+  flex: 1 1 auto;
+  align-content: start;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.uc-provider-page--manage .uc-provider-page__model-list {
+  min-height: 160px;
+}
+
+.uc-provider-page--manage .uc-provider-page__tab-panel[aria-labelledby="connection-heading"],
+.uc-provider-page--manage .uc-provider-page__tab-panel[aria-labelledby="credential-heading"] {
+  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 860px) {
+  .uc-provider-page--manage .uc-provider-page__workspace {
+    grid-template-rows: minmax(220px, 0.72fr) minmax(0, 1fr);
+  }
+
+  .uc-provider-page--manage .uc-provider-page__details {
+    min-height: 0;
+  }
+}
+
 .uc-provider-page__connections,
 .uc-provider-page__details {
   min-width: 0;
@@ -10453,6 +10548,46 @@ button.uc-project-center__project-card:disabled {
   .uc-settings__status-heading,
   .uc-settings__facts {
     grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1501px) {
+  .workspace:has(.uc-settings) {
+    overflow: hidden;
+  }
+
+  .uc-settings {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .uc-settings__workspace {
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;
+    overflow: hidden;
+  }
+
+  .uc-settings__categories {
+    align-self: start;
+  }
+
+  .uc-settings__content,
+  .uc-settings__status {
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
+
+  .uc-settings__content,
+  .uc-settings__status {
+    overflow-y: auto;
+  }
+
+  .uc-settings__status {
+    align-self: start;
+    max-height: 100%;
   }
 }
 

@@ -69,5 +69,9 @@ test('A1 keeps controls accessible and layout responsive', () => {
   assert.match(styles, /\.uc-settings__workspace/);
   assert.match(styles, /\.uc-settings__categories \{[\s\S]*?position: sticky;[\s\S]*?top: 0;/);
   assert.match(styles, /@media \(max-width: 1500px\)/);
+  assert.match(styles, /@media \(min-width: 1501px\) \{[\s\S]*?\.workspace:has\(\.uc-settings\) \{[^}]*overflow: hidden;/);
+  assert.match(styles, /@media \(min-width: 1501px\) \{[\s\S]*?\.uc-settings__content,[^}]*overflow-y: auto;/);
+  assert.match(styles, /@media \(min-width: 1501px\) \{[\s\S]*?\.uc-settings__status \{[^}]*align-self: start;/);
+  assert.match(page, /uc-settings__content uc-scrollbar/);
   assert.match(styles, /@media \(max-width: 1180px\)/);
 });
