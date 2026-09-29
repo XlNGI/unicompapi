@@ -199,7 +199,7 @@ export function ProviderManageView({
             <button aria-pressed={connectionFilter === value} key={value} onClick={() => onConnectionFilterChange(value)} type="button">{label}</button>
           ))}
         </div>
-        <div className="uc-provider-page__connection-list">
+        <div className="uc-provider-page__connection-list uc-scrollbar">
           {visibleConnections.length === 0 ? (
             <p className="uc-provider-page__muted">当前筛选下没有连接。</p>
           ) : visibleConnections.map((connection) => {
@@ -269,7 +269,7 @@ export function ProviderManageView({
             </nav>
 
             {activeTab === 'models' && (
-              <section className="uc-provider-page__tab-panel" aria-labelledby="models-heading">
+              <section className="uc-provider-page__tab-panel uc-scrollbar" aria-labelledby="models-heading">
                 <div className="uc-provider-page__section-heading">
                   <div><h3 id="models-heading">模型目录</h3><p>{selectedTemplate?.displayName ?? '历史连接'}</p></div>
                   <div className="uc-provider-page__header-actions">
@@ -430,7 +430,7 @@ export function ProviderManageView({
                         title="没有匹配的模型"
                       />
                     ) : (
-                      <div className="uc-provider-page__model-list">
+                      <div className="uc-provider-page__model-list uc-scrollbar">
                         {visibleModels.map((model) => (
                           <div className="uc-provider-page__model" data-selected={selectedModel?.modelId === model.modelId || undefined} key={model.modelId}>
                             <button aria-pressed={selectedModel?.modelId === model.modelId} className="uc-provider-page__model-select" onClick={() => onSelectModel(model.modelId)} type="button">
@@ -466,7 +466,7 @@ export function ProviderManageView({
             )}
 
             {activeTab === 'connection' && (
-              <section className="uc-provider-page__tab-panel" aria-labelledby="connection-heading">
+              <section className="uc-provider-page__tab-panel uc-scrollbar" aria-labelledby="connection-heading">
                 <div className="uc-provider-page__section-heading"><div><h3 id="connection-heading">连接状态</h3><p>{selectedTemplate?.displayName ?? '历史连接'}</p></div></div>
                 <dl className="uc-provider-page__facts">
                   <div><dt>连接</dt><dd>{connectionLabels[selectedConnection.state] ?? '未知'}</dd></div>
@@ -478,7 +478,7 @@ export function ProviderManageView({
             )}
 
             {activeTab === 'credential' && (
-              <section className="uc-provider-page__tab-panel" aria-labelledby="credential-heading">
+              <section className="uc-provider-page__tab-panel uc-scrollbar" aria-labelledby="credential-heading">
                 <div className="uc-provider-page__section-heading">
                   <div><h3 id="credential-heading">凭证</h3><p>本机安全存储，不提供明文读取</p></div>
                   <StatusPill tone={toneForState(selectedConnection.credentialState)}>{credentialLabels[selectedConnection.credentialState] ?? '未知'}</StatusPill>
