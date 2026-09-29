@@ -17,7 +17,10 @@ import {
   NEWAPI_ADAPTER_VERSION, NEWAPI_CHAT_PROTOCOL_ID, NEWAPI_PROTOCOL_VERSION, type NewApiHttpTransportResponse
 } from '../../src/platform';
 import { ConversationProductionTraceStore } from '../../src/platform/conversation-production-trace';
-import { PlatformDocumentGenerationExecutor } from '../../src/platform/documents/document-generation-application-adapters';
+import { PlatformDocumentDraftCompiler, PlatformDocumentGenerationExecutor } from '../../src/platform/documents/document-generation-application-adapters';
+import { buildFallbackPresentationDesignIR, parseArtDirection } from '../../src/domain/entities/presentation-design-contract';
+import { generateTemporaryDocumentFile, type GenerateDocumentFileInput } from '../../src/platform/documents/office-document-generator';
+import type { PresentationDesignCompilationSnapshot } from '../../src/platform/documents/presentation-design-compiler';
 import { RegisteredPresentationReader } from '../../src/platform/documents/registered-presentation-reader';
 import { readPptxDocument } from '../../src/platform/documents/pptx-page-reader';
 import { DocumentTaskRuntimeService } from '../../src/application/document-task-runtime-service';
@@ -46,7 +49,7 @@ interface WireRequest { readonly model: string; readonly messages: readonly Wire
 interface ReadResult { readonly status: string; readonly observation?: { readonly pageCount: number; readonly totalSections: number;
   readonly revision: number; readonly sections: readonly { readonly blocks: readonly { readonly text: string }[] }[] } }
 
-async function fixture(revokeAfterAdvertisingRead = false) {
+async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection = false) {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-generation-read-loop-'));
   roots.push(rootDirectory);
   const userDataDirectory = path.join(rootDirectory, 'test-profile');
@@ -62,6 +65,9 @@ async function fixture(revokeAfterAdvertisingRead = false) {
   expect(conversation.messages).toEqual([]);
   const provider = await providerFixture(userDataDirectory);
   const requests: WireRequest[] = [];
+  const artRequests: WireRequest[] = [];
+  const writes: GenerateDocumentFileInput[] = [];
+  const designSnapshots: PresentationDesignCompilationSnapshot[] = [];
   const errors: unknown[] = [];
   const readSpy = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
   const beginSpy = vi.spyOn(DocumentTaskRuntimeService.prototype, 'beginToolCall');
@@ -72,7 +78,14 @@ async function fixture(revokeAfterAdvertisingRead = false) {
   // registration real. Only the external Office renderer is an offline adapter.
   const execute = PlatformDocumentGenerationExecutor.prototype.run;
   const executor = new PlatformDocumentGenerationExecutor(new DocumentGenerationRunner({
-    rootDirectory, projectId, renderPreview: render, requireRenderForPpt: true
+    rootDirectory, projectId, renderPreview: render, requireRenderForPpt: true,
+    generateTemporaryFile: async input => {
+      writes.push(input);
+      return generateTemporaryDocumentFile({ ...input, onDesignCompiled: async snapshot => {
+        designSnapshots.push(snapshot);
+        await input.onDesignCompiled?.(snapshot);
+      } });
+    }
   }));
   const generationSpy = vi.spyOn(PlatformDocumentGenerationExecutor.prototype, 'run').mockImplementation(input => execute.call(executor, input));
   const generationCall: WireCall = { id: 'generated-call-original-1', type: 'function', function: { name: generation.toolId,
@@ -81,6 +94,22 @@ async function fixture(revokeAfterAdvertisingRead = false) {
     arguments: JSON.stringify({ scope: 'document' }) } };
   const transport = { send: async (request: { readonly body?: Uint8Array }): Promise<NewApiHttpTransportResponse> => {
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
+    if (!payload.tools && payload.messages.some(message => message.role === 'system' && message.content.includes('Art Direction'))) {
+      artRequests.push(payload);
+      const outline = new PlatformDocumentDraftCompiler().compile({ content, kind: 'ppt', operation: 'create' });
+      const initial = buildFallbackPresentationDesignIR(outline);
+      const direction = parseArtDirection({ ...initial, globalDesign: { ...initial.globalDesign,
+        visualTone: 'editorial', density: 'sparse', whitespace: 'generous', typographyDirection: 'display-led' },
+        pages: initial.pages.map(page => page.pageNumber > 1 && page.pageNumber < initial.pages.length ? { ...page,
+          pageRole: 'evidence', pageIntent: 'SENSITIVE-PAGE-INTENT-9001: Present the verified marker as the single focus',
+          hierarchy: { primary: [`outline.sections[${page.pageNumber - 2}].blocks[0]`],
+            secondary: [`outline.sections[${page.pageNumber - 2}].heading`], supporting: [] },
+          composition: { principle: 'evidence-led', focalArea: 'right', balance: 'asymmetric-right', flow: 'left-to-right' },
+          density: 'sparse', whitespace: 'generous',
+          emphasis: { target: `outline.sections[${page.pageNumber - 2}].blocks[0]`, strength: 'dominant' }
+        } : page) }, { outline });
+      return stream(provider.modelKey, { content: invalidArtDirection ? '{"schemaVersion":' : JSON.stringify(direction) }, 'stop');
+    }
     requests.push(payload);
     if (requests.length === 1) return stream(provider.modelKey, { tool_calls: [{ index: 0, ...generationCall }] }, 'tool_calls');
     if (requests.length === 2) {
@@ -134,7 +163,7 @@ async function fixture(revokeAfterAdvertisingRead = false) {
       traces: await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id }),
       runtimes: await new JsonDocumentTaskRuntimeRepository(storage, projectId).list() };
   }
-  return { run, rootDirectory, files, works, requests, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
+  return { run, rootDirectory, files, works, requests, artRequests, writes, designSnapshots, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
 }
 
 describe('production NewAPI generation to verified-file read continuation', () => {
@@ -143,6 +172,22 @@ describe('production NewAPI generation to verified-file read continuation', () =
     const { execution, traces, runtimes } = await data.run();
     expect(data.errors).toEqual([]);
     expect(data.requests).toHaveLength(3);
+    expect(data.artRequests).toHaveLength(1);
+    expect(data.artRequests[0].tools).toBeUndefined();
+    expect(data.artRequests[0].messages.map(message => message.content).join('\n')).toContain(markers[0]);
+    expect(data.writes).toHaveLength(1);
+    expect(data.writes[0].designIR?.schemaVersion).toBe(2);
+    expect(data.designSnapshots).toHaveLength(1);
+    expect(data.designSnapshots[0].strategies.find(page => page.pageNumber === 2)?.strategy).toBe('evidence');
+    expect(data.designSnapshots[0].designIR?.pages[1].composition.focalArea).toBe('right');
+    expect(data.designSnapshots[0]).toMatchObject({ designPath: 'design-aware', layoutStatus: 'success', renderPlanStatus: 'valid' });
+    expect(data.designSnapshots[0].pages?.every(page => page.geometrySignature !== undefined)).toBe(true);
+    expect(traces.some(trace => trace.operationId === 'presentation-layout-summary' && trace.status === 'completed')).toBe(true);
+    const pageTrace = traces.find(trace => trace.operationId === 'presentation-layout-page-2' && trace.status === 'completed');
+    expect(pageTrace?.facts?.pageIntentDigest).toBe('sha256:' + createHash('sha256')
+      .update('SENSITIVE-PAGE-INTENT-9001: Present the verified marker as the single focus').digest('hex').slice(0, 20));
+    expect(JSON.stringify(traces)).not.toContain('SENSITIVE-PAGE-INTENT-9001');
+    expect(traces.some(trace => trace.operationId === 'presentation-design-validated' && trace.status === 'completed')).toBe(true);
     expect(data.generationSpy).toHaveBeenCalledTimes(1);
     expect(data.generationSpy.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
     expect(data.render).toHaveBeenCalledTimes(1);
@@ -206,12 +251,32 @@ describe('production NewAPI generation to verified-file read continuation', () =
     for (const stage of ['document-output-structure', 'document-render-diagnostics', 'document-published-hash', 'document-work-register']) {
       expect(traces.some(trace => trace.operationId === stage && trace.status === 'completed')).toBe(true);
     }
-    const outgoing = [JSON.stringify(data.requests), ...data.requests.flatMap(request => request.messages
+    const outgoing = [JSON.stringify([...data.requests, ...data.artRequests]), ...data.requests.flatMap(request => request.messages
       .filter(message => message.role === 'tool').map(message => message.content))].join('\n');
     for (const hidden of [data.rootDirectory, work.id, file.id, file.checksumSha256, '"rootDirectory"', '"relativePath"',
       '"currentDocumentId"', '"currentDocumentIR"', '"authorization"', '"abortSignal"', '"projectContext"', '"taskContext"']) {
       expect(outgoing).not.toContain(hidden);
     }
+  });
+
+  it('falls back to the stable template after malformed Art Direction and still registers and reads the real file', async () => {
+    const data = await fixture(false, true);
+    const { execution, traces } = await data.run();
+    expect(data.artRequests).toHaveLength(1);
+    expect(data.requests).toHaveLength(3);
+    expect(data.writes).toHaveLength(1);
+    expect(data.writes[0].designIR).toBeUndefined();
+    expect(data.designSnapshots).toHaveLength(1);
+    expect(data.designSnapshots[0]).toMatchObject({ designPath: 'legacy-fallback', fallbackReason: 'art_direction_invalid', artDirectionStatus: 'invalid', designIrStatus: 'invalid' });
+    expect(traces.some(trace => trace.operationId === 'presentation-layout-summary' && trace.status === 'completed')).toBe(true);
+    expect(traces.some(trace => trace.operationId === 'presentation-design-fallback')).toBe(true);
+    const [work] = await data.works.list(projectId);
+    expect(work).toBeDefined();
+    const file = (await data.files.get(work.fileId))!;
+    expect(file.state).toBe('available');
+    expect(file.checksumSha256).toMatch(/^[a-f0-9]{64}$/u);
+    for (const marker of markers) expect(execution.content).toContain(marker);
+    expect(data.errors).toEqual([]);
   });
 
   it('refuses a generated file revoked after read was advertised and preserves the actual completed Work', async () => {

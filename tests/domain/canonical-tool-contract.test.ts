@@ -15,6 +15,8 @@ import {
 const registry = createCanonicalToolRegistry();
 const read = registry.get('read_document_structure')!;
 const update = registry.get('update_element')!;
+const add = registry.get('add_element')!;
+const remove = registry.get('delete_element')!;
 const context: AvailableToolContext = {
   implementedToolIds: canonicalToolIds,
   capabilities: canonicalToolIds,
@@ -27,9 +29,11 @@ const context: AvailableToolContext = {
 
 describe('canonical document tool contracts', () => {
   it('keeps the existing registry while exposing only the established business contract', () => {
-    expect(registry.size).toBe(10);
+    expect(registry.size).toBe(canonicalToolIds.length);
     expect([...registry.keys()]).toEqual(canonicalToolIds);
-    expect(deriveAvailableToolSet(registry, context).map(contract => contract.toolId)).toEqual(['read_document_structure', 'update_element']);
+    expect(deriveAvailableToolSet(registry, context).map(contract => contract.toolId)).toEqual(expect.arrayContaining([
+      'read_document_structure', 'update_element', 'add_element', 'delete_element'
+    ]));
     for (const contract of registry.values()) {
       expect(contract.schemaVersion).toBe(1);
       expect(contract.input.additionalProperties).toBe(false);
@@ -37,7 +41,7 @@ describe('canonical document tool contracts', () => {
       expect(contract.execution.timeoutMs).toBeGreaterThan(0);
       expect(contract.execution.budgetUnits).toBeGreaterThan(0);
       expect(contract.diagnostics.failureCodes).toContain('invalid_tool_arguments');
-      if (contract.toolId !== read.toolId && contract.toolId !== 'generate_pptx' && contract.toolId !== 'update_element') {
+      if (!['read_document_structure', 'generate_pptx', 'update_element', 'add_element', 'delete_element', 'add_slide'].includes(contract.toolId)) {
         expect(contract.exposure).toBe('internal');
         expect(contract.input.fields).toEqual({});
       }
@@ -82,6 +86,16 @@ describe('canonical document tool contracts', () => {
       irPatch: { schemaVersion: 1, operations: [{ op: 'update_text', target: { elementId: 'element-1' }, text: '新文本' }] },
       observation: { changedElementId: 'element-1' }, artifactRefs: [{ kind: 'work', ref: 'work-candidate-1' }]
     })).toMatchObject({ status: 'success' });
+  });
+
+  it('exposes only business add/delete arguments and rejects host-owned fields', () => {
+    expect(canonicalToolInputSchema(add)).toMatchObject({ required: ['pageId', 'type', 'text'], properties: { type: { enum: ['text'] }, placement: { enum: ['default'] } } });
+    expect(validateCanonicalToolArguments(add, { pageId: 'page-1', type: 'text', text: '新增' })).toEqual({ pageId: 'page-1', type: 'text', text: '新增', placement: 'default' });
+    expect(validateCanonicalToolArguments(remove, { elementId: 'element-1' })).toEqual({ elementId: 'element-1' });
+    expect(() => validateCanonicalToolArguments(add, { pageId: 'page-1', type: 'text', text: '新增', elementId: 'model-id' })).toThrow('invalid_tool_arguments');
+    expect(() => validateCanonicalToolArguments(remove, { elementId: 'element-1', revision: 2 })).toThrow('invalid_tool_arguments');
+    expect(validateDocumentToolResult(add, { schemaVersion: 1, status: 'success', observation: { elementId: 'element-host', pageId: 'page-1', operation: 'added' }, irPatch: { schemaVersion: 1, operations: [{ op: 'add_text', target: { pageId: 'page-1' }, elementId: 'element-host', text: '新增', placement: 'default' }] } })).toMatchObject({ status: 'success' });
+    expect(validateDocumentToolResult(remove, { schemaVersion: 1, status: 'success', observation: { elementId: 'element-1', operation: 'deleted' }, irPatch: { schemaVersion: 1, operations: [{ op: 'delete_element', target: { elementId: 'element-1' } }] } })).toMatchObject({ status: 'success' });
   });
 
   it.each([
@@ -199,6 +213,6 @@ describe('canonical document tool contracts', () => {
   it('does not leak transient registry mutation into the authoritative catalog', () => {
     const empty: CanonicalToolRegistry = createCanonicalToolRegistry([]);
     expect(deriveAvailableToolSet(empty, context)).toEqual([]);
-    expect(createCanonicalToolRegistry().size).toBe(10);
+    expect(createCanonicalToolRegistry().size).toBe(canonicalToolIds.length);
   });
 });

@@ -180,6 +180,88 @@ const canonicalToolCatalog = [
     diagnostics: { traceType: 'patch', failureCodes: [...commonFailureCodes, 'invalid_arguments', 'identity_unresolved', 'identity_ambiguous', 'identity_pin_mismatch', 'identity_stale', 'revision_conflict', 'authorization_denied', 'materialization_failed', 'qa_failed', 'commit_failed', 'unknown_result', 'idempotency_conflict', 'committed_pending_refresh'] }
   },
   {
+    toolId: 'add_element',
+    description: 'Add one text element to a verified presentation page. The host creates the element identity and owns placement.',
+    exposure: 'provider',
+    input: {
+      type: 'object', additionalProperties: false,
+      fields: {
+        pageId: { type: 'string', maxLength: 128, required: true },
+        type: { type: 'string', maxLength: 8, enum: ['text'], required: true },
+        text: { type: 'string', maxLength: 8_000, required: true },
+        placement: { type: 'string', maxLength: 16, enum: ['default'], defaultValue: 'default' }
+      }
+    },
+    schemaVersion: 1, version: '1.0',
+    preconditions: {
+      requiresExistingDocument: true, requiresDocumentIR: true, requiresWrite: true,
+      requiresRevision: true, requiresAuthorization: true, allowedOperations: ['edit']
+    },
+    effects: {
+      modifiesDocumentIR: true, modifiesArtifact: true, producesIRPatch: true,
+      producesObservation: true, producesDiagnostics: true, producesArtifactRefs: true
+    },
+    execution: {
+      cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required', scope: 'task_call', keyFields: ['pageId', 'type', 'text', 'placement'] }
+    },
+    diagnostics: { traceType: 'patch', failureCodes: [...commonFailureCodes, 'invalid_arguments', 'page_not_found', 'identity_creation_failed', 'identity_unresolved', 'identity_ambiguous', 'identity_pin_mismatch', 'identity_stale', 'revision_conflict', 'authorization_denied', 'materialization_failed', 'qa_failed', 'commit_failed', 'unknown_result', 'idempotency_conflict', 'committed_pending_refresh'] }
+  },
+  {
+    toolId: 'delete_element',
+    description: 'Delete one verified presentation element by its opaque element identity.',
+    exposure: 'provider',
+    input: {
+      type: 'object', additionalProperties: false,
+      fields: { elementId: { type: 'string', maxLength: 128, required: true } }
+    },
+    schemaVersion: 1, version: '1.0',
+    preconditions: {
+      requiresExistingDocument: true, requiresDocumentIR: true, requiresWrite: true,
+      requiresRevision: true, requiresAuthorization: true, allowedOperations: ['edit']
+    },
+    effects: {
+      modifiesDocumentIR: true, modifiesArtifact: true, producesIRPatch: true,
+      producesObservation: true, producesDiagnostics: true, producesArtifactRefs: true
+    },
+    execution: {
+      cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required', scope: 'task_call', keyFields: ['elementId'] }
+    },
+    diagnostics: { traceType: 'patch', failureCodes: [...commonFailureCodes, 'invalid_arguments', 'element_not_found', 'identity_unresolved', 'identity_ambiguous', 'identity_pin_mismatch', 'identity_stale', 'revision_conflict', 'authorization_denied', 'materialization_failed', 'qa_failed', 'commit_failed', 'unknown_result', 'idempotency_conflict', 'committed_pending_refresh'] }
+  },
+  {
+    toolId: 'add_slide',
+    description: 'Add one blank presentation page, optionally with a title, at a controlled page position. The host creates page identity.',
+    exposure: 'provider',
+    input: {
+      type: 'object', additionalProperties: false,
+      fields: {
+        position: { type: 'string', maxLength: 6, enum: ['before', 'after', 'end'], defaultValue: 'end' },
+        referencePageId: { type: 'string', maxLength: 128 },
+        title: { type: 'string', maxLength: 8_000 }
+      },
+      conditions: [
+        { when: { field: 'position', values: ['before', 'after'], includeAbsent: false }, required: ['referencePageId'] },
+        { when: { field: 'position', values: ['end'], includeAbsent: true }, forbidden: ['referencePageId'] }
+      ]
+    },
+    schemaVersion: 1, version: '1.0',
+    preconditions: {
+      requiresExistingDocument: true, requiresDocumentIR: true, requiresWrite: true,
+      requiresRevision: true, requiresAuthorization: true, allowedOperations: ['edit']
+    },
+    effects: {
+      modifiesDocumentIR: true, modifiesArtifact: true, producesIRPatch: true,
+      producesObservation: true, producesDiagnostics: true, producesArtifactRefs: true
+    },
+    execution: {
+      cancellable: true, timeoutMs: 180_000, budgetUnits: 8,
+      idempotency: { mode: 'required', scope: 'task_call', keyFields: ['position', 'referencePageId', 'title'] }
+    },
+    diagnostics: { traceType: 'patch', failureCodes: [...commonFailureCodes, 'invalid_arguments', 'page_not_found', 'page_order_unresolved', 'identity_creation_failed', 'identity_unresolved', 'identity_ambiguous', 'identity_pin_mismatch', 'identity_stale', 'revision_conflict', 'authorization_denied', 'materialization_failed', 'qa_failed', 'commit_failed', 'unknown_result', 'idempotency_conflict', 'committed_pending_refresh'] }
+  },
+  {
     toolId: 'generate_pptx',
     description: 'Generate a verified PowerPoint presentation from business content. The runtime owns the project, output location, revision, authorization and publication.',
     exposure: 'provider',

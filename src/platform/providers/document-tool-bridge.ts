@@ -94,7 +94,12 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
           return report(contract, call.id, 'failed').then(() => failure('TOOL_PRECONDITION_FAILED'));
         }
         const bindingKey = stable([taskIdentity, selected.currentDocumentId, selected.revision]);
-        const fingerprint = hash(stable([contract.toolId, contract.version, bindingKey, args]));
+        // Call identity and idempotency survive the head revision that a successful
+        // mutation advances, while a different document lineage still conflicts.
+        const documentIdentity = contract.preconditions.requiresWrite
+          ? selected.currentVersionPin?.documentLineageId ?? selected.currentDocumentId
+          : stable([selected.currentDocumentId, selected.revision]);
+        const fingerprint = hash(stable([contract.toolId, contract.version, documentIdentity, args]));
         const previous = calls.get(call.id);
         if (previous) return previous.fingerprint === fingerprint ? previous.result : Promise.resolve(failure('call_id_conflict'));
         if (calls.size >= maxCalls) return Promise.resolve(failure('tool_call_limit'));
@@ -137,8 +142,7 @@ export function createDocumentToolCallingBridge(options: DocumentToolCallingBrid
             currentDocumentIR: context.currentDocumentIR ? freeze(structuredClone(context.currentDocumentIR)) : undefined,
             abortSignal: controller.signal,
             callId: call.id,
-            idempotencyKey: hash(stable([taskIdentity, call.id, contract.toolId, contract.version, bindingKey,
-              contract.execution.idempotency.keyFields.map(key => args[key]), args]))
+            idempotencyKey: fingerprint
           });
           const execute = async (): Promise<DocumentToolResult> => {
             const authorized = await binding.authorize(args, executionContext);

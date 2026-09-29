@@ -12,9 +12,12 @@ import {
   readIdentityElementText,
   readIdentityElementTexts,
   parsePresentationIdentityManifest,
-  verifyPresentationIdentityManifest
+  verifyPresentationIdentityManifest,
+  applyPresentationMutationPatch,
+  carryForwardPresentationIdentityManifestForPatch
 } from '../../src/platform/documents/presentation-identity-manifest';
-import { updateTextPatch } from '../../src/domain/entities/document-ir-patch';
+import { addSlidePatch, addTextPatch, deleteElementPatch, updateTextPatch } from '../../src/domain/entities/document-ir-patch';
+import { readPptxDocument } from '../../src/platform/documents/pptx-page-reader';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -95,6 +98,114 @@ describe('presentation identity manifest', () => {
     await expect(buildPresentationIdentityManifest({ buffer: await zip.generateAsync({ type: 'nodebuffer' }),
       documentLineageId: manifest.documentLineageId, workId: manifest.workId, fileId: manifest.fileId,
       sourceExecutionId: manifest.sourceExecutionId, revision: 1 })).rejects.toMatchObject({ code: 'identity_ambiguous' });
+  });
+
+  it('adds a host-generated text identity and reads it back from the real PPTX', async () => {
+    const { buffer, manifest, target } = await identityFixture();
+    const page = manifest.pages.find(item => item.pageId === target.pageId)!;
+    const patch = addTextPatch(page.pageId, 'element-host-generated', '重复目标');
+    const candidate = await (await import('../../src/platform/documents/presentation-identity-manifest')).applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await (await import('../../src/platform/documents/presentation-identity-manifest')).carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate, revision: 2, patch });
+    expect(next.elements.filter(element => element.text === '重复目标')).toHaveLength(3);
+    expect(new Set(next.elements.filter(element => element.text === '重复目标').map(element => element.elementId)).size).toBe(3);
+    expect(await readIdentityElementText(candidate, next, 'element-host-generated')).toBe('重复目标');
+    await expect(verifyPresentationIdentityManifest(candidate, next)).resolves.toBeDefined();
+  });
+
+  it('deletes exactly the requested identity and keeps a tombstone for old revision audit', async () => {
+    const { buffer, manifest, target } = await identityFixture();
+    const patch = deleteElementPatch(target.elementId);
+    const candidate = await (await import('../../src/platform/documents/presentation-identity-manifest')).applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await (await import('../../src/platform/documents/presentation-identity-manifest')).carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate, revision: 2, patch });
+    expect(next.elements.some(element => element.elementId === target.elementId)).toBe(false);
+    expect(next.tombstones).toContainEqual({ elementId: target.elementId, pageId: target.pageId, revision: 2 });
+    await expect(readIdentityElementText(candidate, next, target.elementId)).rejects.toMatchObject({ code: 'identity_unresolved' });
+    expect(next.elements.filter(element => element.text === target.text)).toHaveLength(manifest.elements.filter(element => element.text === target.text).length - 1);
+    await expect(verifyPresentationIdentityManifest(candidate, next)).resolves.toBeDefined();
+  });
+
+  it('inserts a host-identified slide and preserves later page identities after real-file read-back', async () => {
+    const { buffer, manifest } = await identityFixture();
+    const reference = manifest.pages[0]!;
+    const originalIds = manifest.pages.map(page => page.pageId);
+    const patch = addSlidePatch({ pageId: 'page-host-generated', mode: 'after', referencePageId: reference.pageId,
+      title: '新增页面', titleElementId: 'element-title-host-generated' });
+    const candidate = await applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate,
+      revision: 2, patch });
+    expect(next.pages.map(page => page.pageId)).toEqual([originalIds[0], 'page-host-generated', ...originalIds.slice(1)]);
+    expect(next.pages.slice(2).map(page => page.physicalPageNumber)).toEqual(originalIds.slice(1).map((_, index) => index + 3));
+    expect(next.elements.find(element => element.elementId === 'element-title-host-generated')).toMatchObject({
+      pageId: 'page-host-generated', text: '新增页面'
+    });
+    const realPages = await readPptxDocument(candidate);
+    expect(realPages).toHaveLength(manifest.pages.length + 1);
+    expect(realPages[1]?.contentText).toContain('新增页面');
+    await expect(verifyPresentationIdentityManifest(candidate, next)).resolves.toBeDefined();
+  });
+
+  it('places end additions before a recognizable closing page', async () => {
+    const { buffer, manifest } = await identityFixture();
+    const closing = manifest.pages.at(-1)!;
+    const patch = addSlidePatch({ pageId: 'page-p4-end-generated', mode: 'end', title: '新增末页', titleElementId: 'element-p4-end-title' });
+    const candidate = await applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate, revision: 2, patch });
+    expect(next.pages.at(-1)?.pageId).toBe(closing.pageId);
+    expect(next.pages.at(-2)?.pageId).toBe('page-p4-end-generated');
+    expect((await readPptxDocument(candidate)).at(-2)?.contentText).toContain('新增末页');
+  });
+
+  it('inserts before an exact page identity without changing later identities', async () => {
+    const { buffer, manifest } = await identityFixture();
+    const reference = manifest.pages[1]!;
+    const originalIds = manifest.pages.map(page => page.pageId);
+    const patch = addSlidePatch({ pageId: 'page-p4-before-generated', mode: 'before', referencePageId: reference.pageId });
+    const candidate = await applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate, revision: 2, patch });
+    expect(next.pages.map(page => page.pageId)).toEqual([originalIds[0], 'page-p4-before-generated', ...originalIds.slice(1)]);
+    expect(next.pages.find(page => page.pageId === originalIds[2])?.physicalPageNumber).toBe(4);
+    await expect(verifyPresentationIdentityManifest(candidate, next)).resolves.toBeDefined();
+  });
+
+  it('appends at end when the document has no recognizable closing page', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-identity-no-closing-'));
+    roots.push(root);
+    const outline = parseDocumentOutline(JSON.stringify({ kind: 'ppt', title: '无结束页', sections: [] }));
+    const generated = await generateTemporaryDocumentFile({ kind: 'ppt', outline, outputDirectory: root,
+      now: '2026-09-28T12:00:00.000Z', presentationTemplate: 'business_minimal' });
+    const buffer = await readFile(generated.temporaryPath);
+    const manifest = await buildPresentationIdentityManifest({ buffer, documentLineageId: 'lineage-no-closing', workId: 'work-no-closing',
+      fileId: 'file-no-closing', sourceExecutionId: 'execution-no-closing', revision: 1 });
+    const patch = addSlidePatch({ pageId: 'page-p4-append-generated', mode: 'end' });
+    const candidate = await applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate, revision: 2, patch });
+    expect(next.pages.at(-1)?.pageId).toBe('page-p4-append-generated');
+    expect((await readPptxDocument(candidate)).at(-1)?.contentText).toBe('');
+    await expect(verifyPresentationIdentityManifest(candidate, next)).resolves.toBeDefined();
+  });
+
+  it('uses pageId rather than duplicate page titles when choosing the insertion target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'unicomp-identity-duplicate-pages-'));
+    roots.push(root);
+    const outline = parseDocumentOutline(JSON.stringify({ kind: 'ppt', title: '重复页面标题', sections: [
+      { heading: '市场分析', level: 1, blocks: [{ type: 'paragraph', text: '第一份分析' }] },
+      { heading: '市场分析', level: 1, blocks: [{ type: 'paragraph', text: '第二份分析' }] }
+    ] }));
+    const generated = await generateTemporaryDocumentFile({ kind: 'ppt', outline, outputDirectory: root,
+      now: '2026-09-28T12:00:00.000Z', presentationTemplate: 'business_minimal' });
+    const buffer = await readFile(generated.temporaryPath);
+    const manifest = await buildPresentationIdentityManifest({ buffer, documentLineageId: 'lineage-duplicate-pages', workId: 'work-duplicate-pages',
+      fileId: 'file-duplicate-pages', sourceExecutionId: 'execution-duplicate-pages', revision: 1 });
+    const duplicateTitlePages = manifest.pages.filter(page => page.physicalPageNumber === 2 || page.physicalPageNumber === 3);
+    expect(duplicateTitlePages).toHaveLength(2);
+    const originalIds = manifest.pages.map(page => page.pageId);
+    const patch = addSlidePatch({ pageId: 'page-p4-duplicate-target', mode: 'after', referencePageId: duplicateTitlePages[1]!.pageId, title: '定向插入', titleElementId: 'element-p4-duplicate-title' });
+    const candidate = await applyPresentationMutationPatch({ buffer, manifest, patch });
+    const next = await carryForwardPresentationIdentityManifestForPatch({ previous: manifest, buffer: candidate, revision: 2, patch });
+    expect(next.pages.map(page => page.pageId)).toEqual([originalIds[0], originalIds[1], originalIds[2], 'page-p4-duplicate-target', ...originalIds.slice(3)]);
+    expect(next.pages[1]?.pageId).toBe(duplicateTitlePages[0]!.pageId);
+    expect(next.pages[2]?.pageId).toBe(duplicateTitlePages[1]!.pageId);
+    await expect(verifyPresentationIdentityManifest(candidate, next)).resolves.toBeDefined();
   });
 
   it.each(['rich_text', 'field'])('refuses %s mutation without flattening the object', async variant => {

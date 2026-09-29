@@ -71,7 +71,7 @@ function authorized(context: DocumentAtomicExecutionContext): boolean {
 }
 
 async function mutationId(context: DocumentAtomicExecutionContext): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify([context.projectContext.projectId, context.taskContext.taskId, context.callId]));
+  const bytes = new TextEncoder().encode(context.idempotencyKey);
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return `mutation-${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`;
 }

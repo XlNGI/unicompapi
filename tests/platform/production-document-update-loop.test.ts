@@ -36,6 +36,8 @@ const now = toIsoTimestamp('2026-09-28T12:00:00.000Z');
 const registry = createCanonicalToolRegistry();
 const reading = registry.get('read_document_structure')!;
 const updating = registry.get('update_element')!;
+const adding = registry.get('add_element')!;
+const deleting = registry.get('delete_element')!;
 const originalText = '年度销售目标';
 const firstText = '2027 年全球销售目标';
 const secondText = '2028 年全球销售目标';
@@ -51,11 +53,11 @@ interface WireMessage { readonly role: string; readonly content: string; readonl
 interface WireRequest { readonly model: string; readonly messages: readonly WireMessage[]; readonly tools?: readonly {
   readonly type: string; readonly function: { readonly name: string; readonly parameters: Record<string, unknown> }
 }[] }
-interface ElementObservation { readonly elementId: string; readonly kind: string; readonly text: string }
-interface ToolResult { readonly status: string; readonly observation?: { readonly page?: { readonly elements: readonly ElementObservation[] };
+interface ElementObservation { readonly elementId: string; readonly pageId?: string; readonly kind: string; readonly text: string }
+interface ToolResult { readonly status: string; readonly observation?: { readonly page?: { readonly pageId?: string; readonly elements: readonly ElementObservation[] };
   readonly elementId?: string; readonly changed?: boolean; readonly field?: string } }
 
-async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false) {
+async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mutationMode: 'update' | 'add-delete' = 'update') {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-production-update-'));
   roots.push(rootDirectory);
   const userDataDirectory = path.join(rootDirectory, 'test-profile');
@@ -101,6 +103,7 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false) {
   const errors: unknown[] = [];
   const readSpy = vi.spyOn(RegisteredPresentationReader.prototype, 'read');
   const mutateSpy = vi.spyOn(DocumentMutationCoordinator.prototype, 'updateText');
+  const genericMutateSpy = vi.spyOn(DocumentMutationCoordinator.prototype, 'mutate');
   const beginSpy = vi.spyOn(DocumentTaskRuntimeService.prototype, 'beginToolCall');
   const failureSpy = vi.spyOn(ConversationResponseExecutionLifecycle.prototype, 'failDeferredPublish');
   const calls: WireCall[] = [];
@@ -117,12 +120,43 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false) {
     expect(result.status).toBe('success');
     return result.observation!.page!.elements.find(element => element.elementId === target.elementId)!;
   };
+  const pageElements = (result: ToolResult): readonly ElementObservation[] => {
+    expect(result.status).toBe('success');
+    return result.observation!.page!.elements;
+  };
+  let addedElementId: string | undefined;
   const transport = { send: async (request: { readonly body?: Uint8Array }): Promise<NewApiHttpTransportResponse> => {
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
     requests.push(payload);
     let next: WireCall;
     if (requests.length === 1) {
       next = call('read-target-1', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (mutationMode === 'add-delete' && requests.length === 2) {
+      const observed = pageElement(resultFor(payload, 'read-target-1'));
+      expect(observed.text).toBe(originalText);
+      const pageId = resultFor(payload, 'read-target-1').observation?.page?.pageId;
+      expect(pageId).toBe(target.pageId);
+      next = call('add-target-2', adding.toolId, { pageId, type: 'text', text: originalText, placement: 'default' });
+    } else if (mutationMode === 'add-delete' && requests.length === 3) {
+      const added = resultFor(payload, 'add-target-2');
+      expect(added).toMatchObject({ status: 'success', observation: { pageId: target.pageId, operation: 'added' } });
+      addedElementId = added.observation?.elementId;
+      expect(addedElementId).toMatch(/^element-[a-f0-9]{48}$/u);
+      next = call('read-after-add-3', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (mutationMode === 'add-delete' && requests.length === 4) {
+      const elements = pageElements(resultFor(payload, 'read-after-add-3'));
+      expect(elements.filter(element => element.text === originalText)).toHaveLength(2);
+      expect(new Set(elements.filter(element => element.text === originalText).map(element => element.elementId)).size).toBe(2);
+      expect(addedElementId).toBeDefined();
+      next = call('delete-added-4', deleting.toolId, { elementId: addedElementId });
+    } else if (mutationMode === 'add-delete' && requests.length === 5) {
+      expect(resultFor(payload, 'delete-added-4')).toMatchObject({ status: 'success', observation: { elementId: addedElementId, operation: 'deleted' } });
+      next = call('read-after-delete-5', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (mutationMode === 'add-delete' && requests.length === 6) {
+      const elements = pageElements(resultFor(payload, 'read-after-delete-5'));
+      expect(elements.filter(element => element.text === originalText)).toHaveLength(1);
+      expect(elements.some(element => element.elementId === addedElementId)).toBe(false);
+      return stream(provider.modelKey, { content: '已从真实文件核验：新增后删除成功，其他元素身份保持稳定。' }, 'stop');
     } else if (requests.length === 2) {
       const observed = pageElement(resultFor(payload, 'read-target-1'));
       expect(observed.text).toBe(originalText);
@@ -168,9 +202,11 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false) {
     if (!candidates.ok) throw new Error('Candidates failed: ' + candidates.error.code);
     const candidate = candidates.value.find(item => item.available);
     if (!candidate) throw new Error('No candidate');
-    const started = await runtime.responses.start({ clientCommandId: 'start-production-update',
+    const started = await runtime.responses.start({ clientCommandId: mutationMode === 'update' ? 'start-production-update' : 'start-production-add-delete',
       conversation: { conversationId: conversation.id, expectedRevision: conversation.revision, editedMessageId: null }, title: conversation.title,
-      content: '把当前 PPT 第二页的“年度销售目标”改成“2027 年全球销售目标”，读取核验后，再改成“2028 年全球销售目标”并再次读取第二页核验，最后简短告诉我结果。',
+      content: mutationMode === 'update'
+        ? '把当前 PPT 第二页的“年度销售目标”改成“2027 年全球销售目标”，读取核验后，再改成“2028 年全球销售目标”并再次读取第二页核验，最后简短告诉我结果。'
+        : '在当前 PPT 第二页新增一句“年度销售目标”，读取真实文件核验后，再删除刚才新增的那一句并再次读取第二页核验，最后简短告诉我结果。',
       productFeature: 'text_chat', candidateId: candidate.candidateId, contextSelections: [], parameterValues: {}, confirmed: true });
     if (!started.ok) throw new Error('Start failed: ' + started.error.code);
     const executionId = started.value.execution.responseExecutionId;
@@ -186,7 +222,8 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false) {
     return current.value;
   }
   return { run, rootDirectory, storage, works, files, identityStore, headStore, identity, source, sourceRead, target, duplicate,
-    requests, errors, calls, render, readSpy, mutateSpy, beginSpy, failureSpy, updatePrepared, releaseLateCall,
+    requests, errors, calls, render, readSpy, mutateSpy, genericMutateSpy, beginSpy, failureSpy, updatePrepared, releaseLateCall,
+    addedElementId: () => addedElementId,
     cancel: async () => {
       if (!activeExecutionId) throw new Error('Execution not started');
       return runtime.responses.cancelExecution({ responseExecutionId: activeExecutionId });
@@ -219,7 +256,7 @@ describe('production NewAPI update_element continuation', () => {
     const old = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(data.source.work.id);
     expect(await readIdentityElementText(old.buffer, data.identity, data.target.elementId)).toBe(originalText);
     for (const request of data.requests) {
-      expect(request.tools?.map(tool => tool.function.name).sort()).toEqual([reading.toolId, updating.toolId].sort());
+      expect(request.tools?.map(tool => tool.function.name).sort()).toEqual([reading.toolId, updating.toolId, 'add_element', 'add_slide', 'delete_element'].sort());
       for (const tool of request.tools!) expect(tool.function.parameters).toEqual(canonicalToolInputSchema(registry.get(tool.function.name as 'update_element')!));
     }
     const final = data.requests.at(-1)!;
@@ -253,6 +290,60 @@ describe('production NewAPI update_element continuation', () => {
     expect(data.mutateSpy).not.toHaveBeenCalled();
     expect(await data.works.list(projectId)).toHaveLength(1);
     expect((await data.headStore.get(data.identity.documentLineageId))?.headWorkId).toBe(data.source.work.id);
+  }, 20_000);
+
+  it('adds a third duplicate text, reads the real file, then deletes only the returned identity', async () => {
+    const data = await fixture(false, false, 'add-delete');
+    const execution = await data.run();
+    expect(execution.state).toBe('completed');
+    expect(execution.content).toBe('已从真实文件核验：新增后删除成功，其他元素身份保持稳定。');
+    expect(data.errors).toEqual([]);
+    expect(data.requests).toHaveLength(6);
+    expect(data.genericMutateSpy).toHaveBeenCalledTimes(2);
+    const addedElementId = data.addedElementId();
+    expect(addedElementId).toMatch(/^element-[a-f0-9]{48}$/u);
+    const addedMutation = await data.genericMutateSpy.mock.results[0]!.value as {
+      readonly candidate?: { readonly pin: { readonly headWorkId: string } }
+    };
+    expect(addedMutation.candidate).toBeDefined();
+    const addedRead = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(toWorkId(addedMutation.candidate!.pin.headWorkId));
+    const addedIdentity = (await data.identityStore.getForWork(addedMutation.candidate!.pin.headWorkId))!;
+    expect(addedIdentity.elements.filter(element => element.text === originalText)).toHaveLength(3);
+    expect(await readIdentityElementText(addedRead.buffer, addedIdentity, addedElementId!)).toBe(originalText);
+    const head = (await data.headStore.get(data.identity.documentLineageId))!;
+    expect(head.runtimeRevision).toBe(3);
+    expect(await data.works.list(projectId)).toHaveLength(3);
+    const currentIdentity = (await data.identityStore.getForWork(head.headWorkId))!;
+    expect(currentIdentity.elements.map(element => element.elementId)).toEqual(data.identity.elements.map(element => element.elementId));
+    expect(currentIdentity.tombstones).toContainEqual({ elementId: addedElementId, pageId: data.target.pageId, revision: 3 });
+    const actual = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(toWorkId(head.headWorkId));
+    expect(await readIdentityElementText(actual.buffer, currentIdentity, data.target.elementId)).toBe(originalText);
+    expect(await readIdentityElementText(actual.buffer, currentIdentity, data.duplicate.elementId)).toBe(originalText);
+    await expect(readIdentityElementText(actual.buffer, currentIdentity, addedElementId!)).rejects.toMatchObject({ code: 'identity_unresolved' });
+
+    for (const request of data.requests) {
+      expect(request.model).toBe('synthetic-newapi-text');
+      expect(request.tools?.map(tool => tool.function.name).sort()).toEqual([reading.toolId, updating.toolId, adding.toolId, 'add_slide', deleting.toolId].sort());
+      for (const tool of request.tools!) expect(tool.function.parameters).toEqual(canonicalToolInputSchema(registry.get(tool.function.name as 'update_element')!));
+    }
+    expect(data.calls.map(call => call.function.name)).toEqual([
+      reading.toolId, adding.toolId, reading.toolId, deleting.toolId, reading.toolId
+    ]);
+    const addCall = data.calls.find(call => call.function.name === adding.toolId)!;
+    const deleteCall = data.calls.find(call => call.function.name === deleting.toolId)!;
+    expect(JSON.parse(addCall.function.arguments)).toEqual({ pageId: data.target.pageId, type: 'text', text: originalText, placement: 'default' });
+    expect(JSON.parse(deleteCall.function.arguments)).toEqual({ elementId: addedElementId });
+    const final = data.requests.at(-1)!;
+    const outgoing = JSON.stringify(data.requests) + data.requests.flatMap(request => request.messages.filter(message => message.role === 'tool').map(message => message.content)).join('\n');
+    for (const hidden of [data.rootDirectory, data.identity.documentLineageId, head.checksumSha256,
+      ...((await data.works.list(projectId)).flatMap(work => [work.id, work.fileId, work.sourceExecutionId])),
+      '"rootDirectory"', '"relativePath"', '"slidePart"', '"shapeId"', '"identityIndexVersion"', '"manifest"',
+      '"currentDocumentIR"', '"authorization"', '"abortSignal"', '"projectContext"', '"taskContext"', '"irPatch"']) expect(outgoing).not.toContain(hidden);
+    expect(final.messages.filter(message => message.role === 'assistant' && message.tool_calls).flatMap(message => message.tool_calls!)).toEqual(data.calls);
+    const runtimes = await new JsonDocumentTaskRuntimeRepository(data.storage, projectId).list();
+    expect(runtimes.some(runtime => runtime.toolCalls.some(call => call.toolId === adding.toolId && call.status === 'completed'))).toBe(true);
+    expect(runtimes.some(runtime => runtime.toolCalls.some(call => call.toolId === deleting.toolId && call.status === 'completed'))).toBe(true);
+    expect(data.render.mock.calls.length).toBeGreaterThanOrEqual(3);
   }, 20_000);
 
   it('cancels through Runtime before adapter start and ignores the late provider update call', async () => {

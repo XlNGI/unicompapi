@@ -41,6 +41,7 @@ function ports(initial: DocumentMutationHead) {
     }),
     materialize: vi.fn<DocumentMutationPorts['materialize']>(async ({ head: base, patch, mutationId }) => {
       const buffer = await applyPresentationTextPatch({ buffer: base.buffer, manifest: base.identity, patch });
+      if (patch.operations[0].op !== 'update_text') throw new Error('update_fixture_only');
       const carried = await carryForwardPresentationIdentityManifest({ previous: base.identity, buffer, revision: base.pin.runtimeRevision + 1,
         targetElementId: patch.operations[0].target.elementId, targetText: patch.operations[0].text,
         fileId: `file-${mutationId}`, sourceExecutionId: `execution-${mutationId}` });

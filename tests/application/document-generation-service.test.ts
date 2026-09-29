@@ -3,6 +3,7 @@ import type { DocumentGenerationProgressCallback, DocumentGenerationProgressEven
 import {
   ConversationApplicationError,
   collectRevisionRequestText,
+  collectArtDirectionRequestText,
   DocumentDraftCompilationError,
   DocumentGenerationApplicationService,
   type DocumentGenerationExecutionInput,
@@ -35,6 +36,16 @@ const messageId = toMessageId('document-application-message');
 const now = toIsoTimestamp('2026-08-27T00:00:00.000Z');
 
 describe('semantic document revisions', () => {
+  it('keeps the original visual brief across an outline and confirmation turn', () => {
+    const initial = addUserMessage(createConversation({ id: conversationId, title: 'brief', projectId, createdAt: now }),
+      { id: toMessageId('brief-user'), content: '左侧强结论，右侧两个指标，留白较多', createdAt: now });
+    const outlineConversation = appendCompletedAssistantMessage(initial, messageId, 'validated outline');
+    const withConfirmation = addUserMessage(outlineConversation, { id: toMessageId('confirm-user'), content: '确认生成', createdAt: now });
+    const assistant = appendCompletedAssistantMessage(withConfirmation, toMessageId('design-assistant'), 'validated outline');
+    expect(collectArtDirectionRequestText(assistant, toMessageId('design-assistant'))).toContain('左侧强结论');
+    expect(collectArtDirectionRequestText(assistant, toMessageId('design-assistant'))).toContain('确认生成');
+  });
+
   it('preserves untargeted chapters while applying the requested ordinal chapter', () => {
     const previous = {
       kind: 'ppt' as const,

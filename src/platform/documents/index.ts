@@ -6,6 +6,8 @@ export * from './temporary-document-workflow';
 export * from './repair-workflow';
 export * from './document-publish-workflow';
 export * from './office-document-generator';
+export * from './presentation-design-compiler';
+export * from './presentation-design-renderer';
 export * from './document-generation-runner';
 export * from './document-generation-application-adapters';
 export * from './file-extraction-service';

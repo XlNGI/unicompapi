@@ -81,7 +81,7 @@ export class DocumentMutationCoordinator {
 
   constructor(private readonly ports: DocumentMutationPorts) {}
 
-  async updateText(input: MutationInput): Promise<DocumentMutationResult> {
+  async mutate(input: MutationInput): Promise<DocumentMutationResult> {
     let patch: DocumentIRPatch;
     let fingerprint: string;
     try {
@@ -99,6 +99,11 @@ export class DocumentMutationCoordinator {
     try { return await result; }
     catch { return this.uncertain(input, fingerprint); }
     finally { this.pending.delete(input.idempotencyKey); }
+  }
+
+  /** Kept as a source-compatible alias for the P2 update binding. */
+  async updateText(input: MutationInput): Promise<DocumentMutationResult> {
+    return this.mutate(input);
   }
 
   private async run(input: MutationInput, patch: DocumentIRPatch, fingerprint: string): Promise<DocumentMutationResult> {
@@ -268,8 +273,9 @@ function assertCandidateVersion(base: DocumentVersionPin, candidate: DocumentVer
 }
 
 function safeDiagnostic(error: unknown, fallback: string): string {
-  const known = new Set(['identity_unresolved', 'identity_ambiguous', 'identity_stale', 'revision_conflict',
-    'authorization_denied', 'cancelled', 'materialization_failed', 'qa_failed', 'commit_failed']);
+  const known = new Set(['identity_unresolved', 'identity_ambiguous', 'identity_pin_mismatch', 'identity_stale', 'revision_conflict',
+    'authorization_denied', 'cancelled', 'materialization_failed', 'qa_failed', 'commit_failed',
+    'page_not_found', 'page_order_unresolved', 'element_not_found', 'identity_creation_failed']);
   if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && known.has(error.code)) return error.code;
   return error instanceof Error && known.has(error.message) ? error.message : fallback;
 }
