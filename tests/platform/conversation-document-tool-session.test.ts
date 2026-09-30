@@ -279,7 +279,7 @@ describe('production registered document read sessions', () => {
       createdAt: now
     });
     const selection = await service.prepare({ conversation: request.conversation, draft });
-    expect(selection).toMatchObject({ kind: 'mutation', writeAuthorized: true, workId: data.first.work.id });
+    expect(selection).toMatchObject({ kind: 'agent', mutation: { kind: 'mutation', writeAuthorized: true, workId: data.first.work.id } });
   });
 
   it('does not attach tools to an internal generation prompt or a different project', async () => {

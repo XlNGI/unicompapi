@@ -29,7 +29,7 @@ import type { SubmissionArtifactFactoryPort } from './provider-submission-orches
 import type { ConversationAttachmentContextService } from '../documents/conversation-attachment-context';
 import { ConversationAttachmentError } from '../documents/conversation-attachment-context';
 import { ConversationDocumentPageError, resolveConversationResponseDocumentPages, type ConversationDocumentPageContextService } from '../documents/conversation-document-page-context';
-import { buildDocumentReadToolInstruction, buildDocumentGenerationToolInstruction, buildDocumentMutationToolInstruction, type ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
+import { buildAgentToolInstruction, buildDocumentReadToolInstruction, buildDocumentGenerationToolInstruction, buildDocumentMutationToolInstruction, type ConversationDocumentToolSessionService } from '../documents/conversation-document-tool-session';
 import { buildDocumentGenerationConversationInstruction, isPptGenerationIntent } from '../documents/conversation-document-tool-session';
 
 export interface ConversationResponseArtifactFactoryDependencies {
@@ -89,14 +89,17 @@ export class ConversationResponseArtifactFactory
     }
     const nativeSearch = await this.dependencies.nativeSearch?.dispatch(draft, input.candidate);
     const toolSelection = await this.dependencies.documentTools?.prepare({ conversation, draft });
+    const bindsExistingDocument = toolSelection !== undefined &&
+      (!('kind' in toolSelection) || toolSelection.kind === 'mutation' ||
+        (toolSelection.kind === 'agent' && toolSelection.mutation !== undefined));
     if (toolSelection && (nativeSearch || !input.subject.contextContentHashes.includes(toolSelection.bindingHash))) {
       throw new ConversationDocumentPageError('document_page_unavailable', '文档读取授权范围或版本已变化，请重新提交。');
     }
-    const pageReferences = toolSelection ? [] : await resolveConversationResponseDocumentPages({
+    const pageReferences = bindsExistingDocument ? [] : await resolveConversationResponseDocumentPages({
       conversation, draft, service: this.dependencies.documentPages
     });
     const selectedContexts = [];
-    for (const selection of pageReferences.length || toolSelection ? [] : draft.contextSelections) {
+    for (const selection of pageReferences.length || bindsExistingDocument ? [] : draft.contextSelections) {
       const context = await this.dependencies.contexts.get(selection.contextId);
       if (context) selectedContexts.push(context);
     }
@@ -104,7 +107,7 @@ export class ConversationResponseArtifactFactory
       projectId: this.dependencies.conversations.projectId,
       surface: 'conversation',
       contexts: selectedContexts,
-      selections: pageReferences.length || toolSelection ? [] : draft.contextSelections
+      selections: pageReferences.length || bindsExistingDocument ? [] : draft.contextSelections
     });
     if (pageReferences.some((reference) => !input.subject.contextContentHashes?.includes(reference.contentHash))) {
       throw new ConversationDocumentPageError('document_page_unavailable', '作品页面在请求准备后发生变化，请重新核对后再提问。');
@@ -113,7 +116,7 @@ export class ConversationResponseArtifactFactory
     if (draft.imageQuery && (!imageInput || input.subject.imageCount !== 1 || !input.subject.materialReferences.some(item => item.referenceId === imageInput.fileId) || !input.subject.contextContentHashes.includes(imageInput.image.checksumSha256))) {
       throw new ConversationAttachmentError('attachment_changed', '图片与已确认的发送范围不一致，请重新确认。');
     }
-    const attachmentReferences = pageReferences.length || toolSelection ? [] : await this.dependencies.attachments?.resolve({
+    const attachmentReferences = pageReferences.length || bindsExistingDocument ? [] : await this.dependencies.attachments?.resolve({
       conversation,
       currentUserMessageId: draft.userMessageId,
       query: draft.attachmentQuery ?? userMessage.displayContent ?? userMessage.content,
@@ -148,7 +151,13 @@ export class ConversationResponseArtifactFactory
       throw new ConversationDocumentPageError('document_page_scope_exceeded', '目标页面超过本次完整读取预算，请缩小问题范围后继续。');
     }
     const messages = toolSelection ? [
-      { role: 'system' as const, content: 'kind' in toolSelection ? (toolSelection.kind === 'generation' ? buildDocumentGenerationToolInstruction(toolSelection) : buildDocumentMutationToolInstruction(toolSelection)) : buildDocumentReadToolInstruction(toolSelection) },
+      { role: 'system' as const, content: 'kind' in toolSelection
+        ? toolSelection.kind === 'generation'
+          ? buildDocumentGenerationToolInstruction(toolSelection)
+          : toolSelection.kind === 'mutation'
+            ? buildDocumentMutationToolInstruction(toolSelection)
+            : buildAgentToolInstruction()
+        : buildDocumentReadToolInstruction(toolSelection) },
       ...contextEnvelope.messages
     ] : isPptGenerationIntent(userMessage.content) ? [
       { role: 'system' as const, content: buildDocumentGenerationConversationInstruction() },

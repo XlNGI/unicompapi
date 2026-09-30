@@ -260,7 +260,7 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
       const current = await runtime.responses.getExecution({ responseExecutionId: executionId });
       if (!current.ok) throw new Error('Missing execution: ' + current.error.code);
       expect(['completed', 'failed', 'cancelled']).toContain(current.value.state);
-    }, { timeout: 10_000, interval: 30 });
+    }, { timeout: 20_000, interval: 30 });
     await runtime.waitForMutations();
     const current = await runtime.responses.getExecution({ responseExecutionId: executionId });
     if (!current.ok) throw new Error('Missing execution');

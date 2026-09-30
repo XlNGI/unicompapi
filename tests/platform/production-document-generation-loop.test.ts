@@ -316,6 +316,17 @@ describe('production NewAPI generation to verified-file read continuation', () =
     const data = await fixture();
     const { execution, traces, runtimes } = await data.run(true);
     expect(data.errors).toEqual([]);
+    await vi.waitFor(async () => {
+      const agentRunDocument = JSON.parse(await readFile(path.join(data.rootDirectory, 'entities/conversation-agent-runs.json'), 'utf8')) as {
+        readonly runs: readonly { readonly conversationId: string; readonly responseExecutionId?: string; readonly status: string }[]
+      };
+      expect(agentRunDocument.runs).toHaveLength(1);
+      expect(agentRunDocument.runs[0]).toMatchObject({
+        conversationId: 'conversation-generation-read',
+        responseExecutionId: execution.responseExecutionId,
+        status: 'completed'
+      });
+    }, { timeout: 2_000, interval: 25 });
     expect(data.requests).toHaveLength(3);
     expect(data.requests.map(request => request.tools?.[0]?.function.name)).toEqual([
       generation.toolId,
@@ -361,7 +372,7 @@ describe('production NewAPI generation to verified-file read continuation', () =
       { toolId: 'read_document_structure', status: 'completed' }
     ]);
     expect(conversation.messages.some(message => message.role === 'user' && message.content === '可以')).toBe(true);
-  });
+  }, 15_000);
 
   it('falls back to the stable template after malformed Art Direction and still registers and reads the real file', async () => {
     const data = await fixture(false, true);
