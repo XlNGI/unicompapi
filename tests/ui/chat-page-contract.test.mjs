@@ -156,6 +156,13 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /等待保存消息/);
   assert.doesNotMatch(source, /setSelectedCandidateId\(candidates\.value\[0\]/);
   assert.match(source, /chat\.listConversations\(true, false\)/);
+  assert.match(source, /uc-chat-page__workspace-sidebar/);
+  assert.match(source, /storage\.listProjects\(\)/);
+  assert.match(source, /storage\.openRecentProject\(projectId\)/);
+  assert.match(source, /<Button[\s\S]*新建项目/);
+  assert.match(styles, /\.uc-chat-page\s*\{[\s\S]*grid-template-columns: 286px minmax\(0, 1fr\);/);
+  assert.match(styles, /\.uc-chat-page__workspace-sidebar\s*\{[\s\S]*grid-column: 1;/);
+  assert.match(appSource, /activeItemId === 'projects' && !activeSubItemId \?[\s\S]*<ChatPage/);
   assert.match(source, /key: 'archive'/);
   assert.match(source, /key: 'restore'/);
   assert.doesNotMatch(source, /新建项目对话|创建项目对话/);

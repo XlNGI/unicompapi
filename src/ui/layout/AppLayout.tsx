@@ -42,7 +42,7 @@ export function AppLayout({
         'video-editing': '视频编辑'
       } as Record<string, string>)[activeSubItemId]
     : ({
-        projects: '项目',
+        projects: '项目工作台',
         chat: '对话',
         'image-creation': '图片创作',
         'video-creation': '视频创作',

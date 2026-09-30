@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import {
   LuArchive,
   LuArchiveRestore,
   LuArrowDown,
   LuArrowUp,
   LuCheck,
+  LuChevronRight,
   LuCopy,
   LuFileText,
+  LuFolderKanban,
   LuMessageSquarePlus,
   LuMessagesSquare,
   LuPaperclip,
   LuPanelRight,
+  LuPlus,
+  LuSearch,
   LuTerminal,
   LuPencil,
   LuSquare,
@@ -30,6 +35,7 @@ import type { ProductionTraceEventDto } from '../../shared/conversation-producti
 import { projectTaskProgress } from '../../shared/conversation-task-progress';
 import { ModelSelect } from '../../components/ModelSelect';
 import { StatusPill } from '../../components/StatusPill';
+import { ProjectsPage } from '../projects/ProjectsPage';
 import type {
   ChatContextIpcErrorCode,
   ConversationDto,
@@ -46,7 +52,10 @@ import type {
   WebResearchReferenceDto,
   WebResearchSessionDto
 } from '../../shared/web-research-ipc';
-import type { StorageProjectSessionDto } from '../../shared/storage-ipc';
+import type {
+  StorageProjectSessionDto,
+  StorageProjectSummaryDto
+} from '../../shared/storage-ipc';
 import type { DocumentExtractionStatus } from '../../shared/document-attachment-ipc';
 import { composeWorkflowRequirements, composeResearchInput } from './workflowInput';
 import {
@@ -56,7 +65,10 @@ import {
   extractSectionHeadings,
   resolvePresentationTemplate
 } from './documentDrafting';
-import { PROJECT_SESSION_CHANGED_EVENT } from '../../ui/project-session-events';
+import {
+  notifyProjectSessionChanged,
+  PROJECT_SESSION_CHANGED_EVENT
+} from '../../ui/project-session-events';
 import { failedResponseNotice } from '../../ui/chat-response-failure-notice';
 import {
   parseDeterministicClearRevisionTarget,
@@ -318,6 +330,7 @@ interface ChatPageProps {
   readonly initialModelSelection?: ChatModelSelection;
   readonly onModelSelectionChange?: (selection?: ChatModelSelection) => void;
   readonly onOpenLibrary?: () => void;
+  readonly onNavigateToCreation?: (itemId: 'image-creation' | 'video-creation') => void;
 }
 
 function formatBytes(value?: number): string {
@@ -484,7 +497,8 @@ export function ChatPage({
   onConversationChange,
   initialModelSelection,
   onModelSelectionChange,
-  onOpenLibrary
+  onOpenLibrary,
+  onNavigateToCreation
 }: ChatPageProps) {
   const chat = window.unicomp?.chatContexts;
   const productionTrace = window.unicomp?.productionTrace;
@@ -494,6 +508,11 @@ export function ChatPage({
   const imageFeatures = window.unicomp?.imageFeatures;
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
+  const [projects, setProjects] = useState<readonly StorageProjectSummaryDto[]>([]);
+  const [projectSearch, setProjectSearch] = useState('');
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectManagementOpen, setProjectManagementOpen] = useState(false);
+  const [projectCreateName, setProjectCreateName] = useState('');
   const [conversations, setConversations] = useState<readonly ConversationDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | undefined>(initialConversationId);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -650,6 +669,13 @@ export function ChatPage({
     });
     return [...groups.entries()];
   }, [conversations]);
+  const visibleProjects = useMemo(() => {
+    const keyword = projectSearch.trim().toLocaleLowerCase();
+    if (!keyword) return projects;
+    return projects.filter((project) =>
+      project.projectName.toLocaleLowerCase().includes(keyword)
+    );
+  }, [projectSearch, projects]);
   const responseInProgress = Boolean(
     responseStarting ||
     (responseExecution && ['pending', 'streaming'].includes(responseExecution.state))
@@ -667,9 +693,13 @@ export function ChatPage({
         return;
       }
       try {
-        const [sessionResult, conversationResult] = await Promise.all([
+        const projectListPromise = typeof storage.listProjects === 'function'
+          ? storage.listProjects()
+          : Promise.resolve({ ok: true as const, value: [] as readonly StorageProjectSummaryDto[] });
+        const [sessionResult, conversationResult, projectsResult] = await Promise.all([
           storage.getProjectSession(),
-          chat.listConversations(true, false)
+          chat.listConversations(true, false),
+          projectListPromise
         ]);
         if (!active) return;
         if (sessionResult.ok) {
@@ -730,6 +760,9 @@ export function ChatPage({
           );
         } else {
           setNotice(errorMessages[conversationResult.error.code]);
+        }
+        if (projectsResult.ok) {
+          setProjects(projectsResult.value);
         }
         if (sessionResult.ok && sessionResult.value) {
           const contexts = await chat.listProjectContextCandidates();
@@ -3091,6 +3124,77 @@ export function ChatPage({
     }
   }
 
+  async function switchProject(projectId: string) {
+    if (!storage || busy || responseInProgress || documentGenerationActive || projectId === session?.projectId) return;
+    setBusy(true);
+    setNotice('');
+    try {
+      const result = await storage.openRecentProject(projectId);
+      if (!result.ok) {
+        setNotice(result.error.message || '打开项目失败，请重试。');
+        return;
+      }
+      if (!result.value.session) return;
+      setSession(result.value.session);
+      setSelectedId(undefined);
+      setConversations([]);
+      notifyProjectSessionChanged();
+    } catch {
+      setNotice('打开项目失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openLocalProject() {
+    if (!storage || busy || responseInProgress || documentGenerationActive) return;
+    setBusy(true);
+    setNotice('');
+    try {
+      const result = await storage.openProject();
+      if (!result.ok) {
+        setNotice(result.error.message || '打开项目失败，请重试。');
+        return;
+      }
+      if (!result.value.session) return;
+      setSession(result.value.session);
+      setSelectedId(undefined);
+      setConversations([]);
+      notifyProjectSessionChanged();
+    } catch {
+      setNotice('打开项目失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = projectCreateName.trim();
+    if (!storage || !name || busy || responseInProgress || documentGenerationActive) return;
+    setBusy(true);
+    setNotice('');
+    try {
+      const result = await storage.createProject(name);
+      if (!result.ok) {
+        setNotice(result.error.message || '创建项目失败，请重试。');
+        return;
+      }
+      setProjectCreateName('');
+      setProjectCreateOpen(false);
+      if (result.value.session) {
+        setSession(result.value.session);
+        setSelectedId(undefined);
+        setConversations([]);
+        notifyProjectSessionChanged();
+      }
+    } catch {
+      setNotice('创建项目失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section
       aria-labelledby="chat-page-title"
@@ -3100,6 +3204,126 @@ export function ChatPage({
       onDragOver={handlePageDragOver}
       onDrop={handlePageDrop}
     >
+      <aside className="uc-chat-page__workspace-sidebar" aria-label="项目和对话">
+        <header className="uc-chat-page__workspace-heading">
+          <h2>项目工作台</h2>
+          <span>{session?.projectName ?? '尚未打开项目'}</span>
+        </header>
+        <Button
+          className="uc-chat-page__new-conversation"
+          disabled={!session || busy || responseInProgress}
+          onClick={startNewConversation}
+        >
+          <LuPlus aria-hidden="true" />
+          新建对话
+        </Button>
+        <label className="uc-chat-page__project-search">
+          <LuSearch aria-hidden="true" />
+          <span className="uc-visually-hidden">搜索项目或对话</span>
+          <input
+            aria-label="搜索项目或对话"
+            onChange={(event) => setProjectSearch(event.currentTarget.value)}
+            placeholder="搜索项目或对话"
+            value={projectSearch}
+          />
+        </label>
+        <div className="uc-chat-page__workspace-scroll">
+          <section className="uc-chat-page__project-list" aria-labelledby="chat-project-list-title">
+            <h3 id="chat-project-list-title">项目</h3>
+            {loading && projects.length === 0 ? (
+              <p className="uc-chat-page__workspace-hint">正在读取项目…</p>
+            ) : visibleProjects.length === 0 ? (
+              <p className="uc-chat-page__workspace-hint">暂无匹配项目</p>
+            ) : (
+              visibleProjects.map((project) => {
+                const isCurrent = project.projectId === session?.projectId;
+                return (
+                  <div className="uc-chat-page__project-group" key={project.projectId}>
+                    <button
+                      aria-current={isCurrent ? 'true' : undefined}
+                      className={isCurrent ? 'uc-chat-page__project-item is-current' : 'uc-chat-page__project-item'}
+                      disabled={project.availability !== 'available' || busy}
+                      onClick={() => void switchProject(project.projectId)}
+                      title={project.availability === 'available' ? `打开项目：${project.projectName}` : '项目当前不可用'}
+                      type="button"
+                    >
+                      <LuFolderKanban aria-hidden="true" />
+                      <span>{project.projectName}</span>
+                      <LuChevronRight aria-hidden="true" />
+                    </button>
+                    {isCurrent ? (
+                      <div className="uc-chat-page__workspace-conversations">
+                        <small>当前项目 · {conversations.length} 个对话</small>
+                        {conversationGroups.length === 0 ? (
+                          <p className="uc-chat-page__workspace-hint">发送第一条消息后，对话会显示在这里。</p>
+                        ) : conversationGroups.map(([label, items]) => (
+                          <section className="uc-chat-page__workspace-conversation-group" key={label}>
+                            <h4>{label}</h4>
+                            {items.map((conversation) => (
+                              <div
+                                aria-current={conversation.conversationId === selectedId ? 'true' : undefined}
+                                className="uc-chat-page__workspace-conversation-row"
+                                key={conversation.conversationId}
+                              >
+                                <button
+                                  className="uc-chat-page__workspace-conversation"
+                                  onClick={() => selectConversation(conversation.conversationId)}
+                                  type="button"
+                                >
+                                  <LuMessagesSquare aria-hidden="true" />
+                                  <span>{conversation.title}</span>
+                                </button>
+                                {!conversation.readOnly ? (
+                                  <ActionMenu
+                                    ariaLabel={`管理对话：${conversation.title}`}
+                                    className="uc-chat-page__history-menu"
+                                    items={[
+                                      { key: 'rename', label: '重命名' },
+                                      ...(conversation.status === 'active'
+                                        ? [{ key: 'archive', label: '归档', icon: <LuArchive aria-hidden="true" /> }]
+                                        : [{ key: 'restore', label: '恢复对话', icon: <LuArchiveRestore aria-hidden="true" /> }]),
+                                      { key: 'delete', label: '删除', icon: <LuTrash2 aria-hidden="true" />, danger: true, separatorBefore: true }
+                                    ]}
+                                    onSelect={(eventKey) => {
+                                      if (eventKey === 'rename') {
+                                        setRenameTitle(conversation.title);
+                                        setRenamingConversationId(conversation.conversationId);
+                                      } else if (eventKey === 'archive' || eventKey === 'restore') {
+                                        void mutateConversation(conversation, eventKey);
+                                      } else if (eventKey === 'delete') {
+                                        setDeleteTarget({ kind: 'conversation', value: conversation });
+                                      }
+                                    }}
+                                    toggleClassName="uc-chat-page__icon-button"
+                                  />
+                                ) : null}
+                              </div>
+                            ))}
+                          </section>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </section>
+        </div>
+        <footer className="uc-chat-page__workspace-actions">
+          <Button disabled={busy || responseInProgress} onClick={() => setProjectManagementOpen(true)} variant="ghost">
+            <LuFolderKanban aria-hidden="true" />
+            管理项目
+          </Button>
+          <Button disabled={busy || responseInProgress} onClick={() => setProjectCreateOpen(true)} variant="ghost">
+            <LuPlus aria-hidden="true" />
+            新建项目
+          </Button>
+          <Button disabled={busy || responseInProgress} onClick={() => void openLocalProject()} variant="ghost">
+            <LuFolderKanban aria-hidden="true" />
+            打开本地项目
+          </Button>
+        </footer>
+      </aside>
       <section className="uc-chat-page__conversation" aria-label="当前对话">
         <header className="uc-chat-page__header">
           <div className="uc-chat-page__title-block">
@@ -3130,6 +3354,7 @@ export function ChatPage({
               <Button
                 aria-label="打开对话列表"
                 aria-expanded={historyOpen}
+                className="uc-chat-page__history-toggle"
                 onClick={() => {
                   setContextOpen(false);
                   setHistoryOpen(true);
@@ -3814,6 +4039,50 @@ export function ChatPage({
           )}
         </Drawer.Body>
       </Drawer>
+
+      <Modal
+        className="uc-chat-page__project-create-dialog"
+        onClose={() => setProjectCreateOpen(false)}
+        open={projectCreateOpen}
+        size="xs"
+      >
+        <Modal.Header>
+          <Modal.Title>新建项目</Modal.Title>
+        </Modal.Header>
+        <form onSubmit={(event) => void createProject(event)}>
+          <Modal.Body>
+            <label className="uc-chat-page__project-create-field" htmlFor="chat-project-name">
+              项目名称
+              <Input
+                autoFocus
+                id="chat-project-name"
+                maxLength={100}
+                onChange={setProjectCreateName}
+                placeholder="例如：产品宣传片"
+                value={projectCreateName}
+              />
+            </label>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button disabled={busy || !projectCreateName.trim()} type="submit">创建并打开</Button>
+            <Button disabled={busy} onClick={() => setProjectCreateOpen(false)} variant="secondary">取消</Button>
+          </Modal.Footer>
+        </form>
+      </Modal>
+
+      <Modal
+        className="uc-chat-page__project-management-dialog"
+        onClose={() => setProjectManagementOpen(false)}
+        open={projectManagementOpen}
+        size="lg"
+      >
+        <Modal.Header>
+          <Modal.Title>项目管理</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <ProjectsPage onNavigate={onNavigateToCreation} />
+        </Modal.Body>
+      </Modal>
 
       <Modal
         className="uc-chat-page__rename-dialog"

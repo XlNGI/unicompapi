@@ -78,7 +78,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <nav className="nav-list" aria-label="主导航">
-        {navigationItems.map((item) => {
+        {navigationItems.filter((item) => item.id !== 'chat').map((item) => {
           const isActive = item.id === activeItemId;
           const subItems = getSecondaryNavigationItems(item.id);
           const hasSubItems = subItems.length > 0;
