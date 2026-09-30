@@ -102,19 +102,28 @@ export class ProjectVideoFeatureSubjectResolver
       if (draft.imageToVideo.materials) {
         throw new TypeError('Image-to-video cannot consume dynamic material slots');
       }
-      const selection = draft.imageToVideo.source;
-      if (!selection || selection.mediaKind !== 'image') {
-        throw new TypeError('Image-to-video requires exactly one image source');
+      const selections = draft.imageToVideo.referenceImages?.length
+        ? draft.imageToVideo.referenceImages
+        : draft.imageToVideo.source
+          ? [draft.imageToVideo.source]
+          : [];
+      if (selections.length === 0 || selections.some((selection) => selection.mediaKind !== 'image')) {
+        throw new TypeError('Image-to-video requires at least one image reference');
       }
-      const asset = await this.assets.get(toAssetId(selection.assetId));
-      if (!asset || asset.projectId !== this.projectId || asset.mediaKind !== 'image') {
-        throw new TypeError('Selected image source is unavailable');
+      if (draft.prompt.finalPrompt.includes('（已失效）')) {
+        throw new TypeError('The prompt contains a deleted image reference');
       }
-      materialReferences.push({
-        kind: 'asset' as const,
-        referenceId: asset.id,
-        revision: 1
-      });
+      for (const selection of selections) {
+        const asset = await this.assets.get(toAssetId(selection.assetId));
+        if (!asset || asset.projectId !== this.projectId || asset.mediaKind !== 'image') {
+          throw new TypeError('Selected image source is unavailable');
+        }
+        materialReferences.push({
+          kind: 'asset' as const,
+          referenceId: asset.id,
+          revision: 1
+        });
+      }
     }
 
     const outboundTextSnapshot = draft.prompt.finalPrompt;

@@ -790,6 +790,10 @@ export function registerStorageIpcHandlers(options: {
     (_event, request: unknown) => videoReferenceMedia.importMaterial(request)
   );
   ipcMain.handle(
+    videoWorkspaceIpcChannels.useWorkAsMaterial,
+    (_event, request: unknown) => videoReferenceMedia.useWorkAsMaterial(request)
+  );
+  ipcMain.handle(
     videoWorkspaceIpcChannels.getMaterial,
     (_event, request: unknown) => videoReferenceMedia.getMaterial(request)
   );

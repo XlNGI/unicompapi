@@ -160,6 +160,7 @@ export interface TextToVideoWorkspace {
 
 export interface ImageToVideoWorkspace {
   readonly source?: VideoMaterialSelection;
+  readonly referenceImages?: readonly VideoMaterialSelection[];
   readonly materials?: VideoMaterialSlotSnapshot;
   readonly mustKeep: readonly string[];
   readonly allowedChanges: readonly string[];
@@ -790,6 +791,7 @@ function isImageToVideoWorkspace(
     isRecord(value) &&
     hasOnlyKeys(value, [
       'source',
+      'referenceImages',
       'materials',
       'mustKeep',
       'allowedChanges',
@@ -800,6 +802,8 @@ function isImageToVideoWorkspace(
       'depthOfField'
     ]) &&
     (value.source === undefined || isVideoMaterialSelection(value.source)) &&
+    (value.referenceImages === undefined ||
+      (value.source === undefined && isVideoImageReferenceList(value.referenceImages))) &&
     (value.materials === undefined ||
       isVideoMaterialSlotSnapshot(value.materials, generation)) &&
     isNonBlankStringArray(value.mustKeep) &&
@@ -810,6 +814,19 @@ function isImageToVideoWorkspace(
     typeof value.pace === 'string' &&
     typeof value.depthOfField === 'string'
   );
+}
+
+function isVideoImageReferenceList(value: unknown): boolean {
+  return Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((selection) =>
+      isVideoMaterialSelection(selection) &&
+      selection.mediaKind === 'image' &&
+      selection.role === 'reference'
+    ) &&
+    new Set(value.map((selection) =>
+      isRecord(selection) ? selection.assetId : ''
+    )).size === value.length;
 }
 
 function isVideoMaterialSlotSnapshot(

@@ -102,6 +102,9 @@ test('task center groups consumption charts in one mask and collapses it on page
   assert.match(source, /sincePreviousWheel < 180/);
   assert.match(source, /direction !== taskCenterWheelDirection\.current/);
   assert.match(source, /!consumptionChartsCollapsedRef\.current/);
+  assert.match(source, /closest<HTMLElement>\('\.uc-scrollbar'\)/);
+  assert.match(source, /taskCenterScrollTop/);
+  assert.match(source, /taskCenterScrollTop <= Math\.abs\(event\.deltaY\)/);
   assert.doesNotMatch(source, /handleTaskPaneScroll|onPaneScroll/);
   assert.match(source, /data-consumption-charts-collapsed=\{consumptionChartsCollapsed\}/);
 });

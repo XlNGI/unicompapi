@@ -13,35 +13,39 @@ test('image-to-video omits the redundant call-record notice', () => {
   assert.doesNotMatch(source, /<StatusPill/);
 });
 
-test('image-to-video uses exactly one controlled image source', () => {
+test('image-to-video uses an ordered multi-image controlled source', () => {
   assert.match(source, /kind: 'image_source'/);
   assert.match(source, /selectMaterial\([\s\S]*'image'/);
-  assert.match(source, /draft\.imageToVideo\.source/);
-  assert.match(source, /恰好一张受控图片/);
+  assert.match(source, /draft\.imageToVideo\.referenceImages/);
+  assert.match(source, /图生视频至少需要一张受控参考图片/);
+  assert.match(source, /图\{index \+ 1\}/);
+  assert.match(source, /继续添加图片/);
+  assert.match(source, /remapDeletedImageReferences/);
+  assert.match(source, /hasInvalidImageReference/);
   assert.doesNotMatch(source, /尾帧|主体参考|acceptedMediaKinds/);
   assert.match(
     source,
-    /uc-image-professional__prompt-input has-reference[\s\S]*ControlledImageDropZone/
+    /uc-image-professional__reference-field[\s\S]*ControlledImageDropZone[\s\S]*uc-image-professional__prompt-input/
   );
   assert.match(source, /uc-image-professional__placeholder/);
   assert.match(source, /<LuPlus aria-hidden="true" \/>/);
-  assert.match(source, /uc-image-professional__preview-overlay/);
-  assert.match(source, /aria-label="删除图片"/);
+  assert.match(source, /uc-image-professional__reference-strip/);
+  assert.match(source, /aria-label=\{`删除图\$\{index \+ 1\}`\}/);
   assert.doesNotMatch(source, /uc-image-quick__reference|uc-image-quick__preview/);
 });
 
 test('image source selection stays inside controlled media APIs', () => {
-  for (const operation of ['selectMaterial', 'getMaterial', 'clearMaterial', 'createMaterialPreview']) {
+  for (const operation of ['selectMaterial', 'clearMaterial', 'createMaterialPreview']) {
     assert.match(source, new RegExp(`\\.${operation}\\(`));
   }
   assert.match(source, /selectMaterial\([\s\S]*createMaterialPreview\(/);
   assert.match(
     source,
-    /selectMaterial\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+    /selectMaterial\([\s\S]*?onDraftPersisted\(persisted\.value/
   );
   assert.match(
     source,
-    /importMaterial\([\s\S]*?onDraftPersisted\(result\.value\.draft/
+    /importMaterial\([\s\S]*?onDraftPersisted\(persisted\.value/
   );
   assert.match(
     source,
@@ -116,9 +120,9 @@ test('image-to-video keeps the current history mounted after completion', () => 
 });
 
 test('image-to-video identifies and validates real required inputs locally', () => {
-  assert.match(source, /首帧图片必填/);
+  assert.match(source, /至少一张参考图片/);
   assert.match(source, /uc-dynamic-parameters__required.*必填/);
-  assert.match(panel, /draft\.mode === 'image_to_video' && !draft\.imageToVideo\.source/);
-  assert.match(panel, /首帧图片为必填项/);
+  assert.match(panel, /imageReferenceCount === 0/);
+  assert.match(panel, /至少一张参考图片/);
   assert.doesNotMatch(bundle, /可以提交/);
 });

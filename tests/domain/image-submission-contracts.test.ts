@@ -93,4 +93,48 @@ describe('image submission domain contracts', () => {
     });
     expect(queued.remoteOperationId).toBe('internal-remote-operation');
   });
+
+  it('freezes ordered professional reference images and rejects invalidated prompt references', () => {
+    const base = createEmptyImageWorkspaceDraft({
+      id: toDraftId('draft-image-multi-reference'),
+      projectId: toProjectId('project-image-submission-domain'),
+      mode: 'professional_image',
+      createdAt: t0
+    });
+    const draft = {
+      ...base,
+      state: 'saved' as const,
+      prompt: { ...base.prompt, finalPrompt: '图1的人物穿图2的衣服' },
+      featureSelection: {
+        productFeature: 'reference_to_image' as const,
+        parameterValues: {}
+      },
+      input: undefined,
+      referenceImages: [
+        { assetId: 'asset-image-reference-1' as never, role: 'reference' as const, selectedAt: t0 },
+        { assetId: 'asset-image-reference-2' as never, role: 'reference' as const, selectedAt: t1 }
+      ]
+    };
+    const confirmation = {
+      ...createTask().submission.image!,
+      mode: 'professional_image' as const,
+      purpose: 'reference_to_image' as const
+    };
+    const task = createImageTask({
+      id: toTaskId('task-image-multi-reference'),
+      draft,
+      confirmation,
+      confirmedAt: t1
+    });
+    expect(task.submission.assetIds).toEqual([
+      'asset-image-reference-1',
+      'asset-image-reference-2'
+    ]);
+    expect(() => createImageTask({
+      id: toTaskId('task-image-invalid-reference'),
+      draft: { ...draft, prompt: { ...draft.prompt, finalPrompt: '图2（已失效）' } },
+      confirmation,
+      confirmedAt: t1
+    })).toThrow(/deleted reference image/);
+  });
 });

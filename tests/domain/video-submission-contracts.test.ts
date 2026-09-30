@@ -166,4 +166,59 @@ describe('video submission task contracts', () => {
       target: { kind: 'image_source' }
     }]);
   });
+
+  it('freezes ordered image_to_video referenceImages into the task snapshot', () => {
+    const base = createEmptyVideoWorkspaceDraft({
+      id: toDraftId('draft-image-to-video-references'),
+      projectId: toProjectId('project-video-task'),
+      mode: 'image_to_video',
+      createdAt
+    });
+    if (base.mode !== 'image_to_video') throw new Error('unexpected mode');
+    const draft = {
+      ...base,
+      state: 'saved' as const,
+      prompt: { ...base.prompt, finalPrompt: '图1作为人物，图2作为服装参考' },
+      imageToVideo: {
+        ...base.imageToVideo,
+        source: undefined,
+        referenceImages: [
+          { assetId: 'asset-video-reference-1' as never, mediaKind: 'image' as const, role: 'reference', selectedAt: createdAt },
+          { assetId: 'asset-video-reference-2' as never, mediaKind: 'image' as const, role: 'reference', selectedAt: confirmedAt }
+        ]
+      }
+    };
+    const confirmation: VideoSubmissionConfirmationSnapshot = {
+      ...createConfirmation(),
+      mode: 'image_to_video',
+      materials: [
+        { assetId: 'asset-video-reference-1' as never, mediaKind: 'image', role: 'reference', target: { kind: 'image_source' } },
+        { assetId: 'asset-video-reference-2' as never, mediaKind: 'image', role: 'reference', target: { kind: 'image_source' } }
+      ],
+      input: {
+        mode: 'image_to_video',
+        mustKeep: [],
+        allowedChanges: [],
+        prohibited: [],
+        subjectAction: '',
+        cameraMovement: '',
+        pace: '',
+        depthOfField: ''
+      }
+    };
+    const task = createVideoTask({
+      id: toTaskId('task-video-reference-images'),
+      draft,
+      confirmation,
+      confirmedAt: confirmedAt
+    });
+    expect(task.submission.assetIds).toEqual([
+      'asset-video-reference-1',
+      'asset-video-reference-2'
+    ]);
+    expect(task.submission.video?.materials.map((material) => material.assetId)).toEqual([
+      'asset-video-reference-1',
+      'asset-video-reference-2'
+    ]);
+  });
 });

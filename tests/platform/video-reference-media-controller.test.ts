@@ -231,6 +231,43 @@ describe('VideoReferenceMediaController', () => {
     expect(cleared.value.imageToVideo.source).toBeUndefined();
   });
 
+  it('previews a reference image saved with the reference role', async () => {
+    const fixture = await createFixture('image_to_video');
+    const imported = await fixture.controller.importMaterial({
+      draftId: fixture.draft.id,
+      target: { kind: 'image_source' },
+      mediaKind: 'image',
+      sourcePath: fixture.selectedImage
+    });
+    if (!imported.ok || imported.value.cancelled) {
+      throw fixture.getLastError();
+    }
+    const draft = imported.value.draft;
+    if (!draft || draft.mode !== 'image_to_video') {
+      throw fixture.getLastError();
+    }
+    const repository = new JsonVideoWorkspaceRepository(fixture.storage, fixture.projectId);
+    const stored = await repository.get(fixture.draft.id);
+    if (!stored || stored.mode !== 'image_to_video' || !stored.imageToVideo.source) {
+      throw new Error('missing stored draft');
+    }
+    const { source, ...imageToVideo } = stored.imageToVideo;
+    await repository.save(createVideoWorkspaceDraft({
+      ...stored,
+      imageToVideo: {
+        ...imageToVideo,
+        referenceImages: [{ ...source, role: 'reference' }]
+      }
+    }));
+    await expect(fixture.controller.createMaterialPreview({
+      draftId: fixture.draft.id,
+      target: { kind: 'image_source', referenceIndex: 0 }
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { mediaKind: 'image' }
+    });
+  });
+
   it('registers a dropped image as the single image-to-video source', async () => {
     const fixture = await createFixture('image_to_video');
     const result = await fixture.controller.importMaterial({

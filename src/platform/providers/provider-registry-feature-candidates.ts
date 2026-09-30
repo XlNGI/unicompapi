@@ -18,9 +18,19 @@ import { routeOpenAiCompatibleVideoProfilesForEnabledModels } from './newapi/ope
 import {
   isKnownUniCompApiModel,
   isUniCompApiPackage,
+  UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID,
   uniCompApiSupportsFeature,
   type UniCompApiModelFeature
 } from './newapi/unicompapi-model-capabilities';
+import { MINIMAX_H3_IMAGE_TO_VIDEO_CONSTRAINT_SET_ID } from './minimax/minimax-contracts';
+import { NEWAPI_VIDEO_ADAPTER_ID } from './newapi/newapi-contracts';
+import {
+  isViduOfficialReferenceToImageParameterSchema,
+  isViduReferenceVideoParameterSchema,
+  VIDU_MULTI_IMAGE_CONSTRAINT_SET_ID,
+  VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID,
+  VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID
+} from './vidu/vidu-contracts';
 import type { ProviderPackageRegistry } from './provider-package-registry';
 import type { JsonProviderRegistryStore } from './provider-registry';
 import type {
@@ -221,8 +231,16 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
               catalogState: model.catalogState ?? 'present',
               connectionState: connection.state,
               profileStatus: profile.status,
-              featureSupported: subject.surface !== 'conversation' || !['text_chat', 'text_reasoning'].includes(subject.productFeature) || subject.imageCount === 0 ||
-                supportsConversationImageInput(profile.adapterKey, snapshot.capabilities.filter(evidence => evidence.modelId === model.id && evidence.capability === 'image_understanding')),
+              featureSupported: supportsRequestedImageCount(
+                subject,
+                feature.productFeature,
+                contract.parameterSchema.schemaId,
+                profile.adapterKey,
+                contract.constraintSetId,
+                profile.packageId
+              ) &&
+                (subject.surface !== 'conversation' || !['text_chat', 'text_reasoning'].includes(subject.productFeature) || subject.imageCount === 0 ||
+                  supportsConversationImageInput(profile.adapterKey, snapshot.capabilities.filter(evidence => evidence.modelId === model.id && evidence.capability === 'image_understanding'))),
               bindingAvailable,
               runtimeAllowed: runtime.allowed,
               schemasInterpretable: true
@@ -267,6 +285,43 @@ export class RegistryFeatureCandidateSource implements FeatureCandidateSourcePor
     }
     return candidates;
   }
+}
+
+function supportsRequestedImageCount(
+  subject: ResolvedFeatureSubjectV1,
+  feature: ProductFeature,
+  parameterSchemaId: string,
+  adapterKey: string,
+  constraintSetId: string,
+  packageId: string
+): boolean {
+  if (subject.imageCount <= 1) return true;
+  if (feature !== 'reference_to_image' && feature !== 'image_to_video') return false;
+  if (
+    feature === 'image_to_video' &&
+    isUniCompApiPackage(packageId) &&
+    adapterKey === NEWAPI_VIDEO_ADAPTER_ID &&
+    parameterSchemaId === UNICOMPAPI_SEEDANCE_2_IMAGE_TO_VIDEO_PARAMETER_SCHEMA_ID &&
+    subject.imageCount <= 9
+  ) return true;
+  if (
+    constraintSetId === MINIMAX_H3_IMAGE_TO_VIDEO_CONSTRAINT_SET_ID &&
+    subject.imageCount <= 9
+  ) return true;
+  if (
+    feature === 'reference_to_image' &&
+    adapterKey === VIDU_REFERENCE_IMAGE_V2_ADAPTER_ID &&
+    isViduOfficialReferenceToImageParameterSchema(parameterSchemaId) &&
+    subject.imageCount <= 7
+  ) return true;
+  if (
+    feature === 'image_to_video' &&
+    adapterKey === VIDU_REFERENCE_VIDEO_V2_ADAPTER_ID &&
+    isViduReferenceVideoParameterSchema(parameterSchemaId) &&
+    subject.imageCount <= 7
+  ) return true;
+  return constraintSetId === VIDU_MULTI_IMAGE_CONSTRAINT_SET_ID &&
+    subject.imageCount <= 7;
 }
 
 function validateContract(contract: ProviderFeatureContractV1): ProviderFeatureContractV1 {

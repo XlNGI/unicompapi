@@ -382,9 +382,7 @@ export function GenerationHistory({
     event: DragEvent<HTMLElement>,
     workId: string
   ) {
-    event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData(imageWorkDragDataType, workId);
-    event.dataTransfer.setData('text/plain', workId);
+    assignImageWorkDragData(event, workId);
   }
 
   function handleWorkSelection(workId: string) {
@@ -567,6 +565,15 @@ export function GenerationHistory({
   );
 }
 
+function latestHistoryWorkForTask(
+  works: readonly { readonly workId: string; readonly sourceTaskId: string; readonly createdAt?: string }[],
+  taskId: string
+) {
+  return works.filter((work) => work.sourceTaskId === taskId).sort((left, right) =>
+    (left.createdAt ?? '').localeCompare(right.createdAt ?? '') || left.workId.localeCompare(right.workId)
+  ).at(-1);
+}
+
 export function resolveHistorySelection(input: {
   readonly followTask?: boolean;
   readonly autoSelectActive: boolean;
@@ -609,14 +616,29 @@ export function resolveHistorySelection(input: {
       shouldScrollToLatest: false
     };
   }
-  if (!input.followTask && input.selectedStatusId && input.statusNodes?.some((node) => node.id === input.selectedStatusId)) {
-    return {
-      matchedTarget: false,
-      selectedStatusId: input.selectedStatusId,
-      selectedTaskId: input.selectedTaskId,
-      selectedWorkId: undefined,
-      shouldScrollToLatest: false
-    };
+  if (!input.followTask && input.selectedStatusId) {
+    const selectedStatus = input.statusNodes?.find((node) => node.id === input.selectedStatusId);
+    if (selectedStatus) {
+      const completedWork = selectedStatus.kind === 'completed'
+        ? latestHistoryWorkForTask(input.works, selectedStatus.taskId)
+        : undefined;
+      if (completedWork) {
+        return {
+          matchedTarget: false,
+          selectedStatusId: undefined,
+          selectedTaskId: selectedStatus.taskId,
+          selectedWorkId: completedWork.workId,
+          shouldScrollToLatest: false
+        };
+      }
+      return {
+        matchedTarget: false,
+        selectedStatusId: input.selectedStatusId,
+        selectedTaskId: input.selectedTaskId,
+        selectedWorkId: undefined,
+        shouldScrollToLatest: false
+      };
+    }
   }
   const selectedTaskWork = input.selectedTaskId
     ? input.works.find((work) => work.sourceTaskId === input.selectedTaskId)
@@ -925,6 +947,15 @@ export function formatHistorySummary(summary: {
   return segments.join(' · ');
 }
 
+function assignImageWorkDragData(
+  event: DragEvent<HTMLElement>,
+  workId: string
+) {
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.setData(imageWorkDragDataType, workId);
+  event.dataTransfer.setData('text/plain', workId);
+}
+
 function HistoryMediaThumbnail({
   selected,
   work
@@ -975,7 +1006,9 @@ function HistoryMediaThumbnail({
     <img
       alt={`${work.name} 缩略图`}
       decoding="async"
+      draggable
       loading="lazy"
+      onDragStart={(event) => assignImageWorkDragData(event, work.workId)}
       ref={elementRef as RefObject<HTMLImageElement>}
       src={localUrl}
     />

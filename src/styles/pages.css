@@ -1824,6 +1824,24 @@ button.uc-generation-history__task-status { cursor: pointer; }
   flex: 1;
 }
 
+.uc-creation-simple .uc-image-professional__before-scroll > .uc-card:first-child > .uc-image-quick__field:has(.uc-image-professional__reference-field),
+.uc-video-image__workspace
+  .uc-generation-two-pane__preparation-flow > .uc-card:first-child > .uc-image-quick__field:has(.uc-image-professional__reference-field) {
+  align-content: start;
+  grid-template-rows: max-content minmax(178px, 1fr);
+}
+
+.uc-creation-simple .uc-image-quick__field:has(.uc-image-professional__reference-field) > .uc-image-professional__prompt-input,
+.uc-video-image__workspace .uc-image-quick__field:has(.uc-image-professional__reference-field) > .uc-image-professional__prompt-input {
+  height: 100%;
+  min-height: 0;
+}
+
+.uc-creation-simple .uc-image-quick__field:has(.uc-image-professional__reference-field) .uc-image-professional__prompt-textarea,
+.uc-video-image__workspace .uc-image-quick__field:has(.uc-image-professional__reference-field) .uc-image-professional__prompt-textarea {
+  height: 100%;
+}
+
 .uc-creation-simple .uc-image-professional__prompt-input {
   display: grid;
 }
@@ -1838,11 +1856,6 @@ button.uc-generation-history__task-status { cursor: pointer; }
 
 .uc-creation-simple .uc-image-professional__prompt-input .uc-image-professional__prompt-textarea {
   min-height: 178px;
-}
-
-.uc-creation-simple .uc-image-professional__prompt-input.has-reference
-  .uc-image-professional__prompt-textarea {
-  padding-bottom: 104px;
 }
 
 .uc-creation-simple .uc-image-feature-mode {
@@ -3875,85 +3888,52 @@ button.uc-generation-history__task-status { cursor: pointer; }
   resize: none;
 }
 
-.uc-image-professional__prompt-input.has-reference
-  .uc-image-professional__prompt-textarea {
-  padding-bottom: 112px;
+.uc-image-professional__reference-field {
+  display: grid;
+  align-content: start;
+  gap: var(--uc-space-2);
+  min-width: 0;
 }
 
-.uc-image-professional__prompt-input > .uc-controlled-image-drop-zone {
-  position: absolute;
-  z-index: 2;
-  right: var(--uc-space-3);
-  bottom: var(--uc-space-3);
-  width: 132px;
-  height: 88px;
-  gap: 0;
-  overflow: hidden;
+.uc-image-professional__reference-field > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--uc-color-text-primary);
+  font-size: var(--uc-font-size-label);
+  font-weight: 600;
 }
 
-.uc-image-professional__prompt-input
+.uc-image-professional__reference-field > span small {
+  color: var(--uc-color-text-tertiary);
+  font-size: var(--uc-font-size-caption);
+  font-weight: 400;
+}
+
+.uc-image-professional__reference-field > .uc-controlled-image-drop-zone {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.uc-image-professional__reference-field
   > .uc-controlled-image-drop-zone
   > .uc-controlled-image-drop-zone__hint {
-  display: none;
+  justify-self: end;
+  padding: 0 var(--uc-space-2) var(--uc-space-2);
 }
 
-/*
- * 修复首帧缩略图被放大、撑出 132x88 固定卡片的问题。
- * 根因：dropzone 是 display:grid，必填角标占走第一条 grid 轨道，reference
- * 落到 auto 轨道后其 height:100% 失效，并沿 reference->preview->media->img
- * 逐层传导，img 只剩 width:100%，高度按原图比例撑开，越竖的图溢出越多。
- * 做法（不移动卡片位置）：角标绝对定位脱离文档流；reference/preview/media
- * 用 flex 把 88px 确定高度逐层传到 img，配合既有 object-fit:contain 让整张
- * 图等比缩放到卡片内完整显示。
- */
-.uc-image-professional__prompt-input
-  > .uc-controlled-image-drop-zone
-  > .uc-dynamic-parameters__required {
-  position: absolute;
-  z-index: 3;
-  top: 4px;
-  left: 4px;
-  margin: 0;
-  pointer-events: none;
-}
-
-.uc-image-professional__prompt-input
-  > .uc-controlled-image-drop-zone
-  .uc-image-professional__reference {
-  display: flex;
-  flex-direction: column;
-}
-
-.uc-image-professional__prompt-input
-  > .uc-controlled-image-drop-zone
-  .uc-image-professional__preview {
-  display: flex;
-  flex: 1 1 auto;
+.uc-image-professional__reference-field .uc-image-professional__reference {
   min-height: 0;
+  height: auto;
 }
 
-.uc-image-professional__prompt-input
-  > .uc-controlled-image-drop-zone
-  .uc-image-professional__preview-media {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-  align-items: center;
-  justify-content: center;
-}
-
-.uc-image-professional__prompt-input
-  > .uc-controlled-image-drop-zone
-  .uc-image-professional__preview img {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-}
-
-.uc-image-professional__prompt-input
-  > .uc-controlled-image-drop-zone
-  .uc-image-professional__placeholder {
-  flex: 1 1 auto;
+.uc-image-professional__reference-field .uc-image-professional__reference.has-image {
+  overflow: visible;
+  border: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .uc-image-professional__contexts--compact {
@@ -3996,6 +3976,7 @@ button.uc-generation-history__task-status { cursor: pointer; }
 }
 
 .uc-image-professional__reference {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--uc-color-border-default);
   border-radius: var(--uc-radius-10);
@@ -4013,6 +3994,122 @@ button.uc-generation-history__task-status { cursor: pointer; }
 
 .uc-image-professional__reference.has-image {
   padding: 0;
+}
+
+.uc-image-professional__reference-strip {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--uc-space-2);
+  width: 100%;
+  min-height: 72px;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.uc-image-professional__reference-item {
+  position: relative;
+  flex: 0 0 72px;
+  width: 72px;
+  display: grid;
+  grid-template-rows: 72px auto;
+  gap: 4px;
+  min-width: 0;
+  color: var(--uc-color-text-tertiary);
+}
+
+.uc-image-professional__reference-thumbnail,
+.uc-image-professional__reference-add {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--uc-color-border-default);
+  border-radius: var(--uc-radius-8);
+  background: var(--uc-color-surface-raised);
+  color: var(--uc-color-text-tertiary);
+}
+
+.uc-image-professional__reference-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.uc-image-professional__reference-status {
+  padding: 0 4px;
+  color: var(--uc-color-text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.uc-image-professional__reference-label {
+  display: block;
+  color: var(--uc-color-text-secondary);
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-caption);
+  text-align: center;
+}
+
+.uc-button.uc-image-professional__reference-delete {
+  position: absolute;
+  z-index: 2;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+}
+
+.uc-image-professional__reference-delete svg {
+  width: 13px;
+  height: 13px;
+}
+
+.uc-button.uc-image-professional__reference-add {
+  box-sizing: border-box;
+  flex: 0 0 72px;
+  width: 72px;
+  min-width: 72px;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  border-style: dashed;
+  cursor: pointer;
+}
+
+.uc-image-professional__reference-field
+  > .uc-controlled-image-drop-zone
+  > .uc-controlled-image-drop-zone__hint {
+  display: none;
+}
+
+.uc-image-professional__reference.is-empty {
+  width: 72px;
+  height: 72px;
+  padding: 0;
+}
+
+.uc-image-professional__reference.is-empty .uc-image-professional__placeholder {
+  width: 100%;
+  height: 100%;
+}
+
+.uc-image-professional__reference.is-empty .uc-image-professional__placeholder-button {
+  box-sizing: border-box;
+  width: 72px;
+  height: 72px;
+  min-height: 0;
+  border-style: dashed;
+  border-radius: var(--uc-radius-8);
+  box-shadow: none;
 }
 
 .uc-image-professional__context span,

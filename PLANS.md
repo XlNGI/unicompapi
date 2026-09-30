@@ -1,5 +1,53 @@
 # UniComp 开发计划
 
+### 专业图生图/图生视频多图参考（2026-09-28；负责人批准，功能分支实施中）
+
+负责人明确批准在专业图生图与图生视频中加入多张参考图片共同参与一次生成。此决定是 `AGENTS.md`“不得恢复多图参考”的唯一有界例外；仍禁止图片/视频批量创作、其他模式的多图输入和任何一次请求产出多件作品。本功能只在从最新 `develop` 建立的 `feature/multi-reference-generation` 实施，不带入其他工作树的未提交改动。
+
+#### 当前代码基线与产品边界
+
+- 基线为 `develop@bb090c557e1f155e6a748f79fc7a23970e6c2f96`；功能 worktree 为 `D:\unicompapi-worktrees\multi-reference-generation`。
+- 当前图生图草稿只有一个 `input`，图生视频只有一个 `imageToVideo.source`；任务快照、素材预检和 adapter 请求同样只携带单图。只改页面不构成功能。
+- 输入只存在于专业图生图和图生视频；按顺序显示 `图1`、`图2` 等约 72×72 CSS px 缩略图，区域位于提示词输入上方。支持项目内文件选择、拖入及项目作品引用。删除后连续重编号；提示词内被删图片的引用变为失效标记，不得绑定后继图片，修复前阻止提交。编号替换必须避免误改“图10”等其他 token。
+- 提示词负责描述每张图的语义作用；客户端不从自然语言猜 API 模式。图生视频多图作为共同参考发送；单张输入沿用现有图生视频路径。MiniMax H3 的 `reference_image` 不得与 `first_frame` / `last_frame` 混发。
+- 一次生成仍只产出一张图片或一段视频；保留项目本地复制、文件校验、提交确认、任务快照/历史关联和防重。旧单图草稿无损读取，并作为单项参考。
+
+#### 能力合同与外部证据
+
+- MiniMax 官方图片生成 API 声明 `subject_reference` 数组，语义限定为人物主体参考；不能据此宣称任意图片角色均被支持。其公开 schema 没有输入数组最大数，不得从输出数量 `n` 推导输入上限；实现仍要设本地请求资源界限，供应商最大数未证实前不得声称官方上限。
+- MiniMax H3 官方视频接口支持多个 `content` 项及 `role: reference_image`；提示词可描述图1、图2的不同作用。首帧/尾帧属于不同语义。中国区/全球区遵循连接已有 endpoint，不静默迁移。
+- UniCompAPI Studio H3 的 `ref2va` 是独立于通用 `/v1` OpenAI-compatible 路由的能力，只能按已登记 profile/变体及受控图片上传合同开放；保留 `fl2va` 文生视频路径。
+- OpenAI-compatible 中转模型必须由当前 profile/route/schema 明确声明多图能力与请求形状。图生图/图生视频 feature 声明不等于多图支持；未声明候选必须阻断，不猜测模型名或通用兼容性。
+- 官方资料：[MiniMax image-to-image schema](https://platform.minimaxi.com/docs/api-reference/image/generation/api/image-to-image.json)、[MiniMax H3 video create](https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create.md)、[H3 generation guide](https://platform.minimaxi.com/docs/guides/video-generation.md)。Studio H3 另按项目 `docs/current/UNICOMPAPI_STUDIO_H3_TEST_ADAPTER.md` 与当前 profile 复核。
+
+#### Owner、安全和验收
+
+- 领域草稿拥有有序素材及图片编号；实体校验器拥有引用/编号规则；预检与候选解析拥有能力合同；提交工厂创建有序不可变任务快照；主进程 IPC 只负责受控导入、预览、移除和排序；provider adapter 负责协议映射，不猜图片作用或改写提示词；工作台负责显示及调用。
+- 图片只通过当前项目文件选择/拖入/作品复用链路复制、登记和校验。拒绝 renderer 任意路径/URL、跨项目/失效 asset、非图片输入。数量、字节、总请求体、预览句柄均需有界；密钥不进入日志、快照或 Git。
+- 允许修改：本节与 `AGENTS.md` 的有界例外；图/视频领域实体、DTO/IPC、媒体控制器、任务快照/预检/候选能力合同、MiniMax/Studio H3 adapter/runtime、两个工作台及样式、直接测试和隔离 Electron 验证。禁止顺带触碰任务中心、视频编辑器、计费授权、连接 endpoint 和无关模式。
+- 分类 D2/T2。T2 RED 覆盖：有序列表/旧单图读取、删图重排与失效引用、任务快照保序、未声明能力阻断、MiniMax/Studio 请求发送全部图且不误作首尾帧。还需负向证明跨项目/无效 asset/非图片/空列表不提交。UI 验收覆盖添加/删除/拖入/作品复用、正确编号、提示词位置、72px 缩略图与响应式无溢出。
+- 必跑受影响测试、`pnpm test`、`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm audit:platform`、`git diff --check` 及生产 Electron 隔离项目全链路。只用合成图片/受控 HTTP；不读取凭证或调用付费服务商。模拟协议通过不能代替真实连接可执行性，远端真实请求列为未验证。
+- 停止条件：协议形状/能力无法证实、旧草稿不能无损读入、删图重编号会错误重绑、现有本地文件保护被绕过或任一相关全仓门禁失败时，保留失败状态并报告，不放宽断言、不声称全部通过、不自动发真实请求。
+
+#### 实施与验收回写（2026-09-28）
+
+- 已完成领域草稿、任务快照、受控图片 IPC、专业图生图/图生视频工作台、72px 参考缩略图条、图号连续重排与失效引用阻断、能力候选过滤、MiniMax H3 多图视频请求和 Vidu `viduq1` 1–7 张参考生图合同；一次提交仍只生成一张图片或一段视频。提交面板同时按 `referenceImages` 校验，旧单图草稿仍按单项参考读取。
+- 本功能定向验收通过：Node/UI 合同 29/29（布局合同已更新为参考图区位于提示词上方）；相关领域、平台、控制器和适配器定向 Vitest 通过；当前 `pnpm test` 为 Node/UI 385/385、Vitest 2008/2008；`pnpm typecheck`、生产 `pnpm build`、`pnpm audit:platform`（0 violations）、`git diff --check` 通过。构建仅保留既有 chunk 过大警告。
+- 全仓门禁已通过：恢复同一冻结交接包后 `pnpm verify:handoff` 为 50 条校验、27 个资源、0 失败；更新聊天文档进度合同以匹配当前事件压缩实现；开发 manifest 已切换到仍可获取的官方 FFmpeg 8.1.2 LGPL 构建（`n8.1.2-267-gb2f422d306`），归档 SHA、版本、配置和编码器均已校验，`pnpm setup:media-engine` 与 `pnpm verify:media-engine` 通过；修正 `office-render-adapter.ts` 的类型导入后 `pnpm lint`、`pnpm typecheck`、`pnpm test`（Node/UI 385/385，Vitest 2008/2008）、`pnpm build`、`pnpm audit:platform`（0 violations）和 `git diff --check` 全部通过。
+- 生产 Electron 隔离验收已通过：`scripts/verify-multi-reference-generation-electron.cjs` 驱动真实专业图生图和图生视频 renderer，实际验证参考图区位于提示词上方、参考图不嵌入提示词、三图真实 `<img>` 预览、`图1/图2/图3` 编号、删除连续重排、失效引用阻断、72×72 缩略图和 800px 窄窗口无横向溢出。Electron 仅有开发环境 CSP 警告，无业务 renderer 错误；未调用真实服务商或发送凭证。
+- 最终验收脚本还在隔离夹具中展开模型列表并选择图生图/图生视频候选，断言对应 `candidateId` 写入草稿；候选仅为 fixture，不能作为真实 Provider 可用性或请求联通证据。截图用于核对布局与参考图交互。
+- **按最终截图复验后的 UI 修正（2026-09-28）**：逐像素查看隔离 Electron 截图发现通用 `.uc-button` 规则覆盖了删除按钮 `position`，且有图状态的继续添加按钮实际仅 36px 高；此前自动化只量缩略图，误报按钮布局通过。将专业参考图操作按钮规则提高到组件级选择器优先级，修复 72×72 添加框及图内 24×24 删除按钮；Electron 脚本现在检查有图状态添加框尺寸、删除按钮完全位于图片框内且点击中心可命中。修复后重跑 `pnpm test`（Node/UI 385/385，Vitest 243 文件、2008/2008）、`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm audit:platform`（0 violations）、`pnpm verify:handoff`（50 条校验、27 个资源、0 失败）、`git diff --check` 和多参考图 Electron 验收，均通过。最新两张截图为 `C:\Users\Administrator\AppData\Local\Temp\unicomp-multi-reference-image-acceptance.png` 与 `C:\Users\Administrator\AppData\Local\Temp\unicomp-multi-reference-video-acceptance.png`；未调用真实服务商或读取凭证。构建保留既有 chunk 大小警告。
+- **负责人全屏截图问题复验（2026-09-28，验收未闭环）**：负责人实际运行截图指出图生图/图生视频参考条上下留白过大、视频缩略图退化成“图片”占位、系统文件拖入未成功。此前 Electron 脚本只测点击添加和隔离夹具图像，未断言视频预览的自然尺寸，也未覆盖系统文件拖拽；因此前一条“UI 验收通过”不能代表这三项已被真实全屏操作确认。已将工作区网格内容改为靠上自然排列，视频预览改为草稿持久化后按具体 `referenceIndex` 创建，并避免父层消息回调变化时先清空全部预览；Electron 验收现检查图生图/图生视频每张预览均解码、参考区到提示词间距不超过 16px、72×72 尺寸、实际 `File` 拖放事件的文件名/类型、删除重排及 800px 窄窗。复验截图 `C:\Users\Administrator\AppData\Local\Temp\unicomp-multi-reference-image-acceptance.png`、`...video-desktop-acceptance.png` 和 `...video-acceptance.png`，自动化通过；`pnpm test`（385 Node/UI + 2008 Vitest）、`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm audit:platform`、`pnpm verify:handoff`、`git diff --check` 均通过。**仍未确认**：Windows 桌面全屏真实项目界面和从系统文件管理器拖入文件；本轮桌面截图 API 两次返回 `SetIsBorderRequired failed: 不支持此接口 (0x80004002)`，本机 CDP 连接也超时。内部合成 `File` 拖放只验证 renderer 事件到受控导入 API，不等同 OS 原生拖动。不得据此交付“全部验收通过”或人工验收通过清单；需在可用桌面控制环境中完成这两项复验后再关闭。
+- **文生视频布局误影响修正（2026-09-29）**：负责人指出之前参考图区 `align-content: start` 选择器同时命中文生视频工作台，超出本功能范围。新增 `align-content: start` 只保留在 `.uc-video-image__workspace`；专业生图工作台不再使用这条规则，文生图提示词结构恢复为参考图功能之前的写法。原 `.uc-creation-simple` 通用 `flex: 1` 与视频文字工作台 CSS 保持基线，`VideoTextWorkspace.tsx` 无差异。重新通过多参考图 Electron 布局/预览/拖放事件脚本、`pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm audit:platform`、`pnpm verify:handoff`、`git diff --check`；全量 Node/UI 385 项和 Vitest 2008 项通过。全屏桌面窗口与 Windows Explorer 原生拖入仍受当前自动化接口限制而未验证，不能宣称所有人工视觉交互已通过。
+- **文生图误影响撤回与类型复验（2026-09-29）**：负责人确认专业生图的文生图布局不应被多参考图改动。已去掉会同时作用于文生图的工作台对齐规则，参考图条只在选择图生图或图生视频时渲染。预览失败状态改为 `Record<string, boolean>`，消除 `Record<string, true>` 与 `Object.fromEntries` 推断出的 `boolean` 不兼容。效果图以 Vidu 参考生图的紧凑横排为准：有图时 72×72 缩略图、图号在缩略图下方、右侧同尺寸添加框、删除按钮在缩略图内右下角；空状态保持 72×72，不恢复截图里被圈出的大虚线框。本轮复跑 `pnpm test`（Node/UI 385/385，Vitest 243 文件、2008/2008）、`pnpm typecheck`、`tsconfig.app.json` 与 `electron/tsconfig.json` 的 `tsc --noEmit`、`pnpm lint`、`pnpm build`、`pnpm audit:platform`（0 violations）、`git diff --check` 和多参考图 Electron 脚本，均通过。Electron 仅有开发环境 CSP 警告。未重跑 `pnpm verify:handoff` 与 `pnpm verify:media-engine`，未调用真实服务商，也未验证 Windows 资源管理器原生拖入和负责人全屏真实项目窗口。
+- **文生图误影响撤回与类型复验（2026-09-29）**：负责人确认专业生图的文生图布局不应被多参考图改动。已去掉会同时作用于文生图的工作台对齐规则，参考图条只在选择图生图或图生视频时渲染。预览失败状态改为 Record<string, boolean>，消除 Record<string, true> 与 Object.fromEntries 推断出的 oolean 不兼容。效果图以 Vidu 参考生图的紧凑横排为准：有图时 72×72 缩略图、图号在缩略图下方、右侧同尺寸添加框、删除按钮在缩略图内右下角；空状态保持 72×72，不恢复截图里被圈出的大虚线框。本轮复跑 pnpm test（Node/UI 385/385，Vitest 243 文件、2008/2008）、pnpm typecheck、	sconfig.app.json 与 lectron/tsconfig.json 的 	sc --noEmit、pnpm lint、pnpm build、pnpm audit:platform（0 violations）、git diff --check 和多参考图 Electron 脚本，均通过。Electron 仅有开发环境 CSP 警告。未重跑 pnpm verify:handoff 与 pnpm verify:media-engine，未调用真实服务商，也未验证 Windows 资源管理器原生拖入和负责人全屏真实项目窗口。
+
+- **全屏留白、视频预览、拖入和 Seedance 2.0 多图（2026-09-29）**：图生图全屏留白是参考图网格在变高后把多余高度分给每一行；修复只作用于带参考图字段的网格，文生图选择器不命中。图生视频提示词框同样改为按内容高度靠上排列。视频“预览失败 / 已选素材记录不可用”是草稿里的 `reference` 和素材登记时的 `image_to_video_source` 被当成不同角色；预览现在把这两种图片参考角色视为同一份素材。系统拖入失败是投放区没稳定拿到本机路径；预加载现在沿实际投放路径查找投放区，并只在本次系统投放已捕获路径时回退，不接受渲染进程自填路径。`doubao-seedance-2-0-260128` 在 UniCompAPI 图生视频下最多 9 张参考图，多张时 `content[]` 使用 `reference_image`；单张仍按原合同发送 `first_frame`。`doubao-seedance-2-0-fast-260128` 和其他未点名模型不放开。本轮验证：Seedance 单图/多图与视频参考预览定向 Vitest 通过，专业生图 UI 合同 18/18，`tsc --noEmit`、`tsc --noEmit -p tsconfig.test.json`、改动文件 ESLint 和 `git diff --check` 通过。未重跑全量 `pnpm test`、`pnpm lint`、`pnpm build`、Electron 脚本，也未在真实全屏窗口复验资源管理器拖入。
+
+- **提示词撑满与历史缩略图拖入（2026-09-29）**：上一轮把带参考图的字段按内容靠上排列后，全屏多余高度留在提示词框下面。本轮只让参考图行保持内容高度，提示词行吃掉剩余高度；选择器仍要求存在参考图字段，文生图不命中。生成历史时间轴里的图片之前会按浏览器原生图片拖动，没有作品编号，因而走进文件导入并提示“拖入图片失败，请重试。”现在缩略图拖动写入既有作品拖动数据；大预览图不再单独发起原生图片拖动，仍由原预览容器携带作品编号。多参考图 Electron 脚本在图生图和图生视频中把字段强制撑到至少 600px 后，提示词底边与字段底边差距不超过 8px，原有 72px、间距和窄窗口检查通过。相关 UI 合同 36/36、改动组件 ESLint、`tsc --noEmit` 和 `git diff --check` 通过。未在负责人的真实全屏项目窗口复验，也未实际从生成历史拖一张作品到加号；未重跑全量测试、全仓 lint、构建和真实服务商。
+
+- **多图放行改为已核对合同（2026-09-29）**：不加“全部模型放开”开关，也没有修改“暂无可用模型”文案。两张及以上时，候选过滤和 Seedance 请求不再按模型名放行。UniCompAPI 只放行已核对的 Seedance 2.0 图生视频参数合同，最多 9 张；多张仍用 `reference_image`，单张仍用 `first_frame`。fast 合同和其他未核对合同不会发送多图。MiniMax H3 仍按已核对约束集最多 9 张。Vidu 参考生图只放行 viduq1/viduq2 的参考图参数合同，最多 7 张；参考视频只放行现有参考视频参数合同，最多 7 张。模型名留在各自合同模块。新模型要先核对官方请求格式、张数上限和图片含义，再登记对应合同。定向 Vitest：候选门禁 2/2、NewAPI 包 112/112，Vidu 图片适配器与候选注册表相关用例通过；`tsc --noEmit`、`tsc --noEmit -p tsconfig.test.json`、改动文件 ESLint 和 `git diff --check` 通过。未重跑全量测试、全仓 lint、构建、Electron 和真实服务商。
+
 ## 新版统一计划（当前代码基线，2026-09-27）
 
 2026-09-29 D3-P1 至 P7 已完成并收口：P1-P6 本地实现与 fixture 验收覆盖页面特征、无坐标约束模型、确定性动态 Layout Engine、Render Plan 校验与生产接线、有限修复和 legacy fallback；design-aware Renderer 只消费已校验 Render Plan。真实 kimi-k3 P7 通过：Content Planning 6 sections/8 页，DocumentIR 已创建，Art Direction HTTP 200，Design IR v2 校验通过；4 次 HTTP、0 自动重试，8/8 design-aware、0 legacy fallback，Render Plan 与真实 PPTX 各有 8 个不同几何签名；PPTX 为 8 页，Hash、大小、RegisteredReader、Observation 回读均匹配，未发现路径/runtime context 泄漏。布局分布为 single-focus 3、comparison 1、structured 2、evidence-led 1、sequence 1。此前 55 秒 Art Direction 默认等待在 8 页真实请求上超时；现按页数有界提高等待预算，8 页最高 115 秒，Application 与 Provider 共用该预算，较小请求仍为 55 秒。editorial/dashboard/narrative 同内容 fixture 的 Layout Constraints、Render Plan 与最终 PPTX 几何均有差异。最终全量 `pnpm test` 2,428/2,428；typecheck、lint、build、平台/恢复/阶段关闭/计划审计及 `git diff --check` 通过。证据：`outputs/phase2-d3-kimi-layout-engine/real-provider.json`。D3 到此停止；D4 未启动，等待负责人审阅。

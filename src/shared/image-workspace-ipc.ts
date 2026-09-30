@@ -155,6 +155,7 @@ interface ImageWorkspaceDraftDtoBase {
       };
   readonly prompt: ImageWorkspacePromptDto;
   readonly input?: ImageWorkspaceInputDto;
+  readonly referenceImages?: readonly ImageWorkspaceInputDto[];
   readonly contextReferences: readonly ImageWorkspaceContextDto[];
   readonly featureSelection?: ImageWorkspaceFeatureSelectionDto;
   readonly createdAt: string;
@@ -165,6 +166,7 @@ export type ImageWorkspaceDraftDto = ImageWorkspaceDraftDtoBase &
   (
     | {
         readonly mode: 'quick_image' | 'professional_image';
+        readonly referenceImages?: readonly ImageWorkspaceInputDto[];
         readonly generation: {
           readonly model?: ImageWorkspaceModelDto;
           readonly parameters?: ImageWorkspaceParametersDto;
@@ -258,6 +260,7 @@ export interface ImageWorkspaceApi {
     ImageWorkspaceIpcResult<ImageWorkspaceInputAssetDto | undefined>
   >;
   createInputPreview(
-    draftId: string
+    draftId: string,
+    assetId?: string
   ): Promise<ImageWorkspaceIpcResult<ImageWorkspaceInputPreviewDto>>;
 }

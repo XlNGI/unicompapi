@@ -230,14 +230,16 @@ export class ImageLocalMediaController {
       const context = this.createContext();
       const draft = await requireDraft(context.workspaceRepository, draftId);
 
-      if (!draft.input) {
+      const requestedAssetId = parseOptionalAssetId(request);
+      const assetId = requestedAssetId ?? draft.input?.assetId;
+      if (!assetId) {
         throw new ImageLocalMediaError(
           'input_not_found',
           'The image workspace does not have a selected input'
         );
       }
 
-      const resolved = await resolveInput(context, draft.input.assetId);
+      const resolved = await resolveInput(context, assetId);
       const probe = new NodeFileStatusProbe(context.session.rootDirectory);
       const persistence = new FileVerificationPersistenceService(
         context.fileRepository,
@@ -444,6 +446,18 @@ function parseWorkId(request: unknown) {
   }
 }
 
+function parseOptionalAssetId(request: unknown): ReturnType<typeof toAssetId> | undefined {
+  if (!isRecord(request) || request.assetId === undefined) return undefined;
+  if (typeof request.assetId !== 'string') {
+    throw new ImageLocalMediaError('invalid_request', 'The image asset ID is invalid');
+  }
+  try {
+    return toAssetId(request.assetId);
+  } catch {
+    throw new ImageLocalMediaError('invalid_request', 'The image asset ID is invalid');
+  }
+}
+
 async function requireDraft(
   repository: JsonImageWorkspaceRepository,
   draftId: ReturnType<typeof toDraftId>
@@ -523,6 +537,7 @@ function attachInput(
       purpose: draft.input?.purpose,
       selectedAt: updatedAt
     },
+    ...(draft.mode === 'professional_image' ? { referenceImages: undefined } : {}),
     updatedAt
   };
   const candidate = createImageWorkspaceDraft(

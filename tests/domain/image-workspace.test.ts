@@ -95,6 +95,28 @@ describe('image workspace contracts', () => {
     );
   });
 
+  it('accepts an ordered reference image list on professional image drafts', () => {
+    const base = createEmpty('professional_image');
+    const candidate = {
+      ...base,
+      input: undefined,
+      referenceImages: [
+        { assetId: toAssetId('asset-ref-one'), role: 'reference', selectedAt: t0 },
+        { assetId: toAssetId('asset-ref-two'), role: 'reference', selectedAt: t1 }
+      ]
+    };
+
+    expect(isImageWorkspaceDraft(candidate)).toBe(true);
+    expect(isImageWorkspaceDraft({
+      ...candidate,
+      mode: 'quick_image'
+    })).toBe(false);
+    expect(isImageWorkspaceDraft({
+      ...candidate,
+      referenceImages: [candidate.referenceImages[0], candidate.referenceImages[0]]
+    })).toBe(false);
+  });
+
   it('preserves model observations when users add understanding revisions', () => {
     const base = createEmpty('image_understanding');
     if (base.mode !== 'image_understanding') {

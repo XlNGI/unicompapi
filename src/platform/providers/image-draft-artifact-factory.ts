@@ -69,7 +69,7 @@ export class ImageDraftArtifactFactory implements SubmissionArtifactFactoryPort 
       throw new TypeError('Image route model capability evidence is unavailable');
     }
 
-    const purpose = draft.input &&
+    const purpose = (draft.input || draft.referenceImages?.length) &&
       (draft.mode === 'quick_image' || draft.mode === 'professional_image')
       ? 'reference_to_image' as const
       : imagePurposeForMode(draft.mode);
@@ -130,7 +130,9 @@ export class ImageDraftArtifactFactory implements SubmissionArtifactFactoryPort 
     await this.dependencies.executions.save(execution);
     await this.dependencies.tasks.save(linked);
 
-    const assetId = draft.input?.assetId;
+    const assetIds = draft.referenceImages?.length
+      ? draft.referenceImages.map((reference) => reference.assetId)
+      : draft.input ? [draft.input.assetId] : [];
     return {
       subjectArtifacts: {
         kind: 'media' as const,
@@ -143,7 +145,8 @@ export class ImageDraftArtifactFactory implements SubmissionArtifactFactoryPort 
         prompt: input.subject.outboundTextSnapshot,
         taskId: linked.id,
         executionId: execution.id,
-        ...(assetId ? { assetId } : {}),
+        ...(assetIds.length === 1 ? { assetId: assetIds[0] } : {}),
+        ...(assetIds.length > 1 ? { assetIds } : {}),
         parameterValues: input.subject.parameterValues
       }
     };

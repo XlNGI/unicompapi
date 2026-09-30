@@ -87,8 +87,19 @@ export class ProjectImageFeatureSubjectResolver
       : 'professional';
     const contextSnapshots = await this.resolveContexts(draft, surface);
     const materialReferences = [];
-    if (draft.input) {
-      const asset = await this.assets.get(toAssetId(draft.input.assetId));
+    const imageInputs = draft.referenceImages?.length
+      ? draft.referenceImages
+      : draft.input
+        ? [draft.input]
+        : [];
+    if (productFeature === 'reference_to_image' && imageInputs.length === 0) {
+      throw new TypeError('Reference image generation requires at least one image');
+    }
+    if (draft.prompt.finalPrompt.includes('（已失效）')) {
+      throw new TypeError('The prompt contains a deleted image reference');
+    }
+    for (const imageInput of imageInputs) {
+      const asset = await this.assets.get(toAssetId(imageInput.assetId));
       if (!asset || asset.projectId !== this.projectId || asset.mediaKind !== 'image') {
         throw new TypeError('Selected image material is unavailable');
       }

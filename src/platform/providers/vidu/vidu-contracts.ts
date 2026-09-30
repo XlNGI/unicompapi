@@ -67,6 +67,25 @@ export const VIDU_TEXT_VIDEO_V2_RESULT_SCHEMA_ID =
 export const VIDU_USAGE_SCHEMA_ID = 'usage.vidu.not-reported';
 
 export const frozenViduOfficialImageModelKeys = ['viduq2', 'viduq1'] as const;
+
+export function viduReferenceImageV2ParameterSchemaId(
+  productFeature: 'text-to-image' | 'reference-to-image' | 'image-edit',
+  providerModelKey: string
+): string {
+  return `parameters.vidu.reference-image-v2.${productFeature}.${providerModelKey}`;
+}
+
+export function isViduOfficialReferenceToImageParameterSchema(
+  parameterSchemaId: string
+): boolean {
+  return frozenViduOfficialImageModelKeys.some((providerModelKey) =>
+    parameterSchemaId === viduReferenceImageV2ParameterSchemaId(
+      'reference-to-image',
+      providerModelKey
+    )
+  );
+}
+
 export const frozenViduLegacyGeminiImageModelKeys = [
   'q2-fast',
   'q2-pro',
@@ -78,6 +97,8 @@ export const VIDU_TEXT_IMAGE_CONSTRAINT_SET_ID =
   'constraints.vidu.text-only-single-output';
 export const VIDU_SINGLE_IMAGE_CONSTRAINT_SET_ID =
   'constraints.vidu.single-controlled-image-single-output';
+export const VIDU_MULTI_IMAGE_CONSTRAINT_SET_ID =
+  'constraints.vidu.multi-controlled-image-single-output';
 export const VIDU_IMAGE_VIDEO_CONSTRAINT_SET_ID =
   'constraints.vidu.single-controlled-first-frame-single-output';
 export const VIDU_TEXT_VIDEO_CONSTRAINT_SET_ID =
@@ -96,6 +117,16 @@ export const frozenViduReferenceVideoModelKeys = [
   'viduq3-turbo',
   'viduq3'
 ] as const;
+
+export function viduReferenceVideoParameterSchemaId(providerModelKey: string): string {
+  return `parameters.vidu.reference-video-v2.image-to-video.${providerModelKey}`;
+}
+
+export function isViduReferenceVideoParameterSchema(parameterSchemaId: string): boolean {
+  return frozenViduReferenceVideoModelKeys.some((providerModelKey) =>
+    parameterSchemaId === viduReferenceVideoParameterSchemaId(providerModelKey)
+  );
+}
 
 export const frozenViduVideoModelKeys = [
   'viduq3-drama',
@@ -335,12 +366,18 @@ function geminiImageContract(
   // viduq2 supports text-to-image (0 images), reference-to-image, and image edit.
   // viduq1 supports reference-to-image only (1–7 images).
   if (providerModelKey === 'viduq2') {
-    const textSchemaId =
-      `parameters.vidu.reference-image-v2.text-to-image.${providerModelKey}`;
-    const referenceSchemaId =
-      `parameters.vidu.reference-image-v2.reference-to-image.${providerModelKey}`;
-    const editSchemaId =
-      `parameters.vidu.reference-image-v2.image-edit.${providerModelKey}`;
+    const textSchemaId = viduReferenceImageV2ParameterSchemaId(
+      'text-to-image',
+      providerModelKey
+    );
+    const referenceSchemaId = viduReferenceImageV2ParameterSchemaId(
+      'reference-to-image',
+      providerModelKey
+    );
+    const editSchemaId = viduReferenceImageV2ParameterSchemaId(
+      'image-edit',
+      providerModelKey
+    );
     const commonFields: readonly ParameterFieldSchemaV2[] = [
       optionalEnum('aspect_ratio', 10, [
         '16:9',
@@ -396,8 +433,10 @@ function geminiImageContract(
   }
 
   if (providerModelKey === 'viduq1') {
-    const schemaId =
-      `parameters.vidu.reference-image-v2.reference-to-image.${providerModelKey}`;
+    const schemaId = viduReferenceImageV2ParameterSchemaId(
+      'reference-to-image',
+      providerModelKey
+    );
     return {
       definition: definition(
         providerModelKey,
@@ -447,7 +486,7 @@ function geminiImageContract(
 function referenceVideoContract(
   providerModelKey: (typeof frozenViduReferenceVideoModelKeys)[number]
 ): ViduModelContractV1 {
-  const schemaId = `parameters.vidu.reference-video-v2.image-to-video.${providerModelKey}`;
+  const schemaId = viduReferenceVideoParameterSchemaId(providerModelKey);
   const range = referenceDurationRange(providerModelKey);
   return {
     definition: definition(
@@ -502,8 +541,7 @@ function dualVideoContract(
   // Official docs list viduq3-turbo for text2video and the packaged reference
   // path. Catalog install binds one profile/adapter per model, so both product
   // features share the reference video adapter; submit routes by capability.
-  const referenceSchemaId =
-    `parameters.vidu.reference-video-v2.image-to-video.${providerModelKey}`;
+  const referenceSchemaId = viduReferenceVideoParameterSchemaId(providerModelKey);
   const textSchemaId =
     `parameters.vidu.text-video-v2.text-to-video.${providerModelKey}`;
   const referenceRange = referenceDurationRange(providerModelKey);

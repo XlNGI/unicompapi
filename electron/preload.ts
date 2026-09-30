@@ -297,9 +297,10 @@ const imageWorkspaces: ImageWorkspaceApi = {
     ipcRenderer.invoke(imageWorkspaceIpcChannels.clearInput, { draftId }),
   getInput: (draftId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.getInput, { draftId }),
-  createInputPreview: (draftId) =>
+  createInputPreview: (draftId, assetId) =>
     ipcRenderer.invoke(imageWorkspaceIpcChannels.createInputPreview, {
-      draftId
+      draftId,
+      ...(assetId ? { assetId } : {})
     })
 };
 
@@ -442,6 +443,12 @@ const videoWorkspaces: VideoWorkspaceApi = {
       mediaKind,
       sourcePath: getPathForDroppedFile(file)
     }),
+  useWorkAsMaterial: (draftId, target, workId) =>
+    ipcRenderer.invoke(videoWorkspaceIpcChannels.useWorkAsMaterial, {
+      draftId,
+      target,
+      workId
+    }),
   getMaterial: (draftId, target) =>
     ipcRenderer.invoke(videoWorkspaceIpcChannels.getMaterial, {
       draftId,
@@ -467,6 +474,10 @@ const droppedFilePaths = new Map<string, {
   readonly sourcePath: string;
   readonly expiresAt: number;
 }>();
+let pendingDroppedPath: {
+  readonly sourcePath: string;
+  readonly expiresAt: number;
+} | undefined;
 
 const rendererWindow = globalThis as unknown as {
   addEventListener(
@@ -491,16 +502,14 @@ rendererWindow.addEventListener('drop', (event) => {
   for (const [token, entry] of droppedFilePaths) {
     if (entry.expiresAt < now) droppedFilePaths.delete(token);
   }
+  pendingDroppedPath = { sourcePath, expiresAt: now + 5_000 };
   const token = randomUUID();
   droppedFilePaths.set(token, {
     sourcePath,
     expiresAt: now + 30_000
   });
-  const dropZone = findDropZone(event.target);
-  if (!dropZone) {
-    droppedFilePaths.delete(token);
-    return;
-  }
+  const dropZone = findDropZone(event);
+  if (!dropZone) return;
   dropZone.setAttribute('data-unicomp-drop-token', token);
 }, true);
 
@@ -509,9 +518,18 @@ function getPathForDroppedFile(file: unknown): string | undefined {
     const entry = droppedFilePaths.get(file);
     droppedFilePaths.delete(file);
     if (!entry || entry.expiresAt < Date.now()) return undefined;
+    pendingDroppedPath = undefined;
     return entry.sourcePath;
   }
-  return getPathForNativeFile(file);
+  const nativePath = getPathForNativeFile(file);
+  if (nativePath) {
+    pendingDroppedPath = undefined;
+    return nativePath;
+  }
+  const pending = pendingDroppedPath;
+  pendingDroppedPath = undefined;
+  if (!pending || pending.expiresAt < Date.now()) return undefined;
+  return pending.sourcePath;
 }
 
 function getPathForNativeFile(file: unknown): string | undefined {
@@ -525,17 +543,38 @@ function getPathForNativeFile(file: unknown): string | undefined {
   }
 }
 
-function findDropZone(value: unknown): {
+function findDropZone(event: {
+  readonly target?: unknown;
+  composedPath?(): readonly unknown[];
+}): {
   setAttribute(name: string, value: string): void;
 } | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const closest = (value as { closest?: unknown }).closest;
-  if (typeof closest !== 'function') return undefined;
-  const target = closest.call(value, '.uc-controlled-image-drop-zone');
-  return target && typeof target === 'object' &&
-    typeof (target as { setAttribute?: unknown }).setAttribute === 'function'
-    ? target as { setAttribute(name: string, value: string): void }
-    : undefined;
+  const path = typeof event.composedPath === 'function'
+    ? event.composedPath()
+    : [];
+  const nodes = path.length > 0 ? path : [event.target];
+  for (const node of nodes) {
+    let current = node;
+    if (
+      current &&
+      typeof current === 'object' &&
+      (current as { nodeType?: unknown }).nodeType === 3
+    ) {
+      current = (current as { parentElement?: unknown }).parentElement;
+    }
+    if (!current || typeof current !== 'object') continue;
+    const closest = (current as { closest?: unknown }).closest;
+    if (typeof closest !== 'function') continue;
+    const target = closest.call(current, '.uc-controlled-image-drop-zone');
+    if (
+      target &&
+      typeof target === 'object' &&
+      typeof (target as { setAttribute?: unknown }).setAttribute === 'function'
+    ) {
+      return target as { setAttribute(name: string, value: string): void };
+    }
+  }
+  return undefined;
 }
 
 const videoEditors: VideoEditorApi = {

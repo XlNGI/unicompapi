@@ -216,10 +216,13 @@ export function VideoFeatureSubmissionPanel({
       >}
     />
   );
+  const imageReferenceCount = draft.mode === 'image_to_video'
+    ? draft.imageToVideo.referenceImages?.length ?? (draft.imageToVideo.source ? 1 : 0)
+    : 0;
   const requiredInputError = draft.prompt.finalPrompt.trim().length === 0
     ? '提示词为必填项。'
-    : draft.mode === 'image_to_video' && !draft.imageToVideo.source
-      ? '首帧图片为必填项。'
+    : draft.mode === 'image_to_video' && imageReferenceCount === 0
+      ? '至少一张参考图片。'
       : undefined;
 
   function silentlyFinishRuntimeGate() {
@@ -483,10 +486,13 @@ export function VideoFeatureSubmissionPanel({
         if (trackProgress) setProgressPhase('submission_failed');
         return;
       }
+      const savedImageReferenceCount = saved.mode === 'image_to_video'
+        ? saved.imageToVideo.referenceImages?.length ?? (saved.imageToVideo.source ? 1 : 0)
+        : 0;
       const savedInputError = saved.prompt.finalPrompt.trim().length === 0
         ? '提示词为必填项。'
-        : saved.mode === 'image_to_video' && !saved.imageToVideo.source
-          ? '首帧图片为必填项。'
+        : saved.mode === 'image_to_video' && savedImageReferenceCount === 0
+          ? '至少一张参考图片。'
           : undefined;
       if (savedInputError) {
         showSubmissionError(savedInputError);
@@ -610,9 +616,11 @@ export function VideoFeatureSubmissionPanel({
         emptyDescription={
           loadState === 'loading'
             ? '正在读取安全候选。'
-            : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
+            : imageReferenceCount > 1
+              ? `已添加 ${imageReferenceCount} 张参考图。当前没有档案明确声明支持多图的图生视频模型，未声明的模型已阻止提交。只保留一张后，单图模型可以继续使用。`
+              : '当前没有匹配的服务候选，请在“模型与服务商”中完成连接与模型配置。'
         }
-        emptyTitle={loadState === 'loading' ? '正在读取' : '没有可选模型'}
+        emptyTitle={loadState === 'loading' ? '正在读取' : imageReferenceCount > 1 ? '没有支持多图的模型' : '没有可选模型'}
         hint={loadState === 'loading' ? '正在读取安全候选。' : undefined}
         onChange={changeCandidate}
         options={candidates.map((candidate) => ({
@@ -624,7 +632,12 @@ export function VideoFeatureSubmissionPanel({
           unavailableReasons: candidate.unavailableReasons
         }))}
         required
-        reasonLabels={unavailableReasonLabels}
+        reasonLabels={{
+          ...unavailableReasonLabels,
+          ...(imageReferenceCount > 1 ? {
+            feature_unsupported: '模型档案未声明多图请求，多图时不能提交；只保留一张后可继续使用'
+          } : {})
+        }}
         value={featureSelection.candidateId ?? ''}
       />
 

@@ -9,6 +9,7 @@ import {
   toDraftId,
   toFileReferenceId,
   toIsoTimestamp,
+  toWorkId,
   transitionFile,
   type Asset,
   type FileLocator,
@@ -44,7 +45,8 @@ import {
   JsonAssetRepository,
   JsonFileIndexRepository,
   JsonFileReferenceRepository,
-  JsonVideoWorkspaceRepository
+  JsonVideoWorkspaceRepository,
+  JsonWorkRepository
 } from '../repositories';
 import {
   NodeProjectStorage,
@@ -103,6 +105,55 @@ export class VideoReferenceMediaController {
           return { cancelled: true };
         }
         return this.registerMaterial({ ...parsed, mediaKind }, selectedPath);
+      })
+    );
+  }
+
+  useWorkAsMaterial(
+    request: unknown
+  ): Promise<VideoWorkspaceIpcResult<VideoWorkspaceMaterialSelectionResultDto>> {
+    return this.dependencies.mutations.enqueue(() =>
+      this.execute(async () => {
+        const parsed = parseMaterialRequest(request, false);
+        const workId = parseWorkId(request);
+        const context = this.createContext();
+        const draft = await requireDraft(context.workspaceRepository, parsed.draftId);
+        if (draft.mode !== 'image_to_video' || parsed.target.kind !== 'image_source') {
+          throw mediaError(
+            'material_target_mismatch',
+            'Project image works can only be added to image-to-video references'
+          );
+        }
+        const work = (await context.workRepository.list(context.session.projectId))
+          .find((candidate) => candidate.id === workId);
+        if (!work || work.projectId !== context.session.projectId || work.mediaKind !== 'image') {
+          throw mediaError(
+            'material_not_found',
+            'The selected project image work does not exist'
+          );
+        }
+        const file = await context.fileRepository.get(work.fileId);
+        if (!file || file.projectId !== context.session.projectId || file.state !== 'available' || !file.checksumSha256) {
+          throw mediaError(
+            'preview_unavailable',
+            'The selected project image work is unavailable'
+          );
+        }
+        const existing = (await context.assetRepository.list(context.session.projectId))
+          .find((candidate) => candidate.fileId === file.id && candidate.mediaKind === 'image');
+        if (existing) {
+          const updated = attachSelection(draft, parsed.target, existing, this.now());
+          return {
+            cancelled: false,
+            draft: toVideoWorkspaceDto(updated),
+            material: toMaterialDto(existing, file)
+          };
+        }
+        const target = await resolveFileReferencePathSafely(
+          context.session.rootDirectory,
+          file
+        );
+        return this.registerMaterial({ ...parsed, mediaKind: 'image' }, target);
       })
     );
   }
@@ -233,7 +284,8 @@ export class VideoReferenceMediaController {
       ),
       assetRepository: new JsonAssetRepository(storage, session.projectId),
       fileRepository: new JsonFileReferenceRepository(storage, session.projectId),
-      indexRepository: new JsonFileIndexRepository(storage, session.projectId)
+      indexRepository: new JsonFileIndexRepository(storage, session.projectId),
+      workRepository: new JsonWorkRepository(storage, session.projectId)
     };
   }
 
@@ -343,6 +395,7 @@ interface VideoReferenceMediaContext {
   readonly assetRepository: JsonAssetRepository;
   readonly fileRepository: JsonFileReferenceRepository;
   readonly indexRepository: JsonFileIndexRepository;
+  readonly workRepository: JsonWorkRepository;
 }
 
 interface ParsedMaterialRequest {
@@ -427,8 +480,18 @@ function parseTarget(value: unknown): VideoWorkspaceMaterialTargetDto {
   if (value.kind === 'quick_reference' && Object.keys(value).length === 1) {
     return { kind: 'quick_reference' };
   }
-  if (value.kind === 'image_source' && Object.keys(value).length === 1) {
-    return { kind: 'image_source' };
+  if (
+    value.kind === 'image_source' &&
+    (value.referenceIndex === undefined ||
+      (typeof value.referenceIndex === 'number' &&
+        Number.isSafeInteger(value.referenceIndex) &&
+        value.referenceIndex >= 0)) &&
+    Object.keys(value).every((key) => key === 'kind' || key === 'referenceIndex')
+  ) {
+    return {
+      kind: 'image_source',
+      ...(value.referenceIndex === undefined ? {} : { referenceIndex: value.referenceIndex })
+    };
   }
   if (
     value.kind === 'slot' &&
@@ -480,10 +543,15 @@ function resolveTarget(
     if (requestedKind && requestedKind !== 'image') {
       throw mediaError(
         'material_type_mismatch',
-        'Image-to-video requires exactly one image source'
+        'Image-to-video requires image reference inputs'
       );
     }
-    return { role: 'image_to_video_source', selection: draft.imageToVideo.source };
+    const references = draft.imageToVideo.referenceImages ?? [];
+    const selection = target.referenceIndex === undefined
+      ? draft.imageToVideo.source ?? (references.length === 1 ? references[0] : undefined)
+      : references[target.referenceIndex] ??
+        (target.referenceIndex === 0 ? draft.imageToVideo.source : undefined);
+    return { role: 'image_to_video_source', selection };
   }
 
   if (draft.mode === 'quick_video') {
@@ -536,7 +604,8 @@ function attachSelection(
           state: imageSourceMutationState(target),
           imageToVideo: {
             ...(draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo,
-            source: selection
+            source: selection,
+            referenceImages: undefined
           },
           updatedAt
         }
@@ -564,8 +633,9 @@ function clearSelection(
       ? {
           ...draft,
           state: imageSourceMutationState(target),
-          imageToVideo: withoutImageSource(
-            (draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo
+          imageToVideo: clearImageReference(
+            (draft as Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>).imageToVideo,
+            target.referenceIndex
           ),
           updatedAt
         }
@@ -586,12 +656,22 @@ function imageSourceMutationState(
   return target.kind === 'image_source' ? 'saved' as const : 'editing' as const;
 }
 
-function withoutImageSource(
-  workspace: Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>['imageToVideo']
+function clearImageReference(
+  workspace: Extract<VideoWorkspaceDraft, { mode: 'image_to_video' }>['imageToVideo'],
+  referenceIndex?: number
 ) {
-  const { source, ...rest } = workspace;
-  void source;
-  return rest;
+  if (referenceIndex === undefined) {
+    const { source, ...rest } = workspace;
+    void source;
+    return rest;
+  }
+  const references = workspace.referenceImages ?? [];
+  const remaining = references.filter((_, index) => index !== referenceIndex);
+  return {
+    ...workspace,
+    source: undefined,
+    referenceImages: remaining.length > 0 ? remaining : undefined
+  };
 }
 
 function replaceSlotSelection(
@@ -648,6 +728,18 @@ function replaceSlotSelection(
       };
 }
 
+
+function materialRolesMatch(
+  assetRole: string | undefined,
+  selectionRole: string
+): boolean {
+  if (assetRole === selectionRole) return true;
+  const imageReferenceRoles = new Set(['reference', 'image_to_video_source']);
+  return assetRole !== undefined &&
+    imageReferenceRoles.has(assetRole) &&
+    imageReferenceRoles.has(selectionRole);
+}
+
 async function resolveMaterial(
   context: VideoReferenceMediaContext,
   selection: VideoMaterialSelection
@@ -656,7 +748,7 @@ async function resolveMaterial(
   if (
     !asset ||
     asset.mediaKind !== selection.mediaKind ||
-    asset.role !== selection.role ||
+    !materialRolesMatch(asset.role, selection.role) ||
     (asset.mediaKind === 'image' && !asset.imageMetadata) ||
     (asset.mediaKind === 'video' && !asset.videoMetadata)
   ) {
@@ -948,6 +1040,18 @@ function mapMediaError(error: unknown): {
     code: 'workspace_storage_error',
     message: 'The local video material operation failed'
   };
+}
+
+
+function parseWorkId(request: unknown) {
+  if (!isRecord(request) || typeof request.workId !== 'string') {
+    throw mediaError('invalid_request', 'A valid project image work ID is required');
+  }
+  try {
+    return toWorkId(request.workId);
+  } catch {
+    throw mediaError('invalid_request', 'A valid project image work ID is required');
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

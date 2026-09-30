@@ -48,6 +48,7 @@ test('exposes only the controlled local image workspace operations', () => {
     /rootDirectory|absolutePath|checksumSha256|credentialReference|errorStack/
   );
   assert.match(sharedSource, /featureSelection/);
+  assert.match(sharedSource, /referenceImages/);
   assert.match(sharedSource, /contextRevision/);
   assert.match(sharedSource, /includeInPrompt/);
   assert.doesNotMatch(

@@ -115,7 +115,7 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
     await this.dependencies.executions.save(execution);
     await this.dependencies.tasks.save(linked);
 
-    const assetId = sourceAssetId(draft);
+    const assetIds = sourceAssetIds(draft);
     return {
       subjectArtifacts: {
         kind: 'media' as const,
@@ -128,28 +128,32 @@ export class VideoDraftArtifactFactory implements SubmissionArtifactFactoryPort 
         prompt: input.subject.outboundTextSnapshot,
         taskId: linked.id,
         executionId: execution.id,
-        ...(assetId ? { assetId } : {}),
+        ...(assetIds.length === 1 ? { assetId: assetIds[0] } : {}),
+        ...(assetIds.length > 1 ? { assetIds } : {}),
         parameterValues: input.subject.parameterValues
       }
     };
   }
 }
 
-function sourceAssetId(draft: VideoWorkspaceDraft): string | undefined {
-  if (draft.mode === 'image_to_video' && draft.imageToVideo.source) {
-    return draft.imageToVideo.source.assetId;
+function sourceAssetIds(draft: VideoWorkspaceDraft): readonly string[] {
+  if (draft.mode === 'image_to_video') {
+    const references = draft.imageToVideo.referenceImages?.length
+      ? draft.imageToVideo.referenceImages
+      : draft.imageToVideo.source
+        ? [draft.imageToVideo.source]
+        : [];
+    return references.map((reference) => reference.assetId);
   }
   if (draft.mode === 'quick_video' && draft.quick.reference) {
-    return draft.quick.reference.assetId;
+    return [draft.quick.reference.assetId];
   }
-  if (draft.mode === 'image_to_video' || draft.mode === 'text_to_video') {
-    const materials = draft.mode === 'image_to_video'
-      ? draft.imageToVideo.materials
-      : draft.textToVideo.materials;
+  if (draft.mode === 'text_to_video') {
+    const materials = draft.textToVideo.materials;
     const selected = materials?.slots.find((slot) => slot.selection)?.selection;
-    return selected?.assetId;
+    return selected ? [selected.assetId] : [];
   }
-  return undefined;
+  return [];
 }
 
 function materialsMatchingDraft(
@@ -165,17 +169,20 @@ function materialsMatchingDraft(
         }]
       : [];
   }
-  if (draft.mode === 'image_to_video' && draft.imageToVideo.source) {
-    return [{
-      assetId: draft.imageToVideo.source.assetId,
-      mediaKind: draft.imageToVideo.source.mediaKind,
-      role: draft.imageToVideo.source.role,
-      target: { kind: 'image_source' }
-    }];
+  if (draft.mode === 'image_to_video') {
+    const references = draft.imageToVideo.referenceImages?.length
+      ? draft.imageToVideo.referenceImages
+      : draft.imageToVideo.source
+        ? [draft.imageToVideo.source]
+        : [];
+    return references.map((reference) => ({
+      assetId: reference.assetId,
+      mediaKind: reference.mediaKind,
+      role: reference.role,
+      target: { kind: 'image_source' as const }
+    }));
   }
-  const materials = draft.mode === 'text_to_video'
-    ? draft.textToVideo.materials
-    : draft.imageToVideo.materials;
+  const materials = draft.textToVideo.materials;
   return materials?.slots.flatMap((slot) =>
     slot.selection
       ? [{

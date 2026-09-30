@@ -70,8 +70,15 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
           'not_retryable'
         );
       }
-      const expectedInputs = purpose === 'image_generation' ? 0 : 1;
-      assertSingleInputCount(request, expectedInputs);
+      const officialMultiReference = purpose === 'reference_to_image' &&
+        (request.model.providerModelKey === 'viduq1' ||
+          request.model.providerModelKey === 'viduq2');
+      const expectedInputs = purpose === 'image_generation'
+        ? { minimum: 0, maximum: 0 }
+        : officialMultiReference
+          ? { minimum: 1, maximum: 7 }
+          : { minimum: 1, maximum: 1 };
+      assertInputCount(request, expectedInputs.minimum, expectedInputs.maximum);
       const connection = await requireConnection(
         this.dependencies.connections,
         request.model.connectionId
@@ -81,14 +88,14 @@ export class ViduReferenceImageV2Adapter implements ProviderProtocolSubmitPort {
         prompt: requirePrompt(request),
         ...officialImageParameters(request.model.providerModelKey, image.parameters)
       };
-      if (expectedInputs === 1) {
-        const material = await this.dependencies.materials.resolve({
-          projectId: request.task.projectId,
-          assetId: request.task.submission.assetIds![0]
-        });
-        body.images = [
-          `data:${material.mimeType};base64,${material.base64}`
-        ];
+      if (expectedInputs.maximum > 0) {
+        body.images = await Promise.all(request.task.submission.assetIds!.map(async (assetId) => {
+          const material = await this.dependencies.materials.resolve({
+            projectId: request.task.projectId,
+            assetId
+          });
+          return `data:${material.mimeType};base64,${material.base64}`;
+        }));
       }
       const serialized = serializeBoundedJson(body);
       const createResponse = await this.dependencies.runtime.request({
@@ -224,16 +231,20 @@ function requireImageSubmission(request: ProviderProtocolSubmitRequest) {
   return image;
 }
 
-function assertSingleInputCount(
+function assertInputCount(
   request: ProviderProtocolSubmitRequest,
-  expected: 0 | 1
+  minimum: number,
+  maximum: number
 ): void {
   const assetIds = request.task.submission.assetIds;
-  if (!assetIds || assetIds.length !== expected || new Set(assetIds).size !== expected) {
+  if (!assetIds || assetIds.length < minimum || assetIds.length > maximum || new Set(assetIds).size !== assetIds.length) {
+    const message = minimum === 0 && maximum === 0
+      ? 'This image operation does not accept input images'
+      : minimum === maximum
+        ? `Exactly ${minimum} controlled image input${minimum === 1 ? ' is' : 's are'} required`
+        : `Between ${minimum} and ${maximum} controlled image inputs are required`;
     throw new ViduReferenceImageAdapterError(
-      expected === 1
-        ? 'Exactly one controlled image input is required'
-        : 'This image operation does not accept input images',
+      message,
       'not_retryable'
     );
   }

@@ -276,7 +276,7 @@ export function validateProductFeatureRequest(
     return;
   }
   if (feature === 'reference_to_image' || feature === 'image_to_video') {
-    requireSingleImage(imageCount, feature);
+    requireAtLeastOneImage(imageCount, feature);
     if (videoCount !== 0) throw featureConstraint(`${feature} cannot accept video media`);
     if (subject.surface !== 'professional') {
       throw featureConstraint(`${feature} requires the professional surface`);
@@ -401,6 +401,10 @@ function invalidParameter(field: ParameterFieldSchemaV2): never {
 
 function requireSingleImage(imageCount: number, feature: ProductFeature): void {
   if (imageCount !== 1) throw featureConstraint(`${feature} requires exactly one image`);
+}
+
+function requireAtLeastOneImage(imageCount: number, feature: ProductFeature): void {
+  if (imageCount < 1) throw featureConstraint(`${feature} requires exactly one or more images`);
 }
 
 function featureConstraint(message: string): ProductFeatureContractError {
