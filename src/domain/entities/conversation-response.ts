@@ -34,6 +34,8 @@ export interface ConversationResponseDraftV1 {
   readonly conversationRevision: number;
   readonly userMessageId: MessageId;
   readonly userMessageRevision: number;
+  /** Marks a response submitted through the Agent-native entry path. */
+  readonly agentNative?: boolean;
   readonly promptContent?: string;
   /** Internal snapshot of validated source-reading requirements, never a provider prompt. */
   readonly attachmentQuery?: string;
@@ -54,6 +56,7 @@ export interface CreateConversationResponseDraftInput {
   readonly conversationRevision: number;
   readonly userMessageId: MessageId;
   readonly userMessageRevision: number;
+  readonly agentNative?: boolean;
   readonly promptContent?: string;
   readonly attachmentQuery?: string;
   readonly documentPageQuery?: string;
@@ -76,6 +79,7 @@ export function createConversationResponseDraft(
     conversationRevision: input.conversationRevision,
     userMessageId: input.userMessageId,
     userMessageRevision: input.userMessageRevision,
+    ...(input.agentNative === true ? { agentNative: true } : {}),
     ...(input.promptContent !== undefined
       ? { promptContent: input.promptContent }
       : {}),
@@ -150,11 +154,12 @@ export function parseConversationResponseDraft(
   const keys = Object.keys(item);
   const hasParameterValues = Object.prototype.hasOwnProperty.call(item, 'parameterValues');
   const hasPromptContent = Object.prototype.hasOwnProperty.call(item, 'promptContent');
+  const hasAgentNative = Object.prototype.hasOwnProperty.call(item, 'agentNative');
   const hasAttachmentQuery = Object.prototype.hasOwnProperty.call(item, 'attachmentQuery');
   const hasDocumentPageQuery = Object.prototype.hasOwnProperty.call(item, 'documentPageQuery');
   if (
-    keys.some((key) => !requiredKeys.has(key) && !['parameterValues', 'promptContent', 'attachmentQuery', 'documentPageQuery', 'imageQuery'].includes(key)) ||
-    requiredKeys.size + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) + (hasAttachmentQuery ? 1 : 0) + (hasDocumentPageQuery ? 1 : 0) + (item.imageQuery !== undefined ? 1 : 0) !== keys.length ||
+    keys.some((key) => !requiredKeys.has(key) && !['agentNative', 'parameterValues', 'promptContent', 'attachmentQuery', 'documentPageQuery', 'imageQuery'].includes(key)) ||
+    requiredKeys.size + (hasAgentNative ? 1 : 0) + (hasParameterValues ? 1 : 0) + (hasPromptContent ? 1 : 0) + (hasAttachmentQuery ? 1 : 0) + (hasDocumentPageQuery ? 1 : 0) + (item.imageQuery !== undefined ? 1 : 0) !== keys.length ||
     item.schemaVersion !== 1 ||
     !Number.isSafeInteger(item.revision) ||
     Number(item.revision) < 0 ||
@@ -180,6 +185,13 @@ export function parseConversationResponseDraft(
   if (promptContent !== undefined && promptContent.length > 1_000_000) {
     throw new InvariantViolationError('conversation response draft promptContent is too long');
   }
+  const agentNative = hasAgentNative
+    ? item.agentNative === true
+      ? true
+      : item.agentNative === false
+        ? false
+        : (() => { throw new InvariantViolationError('conversation response draft agentNative is invalid'); })()
+    : undefined;
   const attachmentQuery = hasAttachmentQuery
     ? nonBlank(item.attachmentQuery, 'draft.attachmentQuery')
     : undefined;
@@ -213,6 +225,7 @@ export function parseConversationResponseDraft(
     conversationRevision: Number(item.conversationRevision),
     userMessageId: toMessageId(nonBlank(item.userMessageId, 'draft.userMessageId')),
     userMessageRevision: Number(item.userMessageRevision),
+    ...(agentNative === true ? { agentNative: true } : {}),
     ...(promptContent !== undefined ? { promptContent } : {}),
     ...(attachmentQuery !== undefined ? { attachmentQuery } : {}),
     ...(documentPageQuery !== undefined ? { documentPageQuery } : {}),

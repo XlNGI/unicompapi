@@ -17,6 +17,7 @@ import {
 import { freezeProjectContextOutboundSnapshots } from '../repositories/project-context-snapshot';
 import {
   ConversationContextBuilder,
+  AgentContextAssembler,
   type ConversationContextReference
 } from '../../application';
 import { DEEPSEEK_PROVIDER_PACKAGE_ID } from './deepseek/deepseek-contracts';
@@ -38,6 +39,7 @@ export interface ConversationResponseArtifactFactoryDependencies {
   readonly contexts: ProjectContextRepository;
   readonly executions: ConversationResponseExecutionRepository;
   readonly contextBuilder?: ConversationContextBuilder;
+  readonly agentContextAssembler?: AgentContextAssembler;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'resolve'> & Partial<Pick<ConversationAttachmentContextService, 'resolveImage'>>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'prepare' | 'registerExecution'>;
@@ -53,6 +55,7 @@ export class ConversationResponseArtifactFactory
   private readonly nextExecutionId: () => string;
   private readonly nextStreamEventId: () => string;
   private readonly contextBuilder: ConversationContextBuilder;
+  private readonly agentContextAssembler: AgentContextAssembler;
 
   constructor(
     private readonly dependencies: ConversationResponseArtifactFactoryDependencies
@@ -64,6 +67,7 @@ export class ConversationResponseArtifactFactory
     this.nextStreamEventId = dependencies.nextStreamEventId ??
       (() => `response-stream-${randomUUID()}`);
     this.contextBuilder = dependencies.contextBuilder ?? new ConversationContextBuilder();
+    this.agentContextAssembler = dependencies.agentContextAssembler ?? new AgentContextAssembler();
   }
 
   async create(input: Parameters<SubmissionArtifactFactoryPort['create']>[0]) {
@@ -125,13 +129,20 @@ export class ConversationResponseArtifactFactory
       })
     )];
     if (nativeSearch && references.length) throw new TypeError('Native search context exceeds the authorized scope');
-    const contextEnvelope = this.contextBuilder.build({
-      conversation,
-      currentUserMessageId: draft.userMessageId,
-      currentUserContent: input.subject.outboundTextSnapshot,
-      omitHistory: pageReferences.length > 0 || !!nativeSearch || !!toolSelection,
-      references
-    });
+    const contextEnvelope = draft.agentNative
+      ? this.agentContextAssembler.assemble({
+          conversation,
+          currentUserMessageId: draft.userMessageId,
+          currentUserContent: input.subject.outboundTextSnapshot,
+          references
+        })
+      : this.contextBuilder.build({
+          conversation,
+          currentUserMessageId: draft.userMessageId,
+          currentUserContent: input.subject.outboundTextSnapshot,
+          omitHistory: pageReferences.length > 0 || !!nativeSearch || !!toolSelection,
+          references
+        });
     if (pageReferences.some((page) => !contextEnvelope.references.some((reference) =>
       reference.sourceId === page.sourceId && reference.contentHash === page.contentHash && reference.excerpt === page.excerpt))) {
       throw new ConversationDocumentPageError('document_page_scope_exceeded', '目标页面超过本次完整读取预算，请缩小问题范围后继续。');

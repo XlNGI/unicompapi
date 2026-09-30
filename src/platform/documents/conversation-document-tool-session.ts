@@ -208,6 +208,35 @@ export class ConversationDocumentToolSessionService implements ConversationDocum
       return pin.selection;
     }
     if (draft.imageQuery !== undefined) return undefined;
+    if (draft.agentNative) {
+      const currentIndex = conversation.messages.findIndex(item => item.id === message.id);
+      const hasPriorPresentation = currentIndex >= 0 && conversation.messages
+        .slice(0, currentIndex)
+        .some(item => item.role === 'assistant' && item.state === 'completed' && item.documentResult?.kind === 'ppt');
+      if (hasPriorPresentation && this.options.mutation) {
+        const mutation = await this.select({
+          conversation,
+          currentUserMessageId: message.id,
+          query: '修改当前 PPT'
+        });
+        if (mutation && 'kind' in mutation && mutation.kind === 'mutation') return mutation;
+      }
+      const selection = Object.freeze({
+        kind: 'generation' as const,
+        projectId: this.options.projectId,
+        conversationId: conversation.id,
+        currentUserMessageId: message.id,
+        userMessageRevision: message.revision,
+        userMessageHash: hash(JSON.stringify([message.content, message.displayContent])),
+        // In the Agent-native path, the user's submitted message authorizes the
+        // model to decide whether to call the generation tool. Runtime still
+        // revalidates project scope, cancellation and write capability.
+        authorizationStatus: 'approved' as const,
+        bindingHash: hash(JSON.stringify([conversation.id, message.id, message.revision, 'agent-native']))
+      });
+      this.issued.add(selection);
+      return selection;
+    }
     // Internal drafting prompts must remain on the existing Outline generation path.
     const ordinary = (message.displayContent === undefined || message.displayContent === message.content ||
       draft.promptContent === message.displayContent) && (draft.promptContent === undefined ||

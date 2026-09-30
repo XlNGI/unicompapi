@@ -1,5 +1,5 @@
 const { createHash, randomUUID } = require('node:crypto');
-const { copyFile, mkdir, readFile, rm, writeFile } = require('node:fs/promises');
+const { copyFile, mkdir, readFile, rm, stat, writeFile } = require('node:fs/promises');
 const { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,10 +12,12 @@ const { app, safeStorage } = require('electron');
 const { values } = parseArgs({ options: {
   'dry-run': { type: 'boolean', default: false },
   'authorized-update-case': { type: 'boolean', default: false },
+  'agent-native': { type: 'boolean', default: false },
   model: { type: 'string' }
 } });
 const requestedModel = values.model ?? 'kimi-k3';
 const live = values['authorized-update-case'] && !values['dry-run'];
+const agentNative = values['agent-native'];
 const workspace = path.resolve(__dirname, '..');
 const sourceData = path.join(app.getPath('appData'), require('../package.json').name);
 const temporaryRootAtStartup = mkdtempSync(path.join(os.tmpdir(), 'unicomp-production-read-'));
@@ -39,9 +41,10 @@ const report = {
   schemaVersion: 2, ...(requestedModel ? { requestedModel: safeModel(requestedModel) } : {}), mode: live ? 'real_provider' : 'dry_run', status: 'in_progress',
   startedAt: new Date().toISOString(),
   outboundScope: 'One synthetic PPT text update and real-file element readback; no user files or prior user conversations.',
-  entryPoint: 'createChatContextRuntime.responses.start -> canonical read/update -> coordinator -> candidate Work/manifest -> head CAS -> real-file read -> final answer',
+  entryPoint: `${agentNative ? 'createChatContextRuntime.responses.startAgent' : 'createChatContextRuntime.responses.start'} -> canonical read/update -> coordinator -> candidate Work/manifest -> head CAS -> real-file read -> final answer`,
   maximumNetworkRequests: 6, maximumRequestsPerCase: 6, maximumOutputTokensPerRequest: 1024,
-  automaticRetries: 0, cost: 'unknown', cases: [], networkRequests: 0
+  automaticRetries: 0, cost: 'unknown', cases: [], networkRequests: 0,
+  acceptanceEnvironment: { isolatedUserConfig: true, protectedConfigChanged: false }
 };
 let stage = 'setup';
 let temporaryRoot = temporaryRootAtStartup;
@@ -53,7 +56,17 @@ let newApiRuntime;
 let activeCase;
 let processDeadline;
 const lifecycleAbort = new AbortController();
-const protectedHashes = new Map();
+const protectedConfigDefinitions = [
+  ['provider-registry', 'provider-registry.json'],
+  ['secure-credentials', 'secure-credentials.json'],
+  ['project-catalog', 'project-catalog.json'],
+  ['runtime-authorization-ledger', 'runtime-authorization-ledger.json'],
+  ['settings', 'settings/settings.json'],
+  ['settings-backup', 'settings/settings.json.bak'],
+  ['proxy-credentials', 'settings/proxy-credentials.json'],
+  ['electron-local-state', 'Local State']
+].map(([id, relativePath]) => ({ id, relativePath }));
+let protectedConfigManifestBefore = [];
 const sensitiveValues = new Set([sourceData]);
 const originalText = '年度销售目标';
 const updatedText = '2027 年全球销售目标';
@@ -96,13 +109,20 @@ async function copyOptionalFile(source, destination) {
   try { await copyFile(source, destination); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
+async function protectedConfigManifest() {
+  return Promise.all(protectedConfigDefinitions.map(async definition => {
+    const file = path.join(sourceData, definition.relativePath);
+    try {
+      const metadata = await stat(file);
+      return { id: definition.id, path: definition.relativePath, exists: true, size: metadata.size, sha256: await hashFile(file) };
+    } catch (error) {
+      if (error.code === 'ENOENT') return { id: definition.id, path: definition.relativePath, exists: false, size: 0, sha256: 'absent' };
+      throw error;
+    }
+  }));
+}
 async function rememberProtectedFiles() {
-  for (const relative of ['provider-registry.json', 'secure-credentials.json', 'project-catalog.json',
-    'runtime-authorization-ledger.json', 'settings/settings.json', 'settings/settings.json.bak', 'settings/proxy-credentials.json']) {
-    const file = path.join(sourceData, relative);
-    protectedHashes.set(file, await hashFile(file));
-  }
-  protectedHashes.set(localStateSource, await hashFile(localStateSource));
+  protectedConfigManifestBefore = await protectedConfigManifest();
 }
 async function resolveConfiguredRoute(platform, isolatedProfile) {
   stage = 'configured_route';
@@ -188,7 +208,10 @@ async function inspectOutbound(request, domain, expectedModel) {
   requireCondition(Number.isSafeInteger(limit) && limit > 0 && limit <= 1024, 'output_budget_missing');
   const registry = domain.createCanonicalToolRegistry();
   const available = payload.tools?.map(tool => tool.function.name).sort();
-  requireCondition(JSON.stringify(available) === JSON.stringify(['read_document_structure', 'update_element']), 'unexpected_available_set');
+  const expectedAvailable = agentNative
+    ? ['add_element', 'add_slide', 'delete_element', 'read_document_structure', 'update_element']
+    : ['read_document_structure', 'update_element'];
+  requireCondition(JSON.stringify(available) === JSON.stringify(expectedAvailable), 'unexpected_available_set');
   for (const tool of payload.tools) requireCondition(JSON.stringify(tool.function.parameters) ===
     JSON.stringify(domain.canonicalToolInputSchema(registry.get(tool.function.name))), 'schema_not_canonical');
   const calls = [];
@@ -203,6 +226,7 @@ async function inspectOutbound(request, domain, expectedModel) {
       requireCondition(contract && available.includes(contract.toolId), 'unexpected_tool');
       const args = domain.validateCanonicalToolArguments(contract, JSON.parse(call.function.arguments));
       if (contract.toolId === 'update_element') requireCondition(args.elementId === fixtureState.target.elementId && args.text === updatedText, 'wrong_update_target');
+      else if (agentNative) requireCondition(args.scope === 'document' || (args.scope === 'page' && args.ordinal === 2), 'wrong_read_scope');
       else requireCondition(args.scope === 'page' && args.ordinal === 2, 'wrong_read_scope');
       calls.push({ id: call.id, name: call.function.name, args });
       summary.tool = call.function.name; summary.callRef = 'call-' + calls.length;
@@ -223,7 +247,10 @@ async function inspectOutbound(request, domain, expectedModel) {
         await verifyActualUpdate();
         activeCase.updateExecuted = true;
       } else {
-        const element = result.observation?.page?.elements?.find(item => item.elementId === fixtureState.target.elementId);
+        const element = [
+          ...(result.observation?.page?.elements ?? []),
+          ...(result.observation?.pages ?? []).flatMap(page => page.elements ?? [])
+        ].find(item => item.elementId === fixtureState.target.elementId);
         requireCondition(result.observation?.source === 'verified_pptx_objects' && element, 'element_observation_missing');
         requireCondition(element.text === (updatedResult ? updatedText : originalText), 'wrong_element_observation');
         if (updatedResult) activeCase.finalObservationFromRealFile = true;
@@ -302,13 +329,16 @@ async function executeCase(platform, domain, storage, projectId, fixture, candid
   const conversation = await seedConversation(platform, domain, storage, projectId, fixture);
   activeCase = { case: 'real_element_update', status: 'in_progress', networkRequests: 0, toolCalls: [] };
   report.cases.push(activeCase);
-  const started = resultValue(await runtime.responses.start({
+  const request = {
     clientCommandId: 'update-acceptance-' + randomUUID(),
     conversation: { conversationId: conversation.id, expectedRevision: conversation.revision, editedMessageId: null },
     title: '合成文本修改验收',
     content: '请把当前 PPT 第二页的“年度销售目标”改成“2027 年全球销售目标”，其他对象保持不变。请实际修改文件并再次读取第二页核验，最后简短告诉我核验的文字。',
-    productFeature: 'text_chat', candidateId: candidate.candidateId, contextSelections: [], parameterValues, confirmed: true
-  }), 'response_start_failed');
+    productFeature: 'text_chat', candidateId: candidate.candidateId, contextSelections: [], parameterValues
+  };
+  const started = resultValue(await (agentNative
+    ? runtime.responses.startAgent(request)
+    : runtime.responses.start({ ...request, confirmed: true })), 'response_start_failed');
   let execution = started.execution;
   const deadline = Date.now() + 300_000;
   while (!terminalStates.has(execution.state) && Date.now() < deadline && !lifecycleAbort.signal.aborted) {
@@ -444,9 +474,23 @@ async function cleanup() {
   proxy?.dispose();
   proxyAdapter?.dispose();
   report.protectedUserConfigurationUnchanged = true;
-  for (const [file, before] of protectedHashes) {
-    if (await hashFile(file) !== before) report.protectedUserConfigurationUnchanged = false;
-  }
+  const protectedConfigManifestAfter = await protectedConfigManifest();
+  const protectedConfigDiff = protectedConfigManifestBefore.flatMap(before => {
+    const after = protectedConfigManifestAfter.find(item => item.id === before.id);
+    if (!after) return [{ id: before.id, path: before.path, changeType: 'deleted', beforeHash: before.sha256, afterHash: 'absent' }];
+    if (before.exists === after.exists && before.size === after.size && before.sha256 === after.sha256) return [];
+    return [{ id: before.id, path: before.path,
+      changeType: !before.exists && after.exists ? 'created' : before.exists && !after.exists ? 'deleted' : 'modified',
+      beforeHash: before.sha256, afterHash: after.sha256 }];
+  });
+  report.protectedConfigManifest = {
+    before: protectedConfigManifestBefore,
+    after: protectedConfigManifestAfter,
+    diffCount: protectedConfigDiff.length
+  };
+  report.protectedConfigDiff = protectedConfigDiff;
+  report.acceptanceEnvironment.protectedConfigChanged = protectedConfigDiff.length > 0;
+  if (protectedConfigDiff.length > 0) report.protectedUserConfigurationUnchanged = false;
   if (!report.protectedUserConfigurationUnchanged) {
     report.status = 'failed';
     report.safeCode = 'user_configuration_changed_during_acceptance';
