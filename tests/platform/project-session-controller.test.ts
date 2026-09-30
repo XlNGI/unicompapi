@@ -4,11 +4,14 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createProject,
+  createProjectConversation,
+  toConversationId,
   toIsoTimestamp,
   toProjectId
 } from '../../src/domain';
 import {
   InMemoryProjectCatalogStore,
+  JsonProjectConversationRepository,
   JsonProjectRepository,
   NodeProjectStorage,
   ProjectCatalogService,
@@ -144,6 +147,66 @@ describe('ProjectSessionController', () => {
       ok: false,
       error: { code: 'project_open_failed' }
     });
+    expect(registry.get()).toBeUndefined();
+  });
+
+  it('lists another project conversation titles without opening it or moving the catalog', async () => {
+    const { projectId, root } = await createValidProjectRoot();
+    const keptRoot = await createRoot();
+    const keptProjectId = toProjectId('project-kept');
+    const keptStorage = new NodeProjectStorage(keptRoot);
+    await new JsonProjectRepository(keptStorage, keptProjectId).save(
+      createProject({
+        id: keptProjectId,
+        name: 'Kept project',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+    );
+    const catalog = new ProjectCatalogService(new InMemoryProjectCatalogStore());
+    await catalog.remember({
+      projectId: keptProjectId,
+      projectName: 'Kept project',
+      rootDirectory: keptRoot
+    });
+    await catalog.remember({
+      projectId,
+      projectName: 'Session project',
+      rootDirectory: root
+    });
+    await new JsonProjectConversationRepository(new NodeProjectStorage(root), projectId).create(
+      createProjectConversation({
+        id: toConversationId('conversation-sidebar'),
+        projectId,
+        title: 'Sidebar chat',
+        createdAt: timestamp
+      })
+    );
+    const registry = new StorageProjectSessionRegistry();
+    const controller = new ProjectSessionController({
+      registry,
+      chooseProjectDirectory: async () => undefined,
+      catalog
+    });
+
+    const listed = await controller.listProjectConversationSummaries({ projectId });
+
+    expect(listed).toEqual({
+      ok: true,
+      value: [{
+        conversationId: 'conversation-sidebar',
+        projectId,
+        title: 'Sidebar chat',
+        status: 'active',
+        updatedAt: timestamp
+      }]
+    });
+    expect(JSON.stringify(listed)).not.toContain(root);
+    expect(registry.get()).toBeUndefined();
+    expect((await catalog.list()).map((item) => item.projectId)).toEqual([projectId, keptProjectId]);
+    await expect(controller.listProjectConversationSummaries({
+      projectId: 'project-missing'
+    })).resolves.toMatchObject({ ok: false, error: { code: 'project_open_failed' } });
     expect(registry.get()).toBeUndefined();
   });
 

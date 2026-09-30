@@ -17,6 +17,7 @@ test('keeps the storage IPC surface narrow and path-free', () => {
     'openRecentProject',
     'createProject',
     'listProjects',
+    'listProjectConversationSummaries',
     'getLocalStorageSummary',
     'onLocalStorageChanged',
     'listTasks',

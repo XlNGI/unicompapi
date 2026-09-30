@@ -50,6 +50,7 @@ function find(node: ReactNode, predicate: (element: Element) => boolean): Elemen
 
 describe('chat composer event behavior', () => {
   let tree: ReactElement;
+  let draftTree: ReactNode;
   const startWorkflow = vi.fn();
   const answerWorkflow = vi.fn();
   const startResponse = vi.fn();
@@ -74,13 +75,33 @@ describe('chat composer event behavior', () => {
     for (let turn = 0; turn < rounds; turn += 1) {
       hooks.cursor = 0;
       tree = ChatPage({ initialConversationId, initialModelSelection, onModelSelectionChange });
+      const field = find(tree, (item) => typeof item.type === 'function' && (item.type as { name?: string }).name === 'ChatDraftField');
+      draftTree = field
+        ? (field.type as (props: Record<string, unknown>) => ReactNode)(field.props)
+        : undefined;
       hooks.effects.splice(0).forEach((effect) => effect());
       await Promise.resolve();
     }
   }
   function element(label: string) {
-    const found = find(tree, (item) => item.props['aria-label'] === label);
+    const found = find(tree, (item) => item.props['aria-label'] === label)
+      ?? find(draftTree, (item) => item.props['aria-label'] === label);
     if (!found) throw new Error(`Missing ${label}`);
+    return found;
+  }
+  function containsText(node: ReactNode, text: string): boolean {
+    if (typeof node === 'string' || typeof node === 'number') return String(node) === text;
+    if (Array.isArray(node)) return node.some((child) => containsText(child, text));
+    if (node && typeof node === 'object' && 'props' in node) {
+      return containsText((node as ReactElement).props.children as ReactNode, text);
+    }
+    return false;
+  }
+  function conversationButton(title: string) {
+    const found = find(tree, (item) => item.type === 'button'
+      && item.props.className === 'uc-chat-page__workspace-conversation'
+      && containsText(item.props.children as ReactNode, title));
+    if (!found) throw new Error(`Missing conversation ${title}`);
     return found;
   }
   function modelPicker() {
@@ -441,13 +462,162 @@ describe('chat composer event behavior', () => {
     (page.props.onDrop as (event: unknown) => void)({ preventDefault: vi.fn(), dataTransfer: { files: [{}] } });
     await settle();
     await type('制作一份融资 PPT，使用 AI 配图');
-    (element('新建对话').props.onClick as () => void)();
+    (element('新聊天').props.onClick as () => void)();
     await settle();
     await type('谢谢');
     await send('button');
     expect(startWorkflow.mock.calls[0][0].attachmentFileIds).toBeUndefined();
     expect(startWorkflow.mock.calls[0][0].intentHint).toBeUndefined();
     expect(startWorkflow.mock.calls[0][0].content).toBe('谢谢');
+  });
+
+  it('opens chat search across the current project without a file-search action', async () => {
+    const listConversations = vi.fn(async () => ({ ok: true, value: [
+      conversation,
+      { ...conversation, conversationId: 'conversation-2', title: '品牌手册大纲', updatedAt: '2026-09-01T00:00:00Z' }
+    ] }));
+    Object.assign(window.unicomp!.chatContexts!, { listConversations });
+    Object.assign(window.unicomp!.storage!, {
+      listProjects: vi.fn(async () => ({ ok: true, value: [
+        { projectId: 'project-1', projectName: '测试测试', availability: 'available', lastOpenedAt: '2026-09-30T00:00:00Z' },
+        { projectId: 'project-2', projectName: '品牌手册', availability: 'available', lastOpenedAt: '2026-09-01T00:00:00Z' }
+      ] }))
+    });
+    await settle();
+    (element('搜索项目或对话').props.onClick as () => void)();
+    await settle();
+    expect(element('搜索聊天')).toBeTruthy();
+    const rendered = JSON.stringify(tree);
+    expect(rendered).toContain('资料问答');
+    expect(rendered).toContain('品牌手册大纲');
+    expect(rendered).toContain('Alt+1');
+    expect(rendered).toContain('Ctrl+N');
+    expect(rendered).toContain('Ctrl+O');
+    expect(rendered).not.toContain('搜索文件');
+    expect(rendered).not.toContain('7 天内');
+    expect(rendered).not.toContain('30 天内');
+  });
+
+  it('expands projects in place and switches only when a chat is chosen', async () => {
+    const listeners = new Map<string, Set<(event: Event) => void>>();
+    const projects = [
+      { projectId: 'project-1', projectName: 'Alpha', availability: 'available' as const, lastOpenedAt: '2026-09-30T00:00:00Z' },
+      { projectId: 'project-2', projectName: 'Beta', availability: 'available' as const, lastOpenedAt: '2026-09-01T00:00:00Z' }
+    ];
+    const desktop = window.unicomp!;
+    Object.assign(desktop.chatContexts!, {
+      listConversations: vi.fn(async () => ({
+        ok: true,
+        value: currentSession.projectId === 'project-2'
+          ? [{ ...conversation, conversationId: 'conversation-beta', projectId: 'project-2', title: 'Beta chat' }]
+          : [{ ...conversation, title: 'Original chat' }]
+      }))
+    });
+    Object.assign(desktop.storage!, {
+      getProjectSession: vi.fn(async () => ({ ok: true, value: currentSession })),
+      listProjects: vi.fn(async () => ({
+        ok: true,
+        value: currentSession.projectId === 'project-2' ? [projects[1], projects[0]] : projects
+      })),
+      listProjectConversationSummaries: vi.fn(async (projectId: string) => ({
+        ok: true,
+        value: projectId === 'project-2' ? [{
+          conversationId: 'conversation-beta',
+          projectId,
+          title: 'Beta chat',
+          status: 'active' as const,
+          updatedAt: '2026-09-01T00:00:00Z'
+        }] : []
+      })),
+      openRecentProject: vi.fn(async (projectId: string) => {
+        currentSession = projectId === 'project-2'
+          ? { projectId: 'project-2', projectName: 'Beta', projectPath: '/beta' }
+          : session;
+        return { ok: true, value: { cancelled: false, session: currentSession } };
+      })
+    });
+    window.addEventListener = vi.fn((type: string, listener: (event: Event) => void) => {
+      const set = listeners.get(type) ?? new Set<(event: Event) => void>();
+      set.add(listener);
+      listeners.set(type, set);
+    }) as typeof window.addEventListener;
+    window.removeEventListener = vi.fn((type: string, listener: (event: Event) => void) => {
+      listeners.get(type)?.delete(listener);
+    }) as typeof window.removeEventListener;
+    window.dispatchEvent = ((event: Event) => {
+      listeners.get(event.type)?.forEach((listener) => listener(event));
+      return true;
+    }) as typeof window.dispatchEvent;
+    await settle();
+
+    const projectButtons = () => {
+      const found: Element[] = [];
+      const walk = (node: ReactNode) => {
+        if (Array.isArray(node)) {
+          node.forEach(walk);
+          return;
+        }
+        if (!node || typeof node !== 'object' || !('props' in node)) return;
+        const element = node as Element;
+        if (typeof element.props.className === 'string' && element.props.className.includes('uc-chat-page__project-item')) {
+          found.push(element);
+        }
+        walk(element.props.children as ReactNode);
+      };
+      walk(tree);
+      return found;
+    };
+    const projectLabel = (button: Element) => {
+      const children = button.props.children;
+      const span = (Array.isArray(children) ? children : [children]).find((child) =>
+        Boolean(child) && typeof child === 'object' && 'type' in child && child.type === 'span'
+      ) as Element | undefined;
+      return span?.props.children;
+    };
+    const buttonNamed = (name: string) => {
+      const button = projectButtons().find((item) => projectLabel(item) === name);
+      if (!button) throw new Error(`Missing project ${name}`);
+      return button;
+    };
+
+    const sidebarText = () => JSON.stringify(find(tree, (item) => item.props.className === 'uc-chat-page__workspace-sidebar'));
+    expect(projectButtons().map(projectLabel)).toEqual(['Alpha', 'Beta']);
+    expect(sidebarText()).toContain('Original chat');
+    expect(buttonNamed('Alpha').props['aria-expanded']).toBe(true);
+    (buttonNamed('Alpha').props.onClick as () => void)();
+    await settle();
+    expect(buttonNamed('Alpha').props['aria-expanded']).toBe(false);
+    expect(sidebarText()).not.toContain('Original chat');
+    (buttonNamed('Alpha').props.onClick as () => void)();
+    await settle();
+    expect(buttonNamed('Alpha').props['aria-expanded']).toBe(true);
+    expect(sidebarText()).toContain('Original chat');
+    (buttonNamed('Beta').props.onClick as () => void)();
+    await settle(12);
+    expect(projectButtons().map(projectLabel)).toEqual(['Alpha', 'Beta']);
+    expect(buttonNamed('Alpha').props['aria-expanded']).toBe(true);
+    expect(buttonNamed('Beta').props['aria-expanded']).toBe(true);
+    expect(desktop.storage!.openRecentProject).not.toHaveBeenCalled();
+    expect(sidebarText()).toContain('Original chat');
+    expect(sidebarText()).toContain('Beta chat');
+    const betaChat = find(tree, (item) =>
+      item.props.className === 'uc-chat-page__workspace-conversation' &&
+      JSON.stringify(item.props.children).includes('Beta chat')
+    );
+    if (!betaChat) throw new Error('Missing Beta chat');
+    (betaChat.props.onClick as () => void)();
+    await settle(12);
+    expect(desktop.storage!.openRecentProject).toHaveBeenCalledWith('project-2');
+    expect(projectButtons().map(projectLabel)).toEqual(['Alpha', 'Beta']);
+    expect(buttonNamed('Alpha').props['aria-expanded']).toBe(true);
+    expect(buttonNamed('Beta').props['aria-expanded']).toBe(true);
+    expect(sidebarText()).toContain('Original chat');
+    expect(sidebarText()).toContain('Beta chat');
+    const betaRow = find(tree, (item) =>
+      item.props.className === 'uc-chat-page__workspace-conversation-row' &&
+      JSON.stringify(item.props.children).includes('Beta chat')
+    );
+    expect(betaRow?.props['aria-current']).toBe('true');
   });
 
   it('delivers Office outputs sequentially and retries local generation without repeating completed model responses', async () => {
@@ -530,5 +700,46 @@ describe('chat composer event behavior', () => {
     expect(events).toEqual(['start:word', 'generate:word', 'start:ppt', 'generate:ppt', 'generate:ppt']);
     expect(startResponse).toHaveBeenCalledTimes(2);
     expect(deliveries.map((item) => item.status)).toEqual(['completed', 'completed']);
+  });
+
+  it('keeps an unsent draft with its own conversation and does not ask to discard it', async () => {
+    const other = { ...conversation, conversationId: 'conversation-2', title: '另一条', updatedAt: '2026-09-09T00:00:01Z' };
+    const confirm = vi.fn(() => false);
+    window.confirm = confirm;
+    initialConversationId = conversation.conversationId;
+    Object.assign(window.unicomp!.chatContexts!, {
+      listConversations: vi.fn(async () => ({ ok: true, value: [conversation, other] }))
+    });
+    Object.assign(window.unicomp!.storage!, {
+      listProjects: vi.fn(async () => ({ ok: true, value: [{
+        projectId: session.projectId,
+        projectName: session.projectName,
+        availability: 'available',
+        lastOpenedAt: conversation.updatedAt
+      }] }))
+    });
+    await settle();
+    await type('第一段');
+    (conversationButton('另一条').props.onClick as () => void)();
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('');
+    (conversationButton('资料问答').props.onClick as () => void)();
+    await settle();
+    expect(element('对话输入').props.value).toBe('第一段');
+    (element('新聊天').props.onClick as () => void)();
+    await settle();
+    expect(element('对话输入').props.value).toBe('');
+    await type('新的内容');
+    (conversationButton('资料问答').props.onClick as () => void)();
+    await settle();
+    expect(element('对话输入').props.value).toBe('第一段');
+    (element('新聊天').props.onClick as () => void)();
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(element('对话输入').props.value).toBe('新的内容');
+    (element('新聊天').props.onClick as () => void)();
+    await settle();
+    expect(element('对话输入').props.value).toBe('');
   });
 });

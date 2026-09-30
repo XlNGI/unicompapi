@@ -5,6 +5,8 @@ import test from 'node:test';
 const source = await readFile('src/pages/chat/ChatPage.tsx', 'utf8');
 const styles = await readFile('src/styles/pages.css', 'utf8');
 const appSource = await readFile('src/ui/App.tsx', 'utf8');
+const layoutSource = await readFile('src/ui/layout/AppLayout.tsx', 'utf8');
+const shellStyles = await readFile('src/styles.css', 'utf8');
 const buttonSource = await readFile('src/components/Button.tsx', 'utf8');
 const failureNoticeSource = await readFile(
   'src/ui/chat-response-failure-notice.ts',
@@ -79,14 +81,14 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /打开对话列表/);
   assert.match(source, /打开项目上下文/);
   assert.match(source, /conversationTitleFromMessage/);
-  assert.match(source, /conversationGroups/);
+  assert.match(source, /aria-label="搜索聊天"/);
   assert.match(source, /发送第一条消息后，对话会自动保存在这里/);
   assert.match(source, /<Whisper/);
   assert.match(source, /<Tooltip>\{conversation\.title\}<\/Tooltip>/);
   assert.match(styles, /\.uc-chat-page__history-menu \{[\s\S]*opacity: 0;[\s\S]*pointer-events: none;/);
   assert.match(styles, /\.uc-chat-page__history-row:hover \.uc-chat-page__history-menu/);
   assert.match(styles, /text-overflow: ellipsis/);
-  assert.match(styles, /--uc-chat-content-width: 860px/);
+  assert.match(styles, /--uc-chat-content-width: 760px/);
   assert.match(styles, /\.uc-chat-page__messages-inner[\s\S]*width: min\(var\(--uc-chat-content-width\), 100%\)/);
   assert.match(styles, /\.uc-chat-page__composer-region[\s\S]*width: min\(var\(--uc-chat-content-width\), calc\(100% - 48px\)\)/);
   assert.match(source, /uc-chat-page__messages-inner[\s\S]*aria-label="助手任务回复"[\s\S]*\{notice \? \([\s\S]*role="status"[\s\S]*uc-chat-page__composer-region/);
@@ -100,7 +102,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /initialModelSelection\?: ChatModelSelection/);
   assert.match(source, /onModelSelectionChange\?: \(selection\?: ChatModelSelection\) => void/);
   assert.match(source, /candidate\?\.available \? current : undefined/);
-  assert.match(source, /speaker=\{<Tooltip>新对话<\/Tooltip>\}[\s\S]*aria-label="新建对话"[\s\S]*onClick=\{startNewConversation\}/);
+  assert.match(source, /speaker=\{<Tooltip>新聊天<\/Tooltip>\}[\s\S]*aria-label="新聊天"[\s\S]*onClick=\{startNewConversation\}/);
   assert.match(source, /speaker=\{<Tooltip>对话列表<\/Tooltip>\}/);
   assert.match(source, /speaker=\{<Tooltip>项目上下文<\/Tooltip>\}/);
   assert.match(buttonSource, /forwardRef<HTMLButtonElement, ButtonProps>/);
@@ -129,7 +131,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /className="uc-chat-page__message-bubble"/);
   assert.match(styles, /\.uc-chat-page__message-item--user > \.uc-chat-page__message-bubble \{[\s\S]*padding: 8px 12px;[\s\S]*background: var\(--uc-color-surface-subtle\);/);
   assert.match(styles, /\.uc-chat-page__composer \{[\s\S]*background: var\(--uc-color-surface-raised\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
-  assert.match(styles, /\.uc-chat-page__composer-region \{[\s\S]*position: absolute;[\s\S]*bottom: 0;[\s\S]*left: 50%;[\s\S]*background: transparent;[\s\S]*pointer-events: none;/);
+  assert.match(styles, /\.uc-chat-page__composer-region \{[\s\S]*position: absolute;[\s\S]*bottom: 0;[\s\S]*left: 50%;[\s\S]*transform: translateX\(-50%\);[\s\S]*background: transparent;[\s\S]*pointer-events: none;/);
   assert.match(styles, /\.uc-chat-page__messages \{[\s\S]*scroll-padding-bottom: 180px;/);
   assert.match(styles, /\.uc-chat-page__messages-inner \{[\s\S]*padding-bottom: 180px;/);
   assert.match(styles, /\.uc-chat-page__composer:focus-within \{[\s\S]*border-color: var\(--uc-color-border-default\);[\s\S]*box-shadow: var\(--uc-shadow-md\);/);
@@ -160,7 +162,7 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.match(source, /storage\.listProjects\(\)/);
   assert.match(source, /storage\.openRecentProject\(projectId\)/);
   assert.match(source, /<Button[\s\S]*新建项目/);
-  assert.match(styles, /\.uc-chat-page\s*\{[\s\S]*grid-template-columns: 286px minmax\(0, 1fr\);/);
+  assert.match(styles, /\.uc-chat-page\s*\{[\s\S]*grid-template-columns: 260px minmax\(0, 1fr\);/);
   assert.match(styles, /\.uc-chat-page__workspace-sidebar\s*\{[\s\S]*grid-column: 1;/);
   assert.match(appSource, /activeItemId === 'projects' && !activeSubItemId \?[\s\S]*<ChatPage/);
   assert.match(source, /key: 'archive'/);
@@ -176,6 +178,40 @@ test('chat page uses project conversations and composer-first streaming workflow
   assert.doesNotMatch(source, /请查看任务中心调用记录/);
   assert.doesNotMatch(source, /消息内容已复制/);
   assert.doesNotMatch(source, /上下文 \{includedContextIds\.length\}/);
+});
+
+test('chat workspace uses a quiet project list and search dialog', () => {
+  assert.match(source, /aria-label="新聊天"/);
+  assert.match(source, /aria-label="搜索项目或对话"/);
+  assert.match(source, /LuSquarePen/);
+  assert.match(source, /LuFolder/);
+  assert.match(source, /打开本地项目/);
+  assert.match(source, /Alt\+\$\{index \+ 1\}/);
+  assert.doesNotMatch(source, /搜索文件/);
+  assert.doesNotMatch(source, /<h4>\{label\}<\/h4>/);
+  assert.doesNotMatch(source, /当前项目 · \{conversations\.length\} 个对话/);
+  assert.match(styles, /\.uc-chat-page__new-conversation\s*\{[^}]*width: calc\(100% - var\(--uc-space-4\)\);/);
+  assert.doesNotMatch(styles, /\.uc-chat-page__new-conversation\s*\{[^}]*width: fit-content;/);
+  assert.match(styles, /\.uc-chat-page__new-conversation[\s\S]*background: transparent/);
+  assert.match(source, /registerProjectSwitchGuard/);
+  assert.match(styles, /\.uc-chat-page__header-new/);
+  assert.match(source, /function onProjectRowClick\(projectId: string\)/);
+  assert.match(source, /expandedProjectIds/);
+  assert.match(source, /listProjectConversationSummaries\(projectId\)/);
+  assert.match(source, /function openProjectConversation\(projectId: string, conversationId: string\)/);
+  assert.doesNotMatch(source, /function switchProject/);
+  assert.match(source, /retainProjectOrder\(current, projectsResult\.value\)/);
+  assert.match(source, /aria-expanded=\{expanded\}/);
+  assert.doesNotMatch(source, /isCurrent && projectChatsExpanded/);
+  assert.match(styles, /\.uc-chat-page__workspace-scroll\s*\{[\s\S]*scrollbar-width: thin/);
+  assert.match(styles, /\.uc-chat-page__project-item\s*\{[\s\S]*min-height: 28px/);
+  assert.doesNotMatch(styles, /\.uc-chat-page__workspace-conversations\s*\{[^}]*max-height:/);
+  assert.match(layoutSource, /activeItemId === 'chat' \|\| activeItemId === 'projects' \? ' workspace--chat'/);
+  assert.match(shellStyles, /\.workspace--chat\s*\{[\s\S]*padding:\s*0;/);
+  assert.match(styles, /\.uc-chat-page__messages-inner\s*\{[\s\S]*margin: 0 auto;/);
+  assert.match(styles, /\.uc-chat-page__empty\s*\{[\s\S]*place-items: center;[\s\S]*text-align: center;/);
+  assert.match(styles, /\.uc-chat-page__conversation\s*\{[\s\S]*gap: 0;/);
+  assert.match(styles, /\.uc-chat-search__dialog/);
 });
 
 test('chat composer imports images through the controlled attachment API', () => {
