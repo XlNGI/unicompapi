@@ -1,5 +1,11 @@
 # UniComp 开发计划
 
+### 维护记录：Design IR 与 Agent Runtime 缺口登记（2026-09-30）
+
+已基于当前 develop@9e90f6f 完成 [Design IR 与 Agent Runtime 缺口登记](docs/current/design-ir-and-runtime-gap-register.md)。本记录不修改业务代码，也不推翻 D3 当前支持范围的真实 kimi-k3 验收结论；它明确区分“当前支持范围已闭环”和“目标架构仍有缺口”。Design IR 缺口包括内容事实源分裂、非强制 Design IR、Layout IR 多套表示、复杂内容覆盖不足、修正循环丢失 Design IR 和 Visual QA 不完整。Runtime 缺口包括 ConversationAgentRun 仍是响应投影、与 DocumentTaskRuntime 状态机未统一、聊天 Agent Loop 未完整持久化、等待/恢复协议、统一 Recovery、事件流、总预算/取消、完成条件和未知结果对账未闭环。
+
+本轮仅新增登记文档并更新本节；未修改业务代码，未运行全量测试。验收执行 git diff --check，新增文档中的路径和状态以当前源码为依据。
+
 ### 专业图生图/图生视频多图参考（2026-09-28；负责人批准，功能分支实施中）
 
 负责人明确批准在专业图生图与图生视频中加入多张参考图片共同参与一次生成。此决定是 `AGENTS.md`“不得恢复多图参考”的唯一有界例外；仍禁止图片/视频批量创作、其他模式的多图输入和任何一次请求产出多件作品。本功能只在从最新 `develop` 建立的 `feature/multi-reference-generation` 实施，不带入其他工作树的未提交改动。
