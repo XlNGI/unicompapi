@@ -154,9 +154,17 @@ export function App() {
           onConversationChange={setSelectedChatConversationId}
           onModelSelectionChange={setChatModelSelection}
           onOpenLibrary={() => handleNavigate('library')}
+          onNavigateToCreation={(itemId) => handleNavigate(itemId)}
         />
       ) : activeItemId === 'projects' && !activeSubItemId ? (
-        <ProjectsPage onNavigate={handleNavigate} />
+        <ChatPage
+          initialConversationId={selectedChatConversationId}
+          initialModelSelection={chatModelSelection}
+          onConversationChange={setSelectedChatConversationId}
+          onModelSelectionChange={setChatModelSelection}
+          onOpenLibrary={() => handleNavigate('library')}
+          onNavigateToCreation={(itemId) => handleNavigate(itemId)}
+        />
       ) : activeItemId === 'tasks' && !activeSubItemId ? (
         <TasksPage
           onNavigate={handleNavigate}
