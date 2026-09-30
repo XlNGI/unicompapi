@@ -4,3 +4,18 @@ export const PROJECT_SESSION_CHANGED_EVENT = 'unicomp:project-session-changed';
 export function notifyProjectSessionChanged(): void {
   window.dispatchEvent(new Event(PROJECT_SESSION_CHANGED_EVENT));
 }
+
+type ProjectSwitchGuard = () => boolean;
+
+let projectSwitchGuard: ProjectSwitchGuard | undefined;
+
+export function registerProjectSwitchGuard(guard: ProjectSwitchGuard): () => void {
+  projectSwitchGuard = guard;
+  return () => {
+    if (projectSwitchGuard === guard) projectSwitchGuard = undefined;
+  };
+}
+
+export function canSwitchProject(): boolean {
+  return projectSwitchGuard?.() ?? true;
+}

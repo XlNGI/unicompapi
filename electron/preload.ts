@@ -173,6 +173,8 @@ const storage: StorageApi = {
   createProject: (name) =>
     ipcRenderer.invoke(storageIpcChannels.createProject, { name }),
   listProjects: () => ipcRenderer.invoke(storageIpcChannels.listProjects),
+  listProjectConversationSummaries: (projectId) =>
+    ipcRenderer.invoke(storageIpcChannels.listProjectConversationSummaries, { projectId }),
   getLocalStorageSummary: () =>
     ipcRenderer.invoke(storageIpcChannels.getLocalStorageSummary),
   onLocalStorageChanged: (listener) => {

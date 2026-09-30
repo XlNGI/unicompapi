@@ -62,7 +62,7 @@ export function AppLayout({
     return () => unregister(sceneStatusId);
   }, [activeItemId, activeSubItemId, register, sceneLabel, sceneStatusId, unregister]);
   const workspaceVariant =
-    activeItemId === 'chat' ? ' workspace--chat' :
+    activeItemId === 'chat' || activeItemId === 'projects' ? ' workspace--chat' :
     activeItemId === 'tasks' ? ' workspace--tasks' :
     activeSubItemId === 'video-editing' ? ' workspace--video-editing' : '';
   return (

@@ -8,6 +8,7 @@ export const storageIpcChannels = {
   openRecentProject: 'storage:open-recent-project',
   createProject: 'storage:create-project',
   listProjects: 'storage:list-projects',
+  listProjectConversationSummaries: 'storage:list-project-conversation-summaries',
   getLocalStorageSummary: 'storage:get-local-storage-summary',
   localStorageChanged: 'storage:local-storage-changed',
   consumptionChanged: 'storage:consumption-changed',
@@ -484,6 +485,14 @@ export interface StorageCreateProjectDto {
   readonly session?: StorageProjectSessionDto;
 }
 
+export interface StorageProjectConversationSummaryDto {
+  readonly conversationId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly status: 'active' | 'archived';
+  readonly updatedAt: string;
+}
+
 export interface StorageApi {
   probeFile(fileId: string): Promise<StorageIpcResult<StorageFileStatusDto>>;
   verifyFile(fileId: string): Promise<StorageIpcResult<StorageFileStatusDto>>;
@@ -500,6 +509,9 @@ export interface StorageApi {
     name: string
   ): Promise<StorageIpcResult<StorageCreateProjectDto>>;
   listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>>;
+  listProjectConversationSummaries(
+    projectId: string
+  ): Promise<StorageIpcResult<readonly StorageProjectConversationSummaryDto[]>>;
   getLocalStorageSummary(): Promise<StorageIpcResult<StorageLocalStorageSummaryDto>>;
   onLocalStorageChanged(listener: () => void): () => void;
   onConsumptionChanged(listener: () => void): () => void;

@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
+import type { ClipboardEvent, FormEvent, ReactNode } from 'react';
 import {
   LuArchive,
   LuArchiveRestore,
   LuArrowDown,
   LuArrowUp,
   LuCheck,
+  LuChevronDown,
   LuChevronRight,
   LuCopy,
   LuFileText,
-  LuFolderKanban,
-  LuMessageSquarePlus,
+  LuFolder,
+  LuSquarePen,
   LuMessagesSquare,
   LuPaperclip,
   LuPanelRight,
@@ -67,7 +68,8 @@ import {
 } from './documentDrafting';
 import {
   notifyProjectSessionChanged,
-  PROJECT_SESSION_CHANGED_EVENT
+  PROJECT_SESSION_CHANGED_EVENT,
+  registerProjectSwitchGuard
 } from '../../ui/project-session-events';
 import { failedResponseNotice } from '../../ui/chat-response-failure-notice';
 import {
@@ -298,22 +300,6 @@ function findEditableCancelledUserMessage(
   return undefined;
 }
 
-function conversationGroupLabel(updatedAt: string): string {
-  const updated = new Date(updatedAt);
-  if (Number.isNaN(updated.getTime())) return '更早';
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const updatedDay = new Date(updated.getFullYear(), updated.getMonth(), updated.getDate()).getTime();
-  const days = Math.floor((today - updatedDay) / 86_400_000);
-  if (days <= 0) return '今天';
-  if (days <= 7) return '7 天内';
-  if (days <= 30) return '30 天内';
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit'
-  }).format(updated);
-}
-
 type DeleteTarget =
   | { readonly kind: 'conversation'; readonly value: ConversationDto }
   | { readonly kind: 'context'; readonly value: ProjectContextCandidateDto };
@@ -492,6 +478,225 @@ interface ReadyDocumentWorkflowExecution {
   readonly researchReferences?: readonly WebResearchReferenceDto[];
 }
 
+
+interface ProjectSidebarChat {
+  readonly conversationId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly updatedAt: string;
+  readonly status: ConversationDto['status'];
+  readonly readOnly: boolean;
+  readonly source?: ConversationDto;
+}
+
+function sidebarChatFromConversation(conversation: ConversationDto): ProjectSidebarChat {
+  return {
+    conversationId: conversation.conversationId,
+    projectId: conversation.projectId ?? '',
+    title: conversation.title,
+    updatedAt: conversation.updatedAt,
+    status: conversation.status,
+    readOnly: conversation.readOnly,
+    source: conversation
+  };
+}
+
+function retainProjectOrder(
+  previous: readonly StorageProjectSummaryDto[],
+  incoming: readonly StorageProjectSummaryDto[]
+): readonly StorageProjectSummaryDto[] {
+  if (previous.length === 0) return incoming;
+  const incomingById = new Map(incoming.map((project) => [project.projectId, project]));
+  const retained = previous.flatMap((project) => {
+    const next = incomingById.get(project.projectId);
+    return next ? [next] : [];
+  });
+  const retainedIds = new Set(retained.map((project) => project.projectId));
+  return [
+    ...retained,
+    ...incoming.filter((project) => !retainedIds.has(project.projectId))
+  ];
+}
+
+interface ComposerDraft {
+  text: string;
+  attachments: readonly AttachmentDraft[];
+}
+
+interface ComposerFieldApi {
+  setText: (value: string) => void;
+  getText: () => string;
+  focus: () => void;
+}
+
+function composerDraftKey(projectId: string | undefined, conversationId: string | undefined) {
+  return `${projectId ?? 'none'}:${conversationId ?? 'new'}`;
+}
+
+function resizeComposer(textarea: HTMLTextAreaElement | null) {
+  if (!textarea?.style) return;
+  textarea.style.height = 'auto';
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
+}
+
+function withComposerSubmit(children: ReactNode, extra: ReactNode) {
+  return Children.map(children, (child) => {
+    if (!isValidElement<{ className?: string; children?: ReactNode }>(child)) return child;
+    if (child.props.className !== 'uc-chat-page__composer-toolbar') return child;
+    const toolbarChildren = Children.map(child.props.children, (inner) => {
+      if (!isValidElement<{ className?: string; children?: ReactNode }>(inner)) return inner;
+      if (inner.props.className !== 'uc-chat-page__composer-actions') return inner;
+      return cloneElement(inner, {}, inner.props.children, extra);
+    });
+    return cloneElement(child, {}, toolbarChildren);
+  });
+}
+
+function ChatDraftField({
+  draftKey,
+  restoredText,
+  field,
+  canCompose,
+  editing,
+  placeholder,
+  pasteEnabled,
+  planningActive,
+  planningCancelRequested,
+  documentGenerationActive,
+  documentResponseActive,
+  documentCancelRequested,
+  responseInProgress,
+  cancelRequested,
+  busy,
+  chat,
+  selectedCandidate,
+  onTextChange,
+  onPasteFiles,
+  onSubmit,
+  onPress,
+  children
+}: {
+  readonly draftKey: string;
+  readonly restoredText: string;
+  readonly field: ComposerFieldApi;
+  readonly canCompose: boolean;
+  readonly editing: boolean;
+  readonly placeholder: string;
+  readonly pasteEnabled: boolean;
+  readonly planningActive: boolean;
+  readonly planningCancelRequested: boolean;
+  readonly documentGenerationActive: boolean;
+  readonly documentResponseActive: boolean;
+  readonly documentCancelRequested: boolean;
+  readonly responseInProgress: boolean;
+  readonly cancelRequested: boolean;
+  readonly busy: boolean;
+  readonly chat: boolean;
+  readonly selectedCandidate: { readonly available: boolean } | undefined;
+  readonly onTextChange: (value: string) => void;
+  readonly onPasteFiles: (files: readonly File[]) => void;
+  readonly onSubmit: () => void;
+  readonly onPress: () => void;
+  readonly children: ReactNode;
+}) {
+  const [appliedKey, setAppliedKey] = useState(draftKey);
+  const [value, setValue] = useState(restoredText);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const shownRef = useRef(restoredText);
+  const keyChanged = appliedKey !== draftKey;
+  if (keyChanged) {
+    setAppliedKey(draftKey);
+    setValue(restoredText);
+  }
+  const shown = keyChanged ? restoredText : value;
+  shownRef.current = shown;
+  field.setText = (next: string) => {
+    shownRef.current = next;
+    setAppliedKey(draftKey);
+    setValue(next);
+    resizeComposer(textareaRef.current);
+  };
+  field.getText = () => shownRef.current;
+  field.focus = () => {
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+  useEffect(() => {
+    resizeComposer(textareaRef.current);
+  }, [shown]);
+  const documentStop = documentGenerationActive || (documentResponseActive && !responseInProgress);
+  const showStop = planningActive || responseInProgress || documentGenerationActive || documentResponseActive;
+  const submitLabel = planningActive
+    ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
+    : documentStop
+      ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
+      : responseInProgress
+        ? cancelRequested ? '正在停止生成' : '停止生成'
+        : '发送消息';
+  return (
+    <>
+      <textarea
+        aria-label={editing ? '编辑已停止的消息' : '对话输入'}
+        disabled={!canCompose}
+        maxLength={8000}
+        onChange={(event) => {
+          const next = event.currentTarget.value;
+          shownRef.current = next;
+          setValue(next);
+          onTextChange(next);
+          resizeComposer(event.currentTarget);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (!responseInProgress && !cancelRequested && !busy) onSubmit();
+          }
+        }}
+        onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+          const files = Array.from(event.clipboardData.files).filter((file) => file.type?.startsWith('image/'));
+          if (files.length > 0 && pasteEnabled) {
+            event.preventDefault();
+            onPasteFiles(files);
+          }
+        }}
+        placeholder={placeholder}
+        ref={textareaRef}
+        rows={1}
+        value={shown}
+      />
+      {withComposerSubmit(children, <>
+        {shown.length >= 7000 ? <span className='uc-chat-page__composer-count'>{shown.length} / 8000</span> : null}
+        <button
+          aria-label={submitLabel}
+          className={`uc-chat-page__submit${showStop ? ' uc-chat-page__submit--stop' : ''}`}
+          disabled={planningActive
+            ? planningCancelRequested
+            : documentGenerationActive || (documentResponseActive && !responseInProgress)
+              ? documentCancelRequested
+              : responseInProgress
+                ? cancelRequested
+                : !chat ||
+                  !canCompose ||
+                  !selectedCandidate?.available ||
+                  !shown.trim() ||
+                  busy ||
+                  cancelRequested}
+          onClick={onPress}
+          title={planningActive
+            ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
+            : documentStop
+              ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
+              : responseInProgress
+                ? cancelRequested ? '正在停止' : '停止生成'
+                : !selectedCandidate?.available ? '请先选择一个可用模型' : '发送'}
+          type='button'
+        >
+          {showStop ? <LuSquare aria-hidden='true' /> : <LuArrowUp aria-hidden='true' />}
+        </button>
+      </>)}
+    </>
+  );
+}
+
 export function ChatPage({
   initialConversationId,
   onConversationChange,
@@ -509,7 +714,12 @@ export function ChatPage({
   const storage = window.unicomp?.storage;
   const [session, setSession] = useState<StorageProjectSessionDto>();
   const [projects, setProjects] = useState<readonly StorageProjectSummaryDto[]>([]);
-  const [projectSearch, setProjectSearch] = useState('');
+  const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [chatsByProject, setChatsByProject] = useState<Readonly<Record<string, readonly ProjectSidebarChat[]>>>({});
+  const initialProjectExpandedRef = useRef(false);
+  const sessionProjectViewRef = useRef<string | undefined>(undefined);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectManagementOpen, setProjectManagementOpen] = useState(false);
   const [projectCreateName, setProjectCreateName] = useState('');
@@ -518,7 +728,6 @@ export function ChatPage({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState('');
   const [renamingConversationId, setRenamingConversationId] = useState<string>();
-  const [input, setInput] = useState('');
   const [documentGenerationActive, setDocumentGenerationActive] =
     useState(false);
   // Document requests stream a machine-readable outline. Project its body into
@@ -564,7 +773,6 @@ export function ChatPage({
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidateLoadFailures, setCandidateLoadFailures] = useState<readonly string[]>([]);
   const [candidateReloadVersion, setCandidateReloadVersion] = useState(0);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const followScrollFrameRef = useRef<number>();
@@ -572,6 +780,18 @@ export function ChatPage({
   const cancelRequestedRef = useRef(false);
   const cancelAfterStartRef = useRef(false);
   const inputValueRef = useRef('');
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const draftsRef = useRef(new Map<string, ComposerDraft>());
+  const attachmentsRef = useRef<readonly AttachmentDraft[]>([]);
+  const composerOwnerKeyRef = useRef<string | null>(null);
+  const draftFieldRef = useRef<ComposerFieldApi>({
+    setText() {},
+    getText() { return ''; },
+    focus() {}
+  });
+  const activeDraftKey = composerDraftKey(session?.projectId, selectedId);
+  if (composerOwnerKeyRef.current === null) composerOwnerKeyRef.current = activeDraftKey;
   const workflowSubmissionInFlightRef = useRef(false);
   const planningCommandRef = useRef<{ readonly clientCommandId: string; cancelled: boolean }>();
   const productionCommandSubscriptions = useRef(new Map<string, () => void>());
@@ -585,6 +805,7 @@ export function ChatPage({
   const attachmentSelectionChangedRef = useRef(false);
   const sessionProjectIdRef = useRef<string>();
   const documentGenerationInFlightRef = useRef(false);
+  const projectSwitchBlockedRef = useRef(false);
   const documentResponseUserIdsRef = useRef(new Set<string>());
   const documentOrchestrationCancelRef = useRef(false);
   const activeDocumentGenerationRef = useRef<{
@@ -659,23 +880,15 @@ export function ChatPage({
       .toLocaleLowerCase()
       .includes(keyword);
   });
-  const conversationGroups = useMemo(() => {
-    const groups = new Map<string, ConversationDto[]>();
-    conversations.forEach((conversation) => {
-      const label = conversationGroupLabel(conversation.updatedAt);
-      const group = groups.get(label) ?? [];
-      group.push(conversation);
-      groups.set(label, group);
-    });
-    return [...groups.entries()];
-  }, [conversations]);
-  const visibleProjects = useMemo(() => {
-    const keyword = projectSearch.trim().toLocaleLowerCase();
-    if (!keyword) return projects;
-    return projects.filter((project) =>
-      project.projectName.toLocaleLowerCase().includes(keyword)
-    );
-  }, [projectSearch, projects]);
+  const visibleConversations = useMemo(() => [...conversations].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt)
+  ), [conversations]);
+  const searchResults = useMemo(() => {
+    const keyword = searchQuery.trim().toLocaleLowerCase();
+    return visibleConversations.filter((conversation) =>
+      !keyword || conversation.title.toLocaleLowerCase().includes(keyword)
+    ).slice(0, 8);
+  }, [searchQuery, visibleConversations]);
   const responseInProgress = Boolean(
     responseStarting ||
     (responseExecution && ['pending', 'streaming'].includes(responseExecution.state))
@@ -683,8 +896,17 @@ export function ChatPage({
   const canCompose = Boolean(
     session && (!selected || (!selected.readOnly && selected.status === 'active'))
   );
+  projectSwitchBlockedRef.current = responseInProgress
+    || busy
+    || documentGenerationActive
+    || documentGenerationInFlightRef.current;
   useEffect(() => {
     let active = true;
+    const unregisterProjectSwitchGuard = registerProjectSwitchGuard(() => {
+      if (!projectSwitchBlockedRef.current && !documentGenerationInFlightRef.current) return true;
+      setNotice('请先停止当前任务，再切换项目。');
+      return false;
+    });
     async function load(options?: { readonly quiet?: boolean }) {
       if (!options?.quiet) setLoading(true);
       if (!chat || !storage) {
@@ -703,7 +925,25 @@ export function ChatPage({
         ]);
         if (!active) return;
         if (sessionResult.ok) {
+          if (sessionResult.value && !initialProjectExpandedRef.current) {
+            initialProjectExpandedRef.current = true;
+            const openedProjectId = sessionResult.value.projectId;
+            setExpandedProjectIds((current) => {
+              const next = new Set(current);
+              next.add(openedProjectId);
+              return next;
+            });
+          }
           if (sessionProjectIdRef.current !== sessionResult.value?.projectId) {
+            const previousProjectKey = sessionProjectIdRef.current ?? 'none';
+            const ownerKey = composerOwnerKeyRef.current ?? composerDraftKey(sessionProjectIdRef.current, selectedIdRef.current);
+            if (ownerKey.slice(0, ownerKey.indexOf(':')) === previousProjectKey) {
+              draftsRef.current.set(ownerKey, {
+                text: inputValueRef.current,
+                attachments: attachmentsRef.current.slice()
+              });
+              composerOwnerKeyRef.current = composerDraftKey(sessionResult.value?.projectId, selectedIdRef.current);
+            }
             sessionProjectIdRef.current = sessionResult.value?.projectId;
             setModelSelection((current) => sessionResult.value && current?.projectId === sessionResult.value.projectId
               ? current
@@ -711,8 +951,6 @@ export function ChatPage({
             setResponseCandidates([]);
             setProductionEvents([]);
             setProductionIssues([]);
-            resetComposerScope();
-            updateInput('');
             setActiveWorkflow(undefined);
             setWebResearchSession(undefined);
           }
@@ -762,7 +1000,7 @@ export function ChatPage({
           setNotice(errorMessages[conversationResult.error.code]);
         }
         if (projectsResult.ok) {
-          setProjects(projectsResult.value);
+          setProjects((current) => retainProjectOrder(current, projectsResult.value));
         }
         if (sessionResult.ok && sessionResult.value) {
           const contexts = await chat.listProjectContextCandidates();
@@ -782,6 +1020,7 @@ export function ChatPage({
     window.addEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
     return () => {
       active = false;
+      unregisterProjectSwitchGuard();
       window.removeEventListener('focus', refresh);
       window.removeEventListener(PROJECT_SESSION_CHANGED_EVENT, refresh);
     };
@@ -790,6 +1029,18 @@ export function ChatPage({
   useEffect(() => {
     onConversationChange?.(selectedId);
   }, [onConversationChange, selectedId]);
+
+  sessionProjectViewRef.current = session?.projectId;
+
+  useEffect(() => {
+    const projectId = session?.projectId;
+    if (!projectId) return;
+    if (conversations.some((conversation) => conversation.projectId !== null && conversation.projectId !== projectId)) return;
+    setChatsByProject((current) => ({
+      ...current,
+      [projectId]: conversations.map(sidebarChatFromConversation)
+    }));
+  }, [conversations, session?.projectId]);
 
   useEffect(() => {
     if (!documentGenerationActive || !chat || !selectedId) return;
@@ -1124,40 +1375,39 @@ export function ChatPage({
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!input.trim()) return;
+      if (!inputValueRef.current.trim()) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [input]);
-
-  function startNewConversation() {
-    if (responseInProgress || busy || documentGenerationInFlightRef.current) {
-      setNotice('请先停止当前回复，再开始新的对话。');
-      return;
-    }
-    if (!confirmLeaveUnsentInput()) return;
-    resetComposerScope();
-    setSelectedId(undefined);
-    setActiveWorkflow(undefined);
-    setWebResearchSession(undefined);
-    updateInput('');
-    setEditingMessageId(undefined);
-    setHistoryOpen(false);
-    setContextOpen(false);
-    setIncludedContextIds([]);
-    setContextDraft(undefined);
-    setNotice(session ? '' : '请先打开项目。');
-    clearResponseDraftState();
-  }
+  }, []);
 
   useEffect(() => {
-    const textarea = composerRef.current;
-    if (!textarea) return;
-    textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
-  }, [input]);
+    const ownerKey = composerOwnerKeyRef.current;
+    const ownerSeparator = ownerKey?.indexOf(':') ?? -1;
+    const activeSeparator = activeDraftKey.indexOf(':');
+    const promotedNewChat = ownerKey !== null
+      && ownerKey !== activeDraftKey
+      && ownerSeparator >= 0
+      && ownerKey.slice(0, ownerSeparator) === activeDraftKey.slice(0, activeSeparator)
+      && ownerKey.slice(ownerSeparator + 1) === 'new'
+      && activeDraftKey.slice(activeSeparator + 1) !== 'new';
+    if (promotedNewChat) {
+      draftsRef.current.set(activeDraftKey, {
+        text: inputValueRef.current,
+        attachments: attachmentsRef.current.slice()
+      });
+      composerOwnerKeyRef.current = activeDraftKey;
+      return;
+    }
+    const draft = draftsRef.current.get(activeDraftKey) ?? { text: '', attachments: [] };
+    composerOwnerKeyRef.current = activeDraftKey;
+    inputValueRef.current = draft.text;
+    attachmentsRef.current = draft.attachments;
+    setAttachments(draft.attachments);
+    draftFieldRef.current.setText(draft.text);
+  }, [activeDraftKey]);
 
   useEffect(() => {
     const messages = messagesRef.current;
@@ -1193,13 +1443,69 @@ export function ChatPage({
     responseFailureSafeCodeRef.current = undefined;
   }
 
+  function commitAttachments(next: readonly AttachmentDraft[]) {
+    attachmentsRef.current = next;
+    setAttachments(next);
+  }
+
+  function mapAttachments(update: (current: readonly AttachmentDraft[]) => readonly AttachmentDraft[]) {
+    commitAttachments(update(attachmentsRef.current));
+  }
+
+  function sealActiveDraft() {
+    const key = composerOwnerKeyRef.current ?? activeDraftKey;
+    draftsRef.current.set(key, {
+      text: inputValueRef.current,
+      attachments: attachmentsRef.current.slice()
+    });
+  }
+
+  function claimDraft(projectId: string | undefined, conversationId: string | undefined) {
+    composerOwnerKeyRef.current = composerDraftKey(projectId, conversationId);
+  }
+
+  function discardActiveDraft() {
+    inputValueRef.current = '';
+    draftsRef.current.set(composerOwnerKeyRef.current ?? activeDraftKey, { text: '', attachments: [] });
+    commitAttachments([]);
+    draftFieldRef.current.setText('');
+  }
+
   function updateInput(value: string) {
     inputValueRef.current = value;
-    setInput(value);
+    draftFieldRef.current.setText(value);
+    if (!value.trim()) {
+      draftsRef.current.set(composerOwnerKeyRef.current ?? activeDraftKey, { text: '', attachments: [] });
+    }
   }
 
   function focusComposer() {
-    window.requestAnimationFrame(() => composerRef.current?.focus());
+    draftFieldRef.current.focus();
+  }
+
+  function startNewConversation() {
+    if (responseInProgress || busy || documentGenerationInFlightRef.current) {
+      setNotice('请先停止当前回复，再开始新的对话。');
+      return;
+    }
+    if (selectedId === undefined) {
+      resetComposerScope();
+      discardActiveDraft();
+    } else {
+      sealActiveDraft();
+      claimDraft(session?.projectId, undefined);
+      resetComposerScope();
+      setSelectedId(undefined);
+    }
+    setActiveWorkflow(undefined);
+    setWebResearchSession(undefined);
+    setEditingMessageId(undefined);
+    setHistoryOpen(false);
+    setContextOpen(false);
+    setIncludedContextIds([]);
+    setContextDraft(undefined);
+    setNotice(session ? '' : '请先打开项目。');
+    clearResponseDraftState();
   }
 
   function startEditingCancelledMessage(message: MessageDto) {
@@ -1254,7 +1560,7 @@ export function ChatPage({
   }
 
   function confirmLeaveUnsentInput(): boolean {
-    if (!input.trim() && attachments.length === 0) return true;
+    if (!inputValueRef.current.trim() && attachmentsRef.current.length === 0) return true;
     return window.confirm('当前输入尚未发送，确定离开并丢弃吗？');
   }
 
@@ -1264,7 +1570,7 @@ export function ChatPage({
     for (const unsubscribe of productionCommandSubscriptions.current.values()) unsubscribe();
     productionCommandSubscriptions.current.clear();
     documentResponseUserIdsRef.current.clear();
-    setAttachments([]);
+    commitAttachments([]);
     attachmentSelectionChangedRef.current = false;
 
 
@@ -1279,9 +1585,9 @@ export function ChatPage({
       setNotice('请先停止当前任务，再切换对话。');
       return;
     }
-    if (!confirmLeaveUnsentInput()) return;
+    sealActiveDraft();
+    claimDraft(session?.projectId, conversationId);
     resetComposerScope();
-    updateInput('');
     setEditingMessageId(undefined);
     setSelectedId(conversationId);
     setActiveWorkflow(undefined);
@@ -1324,8 +1630,9 @@ export function ChatPage({
         const remaining = conversations.filter((item) => item.conversationId !== conversation.conversationId);
         setConversations(remaining);
         if (selectedId === conversation.conversationId) {
+          draftsRef.current.delete(composerOwnerKeyRef.current ?? activeDraftKey);
+          claimDraft(session?.projectId, undefined);
           setSelectedId(undefined);
-          updateInput('');
           setEditingMessageId(undefined);
           clearResponseDraftState();
         }
@@ -1352,6 +1659,8 @@ export function ChatPage({
         setNotice(errorMessages[result.error.code]);
         return;
       }
+      sealActiveDraft();
+      claimDraft(session.projectId, result.value.conversationId);
       setConversations((items) => [result.value, ...items]);
       setSelectedId(result.value.conversationId);
       setNotice('');
@@ -1367,7 +1676,7 @@ export function ChatPage({
       !chat ||
       !session ||
       (selected && (selected.readOnly || selected.status !== 'active')) ||
-      !input.trim() ||
+      !inputValueRef.current.trim() ||
       cancelRequested ||
       responseInProgress ||
       busy
@@ -1379,7 +1688,7 @@ export function ChatPage({
         setNotice('请先选择一个可用模型。');
         return;
       }
-      await startChatResponse(input.trim(), selected);
+      await startChatResponse(inputValueRef.current.trim(), selected);
       return;
     }
     await submitWorkflowInput();
@@ -1387,13 +1696,13 @@ export function ChatPage({
 
   async function submitWorkflowInput() {
     if (workflowSubmissionInFlightRef.current) return;
-    if (!chat || !session || !input.trim() || busy || responseInProgress) return;
+    if (!chat || !session || !inputValueRef.current.trim() || busy || responseInProgress) return;
     if (!selectedCandidateId || !selectedCandidate?.available) {
       setNotice(errorMessages.model_selection_required);
       return;
     }
     if (activeWorkflow?.status === 'ready' && selected && selectedCandidateId && webResearch?.answerNative &&
-        /^允许本(?:次|会话)联网[。！!]?$/u.test(input.trim()) && !attachmentSelectionChangedRef.current) {
+        /^允许本(?:次|会话)联网[。！!]?$/u.test(inputValueRef.current.trim()) && !attachmentSelectionChangedRef.current) {
       workflowSubmissionInFlightRef.current = true;
       setBusy(true);
       try {
@@ -1401,7 +1710,7 @@ export function ChatPage({
         if (!refreshed.ok) { setNotice(describeChatError(refreshed.error)); return; }
         const answered = await webResearch.answerNative({ workflowId: activeWorkflow.workflowId,
           expectedWorkflowRevision: activeWorkflow.revision, expectedConversationRevision: refreshed.value.revision,
-          candidateId: selectedCandidateId, content: input.trim() });
+          candidateId: selectedCandidateId, content: inputValueRef.current.trim() });
         if (!answered.ok) { setNotice(answered.error.message); return; }
         const current = await chat.getConversation(selected.conversationId);
         if (!current.ok) { setNotice(describeChatError(current.error)); return; }
@@ -1417,7 +1726,7 @@ export function ChatPage({
     planningCommandRef.current = planningCommand;
     setPlanningActive(true);
     setPlanningCancelRequested(false);
-    const content = input.trim();
+    const content = inputValueRef.current.trim();
     const inputScope = composerScopeRef.current;
     setPendingProduction({ clientCommandId: planningCommand.clientCommandId, content,
       ...(selected ? { conversationId: selected.conversationId } : {}) });
@@ -2104,7 +2413,7 @@ export function ChatPage({
       setSelectedId(started.value.conversation.conversationId);
       setResponseExecution(started.value.execution);
       setActiveWorkflow(undefined);
-      setAttachments([]);
+      commitAttachments([]);
       attachmentSelectionChangedRef.current = false;
 
       updateInput('');
@@ -2159,7 +2468,7 @@ export function ChatPage({
         );
         return;
       }
-      setAttachments((current) => [
+      mapAttachments((current) => [
         ...current.filter((attachment) => attachment.fileId !== result.value.fileId),
         {
           fileId: result.value.fileId,
@@ -2244,7 +2553,7 @@ export function ChatPage({
 
   function removeAttachment(fileId: string) {
     attachmentSelectionChangedRef.current = true;
-    setAttachments((current) =>
+    mapAttachments((current) =>
       current.filter((attachment) => attachment.fileId !== fileId)
     );
   }
@@ -2538,7 +2847,7 @@ export function ChatPage({
         if (preparedConversation.ok) replaceConversation(preparedConversation.value);
       }
       updateInput('');
-      setAttachments([]);
+      commitAttachments([]);
       const targetId = started.value.conversation.conversationId;
       const completion = await awaitDocumentCompletion(
         chat,
@@ -3124,26 +3433,74 @@ export function ChatPage({
     }
   }
 
-  async function switchProject(projectId: string) {
-    if (!storage || busy || responseInProgress || documentGenerationActive || projectId === session?.projectId) return;
-    setBusy(true);
-    setNotice('');
-    try {
-      const result = await storage.openRecentProject(projectId);
-      if (!result.ok) {
-        setNotice(result.error.message || '打开项目失败，请重试。');
-        return;
-      }
-      if (!result.value.session) return;
-      setSession(result.value.session);
-      setSelectedId(undefined);
-      setConversations([]);
-      notifyProjectSessionChanged();
-    } catch {
-      setNotice('打开项目失败，请重试。');
-    } finally {
-      setBusy(false);
+  function expandProject(projectId: string) {
+    setExpandedProjectIds((current) => {
+      if (current.has(projectId)) return current;
+      const next = new Set(current);
+      next.add(projectId);
+      return next;
+    });
+  }
+
+  async function ensureProjectChats(projectId: string) {
+    if (!storage || projectId === sessionProjectViewRef.current) return;
+    const result = await storage.listProjectConversationSummaries(projectId);
+    if (!result.ok) {
+      setNotice(result.error.message || '读取项目对话失败，请重试。');
+      setChatsByProject((current) => ({ ...current, [projectId]: current[projectId] ?? [] }));
+      return;
     }
+    if (sessionProjectViewRef.current === projectId) return;
+    setChatsByProject((current) => ({
+      ...current,
+      [projectId]: result.value.map((conversation) => ({
+        conversationId: conversation.conversationId,
+        projectId: conversation.projectId,
+        title: conversation.title,
+        updatedAt: conversation.updatedAt,
+        status: conversation.status,
+        readOnly: false
+      }))
+    }));
+  }
+
+  function onProjectRowClick(projectId: string) {
+    const opening = !expandedProjectIds.has(projectId);
+    setExpandedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+    if (opening) void ensureProjectChats(projectId);
+  }
+
+  async function openProjectConversation(projectId: string, conversationId: string) {
+    if (projectId === session?.projectId) {
+      selectConversation(conversationId);
+      return;
+    }
+    if (!storage || busy || responseInProgress || documentGenerationActive) {
+      setNotice('请先停止当前任务，再切换对话。');
+      return;
+    }
+    const result = await storage.openRecentProject(projectId);
+    if (!result.ok) {
+      setNotice(result.error.message || '打开项目失败，请重试。');
+      return;
+    }
+    if (!result.value.session) return;
+    sealActiveDraft();
+    claimDraft(projectId, conversationId);
+    resetComposerScope();
+    setEditingMessageId(undefined);
+    setSession(result.value.session);
+    setSelectedId(conversationId);
+    setActiveWorkflow(undefined);
+    setWebResearchSession(undefined);
+    setHistoryOpen(false);
+    expandProject(projectId);
+    notifyProjectSessionChanged();
   }
 
   async function openLocalProject() {
@@ -3157,6 +3514,10 @@ export function ChatPage({
         return;
       }
       if (!result.value.session) return;
+      sealActiveDraft();
+      claimDraft(result.value.session.projectId, undefined);
+      resetComposerScope();
+      expandProject(result.value.session.projectId);
       setSession(result.value.session);
       setSelectedId(undefined);
       setConversations([]);
@@ -3183,6 +3544,10 @@ export function ChatPage({
       setProjectCreateName('');
       setProjectCreateOpen(false);
       if (result.value.session) {
+        sealActiveDraft();
+        claimDraft(result.value.session.projectId, undefined);
+        resetComposerScope();
+        expandProject(result.value.session.projectId);
         setSession(result.value.session);
         setSelectedId(undefined);
         setConversations([]);
@@ -3195,6 +3560,56 @@ export function ChatPage({
     }
   }
 
+
+  const workspaceShortcutRef = useRef({
+    openLocalProject,
+    selectConversation,
+    startNewConversation
+  });
+  workspaceShortcutRef.current = {
+    openLocalProject,
+    selectConversation,
+    startNewConversation
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      const key = event.key.toLowerCase();
+      const actions = workspaceShortcutRef.current;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key === 'n') {
+        event.preventDefault();
+        setSearchOpen(false);
+        setSearchQuery('');
+        actions.startNewConversation();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key === 'o') {
+        event.preventDefault();
+        setSearchOpen(false);
+        setSearchQuery('');
+        void actions.openLocalProject();
+        return;
+      }
+      if (!searchOpen) return;
+      if (event.key === 'Escape') {
+        setSearchOpen(false);
+        setSearchQuery('');
+        return;
+      }
+      if (event.altKey && !event.ctrlKey && !event.metaKey && /^[1-8]$/.test(event.key)) {
+        const conversation = searchResults[Number(event.key) - 1];
+        if (!conversation) return;
+        event.preventDefault();
+        actions.selectConversation(conversation.conversationId);
+        setSearchOpen(false);
+        setSearchQuery('');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [searchOpen, searchResults]);
+
   return (
     <section
       aria-labelledby="chat-page-title"
@@ -3205,101 +3620,112 @@ export function ChatPage({
       onDrop={handlePageDrop}
     >
       <aside className="uc-chat-page__workspace-sidebar" aria-label="项目和对话">
-        <header className="uc-chat-page__workspace-heading">
-          <h2>项目工作台</h2>
-          <span>{session?.projectName ?? '尚未打开项目'}</span>
-        </header>
-        <Button
+        <button
+          aria-label="新聊天"
           className="uc-chat-page__new-conversation"
           disabled={!session || busy || responseInProgress}
           onClick={startNewConversation}
+          type="button"
         >
-          <LuPlus aria-hidden="true" />
-          新建对话
-        </Button>
-        <label className="uc-chat-page__project-search">
+          <LuSquarePen aria-hidden="true" />
+          新聊天
+        </button>
+        <button
+          aria-label="搜索项目或对话"
+          className="uc-chat-page__project-search"
+          onClick={() => {
+            setHistoryOpen(false);
+            setContextOpen(false);
+            setSearchQuery('');
+            setSearchOpen(true);
+          }}
+          type="button"
+        >
           <LuSearch aria-hidden="true" />
-          <span className="uc-visually-hidden">搜索项目或对话</span>
-          <input
-            aria-label="搜索项目或对话"
-            onChange={(event) => setProjectSearch(event.currentTarget.value)}
-            placeholder="搜索项目或对话"
-            value={projectSearch}
-          />
-        </label>
+          搜索项目或对话
+        </button>
         <div className="uc-chat-page__workspace-scroll">
           <section className="uc-chat-page__project-list" aria-labelledby="chat-project-list-title">
             <h3 id="chat-project-list-title">项目</h3>
             {loading && projects.length === 0 ? (
               <p className="uc-chat-page__workspace-hint">正在读取项目…</p>
-            ) : visibleProjects.length === 0 ? (
-              <p className="uc-chat-page__workspace-hint">暂无匹配项目</p>
+            ) : projects.length === 0 ? (
+              <p className="uc-chat-page__workspace-hint">暂无项目</p>
             ) : (
-              visibleProjects.map((project) => {
+              projects.map((project) => {
                 const isCurrent = project.projectId === session?.projectId;
+                const expanded = expandedProjectIds.has(project.projectId);
+                const conversationsMatchProject = isCurrent && conversations.every((conversation) =>
+                  conversation.projectId === null || conversation.projectId === project.projectId
+                );
+                const projectChats = conversationsMatchProject
+                  ? visibleConversations
+                    .filter((conversation) => conversation.projectId === null || conversation.projectId === project.projectId)
+                    .map(sidebarChatFromConversation)
+                  : chatsByProject[project.projectId] ?? [];
                 return (
                   <div className="uc-chat-page__project-group" key={project.projectId}>
                     <button
                       aria-current={isCurrent ? 'true' : undefined}
+                      aria-expanded={expanded}
                       className={isCurrent ? 'uc-chat-page__project-item is-current' : 'uc-chat-page__project-item'}
                       disabled={project.availability !== 'available' || busy}
-                      onClick={() => void switchProject(project.projectId)}
-                      title={project.availability === 'available' ? `打开项目：${project.projectName}` : '项目当前不可用'}
+                      onClick={() => onProjectRowClick(project.projectId)}
+                      title={project.availability === 'available' ? `展开或收起项目：${project.projectName}` : '项目当前不可用'}
                       type="button"
                     >
-                      <LuFolderKanban aria-hidden="true" />
+                      <LuFolder aria-hidden="true" />
                       <span>{project.projectName}</span>
-                      <LuChevronRight aria-hidden="true" />
+                      {expanded ? <LuChevronDown aria-hidden="true" /> : <LuChevronRight aria-hidden="true" />}
                     </button>
-                    {isCurrent ? (
+                    {expanded ? (
                       <div className="uc-chat-page__workspace-conversations">
-                        <small>当前项目 · {conversations.length} 个对话</small>
-                        {conversationGroups.length === 0 ? (
-                          <p className="uc-chat-page__workspace-hint">发送第一条消息后，对话会显示在这里。</p>
-                        ) : conversationGroups.map(([label, items]) => (
-                          <section className="uc-chat-page__workspace-conversation-group" key={label}>
-                            <h4>{label}</h4>
-                            {items.map((conversation) => (
+                        {projectChats.length === 0 ? (
+                          <p className="uc-chat-page__workspace-hint">
+                            {conversationsMatchProject || project.projectId in chatsByProject
+                              ? '发送第一条消息后，对话会显示在这里。'
+                              : '正在读取对话…'}
+                          </p>
+                        ) : projectChats.map((conversation) => (
                               <div
                                 aria-current={conversation.conversationId === selectedId ? 'true' : undefined}
                                 className="uc-chat-page__workspace-conversation-row"
-                                key={conversation.conversationId}
+                                key={`${project.projectId}:${conversation.conversationId}`}
                               >
                                 <button
                                   className="uc-chat-page__workspace-conversation"
-                                  onClick={() => selectConversation(conversation.conversationId)}
+                                  onClick={() => void openProjectConversation(project.projectId, conversation.conversationId)}
                                   type="button"
                                 >
-                                  <LuMessagesSquare aria-hidden="true" />
                                   <span>{conversation.title}</span>
                                 </button>
-                                {!conversation.readOnly ? (
+                                {conversation.source && !conversation.source.readOnly ? (
                                   <ActionMenu
                                     ariaLabel={`管理对话：${conversation.title}`}
                                     className="uc-chat-page__history-menu"
                                     items={[
                                       { key: 'rename', label: '重命名' },
-                                      ...(conversation.status === 'active'
+                                      ...(conversation.source.status === 'active'
                                         ? [{ key: 'archive', label: '归档', icon: <LuArchive aria-hidden="true" /> }]
                                         : [{ key: 'restore', label: '恢复对话', icon: <LuArchiveRestore aria-hidden="true" /> }]),
                                       { key: 'delete', label: '删除', icon: <LuTrash2 aria-hidden="true" />, danger: true, separatorBefore: true }
                                     ]}
                                     onSelect={(eventKey) => {
+                                      const source = conversation.source;
+                                      if (!source) return;
                                       if (eventKey === 'rename') {
-                                        setRenameTitle(conversation.title);
-                                        setRenamingConversationId(conversation.conversationId);
+                                        setRenameTitle(source.title);
+                                        setRenamingConversationId(source.conversationId);
                                       } else if (eventKey === 'archive' || eventKey === 'restore') {
-                                        void mutateConversation(conversation, eventKey);
+                                        void mutateConversation(source, eventKey);
                                       } else if (eventKey === 'delete') {
-                                        setDeleteTarget({ kind: 'conversation', value: conversation });
+                                        setDeleteTarget({ kind: 'conversation', value: source });
                                       }
                                     }}
                                     toggleClassName="uc-chat-page__icon-button"
                                   />
                                 ) : null}
                               </div>
-                            ))}
-                          </section>
                         ))}
                       </div>
                     ) : null}
@@ -3311,7 +3737,7 @@ export function ChatPage({
         </div>
         <footer className="uc-chat-page__workspace-actions">
           <Button disabled={busy || responseInProgress} onClick={() => setProjectManagementOpen(true)} variant="ghost">
-            <LuFolderKanban aria-hidden="true" />
+            <LuFolder aria-hidden="true" />
             管理项目
           </Button>
           <Button disabled={busy || responseInProgress} onClick={() => setProjectCreateOpen(true)} variant="ghost">
@@ -3319,7 +3745,7 @@ export function ChatPage({
             新建项目
           </Button>
           <Button disabled={busy || responseInProgress} onClick={() => void openLocalProject()} variant="ghost">
-            <LuFolderKanban aria-hidden="true" />
+            <LuFolder aria-hidden="true" />
             打开本地项目
           </Button>
         </footer>
@@ -3336,18 +3762,19 @@ export function ChatPage({
                   {selected.readOnly ? '旧记录只读' : '项目级'}
                 </StatusPill>
               ) : null}
+              <span className="uc-chat-page__header-project">{session?.projectName ?? '尚未打开项目'}</span>
             </div>
-            <span>{session?.projectName ? `当前项目：${session.projectName}` : '尚未打开项目'}</span>
           </div>
           <div className="uc-chat-page__header-actions">
-            <Whisper placement="bottom" speaker={<Tooltip>新对话</Tooltip>} trigger="hover">
+            <Whisper placement="bottom" speaker={<Tooltip>新聊天</Tooltip>} trigger="hover">
               <Button
-                aria-label="新建对话"
+                aria-label="新聊天"
+                className="uc-chat-page__header-new"
                 disabled={!session || busy}
                 onClick={startNewConversation}
                 variant="ghost"
               >
-                <LuMessageSquarePlus aria-hidden="true" />
+                <LuSquarePen aria-hidden="true" />
               </Button>
             </Whisper>
             <Whisper placement="bottom" speaker={<Tooltip>对话列表</Tooltip>} trigger="hover">
@@ -3410,13 +3837,11 @@ export function ChatPage({
           <div className="uc-chat-page__messages-inner">
             {!selected && displayMessages.length === 0 ? (
               <div className="uc-chat-page__empty">
-                <LuMessagesSquare aria-hidden="true" />
                 <strong>开始新的对话</strong>
                 <p>选择模型并发送第一条消息，名称将自动生成。</p>
               </div>
             ) : displayMessages.length === 0 ? (
               <div className="uc-chat-page__empty">
-                <LuMessagesSquare aria-hidden="true" />
                 <strong>开始这段对话</strong>
                 <p>在下方选择模型，然后发送第一条消息。</p>
               </div>
@@ -3727,35 +4152,37 @@ export function ChatPage({
             className="uc-chat-page__composer"
           >
             <h2 className="uc-visually-hidden" id="chat-composer-title">发送消息</h2>
-            <textarea
-              aria-label={editingMessageId ? '编辑已停止的消息' : '对话输入'}
-              disabled={!canCompose}
-              maxLength={8000}
-              onChange={(event) => updateInput(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  if (!responseInProgress && !cancelRequested && !busy) {
-                    void sendMessage();
-                  }
-                }
-              }}
-              placeholder={
-                !session
-                  ? '请先打开项目'
-                  : '输入问题或任务，可拖入图片、文档或电子书'
+            <ChatDraftField
+              draftKey={activeDraftKey}
+              restoredText={draftsRef.current.get(activeDraftKey)?.text ?? ''}
+              field={draftFieldRef.current}
+              canCompose={canCompose}
+              editing={Boolean(editingMessageId)}
+              placeholder={!session ? '请先打开项目' : '输入问题或任务，可拖入图片、文档或电子书'}
+              pasteEnabled={Boolean(session) && !busy && !responseInProgress}
+              planningActive={planningActive}
+              planningCancelRequested={planningCancelRequested}
+              documentGenerationActive={documentGenerationActive}
+              documentResponseActive={documentResponseActive}
+              documentCancelRequested={documentCancelRequested}
+              responseInProgress={responseInProgress}
+              cancelRequested={cancelRequested}
+              busy={busy}
+              chat={Boolean(chat)}
+              selectedCandidate={selectedCandidate}
+              onTextChange={(value) => { inputValueRef.current = value; }}
+              onPasteFiles={(files) => { void importDroppedFiles(files); }}
+              onSubmit={() => { void sendMessage(); }}
+              onPress={() =>
+                planningActive
+                  ? void cancelWorkflowPlanning()
+                  : documentGenerationActive || documentResponseActive
+                    ? void cancelDocumentGeneration()
+                    : responseInProgress
+                      ? void cancelResponse()
+                      : void sendMessage()
               }
-              onPaste={(event) => {
-                const files = Array.from(event.clipboardData.files).filter(file => file.type?.startsWith('image/'));
-                if (files.length && session && !busy && !responseInProgress) {
-                  event.preventDefault();
-                  void importDroppedFiles(files);
-                }
-              }}
-              ref={composerRef}
-              rows={1}
-              value={input}
-            />
+            >
             {attachments.length > 0 ? (
               <ul className="uc-chat-page__attachments">
                 {attachments.map((attachment) => (
@@ -3889,52 +4316,9 @@ export function ChatPage({
                   showEmptyState={false}
                   value={selectedCandidateId ?? ''}
                 />
-                {input.length >= 7000 ? <span className="uc-chat-page__composer-count">{input.length} / 8000</span> : null}
-                <button
-                  aria-label={planningActive
-                    ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
-                    : documentGenerationActive || (documentResponseActive && !responseInProgress)
-                    ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
-                    : responseInProgress
-                      ? cancelRequested ? '正在停止生成' : '停止生成'
-                      : '发送消息'}
-                  className={`uc-chat-page__submit${planningActive || responseInProgress || documentGenerationActive || documentResponseActive ? ' uc-chat-page__submit--stop' : ''}`}
-                  disabled={planningActive
-                    ? planningCancelRequested
-                    : documentGenerationActive || (documentResponseActive && !responseInProgress)
-                    ? documentCancelRequested
-                    : responseInProgress
-                      ? cancelRequested
-                      : !chat ||
-                        !canCompose ||
-                        !selectedCandidate?.available ||
-                        !input.trim() ||
-                        busy ||
-                        cancelRequested}
-                  onClick={() =>
-                    planningActive
-                      ? void cancelWorkflowPlanning()
-                      : documentGenerationActive || documentResponseActive
-                      ? void cancelDocumentGeneration()
-                      : responseInProgress
-                        ? void cancelResponse()
-                        : void sendMessage()
-                  }
-                  title={planningActive
-                    ? planningCancelRequested ? '正在停止需求理解' : '停止需求理解'
-                    : documentGenerationActive || (documentResponseActive && !responseInProgress)
-                    ? documentCancelRequested ? '正在停止文档生成' : '停止文档生成'
-                    : responseInProgress
-                      ? cancelRequested ? '正在停止' : '停止生成'
-                      : !selectedCandidate?.available ? '请先选择一个可用模型' : '发送'}
-                  type="button"
-                >
-                  {planningActive || responseInProgress || documentGenerationActive || documentResponseActive
-                    ? <LuSquare aria-hidden="true" />
-                    : <LuArrowUp aria-hidden="true" />}
-                </button>
               </div>
             </div>
+            </ChatDraftField>
           </section>
         </div>
       </section>
@@ -3964,10 +4348,7 @@ export function ChatPage({
             <EmptyState description="发送第一条消息后，对话会自动保存在这里。" icon="对" title="暂无历史对话" />
           ) : (
             <div className="uc-chat-page__history-list">
-              {conversationGroups.map(([label, items]) => (
-                <section className="uc-chat-page__history-group" key={label}>
-                  <h3>{label}</h3>
-                  {items.map((conversation) => (
+              {visibleConversations.map((conversation) => (
                     <div
                       aria-current={conversation.conversationId === selectedId ? 'true' : undefined}
                       className="uc-chat-page__history-row"
@@ -4032,13 +4413,85 @@ export function ChatPage({
                         />
                       ) : null}
                     </div>
-                  ))}
-                </section>
               ))}
             </div>
           )}
         </Drawer.Body>
       </Drawer>
+
+      {searchOpen ? (
+        <div
+          className="uc-chat-search"
+          onMouseDown={() => setSearchOpen(false)}
+          role="presentation"
+        >
+          <div
+            aria-label="搜索聊天"
+            aria-modal="true"
+            className="uc-chat-search__dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <label className="uc-chat-search__query">
+              <LuSearch aria-hidden="true" />
+              <input
+                aria-label="搜索聊天"
+                autoFocus
+                onChange={(event) => setSearchQuery(event.currentTarget.value)}
+                placeholder="搜索聊天"
+                value={searchQuery}
+              />
+            </label>
+            <div className="uc-chat-search__section">聊天</div>
+            {searchResults.length === 0 ? (
+              <p className="uc-chat-search__empty">没有匹配的聊天</p>
+            ) : searchResults.map((conversation, index) => (
+              <button
+                className={index === 0 ? 'uc-chat-search__row is-active' : 'uc-chat-search__row'}
+                key={conversation.conversationId}
+                onClick={() => {
+                  selectConversation(conversation.conversationId);
+                  setSearchOpen(false);
+                  setSearchQuery('');
+                }}
+                type="button"
+              >
+                <span>{conversation.title}</span>
+                <span className="uc-chat-search__meta">
+                  <span>{session?.projectName ?? '当前项目'}</span>
+                  <span className="uc-chat-search__key">{`Alt+${index + 1}`}</span>
+                </span>
+              </button>
+            ))}
+            <div className="uc-chat-search__divider" />
+            <div className="uc-chat-search__section">快捷操作</div>
+            <button
+              className="uc-chat-search__row"
+              onClick={() => {
+                setSearchOpen(false);
+                startNewConversation();
+              }}
+              type="button"
+            >
+              <LuSquarePen aria-hidden="true" />
+              <span>新聊天</span>
+              <span className="uc-chat-search__key">Ctrl+N</span>
+            </button>
+            <button
+              className="uc-chat-search__row"
+              onClick={() => {
+                setSearchOpen(false);
+                void openLocalProject();
+              }}
+              type="button"
+            >
+              <LuFolder aria-hidden="true" />
+              <span>打开本地项目</span>
+              <span className="uc-chat-search__key">Ctrl+O</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <Modal
         className="uc-chat-page__project-create-dialog"

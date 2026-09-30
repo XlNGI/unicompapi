@@ -525,6 +525,9 @@ export function registerStorageIpcHandlers(options: {
   ipcMain.handle(storageIpcChannels.listProjects, () =>
     projectController.listProjects()
   );
+  ipcMain.handle(storageIpcChannels.listProjectConversationSummaries, (_event, request: unknown) =>
+    projectController.listProjectConversationSummaries(request)
+  );
   ipcMain.handle(storageIpcChannels.getLocalStorageSummary, () =>
     readModels.getLocalStorageSummary()
   );

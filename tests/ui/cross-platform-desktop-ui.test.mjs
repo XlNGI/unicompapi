@@ -72,3 +72,15 @@ test('uses native platform font fallbacks and accessibility media preferences', 
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(styles, /@media \(forced-colors: active\)/);
 });
+
+test('title bar project control switches from a menu without resizing the bar', () => {
+  assert.match(titleBar, /aria-haspopup="menu"/);
+  assert.match(titleBar, /切换所属项目，当前为/);
+  assert.match(titleBar, /storage\.listProjects\(\)/);
+  assert.match(titleBar, /storage\.openRecentProject\(project\.projectId\)/);
+  assert.match(titleBar, /canSwitchProject\(\)/);
+  assert.match(titleBar, /notifyProjectSessionChanged\(\)/);
+  assert.doesNotMatch(titleBar, /setProjectName\('尚未打开项目'\)/);
+  assert.match(styles, /\.title-bar__project-switch\s*\{[^}]*-webkit-app-region: no-drag;/);
+  assert.match(styles, /\.title-bar__project-menu\s*\{[^}]*position: absolute;/);
+});

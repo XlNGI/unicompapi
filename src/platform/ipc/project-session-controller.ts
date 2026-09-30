@@ -5,9 +5,10 @@ import type {
   StorageCreateProjectDto,
   StorageIpcResult,
   StorageOpenProjectDto,
+  StorageProjectConversationSummaryDto,
   StorageProjectSessionDto
 } from '../../shared/storage-ipc';
-import { JsonProjectRepository } from '../repositories';
+import { JsonProjectConversationRepository, JsonProjectRepository } from '../repositories';
 import {
   NodeProjectStorage,
   projectStoragePaths,
@@ -149,6 +150,48 @@ export class ProjectSessionController {
         session: toSessionDto(session)
       };
     });
+  }
+
+  async listProjectConversationSummaries(
+    request: unknown
+  ): Promise<StorageIpcResult<readonly StorageProjectConversationSummaryDto[]>> {
+    try {
+      const projectId = parseRecentProjectId(request);
+      const entries = await this.dependencies.catalog?.getEntries();
+      const entry = entries?.find((candidate) => candidate.projectId === projectId);
+      if (!entry) {
+        return {
+          ok: false,
+          error: {
+            code: 'project_open_failed',
+            message: 'The recent project could not be found'
+          }
+        };
+      }
+      const conversations = await new JsonProjectConversationRepository(
+        new NodeProjectStorage(entry.rootDirectory),
+        toProjectId(projectId)
+      ).list({ statuses: ['active', 'archived'] });
+      return {
+        ok: true,
+        value: conversations.map((conversation) => ({
+          conversationId: conversation.id,
+          projectId,
+          title: conversation.title,
+          status: conversation.status === 'archived' ? 'archived' : 'active',
+          updatedAt: conversation.updatedAt
+        }))
+      };
+    } catch (error) {
+      this.dependencies.onError?.(error);
+      return {
+        ok: false,
+        error: {
+          code: 'read_model_failed',
+          message: 'The project conversations could not be read'
+        }
+      };
+    }
   }
 
   async listProjects(): Promise<StorageIpcResult<readonly StorageProjectSummaryDto[]>> {

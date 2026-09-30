@@ -151,17 +151,109 @@ button {
   -webkit-app-region: no-drag;
 }
 
+.title-bar__project-switch {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+
 .title-bar__project {
   max-width: min(320px, 40vw);
   border-color: var(--uc-color-border-default);
   background: var(--uc-color-surface-base);
-  cursor: default;
+  cursor: pointer;
+}
+
+.title-bar__project:hover,
+.title-bar__project[aria-expanded='true'] {
+  border-color: var(--uc-color-border-strong);
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-subtle);
 }
 
 .title-bar__project span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.title-bar__project-chevron {
+  color: var(--uc-color-text-tertiary);
+}
+
+.title-bar__project-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 400;
+  display: grid;
+  width: max(220px, 100%);
+  max-height: min(320px, calc(100vh - 64px));
+  overflow: auto;
+  border: 1px solid var(--uc-color-border-default);
+  border-radius: var(--uc-radius-10);
+  padding: var(--uc-space-1);
+  background: var(--uc-color-surface-raised);
+  box-shadow: var(--uc-shadow-md);
+}
+
+.title-bar__project-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: var(--uc-space-2);
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--uc-radius-6);
+  padding: 0 var(--uc-space-2);
+  color: var(--uc-color-text-secondary);
+  background: transparent;
+  font-size: var(--uc-font-size-caption);
+  line-height: var(--uc-line-height-caption);
+  text-align: left;
+  cursor: pointer;
+}
+
+.title-bar__project-option:hover:not(:disabled),
+.title-bar__project-option[aria-checked='true'] {
+  color: var(--uc-color-text-primary);
+  background: var(--uc-color-surface-selected);
+}
+
+.title-bar__project-option:disabled {
+  color: var(--uc-color-text-disabled);
+  cursor: not-allowed;
+}
+
+.title-bar__project-option svg,
+.title-bar__project-empty,
+.title-bar__project-error {
+  width: 16px;
+  height: 16px;
+}
+
+.title-bar__project-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-bar__project-empty,
+.title-bar__project-error {
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: var(--uc-space-2);
+  color: var(--uc-color-text-tertiary);
+  font-size: var(--uc-font-size-caption);
+}
+
+.title-bar__project-error {
+  color: var(--uc-color-status-danger);
 }
 
 .title-bar__project svg,
@@ -220,6 +312,8 @@ button {
 
 .theme-switch__trigger:focus-visible,
 .theme-switch__option:focus-visible,
+.title-bar__project:focus-visible,
+.title-bar__project-option:focus-visible,
 .title-bar__utility:focus-visible,
 .window-control:focus-visible {
   outline: 2px solid var(--uc-color-border-focus);
