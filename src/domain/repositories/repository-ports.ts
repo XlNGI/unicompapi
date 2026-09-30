@@ -53,6 +53,8 @@ import type {
   AssetId,
   CapabilityEvidenceId,
   ConnectionId,
+  ConversationAgentRunId,
+  ConversationId,
   ConversationWorkflowId,
   ConversationResponseDraftId,
   ConversationResponseExecutionId,
@@ -78,8 +80,8 @@ import type {
   WorkId
 } from '../ids';
 import type { DocumentTaskRuntimeId } from '../ids';
-import type { ConversationId } from '../ids';
 import type { IsoTimestamp } from '../timestamps';
+import type { ConversationAgentRunV1 } from '../entities/conversation-agent-run';
 
 export interface ConversationListOptions {
   readonly statuses?: readonly ConversationStatus[];
@@ -112,6 +114,15 @@ export interface ConversationWorkflowRepository {
   create(workflow: ConversationWorkflowV1): Promise<void>;
   createSupersedingPending(workflow: ConversationWorkflowV1): Promise<void>;
   save(workflow: ConversationWorkflowV1, expectedRevision: number): Promise<void>;
+}
+
+export interface ConversationAgentRunRepository {
+  readonly projectId: ProjectId;
+  get(id: ConversationAgentRunId): Promise<ConversationAgentRunV1 | undefined>;
+  list(conversationId?: ConversationId): Promise<readonly ConversationAgentRunV1[]>;
+  findByResponseExecutionId(responseExecutionId: ConversationResponseExecutionId): Promise<ConversationAgentRunV1 | undefined>;
+  create(run: ConversationAgentRunV1): Promise<void>;
+  save(run: ConversationAgentRunV1, expectedRevision: number): Promise<void>;
 }
 
 export interface ConversationResponseExecutionRepository {

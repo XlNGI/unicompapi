@@ -30,13 +30,16 @@ import {
   toProjectContextId,
   toSubmissionIntentId,
   transitionSubmissionIntent,
+  transitionConversationAgentRun,
   type Conversation,
-  type ProjectId
+  type ProjectId,
+  type SubmissionIntentStatus
 } from '../../domain';
 import {
   JsonConversationRepository,
   JsonConversationResponseDraftRepository,
   JsonConversationResponseExecutionRepository,
+  JsonConversationAgentRunRepository,
   JsonConversationWorkflowRepository,
   JsonProviderExecutionRouteSnapshotRepository,
   JsonProviderInvocationRepository,
@@ -208,7 +211,8 @@ export function createChatContextRuntime(
     readonly conversations: ConversationController;
     readonly conversationRepository: JsonProjectConversationRepository;
     readonly contextService: ProjectContextRegistryService;
-    readonly workflowService: ConversationWorkflowService;
+  readonly workflowService: ConversationWorkflowService;
+    readonly agentRuns: JsonConversationAgentRunRepository;
     readonly attachments: ConversationAttachmentContextService;
     readonly documentTools: ConversationDocumentToolSessionService;
     readonly webResearch: ConversationWebResearchControllerRuntime;
@@ -216,6 +220,7 @@ export function createChatContextRuntime(
   };
   let cached: ProjectRuntime | undefined;
   const runtimes = new Set<ProjectRuntime>();
+  const responseFinalizers = new Set<Promise<void>>();
   const getProjectRuntime = (session: StorageProjectSession): ProjectRuntime => {
     if (
       cached?.projectId === session.projectId &&
@@ -254,6 +259,7 @@ export function createChatContextRuntime(
       storage,
       session.projectId
     );
+    const agentRuns = new JsonConversationAgentRunRepository(storage, session.projectId, now);
     const invocationRoutes = new JsonProviderExecutionRouteSnapshotRepository(
       storage,
       session.projectId
@@ -412,6 +418,7 @@ export function createChatContextRuntime(
       executionCoordinator,
       streamChannel,
       workflowService,
+      agentRuns,
       attachments,
       documentPages,
       documentTools,
@@ -449,9 +456,11 @@ export function createChatContextRuntime(
           acceptances,
           authorization as RuntimeAuthorizationOrchestrationPort,
           workflowService,
+          agentRuns,
           invocationRoutes,
           invocations,
-          now
+          now,
+          responseFinalizers
         ),
         now
       });
@@ -501,7 +510,8 @@ export function createChatContextRuntime(
           invocations
         });
         const executionId = started.subjectArtifacts.responseExecution.id;
-        void started.completion.then(async () => {
+        let responseFinalizer: Promise<void>;
+        responseFinalizer = started.completion.then(async () => {
           try {
             const completed = await acceptances.get(submissionIntentId);
             if (completed) {
@@ -510,6 +520,14 @@ export function createChatContextRuntime(
                 routes: invocationRoutes,
                 invocations
               });
+              if (completed.subjectArtifacts.kind === 'conversation') {
+                await settleConversationAgentRun(
+                  agentRuns,
+                  completed.subjectArtifacts.responseExecution.id,
+                  completed.intent.status,
+                  now
+                );
+              }
             }
           } catch (error) {
             dependencies.onError?.(error);
@@ -555,10 +573,12 @@ export function createChatContextRuntime(
                 invocations
               });
             }
+            await settleConversationAgentRun(agentRuns, executionId, 'failed', now);
           } catch (terminalError) {
             dependencies.onError?.(terminalError);
           }
-        });
+        }).finally(() => responseFinalizers.delete(responseFinalizer));
+        responseFinalizers.add(responseFinalizer);
         return responseLifecycle.readModel(executionId);
       };
     }
@@ -575,6 +595,7 @@ export function createChatContextRuntime(
       conversationRepository: projectConversations,
       contextService,
       workflowService,
+      agentRuns,
       attachments,
       documentTools,
       webResearch: {
@@ -742,6 +763,7 @@ export function createChatContextRuntime(
     getSession: dependencies.getSession,
     getRuntime: (session) => getProjectRuntime(session).responses,
     nextResponseDraftId: () => `response-draft-${randomUUID()}`,
+    nextAgentRunId: () => `agent-run-${randomUUID()}`,
     now,
     onError: dependencies.onError
   });
@@ -776,7 +798,8 @@ export function createChatContextRuntime(
         responses.waitForOperations(),
         projectContexts.waitForMutations(),
         workflows.waitForOperations(),
-        webResearch.waitForOperations()
+        webResearch.waitForOperations(),
+        ...responseFinalizers
       ]);
     }
   };
@@ -867,13 +890,42 @@ async function interruptOrphanedConversationResponses(
   }
 }
 
+async function settleConversationAgentRun(
+  agentRuns: JsonConversationAgentRunRepository,
+  responseExecutionId: string,
+  submissionStatus: SubmissionIntentStatus,
+  now: () => string
+): Promise<void> {
+  const status = submissionStatus === 'completed'
+    ? 'completed'
+    : submissionStatus === 'cancelled'
+      ? 'cancelled'
+      : ['failed', 'failed_before_submission', 'unknown_outcome'].includes(submissionStatus)
+        ? 'failed'
+        : undefined;
+  if (!status) return;
+  const run = await agentRuns.findByResponseExecutionId(toConversationResponseExecutionId(responseExecutionId));
+  if (!run || ['completed', 'failed', 'cancelled'].includes(run.status)) return;
+  try {
+    await agentRuns.save(
+      transitionConversationAgentRun(run, status, toIsoTimestamp(now())),
+      run.revision
+    );
+  } catch (error) {
+    const latest = await agentRuns.get(run.id);
+    if (!latest || !['completed', 'failed', 'cancelled'].includes(latest.status)) throw error;
+  }
+}
+
 function createConversationTerminalObserver(
   acceptances: ProjectSubmissionAcceptanceStore,
   authorization: RuntimeAuthorizationOrchestrationPort,
   workflows: ConversationWorkflowService,
+  agentRuns: JsonConversationAgentRunRepository,
   routes: JsonProviderExecutionRouteSnapshotRepository,
   invocations: JsonProviderInvocationRepository,
-  now: () => string
+  now: () => string,
+  finalizers: Set<Promise<void>>
 ) {
   const advance = async (
     input: {
@@ -909,6 +961,14 @@ function createConversationTerminalObserver(
     await persistConversationCallRecordFacts({ acceptance: updated, routes, invocations });
     await authorization.recordOutcome(acceptance.intent.authorizationClaimId, occurredAt);
     if (acceptance.subjectArtifacts.kind === 'conversation') {
+      await settleConversationAgentRun(
+        agentRuns,
+        acceptance.subjectArtifacts.responseExecution.id,
+        status === 'completed' ? 'completed' : status === 'cancelled' ? 'cancelled' : 'failed',
+        now
+      );
+    }
+    if (acceptance.subjectArtifacts.kind === 'conversation') {
       await workflows.finishExecution(
         acceptance.subjectArtifacts.responseExecution.id,
         status === 'completed'
@@ -919,15 +979,21 @@ function createConversationTerminalObserver(
       );
     }
   };
+  const track = (operation: Promise<void>): Promise<void> => {
+    let tracked: Promise<void>;
+    tracked = operation.finally(() => finalizers.delete(tracked));
+    finalizers.add(tracked);
+    return tracked;
+  };
   return {
     completed: (input: { providerOperationId: string; invocationAttemptId: string }) =>
-      advance(input, 'completed', 'completed').catch(() => undefined),
+      track(advance(input, 'completed', 'completed').catch(() => undefined)),
     failed: (input: { providerOperationId: string; invocationAttemptId: string; safeCode: string }) =>
-      advance(input, 'failed', 'failed').catch(() => undefined),
+      track(advance(input, 'failed', 'failed').catch(() => undefined)),
     cancelled: (input: { providerOperationId: string; invocationAttemptId: string }) =>
-      advance(input, 'cancelled', 'cancelled').catch(() => undefined),
+      track(advance(input, 'cancelled', 'cancelled').catch(() => undefined)),
     interrupted: (input: { providerOperationId: string; invocationAttemptId: string }) =>
-      advance(input, 'unknown_outcome', 'outcome_unknown').catch(() => undefined)
+      track(advance(input, 'unknown_outcome', 'outcome_unknown').catch(() => undefined))
   };
 }
 

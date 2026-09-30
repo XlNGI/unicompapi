@@ -3,6 +3,7 @@ export * from './entities/conversation';
 export * from './entities/conversation-response';
 export * from './entities/conversation-intent-plan';
 export * from './entities/conversation-workflow';
+export * from './entities/conversation-agent-run';
 export * from './entities/conversation-response-execution';
 export * from './entities/draft';
 export * from './entities/document-generation';
