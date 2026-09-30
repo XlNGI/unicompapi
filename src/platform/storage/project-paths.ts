@@ -46,6 +46,9 @@ export const projectStoragePaths = {
     conversationWorkflows: toProjectRelativePath(
       'entities/conversation-workflows.json'
     ),
+    conversationAgentRuns: toProjectRelativePath(
+      'entities/conversation-agent-runs.json'
+    ),
     conversationResponseExecutions: toProjectRelativePath(
       'entities/conversation-response-executions.json'
     ),

@@ -49,7 +49,7 @@ interface WireRequest { readonly model: string; readonly messages: readonly Wire
 interface ReadResult { readonly status: string; readonly observation?: { readonly pageCount: number; readonly totalSections: number;
   readonly revision: number; readonly sections: readonly { readonly blocks: readonly { readonly text: string }[] }[] } }
 
-async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection = false) {
+async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection = false, agentChatOnly = false, agentConversation = false) {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-generation-read-loop-'));
   roots.push(rootDirectory);
   const userDataDirectory = path.join(rootDirectory, 'test-profile');
@@ -111,6 +111,14 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
       return stream(provider.modelKey, { content: invalidArtDirection ? '{"schemaVersion":' : JSON.stringify(direction) }, 'stop');
     }
     requests.push(payload);
+    if (agentChatOnly) return stream(provider.modelKey, { content: '可以把冲突提前，让场景一更有张力。' }, 'stop');
+    if (agentConversation) {
+      if (requests.length <= 3) return stream(provider.modelKey, { content: '这个方向已经清楚了，我们继续细化人物和冲突。' }, 'stop');
+      if (requests.length === 4) return stream(provider.modelKey, { tool_calls: [{ index: 0, ...generationCall }] }, 'tool_calls');
+      if (requests.length === 5) return stream(provider.modelKey, { tool_calls: [{ index: 0, ...readCall }] }, 'tool_calls');
+      if (requests.length === 6) return stream(provider.modelKey, { content: '已根据上下文生成并读取真实 PPT。' }, 'stop');
+      throw new Error('Unexpected Agent conversation request');
+    }
     if (requests.length === 1) return stream(provider.modelKey, { tool_calls: [{ index: 0, ...generationCall }] }, 'tool_calls');
     if (requests.length === 2) {
       const generatedWorks = await works.list(projectId);
@@ -141,15 +149,18 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
     deepSeekRuntime.dispose();
     newApiRuntime.dispose();
   });
-  async function run() {
+  async function run(agentNative = false, contentOverride?: string) {
     const candidates = await runtime.responses.listTextCandidates({ productFeature: 'text_chat' });
     if (!candidates.ok) throw new Error('Candidates failed: ' + candidates.error.code);
     const candidate = candidates.value.find(item => item.available);
     if (!candidate) throw new Error('No candidate: ' + JSON.stringify(candidates.value));
-    const started = await runtime.responses.start({ clientCommandId: 'start-generation-read',
+    const request = { clientCommandId: agentNative ? 'start-agent-generation-read' : 'start-generation-read',
       conversation: { conversationId: conversation.id, expectedRevision: conversation.revision, editedMessageId: null },
-      title: conversation.title, content: '直接生成一个测试 PPT，然后读取刚生成文件的整篇结构，告诉我真实物理页数。',
-      productFeature: 'text_chat', candidateId: candidate.candidateId, contextSelections: [], parameterValues: {}, confirmed: true });
+      title: conversation.title, content: contentOverride ?? '直接生成一个测试 PPT，然后读取刚生成文件的整篇结构，告诉我真实物理页数。',
+      productFeature: 'text_chat' as const, candidateId: candidate.candidateId, contextSelections: [], parameterValues: {} };
+    const started = agentNative
+      ? await runtime.responses.startAgent(request)
+      : await runtime.responses.start({ ...request, confirmed: true });
     if (!started.ok) throw new Error('Start failed: ' + started.error.code);
     const executionId = started.value.execution.responseExecutionId;
     await vi.waitFor(async () => {
@@ -163,7 +174,49 @@ async function fixture(revokeAfterAdvertisingRead = false, invalidArtDirection =
       traces: await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id }),
       runtimes: await new JsonDocumentTaskRuntimeRepository(storage, projectId).list() };
   }
-  return { run, rootDirectory, files, works, requests, artRequests, writes, designSnapshots, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
+  async function runAgentConversation() {
+    const candidates = await runtime.responses.listTextCandidates({ productFeature: 'text_chat' });
+    if (!candidates.ok) throw new Error('Candidates failed: ' + candidates.error.code);
+    const candidate = candidates.value.find(item => item.available);
+    if (!candidate) throw new Error('No candidate: ' + JSON.stringify(candidates.value));
+    const turns = [
+      '我想做一个《交换A》的 PPT。',
+      '主要讲两个家庭交换身份以后发生的冲突。',
+      '人物关系和冲突重点一点。',
+      '可以'
+    ];
+    let currentConversation = await conversations.get(conversation.id);
+    if (!currentConversation) throw new Error('Conversation unavailable');
+    let finalExecution: Awaited<ReturnType<typeof runtime.responses.getExecution>> | undefined;
+    for (const [index, content] of turns.entries()) {
+      const started = await runtime.responses.startAgent({
+        clientCommandId: `start-agent-conversation-${index}`,
+        conversation: { conversationId: currentConversation.id, expectedRevision: currentConversation.revision, editedMessageId: null },
+        title: currentConversation.title,
+        content,
+        productFeature: 'text_chat',
+        candidateId: candidate.candidateId,
+        contextSelections: [],
+        parameterValues: {}
+      });
+      if (!started.ok) throw new Error('Agent start failed: ' + started.error.code);
+      const executionId = started.value.execution.responseExecutionId;
+      await vi.waitFor(async () => {
+        const execution = await runtime.responses.getExecution({ responseExecutionId: executionId });
+        if (!execution.ok) throw new Error('Missing execution: ' + execution.error.code);
+        expect(['completed', 'failed', 'cancelled']).toContain(execution.value.state);
+        if (index === turns.length - 1) finalExecution = execution;
+      }, { timeout: 10_000, interval: 25 });
+      currentConversation = await conversations.get(conversation.id);
+      if (!currentConversation) throw new Error('Conversation disappeared');
+    }
+    await runtime.waitForMutations();
+    if (!finalExecution?.ok) throw new Error('Missing final execution');
+    return { execution: finalExecution.value, conversation: currentConversation,
+      traces: await new ConversationProductionTraceStore(storage, projectId).list({ conversationId: conversation.id }),
+      runtimes: await new JsonDocumentTaskRuntimeRepository(storage, projectId).list() };
+  }
+  return { run, runAgentConversation, rootDirectory, files, works, requests, artRequests, writes, designSnapshots, errors, render, generationSpy, readSpy, beginSpy, generationCall, readCall };
 }
 
 describe('production NewAPI generation to verified-file read continuation', () => {
@@ -258,6 +311,68 @@ describe('production NewAPI generation to verified-file read continuation', () =
       expect(outgoing).not.toContain(hidden);
     }
   });
+
+  it('runs the same verified generation/read loop through the Agent-native entry', async () => {
+    const data = await fixture();
+    const { execution, traces, runtimes } = await data.run(true);
+    expect(data.errors).toEqual([]);
+    await vi.waitFor(async () => {
+      const agentRunDocument = JSON.parse(await readFile(path.join(data.rootDirectory, 'entities/conversation-agent-runs.json'), 'utf8')) as {
+        readonly runs: readonly { readonly conversationId: string; readonly responseExecutionId?: string; readonly status: string }[]
+      };
+      expect(agentRunDocument.runs).toHaveLength(1);
+      expect(agentRunDocument.runs[0]).toMatchObject({
+        conversationId: 'conversation-generation-read',
+        responseExecutionId: execution.responseExecutionId,
+        status: 'completed'
+      });
+    }, { timeout: 2_000, interval: 25 });
+    expect(data.requests).toHaveLength(3);
+    expect(data.requests.map(request => request.tools?.[0]?.function.name)).toEqual([
+      generation.toolId,
+      reading.toolId,
+      reading.toolId
+    ]);
+    expect(execution.content).toContain('真实物理页数：');
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect(runtimes[0].toolCalls).toMatchObject([
+      { id: data.generationCall.id, toolId: generation.toolId, status: 'completed' },
+      { id: data.readCall.id, toolId: reading.toolId, status: 'completed' }
+    ]);
+    expect(traces.some(trace => trace.code === 'tool_result' && trace.status === 'completed')).toBe(true);
+  });
+
+  it('keeps a discussion-only Agent-native turn as assistant text with no tool calls', async () => {
+    const data = await fixture(false, false, true);
+    const { execution } = await data.run(true, '场景一我觉得不够激烈。');
+    expect(execution.state).toBe('completed');
+    expect(execution.content).toContain('场景一');
+    expect(data.requests).toHaveLength(1);
+    expect(data.requests[0].messages.some(message => message.role === 'assistant' && message.tool_calls)).toBe(false);
+    expect(await data.works.list(projectId)).toHaveLength(0);
+    expect(data.generationSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses full conversation history when the final Agent-native turn is only “可以”', async () => {
+    const data = await fixture(false, false, false, true);
+    const { execution, conversation, runtimes } = await data.runAgentConversation();
+    expect(data.errors).toEqual([]);
+    expect(execution.state).toBe('completed');
+    expect(data.requests).toHaveLength(6);
+    expect(data.requests[3].messages.some(message => message.role === 'user' && message.content === '可以')).toBe(true);
+    expect(data.requests[3].messages.some(message => message.role === 'user' && message.content.includes('交换A'))).toBe(true);
+    expect(data.requests[3].messages.some(message => message.role === 'assistant' && message.content.includes('人物和冲突'))).toBe(true);
+    expect(data.requests[3].messages.filter(message => message.role === 'assistant' && message.tool_calls).map(message => message.tool_calls)).toEqual([]);
+    expect(data.requests[4].messages.at(-2)?.tool_calls?.[0]?.function.name).toBe('generate_pptx');
+    expect(data.requests[5].messages.at(-2)?.tool_calls?.[0]?.function.name).toBe('read_document_structure');
+    expect(execution.content).toContain('生成并读取真实 PPT');
+    expect(await data.works.list(projectId)).toHaveLength(1);
+    expect(runtimes[0].toolCalls).toMatchObject([
+      { toolId: 'generate_pptx', status: 'completed' },
+      { toolId: 'read_document_structure', status: 'completed' }
+    ]);
+    expect(conversation.messages.some(message => message.role === 'user' && message.content === '可以')).toBe(true);
+  }, 15_000);
 
   it('falls back to the stable template after malformed Art Direction and still registers and reads the real file', async () => {
     const data = await fixture(false, true);

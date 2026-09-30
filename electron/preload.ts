@@ -870,6 +870,8 @@ const chatContexts: ChatContextApi = {
     }),
   startResponse: (request) =>
     ipcRenderer.invoke(chatContextIpcChannels.startResponse, request),
+  startAgentResponse: (request) =>
+    ipcRenderer.invoke(chatContextIpcChannels.startAgentResponse, request),
   startWorkflow: (request) =>
     ipcRenderer.invoke(chatContextIpcChannels.startWorkflow, request),
   answerWorkflow: (request) =>

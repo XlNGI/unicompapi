@@ -3,6 +3,7 @@ export * from './json-conversation-repository';
 export * from './json-project-conversation-repository';
 export * from './json-conversation-response-draft-repository';
 export * from './json-conversation-workflow-repository';
+export * from './json-conversation-agent-run-repository';
 export * from './json-conversation-response-execution-repository';
 export * from './json-project-context-repository';
 export * from './project-context-snapshot';

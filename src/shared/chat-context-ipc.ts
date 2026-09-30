@@ -20,6 +20,7 @@ export const chatContextIpcChannels = {
   prepareResponseSubmission: 'chat-context:prepare-response-submission',
   submitResponse: 'chat-context:submit-response',
   startResponse: 'chat-context:start-response',
+  startAgentResponse: 'chat-context:start-agent-response',
   startWorkflow: 'chat-context:start-workflow',
   cancelPlanning: 'chat-context:cancel-planning',
   answerWorkflow: 'chat-context:answer-workflow',
@@ -572,8 +573,11 @@ export interface StartResponseRequest {
   readonly parameterValues: Readonly<Record<string, string | number | boolean | readonly unknown[] | {
     readonly [key: string]: unknown;
   }>>;
+  readonly agentNative?: boolean;
   readonly confirmed: boolean;
 }
+
+export type StartAgentResponseRequest = Omit<StartResponseRequest, 'workflow' | 'confirmed' | 'agentNative'>;
 
 export interface StartWorkflowRequest {
   readonly clientCommandId: string;
@@ -851,6 +855,7 @@ export const chatContextRequestParsers = {
       value !== null &&
       !Array.isArray(value) &&
       Object.prototype.hasOwnProperty.call(value, 'workflow');
+    const hasAgentNative = hasOwn(value, 'agentNative');
     const record = exactRecord(value, [
       'clientCommandId',
       'conversation',
@@ -863,6 +868,7 @@ export const chatContextRequestParsers = {
       'candidateId',
       'contextSelections',
       'parameterValues',
+      ...(hasAgentNative ? ['agentNative'] : []),
       'confirmed'
     ]);
     if (record.productFeature !== 'text_chat' && record.productFeature !== 'text_reasoning') {
@@ -936,8 +942,23 @@ export const chatContextRequestParsers = {
       candidateId: controlledId(record.candidateId, 'candidateId'),
       contextSelections,
       parameterValues: parameterValuesRecord(record.parameterValues),
+      ...(hasAgentNative ? { agentNative: booleanValue(record.agentNative, 'agentNative') } : {}),
       confirmed: booleanValue(record.confirmed, 'confirmed')
     };
+  },
+  startAgentResponse(value: unknown): StartAgentResponseRequest {
+    const parsed = this.startResponse({
+      ...(typeof value === 'object' && value !== null ? value : {}),
+      confirmed: true,
+      agentNative: true
+    });
+    if (parsed.workflow !== undefined || parsed.confirmed !== true) {
+      throw new TypeError('Agent-native response cannot include workflow confirmation');
+    }
+    const agentRequest = { ...parsed };
+    delete (agentRequest as { confirmed?: boolean }).confirmed;
+    delete (agentRequest as { agentNative?: boolean }).agentNative;
+    return agentRequest;
   },
   startWorkflow(value: unknown): StartWorkflowRequest {
     const hasAttachments = hasOwn(value, 'attachmentFileIds');
@@ -1243,6 +1264,9 @@ export interface ChatContextApi {
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>>;
   startResponse(
     request: StartResponseRequest
+  ): Promise<ChatContextIpcResult<ConversationResponseStartDto>>;
+  startAgentResponse(
+    request: StartAgentResponseRequest
   ): Promise<ChatContextIpcResult<ConversationResponseStartDto>>;
   startWorkflow(
     request: StartWorkflowRequest

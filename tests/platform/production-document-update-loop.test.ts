@@ -57,7 +57,7 @@ interface ElementObservation { readonly elementId: string; readonly pageId?: str
 interface ToolResult { readonly status: string; readonly observation?: { readonly page?: { readonly pageId?: string; readonly elements: readonly ElementObservation[] };
   readonly elementId?: string; readonly changed?: boolean; readonly field?: string } }
 
-async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mutationMode: 'update' | 'add-delete' = 'update') {
+async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mutationMode: 'update' | 'add-delete' = 'update', failureMode: 'none' | 'invalid_args' | 'version_conflict' | 'tool_error' = 'none') {
   const rootDirectory = await mkdtemp(path.join(os.tmpdir(), 'unicomp-production-update-'));
   roots.push(rootDirectory);
   const userDataDirectory = path.join(rootDirectory, 'test-profile');
@@ -111,6 +111,18 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
   const lateCall = new Promise<void>(resolve => { releaseLateCall = resolve; });
   let signalPrepared!: () => void;
   const updatePrepared = new Promise<void>(resolve => { signalPrepared = resolve; });
+  if (failureMode === 'version_conflict') {
+    mutateSpy.mockResolvedValueOnce({
+      status: 'revision_conflict',
+      record: { state: 'revision_conflict', diagnostic: 'revision_conflict' }
+    } as never);
+  }
+  if (failureMode === 'tool_error') {
+    mutateSpy.mockResolvedValueOnce({
+      status: 'failed',
+      record: { state: 'failed', diagnostic: 'tool_failed' }
+    } as never);
+  }
   const call = (id: string, name: string, args: Record<string, unknown>): WireCall => {
     const value = { id, type: 'function', function: { name, arguments: JSON.stringify(args) } };
     calls.push(value); return value;
@@ -129,7 +141,37 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
     const payload = JSON.parse(Buffer.from(request.body!).toString('utf8')) as WireRequest;
     requests.push(payload);
     let next: WireCall;
-    if (requests.length === 1) {
+    if (failureMode === 'invalid_args' && requests.length === 1) {
+      next = call('invalid-update-1', updating.toolId, { text: firstText });
+    } else if (failureMode === 'invalid_args' && requests.length === 2) {
+      expect(resultFor(payload, 'invalid-update-1')).toMatchObject({ status: 'failed', diagnostics: [{ code: 'invalid_tool_arguments' }] });
+      next = call('read-after-invalid-2', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (failureMode === 'invalid_args' && requests.length === 3) {
+      expect(pageElement(resultFor(payload, 'read-after-invalid-2')).text).toBe(originalText);
+      return stream(provider.modelKey, { content: '参数错误已作为 Observation 返回，文件未修改。' }, 'stop');
+    } else if (failureMode === 'version_conflict' && requests.length === 1) {
+      next = call('read-target-1', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (failureMode === 'version_conflict' && requests.length === 2) {
+      const observed = pageElement(resultFor(payload, 'read-target-1'));
+      next = call('update-conflict-2', updating.toolId, { elementId: observed.elementId, text: firstText });
+    } else if (failureMode === 'version_conflict' && requests.length === 3) {
+      expect(resultFor(payload, 'update-conflict-2')).toMatchObject({ status: 'failed', diagnostics: [{ code: 'revision_conflict' }] });
+      next = call('read-after-conflict-3', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (failureMode === 'version_conflict' && requests.length === 4) {
+      expect(pageElement(resultFor(payload, 'read-after-conflict-3')).text).toBe(originalText);
+      return stream(provider.modelKey, { content: '版本冲突已作为 Observation 返回，重新读取后确认文件未修改。' }, 'stop');
+    } else if (failureMode === 'tool_error' && requests.length === 1) {
+      next = call('read-target-1', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (failureMode === 'tool_error' && requests.length === 2) {
+      const observed = pageElement(resultFor(payload, 'read-target-1'));
+      next = call('runtime-error-2', updating.toolId, { elementId: observed.elementId, text: firstText });
+    } else if (failureMode === 'tool_error' && requests.length === 3) {
+      expect(resultFor(payload, 'runtime-error-2')).toMatchObject({ status: 'failed', diagnostics: [{ code: 'tool_failed' }] });
+      next = call('read-after-runtime-error-3', reading.toolId, { scope: 'page', ordinal: 2 });
+    } else if (failureMode === 'tool_error' && requests.length === 4) {
+      expect(pageElement(resultFor(payload, 'read-after-runtime-error-3')).text).toBe(originalText);
+      return stream(provider.modelKey, { content: '工具失败已作为 Observation 返回，重新读取后确认文件未修改。' }, 'stop');
+    } else if (requests.length === 1) {
       next = call('read-target-1', reading.toolId, { scope: 'page', ordinal: 2 });
     } else if (mutationMode === 'add-delete' && requests.length === 2) {
       const observed = pageElement(resultFor(payload, 'read-target-1'));
@@ -197,17 +239,20 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
     textSubmission: { credentialVault: provider.vault, deepSeekRuntime, newApiRuntime }, now: () => now, onError: error => errors.push(error) });
   cleanups.push(async () => { releaseLateCall(); await runtime.interruptActiveResponses(); await runtime.waitForMutations(); deepSeekRuntime.dispose(); newApiRuntime.dispose(); });
   let activeExecutionId: string | undefined;
-  async function run() {
+  async function run(agentNative = false) {
     const candidates = await runtime.responses.listTextCandidates({ productFeature: 'text_chat' });
     if (!candidates.ok) throw new Error('Candidates failed: ' + candidates.error.code);
     const candidate = candidates.value.find(item => item.available);
     if (!candidate) throw new Error('No candidate');
-    const started = await runtime.responses.start({ clientCommandId: mutationMode === 'update' ? 'start-production-update' : 'start-production-add-delete',
+    const request = { clientCommandId: agentNative ? 'start-agent-production-update' : mutationMode === 'update' ? 'start-production-update' : 'start-production-add-delete',
       conversation: { conversationId: conversation.id, expectedRevision: conversation.revision, editedMessageId: null }, title: conversation.title,
       content: mutationMode === 'update'
         ? '把当前 PPT 第二页的“年度销售目标”改成“2027 年全球销售目标”，读取核验后，再改成“2028 年全球销售目标”并再次读取第二页核验，最后简短告诉我结果。'
         : '在当前 PPT 第二页新增一句“年度销售目标”，读取真实文件核验后，再删除刚才新增的那一句并再次读取第二页核验，最后简短告诉我结果。',
-      productFeature: 'text_chat', candidateId: candidate.candidateId, contextSelections: [], parameterValues: {}, confirmed: true });
+      productFeature: 'text_chat' as const, candidateId: candidate.candidateId, contextSelections: [], parameterValues: {} };
+    const started = agentNative
+      ? await runtime.responses.startAgent(request)
+      : await runtime.responses.start({ ...request, confirmed: true });
     if (!started.ok) throw new Error('Start failed: ' + started.error.code);
     const executionId = started.value.execution.responseExecutionId;
     activeExecutionId = executionId;
@@ -215,7 +260,7 @@ async function fixture(revokeBeforeWrite = false, cancelBeforeWrite = false, mut
       const current = await runtime.responses.getExecution({ responseExecutionId: executionId });
       if (!current.ok) throw new Error('Missing execution: ' + current.error.code);
       expect(['completed', 'failed', 'cancelled']).toContain(current.value.state);
-    }, { timeout: 10_000, interval: 30 });
+    }, { timeout: 20_000, interval: 30 });
     await runtime.waitForMutations();
     const current = await runtime.responses.getExecution({ responseExecutionId: executionId });
     if (!current.ok) throw new Error('Missing execution');
@@ -278,6 +323,55 @@ describe('production NewAPI update_element continuation', () => {
       '"rootDirectory"', '"relativePath"', '"slidePart"', '"shapeId"', '"identityIndexVersion"', '"manifest"',
       '"currentDocumentIR"', '"authorization"', '"abortSignal"', '"projectContext"', '"taskContext"', '"irPatch"']) expect(outgoing).not.toContain(hidden);
     expect(data.render.mock.calls.length).toBeGreaterThanOrEqual(3);
+  }, 20_000);
+
+  it('lets the Agent-native path choose the same read/mutation continuation against the real file', async () => {
+    const data = await fixture();
+    const execution = await data.run(true);
+    expect(execution.state).toBe('completed');
+    expect(execution.content).toBe('已从真实文件核验：' + secondText);
+    expect(data.requests).toHaveLength(6);
+    expect(data.calls.map(call => call.function.name)).toEqual([
+      reading.toolId, updating.toolId, reading.toolId, updating.toolId, reading.toolId
+    ]);
+    expect(data.mutateSpy).toHaveBeenCalledTimes(2);
+    expect((await data.headStore.get(data.identity.documentLineageId))?.runtimeRevision).toBe(3);
+    const head = (await data.headStore.get(data.identity.documentLineageId))!;
+    const current = await new RegisteredPresentationReader({ rootDirectory: data.rootDirectory, projectId }).read(toWorkId(head.headWorkId));
+    const currentIdentity = (await data.identityStore.getForWork(head.headWorkId))!;
+    expect(await readIdentityElementText(current.buffer, currentIdentity, data.target.elementId)).toBe(secondText);
+  }, 20_000);
+
+  it('returns invalid tool arguments as an Observation and continues the Agent-native turn', async () => {
+    const data = await fixture(false, false, 'update', 'invalid_args');
+    const execution = await data.run(true);
+    expect(execution.state).toBe('completed');
+    expect(data.requests).toHaveLength(3);
+    expect(data.calls.map(call => call.function.name)).toEqual([updating.toolId, reading.toolId]);
+    expect(execution.content).toContain('参数错误已作为 Observation');
+    expect(await data.works.list(projectId)).toHaveLength(1);
+  }, 20_000);
+
+  it('returns a revision conflict as an Observation and continues with a fresh read', async () => {
+    const data = await fixture(false, false, 'update', 'version_conflict');
+    const execution = await data.run(true);
+    expect(execution.state).toBe('completed');
+    expect(data.requests).toHaveLength(4);
+    expect(data.calls.map(call => call.function.name)).toEqual([reading.toolId, updating.toolId, reading.toolId]);
+    expect(execution.content).toContain('版本冲突已作为 Observation');
+    expect(data.mutateSpy).toHaveBeenCalledOnce();
+    expect(await data.works.list(projectId)).toHaveLength(1);
+  }, 20_000);
+
+  it('returns a Runtime tool failure as an Observation and continues the Agent-native turn', async () => {
+    const data = await fixture(false, false, 'update', 'tool_error');
+    const execution = await data.run(true);
+    expect(execution.state).toBe('completed');
+    expect(data.requests).toHaveLength(4);
+    expect(data.calls.map(call => call.function.name)).toEqual([reading.toolId, updating.toolId, reading.toolId]);
+    expect(execution.content).toContain('工具失败已作为 Observation');
+    expect(data.mutateSpy).toHaveBeenCalledOnce();
+    expect(await data.works.list(projectId)).toHaveLength(1);
   }, 20_000);
 
   it('does not start mutation after current-file access is revoked while the model responds', async () => {
@@ -411,6 +505,7 @@ async function providerFixture(directory: string) {
   const vault = new SecureCredentialVault(path.join(directory, 'synthetic-credentials.json'), {
     isAvailable: () => true, protect: value => Buffer.from(value), unprotect: value => Buffer.from(value).toString('utf8')
   });
+
   await vault.saveRecord('synthetic-generation-reference', { schemaId: NEWAPI_CREDENTIAL_SCHEMA_ID, schemaVersion: 1,
     values: { api_key: 'synthetic-offline-unit-test-key' } });
   return { registry: providerRegistry, authorization, vault, modelKey };

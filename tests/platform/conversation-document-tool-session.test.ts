@@ -256,6 +256,32 @@ describe('production registered document read sessions', () => {
     expect(selection).toMatchObject({ kind: 'generation', authorizationStatus: 'awaiting_user' });
   });
 
+  it('binds the Agent-native path to the latest registered PPT mutation tools', async () => {
+    const data = await fixture();
+    const service = new ConversationDocumentToolSessionService({
+      rootDirectory: data.rootDirectory,
+      projectId,
+      conversations: data.conversations,
+      mutation: { renderPreview: async temporary => ({ previewCount: (await readFile(temporary)).length ? 1 : 0, diagnostics: [] }) }
+    });
+    services.push(service);
+    const request = await data.question('可以，继续处理刚才的 PPT');
+    const message = request.conversation.messages.at(-1)!;
+    const draft = createConversationResponseDraft({
+      id: toConversationResponseDraftId('agent-native-mutation'),
+      projectId,
+      conversationId: request.conversation.id,
+      conversationRevision: request.conversation.revision,
+      userMessageId: message.id,
+      userMessageRevision: message.revision,
+      agentNative: true,
+      productFeature: 'text_chat',
+      createdAt: now
+    });
+    const selection = await service.prepare({ conversation: request.conversation, draft });
+    expect(selection).toMatchObject({ kind: 'agent', mutation: { kind: 'mutation', writeAuthorized: true, workId: data.first.work.id } });
+  });
+
   it('does not attach tools to an internal generation prompt or a different project', async () => {
     const data = await fixture();
     const request = await data.question();

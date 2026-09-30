@@ -1691,7 +1691,15 @@ export function ChatPage({
       await startChatResponse(inputValueRef.current.trim(), selected);
       return;
     }
-    await submitWorkflowInput();
+    if (activeWorkflow && ['needs_clarification', 'needs_confirmation', 'ready'].includes(activeWorkflow.status)) {
+      await submitWorkflowInput();
+      return;
+    }
+    if (!chat.startAgentResponse) {
+      await submitWorkflowInput();
+      return;
+    }
+    await startChatResponse(input.trim(), selected);
   }
 
   async function submitWorkflowInput() {
@@ -2350,7 +2358,7 @@ export function ChatPage({
     clearResponseDraftState();
     const commandEditingMessageId = workflow ? undefined : editingMessageId;
     try {
-      const started = await chat.startResponse({
+      const request = {
         clientCommandId: `chat-start-${crypto.randomUUID()}`,
         conversation: conversation
           ? {
@@ -2364,14 +2372,6 @@ export function ChatPage({
         ...(!workflow && attachmentSelectionChangedRef.current
           ? { attachmentFileIds: attachments.map((attachment) => attachment.fileId) }
           : {}),
-        ...(workflow
-          ? {
-              workflow: {
-                workflowId: workflow.workflowId,
-                expectedRevision: workflow.revision
-              }
-            }
-          : {}),
         productFeature: responseFeature,
         candidateId: selectedCandidateId,
         contextSelections: includedContextIds.flatMap((contextId) => {
@@ -2384,9 +2384,18 @@ export function ChatPage({
               }]
             : [];
         }),
-        parameterValues: {},
-        confirmed: true
-      });
+        parameterValues: {}
+      } as const;
+      const started = workflow
+        ? await chat.startResponse({
+            ...request,
+            workflow: {
+              workflowId: workflow.workflowId,
+              expectedRevision: workflow.revision
+            },
+            confirmed: true
+          })
+        : await chat.startAgentResponse(request);
       if (executionScope !== composerScopeRef.current) return;
       if (!started.ok) {
         rendererTrace('sendMessage:startResponse-error', {

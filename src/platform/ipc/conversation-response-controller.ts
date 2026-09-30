@@ -1,11 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { NativeSearchAuthorizationError, type ConversationNativeSearch } from '../providers/conversation-native-search';
 import { FeatureSubmissionError } from '../providers/provider-feature-candidates';
 import { isConversationImageRequest, declinesConversationImageInput } from '../../application/conversation-image-request';
 import {
   createConversationResponseDraft,
+  attachConversationAgentRunExecution,
+  createConversationAgentRun,
+  transitionConversationAgentRun,
   replaceConversationResponseContextSelections,
   replaceConversationResponseParameterValues,
   toConversationId,
+  toConversationAgentRunId,
   toConversationResponseDraftId,
   toConversationResponseExecutionId,
   toConversationWorkflowId,
@@ -13,6 +18,7 @@ import {
   toMessageId,
   toProjectContextId,
   type ConversationIntentPlan,
+  type ConversationAgentRunRepository,
   type ConversationResponseDraftRepository,
   type ConversationResponseDraftV1,
   type ConversationResponseExecutionReadModelV1,
@@ -69,6 +75,7 @@ export interface ConversationResponseControllerRuntime {
   readonly executionCoordinator: ConversationExecutionCoordinator;
   readonly streamChannel: ControlledConversationResponseStreamChannel;
   readonly workflowService?: ConversationWorkflowService;
+  readonly agentRuns?: ConversationAgentRunRepository;
   readonly attachments?: Pick<ConversationAttachmentContextService, 'pin' | 'resolve'>;
   readonly documentPages?: Pick<ConversationDocumentPageContextService, 'resolve'>;
   readonly documentTools?: Pick<ConversationDocumentToolSessionService, 'select' | 'pinDraft'>;
@@ -90,6 +97,7 @@ export interface ConversationResponseControllerDependencies {
   getSession(): StorageProjectSession | undefined;
   getRuntime(session: StorageProjectSession): ConversationResponseControllerRuntime;
   nextResponseDraftId(): string;
+  nextAgentRunId?(): string;
   now?: () => string;
   onError?(error: unknown): void;
 }
@@ -345,6 +353,12 @@ export class ConversationResponseController {
     });
   }
 
+  /** Agent-native entry: semantic routing and confirmation stay with the model. */
+  startAgent(request: unknown): Promise<ChatContextIpcResult<ConversationResponseStartDto>> {
+    const parsed = chatContextRequestParsers.startAgentResponse(request);
+    return this.start({ ...parsed, confirmed: true, agentNative: true });
+  }
+
   getExecution(
     request: unknown
   ): Promise<ChatContextIpcResult<ConversationResponseExecutionDto>> {
@@ -574,6 +588,7 @@ export class ConversationResponseController {
     if (!session || session.projectId !== runtime.conversations.projectId) {
       return failure('project_not_open', 'The source project is no longer active');
     }
+    let agentRun: ReturnType<typeof createConversationAgentRun> | undefined;
     return withProductionTrace({ rootDirectory: session.rootDirectory, projectId: session.projectId,
       conversationId: conversation.id, sourceMessageId: userMessage.id, traceId: userMessage.id,
       clientCommandId: input.clientCommandId }, async () => {
@@ -581,7 +596,10 @@ export class ConversationResponseController {
     // Fail locally before candidate authorization or provider dispatch. Factory
     // revalidates the pinned hashes immediately before forming provider messages.
     const attachmentQuery = conversationAttachmentQuery(workflow?.plan, userMessage);
-    const isPageQuestion = workflow ? workflow.plan.kind === 'chat'
+    // Agent-native requests must reach the model before any query-shaped
+    // document selection. The Agent chooses whether to read or mutate after
+    // seeing the available tools and conversation context.
+    const isPageQuestion = input.agentNative ? false : workflow ? workflow.plan.kind === 'chat'
       : userMessage.displayContent === undefined || userMessage.displayContent === userMessage.content;
     const documentPageQuery = isPageQuestion ? attachmentQuery : undefined;
     const toolSelection = documentPageQuery ? await runtime.documentTools?.select({
@@ -590,7 +608,7 @@ export class ConversationResponseController {
     const pageReferences = documentPageQuery && !toolSelection ? await runtime.documentPages?.resolve({
       conversation, currentUserMessageId: userMessage.id, query: documentPageQuery
     }) ?? [] : [];
-    if (!pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
+    if (!input.agentNative && !pageReferences.length && !toolSelection) await runtime.attachments?.resolve({
       conversation,
       currentUserMessageId: userMessage.id,
       query: attachmentQuery
@@ -621,6 +639,7 @@ export class ConversationResponseController {
       conversationRevision: conversation.revision,
       userMessageId: userMessage.id,
       userMessageRevision: userMessage.revision,
+      ...(input.agentNative ? { agentNative: true } : {}),
       ...(workflow
         ? {
             promptContent: workflow.plan.kind === 'document'
@@ -684,6 +703,17 @@ export class ConversationResponseController {
       }
       throw error;
     });
+    if (input.agentNative && !workflow && runtime.agentRuns) {
+      agentRun = createConversationAgentRun({
+        id: toConversationAgentRunId(this.dependencies.nextAgentRunId?.() ?? `agent-run-${randomUUID()}`),
+        projectId: runtime.conversations.projectId,
+        conversationId: conversation.id,
+        sourceMessageId: userMessage.id,
+        parentRunId: (await runtime.agentRuns.list(conversation.id))[0]?.id,
+        createdAt: toIsoTimestamp(this.now())
+      });
+      await runtime.agentRuns.create(agentRun);
+    }
     await emitProductionEvent({ code: 'tool_authorization', status: 'completed',
       facts: { purpose: 'content', count: input.contextSelections.length } });
     const pendingExecutionId = workflow
@@ -712,6 +742,29 @@ export class ConversationResponseController {
         await runtime.workflowService?.finishExecution(pendingExecutionId, 'failed');
       }
       throw error;
+    }
+    if (agentRun && runtime.agentRuns) {
+      try {
+        const attached = attachConversationAgentRunExecution(
+          agentRun,
+          execution.responseExecutionId,
+          toIsoTimestamp(this.now())
+        );
+        await runtime.agentRuns.save(attached, agentRun.revision);
+        agentRun = attached;
+        execution = await runtime.executions.readModel(execution.responseExecutionId);
+        if (['completed', 'failed', 'cancelled', 'interrupted'].includes(execution.state)) {
+          const settled = transitionConversationAgentRun(
+            agentRun,
+            execution.state === 'completed' ? 'completed' : execution.state === 'cancelled' ? 'cancelled' : 'failed',
+            toIsoTimestamp(this.now())
+          );
+          await runtime.agentRuns.save(settled, agentRun.revision);
+          agentRun = settled;
+        }
+      } catch (error) {
+        this.dependencies.onError?.(error);
+      }
     }
     if (executingWorkflow) {
       try {
@@ -746,6 +799,14 @@ export class ConversationResponseController {
       }
     };
     } catch (error) {
+      if (agentRun && runtime.agentRuns) {
+        try {
+          const failed = transitionConversationAgentRun(agentRun, 'failed', toIsoTimestamp(this.now()));
+          await runtime.agentRuns.save(failed, agentRun.revision);
+        } catch (runError) {
+          this.dependencies.onError?.(runError);
+        }
+      }
       await emitProductionEvent({ code: 'task_complete', status: 'failed', facts: { purpose: 'content' } });
       throw error;
     }

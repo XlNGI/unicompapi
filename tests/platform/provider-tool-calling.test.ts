@@ -9,8 +9,10 @@ import {
   parseControlledProviderTools,
   parseControlledToolCallDeltas,
   providerToolsFromContracts,
+  runControlledProviderToolRounds,
   runControlledProviderToolLoop,
-  sanitizeControlledToolResult
+  sanitizeControlledToolResult,
+  type ControlledProviderToolRoundResponse
 } from '../../src/platform/providers/provider-tool-calling';
 
 const registry = createCanonicalToolRegistry();
@@ -320,5 +322,27 @@ describe('controlled provider tool calling', () => {
       toolCalls: [{ id: 'call-1', name: 'inspect_layout' }]
     });
     expect(result.messages.at(-1)?.role).toBe('tool');
+  });
+
+  it('shares the production provider round loop between adapters', async () => {
+    const call = { id: 'shared-round-call', name: readContract.toolId,
+      arguments: { scope: 'document' } };
+    const messages: Array<{ role: 'assistant' | 'tool'; content: string }> = [];
+    const result = await runControlledProviderToolRounds<
+      { role: 'assistant' | 'tool'; content: string },
+      ControlledProviderToolRoundResponse
+    >({
+      initialResponse: { finishReason: 'tool_calls' as const, toolCalls: [call] } satisfies ControlledProviderToolRoundResponse,
+      messages,
+      signal: new AbortController().signal,
+      shouldContinue: response => response.finishReason === 'tool_calls',
+      appendAssistant: (_response, target) => target.push({ role: 'assistant', content: 'tool call' }),
+      appendTool: (_call, observation, target) => target.push({ role: 'tool', content: JSON.stringify(observation) }),
+      requestNext: async () => ({ finishReason: 'stop' as const, content: 'done' } satisfies ControlledProviderToolRoundResponse),
+      bridge: { execute: async () => ({ schemaVersion: 1, status: 'success', observation: { ok: true } }) },
+      toLoopError: code => new Error(code)
+    });
+    expect(result.content).toBe('done');
+    expect(messages.map(message => message.role)).toEqual(['assistant', 'tool']);
   });
 });

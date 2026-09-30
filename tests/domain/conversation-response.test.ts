@@ -134,4 +134,20 @@ describe('project conversation and response draft contracts', () => {
       updatedAt: withContext.updatedAt
     }).parameterValues).toEqual({});
   });
+
+  it('persists the Agent-native response marker without changing legacy drafts', () => {
+    const draft = createConversationResponseDraft({
+      id: toConversationResponseDraftId('agent-native-draft'),
+      projectId,
+      conversationId: toConversationId('conversation-project-owned'),
+      conversationRevision: 1,
+      userMessageId: toMessageId('user-message-agent'),
+      userMessageRevision: 0,
+      agentNative: true,
+      productFeature: 'text_chat',
+      createdAt: t0
+    });
+    expect(parseConversationResponseDraft(JSON.parse(JSON.stringify(draft))).agentNative).toBe(true);
+    expect(() => parseConversationResponseDraft({ ...draft, agentNative: 'yes' })).toThrow();
+  });
 });

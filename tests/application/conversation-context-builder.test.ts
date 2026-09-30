@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AgentContextAssembler,
   ConversationContextBuilder
 } from '../../src/application';
 import {
+  addCompletedAssistantMessage,
   addUserMessage,
   createProjectConversation,
   toConversationId,
@@ -109,5 +111,36 @@ describe('Conversation context builder', () => {
     });
     expect(envelope.references).toHaveLength(1);
     expect(envelope.budget.truncated).toBe(true);
+  });
+
+  it('assembles Agent-native input from the full conversation without interpreting intent', () => {
+    let conversation = createProjectConversation({
+      id: toConversationId('conversation-agent-context'),
+      projectId: toProjectId('project-agent-context'),
+      title: 'Agent context',
+      createdAt: t0
+    });
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('message-agent-user'),
+      content: '我想做一个《交换A》的短剧企划',
+      createdAt: t0
+    });
+    conversation = addCompletedAssistantMessage(conversation, {
+      id: toMessageId('message-agent-assistant'),
+      content: '我们已经确定为喜剧、近未来、抖音方向。',
+      createdAt: t0
+    });
+    conversation = addUserMessage(conversation, {
+      id: toMessageId('message-agent-current'),
+      content: '可以，继续处理',
+      createdAt: t1
+    });
+    const envelope = new AgentContextAssembler().assemble({
+      conversation,
+      currentUserMessageId: toMessageId('message-agent-current')
+    });
+    expect(envelope.messages.at(-1)).toEqual({ role: 'user', content: '可以，继续处理' });
+    expect(envelope.messages).toContainEqual({ role: 'assistant', content: '我们已经确定为喜剧、近未来、抖音方向。' });
+    expect(envelope.messages.some((message) => message.content.includes('conversation and execution agent'))).toBe(true);
   });
 });
